@@ -40,6 +40,12 @@ The app secret value itself must live in an external secret store. The repositor
 - OAuth state is expiring and single-use.
 - Provider/API version is runtime configuration and must be validated before real-account testing.
 
+## Automated checkpoint
+
+The code-level Phase 1 boundary is validated by the repository Quality Gate. Run `31290546839` passed frozen install, formatting, architecture checks, lint, typecheck, tests and build on head `4cd2919ef171e24b82740cc765e2b4e6862c60d7`.
+
+This proves the local contracts and test doubles, not a production connection to Meta.
+
 ## Real-account validation gate
 
 Phase 1 is not production-connected until a real Meta App and authorized test/owned account have proven:
@@ -51,6 +57,6 @@ Phase 1 is not production-connected until a real Meta App and authorized test/ow
 - managed Page is discovered;
 - linked Instagram professional account is discovered when applicable;
 - no secret appears in logs or outputs;
-- Quality Gate remains green.
+- Quality Gate remains green after real configuration is wired.
 
 Until then `META_ENABLED` should remain `false` in production and no provider capability should be marked `PRODUCTION_VALIDATED`.
