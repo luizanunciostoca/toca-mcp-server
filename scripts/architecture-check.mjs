@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 const required = [
   'src/server.ts',
   'src/index.ts',
+  'src/http.ts',
+  'src/http-server.ts',
   'src/config.ts',
   'src/registry.ts',
   'src/core/auth.ts',
@@ -24,6 +26,7 @@ const required = [
   'src/providers/meta/meta-oauth.ts',
   'test/config.test.ts',
   'test/core.test.ts',
+  'test/http-server.test.ts',
   'test/meta.test.ts',
   'test/meta-assets.test.ts',
   'test/meta-graph.test.ts',
@@ -45,6 +48,14 @@ if (missing.length > 0) {
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 if (packageJson.name !== 'toca-mcp-server' || packageJson.private !== true) {
   console.error('package.json violates repository architecture contract');
+  process.exit(1);
+}
+if (!packageJson.dependencies?.['@modelcontextprotocol/node']) {
+  console.error('Remote Node MCP runtime dependency is required');
+  process.exit(1);
+}
+if (!packageJson.scripts?.['start:http']) {
+  console.error('Remote MCP start script is required');
   process.exit(1);
 }
 
