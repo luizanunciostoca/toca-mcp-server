@@ -1,0 +1,29 @@
+export type AuditStatus = 'STARTED' | 'SUCCEEDED' | 'FAILED' | 'DENIED';
+
+export interface AuditEvent {
+  readonly executionId: string;
+  readonly correlationId: string;
+  readonly toolName: string;
+  readonly requester: string;
+  readonly status: AuditStatus;
+  readonly connectedAccount?: string;
+  readonly externalResourceId?: string;
+  readonly errorCode?: string;
+  readonly createdAt: string;
+}
+
+export interface AuditSink {
+  write(event: AuditEvent): Promise<void>;
+}
+
+export class InMemoryAuditSink implements AuditSink {
+  private readonly events: AuditEvent[] = [];
+
+  async write(event: AuditEvent): Promise<void> {
+    this.events.push(event);
+  }
+
+  list(): readonly AuditEvent[] {
+    return this.events;
+  }
+}
