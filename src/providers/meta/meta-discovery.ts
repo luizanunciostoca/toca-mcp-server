@@ -24,10 +24,10 @@ export function toConnectionValidation(input: {
 
   return {
     healthy: input.reason === undefined,
-    providerAccountId: input.providerAccountId,
     grantedScopes: [...input.state.grantedScopes].sort(),
     capabilities,
     checkedAt: input.checkedAt,
-    reason: input.reason,
+    ...(input.providerAccountId ? { providerAccountId: input.providerAccountId } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
   };
 }
