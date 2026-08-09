@@ -8,10 +8,7 @@ import {
   metaOAuthConfigSchema,
   type MetaOAuthTransport,
 } from '../src/providers/meta/meta-connection.js';
-import {
-  InMemoryOAuthStateStore,
-  MetaOAuthService,
-} from '../src/providers/meta/meta-oauth.js';
+import { InMemoryOAuthStateStore, MetaOAuthService } from '../src/providers/meta/meta-oauth.js';
 import { createToolRegistry } from '../src/registry.js';
 
 const readTool: ToolDefinition = {
