@@ -1,0 +1,46 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: toca-mcp-server
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '10'
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:INSTANCE_NAME
+    spec:
+      serviceAccountName: toca-mcp-runtime@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 40
+      timeoutSeconds: 300
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/toca-mcp/server:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: toca-database-url
+                  key: latest
+            - name: TOCA_SECRET_META_APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: toca-meta-app-secret
+                  key: latest
+            - name: TOCA_SECRET_META_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: toca-meta-access-token
+                  key: latest
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            failureThreshold: 10
+            periodSeconds: 3
