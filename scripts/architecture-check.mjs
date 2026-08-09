@@ -93,7 +93,10 @@ if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
 }
 
 const deployWorkflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
-if (!deployWorkflow.includes('id-token: write') || !deployWorkflow.includes('workload_identity_provider')) {
+if (
+  !deployWorkflow.includes('id-token: write') ||
+  !deployWorkflow.includes('workload_identity_provider')
+) {
   console.error('GCP deployment must use GitHub OIDC / Workload Identity Federation');
   process.exit(1);
 }

@@ -19,8 +19,8 @@ describe('Google Cloud production foundation', () => {
 
   it('rejects provider mismatches instead of falling back to arbitrary environment variables', async () => {
     const resolver = new EnvironmentSecretResolver();
-    await expect(
-      resolver.resolve({ provider: 'memory', key: 'meta-app-secret' }),
-    ).rejects.toThrow('Secret provider mismatch');
+    await expect(resolver.resolve({ provider: 'memory', key: 'meta-app-secret' })).rejects.toThrow(
+      'Secret provider mismatch',
+    );
   });
 });
