@@ -30,13 +30,22 @@ function mapRow<TPayload = unknown>(row: Row): ScheduledJob<TPayload> {
 export class PostgresScheduler implements Scheduler {
   constructor(private readonly pool: pg.Pool) {}
 
-  async schedule<TPayload>(job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>): Promise<ScheduledJob<TPayload>> {
+  async schedule<TPayload>(
+    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
+  ): Promise<ScheduledJob<TPayload>> {
     const result = await this.pool.query<Row>(
       `insert into scheduled_jobs (id, tool_name, payload, run_at, timezone, idempotency_key)
        values ($1, $2, $3::jsonb, $4::timestamptz, $5, $6)
        on conflict (idempotency_key) do update set idempotency_key = excluded.idempotency_key
        returning *`,
-      [job.id, job.toolName, JSON.stringify(job.payload), job.runAt, job.timezone, job.idempotencyKey],
+      [
+        job.id,
+        job.toolName,
+        JSON.stringify(job.payload),
+        job.runAt,
+        job.timezone,
+        job.idempotencyKey,
+      ],
     );
     return mapRow<TPayload>(result.rows[0]!);
   }

@@ -7,7 +7,9 @@ if (!connectionString) throw new Error('DATABASE_URL is required');
 
 const pool = createPostgresPool({ connectionString, ssl: process.env.DATABASE_SSL === 'true' });
 try {
-  await pool.query(`create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now())`);
+  await pool.query(
+    `create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now())`,
+  );
   const files = (await readdir('migrations')).filter((file) => file.endsWith('.sql')).sort();
   for (const file of files) {
     const exists = await pool.query('select 1 from schema_migrations where version = $1', [file]);
