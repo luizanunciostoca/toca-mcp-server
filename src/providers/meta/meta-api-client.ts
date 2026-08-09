@@ -40,22 +40,43 @@ export class MetaApiClient {
   ) {}
 
   async get(path: string, query: Readonly<Record<string, string>> = {}): Promise<unknown> {
-    return this.request('GET', path, query);
+    return this.requestForm('GET', path, query);
   }
 
   async post(path: string, body: Readonly<Record<string, string>>): Promise<unknown> {
-    return this.request('POST', path, body);
+    return this.requestForm('POST', path, body);
   }
 
-  private async request(
+  async postJson(path: string, body: unknown): Promise<unknown> {
+    const token = await this.secrets.resolve(this.accessToken);
+    const url = this.buildUrl(path);
+    const response = await this.transport.request(url.toString(), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) throw new MetaApiError(response.status, `META_HTTP_${response.status}`);
+    return response.json();
+  }
+
+  private buildUrl(path: string): URL {
+    const base = this.config.graphBaseUrl.replace(/\/$/, '');
+    const normalizedPath = path.replace(/^\//, '');
+    return new URL(`${base}/${this.config.apiVersion}/${normalizedPath}`);
+  }
+
+  private async requestForm(
     method: 'GET' | 'POST',
     path: string,
     values: Readonly<Record<string, string>>,
   ): Promise<unknown> {
     const token = await this.secrets.resolve(this.accessToken);
-    const base = this.config.graphBaseUrl.replace(/\/$/, '');
-    const normalizedPath = path.replace(/^\//, '');
-    const url = new URL(`${base}/${this.config.apiVersion}/${normalizedPath}`);
+    const url = this.buildUrl(path);
     const headers: Record<string, string> = {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
