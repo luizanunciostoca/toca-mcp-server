@@ -4,6 +4,7 @@ import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
+import { metaOAuthConfigSchema } from '../src/providers/meta/meta-connection.js';
 import { createToolRegistry } from '../src/registry.js';
 
 const readTool: ToolDefinition = {
@@ -42,7 +43,7 @@ describe('ToolRegistry', () => {
     expect(() => registry.register(readTool)).toThrow(/already registered/);
   });
 
-  it('exposes only bootstrap system capabilities before providers exist', () => {
+  it('exposes no Meta write capability before provider validation', () => {
     expect(
       createToolRegistry()
         .list()
@@ -134,6 +135,35 @@ describe('ExecutionContext', () => {
         correlationId: 'corr_test_002',
         contentStatus: 'READY_TO_POST',
         budgetAuthorized: -1,
+      }),
+    ).toThrow();
+  });
+});
+
+describe('Meta OAuth configuration', () => {
+  it('accepts secret references instead of raw app secrets', () => {
+    expect(
+      metaOAuthConfigSchema.parse({
+        appId: 'app-id',
+        appSecret: { provider: 'env', key: 'META_APP_SECRET' },
+        redirectUri: 'https://example.com/oauth/meta/callback',
+        requestedScopes: ['pages_show_list'],
+      }),
+    ).toEqual({
+      appId: 'app-id',
+      appSecret: { provider: 'env', key: 'META_APP_SECRET' },
+      redirectUri: 'https://example.com/oauth/meta/callback',
+      requestedScopes: ['pages_show_list'],
+    });
+  });
+
+  it('rejects invalid redirect URIs and empty scope sets', () => {
+    expect(() =>
+      metaOAuthConfigSchema.parse({
+        appId: 'app-id',
+        appSecret: { provider: 'env', key: 'META_APP_SECRET' },
+        redirectUri: 'not-a-url',
+        requestedScopes: [],
       }),
     ).toThrow();
   });
