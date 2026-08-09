@@ -44,10 +44,11 @@ describe('ToolRegistry', () => {
   });
 
   it('exposes only bootstrap system capabilities before providers exist', () => {
-    expect(createToolRegistry().list().map((tool) => tool.name)).toEqual([
-      'system.capabilities',
-      'system.health',
-    ]);
+    expect(
+      createToolRegistry()
+        .list()
+        .map((tool) => tool.name),
+    ).toEqual(['system.capabilities', 'system.health']);
   });
 });
 
@@ -65,12 +66,8 @@ describe('evaluatePolicy', () => {
       ...writeTool,
       capabilityStatus: 'PRODUCTION_VALIDATED' as const,
     };
-    expect(evaluatePolicy(validated, { requester: 'test' }).decision).toBe(
-      'REQUIRE_APPROVAL',
-    );
-    expect(
-      evaluatePolicy(validated, { requester: 'test', approved: true }).decision,
-    ).toBe('ALLOW');
+    expect(evaluatePolicy(validated, { requester: 'test' }).decision).toBe('REQUIRE_APPROVAL');
+    expect(evaluatePolicy(validated, { requester: 'test', approved: true }).decision).toBe('ALLOW');
   });
 });
 
@@ -86,10 +83,7 @@ describe('executeTool', () => {
     });
 
     expect(result).toBe('ok');
-    expect(auditSink.list().map((event) => event.status)).toEqual([
-      'STARTED',
-      'SUCCEEDED',
-    ]);
+    expect(auditSink.list().map((event) => event.status)).toEqual(['STARTED', 'SUCCEEDED']);
     expect(new Set(auditSink.list().map((event) => event.executionId)).size).toBe(1);
   });
 

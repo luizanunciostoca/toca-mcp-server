@@ -1,11 +1,6 @@
 import * as z from 'zod/v4';
 
-export const connectedAccountStatusSchema = z.enum([
-  'PENDING',
-  'CONNECTED',
-  'DEGRADED',
-  'REVOKED',
-]);
+export const connectedAccountStatusSchema = z.enum(['PENDING', 'CONNECTED', 'DEGRADED', 'REVOKED']);
 
 export const connectedAccountSchema = z.object({
   id: z.string().min(1),

@@ -10,9 +10,5 @@ export interface Telemetry {
 export class NoopTelemetry implements Telemetry {
   increment(_name: string, _attributes?: TelemetryAttributes): void {}
 
-  record(
-    _name: string,
-    _value: number,
-    _attributes?: TelemetryAttributes,
-  ): void {}
+  record(_name: string, _value: number, _attributes?: TelemetryAttributes): void {}
 }
