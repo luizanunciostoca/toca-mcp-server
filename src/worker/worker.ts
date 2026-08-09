@@ -56,6 +56,16 @@ function retryDelayMs(attempt: number, policy: RetryPolicy): number {
   return Math.min(exponential, policy.maxDelayMs);
 }
 
+function logicalAttempt(job: ScheduledJob): number {
+  const matches = [...job.idempotencyKey.matchAll(/:retry:(\d+)/g)];
+  const previousRetry = matches.at(-1)?.[1];
+  return Math.max(job.attempts, previousRetry ? Number(previousRetry) + 1 : 1);
+}
+
+function rootIdempotencyKey(key: string): string {
+  return key.replace(/(?::retry:\d+)+$/, '');
+}
+
 export class SchedulerWorker {
   readonly #batchSize: number;
   readonly #now: () => Date;
@@ -80,9 +90,10 @@ export class SchedulerWorker {
   }
 
   private async executeJob(job: ScheduledJob): Promise<void> {
+    const attempt = logicalAttempt(job);
     const handler = this.options.handlers.get(job.toolName);
     if (!handler) {
-      await this.failOrDeadLetter(job, `HANDLER_NOT_FOUND: ${job.toolName}`);
+      await this.failOrDeadLetter(job, attempt, `HANDLER_NOT_FOUND: ${job.toolName}`);
       return;
     }
 
@@ -90,7 +101,7 @@ export class SchedulerWorker {
     this.options.logger.info('worker.job.started', {
       jobId: job.id,
       toolName: job.toolName,
-      attempt: job.attempts,
+      attempt,
     });
 
     try {
@@ -103,27 +114,31 @@ export class SchedulerWorker {
       });
       this.options.logger.info('worker.job.succeeded', { jobId: job.id, toolName: job.toolName });
     } catch (error) {
-      await this.failOrDeadLetter(job, normalizeError(error));
+      await this.failOrDeadLetter(job, attempt, normalizeError(error));
     }
   }
 
-  private async failOrDeadLetter(job: ScheduledJob, normalizedError: string): Promise<void> {
+  private async failOrDeadLetter(
+    job: ScheduledJob,
+    attempt: number,
+    normalizedError: string,
+  ): Promise<void> {
     await this.options.scheduler.markFailed(job.id, normalizedError);
     this.options.telemetry.increment('worker.job.failed', { toolName: job.toolName });
     this.options.logger.error('worker.job.failed', {
       jobId: job.id,
       toolName: job.toolName,
-      attempt: job.attempts,
+      attempt,
       error: normalizedError,
     });
 
-    if (job.attempts >= this.options.retry.maxAttempts) {
+    if (attempt >= this.options.retry.maxAttempts) {
       await this.options.deadLetters.put({
         id: this.#createId(),
         originalJobId: job.id,
         toolName: job.toolName,
         payload: job.payload,
-        attempts: job.attempts,
+        attempts: attempt,
         lastError: normalizedError,
         failedAt: this.#now().toISOString(),
       });
@@ -131,7 +146,7 @@ export class SchedulerWorker {
       return;
     }
 
-    const delay = retryDelayMs(job.attempts, this.options.retry);
+    const delay = retryDelayMs(attempt, this.options.retry);
     const retryAt = new Date(this.#now().getTime() + delay).toISOString();
     await this.options.scheduler.schedule({
       id: this.#createId(),
@@ -139,7 +154,7 @@ export class SchedulerWorker {
       payload: job.payload,
       runAt: retryAt,
       timezone: job.timezone,
-      idempotencyKey: `${job.idempotencyKey}:retry:${job.attempts}`,
+      idempotencyKey: `${rootIdempotencyKey(job.idempotencyKey)}:retry:${attempt}`,
     });
     this.options.telemetry.increment('worker.job.retry_scheduled', { toolName: job.toolName });
   }
