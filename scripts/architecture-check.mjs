@@ -30,6 +30,7 @@ const required = [
   'test/meta.test.ts',
   'test/meta-assets.test.ts',
   'test/meta-graph.test.ts',
+  'test/secrets.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/integrations/meta.md',
