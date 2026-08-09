@@ -8,11 +8,19 @@
 - **TOCA MCP Server**: deterministic execution layer. It must not contain a competing AI agent or duplicate TOCA_OS knowledge.
 - **Providers**: source of truth for external side effects and provider-native state.
 
-## Phase 0 boundaries
+## Runtime transports
 
-Phase 0 establishes only the execution foundation: MCP runtime, typed runtime configuration, tool registry, requester/auth contracts, connected-account model, execution context, policy enforcement, audit, normalized errors, secret references, observability boundaries, testing and CI.
+- `stdio` remains available for local development and process-spawned validation.
+- Streamable HTTP at `/mcp` is the remote MCP transport intended for ChatGPT connectivity.
+- `/healthz` provides operational health only and exposes no business data.
+- Initial ChatGPT validation may use a supported secure MCP tunnel while the server remains bound to localhost.
+- A public production endpoint must not be deployed until an explicit MCP authentication strategy is configured and validated.
 
-No Meta production credential, provider connection or external write capability is introduced in this phase.
+## Phase 1 boundaries
+
+Phase 1 extends the execution foundation with Meta OAuth contracts, single-use OAuth state, connected-account persistence, token validation, managed Page/Instagram asset discovery, secret persistence boundaries and remote MCP transport.
+
+No source-code change alone makes a Meta account connected or a capability production validated. Real provider evidence remains mandatory. No Instagram or Meta Ads write capability is introduced in Phase 1.
 
 ## Execution pipeline
 
@@ -31,7 +39,7 @@ Every future provider mutation must follow the same deterministic path:
 
 `system.capabilities` reports only tools registered in the running server. A tool being documented in TOCA_OS or planned in the repository never implies that it is connected or production validated.
 
-The initial runtime intentionally exposes only:
+The Phase 1 runtime intentionally continues to expose only:
 
 - `system.health`
 - `system.capabilities`
@@ -40,7 +48,9 @@ Instagram and Meta Ads capabilities must be introduced later with explicit provi
 
 ## Secret boundary
 
-The repository may contain secret **references**, never secret values. Provider tokens and credentials must be resolved by an external secret manager implementation and must not be returned to ChatGPT, written to TOCA_OS documents or emitted in logs/audit payloads.
+The repository may contain secret **references**, never secret values. Provider tokens and credentials must be persisted/resolved through a `SecretStore` implementation and must not be returned to ChatGPT, written to TOCA_OS documents or emitted in logs/audit payloads.
+
+OAuth to Meta authenticates/authorizes TOCA MCP against Meta. Authentication protecting the TOCA MCP remote endpoint from unauthorized clients is a separate concern and must never be conflated with provider OAuth.
 
 ## Rules
 
@@ -50,4 +60,5 @@ The repository may contain secret **references**, never secret values. Provider 
 4. Provider capabilities must be discovered and validated; documentation alone never implies runtime availability.
 5. Existing ChatGPT connectors should not be duplicated without a concrete technical requirement.
 6. Provider-native state is authoritative for external side effects; local state is derived and must be reconcilable.
-7. Phase boundaries must remain explicit: Phase 0 cannot silently introduce production provider writes.
+7. Phase boundaries must remain explicit: Phase 1 cannot silently introduce production provider writes.
+8. Remote MCP exposure must use a private tunnel or validated authentication before it is internet-accessible.
