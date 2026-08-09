@@ -19,14 +19,8 @@ const approvalRiskClasses: ReadonlySet<RiskClass> = new Set([
   'DESTRUCTIVE',
 ]);
 
-export function evaluatePolicy(
-  tool: ToolDefinition,
-  context: PolicyContext,
-): PolicyResult {
-  if (
-    tool.capabilityStatus === 'SUSPENDED' ||
-    tool.capabilityStatus === 'REMOVED'
-  ) {
+export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
+  if (tool.capabilityStatus === 'SUSPENDED' || tool.capabilityStatus === 'REMOVED') {
     return {
       decision: 'DENY',
       reason: `Capability is ${tool.capabilityStatus}.`,

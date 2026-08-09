@@ -1,9 +1,5 @@
 export type RiskClass =
-  | 'READ'
-  | 'WRITE_REVERSIBLE'
-  | 'WRITE_EXTERNAL'
-  | 'FINANCIAL_IMPACT'
-  | 'DESTRUCTIVE';
+  'READ' | 'WRITE_REVERSIBLE' | 'WRITE_EXTERNAL' | 'FINANCIAL_IMPACT' | 'DESTRUCTIVE';
 
 export type CapabilityStatus =
   | 'PLANNED'
@@ -40,8 +36,6 @@ export class ToolRegistry {
   }
 
   list(): ToolDefinition[] {
-    return [...this.tools.values()].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    return [...this.tools.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 }
