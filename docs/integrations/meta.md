@@ -49,7 +49,7 @@ For the first private validation, bind to localhost and use a supported secure M
 
 ## Automated checkpoint
 
-The final code-complete Phase 1 checkpoint is head `7308679e2a0e3fd8c215af7341bfb31ce4e8d48e`, validated by Quality Gate run `31291004408`. Frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed.
+The final code-complete Phase 1 checkpoint is head `ed9fb8dbe9a80fecabddafa7fca8d552f3baf8c8`, validated by Quality Gate run `31291035126`. Frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed.
 
 The checkpoint includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery, secret persistence boundaries and an Architecture Check-enforced real-validation gate.
 
