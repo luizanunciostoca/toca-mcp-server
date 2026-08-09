@@ -42,9 +42,9 @@ The app secret value itself must live in an external secret store. The repositor
 
 ## Automated checkpoint
 
-The code-level Phase 1 boundary is validated by the repository Quality Gate. Run `31290546839` passed frozen install, formatting, architecture checks, lint, typecheck, tests and build on head `4cd2919ef171e24b82740cc765e2b4e6862c60d7`.
+The latest Phase 1 head was validated by repository Quality Gate run `31290586823` on commit `1526e62b0c55eadd6d08747c838f7bdc0a32cdb4`. Frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed.
 
-This proves the local contracts and test doubles, not a production connection to Meta.
+This proves the local contracts, adapters under controlled transports, configuration guards and test doubles. It does not prove a production connection to Meta.
 
 ## Real-account validation gate
 
