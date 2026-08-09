@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryAuditSink } from '../src/core/audit.js';
 import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
-import { ExecutionError } from '../src/core/errors.js';
+import type { ExecutionError } from '../src/core/errors.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import { createToolRegistry } from '../src/registry.js';
