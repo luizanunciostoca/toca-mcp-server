@@ -49,9 +49,9 @@ For the first private validation, bind to localhost and use a supported secure M
 
 ## Automated checkpoint
 
-Quality Gate run `31290851156` passed frozen install, formatting, architecture checks, lint, typecheck, tests and build on the Phase 1 branch after remote MCP transport and Secret Store coverage were introduced.
+Quality Gate run `31290906571` passed frozen install, formatting, architecture checks, lint, typecheck, tests and build on head `75ebabea2eb04291062cb1947451193e0370c5f1`.
 
-This proves the code-level contracts, remote routing, adapters under controlled transports, configuration guards and test doubles. It does not prove a production connection to Meta.
+The checkpoint includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery and secret persistence boundaries. This proves code-level behavior under controlled transports; it does not prove a production Meta connection.
 
 ## Real-account validation gate
 
