@@ -17,7 +17,9 @@ const required = [
   'src/core/observability.ts',
   'src/core/policy.ts',
   'src/core/secrets.ts',
+  'src/core/environment-secret-resolver.ts',
   'src/core/tool-registry.ts',
+  'src/persistence/postgres.ts',
   'src/providers/meta/meta-api-client.ts',
   'src/providers/meta/meta-assets.ts',
   'src/providers/meta/meta-connection.ts',
@@ -31,7 +33,14 @@ const required = [
   'src/providers/meta-ads/meta-ads-contracts.ts',
   'src/providers/meta-ads/meta-ads-graph-provider.ts',
   'src/scheduler/in-memory-scheduler.ts',
+  'src/scheduler/postgres-scheduler.ts',
   'src/scheduler/scheduler-contracts.ts',
+  'migrations/001_production_foundation.sql',
+  'scripts/migrate.ts',
+  'Dockerfile',
+  'infra/cloudrun/service.template.yaml',
+  '.github/workflows/deploy-gcp.yml',
+  'docs/deployment/gcp.md',
   'test/config.test.ts',
   'test/core.test.ts',
   'test/http-server.test.ts',
@@ -41,6 +50,7 @@ const required = [
   'test/preconnection-contracts.test.ts',
   'test/preconnection-runtime.test.ts',
   'test/secrets.test.ts',
+  'test/gcp-foundation.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/architecture/preconnection-roadmap.md',
@@ -67,6 +77,10 @@ if (!packageJson.dependencies?.['@modelcontextprotocol/node']) {
   console.error('Remote Node MCP runtime dependency is required');
   process.exit(1);
 }
+if (!packageJson.dependencies?.pg || !packageJson.scripts?.migrate) {
+  console.error('PostgreSQL production persistence and migration scripts are required');
+  process.exit(1);
+}
 if (!packageJson.scripts?.['start:http']) {
   console.error('Remote MCP start script is required');
   process.exit(1);
@@ -75,6 +89,16 @@ if (!packageJson.scripts?.['start:http']) {
 const qualityWorkflow = readFileSync('.github/workflows/quality.yml', 'utf8');
 if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
   console.error('Quality Gate must enforce frozen lockfile installation');
+  process.exit(1);
+}
+
+const deployWorkflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
+if (!deployWorkflow.includes('id-token: write') || !deployWorkflow.includes('workload_identity_provider')) {
+  console.error('GCP deployment must use GitHub OIDC / Workload Identity Federation');
+  process.exit(1);
+}
+if (deployWorkflow.includes('service_account_key') || deployWorkflow.includes('credentials_json')) {
+  console.error('Long-lived Google service-account keys are forbidden');
   process.exit(1);
 }
 
@@ -98,9 +122,14 @@ if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
   process.exit(1);
 }
 
-if (existsSync('.github/workflows/preconnection-format.yml')) {
-  console.error('Temporary preconnection formatter workflow must be removed before validation');
-  process.exit(1);
+for (const temporary of [
+  '.github/workflows/preconnection-format.yml',
+  '.github/workflows/gcp-foundation-normalize.yml',
+]) {
+  if (existsSync(temporary)) {
+    console.error(`Temporary workflow must be removed before validation: ${temporary}`);
+    process.exit(1);
+  }
 }
 
 console.log('Architecture check passed.');
