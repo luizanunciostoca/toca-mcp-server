@@ -1,0 +1,61 @@
+import type { ScheduledJob, Scheduler } from './scheduler-contracts.js';
+
+export class InMemoryScheduler implements Scheduler {
+  private readonly jobs = new Map<string, ScheduledJob>();
+  private readonly idempotencyIndex = new Map<string, string>();
+
+  async schedule<TPayload>(
+    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
+  ): Promise<ScheduledJob<TPayload>> {
+    const existingId = this.idempotencyIndex.get(job.idempotencyKey);
+    if (existingId) {
+      return this.jobs.get(existingId) as ScheduledJob<TPayload>;
+    }
+
+    const scheduled: ScheduledJob<TPayload> = { ...job, status: 'SCHEDULED', attempts: 0 };
+    this.jobs.set(job.id, scheduled);
+    this.idempotencyIndex.set(job.idempotencyKey, job.id);
+    return scheduled;
+  }
+
+  async get<TPayload = unknown>(id: string): Promise<ScheduledJob<TPayload> | undefined> {
+    return this.jobs.get(id) as ScheduledJob<TPayload> | undefined;
+  }
+
+  async cancel(id: string): Promise<ScheduledJob | undefined> {
+    const current = this.jobs.get(id);
+    if (!current || current.status === 'SUCCEEDED') return current;
+    const canceled: ScheduledJob = { ...current, status: 'CANCELED' };
+    this.jobs.set(id, canceled);
+    return canceled;
+  }
+
+  async claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]> {
+    const now = Date.parse(nowIso);
+    const due = [...this.jobs.values()]
+      .filter((job) => job.status === 'SCHEDULED' && Date.parse(job.runAt) <= now)
+      .sort((a, b) => a.runAt.localeCompare(b.runAt))
+      .slice(0, limit);
+
+    for (const job of due) {
+      this.jobs.set(job.id, { ...job, status: 'RUNNING', attempts: job.attempts + 1 });
+    }
+    return due.map((job) => this.jobs.get(job.id)!);
+  }
+
+  async markSucceeded(id: string): Promise<void> {
+    const current = this.requireJob(id);
+    this.jobs.set(id, { ...current, status: 'SUCCEEDED' });
+  }
+
+  async markFailed(id: string, normalizedError: string): Promise<void> {
+    const current = this.requireJob(id);
+    this.jobs.set(id, { ...current, status: 'FAILED', lastError: normalizedError });
+  }
+
+  private requireJob(id: string): ScheduledJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error(`Scheduled job not found: ${id}`);
+    return job;
+  }
+}
