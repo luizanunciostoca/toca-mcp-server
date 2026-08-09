@@ -30,7 +30,7 @@ export function createTocaServer(): McpServer {
         openWorldHint: false,
       },
     },
-    async () => {
+    () => {
       const output = {
         status: 'ok' as const,
         service: SERVER_NAME,
