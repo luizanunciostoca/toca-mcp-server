@@ -19,8 +19,9 @@ export interface AuditSink {
 export class InMemoryAuditSink implements AuditSink {
   private readonly events: AuditEvent[] = [];
 
-  async write(event: AuditEvent): Promise<void> {
+  write(event: AuditEvent): Promise<void> {
     this.events.push(event);
+    return Promise.resolve();
   }
 
   list(): readonly AuditEvent[] {
