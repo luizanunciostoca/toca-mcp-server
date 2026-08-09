@@ -49,9 +49,9 @@ For the first private validation, bind to localhost and use a supported secure M
 
 ## Automated checkpoint
 
-The final code-complete Phase 1 checkpoint is head `ed9fb8dbe9a80fecabddafa7fca8d552f3baf8c8`, validated by Quality Gate run `31291035126`. Frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed.
+The final implementation checkpoint prior to external validation was proven green by Quality Gate run `31291035126`; frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed. Subsequent changes are documentation-only status clarifications and remain subject to the same Quality Gate on the branch head.
 
-The checkpoint includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery, secret persistence boundaries and an Architecture Check-enforced real-validation gate.
+The implementation includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery, secret persistence boundaries and an Architecture Check-enforced real-validation gate.
 
 This proves code-level behavior under controlled transports; it does not prove a production Meta connection.
 
@@ -59,4 +59,4 @@ This proves code-level behavior under controlled transports; it does not prove a
 
 The canonical checklist is `docs/integrations/phase-1-real-validation.md`.
 
-Phase 1 is not connected or production-ready until a real Meta App and authorized owned/test account, plus a real ChatGPT MCP scan, prove the required provider and client evidence. Until then `META_ENABLED` should remain `false` in production and no provider capability should be promoted to `CONNECTED` or `PRODUCTION_VALIDATED`.
+Phase 1 is code-complete but not connected or production-ready until a real Meta App and authorized owned/test account, plus a real ChatGPT MCP scan, prove the required provider and client evidence. Until then `META_ENABLED` should remain `false` in production and no provider capability should be promoted to `CONNECTED` or `PRODUCTION_VALIDATED`.
