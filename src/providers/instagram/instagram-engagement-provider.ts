@@ -27,15 +27,9 @@ export class InstagramGraphEngagementProvider implements InstagramEngagementProv
     readonly recipientId: string;
     readonly messageId: string;
   }> {
-    const payload = JSON.stringify({
+    const response = (await this.client.postJson(`${input.instagramUserId}/messages`, {
       recipient: { id: input.recipientScopedId },
       message: { text: input.message },
-    });
-
-    const response = (await this.client.post(`${input.instagramUserId}/messages`, {
-      recipient: input.recipientScopedId,
-      message: JSON.stringify({ text: input.message }),
-      payload,
     })) as Record<string, unknown>;
 
     return {
