@@ -8,7 +8,14 @@ export interface Telemetry {
 }
 
 export class NoopTelemetry implements Telemetry {
-  increment(_name: string, _attributes?: TelemetryAttributes): void {}
+  increment(name: string, attributes?: TelemetryAttributes): void {
+    void name;
+    void attributes;
+  }
 
-  record(_name: string, _value: number, _attributes?: TelemetryAttributes): void {}
+  record(name: string, value: number, attributes?: TelemetryAttributes): void {
+    void name;
+    void value;
+    void attributes;
+  }
 }
