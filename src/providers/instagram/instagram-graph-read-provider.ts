@@ -33,7 +33,8 @@ const commentSchema = z.object({
   timestamp: z.string().optional(),
 });
 
-const dataSchema = <T extends z.ZodTypeAny>(item: T) => z.object({ data: z.array(item).default([]) });
+const dataSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({ data: z.array(item).default([]) });
 const insightSchema = z.object({
   name: z.string().min(1),
   period: z.string().optional(),
@@ -47,7 +48,9 @@ function normalizeMediaType(value: string): InstagramMediaType {
   return 'IMAGE';
 }
 
-function normalizeInsight(input: z.infer<typeof insightSchema>): InstagramInsightMetric | undefined {
+function normalizeInsight(
+  input: z.infer<typeof insightSchema>,
+): InstagramInsightMetric | undefined {
   const value = input.total_value?.value ?? input.values?.[0]?.value;
   if (value === undefined) return undefined;
   return { name: input.name, value, ...(input.period ? { period: input.period } : {}) };

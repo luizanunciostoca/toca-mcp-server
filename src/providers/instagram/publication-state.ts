@@ -34,7 +34,9 @@ export function transitionPublication(
   current: PublicationRecord,
   next: PublicationState,
   nowIso: string,
-  patch: Partial<Pick<PublicationRecord, 'externalContainerId' | 'externalMediaId' | 'lastError'>> = {},
+  patch: Partial<
+    Pick<PublicationRecord, 'externalContainerId' | 'externalMediaId' | 'lastError'>
+  > = {},
 ): PublicationRecord {
   if (!allowedTransitions[current.state].includes(next)) {
     throw new Error(`Invalid publication transition: ${current.state} -> ${next}`);
@@ -44,8 +46,16 @@ export function transitionPublication(
 
 export type PublicationReconciliation =
   | { readonly status: 'IN_SYNC'; readonly state: PublicationState }
-  | { readonly status: 'LOCAL_STALE'; readonly local: PublicationState; readonly provider: PublicationState }
-  | { readonly status: 'STATE_CONFLICT'; readonly local: PublicationState; readonly provider: PublicationState };
+  | {
+      readonly status: 'LOCAL_STALE';
+      readonly local: PublicationState;
+      readonly provider: PublicationState;
+    }
+  | {
+      readonly status: 'STATE_CONFLICT';
+      readonly local: PublicationState;
+      readonly provider: PublicationState;
+    };
 
 export function reconcilePublicationState(
   local: PublicationState,
