@@ -22,12 +22,15 @@ const required = [
   'src/providers/meta/meta-discovery.ts',
   'src/providers/meta/meta-graph.ts',
   'src/providers/meta/meta-oauth.ts',
+  'test/config.test.ts',
   'test/core.test.ts',
   'test/meta.test.ts',
   'test/meta-assets.test.ts',
   'test/meta-graph.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
+  'docs/integrations/meta.md',
+  '.env.example',
   '.github/workflows/quality.yml',
   '.gitignore',
   'pnpm-lock.yaml',
@@ -54,6 +57,12 @@ if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
 const registry = readFileSync('src/registry.ts', 'utf8');
 if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
   console.error('Phase 1 must not advertise Instagram or Meta Ads write capabilities');
+  process.exit(1);
+}
+
+const envExample = readFileSync('.env.example', 'utf8');
+if (/META_(APP_SECRET|ACCESS_TOKEN)=\S+/.test(envExample)) {
+  console.error('.env.example must not contain raw Meta secrets or tokens');
   process.exit(1);
 }
 
