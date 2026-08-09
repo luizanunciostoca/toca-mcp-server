@@ -40,6 +40,8 @@ export class ToolRegistry {
   }
 
   list(): ToolDefinition[] {
-    return [...this.tools.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...this.tools.values()].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }
 }
