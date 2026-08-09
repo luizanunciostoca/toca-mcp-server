@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { InMemoryAuditSink } from '../src/core/audit.js';
+import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
+import { ExecutionError } from '../src/core/errors.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import { createToolRegistry } from '../src/registry.js';
@@ -68,6 +71,47 @@ describe('evaluatePolicy', () => {
     expect(
       evaluatePolicy(validated, { requester: 'test', approved: true }).decision,
     ).toBe('ALLOW');
+  });
+});
+
+describe('executeTool', () => {
+  it('audits successful allowed executions', async () => {
+    const auditSink = new InMemoryAuditSink();
+    const result = await executeTool({
+      tool: readTool,
+      policyContext: { requester: 'test-user' },
+      auditSink,
+      correlationId: 'corr_exec_001',
+      action: () => Promise.resolve('ok'),
+    });
+
+    expect(result).toBe('ok');
+    expect(auditSink.list().map((event) => event.status)).toEqual([
+      'STARTED',
+      'SUCCEEDED',
+    ]);
+    expect(new Set(auditSink.list().map((event) => event.executionId)).size).toBe(1);
+  });
+
+  it('blocks writes that are not production validated before action execution', async () => {
+    const auditSink = new InMemoryAuditSink();
+    let called = false;
+
+    await expect(
+      executeTool({
+        tool: writeTool,
+        policyContext: { requester: 'test-user', approved: true },
+        auditSink,
+        correlationId: 'corr_exec_002',
+        action: () => {
+          called = true;
+          return Promise.resolve('should-not-run');
+        },
+      }),
+    ).rejects.toMatchObject<Partial<ExecutionError>>({ code: 'POLICY_DENIED' });
+
+    expect(called).toBe(false);
+    expect(auditSink.list().map((event) => event.status)).toEqual(['DENIED']);
   });
 });
 
