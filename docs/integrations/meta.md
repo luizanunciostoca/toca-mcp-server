@@ -49,22 +49,14 @@ For the first private validation, bind to localhost and use a supported secure M
 
 ## Automated checkpoint
 
-Quality Gate run `31290906571` passed frozen install, formatting, architecture checks, lint, typecheck, tests and build on head `75ebabea2eb04291062cb1947451193e0370c5f1`.
+The final code-complete Phase 1 checkpoint is head `7308679e2a0e3fd8c215af7341bfb31ce4e8d48e`, validated by Quality Gate run `31291004408`. Frozen install, formatting, architecture checks, lint, typecheck, tests and build all passed.
 
-The checkpoint includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery and secret persistence boundaries. This proves code-level behavior under controlled transports; it does not prove a production Meta connection.
+The checkpoint includes remote Streamable HTTP support, HTTP routing tests, Meta configuration guards, OAuth state/replay protection, token inspection, managed asset discovery, secret persistence boundaries and an Architecture Check-enforced real-validation gate.
+
+This proves code-level behavior under controlled transports; it does not prove a production Meta connection.
 
 ## Real-account validation gate
 
-Phase 1 is not production-connected until a real Meta App and authorized test/owned account have proven:
+The canonical checklist is `docs/integrations/phase-1-real-validation.md`.
 
-- configured redirect URI works end to end;
-- requested/granted scopes match the intended read capabilities;
-- token inspection returns valid app ownership;
-- reconnect/expiry behavior is exercised;
-- managed Page is discovered;
-- linked Instagram professional account is discovered when applicable;
-- no secret appears in logs or outputs;
-- ChatGPT can scan the remote MCP endpoint through the selected private/production connection method;
-- Quality Gate remains green after real configuration is wired.
-
-Until then `META_ENABLED` should remain `false` in production and no provider capability should be marked `PRODUCTION_VALIDATED`.
+Phase 1 is not connected or production-ready until a real Meta App and authorized owned/test account, plus a real ChatGPT MCP scan, prove the required provider and client evidence. Until then `META_ENABLED` should remain `false` in production and no provider capability should be promoted to `CONNECTED` or `PRODUCTION_VALIDATED`.
