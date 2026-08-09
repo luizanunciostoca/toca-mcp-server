@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { toNodeHandler } from '@modelcontextprotocol/node';
+import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { createTocaServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
@@ -16,9 +16,11 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
   });
 
   return createServer((request, response) => {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+    const requestUrl = request.url ?? '/';
+    const method = request.method ?? 'POST';
+    const url = new URL(requestUrl, `http://${request.headers.host ?? 'localhost'}`);
 
-    if (url.pathname === '/healthz' && request.method === 'GET') {
+    if (url.pathname === '/healthz' && method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ status: 'ok', service: SERVER_NAME, version: SERVER_VERSION }));
       return;
@@ -30,7 +32,14 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
       return;
     }
 
-    void handleMcp(request, response).catch((error: unknown) => {
+    const normalizedRequest: NodeIncomingMessageLike = {
+      method,
+      url: requestUrl,
+      headers: request.headers,
+      [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
+    };
+
+    void handleMcp(normalizedRequest, response).catch((error: unknown) => {
       options.onError?.(error);
       if (!response.headersSent) {
         response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
