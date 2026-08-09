@@ -34,6 +34,7 @@ const required = [
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/integrations/meta.md',
+  'docs/integrations/phase-1-real-validation.md',
   '.env.example',
   '.github/workflows/quality.yml',
   '.gitignore',
@@ -75,6 +76,12 @@ if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
 const envExample = readFileSync('.env.example', 'utf8');
 if (/META_(APP_SECRET|ACCESS_TOKEN)=\S+/.test(envExample)) {
   console.error('.env.example must not contain raw Meta secrets or tokens');
+  process.exit(1);
+}
+
+const validationGate = readFileSync('docs/integrations/phase-1-real-validation.md', 'utf8');
+if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
+  console.error('Phase 1 must retain the real-provider and ChatGPT validation gate');
   process.exit(1);
 }
 
