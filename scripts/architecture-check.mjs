@@ -80,7 +80,9 @@ if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
 
 const registry = readFileSync('src/registry.ts', 'utf8');
 if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
-  console.error('Preconnection branches must not advertise Instagram or Meta Ads write capabilities');
+  console.error(
+    'Preconnection branches must not advertise Instagram or Meta Ads write capabilities',
+  );
   process.exit(1);
 }
 
