@@ -12,12 +12,16 @@ import type {
 } from './meta-ads-contracts.js';
 
 const idResponseSchema = z.object({ id: z.string().min(1) });
-const dataResponseSchema = z.object({ data: z.array(z.record(z.string(), z.unknown())).default([]) });
+const dataResponseSchema = z.object({
+  data: z.array(z.record(z.string(), z.unknown())).default([]),
+});
 
 export class MetaAdsGraphProvider implements MetaAdsProvider {
   constructor(private readonly api: MetaApiClient) {}
 
-  async listCampaigns(account: MetaAdAccountRef): Promise<readonly Readonly<Record<string, unknown>>[]> {
+  async listCampaigns(
+    account: MetaAdAccountRef,
+  ): Promise<readonly Readonly<Record<string, unknown>>[]> {
     const result = await this.api.get(`act_${account.adAccountId}/campaigns`, {
       fields: 'id,name,objective,status,effective_status',
     });
@@ -36,7 +40,10 @@ export class MetaAdsGraphProvider implements MetaAdsProvider {
     return dataResponseSchema.parse(result).data;
   }
 
-  async createCampaign(account: MetaAdAccountRef, draft: MetaCampaignDraft): Promise<{ readonly id: string }> {
+  async createCampaign(
+    account: MetaAdAccountRef,
+    draft: MetaCampaignDraft,
+  ): Promise<{ readonly id: string }> {
     const result = await this.api.post(`act_${account.adAccountId}/campaigns`, {
       name: draft.name,
       objective: draft.objective,
@@ -46,7 +53,10 @@ export class MetaAdsGraphProvider implements MetaAdsProvider {
     return idResponseSchema.parse(result);
   }
 
-  async createAdSet(account: MetaAdAccountRef, draft: MetaAdSetDraft): Promise<{ readonly id: string }> {
+  async createAdSet(
+    account: MetaAdAccountRef,
+    draft: MetaAdSetDraft,
+  ): Promise<{ readonly id: string }> {
     const values: Record<string, string> = {
       campaign_id: draft.campaignId,
       name: draft.name,
@@ -54,14 +64,18 @@ export class MetaAdsGraphProvider implements MetaAdsProvider {
       status: draft.status,
     };
     if (draft.dailyBudgetMinor !== undefined) values.daily_budget = String(draft.dailyBudgetMinor);
-    if (draft.lifetimeBudgetMinor !== undefined) values.lifetime_budget = String(draft.lifetimeBudgetMinor);
+    if (draft.lifetimeBudgetMinor !== undefined)
+      values.lifetime_budget = String(draft.lifetimeBudgetMinor);
     if (draft.billingEvent) values.billing_event = draft.billingEvent;
     if (draft.optimizationGoal) values.optimization_goal = draft.optimizationGoal;
     const result = await this.api.post(`act_${account.adAccountId}/adsets`, values);
     return idResponseSchema.parse(result);
   }
 
-  async createCreative(account: MetaAdAccountRef, draft: MetaCreativeDraft): Promise<{ readonly id: string }> {
+  async createCreative(
+    account: MetaAdAccountRef,
+    draft: MetaCreativeDraft,
+  ): Promise<{ readonly id: string }> {
     const values: Record<string, string> = {
       name: draft.name,
       object_story_spec: JSON.stringify(draft.objectStorySpec),

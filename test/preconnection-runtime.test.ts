@@ -17,7 +17,13 @@ describe('preconnection runtime support', () => {
       async request(url, init) {
         observedUrl = url;
         observedAuthorization = new Headers(init.headers).get('authorization') ?? '';
-        return { ok: true, status: 200, async json() { return { data: [] }; } };
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { data: [] };
+          },
+        };
       },
     };
     const client = new MetaApiClient(
