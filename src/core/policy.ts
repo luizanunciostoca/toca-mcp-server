@@ -19,17 +19,32 @@ const approvalRiskClasses: ReadonlySet<RiskClass> = new Set([
   'DESTRUCTIVE',
 ]);
 
-export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
-  if (tool.capabilityStatus === 'SUSPENDED' || tool.capabilityStatus === 'REMOVED') {
-    return { decision: 'DENY', reason: `Capability is ${tool.capabilityStatus}.` };
+export function evaluatePolicy(
+  tool: ToolDefinition,
+  context: PolicyContext,
+): PolicyResult {
+  if (
+    tool.capabilityStatus === 'SUSPENDED' ||
+    tool.capabilityStatus === 'REMOVED'
+  ) {
+    return {
+      decision: 'DENY',
+      reason: `Capability is ${tool.capabilityStatus}.`,
+    };
   }
 
   if (tool.capabilityStatus !== 'PRODUCTION_VALIDATED' && tool.sideEffects) {
-    return { decision: 'DENY', reason: 'Write capability is not production validated.' };
+    return {
+      decision: 'DENY',
+      reason: 'Write capability is not production validated.',
+    };
   }
 
   if (approvalRiskClasses.has(tool.riskClass) && !context.approved) {
-    return { decision: 'REQUIRE_APPROVAL', reason: `Risk class ${tool.riskClass} requires approval.` };
+    return {
+      decision: 'REQUIRE_APPROVAL',
+      reason: `Risk class ${tool.riskClass} requires approval.`,
+    };
   }
 
   return { decision: 'ALLOW', reason: 'Policy requirements satisfied.' };
