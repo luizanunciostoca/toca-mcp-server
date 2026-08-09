@@ -51,3 +51,7 @@ Promotion requires both:
 - real-provider plus real-ChatGPT evidence from sections C and D.
 
 Only after this gate may read-only Meta and Instagram capabilities be promoted from `IMPLEMENTED` to `CONNECTED`. `PRODUCTION_VALIDATED` requires the later production-validation checklist.
+
+## F. Current status
+
+The repository implementation is code-complete for this phase and remains intentionally in draft. The outstanding work is external validation: configuring a real Meta App and owned/test account, wiring a real Secret Store implementation, exposing the MCP through a private or authenticated route, and scanning it from ChatGPT. These steps must not be simulated or inferred from repository tests.
