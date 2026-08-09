@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { discoverInstagramCapabilities } from '../src/providers/instagram/instagram-capabilities.js';
 import { evaluateBudgetChange } from '../src/providers/meta-ads/budget-guardrail.js';
 
- describe('preconnection provider contracts', () => {
+describe('preconnection provider contracts', () => {
   it('promotes Instagram capabilities only with positive provider evidence', () => {
     expect(
       discoverInstagramCapabilities({

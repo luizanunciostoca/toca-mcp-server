@@ -21,10 +21,13 @@ export function discoverInstagramCapabilities(
   if (!evidence.accountEligible) return [];
   const capabilities = new Set<InstagramCapability>();
   const has = (scope: string) => evidence.scopes.includes(scope);
-  const proved = (capability: InstagramCapability) => evidence.providerEvidence.includes(capability);
+  const proved = (capability: InstagramCapability) =>
+    evidence.providerEvidence.includes(capability);
 
-  if (has('instagram_basic') && proved('instagram.profile.read')) capabilities.add('instagram.profile.read');
-  if (has('instagram_basic') && proved('instagram.media.read')) capabilities.add('instagram.media.read');
+  if (has('instagram_basic') && proved('instagram.profile.read'))
+    capabilities.add('instagram.profile.read');
+  if (has('instagram_basic') && proved('instagram.media.read'))
+    capabilities.add('instagram.media.read');
   if (proved('instagram.comments.read')) capabilities.add('instagram.comments.read');
   if (proved('instagram.insights.read')) capabilities.add('instagram.insights.read');
 

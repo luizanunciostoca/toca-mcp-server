@@ -36,10 +36,24 @@ export interface InstagramInsightMetric {
 
 export interface InstagramReadProvider {
   getProfile(account: InstagramAccountRef): Promise<InstagramProfile>;
-  listMedia(account: InstagramAccountRef, limit?: number): Promise<readonly InstagramMediaSummary[]>;
-  listComments(account: InstagramAccountRef, mediaId: string, limit?: number): Promise<readonly InstagramComment[]>;
-  getAccountInsights(account: InstagramAccountRef, metrics: readonly string[]): Promise<readonly InstagramInsightMetric[]>;
-  getMediaInsights(account: InstagramAccountRef, mediaId: string, metrics: readonly string[]): Promise<readonly InstagramInsightMetric[]>;
+  listMedia(
+    account: InstagramAccountRef,
+    limit?: number,
+  ): Promise<readonly InstagramMediaSummary[]>;
+  listComments(
+    account: InstagramAccountRef,
+    mediaId: string,
+    limit?: number,
+  ): Promise<readonly InstagramComment[]>;
+  getAccountInsights(
+    account: InstagramAccountRef,
+    metrics: readonly string[],
+  ): Promise<readonly InstagramInsightMetric[]>;
+  getMediaInsights(
+    account: InstagramAccountRef,
+    mediaId: string,
+    metrics: readonly string[],
+  ): Promise<readonly InstagramInsightMetric[]>;
 }
 
 export interface InstagramPublishRequest {
@@ -59,6 +73,13 @@ export interface InstagramPublishResult {
 
 export interface InstagramWriteProvider {
   publish(request: InstagramPublishRequest): Promise<InstagramPublishResult>;
-  getPublishStatus(account: InstagramAccountRef, externalMediaId: string): Promise<InstagramPublishResult>;
-  replyToComment(account: InstagramAccountRef, commentId: string, message: string): Promise<{ readonly replyId: string }>;
+  getPublishStatus(
+    account: InstagramAccountRef,
+    externalMediaId: string,
+  ): Promise<InstagramPublishResult>;
+  replyToComment(
+    account: InstagramAccountRef,
+    commentId: string,
+    message: string,
+  ): Promise<{ readonly replyId: string }>;
 }

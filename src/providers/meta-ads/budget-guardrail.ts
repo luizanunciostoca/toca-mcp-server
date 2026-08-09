@@ -21,16 +21,21 @@ export function evaluateBudgetChange(
   policy: BudgetGuardrailPolicy,
   request: BudgetChangeRequest,
 ): BudgetDecision {
-  if (request.currency !== policy.currency) return { decision: 'DENY', reason: 'currency_not_allowed' };
+  if (request.currency !== policy.currency)
+    return { decision: 'DENY', reason: 'currency_not_allowed' };
   if (!Number.isSafeInteger(request.requestedBudgetMinor) || request.requestedBudgetMinor <= 0) {
     return { decision: 'DENY', reason: 'invalid_budget' };
   }
 
-  const absoluteLimit = request.type === 'DAILY' ? policy.maxDailyBudgetMinor : policy.maxLifetimeBudgetMinor;
-  if (request.requestedBudgetMinor > absoluteLimit) return { decision: 'DENY', reason: 'absolute_budget_limit' };
+  const absoluteLimit =
+    request.type === 'DAILY' ? policy.maxDailyBudgetMinor : policy.maxLifetimeBudgetMinor;
+  if (request.requestedBudgetMinor > absoluteLimit)
+    return { decision: 'DENY', reason: 'absolute_budget_limit' };
 
   if (request.currentBudgetMinor && request.requestedBudgetMinor > request.currentBudgetMinor) {
-    const increase = ((request.requestedBudgetMinor - request.currentBudgetMinor) / request.currentBudgetMinor) * 100;
+    const increase =
+      ((request.requestedBudgetMinor - request.currentBudgetMinor) / request.currentBudgetMinor) *
+      100;
     if (increase > policy.maxSingleIncreasePercent) {
       return { decision: 'REQUIRE_APPROVAL', reason: 'increase_threshold' };
     }

@@ -46,11 +46,29 @@ export interface MetaAdsInsightsQuery {
 
 export interface MetaAdsProvider {
   listCampaigns(account: MetaAdAccountRef): Promise<readonly Readonly<Record<string, unknown>>[]>;
-  getInsights(account: MetaAdAccountRef, query: MetaAdsInsightsQuery): Promise<readonly Readonly<Record<string, unknown>>[]>;
-  createCampaign(account: MetaAdAccountRef, draft: MetaCampaignDraft): Promise<{ readonly id: string }>;
+  getInsights(
+    account: MetaAdAccountRef,
+    query: MetaAdsInsightsQuery,
+  ): Promise<readonly Readonly<Record<string, unknown>>[]>;
+  createCampaign(
+    account: MetaAdAccountRef,
+    draft: MetaCampaignDraft,
+  ): Promise<{ readonly id: string }>;
   createAdSet(account: MetaAdAccountRef, draft: MetaAdSetDraft): Promise<{ readonly id: string }>;
-  createCreative(account: MetaAdAccountRef, draft: MetaCreativeDraft): Promise<{ readonly id: string }>;
+  createCreative(
+    account: MetaAdAccountRef,
+    draft: MetaCreativeDraft,
+  ): Promise<{ readonly id: string }>;
   createAd(account: MetaAdAccountRef, draft: MetaAdDraft): Promise<{ readonly id: string }>;
-  updateStatus(account: MetaAdAccountRef, entityId: string, status: MetaAdEntityStatus): Promise<void>;
-  updateBudget(account: MetaAdAccountRef, adSetId: string, budgetMinor: number, budgetType: 'DAILY' | 'LIFETIME'): Promise<void>;
+  updateStatus(
+    account: MetaAdAccountRef,
+    entityId: string,
+    status: MetaAdEntityStatus,
+  ): Promise<void>;
+  updateBudget(
+    account: MetaAdAccountRef,
+    adSetId: string,
+    budgetMinor: number,
+    budgetType: 'DAILY' | 'LIFETIME',
+  ): Promise<void>;
 }

@@ -13,7 +13,9 @@ export interface ScheduledJob<TPayload = unknown> {
 }
 
 export interface Scheduler {
-  schedule<TPayload>(job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>): Promise<ScheduledJob<TPayload>>;
+  schedule<TPayload>(
+    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
+  ): Promise<ScheduledJob<TPayload>>;
   get<TPayload = unknown>(id: string): Promise<ScheduledJob<TPayload> | undefined>;
   cancel(id: string): Promise<ScheduledJob | undefined>;
   claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]>;
@@ -22,7 +24,8 @@ export interface Scheduler {
 }
 
 export interface ReconciliationResult {
-  readonly status: 'IN_SYNC' | 'LOCAL_STALE' | 'PROVIDER_UNAVAILABLE' | 'STATE_CONFLICT' | 'RESOURCE_MISSING';
+  readonly status:
+    'IN_SYNC' | 'LOCAL_STALE' | 'PROVIDER_UNAVAILABLE' | 'STATE_CONFLICT' | 'RESOURCE_MISSING';
   readonly localState: string;
   readonly providerState?: string;
   readonly externalResourceId?: string;
