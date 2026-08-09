@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryAuditSink } from '../src/core/audit.js';
 import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
-import type { ExecutionError } from '../src/core/errors.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import { createToolRegistry } from '../src/registry.js';
@@ -102,7 +101,7 @@ describe('executeTool', () => {
           return Promise.resolve('should-not-run');
         },
       }),
-    ).rejects.toMatchObject<Partial<ExecutionError>>({ code: 'POLICY_DENIED' });
+    ).rejects.toMatchObject({ code: 'POLICY_DENIED' });
 
     expect(called).toBe(false);
     expect(auditSink.list().map((event) => event.status)).toEqual(['DENIED']);
