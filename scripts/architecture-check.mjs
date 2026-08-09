@@ -15,6 +15,8 @@ const required = [
   'src/core/policy.ts',
   'src/core/secrets.ts',
   'src/core/tool-registry.ts',
+  'src/providers/meta/meta-connection.ts',
+  'src/providers/meta/meta-oauth.ts',
   'test/core.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
@@ -38,6 +40,12 @@ if (packageJson.name !== 'toca-mcp-server' || packageJson.private !== true) {
 const qualityWorkflow = readFileSync('.github/workflows/quality.yml', 'utf8');
 if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
   console.error('Quality Gate must enforce frozen lockfile installation');
+  process.exit(1);
+}
+
+const registry = readFileSync('src/registry.ts', 'utf8');
+if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
+  console.error('Phase 1 must not advertise Instagram or Meta Ads write capabilities');
   process.exit(1);
 }
 
