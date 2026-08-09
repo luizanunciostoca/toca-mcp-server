@@ -4,8 +4,9 @@ import { MetaApiClient, type MetaApiTransport } from '../src/providers/meta/meta
 import { InMemoryScheduler } from '../src/scheduler/in-memory-scheduler.js';
 
 class StaticSecrets implements SecretResolver {
-  async resolve(_reference: SecretReference): Promise<string> {
-    return 'test-token';
+  resolve(reference: SecretReference): Promise<string> {
+    void reference;
+    return Promise.resolve('test-token');
   }
 }
 
@@ -14,16 +15,16 @@ describe('preconnection runtime support', () => {
     let observedUrl = '';
     let observedAuthorization = '';
     const transport: MetaApiTransport = {
-      async request(url, init) {
+      request(url, init) {
         observedUrl = url;
         observedAuthorization = new Headers(init.headers).get('authorization') ?? '';
-        return {
+        return Promise.resolve({
           ok: true,
           status: 200,
-          async json() {
-            return { data: [] };
+          json() {
+            return Promise.resolve({ data: [] });
           },
-        };
+        });
       },
     };
     const client = new MetaApiClient(
