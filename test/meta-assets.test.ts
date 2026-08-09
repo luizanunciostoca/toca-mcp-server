@@ -83,7 +83,11 @@ describe('MetaGraphManagedAssetDiscovery', () => {
   it('normalizes HTTP failure without leaking the access token', async () => {
     const http: MetaHttpTransport = {
       get: () =>
-        Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({ error: 'denied' }) }),
+        Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: 'denied' }),
+        }),
     };
 
     const discovery = new MetaGraphManagedAssetDiscovery(
