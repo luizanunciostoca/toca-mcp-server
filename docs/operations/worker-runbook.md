@@ -11,6 +11,7 @@ Workers are one-shot batch processors. A worker claims due jobs using the Schedu
 ## Retry policy
 
 Default policy:
+
 - maximum attempts: 5
 - base delay: 30 seconds
 - exponential backoff

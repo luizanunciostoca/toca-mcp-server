@@ -8,7 +8,9 @@ export interface ReadinessReport {
   readonly checks: ReadonlyArray<{ readonly name: string; readonly ok: boolean }>;
 }
 
-export async function evaluateReadiness(checks: readonly ReadinessCheck[]): Promise<ReadinessReport> {
+export async function evaluateReadiness(
+  checks: readonly ReadinessCheck[],
+): Promise<ReadinessReport> {
   const results = await Promise.all(
     checks.map(async (check) => {
       try {
