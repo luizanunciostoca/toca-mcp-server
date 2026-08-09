@@ -79,7 +79,12 @@ export function evaluateEngagementPolicy(input: EngagementPolicyInput): Engageme
   }
 
   if (AUTO_ELIGIBLE.has(input.intent)) {
-    return decision(input.channel, 'LOW', 'AUTO_REPLY_ALLOWED', `verified_low_risk:${input.intent}`);
+    return decision(
+      input.channel,
+      'LOW',
+      'AUTO_REPLY_ALLOWED',
+      `verified_low_risk:${input.intent}`,
+    );
   }
 
   return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'unknown_or_unclassified');

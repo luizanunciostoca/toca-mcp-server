@@ -29,7 +29,10 @@ export function discoverInstagramCapabilities(
   const proved = (capability: InstagramCapability) =>
     evidence.providerEvidence.includes(capability);
 
-  if ((has('instagram_basic') || has('instagram_business_basic')) && proved('instagram.profile.read'))
+  if (
+    (has('instagram_basic') || has('instagram_business_basic')) &&
+    proved('instagram.profile.read')
+  )
     capabilities.add('instagram.profile.read');
   if ((has('instagram_basic') || has('instagram_business_basic')) && proved('instagram.media.read'))
     capabilities.add('instagram.media.read');

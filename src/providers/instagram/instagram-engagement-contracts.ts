@@ -1,10 +1,7 @@
 export type EngagementChannel = 'COMMENT' | 'DIRECT';
 
 export type EngagementAutonomy =
-  | 'READ_ONLY'
-  | 'SUGGEST_ONLY'
-  | 'AUTO_REPLY_ALLOWED'
-  | 'HUMAN_REVIEW_REQUIRED';
+  'READ_ONLY' | 'SUGGEST_ONLY' | 'AUTO_REPLY_ALLOWED' | 'HUMAN_REVIEW_REQUIRED';
 
 export type EngagementRisk = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
