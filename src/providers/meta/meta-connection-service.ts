@@ -36,14 +36,14 @@ export class MetaConnectionService {
       scopes: [...validation.grantedScopes],
       status,
       tokenReference: serializeSecretReference(input.state.accessToken),
-      expiresAt: input.state.expiresAt,
+      ...(input.state.expiresAt ? { expiresAt: input.state.expiresAt } : {}),
     });
 
     return {
       accountId: input.localAccountId,
       status,
       capabilities: validation.capabilities,
-      reason: validation.reason,
+      ...(validation.reason ? { reason: validation.reason } : {}),
     };
   }
 }
