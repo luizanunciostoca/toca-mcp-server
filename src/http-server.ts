@@ -1,10 +1,12 @@
 import { createServer, type Server } from 'node:http';
 import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import { evaluateReadiness, type ReadinessCheck } from './health/readiness.js';
 import { createTocaServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
 export interface TocaHttpServerOptions {
   readonly onError?: (error: unknown) => void;
+  readonly readinessChecks?: readonly ReadinessCheck[];
 }
 
 export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Server {
@@ -23,6 +25,16 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
     if (url.pathname === '/healthz' && method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ status: 'ok', service: SERVER_NAME, version: SERVER_VERSION }));
+      return;
+    }
+
+    if (url.pathname === '/readyz' && method === 'GET') {
+      void evaluateReadiness(options.readinessChecks ?? []).then((report) => {
+        response.writeHead(report.status === 'ready' ? 200 : 503, {
+          'content-type': 'application/json; charset=utf-8',
+        });
+        response.end(JSON.stringify(report));
+      });
       return;
     }
 
