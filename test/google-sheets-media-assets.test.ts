@@ -16,8 +16,12 @@ class FakeSheetsClient implements SpreadsheetValuesClient {
 }
 
 describe('GoogleSheetsMediaAssetAdapter', () => {
-  it('returns ranked selectable assets from ASSET_SELECTOR', async () => {
+  it('returns ranked selectable assets from ASSET_SELECTOR when the snapshot context matches', async () => {
     const client = new FakeSheetsClient();
+    client.reads.set('ASSET_SELECTOR!A2:B3', [
+      ['FORMATO', 'STORIES'],
+      ['TEMA / PALAVRA-CHAVE', 'casal'],
+    ]);
     client.reads.set('ASSET_SELECTOR!A12:V440', [
       ['SUN-0354', 'drive-354', 'VC-COUPLE-SUNSET-ROMANCE-01', '', '', '', 100, 100, 100, 78, 94, 100, 0, '', '', '', 100, 100, 96.82, 'TOP_PICK', '', 1],
       ['SUN-0347', 'drive-347', 'VC-COUPLE-SUNSET-KISS-01', '', '', '', 100, 100, 100, 82, 88, 100, 0, '', '', '', 100, 100, 96.76, 'TOP_PICK', '', 2],
@@ -37,14 +41,31 @@ describe('GoogleSheetsMediaAssetAdapter', () => {
     expect(result.source).toBe('TOCA_OS_ASSET_SELECTOR');
   });
 
+  it('fails closed when request context does not match the shared selector snapshot', async () => {
+    const client = new FakeSheetsClient();
+    client.reads.set('ASSET_SELECTOR!A2:B3', [
+      ['FORMATO', 'FEED'],
+      ['TEMA / PALAVRA-CHAVE', 'sunset'],
+    ]);
+    const adapter = new GoogleSheetsMediaAssetAdapter(client, { spreadsheetId: 'sheet-1' });
+
+    await expect(
+      adapter.rank({ contentItemId: 'CONTENT-002', format: 'STORIES', theme: 'casal', limit: 5 }),
+    ).rejects.toThrow(/context mismatch/);
+  });
+
   it('accepts pt-BR decimal strings from Sheets', async () => {
     const client = new FakeSheetsClient();
+    client.reads.set('ASSET_SELECTOR!A2:B3', [
+      ['FORMATO', 'FEED'],
+      ['TEMA / PALAVRA-CHAVE', ''],
+    ]);
     client.reads.set('ASSET_SELECTOR!A12:V440', [
       ['SUN-0009', 'drive-9', 'VC-BRAND-SYMBOL-SUNSET-01', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '92,68', '', '', '1'],
     ]);
 
     const adapter = new GoogleSheetsMediaAssetAdapter(client, { spreadsheetId: 'sheet-1' });
-    const result = await adapter.rank({ contentItemId: 'CONTENT-002', format: 'FEED', limit: 5 });
+    const result = await adapter.rank({ contentItemId: 'CONTENT-003', format: 'FEED', limit: 5 });
 
     expect(result.assets[0]?.score).toBe(92.68);
   });
@@ -55,7 +76,7 @@ describe('GoogleSheetsMediaAssetAdapter', () => {
     const adapter = new GoogleSheetsMediaAssetAdapter(client, { spreadsheetId: 'sheet-1' });
 
     await adapter.recordUsage({
-      contentItemId: 'CONTENT-003',
+      contentItemId: 'CONTENT-004',
       assetId: 'SUN-0347',
       usedAt: '2026-08-10T19:00:00-03:00',
       format: 'STORIES',
@@ -65,18 +86,18 @@ describe('GoogleSheetsMediaAssetAdapter', () => {
     });
 
     expect(client.appends).toHaveLength(1);
-    expect(client.appends[0]?.values[0]).toBe('CONTENT-003:SUN-0347:PUBLISHED');
+    expect(client.appends[0]?.values[0]).toBe('CONTENT-004:SUN-0347:PUBLISHED');
   });
 
   it('does not append duplicate usage records', async () => {
     const client = new FakeSheetsClient();
     client.reads.set('ASSET_USAGE_LOG!A2:I2000', [
-      ['CONTENT-004:SUN-0354:PUBLISHED', 'CONTENT-004', 'SUN-0354'],
+      ['CONTENT-005:SUN-0354:PUBLISHED', 'CONTENT-005', 'SUN-0354'],
     ]);
     const adapter = new GoogleSheetsMediaAssetAdapter(client, { spreadsheetId: 'sheet-1' });
 
     await adapter.recordUsage({
-      contentItemId: 'CONTENT-004',
+      contentItemId: 'CONTENT-005',
       assetId: 'SUN-0354',
       usedAt: '2026-08-10T19:30:00-03:00',
       format: 'FEED',
