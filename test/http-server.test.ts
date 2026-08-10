@@ -93,7 +93,7 @@ describe('remote MCP HTTP server', () => {
       `${baseUrl}/oauth/meta/callback?code=code-123&state=${encodeURIComponent(state!)}`,
     );
     expect(callback.status).toBe(200);
-    const body = await callback.json();
+    const body: unknown = await callback.json();
     expect(body).toEqual({ status: 'connected', grantedScopes: ['instagram_basic'] });
     expect(JSON.stringify(body)).not.toContain('token-1');
   });
