@@ -43,7 +43,30 @@ describe('runtime configuration', () => {
       META_APP_SECRET_PROVIDER: 'secret-manager',
       META_APP_SECRET_KEY: 'toca/meta/app-secret',
       META_GRAPH_API_VERSION: 'v1.0',
+      META_TOKEN_STORE_PROVIDER: 'memory',
     });
     expect(JSON.stringify(config)).not.toContain('APP_SECRET_VALUE');
+  });
+
+  it('requires a GCP project for the persistent Secret Manager token store', () => {
+    expect(() =>
+      loadConfig({
+        ...completeMetaEnv,
+        META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+      }),
+    ).toThrow('GCP_PROJECT_ID is required');
+  });
+
+  it('accepts the persistent Secret Manager token store with a GCP project', () => {
+    expect(
+      loadConfig({
+        ...completeMetaEnv,
+        META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+        GCP_PROJECT_ID: 'toca-mcp-production',
+      }),
+    ).toMatchObject({
+      META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+      GCP_PROJECT_ID: 'toca-mcp-production',
+    });
   });
 });
