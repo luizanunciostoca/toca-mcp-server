@@ -33,6 +33,7 @@ describe('MetaGraphManagedAssetDiscovery', () => {
         const parsed = new URL(url);
         expect(parsed.pathname).toBe('/v1.0/me/accounts');
         expect(parsed.searchParams.get('fields')).toBe('id,name,tasks,instagram_business_account');
+        expect(parsed.searchParams.get('limit')).toBe('100');
         expect(parsed.searchParams.has('access_token')).toBe(false);
         expect(headers.Authorization).toBe('Bearer USER_TOKEN');
 
@@ -78,6 +79,66 @@ describe('MetaGraphManagedAssetDiscovery', () => {
         tasks: ['ANALYZE', 'CREATE_CONTENT'],
       },
     ]);
+  });
+
+  it('falls back to user field expansion when /me/accounts is unexpectedly empty', async () => {
+    let requestCount = 0;
+    const http: MetaHttpTransport = {
+      get: (url, headers) => {
+        requestCount += 1;
+        const parsed = new URL(url);
+        expect(headers.Authorization).toBe('Bearer USER_TOKEN');
+        expect(parsed.searchParams.has('access_token')).toBe(false);
+
+        if (requestCount === 1) {
+          expect(parsed.pathname).toBe('/v1.0/me/accounts');
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ data: [] }),
+          });
+        }
+
+        expect(parsed.pathname).toBe('/v1.0/me');
+        expect(parsed.searchParams.get('fields')).toBe(
+          'accounts.limit(100){id,name,tasks,instagram_business_account}',
+        );
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              id: 'meta-user-1',
+              accounts: {
+                data: [
+                  {
+                    id: 'page-1',
+                    name: 'Toca do Morcego',
+                    tasks: ['MANAGE'],
+                    instagram_business_account: { id: 'ig-123' },
+                  },
+                ],
+              },
+            }),
+        });
+      },
+    };
+
+    const discovery = new MetaGraphManagedAssetDiscovery(
+      { graphBaseUrl: 'https://graph.facebook.com', apiVersion: 'v1.0' },
+      new TestSecrets(),
+      http,
+    );
+
+    await expect(discovery.list(state)).resolves.toEqual([
+      {
+        pageId: 'page-1',
+        pageName: 'Toca do Morcego',
+        tasks: ['MANAGE'],
+        instagramBusinessAccountId: 'ig-123',
+      },
+    ]);
+    expect(requestCount).toBe(2);
   });
 
   it('normalizes HTTP failure without leaking the access token', async () => {
