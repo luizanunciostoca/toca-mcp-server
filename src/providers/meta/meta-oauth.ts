@@ -40,11 +40,22 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
   }
 }
 
+export interface MetaTokenInspectionOptions {
+  readonly graphBaseUrl: string;
+  readonly apiVersion: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
 export class FetchMetaOAuthTransport implements MetaOAuthTransport {
+  readonly #fetch: typeof fetch;
+
   constructor(
     private readonly appSecrets: SecretResolver,
     private readonly tokenStore: SecretStore,
-  ) {}
+    private readonly inspection?: MetaTokenInspectionOptions,
+  ) {
+    this.#fetch = inspection?.fetchImpl ?? fetch;
+  }
 
   async exchangeAuthorizationCode(input: {
     readonly code: string;
@@ -54,7 +65,7 @@ export class FetchMetaOAuthTransport implements MetaOAuthTransport {
     readonly tokenEndpoint: string;
   }): Promise<MetaTokenExchangeResult> {
     const appSecret = await this.appSecrets.resolve(input.appSecret);
-    const response = await fetch(input.tokenEndpoint, {
+    const response = await this.#fetch(input.tokenEndpoint, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -80,6 +91,10 @@ export class FetchMetaOAuthTransport implements MetaOAuthTransport {
       throw new Error('Meta token exchange did not return an access token');
     }
 
+    const grantedScopes = this.inspection
+      ? await this.inspectGrantedScopes(input.appId, appSecret, payload.access_token)
+      : [];
+
     const accessToken = await this.tokenStore.put(
       `meta-access-token-${randomUUID()}`,
       payload.access_token,
@@ -91,9 +106,53 @@ export class FetchMetaOAuthTransport implements MetaOAuthTransport {
 
     return {
       accessToken,
-      grantedScopes: [],
+      grantedScopes,
       ...(expiresAt ? { expiresAt } : {}),
     };
+  }
+
+  private async inspectGrantedScopes(
+    appId: string,
+    appSecret: string,
+    inputToken: string,
+  ): Promise<readonly string[]> {
+    if (!this.inspection) return [];
+
+    const url = new URL(
+      `${this.inspection.graphBaseUrl.replace(/\/$/, '')}/${this.inspection.apiVersion}/debug_token`,
+    );
+    url.searchParams.set('input_token', inputToken);
+
+    const response = await this.#fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${appId}|${appSecret}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Meta token inspection failed with HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as {
+      data?: {
+        app_id?: unknown;
+        is_valid?: unknown;
+        scopes?: unknown;
+      };
+    };
+    const data = payload.data;
+    if (!data || data.is_valid !== true) {
+      throw new Error('Meta token inspection returned an invalid token');
+    }
+    if (data.app_id !== appId) {
+      throw new Error('Meta token inspection returned an app mismatch');
+    }
+    if (!Array.isArray(data.scopes) || !data.scopes.every((scope) => typeof scope === 'string')) {
+      throw new Error('Meta token inspection returned invalid scopes');
+    }
+
+    return [...new Set(data.scopes)].sort();
   }
 }
 
