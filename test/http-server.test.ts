@@ -51,16 +51,19 @@ function createOAuthService(): MetaOAuthService {
 }
 
 describe('remote MCP HTTP server', () => {
-  it('exposes a minimal health endpoint', async () => {
+  it('exposes health endpoints for internal compatibility and Cloud Run', async () => {
     const baseUrl = await listen();
-    const response = await fetch(`${baseUrl}/healthz`);
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      status: 'ok',
-      service: 'toca-mcp-server',
-      version: '0.1.0',
-    });
+    for (const path of ['/healthz', '/health']) {
+      const response = await fetch(`${baseUrl}${path}`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        status: 'ok',
+        service: 'toca-mcp-server',
+        version: '0.1.0',
+      });
+    }
   });
 
   it('does not expose arbitrary routes', async () => {
