@@ -6,12 +6,13 @@ class FakeSheetsClient implements SpreadsheetValuesClient {
   readonly reads = new Map<string, readonly (readonly unknown[])[]>();
   readonly appends: Array<{ range: string; values: readonly unknown[] }> = [];
 
-  async readRange(_spreadsheetId: string, range: string) {
-    return this.reads.get(range) ?? [];
+  readRange(_spreadsheetId: string, range: string) {
+    return Promise.resolve(this.reads.get(range) ?? []);
   }
 
-  async appendRow(_spreadsheetId: string, range: string, values: readonly unknown[]) {
+  appendRow(_spreadsheetId: string, range: string, values: readonly unknown[]) {
     this.appends.push({ range, values });
+    return Promise.resolve();
   }
 }
 
