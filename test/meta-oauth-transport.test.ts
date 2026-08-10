@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InMemorySecretStore, type SecretResolver } from '../src/core/secrets.js';
+import {
+  InMemorySecretStore,
+  type SecretResolver,
+} from '../src/core/secrets.js';
 import { FetchMetaOAuthTransport } from '../src/providers/meta/meta-oauth.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -49,7 +52,9 @@ describe('FetchMetaOAuthTransport', () => {
       'instagram_manage_comments',
       'pages_show_list',
     ]);
-    await expect(tokenStore.resolve(result.accessToken)).resolves.toBe('USER_ACCESS_TOKEN');
+    await expect(tokenStore.resolve(result.accessToken)).resolves.toBe(
+      'USER_ACCESS_TOKEN',
+    );
 
     const debugCall = fetchImpl.mock.calls[1];
     expect(String(debugCall?.[0])).toContain('/v24.0/debug_token');
