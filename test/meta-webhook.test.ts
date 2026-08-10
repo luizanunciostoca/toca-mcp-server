@@ -29,9 +29,9 @@ describe('Meta webhook boundary', () => {
     const signature = createHmac('sha256', secret).update(rawBody).digest('hex');
 
     expect(verifyMetaWebhookSignature(rawBody, `sha256=${signature}`, secret)).toBe(true);
-    expect(
-      verifyMetaWebhookSignature(Buffer.from('{}'), `sha256=${signature}`, secret),
-    ).toBe(false);
+    expect(verifyMetaWebhookSignature(Buffer.from('{}'), `sha256=${signature}`, secret)).toBe(
+      false,
+    );
     expect(verifyMetaWebhookSignature(rawBody, 'sha256=invalid', secret)).toBe(false);
   });
 
