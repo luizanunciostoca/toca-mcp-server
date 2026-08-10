@@ -273,7 +273,9 @@ function toBodyBuffer(chunk: unknown): Buffer | undefined {
 }
 
 function headerValue(value: string | readonly string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
+  if (typeof value === 'string') return value;
+  if (value === undefined) return undefined;
+  return value[0];
 }
 
 class MetaWebhookBodyTooLargeError extends Error {
