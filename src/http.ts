@@ -1,6 +1,10 @@
+import { loadConfig } from './config.js';
 import { createTocaHttpServer } from './http-server.js';
+import { createMetaHttpRuntime } from './providers/meta/meta-http-runtime.js';
 import { SERVER_NAME } from './server.js';
 
+const config = loadConfig();
+const metaRuntime = createMetaHttpRuntime(config, process.env);
 const host =
   process.env.MCP_HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const port = Number.parseInt(process.env.MCP_PORT ?? process.env.PORT ?? '3000', 10);
@@ -13,8 +17,10 @@ const server = createTocaHttpServer({
   onError: (error) => {
     console.error('MCP request failed', error instanceof Error ? error.message : 'unknown error');
   },
+  mcpEnabled: config.MCP_ENABLED,
+  ...(metaRuntime ? { metaOAuth: metaRuntime.oauth } : {}),
 });
 
 server.listen(port, host, () => {
-  console.log(`${SERVER_NAME} remote MCP listening on http://${host}:${port}/mcp`);
+  console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
