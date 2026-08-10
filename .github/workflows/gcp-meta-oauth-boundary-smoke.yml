@@ -1,11 +1,24 @@
 name: GCP Meta OAuth Boundary Smoke
 
 on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - '.github/workflows/gcp-meta-oauth-boundary-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-meta-oauth-staging
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
 
 jobs:
   oauth-boundary:
@@ -21,15 +34,25 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy isolated OAuth boundary with Meta disabled
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push OAuth image from current head
         run: |
-          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-23c08d26ee7a28d479801c855e8f93baf05d6b89"
-          gcloud run deploy toca-meta-oauth-staging \
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:oauth-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated real Meta OAuth boundary
+        run: |
+          gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
-            --project toca-mcp-production \
-            --region southamerica-east1 \
-            --service-account toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com \
-            --set-env-vars NODE_ENV=production,META_ENABLED=false,MCP_ENABLED=false,LOG_LEVEL=info \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0" \
+            --set-secrets META_APP_SECRET=toca-meta-app-secret:1 \
             --min-instances 0 \
             --max-instances 1 \
             --ingress all \
@@ -37,28 +60,17 @@ jobs:
             --no-invoker-iam-check \
             --quiet
 
-      - name: Inspect Cloud Run access settings
-        run: |
-          gcloud run services describe toca-meta-oauth-staging \
-            --project toca-mcp-production \
-            --region southamerica-east1 \
-            --format='yaml(metadata.annotations,status.url,status.address.url,status.latestReadyRevisionName,status.traffic)'
-
-      - name: Probe public service URLs
-        id: probe
+      - name: Resolve public service URL
         run: |
           CANONICAL_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
-          STATUS_URL="$(gcloud run services describe toca-meta-oauth-staging \
-            --project toca-mcp-production \
-            --region southamerica-east1 \
+          STATUS_URL="$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
             --format='value(status.url)')"
 
           for CANDIDATE in "$CANONICAL_URL" "$STATUS_URL"; do
             [ -n "$CANDIDATE" ] || continue
-            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' \
-              "$CANDIDATE/health")"
-            echo "Health candidate $CANDIDATE -> HTTP $STATUS"
-            cat /tmp/health-response.json || true
+            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' "$CANDIDATE/health")"
             if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.json; then
               echo "SERVICE_URL=$CANDIDATE" >> "$GITHUB_ENV"
               exit 0
@@ -68,14 +80,24 @@ jobs:
           echo 'No unauthenticated Cloud Run URL served /health successfully.' >&2
           exit 1
 
-      - name: Verify public boundary contract
+      - name: Verify OAuth start redirects to Meta
         run: |
-          BODY="$(curl --fail --silent --show-error "$SERVICE_URL/health")"
-          echo "$BODY"
-          echo "$BODY" | grep -q '"status":"ok"'
+          STATUS="$(curl --silent --output /dev/null --dump-header /tmp/oauth-headers.txt --write-out '%{http_code}' "$SERVICE_URL/oauth/meta/start")"
+          test "$STATUS" = "302"
+          LOCATION="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/oauth-headers.txt)"
+          test -n "$LOCATION"
+          case "$LOCATION" in
+            https://www.facebook.com/*/dialog/oauth*|https://www.facebook.com/dialog/oauth*) ;;
+            *) echo 'OAuth start did not redirect to the expected Meta authorization endpoint.' >&2; exit 1 ;;
+          esac
+          echo "$LOCATION" | grep -q 'client_id=2281930145887404'
+          echo "$LOCATION" | grep -q 'redirect_uri='
+          echo "$LOCATION" | grep -q 'state='
+          echo 'OAuth start returned a valid Meta authorization redirect.'
 
-          STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' \
-            -X POST "$SERVICE_URL/mcp")"
-          cat /tmp/mcp-response.json
+      - name: Verify MCP remains isolated
+        run: |
+          STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' -X POST "$SERVICE_URL/mcp")"
           test "$STATUS" = "404"
           grep -q '"error":"not_found"' /tmp/mcp-response.json
+          echo 'MCP remains disabled on the public OAuth boundary.'
