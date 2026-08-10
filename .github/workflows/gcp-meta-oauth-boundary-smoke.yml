@@ -2,11 +2,6 @@ name: GCP Meta OAuth Boundary Smoke
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
-    paths:
-      - .github/workflows/gcp-meta-oauth-boundary-smoke.yml
 
 permissions:
   contents: read
