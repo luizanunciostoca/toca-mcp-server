@@ -25,10 +25,7 @@ export class GoogleSheetsRestClient implements SpreadsheetValuesClient {
     this.baseUrl = (options.baseUrl ?? DEFAULT_GOOGLE_SHEETS_BASE_URL).replace(/\/$/, '');
   }
 
-  async readRange(
-    spreadsheetId: string,
-    range: string,
-  ): Promise<readonly (readonly unknown[])[]> {
+  async readRange(spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]> {
     const token = await this.secrets.resolve(this.options.tokenReference);
     const url = new URL(
       `${this.baseUrl}/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`,
