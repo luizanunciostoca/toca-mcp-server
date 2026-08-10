@@ -227,18 +227,49 @@ async function handleMetaWebhookEvent(
   response.end('EVENT_RECEIVED');
 }
 
-async function readRequestBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
+function readRequestBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
 
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes > maxBytes) throw new MetaWebhookBodyTooLargeError();
-    chunks.push(buffer);
-  }
+    request.on('data', (chunk: unknown) => {
+      if (settled) return;
 
-  return Buffer.concat(chunks, totalBytes);
+      const buffer = toBodyBuffer(chunk);
+      if (!buffer) {
+        settled = true;
+        reject(new Error('Unsupported Meta webhook body chunk'));
+        return;
+      }
+
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        reject(new MetaWebhookBodyTooLargeError());
+        return;
+      }
+      chunks.push(buffer);
+    });
+
+    request.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks, totalBytes));
+    });
+
+    request.on('error', (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+  });
+}
+
+function toBodyBuffer(chunk: unknown): Buffer | undefined {
+  if (typeof chunk === 'string') return Buffer.from(chunk);
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return undefined;
 }
 
 function headerValue(value: string | readonly string[] | undefined): string | undefined {
