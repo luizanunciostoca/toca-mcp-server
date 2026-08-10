@@ -47,14 +47,8 @@ export class GoogleSheetsMediaAssetAdapter {
 
   async rank(request: MediaAssetSelectionRequest): Promise<MediaAssetSelectionResult> {
     const [policyRows, assetRows] = await Promise.all([
-      this.client.readRange(
-        this.config.spreadsheetId,
-        `${this.rankingPolicySheet}!A2:B100`,
-      ),
-      this.client.readRange(
-        this.config.spreadsheetId,
-        `${this.intelligenceSheet}!A2:AD1000`,
-      ),
+      this.client.readRange(this.config.spreadsheetId, `${this.rankingPolicySheet}!A2:B100`),
+      this.client.readRange(this.config.spreadsheetId, `${this.intelligenceSheet}!A2:AD1000`),
     ]);
     const policy = parseMediaRankingPolicy(policyRows);
     const assets = rankMediaAssets(request, assetRows, policy, this.now());
