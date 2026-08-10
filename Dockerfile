@@ -16,4 +16,4 @@ RUN pnpm install --prod --frozen-lockfile
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 8080
-CMD ["node", "dist/http.js"]
+CMD ["node", "dist/src/http.js"]
