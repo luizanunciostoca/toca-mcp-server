@@ -141,6 +141,83 @@ describe('MetaGraphManagedAssetDiscovery', () => {
     expect(requestCount).toBe(2);
   });
 
+  it('falls back to business portfolio Pages when user account edges are empty', async () => {
+    const businessState: MetaConnectionState = {
+      ...state,
+      account: {
+        ...state.account,
+        scopes: ['business_management', 'pages_show_list'],
+      },
+      grantedScopes: ['business_management', 'pages_show_list'],
+    };
+    const requests: string[] = [];
+    const http: MetaHttpTransport = {
+      get: (url, headers) => {
+        const parsed = new URL(url);
+        requests.push(parsed.pathname);
+        expect(headers.Authorization).toBe('Bearer USER_TOKEN');
+        expect(parsed.searchParams.has('access_token')).toBe(false);
+
+        if (parsed.pathname === '/v1.0/me/accounts') {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) });
+        }
+        if (parsed.pathname === '/v1.0/me') {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: 'user-1' }) });
+        }
+        if (parsed.pathname === '/v1.0/me/businesses') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ data: [{ id: 'business-1', name: 'Toca do Morcego' }] }),
+          });
+        }
+        if (parsed.pathname === '/v1.0/business-1/owned_pages') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () =>
+              Promise.resolve({
+                data: [
+                  {
+                    id: 'page-1',
+                    name: 'Toca do Morcego',
+                    instagram_business_account: { id: 'ig-123' },
+                  },
+                ],
+              }),
+          });
+        }
+        if (parsed.pathname === '/v1.0/business-1/client_pages') {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) });
+        }
+
+        throw new Error(`Unexpected request: ${parsed.pathname}`);
+      },
+    };
+
+    const discovery = new MetaGraphManagedAssetDiscovery(
+      { graphBaseUrl: 'https://graph.facebook.com', apiVersion: 'v1.0' },
+      new TestSecrets(),
+      http,
+    );
+
+    await expect(discovery.list(businessState)).resolves.toEqual([
+      {
+        pageId: 'page-1',
+        pageName: 'Toca do Morcego',
+        tasks: [],
+        instagramBusinessAccountId: 'ig-123',
+      },
+    ]);
+    expect(requests).toEqual([
+      '/v1.0/me/accounts',
+      '/v1.0/me',
+      '/v1.0/me/businesses',
+      '/v1.0/business-1/owned_pages',
+      '/v1.0/business-1/client_pages',
+    ]);
+  });
+
   it('normalizes HTTP failure without leaking the access token', async () => {
     const http: MetaHttpTransport = {
       get: () =>
