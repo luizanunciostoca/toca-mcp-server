@@ -6,8 +6,15 @@ import type {
 } from '../../contracts/media-assets.js';
 
 export interface SpreadsheetValuesClient {
-  readRange(spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]>;
-  appendRow(spreadsheetId: string, range: string, values: readonly unknown[]): Promise<void>;
+  readRange(
+    spreadsheetId: string,
+    range: string,
+  ): Promise<readonly (readonly unknown[])[]>;
+  appendRow(
+    spreadsheetId: string,
+    range: string,
+    values: readonly unknown[],
+  ): Promise<void>;
 }
 
 export interface MediaAssetSheetsConfig {
@@ -24,8 +31,13 @@ function asString(value: unknown): string {
 }
 
 function asNumber(value: unknown): number {
-  const number = typeof value === 'number' ? value : Number(String(value ?? '').replace(',', '.'));
-  if (!Number.isFinite(number)) throw new Error(`Invalid numeric spreadsheet value: ${String(value)}`);
+  const number =
+    typeof value === 'number'
+      ? value
+      : Number(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(number)) {
+    throw new Error(`Invalid numeric spreadsheet value: ${String(value)}`);
+  }
   return number;
 }
 
@@ -45,7 +57,9 @@ export class GoogleSheetsMediaAssetAdapter {
     this.usageLogSheet = config.usageLogSheet ?? DEFAULT_USAGE_LOG_SHEET;
   }
 
-  async rank(request: MediaAssetSelectionRequest): Promise<MediaAssetSelectionResult> {
+  async rank(
+    request: MediaAssetSelectionRequest,
+  ): Promise<MediaAssetSelectionResult> {
     const contextRows = await this.client.readRange(
       this.config.spreadsheetId,
       `${this.selectorSheet}!A2:B3`,
@@ -53,7 +67,10 @@ export class GoogleSheetsMediaAssetAdapter {
     const snapshotFormat = asString(contextRows[0]?.[1]);
     const snapshotTheme = normalizeTheme(asString(contextRows[1]?.[1]));
 
-    if (snapshotFormat !== request.format || snapshotTheme !== normalizeTheme(request.theme)) {
+    if (
+      snapshotFormat !== request.format ||
+      snapshotTheme !== normalizeTheme(request.theme)
+    ) {
       throw new Error(
         `ASSET_SELECTOR context mismatch: requested ${request.format}/${request.theme ?? ''}, ` +
           `snapshot is ${snapshotFormat}/${snapshotTheme}`,
@@ -101,19 +118,25 @@ export class GoogleSheetsMediaAssetAdapter {
       `${this.usageLogSheet}!A2:I2000`,
     );
 
-    const alreadyRecorded = existingRows.some((row) => asString(row[0]) === idempotencyKey);
+    const alreadyRecorded = existingRows.some(
+      (row) => asString(row[0]) === idempotencyKey,
+    );
     if (alreadyRecorded) return;
 
-    await this.client.appendRow(this.config.spreadsheetId, `${this.usageLogSheet}!A:I`, [
-      idempotencyKey,
-      record.contentItemId,
-      record.assetId,
-      record.usedAt,
-      record.format,
-      record.channel ?? '',
-      record.action,
-      record.source,
-      record.notes ?? '',
-    ]);
+    await this.client.appendRow(
+      this.config.spreadsheetId,
+      `${this.usageLogSheet}!A:I`,
+      [
+        idempotencyKey,
+        record.contentItemId,
+        record.assetId,
+        record.usedAt,
+        record.format,
+        record.channel ?? '',
+        record.action,
+        record.source,
+        record.notes ?? '',
+      ],
+    );
   }
 }
