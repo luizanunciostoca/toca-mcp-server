@@ -14,10 +14,15 @@ export interface MetaHttpRuntime {
 
 function createTokenStore(config: RuntimeConfig): SecretStore {
   if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager') {
-    if (!config.GCP_PROJECT_ID) {
-      throw new Error('GCP_PROJECT_ID is required for the GCP Secret Manager token store');
+    if (!config.GCP_PROJECT_ID || !config.META_TOKEN_SECRET_ID) {
+      throw new Error(
+        'GCP_PROJECT_ID and META_TOKEN_SECRET_ID are required for the GCP Secret Manager token store',
+      );
     }
-    return new GcpSecretManagerStore({ projectId: config.GCP_PROJECT_ID });
+    return new GcpSecretManagerStore({
+      projectId: config.GCP_PROJECT_ID,
+      secretId: config.META_TOKEN_SECRET_ID,
+    });
   }
   return new InMemorySecretStore('memory');
 }
