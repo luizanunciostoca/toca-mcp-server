@@ -21,7 +21,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('GoogleSheetsRestClient', () => {
   it('reads rows with an access token resolved through SecretResolver', async () => {
     const secrets = new FakeSecretResolver();
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const fetcher: FetchLike = (input, init) => {
       calls.push({ url: String(input), init });
       return Promise.resolve(jsonResponse({ values: [['SUN-0001', 96.5]] }));
@@ -48,7 +48,7 @@ describe('GoogleSheetsRestClient', () => {
 
   it('appends one row using USER_ENTERED semantics', async () => {
     const secrets = new FakeSecretResolver();
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const fetcher: FetchLike = (input, init) => {
       calls.push({ url: String(input), init });
       return Promise.resolve(jsonResponse({ updates: { updatedRows: 1 } }));
