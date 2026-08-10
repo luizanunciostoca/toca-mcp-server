@@ -2,6 +2,11 @@ name: GCP Meta OAuth Boundary Smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - .github/workflows/gcp-meta-oauth-boundary-smoke.yml
 
 permissions:
   contents: read
@@ -15,6 +20,7 @@ env:
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   TOKEN_SECRET_ID: toca-meta-oauth-token
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
 
 jobs:
   oauth-boundary:
@@ -91,6 +97,47 @@ jobs:
           echo "$LOCATION" | grep -q 'state='
           echo "$LOCATION" | grep -q 'business_management'
           echo 'OAuth start returned a valid Meta authorization redirect.'
+
+      - name: Validate real Instagram account read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest --secret="$TOKEN_SECRET_ID" --project="$PROJECT_ID")"
+          test -n "$TOKEN"
+          trap 'unset TOKEN' EXIT
+
+          PROFILE_STATUS="$(curl --silent --show-error --output /tmp/instagram-profile.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://graph.facebook.com/v24.0/$INSTAGRAM_ACCOUNT_ID?fields=id,username,name,followers_count,media_count")"
+          test "$PROFILE_STATUS" = "200"
+
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const profile = JSON.parse(fs.readFileSync('/tmp/instagram-profile.json', 'utf8'));
+          if (profile.id !== process.env.INSTAGRAM_ACCOUNT_ID) throw new Error('Instagram account ID mismatch');
+          if (profile.username !== 'tocadomorcego') throw new Error(`Unexpected Instagram username: ${profile.username}`);
+          if (typeof profile.followers_count !== 'number') throw new Error('followers_count missing');
+          if (typeof profile.media_count !== 'number') throw new Error('media_count missing');
+          console.log(JSON.stringify({
+            id: profile.id,
+            username: profile.username,
+            name: profile.name ?? null,
+            followersCount: profile.followers_count,
+            mediaCount: profile.media_count,
+          }));
+          NODE
+
+          MEDIA_STATUS="$(curl --silent --show-error --output /tmp/instagram-media.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://graph.facebook.com/v24.0/$INSTAGRAM_ACCOUNT_ID/media?fields=id,media_type,timestamp&limit=3")"
+          test "$MEDIA_STATUS" = "200"
+
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const payload = JSON.parse(fs.readFileSync('/tmp/instagram-media.json', 'utf8'));
+          if (!Array.isArray(payload.data)) throw new Error('Instagram media response missing data array');
+          console.log(JSON.stringify({ mediaReadOk: true, returned: payload.data.length }));
+          NODE
 
       - name: Verify MCP remains isolated
         run: |
