@@ -29,6 +29,10 @@ function asNumber(value: unknown): number {
   return number;
 }
 
+function normalizeTheme(value: string | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase('pt-BR');
+}
+
 export class GoogleSheetsMediaAssetAdapter {
   private readonly selectorSheet: string;
   private readonly usageLogSheet: string;
@@ -42,6 +46,20 @@ export class GoogleSheetsMediaAssetAdapter {
   }
 
   async rank(request: MediaAssetSelectionRequest): Promise<MediaAssetSelectionResult> {
+    const contextRows = await this.client.readRange(
+      this.config.spreadsheetId,
+      `${this.selectorSheet}!A2:B3`,
+    );
+    const snapshotFormat = asString(contextRows[0]?.[1]);
+    const snapshotTheme = normalizeTheme(asString(contextRows[1]?.[1]));
+
+    if (snapshotFormat !== request.format || snapshotTheme !== normalizeTheme(request.theme)) {
+      throw new Error(
+        `ASSET_SELECTOR context mismatch: requested ${request.format}/${request.theme ?? ''}, ` +
+          `snapshot is ${snapshotFormat}/${snapshotTheme}`,
+      );
+    }
+
     const rows = await this.client.readRange(
       this.config.spreadsheetId,
       `${this.selectorSheet}!A12:V440`,
