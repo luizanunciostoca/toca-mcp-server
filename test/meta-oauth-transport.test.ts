@@ -28,7 +28,11 @@ describe('FetchMetaOAuthTransport', () => {
           data: {
             app_id: '2281930145887404',
             is_valid: true,
-            scopes: ['pages_show_list', 'instagram_basic', 'instagram_manage_comments'],
+            scopes: [
+              'pages_show_list',
+              'instagram_basic',
+              'instagram_manage_comments',
+            ],
           },
         }),
       );
@@ -60,7 +64,9 @@ describe('FetchMetaOAuthTransport', () => {
     expect(String(debugCall?.[0])).toContain('/v24.0/debug_token');
     expect(String(debugCall?.[0])).toContain('input_token=USER_ACCESS_TOKEN');
     expect(debugCall?.[1]?.headers).toEqual(
-      expect.objectContaining({ Authorization: 'Bearer 2281930145887404|APP_SECRET' }),
+      expect.objectContaining({
+        Authorization: 'Bearer 2281930145887404|APP_SECRET',
+      }),
     );
   });
 
@@ -71,9 +77,17 @@ describe('FetchMetaOAuthTransport', () => {
     const tokenStore = new InMemorySecretStore('memory');
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ access_token: 'BAD_TOKEN', expires_in: 3600 }))
       .mockResolvedValueOnce(
-        jsonResponse({ data: { app_id: '2281930145887404', is_valid: false, scopes: [] } }),
+        jsonResponse({ access_token: 'BAD_TOKEN', expires_in: 3600 }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            app_id: '2281930145887404',
+            is_valid: false,
+            scopes: [],
+          },
+        }),
       );
 
     const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore, {
