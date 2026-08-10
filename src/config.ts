@@ -5,10 +5,16 @@ const booleanFromEnv = z
   .default('false')
   .transform((value) => value === 'true');
 
+const enabledByDefaultFromEnv = z
+  .enum(['true', 'false'])
+  .default('true')
+  .transform((value) => value === 'true');
+
 const configSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    MCP_ENABLED: enabledByDefaultFromEnv,
     META_ENABLED: booleanFromEnv,
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
