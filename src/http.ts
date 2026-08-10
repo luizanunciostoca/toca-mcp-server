@@ -2,8 +2,7 @@ import { createTocaHttpServer } from './http-server.js';
 import { SERVER_NAME } from './server.js';
 
 const host =
-  process.env.MCP_HOST ??
-  (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+  process.env.MCP_HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const port = Number.parseInt(process.env.MCP_PORT ?? process.env.PORT ?? '3000', 10);
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
