@@ -2,6 +2,8 @@ import { createServer, type Server } from 'node:http';
 import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { evaluateReadiness, type ReadinessCheck } from './health/readiness.js';
+import type { MetaManagedAsset } from './providers/meta/meta-assets.js';
+import type { MetaTokenExchangeResult } from './providers/meta/meta-connection.js';
 import type { MetaOAuthService } from './providers/meta/meta-oauth.js';
 import { createTocaServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
@@ -9,6 +11,9 @@ export interface TocaHttpServerOptions {
   readonly onError?: (error: unknown) => void;
   readonly readinessChecks?: readonly ReadinessCheck[];
   readonly metaOAuth?: MetaOAuthService;
+  readonly metaAssetDiscovery?: (
+    result: MetaTokenExchangeResult,
+  ) => Promise<readonly MetaManagedAsset[]>;
   readonly mcpEnabled?: boolean;
 }
 
@@ -77,7 +82,10 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
 
       void options.metaOAuth
         .completeAuthorization({ code, state })
-        .then((result) => {
+        .then(async (result) => {
+          const assets = options.metaAssetDiscovery
+            ? await options.metaAssetDiscovery(result)
+            : undefined;
           response.writeHead(200, {
             'content-type': 'application/json; charset=utf-8',
             'cache-control': 'no-store',
@@ -87,6 +95,7 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
               status: 'connected',
               grantedScopes: result.grantedScopes,
               ...(result.expiresAt ? { expiresAt: result.expiresAt } : {}),
+              ...(assets ? { assets } : {}),
             }),
           );
         })
