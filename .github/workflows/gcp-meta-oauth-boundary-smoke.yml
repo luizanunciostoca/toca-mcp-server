@@ -127,6 +127,16 @@ jobs:
           const media = await graph(`${accountId}/media?fields=id,media_type,timestamp&limit=3`);
           if (!Array.isArray(media.data)) throw new Error('Instagram media response missing data array');
 
+          let commentsReadOk = false;
+          let returnedComments = 0;
+          const firstMediaId = media.data[0]?.id;
+          if (firstMediaId) {
+            const comments = await graph(`${firstMediaId}/comments?fields=id,text,username,timestamp&limit=3`);
+            if (!Array.isArray(comments.data)) throw new Error('Instagram comments response missing data array');
+            commentsReadOk = true;
+            returnedComments = comments.data.length;
+          }
+
           console.log(JSON.stringify({
             profileReadOk: true,
             id: profile.id,
@@ -136,6 +146,8 @@ jobs:
             mediaCount: profile.media_count,
             mediaReadOk: true,
             returnedMedia: media.data.length,
+            commentsReadOk,
+            returnedComments,
           }));
           NODE
 
@@ -178,7 +190,7 @@ jobs:
             --wait \
             --quiet
 
-          echo 'Real Instagram profile/media read smoke passed under runtime identity.'
+          echo 'Real Instagram profile/media/comments read smoke passed under runtime identity.'
 
       - name: Verify MCP remains isolated
         run: |
