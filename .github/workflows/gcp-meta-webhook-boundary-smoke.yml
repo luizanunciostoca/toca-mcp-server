@@ -1,0 +1,136 @@
+name: GCP Meta Webhook Boundary Smoke
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - .github/workflows/gcp-meta-webhook-boundary-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-meta-oauth-staging
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+
+jobs:
+  webhook-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Provision dedicated webhook verify token secret
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gcloud secrets describe "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
+            --project "$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud secrets create "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
+              --project "$PROJECT_ID" \
+              --replication-policy automatic \
+              --quiet
+          fi
+
+          VERIFY_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$VERIFY_TOKEN"
+          printf '%s' "$VERIFY_TOKEN" | gcloud secrets versions add "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
+            --project "$PROJECT_ID" \
+            --data-file=- \
+            --quiet >/dev/null
+
+          gcloud secrets add-iam-policy-binding "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
+            --project "$PROJECT_ID" \
+            --member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
+            --role roles/secretmanager.secretAccessor \
+            --quiet >/dev/null
+
+          echo "VERIFY_TOKEN=$VERIFY_TOKEN" >> "$GITHUB_ENV"
+          echo 'Dedicated webhook verify token secret provisioned without exposing its value.'
+
+      - name: Build and push webhook boundary image
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:webhook-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated public OAuth and webhook boundary
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --ingress all \
+            --default-url \
+            --no-invoker-iam-check \
+            --quiet
+
+      - name: Resolve public service URL
+        run: |
+          CANONICAL_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
+          STATUS_URL="$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format='value(status.url)')"
+
+          for CANDIDATE in "$CANONICAL_URL" "$STATUS_URL"; do
+            [ -n "$CANDIDATE" ] || continue
+            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' "$CANDIDATE/health")"
+            if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.json; then
+              echo "SERVICE_URL=$CANDIDATE" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+
+          echo 'No unauthenticated Cloud Run URL served /health successfully.' >&2
+          exit 1
+
+      - name: Validate webhook challenge boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VALID_STATUS="$(curl --silent --output /tmp/webhook-valid.txt --write-out '%{http_code}' \
+            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=$VERIFY_TOKEN&hub.challenge=challenge-verified")"
+          test "$VALID_STATUS" = "200"
+          test "$(cat /tmp/webhook-valid.txt)" = "challenge-verified"
+
+          INVALID_STATUS="$(curl --silent --output /tmp/webhook-invalid.json --write-out '%{http_code}' \
+            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=invalid-token&hub.challenge=challenge-rejected")"
+          test "$INVALID_STATUS" = "403"
+          grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
+
+          echo 'Webhook challenge accepts only the secret-backed verify token.'
+
+      - name: Verify MCP remains isolated
+        run: |
+          STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' -X POST "$SERVICE_URL/mcp")"
+          test "$STATUS" = "404"
+          grep -q '"error":"not_found"' /tmp/mcp-response.json
+          echo 'MCP remains disabled on the public OAuth/webhook boundary.'
