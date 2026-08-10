@@ -37,8 +37,16 @@ jobs:
             --set-env-vars NODE_ENV=production,META_ENABLED=false,MCP_ENABLED=false,LOG_LEVEL=info \
             --min-instances 0 \
             --max-instances 1 \
+            --ingress all \
             --no-invoker-iam-check \
             --quiet
+
+      - name: Inspect Cloud Run access settings
+        run: |
+          gcloud run services describe toca-meta-oauth-staging \
+            --project toca-mcp-production \
+            --region southamerica-east1 \
+            --format='yaml(metadata.annotations,status.url,status.address.url)'
 
       - name: Resolve public service URL
         run: |
