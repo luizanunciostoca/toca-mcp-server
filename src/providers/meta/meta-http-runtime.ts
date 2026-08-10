@@ -1,6 +1,9 @@
 import type { RuntimeConfig } from '../../config.js';
 import { GcpSecretManagerStore } from '../../core/gcp-secret-manager-store.js';
 import { EnvSecretResolver, InMemorySecretStore, type SecretStore } from '../../core/secrets.js';
+import { MetaGraphManagedAssetDiscovery, type MetaManagedAsset } from './meta-assets.js';
+import type { MetaConnectionState, MetaTokenExchangeResult } from './meta-connection.js';
+import { FetchMetaHttpTransport } from './meta-graph.js';
 import {
   FetchMetaOAuthTransport,
   InMemoryOAuthStateStore,
@@ -10,6 +13,7 @@ import {
 export interface MetaHttpRuntime {
   readonly oauth: MetaOAuthService;
   readonly tokenStore: SecretStore;
+  discoverAssets(result: MetaTokenExchangeResult): Promise<readonly MetaManagedAsset[]>;
 }
 
 function createTokenStore(config: RuntimeConfig): SecretStore {
@@ -53,10 +57,11 @@ export function createMetaHttpRuntime(
 
   const appSecrets = new EnvSecretResolver(env, config.META_APP_SECRET_PROVIDER);
   const tokenStore = createTokenStore(config);
-  const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore, {
+  const graphConfig = {
     graphBaseUrl: config.META_GRAPH_BASE_URL,
     apiVersion: config.META_GRAPH_API_VERSION,
-  });
+  };
+  const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore, graphConfig);
   const oauth = new MetaOAuthService(
     {
       appId: config.META_APP_ID,
@@ -74,6 +79,35 @@ export function createMetaHttpRuntime(
     new InMemoryOAuthStateStore(),
     transport,
   );
+  const assetDiscovery = new MetaGraphManagedAssetDiscovery(
+    graphConfig,
+    tokenStore,
+    new FetchMetaHttpTransport(),
+  );
 
-  return { oauth, tokenStore };
+  return {
+    oauth,
+    tokenStore,
+    discoverAssets(result) {
+      const connectedAt = new Date().toISOString();
+      const tokenReference = `${result.accessToken.provider}:${result.accessToken.key}`;
+      const state: MetaConnectionState = {
+        account: {
+          id: 'meta-oauth-staging',
+          provider: 'meta',
+          externalAccountId: 'oauth-user',
+          label: 'TOCA Meta OAuth',
+          scopes: [...result.grantedScopes],
+          status: 'CONNECTED',
+          tokenReference,
+          ...(result.expiresAt ? { expiresAt: result.expiresAt } : {}),
+        },
+        accessToken: result.accessToken,
+        grantedScopes: result.grantedScopes,
+        connectedAt,
+        ...(result.expiresAt ? { expiresAt: result.expiresAt } : {}),
+      };
+      return assetDiscovery.list(state);
+    },
+  };
 }
