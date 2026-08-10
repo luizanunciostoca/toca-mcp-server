@@ -1,9 +1,11 @@
+import { createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTocaHttpServer } from '../src/http-server.js';
-import { InMemoryOAuthStateStore, MetaOAuthService } from '../src/providers/meta/meta-oauth.js';
+import type { InstagramWebhookEvent } from '../src/providers/instagram/instagram-engagement-contracts.js';
 import type { MetaOAuthTransport } from '../src/providers/meta/meta-connection.js';
+import { InMemoryOAuthStateStore, MetaOAuthService } from '../src/providers/meta/meta-oauth.js';
 
 const servers: ReturnType<typeof createTocaHttpServer>[] = [];
 
@@ -99,5 +101,96 @@ describe('remote MCP HTTP server', () => {
     const body: unknown = await callback.json();
     expect(body).toEqual({ status: 'connected', grantedScopes: ['instagram_basic'] });
     expect(JSON.stringify(body)).not.toContain('token-1');
+  });
+
+  it('accepts a valid Meta webhook challenge while MCP remains disabled', async () => {
+    const baseUrl = await listen({
+      mcpEnabled: false,
+      metaWebhook: {
+        resolveVerifyToken: () => Promise.resolve('verify-token'),
+        resolveAppSecret: () => Promise.resolve('app-secret'),
+      },
+    });
+
+    const accepted = await fetch(
+      `${baseUrl}/webhooks/meta?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=challenge-123`,
+    );
+    expect(accepted.status).toBe(200);
+    await expect(accepted.text()).resolves.toBe('challenge-123');
+
+    const rejected = await fetch(
+      `${baseUrl}/webhooks/meta?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=challenge-123`,
+    );
+    expect(rejected.status).toBe(403);
+
+    const mcp = await fetch(`${baseUrl}/mcp`, { method: 'POST' });
+    expect(mcp.status).toBe(404);
+  });
+
+  it('accepts only signed Meta webhook events and forwards normalized read-only events', async () => {
+    const acceptedEvents: InstagramWebhookEvent[] = [];
+    const appSecret = 'app-secret';
+    const rawBody = JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: '17841402033495654',
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: 'comment-1',
+                media_id: 'media-1',
+                from: { id: 'sender-1' },
+                text: 'Olá',
+                created_time: 1_700_000_000,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const signature = createHmac('sha256', appSecret).update(rawBody).digest('hex');
+
+    const baseUrl = await listen({
+      mcpEnabled: false,
+      metaWebhook: {
+        resolveVerifyToken: () => Promise.resolve('verify-token'),
+        resolveAppSecret: () => Promise.resolve(appSecret),
+        onEvents: (events) => {
+          acceptedEvents.push(...events);
+        },
+      },
+    });
+
+    const accepted = await fetch(`${baseUrl}/webhooks/meta`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-hub-signature-256': `sha256=${signature}`,
+      },
+      body: rawBody,
+    });
+
+    expect(accepted.status).toBe(200);
+    await expect(accepted.text()).resolves.toBe('EVENT_RECEIVED');
+    expect(acceptedEvents).toHaveLength(1);
+    expect(acceptedEvents[0]).toMatchObject({
+      channel: 'COMMENT',
+      commentId: 'comment-1',
+      mediaId: 'media-1',
+    });
+
+    const rejected = await fetch(`${baseUrl}/webhooks/meta`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-hub-signature-256': 'sha256=invalid',
+      },
+      body: rawBody,
+    });
+
+    expect(rejected.status).toBe(401);
+    expect(acceptedEvents).toHaveLength(1);
   });
 });
