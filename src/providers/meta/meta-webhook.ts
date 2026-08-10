@@ -48,9 +48,7 @@ export function verifyMetaWebhookSignature(
   return safeEqual(supplied.toLowerCase(), expected.toLowerCase());
 }
 
-export function parseMetaWebhookEvents(
-  rawBody: Buffer,
-): readonly InstagramWebhookEvent[] {
+export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebhookEvent[] {
   const payload = webhookPayloadSchema.parse(JSON.parse(rawBody.toString('utf8')));
   const events: InstagramWebhookEvent[] = [];
 
