@@ -1,11 +1,6 @@
 name: GCP Meta OAuth Boundary Smoke
 
 on:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
-    paths:
-      - '.github/workflows/gcp-meta-oauth-boundary-smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -37,7 +32,7 @@ jobs:
             --set-env-vars NODE_ENV=production,META_ENABLED=false,MCP_ENABLED=false,LOG_LEVEL=info \
             --min-instances 0 \
             --max-instances 1 \
-            --allow-unauthenticated \
+            --no-invoker-iam-check \
             --quiet
 
       - name: Resolve public service URL
