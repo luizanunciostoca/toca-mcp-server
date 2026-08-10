@@ -39,9 +39,9 @@ export interface TocaServerOptions {
 
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const config = loadConfig(options.env);
-  const mediaAssetsRankEnabled =
-    config.TOCA_OS_MEDIA_SPREADSHEET_ID !== undefined &&
-    config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY !== undefined;
+  const spreadsheetId = config.TOCA_OS_MEDIA_SPREADSHEET_ID;
+  const tokenEnvKey = config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY;
+  const mediaAssetsRankEnabled = spreadsheetId !== undefined && tokenEnvKey !== undefined;
 
   const server = new McpServer({
     name: SERVER_NAME,
@@ -127,14 +127,15 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     },
   );
 
-  if (mediaAssetsRankEnabled) {
-    registerMediaAssetsRankTool(server, {
-      spreadsheetId: config.TOCA_OS_MEDIA_SPREADSHEET_ID,
-      tokenEnvKey: config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY,
-      env: options.env,
-      secretResolver: options.secretResolver,
-      fetcher: options.fetcher,
-    });
+  if (spreadsheetId !== undefined && tokenEnvKey !== undefined) {
+    const runtimeOptions: MediaAssetsRankRuntimeOptions = {
+      spreadsheetId,
+      tokenEnvKey,
+      ...(options.env !== undefined ? { env: options.env } : {}),
+      ...(options.secretResolver !== undefined ? { secretResolver: options.secretResolver } : {}),
+      ...(options.fetcher !== undefined ? { fetcher: options.fetcher } : {}),
+    };
+    registerMediaAssetsRankTool(server, runtimeOptions);
   }
 
   return server;
