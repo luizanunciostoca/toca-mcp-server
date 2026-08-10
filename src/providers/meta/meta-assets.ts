@@ -99,7 +99,9 @@ export class MetaGraphManagedAssetDiscovery implements MetaManagedAssetDiscovery
     return parsed.data.accounts?.data ?? [];
   }
 
-  private normalize(pages: readonly z.infer<typeof managedPageSchema>[]): readonly MetaManagedAsset[] {
+  private normalize(
+    pages: readonly z.infer<typeof managedPageSchema>[],
+  ): readonly MetaManagedAsset[] {
     return pages
       .map((page) => ({
         pageId: page.id,
