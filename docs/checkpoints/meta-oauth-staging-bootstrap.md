@@ -15,35 +15,57 @@
 
 Service `toca-meta-oauth-staging` exists with `META_ENABLED=false` and `MCP_ENABLED=false`.
 
-Cloud Run accepts deployments with all of the intended public-boundary service settings:
+Cloud Run accepts deployments with all intended public-boundary service settings:
 
 - ingress is `all`;
 - the default `run.app` URL is enabled;
 - the Invoker IAM check is disabled with `--no-invoker-iam-check`;
 - the OAuth service remains isolated from MCP by `MCP_ENABLED=false`.
 
-Despite those settings, both Cloud Run service URLs currently return the Google-managed HTML `404` for `/healthz` before the request reaches the application container. The application image itself contains the `/healthz` route, so this is an external Cloud Run edge/policy gate rather than an application-route failure.
+The public boundary contract has been validated successfully against the deployed Cloud Run service:
 
-An alternative public-access attempt using `allUsers -> roles/run.invoker` was also tested. Cloud Run deployed the revision, but setting the IAM policy was rejected and the service policy remained without an `allUsers` binding.
+1. unauthenticated `GET /health` returns HTTP 200 with the application health payload;
+2. unauthenticated `POST /mcp` returns HTTP 404 with the application payload `{ "error": "not_found" }`;
+3. the request therefore reaches the application while MCP remains disabled.
 
-## Policy diagnostics
+The validated deployment image is:
 
-The diagnostic smoke follows the Cloud Run troubleshooting path for pre-container `404` responses and attempts to read Cloud Audit policy events for `run.googleapis.com/HttpIngress` plus the effective organization policies relevant to Cloud Run ingress/public access.
+` southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-23c08d26ee7a28d479801c855e8f93baf05d6b89 `
 
-The deployment identity currently cannot complete those read-only diagnostics:
+## Cloud Run `/healthz` finding
 
-- Cloud Logging policy query: `PERMISSION_DENIED` for log views;
-- effective organization policy query: missing `getEffectiveOrgPolicy` permission.
+The earlier Google-managed HTML `404` was not an IAM, VPC Service Controls, container, or application-startup failure.
 
-The workflow `.github/workflows/gcp-meta-oauth-boundary-smoke.yml` has been returned to manual-only mode after the diagnostic runs.
+Diagnostics proved:
 
-## Next external gate
+- `run.allowedIngress` effectively allows all ingress values;
+- `run.managed.requireInvokerIam` does not force Invoker IAM;
+- no `run.googleapis.com/HttpIngress` VPC Service Controls denial was present for the failed requests;
+- the deployed revision was ready, receiving 100% of traffic, listening on `0.0.0.0:8080`, and passing its startup TCP probe;
+- no Cloud Run request log existed for the `/healthz` probes, confirming that those requests were intercepted before the container.
 
-Grant the dedicated deployment/diagnostic identity `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com` the minimum read-only permissions required for the remaining diagnosis:
+Cloud Run documents a known issue/reserved-path limitation for some URL paths ending in `z` and recommends avoiding paths ending in `z`. The runtime therefore now exposes `/health` as the Cloud Run-safe public health endpoint while preserving `/healthz` for internal/backward compatibility.
 
-1. `roles/logging.viewer` (Logs Viewer) on project `toca-mcp-production`;
-2. `roles/orgpolicy.policyViewer` (Organization Policy Viewer) at a scope where the effective policies for `toca-mcp-production` can be read.
+## Organization policy finding
 
-Then rerun the manual OAuth-boundary smoke and determine whether `run.googleapis.com/HttpIngress` is being denied by VPC Service Controls or an effective organization policy.
+`constraints/iam.allowedPolicyMemberDomains` is restricted to customer ID `C01unw207`. This explains why the alternative `allUsers -> roles/run.invoker` binding was rejected.
 
-No Meta/Instagram write capability becomes runtime-exposed before this external gate and the subsequent real Meta OAuth validation are complete.
+The production boundary does not require that binding because `--no-invoker-iam-check` is supported and has now been validated end-to-end.
+
+## Workflow state
+
+`.github/workflows/gcp-meta-oauth-boundary-smoke.yml` is manual-only after validation. It deploys the isolated OAuth boundary and requires the public contract above to pass.
+
+## Next gate: real Meta OAuth
+
+The infrastructure/public-boundary gate is complete.
+
+Before setting `META_ENABLED=true`, validate current official Meta requirements and configure the real OAuth integration:
+
+1. current authorization/token endpoints and Graph API version;
+2. exact Instagram permissions/scopes required for the intended read/write capabilities;
+3. the production/staging redirect URI matching `GET /oauth/meta/callback`;
+4. Meta App ID and existing Secret Manager-backed App Secret configuration;
+5. token exchange, granted scopes, expiration/refresh behavior, and failure handling;
+6. a real authorization smoke while `MCP_ENABLED=false`;
+7. no Instagram/Meta write capability becomes MCP-exposed until the OAuth connection is validated separately.
