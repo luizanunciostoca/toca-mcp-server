@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import type { SecretResolver, SecretStore } from '../../core/secrets.js';
 import type {
   MetaOAuthAuthorizationRequest,
   MetaOAuthCallback,
@@ -36,6 +37,63 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
     const consumed = { ...record, consumedAt: now.toISOString() };
     this.#records.set(state, consumed);
     return Promise.resolve(consumed);
+  }
+}
+
+export class FetchMetaOAuthTransport implements MetaOAuthTransport {
+  constructor(
+    private readonly appSecrets: SecretResolver,
+    private readonly tokenStore: SecretStore,
+  ) {}
+
+  async exchangeAuthorizationCode(input: {
+    readonly code: string;
+    readonly redirectUri: string;
+    readonly appId: string;
+    readonly appSecret: { readonly provider: string; readonly key: string };
+    readonly tokenEndpoint: string;
+  }): Promise<MetaTokenExchangeResult> {
+    const appSecret = await this.appSecrets.resolve(input.appSecret);
+    const response = await fetch(input.tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: input.appId,
+        client_secret: appSecret,
+        redirect_uri: input.redirectUri,
+        code: input.code,
+      }).toString(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Meta token exchange failed with HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as {
+      access_token?: unknown;
+      expires_in?: unknown;
+    };
+    if (typeof payload.access_token !== 'string' || payload.access_token.length === 0) {
+      throw new Error('Meta token exchange did not return an access token');
+    }
+
+    const accessToken = await this.tokenStore.put(
+      `meta-access-token-${randomUUID()}`,
+      payload.access_token,
+    );
+    const expiresAt =
+      typeof payload.expires_in === 'number' && Number.isFinite(payload.expires_in)
+        ? new Date(Date.now() + payload.expires_in * 1000).toISOString()
+        : undefined;
+
+    return {
+      accessToken,
+      grantedScopes: [],
+      ...(expiresAt ? { expiresAt } : {}),
+    };
   }
 }
 
