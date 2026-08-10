@@ -21,7 +21,7 @@ const server = createTocaHttpServer({
   ...(metaRuntime
     ? {
         metaOAuth: metaRuntime.oauth,
-        metaAssetDiscovery: metaRuntime.discoverAssets,
+        metaAssetDiscovery: (result) => metaRuntime.discoverAssets(result),
       }
     : {}),
 });
