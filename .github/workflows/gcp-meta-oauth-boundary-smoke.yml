@@ -39,8 +39,7 @@ jobs:
             --max-instances 1 \
             --ingress all \
             --default-url \
-            --invoker-iam-check \
-            --allow-unauthenticated \
+            --no-invoker-iam-check \
             --quiet
 
       - name: Inspect Cloud Run access settings
@@ -49,12 +48,10 @@ jobs:
             --project toca-mcp-production \
             --region southamerica-east1 \
             --format='yaml(metadata.annotations,status.url,status.address.url)'
-          gcloud run services get-iam-policy toca-meta-oauth-staging \
-            --project toca-mcp-production \
-            --region southamerica-east1 \
-            --format=json
 
-      - name: Resolve public service URL
+      - name: Probe public service URLs
+        id: probe
+        continue-on-error: true
         run: |
           CANONICAL_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
           STATUS_URL="$(gcloud run services describe toca-meta-oauth-staging \
@@ -64,27 +61,54 @@ jobs:
 
           for CANDIDATE in "$CANONICAL_URL" "$STATUS_URL"; do
             [ -n "$CANDIDATE" ] || continue
-            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' \
+            STATUS="$(curl --silent --output /tmp/health-response.html --write-out '%{http_code}' \
               "$CANDIDATE/healthz")"
             echo "Health candidate $CANDIDATE -> HTTP $STATUS"
-            cat /tmp/health-response.json || true
-            if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.json; then
+            head -c 500 /tmp/health-response.html || true
+            echo
+            if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.html; then
               echo "SERVICE_URL=$CANDIDATE" >> "$GITHUB_ENV"
+              echo 'public_health=true' >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
 
-          echo 'No unauthenticated Cloud Run URL served /healthz successfully.' >&2
+          echo 'public_health=false' >> "$GITHUB_OUTPUT"
           exit 1
 
-      - name: Verify unauthenticated health
+      - name: Diagnose VPC Service Controls policy denials
+        if: steps.probe.outcome == 'failure'
+        continue-on-error: true
         run: |
+          echo 'Querying Cloud Audit policy logs for Cloud Run HttpIngress denials...'
+          gcloud logging read \
+            'resource.type="audited_resource" AND logName="projects/toca-mcp-production/logs/cloudaudit.googleapis.com%2Fpolicy" AND resource.labels.method="run.googleapis.com/HttpIngress"' \
+            --project toca-mcp-production \
+            --freshness=30m \
+            --limit=20 \
+            --format=json
+
+      - name: Inspect relevant organization policies
+        if: steps.probe.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          for CONSTRAINT in \
+            run.allowedIngress \
+            run.managed.requireInvokerIam \
+            iam.allowedPolicyMemberDomains; do
+            echo "--- $CONSTRAINT ---"
+            gcloud resource-manager org-policies describe "$CONSTRAINT" \
+              --project=toca-mcp-production \
+              --effective \
+              --format=yaml || true
+          done
+
+      - name: Verify public boundary contract
+        run: |
+          test "${{ steps.probe.outputs.public_health }}" = "true"
           BODY="$(curl --fail --silent --show-error "$SERVICE_URL/healthz")"
           echo "$BODY"
           echo "$BODY" | grep -q '"status":"ok"'
-
-      - name: Verify MCP is not publicly exposed
-        run: |
           STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' \
             -X POST "$SERVICE_URL/mcp")"
           cat /tmp/mcp-response.json
