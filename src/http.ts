@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
-import { createTocaHttpServer } from './http-server.js';
+import { EnvSecretResolver } from './core/secrets.js';
+import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
 import { createMetaHttpRuntime } from './providers/meta/meta-http-runtime.js';
 import { SERVER_NAME } from './server.js';
 
@@ -13,9 +14,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MCP_PORT/PORT must be an integer between 1 and 65535');
 }
 
+const metaWebhook = createMetaWebhookBoundary();
+
 const server = createTocaHttpServer({
   onError: (error) => {
-    console.error('MCP request failed', error instanceof Error ? error.message : 'unknown error');
+    console.error('HTTP request failed', error instanceof Error ? error.message : 'unknown error');
   },
   mcpEnabled: config.MCP_ENABLED,
   ...(metaRuntime
@@ -24,8 +27,47 @@ const server = createTocaHttpServer({
         metaAssetDiscovery: (result) => metaRuntime.discoverAssets(result),
       }
     : {}),
+  ...(metaWebhook ? { metaWebhook } : {}),
 });
 
 server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
+
+function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
+  if (!config.META_WEBHOOK_ENABLED) return undefined;
+
+  if (
+    !config.META_APP_SECRET_PROVIDER ||
+    !config.META_APP_SECRET_KEY ||
+    !config.META_WEBHOOK_VERIFY_TOKEN_KEY
+  ) {
+    throw new Error('Meta webhook configuration is incomplete');
+  }
+
+  if (config.META_APP_SECRET_PROVIDER !== 'env') {
+    throw new Error(`Unsupported Meta webhook secret provider: ${config.META_APP_SECRET_PROVIDER}`);
+  }
+
+  const resolver = new EnvSecretResolver(process.env, config.META_APP_SECRET_PROVIDER);
+  const appSecretReference = {
+    provider: config.META_APP_SECRET_PROVIDER,
+    key: config.META_APP_SECRET_KEY,
+  };
+  const verifyTokenReference = {
+    provider: config.META_APP_SECRET_PROVIDER,
+    key: config.META_WEBHOOK_VERIFY_TOKEN_KEY,
+  };
+
+  return {
+    resolveAppSecret: () => resolver.resolve(appSecretReference),
+    resolveVerifyToken: () => resolver.resolve(verifyTokenReference),
+    onEvents: (events) => {
+      const channels = [...new Set(events.map((event) => event.channel))];
+      console.log(
+        'Meta webhook events accepted',
+        JSON.stringify({ count: events.length, channels, eventIds: events.map((event) => event.eventId) }),
+      );
+    },
+  };
+}
