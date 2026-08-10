@@ -20,13 +20,19 @@ const DEFAULT_SELECTOR_SHEET = 'ASSET_SELECTOR';
 const DEFAULT_USAGE_LOG_SHEET = 'ASSET_USAGE_LOG';
 
 function asString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value).trim();
+  }
+  throw new Error(`Unsupported spreadsheet value type: ${typeof value}`);
 }
 
 function asNumber(value: unknown): number {
-  const number = typeof value === 'number' ? value : Number(String(value ?? '').replace(',', '.'));
+  if (typeof value === 'number') return value;
+  const number = Number(asString(value).replace(',', '.'));
   if (!Number.isFinite(number)) {
-    throw new Error(`Invalid numeric spreadsheet value: ${String(value)}`);
+    throw new Error(`Invalid numeric spreadsheet value type: ${typeof value}`);
   }
   return number;
 }
