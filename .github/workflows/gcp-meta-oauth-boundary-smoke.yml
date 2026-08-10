@@ -1,11 +1,6 @@
 name: GCP Meta OAuth Boundary Smoke
 
 on:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
-    paths:
-      - '.github/workflows/gcp-meta-oauth-boundary-smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -80,7 +75,6 @@ jobs:
         if: steps.probe.outcome == 'failure'
         continue-on-error: true
         run: |
-          echo 'Querying Cloud Audit policy logs for Cloud Run HttpIngress denials...'
           gcloud logging read \
             'resource.type="audited_resource" AND logName="projects/toca-mcp-production/logs/cloudaudit.googleapis.com%2Fpolicy" AND resource.labels.method="run.googleapis.com/HttpIngress"' \
             --project toca-mcp-production \
