@@ -159,16 +159,25 @@ describe('MetaGraphManagedAssetDiscovery', () => {
         expect(parsed.searchParams.has('access_token')).toBe(false);
 
         if (parsed.pathname === '/v1.0/me/accounts') {
-          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) });
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ data: [] }),
+          });
         }
         if (parsed.pathname === '/v1.0/me') {
-          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: 'user-1' }) });
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ id: 'user-1' }),
+          });
         }
         if (parsed.pathname === '/v1.0/me/businesses') {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: () => Promise.resolve({ data: [{ id: 'business-1', name: 'Toca do Morcego' }] }),
+            json: () =>
+              Promise.resolve({ data: [{ id: 'business-1', name: 'Toca do Morcego' }] }),
           });
         }
         if (parsed.pathname === '/v1.0/business-1/owned_pages') {
@@ -188,7 +197,11 @@ describe('MetaGraphManagedAssetDiscovery', () => {
           });
         }
         if (parsed.pathname === '/v1.0/business-1/client_pages') {
-          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) });
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ data: [] }),
+          });
         }
 
         throw new Error(`Unexpected request: ${parsed.pathname}`);
