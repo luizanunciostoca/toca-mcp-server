@@ -37,3 +37,5 @@ jobs:
           git add .
           git commit -m "style: apply Prettier to Cloud Run checkpoint"
           git push
+
+# One-time trigger for the validated Cloud Run OAuth checkpoint.
