@@ -30,7 +30,9 @@ export function verifyMetaWebhookChallenge(
     typeof input.challenge === 'string' &&
     input.challenge.length > 0;
 
-  return accepted ? { accepted: true, challenge: input.challenge ?? undefined } : { accepted: false };
+  return accepted
+    ? { accepted: true, challenge: input.challenge ?? undefined }
+    : { accepted: false };
 }
 
 export function verifyMetaWebhookSignature(
@@ -46,7 +48,9 @@ export function verifyMetaWebhookSignature(
   return safeEqual(supplied.toLowerCase(), expected.toLowerCase());
 }
 
-export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebhookEvent[] {
+export function parseMetaWebhookEvents(
+  rawBody: Buffer,
+): readonly InstagramWebhookEvent[] {
   const payload = webhookPayloadSchema.parse(JSON.parse(rawBody.toString('utf8')));
   const events: InstagramWebhookEvent[] = [];
 
