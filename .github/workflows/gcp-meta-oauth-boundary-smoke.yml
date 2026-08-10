@@ -39,7 +39,8 @@ jobs:
             --max-instances 1 \
             --ingress all \
             --default-url \
-            --no-invoker-iam-check \
+            --invoker-iam-check \
+            --allow-unauthenticated \
             --quiet
 
       - name: Inspect Cloud Run access settings
@@ -48,6 +49,10 @@ jobs:
             --project toca-mcp-production \
             --region southamerica-east1 \
             --format='yaml(metadata.annotations,status.url,status.address.url)'
+          gcloud run services get-iam-policy toca-meta-oauth-staging \
+            --project toca-mcp-production \
+            --region southamerica-east1 \
+            --format=json
 
       - name: Resolve public service URL
         run: |
