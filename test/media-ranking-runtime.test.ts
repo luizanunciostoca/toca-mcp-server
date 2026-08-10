@@ -47,9 +47,9 @@ describe('media ranking runtime configuration', () => {
   it('resolves only explicit env secret references', async () => {
     const resolver = new EnvironmentSecretResolver(configuredEnv);
 
-    await expect(resolver.resolve({ provider: 'env', key: 'TEST_GOOGLE_SHEETS_TOKEN' })).resolves.toBe(
-      'access-token',
-    );
+    await expect(
+      resolver.resolve({ provider: 'env', key: 'TEST_GOOGLE_SHEETS_TOKEN' }),
+    ).resolves.toBe('access-token');
     await expect(resolver.resolve({ provider: 'vault', key: 'secret' })).rejects.toThrow(
       /Unsupported secret provider/,
     );
