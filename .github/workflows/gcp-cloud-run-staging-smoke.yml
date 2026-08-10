@@ -26,7 +26,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy private staging service
+      - name: Deploy staging service
         run: |
           IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-7c6810d18b39f5ac180f58d9f5182e772c82fe41"
           gcloud run deploy toca-mcp-staging \
@@ -37,7 +37,6 @@ jobs:
             --set-env-vars NODE_ENV=production,META_ENABLED=false,LOG_LEVEL=info \
             --min-instances 0 \
             --max-instances 1 \
-            --no-allow-unauthenticated \
             --quiet
 
       - name: Verify service state
@@ -46,3 +45,15 @@ jobs:
             --project toca-mcp-production \
             --region southamerica-east1 \
             --format='value(status.url,status.latestReadyRevisionName,status.conditions[0].status)'
+
+      - name: Verify no public invoker binding
+        run: |
+          POLICY="$(gcloud run services get-iam-policy toca-mcp-staging \
+            --project toca-mcp-production \
+            --region southamerica-east1 \
+            --format=json)"
+          echo "$POLICY"
+          if echo "$POLICY" | grep -q 'allUsers'; then
+            echo 'Public allUsers binding detected; refusing to accept staging as private.' >&2
+            exit 1
+          fi
