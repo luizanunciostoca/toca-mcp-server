@@ -60,9 +60,7 @@ function policyString(values: ReadonlyMap<string, unknown>, key: string): string
   return value;
 }
 
-export function parseMediaRankingPolicy(
-  rows: readonly (readonly unknown[])[],
-): MediaRankingPolicy {
+export function parseMediaRankingPolicy(rows: readonly (readonly unknown[])[]): MediaRankingPolicy {
   const values = new Map<string, unknown>();
   for (const row of rows) {
     const key = valueToString(row[0]);
@@ -160,11 +158,7 @@ function recencyFactor(lastUsed: Date | null, now: Date, policy: MediaRankingPol
   return policy.recencyFactorDefault;
 }
 
-function antiRepeatScore(
-  row: readonly unknown[],
-  now: Date,
-  policy: MediaRankingPolicy,
-): number {
+function antiRepeatScore(row: readonly unknown[], now: Date, policy: MediaRankingPolicy): number {
   const useCount = Math.max(0, valueToNumber(row[23] ?? 0));
   const usageScore = Math.max(
     policy.antiRepeatFloor,
@@ -213,7 +207,9 @@ export function rankMediaAssets(
     return [{ assetId, driveFileId, cluster, score }];
   });
 
-  candidates.sort((left, right) => right.score - left.score || left.assetId.localeCompare(right.assetId));
+  candidates.sort(
+    (left, right) => right.score - left.score || left.assetId.localeCompare(right.assetId),
+  );
   const limit = Math.min(request.limit, policy.maxResultLimit);
   return candidates.slice(0, limit).map((asset, index) => ({ ...asset, rank: index + 1 }));
 }
