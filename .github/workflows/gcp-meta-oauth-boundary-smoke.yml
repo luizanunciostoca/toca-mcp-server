@@ -1,6 +1,9 @@
 name: GCP Meta OAuth Boundary Smoke
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-meta-oauth-boundary-smoke.yml'
   workflow_dispatch:
 
 permissions:
