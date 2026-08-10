@@ -1,0 +1,27 @@
+name: Format Preview
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - '.github/workflows/format-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Print formatted test
+        run: pnpm exec prettier test/http-server.test.ts
