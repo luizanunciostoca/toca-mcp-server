@@ -40,7 +40,9 @@ export function createMetaHttpRuntime(
     !config.META_AUTHORIZATION_ENDPOINT ||
     !config.META_TOKEN_ENDPOINT ||
     !config.META_REDIRECT_URI ||
-    !config.META_REQUESTED_SCOPES
+    !config.META_REQUESTED_SCOPES ||
+    !config.META_GRAPH_BASE_URL ||
+    !config.META_GRAPH_API_VERSION
   ) {
     throw new Error('Meta runtime configuration is incomplete');
   }
@@ -51,7 +53,10 @@ export function createMetaHttpRuntime(
 
   const appSecrets = new EnvSecretResolver(env, config.META_APP_SECRET_PROVIDER);
   const tokenStore = createTokenStore(config);
-  const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore);
+  const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore, {
+    graphBaseUrl: config.META_GRAPH_BASE_URL,
+    apiVersion: config.META_GRAPH_API_VERSION,
+  });
   const oauth = new MetaOAuthService(
     {
       appId: config.META_APP_ID,
