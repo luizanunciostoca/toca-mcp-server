@@ -30,7 +30,7 @@ The public boundary contract has been validated successfully against the deploye
 
 The validated deployment image is:
 
-` southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-23c08d26ee7a28d479801c855e8f93baf05d6b89 `
+`southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-23c08d26ee7a28d479801c855e8f93baf05d6b89`
 
 ## Cloud Run `/healthz` finding
 
