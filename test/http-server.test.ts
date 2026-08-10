@@ -2,10 +2,7 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTocaHttpServer } from '../src/http-server.js';
-import {
-  InMemoryOAuthStateStore,
-  MetaOAuthService,
-} from '../src/providers/meta/meta-oauth.js';
+import { InMemoryOAuthStateStore, MetaOAuthService } from '../src/providers/meta/meta-oauth.js';
 import type { MetaOAuthTransport } from '../src/providers/meta/meta-connection.js';
 
 const servers: ReturnType<typeof createTocaHttpServer>[] = [];
@@ -21,9 +18,7 @@ afterEach(async () => {
   );
 });
 
-async function listen(
-  options: Parameters<typeof createTocaHttpServer>[0] = {},
-): Promise<string> {
+async function listen(options: Parameters<typeof createTocaHttpServer>[0] = {}): Promise<string> {
   const server = createTocaHttpServer(options);
   servers.push(server);
   server.listen(0, '127.0.0.1');
