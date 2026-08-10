@@ -8,27 +8,35 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function inputUrl(input: URL | RequestInfo): string {
+  if (input instanceof URL) return input.toString();
+  if (input instanceof Request) return input.url;
+  return input;
+}
+
 describe('GcpSecretManagerStore', () => {
   it('creates a secret, adds a version, resolves it and deletes it without exposing the token', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      const url = String(input);
+    const fetchImpl: typeof fetch = vi.fn((input: URL | RequestInfo, init?: RequestInit) => {
+      const url = inputUrl(input);
       calls.push({ url, init });
 
-      if (url.includes(':addVersion')) return jsonResponse({ name: 'version-1' });
+      if (url.includes(':addVersion')) return Promise.resolve(jsonResponse({ name: 'version-1' }));
       if (url.endsWith('/versions/latest:access')) {
-        return jsonResponse({
-          payload: { data: Buffer.from('SENSITIVE_TOKEN').toString('base64') },
-        });
+        return Promise.resolve(
+          jsonResponse({
+            payload: { data: Buffer.from('SENSITIVE_TOKEN').toString('base64') },
+          }),
+        );
       }
-      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
-      return jsonResponse({ name: 'secret' });
+      if (init?.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(jsonResponse({ name: 'secret' }));
     });
 
     const store = new GcpSecretManagerStore({
       projectId: 'toca-project',
-      accessToken: async () => 'GCP_ACCESS_TOKEN',
-      fetchImpl: fetchImpl as typeof fetch,
+      accessToken: () => Promise.resolve('GCP_ACCESS_TOKEN'),
+      fetchImpl,
     });
 
     const reference = await store.put('meta/access token', 'SENSITIVE_TOKEN');
@@ -50,7 +58,7 @@ describe('GcpSecretManagerStore', () => {
 
     const store = new GcpSecretManagerStore({
       projectId: 'toca-project',
-      accessToken: async () => 'GCP_ACCESS_TOKEN',
+      accessToken: () => Promise.resolve('GCP_ACCESS_TOKEN'),
       fetchImpl,
     });
 
@@ -62,10 +70,11 @@ describe('GcpSecretManagerStore', () => {
   });
 
   it('rejects references from another provider', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
     const store = new GcpSecretManagerStore({
       projectId: 'toca-project',
-      accessToken: async () => 'GCP_ACCESS_TOKEN',
-      fetchImpl: vi.fn() as unknown as typeof fetch,
+      accessToken: () => Promise.resolve('GCP_ACCESS_TOKEN'),
+      fetchImpl,
     });
 
     await expect(store.resolve({ provider: 'memory', key: 'meta-token' })).rejects.toThrow(
