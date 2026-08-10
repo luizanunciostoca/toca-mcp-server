@@ -26,15 +26,16 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy staging service
+      - name: Deploy staging service with Meta secret mounted but disabled
         run: |
-          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-7c6810d18b39f5ac180f58d9f5182e772c82fe41"
+          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-740c9fce918ad874030d844ad436c580b63c4bbd"
           gcloud run deploy toca-mcp-staging \
             --image "$IMAGE" \
             --project toca-mcp-production \
             --region southamerica-east1 \
             --service-account toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com \
-            --set-env-vars NODE_ENV=production,META_ENABLED=false,LOG_LEVEL=info \
+            --set-env-vars NODE_ENV=production,META_ENABLED=false,MCP_ENABLED=true,LOG_LEVEL=info \
+            --set-secrets META_APP_SECRET=toca-meta-app-secret:1 \
             --min-instances 0 \
             --max-instances 1 \
             --quiet
