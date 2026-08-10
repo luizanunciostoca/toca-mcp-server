@@ -12,6 +12,24 @@ export interface SecretStore extends SecretResolver {
   delete(reference: SecretReference): Promise<void>;
 }
 
+export class EnvSecretResolver implements SecretResolver {
+  constructor(
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly provider = 'env',
+  ) {}
+
+  resolve(reference: SecretReference): Promise<string> {
+    if (reference.provider !== this.provider) {
+      return Promise.reject(new Error('Secret provider mismatch'));
+    }
+    const value = this.env[reference.key];
+    if (!value) {
+      return Promise.reject(new Error(`Secret environment variable not found: ${reference.key}`));
+    }
+    return Promise.resolve(value);
+  }
+}
+
 export class InMemorySecretStore implements SecretStore {
   readonly #values = new Map<string, string>();
 
