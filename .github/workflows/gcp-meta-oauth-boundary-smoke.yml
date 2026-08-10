@@ -42,13 +42,26 @@ jobs:
 
       - name: Resolve public service URL
         run: |
-          SERVICE_URL="$(gcloud run services describe toca-meta-oauth-staging \
+          CANONICAL_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
+          STATUS_URL="$(gcloud run services describe toca-meta-oauth-staging \
             --project toca-mcp-production \
             --region southamerica-east1 \
             --format='value(status.url)')"
-          test -n "$SERVICE_URL"
-          echo "SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
-          echo "OAuth boundary: $SERVICE_URL"
+
+          for CANDIDATE in "$CANONICAL_URL" "$STATUS_URL"; do
+            [ -n "$CANDIDATE" ] || continue
+            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' \
+              "$CANDIDATE/healthz")"
+            echo "Health candidate $CANDIDATE -> HTTP $STATUS"
+            cat /tmp/health-response.json || true
+            if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.json; then
+              echo "SERVICE_URL=$CANDIDATE" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+
+          echo 'No unauthenticated Cloud Run URL served /healthz successfully.' >&2
+          exit 1
 
       - name: Verify unauthenticated health
         run: |
