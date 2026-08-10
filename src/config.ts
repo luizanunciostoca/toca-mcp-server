@@ -25,6 +25,8 @@ const configSchema = z
     META_REQUESTED_SCOPES: z.string().min(1).optional(),
     META_GRAPH_BASE_URL: z.string().url().optional(),
     META_GRAPH_API_VERSION: z.string().min(1).optional(),
+    META_TOKEN_STORE_PROVIDER: z.enum(['memory', 'gcp-secret-manager']).default('memory'),
+    GCP_PROJECT_ID: z.string().min(1).optional(),
   })
   .superRefine((config, context) => {
     if (!config.META_ENABLED) return;
@@ -49,6 +51,14 @@ const configSchema = z
           message: `${field} is required when META_ENABLED=true`,
         });
       }
+    }
+
+    if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager' && !config.GCP_PROJECT_ID) {
+      context.addIssue({
+        code: 'custom',
+        path: ['GCP_PROJECT_ID'],
+        message: 'GCP_PROJECT_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
+      });
     }
   });
 
