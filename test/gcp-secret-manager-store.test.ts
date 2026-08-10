@@ -17,7 +17,9 @@ describe('GcpSecretManagerStore', () => {
 
       if (url.includes(':addVersion')) return jsonResponse({ name: 'version-1' });
       if (url.endsWith('/versions/latest:access')) {
-        return jsonResponse({ payload: { data: Buffer.from('SENSITIVE_TOKEN').toString('base64') } });
+        return jsonResponse({
+          payload: { data: Buffer.from('SENSITIVE_TOKEN').toString('base64') },
+        });
       }
       if (init?.method === 'DELETE') return new Response(null, { status: 204 });
       return jsonResponse({ name: 'secret' });
