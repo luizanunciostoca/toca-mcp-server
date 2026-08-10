@@ -29,11 +29,6 @@ jobs:
             --project toca-mcp-production \
             --location southamerica-east1 \
             --format='value(name,format,mode)'
-      - name: Verify Cloud SQL
-        run: |
-          gcloud sql instances describe toca-mcp-db \
-            --project toca-mcp-production \
-            --format='value(name,databaseVersion,region,state,connectionName)'
       - name: Verify runtime service account
         run: |
           gcloud iam service-accounts describe \
@@ -46,3 +41,16 @@ jobs:
             toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com \
             --project toca-mcp-production \
             --format='value(email,disabled)'
+      - name: Verify Cloud SQL
+        id: cloudsql
+        continue-on-error: true
+        run: |
+          gcloud sql instances describe toca-mcp-db \
+            --project toca-mcp-production \
+            --format='value(name,databaseVersion,region,state,connectionName)'
+      - name: Summarize preflight
+        run: |
+          if [ "${{ steps.cloudsql.outcome }}" != "success" ]; then
+            echo "Cloud SQL describe failed. The instance is known to exist; deployer likely lacks cloudsql.instances.get."
+            exit 1
+          fi
