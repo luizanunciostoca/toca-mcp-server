@@ -176,8 +176,7 @@ describe('MetaGraphManagedAssetDiscovery', () => {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: () =>
-              Promise.resolve({ data: [{ id: 'business-1', name: 'Toca do Morcego' }] }),
+            json: () => Promise.resolve({ data: [{ id: 'business-1', name: 'Toca do Morcego' }] }),
           });
         }
         if (parsed.pathname === '/v1.0/business-1/owned_pages') {
