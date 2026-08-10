@@ -64,7 +64,10 @@ describe('GoogleSheetsRestClient', () => {
     expect(calls[0]?.init?.method).toBe('POST');
     expect(calls[0]?.url).toContain('valueInputOption=USER_ENTERED');
     expect(calls[0]?.url).toContain('insertDataOption=INSERT_ROWS');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+    const body = calls[0]?.init?.body;
+    expect(typeof body).toBe('string');
+    if (typeof body !== 'string') throw new Error('Expected JSON request body');
+    expect(JSON.parse(body)).toEqual({
       majorDimension: 'ROWS',
       values: [['log-1', 'CONTENT-001']],
     });
