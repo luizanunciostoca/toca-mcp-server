@@ -26,6 +26,7 @@ const configSchema = z
     META_GRAPH_BASE_URL: z.string().url().optional(),
     META_GRAPH_API_VERSION: z.string().min(1).optional(),
     META_TOKEN_STORE_PROVIDER: z.enum(['memory', 'gcp-secret-manager']).default('memory'),
+    META_TOKEN_SECRET_ID: z.string().min(1).optional(),
     GCP_PROJECT_ID: z.string().min(1).optional(),
   })
   .superRefine((config, context) => {
@@ -53,12 +54,22 @@ const configSchema = z
       }
     }
 
-    if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager' && !config.GCP_PROJECT_ID) {
-      context.addIssue({
-        code: 'custom',
-        path: ['GCP_PROJECT_ID'],
-        message: 'GCP_PROJECT_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
-      });
+    if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager') {
+      if (!config.GCP_PROJECT_ID) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GCP_PROJECT_ID'],
+          message: 'GCP_PROJECT_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
+        });
+      }
+      if (!config.META_TOKEN_SECRET_ID) {
+        context.addIssue({
+          code: 'custom',
+          path: ['META_TOKEN_SECRET_ID'],
+          message:
+            'META_TOKEN_SECRET_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
+        });
+      }
     }
   });
 
