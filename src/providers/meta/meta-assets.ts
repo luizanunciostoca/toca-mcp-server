@@ -77,10 +77,7 @@ export class MetaGraphManagedAssetDiscovery implements MetaManagedAssetDiscovery
     const url = new URL(
       `${this.graphConfig.graphBaseUrl.replace(/\/$/, '')}/${this.graphConfig.apiVersion}/me`,
     );
-    url.searchParams.set(
-      'fields',
-      'accounts.limit(100){id,name,tasks,instagram_business_account}',
-    );
+    url.searchParams.set('fields', 'accounts.limit(100){id,name,tasks,instagram_business_account}');
 
     const response = await this.http.get(url.toString(), {
       Authorization: `Bearer ${userToken}`,
