@@ -28,3 +28,10 @@ jobs:
         run: |
           gcloud auth list --filter=status:ACTIVE --format='value(account)'
           gcloud projects describe toca-mcp-production --format='value(projectId,projectNumber)'
+
+      - name: Inspect runtime Secret Manager roles
+        run: |
+          gcloud projects get-iam-policy toca-mcp-production \
+            --flatten='bindings[].members' \
+            --filter='bindings.members:serviceAccount:toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' \
+            --format='value(bindings.role)'
