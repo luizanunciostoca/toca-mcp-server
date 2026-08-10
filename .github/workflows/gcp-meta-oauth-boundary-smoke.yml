@@ -1,0 +1,64 @@
+name: GCP Meta OAuth Boundary Smoke
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - '.github/workflows/gcp-meta-oauth-boundary-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  oauth-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy isolated OAuth boundary with Meta disabled
+        run: |
+          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-740c9fce918ad874030d844ad436c580b63c4bbd"
+          gcloud run deploy toca-meta-oauth-staging \
+            --image "$IMAGE" \
+            --project toca-mcp-production \
+            --region southamerica-east1 \
+            --service-account toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com \
+            --set-env-vars NODE_ENV=production,META_ENABLED=false,MCP_ENABLED=false,LOG_LEVEL=info \
+            --min-instances 0 \
+            --max-instances 1 \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Resolve public service URL
+        run: |
+          SERVICE_URL="$(gcloud run services describe toca-meta-oauth-staging \
+            --project toca-mcp-production \
+            --region southamerica-east1 \
+            --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+          echo "SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
+          echo "OAuth boundary: $SERVICE_URL"
+
+      - name: Verify unauthenticated health
+        run: |
+          BODY="$(curl --fail --silent --show-error "$SERVICE_URL/healthz")"
+          echo "$BODY"
+          echo "$BODY" | grep -q '"status":"ok"'
+
+      - name: Verify MCP is not publicly exposed
+        run: |
+          STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' \
+            -X POST "$SERVICE_URL/mcp")"
+          cat /tmp/mcp-response.json
+          test "$STATUS" = "404"
