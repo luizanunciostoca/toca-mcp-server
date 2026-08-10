@@ -66,7 +66,11 @@ function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
       const channels = [...new Set(events.map((event) => event.channel))];
       console.log(
         'Meta webhook events accepted',
-        JSON.stringify({ count: events.length, channels, eventIds: events.map((event) => event.eventId) }),
+        JSON.stringify({
+          count: events.length,
+          channels,
+          eventIds: events.map((event) => event.eventId),
+        }),
       );
     },
   };
