@@ -19,7 +19,7 @@ describe('GcpSecretManagerStore', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl: typeof fetch = vi.fn((input: URL | RequestInfo, init?: RequestInit) => {
       const url = inputUrl(input);
-      calls.push({ url, init });
+      calls.push(init ? { url, init } : { url });
 
       if (url.includes(':addVersion')) return Promise.resolve(jsonResponse({ name: 'version-1' }));
       if (url.endsWith('/versions/latest:access')) {
