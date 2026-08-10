@@ -10,11 +10,7 @@ class FakeSheetsClient implements SpreadsheetValuesClient {
     return this.reads.get(range) ?? [];
   }
 
-  async appendRow(
-    _spreadsheetId: string,
-    range: string,
-    values: readonly unknown[],
-  ) {
+  async appendRow(_spreadsheetId: string, range: string, values: readonly unknown[]) {
     this.appends.push({ range, values });
   }
 }
@@ -111,10 +107,7 @@ describe('GoogleSheetsMediaAssetAdapter', () => {
       limit: 2,
     });
 
-    expect(result.assets.map((asset) => asset.assetId)).toEqual([
-      'SUN-0354',
-      'SUN-0347',
-    ]);
+    expect(result.assets.map((asset) => asset.assetId)).toEqual(['SUN-0354', 'SUN-0347']);
     expect(result.assets[0]?.score).toBe(96.82);
     expect(result.source).toBe('TOCA_OS_ASSET_SELECTOR');
   });
@@ -202,9 +195,7 @@ describe('GoogleSheetsMediaAssetAdapter', () => {
     });
 
     expect(client.appends).toHaveLength(1);
-    expect(client.appends[0]?.values[0]).toBe(
-      'CONTENT-004:SUN-0347:PUBLISHED',
-    );
+    expect(client.appends[0]?.values[0]).toBe('CONTENT-004:SUN-0347:PUBLISHED');
   });
 
   it('does not append duplicate usage records', async () => {
