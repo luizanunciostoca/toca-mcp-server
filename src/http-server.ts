@@ -25,7 +25,7 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
     const method = request.method ?? 'POST';
     const url = new URL(requestUrl, `http://${request.headers.host ?? 'localhost'}`);
 
-    if (url.pathname === '/healthz' && method === 'GET') {
+    if ((url.pathname === '/healthz' || url.pathname === '/health') && method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ status: 'ok', service: SERVER_NAME, version: SERVER_VERSION }));
       return;
