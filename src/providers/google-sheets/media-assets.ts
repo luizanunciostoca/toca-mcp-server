@@ -2,8 +2,8 @@ import type {
   MediaAssetSelectionRequest,
   MediaAssetSelectionResult,
   MediaAssetUsageRecord,
-  RankedMediaAsset,
 } from '../../contracts/media-assets.js';
+import { parseMediaRankingPolicy, rankMediaAssets } from './media-ranking.js';
 
 export interface SpreadsheetValuesClient {
   readRange(spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]>;
@@ -12,11 +12,13 @@ export interface SpreadsheetValuesClient {
 
 export interface MediaAssetSheetsConfig {
   readonly spreadsheetId: string;
-  readonly selectorSheet?: string;
+  readonly intelligenceSheet?: string;
+  readonly rankingPolicySheet?: string;
   readonly usageLogSheet?: string;
 }
 
-const DEFAULT_SELECTOR_SHEET = 'ASSET_SELECTOR';
+const DEFAULT_INTELLIGENCE_SHEET = 'ASSET_INTELLIGENCE';
+const DEFAULT_RANKING_POLICY_SHEET = 'ASSET_RANKING_POLICY';
 const DEFAULT_USAGE_LOG_SHEET = 'ASSET_USAGE_LOG';
 
 function asString(value: unknown): string {
@@ -28,70 +30,28 @@ function asString(value: unknown): string {
   throw new Error(`Unsupported spreadsheet value type: ${typeof value}`);
 }
 
-function asNumber(value: unknown): number {
-  if (typeof value === 'number') return value;
-  const number = Number(asString(value).replace(',', '.'));
-  if (!Number.isFinite(number)) {
-    throw new Error(`Invalid numeric spreadsheet value type: ${typeof value}`);
-  }
-  return number;
-}
-
-function normalizeTheme(value: string | undefined): string {
-  return (value ?? '').trim().toLocaleLowerCase('pt-BR');
-}
-
 export class GoogleSheetsMediaAssetAdapter {
-  private readonly selectorSheet: string;
+  private readonly intelligenceSheet: string;
+  private readonly rankingPolicySheet: string;
   private readonly usageLogSheet: string;
 
   constructor(
     private readonly client: SpreadsheetValuesClient,
     private readonly config: MediaAssetSheetsConfig,
+    private readonly now: () => Date = () => new Date(),
   ) {
-    this.selectorSheet = config.selectorSheet ?? DEFAULT_SELECTOR_SHEET;
+    this.intelligenceSheet = config.intelligenceSheet ?? DEFAULT_INTELLIGENCE_SHEET;
+    this.rankingPolicySheet = config.rankingPolicySheet ?? DEFAULT_RANKING_POLICY_SHEET;
     this.usageLogSheet = config.usageLogSheet ?? DEFAULT_USAGE_LOG_SHEET;
   }
 
   async rank(request: MediaAssetSelectionRequest): Promise<MediaAssetSelectionResult> {
-    const contextRows = await this.client.readRange(
-      this.config.spreadsheetId,
-      `${this.selectorSheet}!A2:B3`,
-    );
-    const snapshotFormat = asString(contextRows[0]?.[1]);
-    const snapshotTheme = normalizeTheme(asString(contextRows[1]?.[1]));
-
-    if (snapshotFormat !== request.format || snapshotTheme !== normalizeTheme(request.theme)) {
-      throw new Error(
-        `ASSET_SELECTOR context mismatch: requested ${request.format}/${request.theme ?? ''}, ` +
-          `snapshot is ${snapshotFormat}/${snapshotTheme}`,
-      );
-    }
-
-    const rows = await this.client.readRange(
-      this.config.spreadsheetId,
-      `${this.selectorSheet}!A12:V440`,
-    );
-
-    const assets: RankedMediaAsset[] = rows
-      .map((row) => ({
-        assetId: asString(row[0]),
-        driveFileId: asString(row[1]),
-        cluster: asString(row[2]),
-        score: asNumber(row[18] ?? 0),
-        rank: asNumber(row[21] ?? 0),
-      }))
-      .filter(
-        (asset) =>
-          /^SUN-\d{4}$/.test(asset.assetId) &&
-          asset.driveFileId.length > 0 &&
-          asset.cluster.length > 0 &&
-          asset.score > 0 &&
-          Number.isInteger(asset.rank) &&
-          asset.rank > 0,
-      )
-      .sort((a, b) => a.rank - b.rank || b.score - a.score)
-      .slice(0, request.limit);
+    const [policyRows, assetRows] = await Promise.all([
+      this.client.readRange(this.config.spreadsheetId, `${this.rankingPolicySheet}!A2:B100`),
+      this.client.readRange(this.config.spreadsheetId, `${this.intelligenceSheet}!A2:AD1000`),
+    ]);
+    const policy = parseMediaRankingPolicy(policyRows);
+    const assets = rankMediaAssets(request, assetRows, policy, this.now());
 
     return {
       contentItemId: request.contentItemId,

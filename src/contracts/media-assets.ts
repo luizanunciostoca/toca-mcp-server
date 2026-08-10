@@ -38,6 +38,7 @@ export const mediaAssetUsageRecordSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
+export type MediaAssetFormat = z.infer<typeof mediaAssetFormatSchema>;
 export type MediaAssetSelectionRequest = z.infer<typeof mediaAssetSelectionRequestSchema>;
 export type RankedMediaAsset = z.infer<typeof rankedMediaAssetSchema>;
 export type MediaAssetSelectionResult = z.infer<typeof mediaAssetSelectionResultSchema>;
