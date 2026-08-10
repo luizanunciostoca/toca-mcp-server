@@ -12,7 +12,7 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write . && git diff --exit-code",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
