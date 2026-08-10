@@ -18,7 +18,12 @@ const server = createTocaHttpServer({
     console.error('MCP request failed', error instanceof Error ? error.message : 'unknown error');
   },
   mcpEnabled: config.MCP_ENABLED,
-  ...(metaRuntime ? { metaOAuth: metaRuntime.oauth } : {}),
+  ...(metaRuntime
+    ? {
+        metaOAuth: metaRuntime.oauth,
+        metaAssetDiscovery: metaRuntime.discoverAssets,
+      }
+    : {}),
 });
 
 server.listen(port, host, () => {
