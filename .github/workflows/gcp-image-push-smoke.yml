@@ -6,6 +6,11 @@ on:
       - feat/instagram-engagement-messaging
     paths:
       - '.github/workflows/gcp-image-push-smoke.yml'
+      - 'Dockerfile'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'src/**'
+      - 'tsconfig.json'
   workflow_dispatch:
 
 permissions:
