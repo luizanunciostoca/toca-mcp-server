@@ -53,20 +53,33 @@ describe('runtime configuration', () => {
       loadConfig({
         ...completeMetaEnv,
         META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+        META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
       }),
     ).toThrow('GCP_PROJECT_ID is required');
   });
 
-  it('accepts the persistent Secret Manager token store with a GCP project', () => {
-    expect(
+  it('requires a dedicated secret ID for the persistent Secret Manager token store', () => {
+    expect(() =>
       loadConfig({
         ...completeMetaEnv,
         META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
         GCP_PROJECT_ID: 'toca-mcp-production',
       }),
+    ).toThrow('META_TOKEN_SECRET_ID is required');
+  });
+
+  it('accepts the persistent Secret Manager token store with project and dedicated secret', () => {
+    expect(
+      loadConfig({
+        ...completeMetaEnv,
+        META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+        GCP_PROJECT_ID: 'toca-mcp-production',
+        META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
+      }),
     ).toMatchObject({
       META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
       GCP_PROJECT_ID: 'toca-mcp-production',
+      META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
     });
   });
 });
