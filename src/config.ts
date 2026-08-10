@@ -16,9 +16,11 @@ const configSchema = z
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     MCP_ENABLED: enabledByDefaultFromEnv,
     META_ENABLED: booleanFromEnv,
+    META_WEBHOOK_ENABLED: booleanFromEnv,
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
     META_APP_SECRET_KEY: z.string().min(1).optional(),
+    META_WEBHOOK_VERIFY_TOKEN_KEY: z.string().min(1).optional(),
     META_AUTHORIZATION_ENDPOINT: z.string().url().optional(),
     META_TOKEN_ENDPOINT: z.string().url().optional(),
     META_REDIRECT_URI: z.string().url().optional(),
@@ -30,6 +32,14 @@ const configSchema = z
     GCP_PROJECT_ID: z.string().min(1).optional(),
   })
   .superRefine((config, context) => {
+    if (config.META_WEBHOOK_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_ENABLED'],
+        message: 'META_ENABLED must be true when META_WEBHOOK_ENABLED=true',
+      });
+    }
+
     if (!config.META_ENABLED) return;
 
     const required = [
@@ -52,6 +62,14 @@ const configSchema = z
           message: `${field} is required when META_ENABLED=true`,
         });
       }
+    }
+
+    if (config.META_WEBHOOK_ENABLED && !config.META_WEBHOOK_VERIFY_TOKEN_KEY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_VERIFY_TOKEN_KEY'],
+        message: 'META_WEBHOOK_VERIFY_TOKEN_KEY is required when META_WEBHOOK_ENABLED=true',
+      });
     }
 
     if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager') {
