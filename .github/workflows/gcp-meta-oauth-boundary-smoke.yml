@@ -38,6 +38,7 @@ jobs:
             --min-instances 0 \
             --max-instances 1 \
             --ingress all \
+            --default-url \
             --no-invoker-iam-check \
             --quiet
 
