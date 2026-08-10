@@ -1,5 +1,6 @@
 import type { RuntimeConfig } from '../../config.js';
-import { EnvSecretResolver, InMemorySecretStore } from '../../core/secrets.js';
+import { GcpSecretManagerStore } from '../../core/gcp-secret-manager-store.js';
+import { EnvSecretResolver, InMemorySecretStore, type SecretStore } from '../../core/secrets.js';
 import {
   FetchMetaOAuthTransport,
   InMemoryOAuthStateStore,
@@ -8,7 +9,17 @@ import {
 
 export interface MetaHttpRuntime {
   readonly oauth: MetaOAuthService;
-  readonly tokenStore: InMemorySecretStore;
+  readonly tokenStore: SecretStore;
+}
+
+function createTokenStore(config: RuntimeConfig): SecretStore {
+  if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager') {
+    if (!config.GCP_PROJECT_ID) {
+      throw new Error('GCP_PROJECT_ID is required for the GCP Secret Manager token store');
+    }
+    return new GcpSecretManagerStore({ projectId: config.GCP_PROJECT_ID });
+  }
+  return new InMemorySecretStore('memory');
 }
 
 export function createMetaHttpRuntime(
@@ -34,7 +45,7 @@ export function createMetaHttpRuntime(
   }
 
   const appSecrets = new EnvSecretResolver(env, config.META_APP_SECRET_PROVIDER);
-  const tokenStore = new InMemorySecretStore('memory');
+  const tokenStore = createTokenStore(config);
   const transport = new FetchMetaOAuthTransport(appSecrets, tokenStore);
   const oauth = new MetaOAuthService(
     {
