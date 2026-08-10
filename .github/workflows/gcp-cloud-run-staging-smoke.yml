@@ -28,7 +28,7 @@ jobs:
 
       - name: Deploy private staging service
         run: |
-          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-0f43e17357605831b587e8a446efaa4243bf22bf"
+          IMAGE="southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:smoke-7c6810d18b39f5ac180f58d9f5182e772c82fe41"
           gcloud run deploy toca-mcp-staging \
             --image "$IMAGE" \
             --project toca-mcp-production \
