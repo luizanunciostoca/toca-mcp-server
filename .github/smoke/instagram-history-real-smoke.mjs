@@ -15,7 +15,7 @@ const client = new MetaApiClient(
 );
 const provider = new InstagramHistoryProvider(client, accountId);
 
-const media = await provider.listMedia({ limit: 10 });
+const media = await provider.listMedia({ limit: 25, since: '2026-05-13' });
 if (!Array.isArray(media.data)) throw new Error('media.list did not return a data array');
 
 const permissionsResponse = await fetch('https://graph.facebook.com/v24.0/me/permissions', {
@@ -96,7 +96,7 @@ if (insightsScopeGranted) {
 
 console.log(
   JSON.stringify({
-    validation: 'ten-media-history-sample',
+    validation: 'ninety-day-history-sample-page-1',
     mediaListOk: true,
     returnedMedia: media.data.length,
     firstMediaId: firstMediaId ?? null,
@@ -107,5 +107,7 @@ console.log(
     accountInsightsOk,
     accountInsightsStatus,
     historySample,
+    pagingAfter: media.paging?.cursors?.after ?? null,
+    hasNextPage: Boolean(media.paging?.next),
   }),
 );
