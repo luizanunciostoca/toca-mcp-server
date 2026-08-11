@@ -17,11 +17,14 @@ env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
   REPOSITORY: toca-mcp
-  SERVICE: toca-meta-oauth-staging
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  DATABASE_SECRET_ID: toca-database-url
-  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
-  JOB: toca-persisted-events-inspect
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_SECRET_ID: toca-meta-app-secret
+  PAGE_ID: '306103746115875'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  META_APP_ID: '2281930145887404'
+  META_GRAPH_API_VERSION: v24.0
+  JOB: toca-meta-comment-subscription-inspect
 
 jobs:
   inspect:
@@ -40,70 +43,143 @@ jobs:
       - name: Configure Docker authentication
         run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
-      - name: Build sanitized inspection image
+      - name: Build sanitized Meta subscription inspector
         shell: bash
         run: |
           set -euo pipefail
-          cat > inspect-persisted-events.mjs <<'NODE'
-          import pg from 'pg';
-
-          const connectionString = process.env.DATABASE_URL;
+          mkdir -p /tmp/meta-comment-subscription-inspect
+          cat > /tmp/meta-comment-subscription-inspect/inspect.mjs <<'NODE'
+          const userToken = process.env.META_ACCESS_TOKEN;
+          const appSecret = process.env.META_APP_SECRET;
+          const appId = process.env.META_APP_ID;
+          const pageId = process.env.PAGE_ID;
+          const igId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const version = process.env.META_GRAPH_API_VERSION;
           const runId = process.env.INSPECTION_RUN_ID;
-          if (!connectionString || !runId) throw new Error('inspection configuration missing');
 
-          const pool = new pg.Pool({ connectionString, ssl: false, max: 1 });
-          try {
-            const counts = await pool.query(`
-              select channel, count(*)::int as count
-              from meta_webhook_events
-              where received_at >= now() - interval '45 minutes'
-                and event_id not like 'validation:%'
-              group by channel
-            `);
+          if (!userToken || !appSecret || !appId || !pageId || !igId || !version || !runId) {
+            throw new Error('inspection configuration missing');
+          }
 
-            const byChannel = Object.fromEntries(counts.rows.map((row) => [row.channel, row.count]));
-            const commentCount = byChannel.COMMENT ?? 0;
-            const directCount = byChannel.DIRECT ?? 0;
+          function marker(name, value) {
+            console.log(`SAFE_RUN_${runId}_${name}=${value}`);
+          }
 
-            const audit = await pool.query(`
-              select count(*)::int as count
-              from audit_events a
-              where a.created_at >= now() - interval '45 minutes'
-                and a.tool_name = 'instagram.engagement.webhook.receive'
-                and a.decision = 'ACCEPTED'
-                and a.correlation_id not like 'validation:%'
-            `);
-            const auditCount = audit.rows[0]?.count ?? 0;
+          async function graph(base, path, token) {
+            const response = await fetch(`${base}/${version}/${path}`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            let body = {};
+            try { body = await response.json(); } catch {}
+            return {
+              status: response.status,
+              code: Number.isInteger(body?.error?.code) ? body.error.code : 0,
+              subcode: Number.isInteger(body?.error?.error_subcode) ? body.error.error_subcode : 0,
+              body,
+            };
+          }
 
-            console.log(`SAFE_RUN_${runId}_COMMENT_COUNT=${commentCount}`);
-            console.log(`SAFE_RUN_${runId}_DIRECT_COUNT=${directCount}`);
-            console.log(`SAFE_RUN_${runId}_AUDIT_COUNT=${auditCount}`);
+          const pages = await graph(
+            'https://graph.facebook.com',
+            'me/accounts?fields=id,access_token,instagram_business_account',
+            userToken,
+          );
+          marker('MANAGED_PAGES_HTTP', pages.status);
+          if (pages.status !== 200) {
+            marker('MANAGED_PAGES_CODE', pages.code);
+            process.exit(1);
+          }
 
-            if (commentCount < 1) throw new Error('persisted COMMENT missing');
-            if (directCount < 1) throw new Error('persisted DIRECT missing');
-            if (auditCount < commentCount + directCount) throw new Error('audit count below accepted persisted events');
+          const page = Array.isArray(pages.body?.data)
+            ? pages.body.data.find((entry) => entry?.id === pageId)
+            : undefined;
+          if (!page || page?.instagram_business_account?.id !== igId || !page.access_token) {
+            marker('PAGE_LINKAGE_OK', 0);
+            process.exit(1);
+          }
+          marker('PAGE_LINKAGE_OK', 1);
+          const pageToken = page.access_token;
 
-            console.log(`SAFE_RUN_${runId}_PERSISTED_EXTERNAL_EVENTS_OK`);
-          } finally {
-            await pool.end().catch(() => undefined);
+          const pageSubs = await graph(
+            'https://graph.facebook.com',
+            `${pageId}/subscribed_apps`,
+            pageToken,
+          );
+          marker('PAGE_SUBS_HTTP', pageSubs.status);
+          if (pageSubs.status === 200) {
+            const app = Array.isArray(pageSubs.body?.data)
+              ? pageSubs.body.data.find((entry) => entry?.id === appId)
+              : undefined;
+            const fields = Array.isArray(app?.subscribed_fields)
+              ? [...app.subscribed_fields].filter((x) => typeof x === 'string').sort()
+              : [];
+            marker('PAGE_HAS_MESSAGES', fields.includes('messages') ? 1 : 0);
+            marker('PAGE_HAS_COMMENTS', fields.includes('comments') ? 1 : 0);
+          } else {
+            marker('PAGE_SUBS_CODE', pageSubs.code);
+            marker('PAGE_SUBS_SUBCODE', pageSubs.subcode);
+          }
+
+          for (const [name, base] of [
+            ['IG_FACEBOOK', 'https://graph.facebook.com'],
+            ['IG_INSTAGRAM', 'https://graph.instagram.com'],
+          ]) {
+            const result = await graph(base, `${igId}/subscribed_apps`, pageToken);
+            marker(`${name}_HTTP`, result.status);
+            marker(`${name}_CODE`, result.code);
+            marker(`${name}_SUBCODE`, result.subcode);
+            if (result.status === 200) {
+              const allFields = new Set();
+              for (const entry of Array.isArray(result.body?.data) ? result.body.data : []) {
+                for (const field of Array.isArray(entry?.subscribed_fields) ? entry.subscribed_fields : []) {
+                  if (typeof field === 'string') allFields.add(field);
+                }
+              }
+              marker(`${name}_HAS_COMMENTS`, allFields.has('comments') ? 1 : 0);
+              marker(`${name}_HAS_MESSAGES`, allFields.has('messages') ? 1 : 0);
+            }
+          }
+
+          // App access token is only used in-memory to inspect app-level webhook fields.
+          const appToken = `${appId}|${appSecret}`;
+          const appSubs = await graph(
+            'https://graph.facebook.com',
+            `${appId}/subscriptions`,
+            appToken,
+          );
+          marker('APP_SUBS_HTTP', appSubs.status);
+          marker('APP_SUBS_CODE', appSubs.code);
+          marker('APP_SUBS_SUBCODE', appSubs.subcode);
+          if (appSubs.status === 200) {
+            let hasComments = false;
+            let hasMessages = false;
+            for (const sub of Array.isArray(appSubs.body?.data) ? appSubs.body.data : []) {
+              const fields = Array.isArray(sub?.fields) ? sub.fields : [];
+              for (const field of fields) {
+                const name = typeof field === 'string' ? field : field?.name;
+                if (name === 'comments') hasComments = true;
+                if (name === 'messages') hasMessages = true;
+              }
+            }
+            marker('APP_HAS_COMMENTS', hasComments ? 1 : 0);
+            marker('APP_HAS_MESSAGES', hasMessages ? 1 : 0);
           }
           NODE
 
-          cat > Dockerfile.persisted-inspection <<'DOCKER'
+          cat > /tmp/meta-comment-subscription-inspect/Dockerfile <<'DOCKER'
           FROM node:24-bookworm-slim
           WORKDIR /app
-          RUN npm init -y >/dev/null 2>&1 && npm install pg@8.16.3 >/dev/null 2>&1
-          COPY inspect-persisted-events.mjs ./inspect-persisted-events.mjs
+          COPY inspect.mjs ./inspect.mjs
           USER node
-          CMD ["node", "inspect-persisted-events.mjs"]
+          CMD ["node", "inspect.mjs"]
           DOCKER
 
-          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/persisted-events-inspect:${GITHUB_SHA}"
-          docker build -f Dockerfile.persisted-inspection -t "$IMAGE" .
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-comment-subscription-inspect:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-comment-subscription-inspect
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Inspect persisted events and sanitized Cloud Run delivery
+      - name: Inspect subscriptions under runtime identity
         shell: bash
         run: |
           set -euo pipefail
@@ -117,9 +193,8 @@ jobs:
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "INSPECTION_RUN_ID=$GITHUB_RUN_ID" \
-            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-env-vars "META_APP_ID=$META_APP_ID,PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,INSPECTION_RUN_ID=$GITHUB_RUN_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:1" \
             --max-retries 0 \
             --task-timeout 120s \
             --quiet
@@ -133,28 +208,10 @@ jobs:
           for ATTEMPT in 1 2 3 4 5; do
             MARKERS="$(gcloud logging read \
               "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"SAFE_RUN_${GITHUB_RUN_ID}_\"" \
-              --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null \
-              | grep -E "^SAFE_RUN_${GITHUB_RUN_ID}_(COMMENT_COUNT|DIRECT_COUNT|AUDIT_COUNT)=[0-9]+$|^SAFE_RUN_${GITHUB_RUN_ID}_PERSISTED_EXTERNAL_EVENTS_OK$" | sort -u || true)"
+              --project "$PROJECT_ID" --freshness=10m --limit=50 --format='value(textPayload)' 2>/dev/null \
+              | grep -E "^SAFE_RUN_${GITHUB_RUN_ID}_[A-Z0-9_]+=[0-9]+$" | sort -u || true)"
             [ -n "$MARKERS" ] && break
             sleep 2
           done
           echo "$MARKERS"
-
-          COMMENT_LOG_COUNT="$(gcloud logging read \
-            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND textPayload:\"Meta webhook events accepted\" AND textPayload:\"COMMENT\"" \
-            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
-          DIRECT_LOG_COUNT="$(gcloud logging read \
-            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND textPayload:\"Meta webhook events accepted\" AND textPayload:\"DIRECT\"" \
-            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
-          POST_LOG_COUNT="$(gcloud logging read \
-            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/webhooks/meta\"" \
-            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
-
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_COMMENT_ACCEPTED=$COMMENT_LOG_COUNT"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_DIRECT_ACCEPTED=$DIRECT_LOG_COUNT"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_WEBHOOK_POSTS=$POST_LOG_COUNT"
-
-          if [ "$EXECUTE_STATUS" -ne 0 ]; then
-            exit "$EXECUTE_STATUS"
-          fi
-          echo "$MARKERS" | grep -q "SAFE_RUN_${GITHUB_RUN_ID}_PERSISTED_EXTERNAL_EVENTS_OK"
+          exit "$EXECUTE_STATUS"
