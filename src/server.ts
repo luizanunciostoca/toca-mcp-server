@@ -1,7 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
+import { EnvironmentSecretResolver } from './core/secrets.js';
+import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
+import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
+import { registerInstagramHistoryTools } from './tools/register-instagram-history.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.1.0';
@@ -29,14 +33,15 @@ export interface TocaServerOptions {
 }
 
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
-  loadConfig(options.env);
+  const env = options.env ?? process.env;
+  const config = loadConfig(env);
 
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
     description: 'Deterministic execution tools for ChatGPT governed by TOCA_OS.',
   });
-  const registry = createToolRegistry();
+  const registry = createToolRegistry({ instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED });
 
   server.registerTool(
     'system.health',
@@ -114,6 +119,24 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       };
     },
   );
+
+  if (
+    config.INSTAGRAM_READ_ENABLED &&
+    config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
+    config.META_ACCESS_TOKEN_ENV_KEY
+  ) {
+    const secrets = new EnvironmentSecretResolver(env);
+    const client = new MetaApiClient(
+      {
+        graphBaseUrl: config.META_GRAPH_BASE_URL,
+        apiVersion: config.META_GRAPH_API_VERSION,
+      },
+      secrets,
+      { provider: 'env', key: config.META_ACCESS_TOKEN_ENV_KEY },
+    );
+    const provider = new InstagramHistoryProvider(client, config.INSTAGRAM_BUSINESS_ACCOUNT_ID);
+    registerInstagramHistoryTools(server, provider);
+  }
 
   return server;
 }
