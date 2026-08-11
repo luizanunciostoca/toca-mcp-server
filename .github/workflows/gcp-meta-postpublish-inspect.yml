@@ -1,0 +1,56 @@
+name: GCP Meta Post-Publish Inspect
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Inspect sanitized post-publish webhook evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT='toca-mcp-production'
+          SERVICE='toca-meta-oauth-staging'
+          SINCE="$(date -u -d '6 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
+
+          retry_read() {
+            local filter="$1"
+            local format="$2"
+            local attempt
+            for attempt in 1 2 3 4; do
+              if gcloud logging read "$filter" --project "$PROJECT" --limit=1000 --format="$format"; then
+                return 0
+              fi
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
+
+          POST_FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND httpRequest.requestMethod=POST AND httpRequest.requestUrl:\"/webhooks/meta\" AND timestamp>=\"${SINCE}\""
+          ACCEPTED_FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND textPayload:\"Meta webhook events accepted\" AND timestamp>=\"${SINCE}\""
+
+          POST_COUNT="$(retry_read "$POST_FILTER" 'value(timestamp)' | wc -l | tr -d ' ')"
+          ACCEPTED="$(retry_read "$ACCEPTED_FILTER" 'value(textPayload)' || true)"
+
+          COMMENT_COUNT="$(printf '%s\n' "$ACCEPTED" | grep -c 'COMMENT' || true)"
+          DIRECT_COUNT="$(printf '%s\n' "$ACCEPTED" | grep -c 'DIRECT' || true)"
+
+          echo "SAFE_POST_COUNT=$POST_COUNT"
+          echo "SAFE_COMMENT_COUNT=$COMMENT_COUNT"
+          echo "SAFE_DIRECT_COUNT=$DIRECT_COUNT"
