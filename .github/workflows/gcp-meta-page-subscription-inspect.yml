@@ -1,0 +1,64 @@
+name: GCP Meta Page Subscription Inspect
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - .github/workflows/gcp-meta-page-subscription-inspect.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  JOB: toca-meta-page-subscription-inspect
+  PAGE_ID: "306103746115875"
+  APP_ID: "2281930145887404"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy ephemeral read-only inspection job
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT='import json, os, urllib.request\n\ndef get(url, token):\n    req=urllib.request.Request(url, headers={"Authorization":"Bearer "+token})\n    with urllib.request.urlopen(req, timeout=30) as r: return json.load(r)\n\nuser=os.environ["USER_TOKEN"]\npage_id=os.environ["PAGE_ID"]\napp_id=os.environ["APP_ID"]\nbase="https://graph.facebook.com/v26.0/"\npage=get(base+page_id+"?fields=access_token,instagram_business_account", user)\npage_token=page.get("access_token")\nif not page_token: raise SystemExit("PAGE_ACCESS_TOKEN_MISSING")\nsubs=get(base+page_id+"/subscribed_apps", page_token).get("data", [])\nmatch=next((x for x in subs if str(x.get("id"))==app_id), None)\nprint("SAFE_SUBSCRIPTION_APP_COUNT="+str(len(subs)))\nprint("SAFE_TOCA_APP_SUBSCRIBED="+("true" if match else "false"))\nprint("SAFE_TOCA_APP_FIELDS="+",".join(sorted((match or {}).get("subscribed_fields", []))))\n'
+          gcloud run jobs deploy "$JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --image python:3.12-slim \
+            --service-account toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com \
+            --set-env-vars "PAGE_ID=${PAGE_ID},APP_ID=${APP_ID}" \
+            --set-secrets "USER_TOKEN=toca-meta-oauth-token:latest" \
+            --command python \
+            --args=-c,"$SCRIPT" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+      - name: Execute inspection job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+      - name: Read sanitized inspection result
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILTER="resource.type=cloud_run_job AND resource.labels.job_name=${JOB} AND textPayload:\"SAFE_\""
+          gcloud logging read "$FILTER" --project "$PROJECT_ID" --limit 20 --order desc --format='value(textPayload)' | head -20
+      - name: Delete ephemeral inspection job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
