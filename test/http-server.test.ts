@@ -68,6 +68,27 @@ describe('remote MCP HTTP server', () => {
     }
   });
 
+  it('exposes public Meta compliance pages even when MCP is disabled', async () => {
+    const baseUrl = await listen({ mcpEnabled: false });
+    const expected = [
+      ['/privacy', 'Política de Privacidade — TOCA MCP'],
+      ['/terms', 'Termos de Serviço — TOCA MCP'],
+      ['/data-deletion', 'Exclusão de Dados — TOCA MCP'],
+    ] as const;
+
+    for (const [path, title] of expected) {
+      const response = await fetch(`${baseUrl}${path}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      const body = await response.text();
+      expect(body).toContain(title);
+      expect(body).toContain('adm@tocadomorcego.com');
+      expect(body).not.toContain('access_token');
+    }
+  });
+
   it('does not expose arbitrary routes', async () => {
     const baseUrl = await listen();
     const response = await fetch(`${baseUrl}/unknown`);
