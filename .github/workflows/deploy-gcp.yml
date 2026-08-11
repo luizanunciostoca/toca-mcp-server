@@ -68,5 +68,5 @@ jobs:
             --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-            --update-secrets "DATABASE_URL=toca-mcp-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-access-token:latest" \
+            --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-access-token:latest" \
             --no-allow-unauthenticated
