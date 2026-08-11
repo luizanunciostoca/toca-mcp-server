@@ -1,0 +1,35 @@
+name: GCP Meta Page Subscription Result
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - .github/workflows/gcp-meta-page-subscription-result.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  JOB: toca-meta-page-subscription-inspect
+
+jobs:
+  read-result:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read only sanitized SAFE output
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILTER="resource.type=cloud_run_job AND resource.labels.job_name=${JOB} AND timestamp>=\"2026-08-11T01:59:30Z\""
+          gcloud logging read "$FILTER" --project "$PROJECT_ID" --limit 100 --order desc --format=json > /tmp/joblogs.json
+          jq -r '.[] | (.textPayload // .jsonPayload.message // "") | select(startswith("SAFE_"))' /tmp/joblogs.json | sort -u
