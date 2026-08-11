@@ -20,6 +20,8 @@ env:
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   TOKEN_SECRET_ID: toca-meta-oauth-token
   WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+  DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   META_APP_ID: '2281930145887404'
   META_GRAPH_API_VERSION: v24.0
   PAGE_ID: '306103746115875'
@@ -57,8 +59,9 @@ jobs:
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
-            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --min-instances 0 \
             --max-instances 1 \
             --ingress all \
