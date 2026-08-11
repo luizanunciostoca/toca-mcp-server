@@ -66,9 +66,9 @@ export type InstagramInsightsResponse = z.infer<typeof insightsSchema>;
 
 export interface InstagramMediaListInput {
   readonly limit: number;
-  readonly after?: string;
-  readonly since?: string;
-  readonly until?: string;
+  readonly after?: string | undefined;
+  readonly since?: string | undefined;
+  readonly until?: string | undefined;
 }
 
 export interface InstagramMediaInsightInput {
@@ -78,10 +78,10 @@ export interface InstagramMediaInsightInput {
 
 export interface InstagramAccountInsightInput {
   readonly metrics: readonly string[];
-  readonly period?: string;
-  readonly since?: string;
-  readonly until?: string;
-  readonly metricType?: 'time_series' | 'total_value';
+  readonly period?: string | undefined;
+  readonly since?: string | undefined;
+  readonly until?: string | undefined;
+  readonly metricType?: 'time_series' | 'total_value' | undefined;
 }
 
 export class InstagramHistoryProvider {
