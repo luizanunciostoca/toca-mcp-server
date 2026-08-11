@@ -1,5 +1,8 @@
 import * as z from 'zod/v4';
-import type { MetaApiClient } from '../meta/meta-api-client.js';
+
+export interface MetaReadClient {
+  get(path: string, query?: Readonly<Record<string, string>>): Promise<unknown>;
+}
 
 const pagingSchema = z
   .object({
@@ -80,7 +83,7 @@ export interface InstagramAccountInsightInput {
 
 export class InstagramHistoryProvider {
   constructor(
-    private readonly client: MetaApiClient,
+    private readonly client: MetaReadClient,
     private readonly instagramBusinessAccountId: string,
   ) {}
 
