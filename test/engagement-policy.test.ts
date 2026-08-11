@@ -3,12 +3,28 @@ import { evaluateEngagementPolicy } from '../src/policy/engagement-policy.js';
 import { discoverInstagramCapabilities } from '../src/providers/instagram/instagram-capabilities.js';
 
 describe('Instagram engagement policy', () => {
-  it('allows verified low-risk FAQ replies', () => {
+  it('keeps verified low-risk replies suggest-only while the write kill switch is off', () => {
     expect(
       evaluateEngagementPolicy({
         channel: 'DIRECT',
         intent: 'FAQ_OPERATIONAL',
         factsVerified: true,
+      }),
+    ).toMatchObject({
+      risk: 'LOW',
+      autonomy: 'SUGGEST_ONLY',
+      reason: 'engagement_writes_kill_switch',
+      requiresHumanReview: false,
+    });
+  });
+
+  it('allows verified low-risk replies only when writes are explicitly enabled', () => {
+    expect(
+      evaluateEngagementPolicy({
+        channel: 'DIRECT',
+        intent: 'FAQ_OPERATIONAL',
+        factsVerified: true,
+        writesEnabled: true,
       }),
     ).toMatchObject({
       risk: 'LOW',
@@ -42,6 +58,7 @@ describe('Instagram engagement policy', () => {
         channel: 'DIRECT',
         intent: 'EVENT_INFO',
         factsVerified: false,
+        writesEnabled: true,
       }).autonomy,
     ).toBe('SUGGEST_ONLY');
   });
