@@ -23,6 +23,7 @@ env:
   META_GRAPH_API_VERSION: v24.0
   PAGE_ID: '306103746115875'
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  RECONCILE_JOB: toca-meta-subscription-reconcile
 
 jobs:
   webhook-boundary:
@@ -92,59 +93,143 @@ jobs:
           grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
           echo 'Webhook boundary rejects an invalid verify token.'
 
-      - name: Reconcile Meta asset webhook subscriptions
+      - name: Build Meta subscription reconciliation image
         shell: bash
         run: |
           set -euo pipefail
-          GRAPH_BASE="https://graph.facebook.com/$META_GRAPH_API_VERSION"
+          mkdir -p /tmp/meta-subscription-reconcile
+          cat > /tmp/meta-subscription-reconcile/reconcile.mjs <<'NODE'
+          const userToken = process.env.META_ACCESS_TOKEN;
+          const appId = process.env.META_APP_ID;
+          const apiVersion = process.env.META_GRAPH_API_VERSION;
+          const pageId = process.env.PAGE_ID;
+          const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
-          USER_TOKEN="$(gcloud secrets versions access latest \
-            --secret="$TOKEN_SECRET_ID" \
-            --project="$PROJECT_ID")"
-          test -n "$USER_TOKEN"
-          echo "::add-mask::$USER_TOKEN"
+          if (!userToken || !appId || !apiVersion || !pageId || !instagramAccountId) {
+            throw new Error('META_SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
+          }
 
-          PAGE_TOKEN_RESPONSE="$(curl --fail-with-body --silent --show-error --get \
-            --header "Authorization: Bearer $USER_TOKEN" \
-            --data-urlencode 'fields=access_token' \
-            "$GRAPH_BASE/$PAGE_ID")"
-          PAGE_TOKEN="$(jq -er '.access_token' <<<"$PAGE_TOKEN_RESPONSE")"
-          test -n "$PAGE_TOKEN"
-          echo "::add-mask::$PAGE_TOKEN"
-          unset USER_TOKEN PAGE_TOKEN_RESPONSE
+          const graphBase = `https://graph.facebook.com/${apiVersion}`;
 
-          curl --fail-with-body --silent --show-error -X POST \
-            --header "Authorization: Bearer $PAGE_TOKEN" \
-            --data-urlencode 'subscribed_fields=messages' \
-            "$GRAPH_BASE/$PAGE_ID/subscribed_apps" \
-            | jq -e '.success == true' >/dev/null
+          async function graph(path, token, method = 'GET', values = {}) {
+            const url = new URL(`${graphBase}/${path}`);
+            const init = {
+              method,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+              },
+            };
 
-          curl --fail-with-body --silent --show-error -X POST \
-            --header "Authorization: Bearer $PAGE_TOKEN" \
-            --data-urlencode 'subscribed_fields=comments,messages' \
-            "$GRAPH_BASE/$INSTAGRAM_ACCOUNT_ID/subscribed_apps" \
-            | jq -e '.success == true' >/dev/null
+            if (method === 'POST') {
+              init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+              init.body = new URLSearchParams(values).toString();
+            }
 
-          PAGE_SUBSCRIPTIONS="$(curl --fail-with-body --silent --show-error --get \
-            --header "Authorization: Bearer $PAGE_TOKEN" \
-            "$GRAPH_BASE/$PAGE_ID/subscribed_apps")"
-          jq -e --arg app "$META_APP_ID" '
-            any(.data[]?; .id == $app and (.subscribed_fields // [] | index("messages") != null))
-          ' <<<"$PAGE_SUBSCRIPTIONS" >/dev/null
+            const response = await fetch(url, init);
+            if (!response.ok) {
+              throw new Error(`META_SUBSCRIPTION_HTTP_${response.status}`);
+            }
+            return response.json();
+          }
 
-          INSTAGRAM_SUBSCRIPTIONS="$(curl --fail-with-body --silent --show-error --get \
-            --header "Authorization: Bearer $PAGE_TOKEN" \
-            "$GRAPH_BASE/$INSTAGRAM_ACCOUNT_ID/subscribed_apps")"
-          jq -e --arg app "$META_APP_ID" '
-            any(.data[]?;
-              .id == $app and
-              (.subscribed_fields // [] | index("comments") != null) and
-              (.subscribed_fields // [] | index("messages") != null)
-            )
-          ' <<<"$INSTAGRAM_SUBSCRIPTIONS" >/dev/null
+          const page = await graph(`${pageId}?fields=access_token`, userToken);
+          const pageToken = page?.access_token;
+          if (typeof pageToken !== 'string' || pageToken.length === 0) {
+            throw new Error('META_PAGE_ACCESS_TOKEN_MISSING');
+          }
 
-          unset PAGE_TOKEN PAGE_SUBSCRIPTIONS INSTAGRAM_SUBSCRIPTIONS
-          echo 'Meta Page and Instagram professional-account webhook subscriptions are reconciled.'
+          const pageWrite = await graph(`${pageId}/subscribed_apps`, pageToken, 'POST', {
+            subscribed_fields: 'messages',
+          });
+          if (pageWrite?.success !== true) throw new Error('META_PAGE_SUBSCRIPTION_WRITE_FAILED');
+
+          const instagramWrite = await graph(
+            `${instagramAccountId}/subscribed_apps`,
+            pageToken,
+            'POST',
+            { subscribed_fields: 'comments,messages' },
+          );
+          if (instagramWrite?.success !== true) {
+            throw new Error('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
+          }
+
+          const pageSubscriptions = await graph(`${pageId}/subscribed_apps`, pageToken);
+          const pageApp = Array.isArray(pageSubscriptions?.data)
+            ? pageSubscriptions.data.find((entry) => entry?.id === appId)
+            : undefined;
+          const pageFields = Array.isArray(pageApp?.subscribed_fields) ? pageApp.subscribed_fields : [];
+          if (!pageFields.includes('messages')) {
+            throw new Error('META_PAGE_MESSAGES_SUBSCRIPTION_MISSING');
+          }
+
+          const instagramSubscriptions = await graph(
+            `${instagramAccountId}/subscribed_apps`,
+            pageToken,
+          );
+          const instagramApp = Array.isArray(instagramSubscriptions?.data)
+            ? instagramSubscriptions.data.find((entry) => entry?.id === appId)
+            : undefined;
+          const instagramFields = Array.isArray(instagramApp?.subscribed_fields)
+            ? instagramApp.subscribed_fields
+            : [];
+          if (!instagramFields.includes('comments')) {
+            throw new Error('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
+          }
+          if (!instagramFields.includes('messages')) {
+            throw new Error('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
+          }
+
+          console.log(JSON.stringify({
+            pageMessages: true,
+            instagramComments: true,
+            instagramMessages: true,
+          }));
+          NODE
+
+          cat > /tmp/meta-subscription-reconcile/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY reconcile.mjs ./reconcile.mjs
+          USER node
+          CMD ["node", "reconcile.mjs"]
+          DOCKER
+
+          RECONCILE_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-subscription-reconcile:${GITHUB_SHA}"
+          docker build -t "$RECONCILE_IMAGE" /tmp/meta-subscription-reconcile
+          docker push "$RECONCILE_IMAGE"
+          echo "RECONCILE_IMAGE=$RECONCILE_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Reconcile Meta asset subscriptions under runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$RECONCILE_JOB" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$RECONCILE_JOB" \
+            --image "$RECONCILE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_APP_ID=$META_APP_ID,META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$RECONCILE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+          echo 'Meta Page and Instagram professional-account subscriptions reconciled under runtime identity.'
 
       - name: Verify MCP remains isolated
         run: |
