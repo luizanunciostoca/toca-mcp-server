@@ -46,6 +46,10 @@ function metricValue(insights, metricName) {
   return null;
 }
 
+function safeString(value) {
+  return typeof value === 'string' ? value : null;
+}
+
 const historySample = [];
 for (const item of media.data) {
   let reach = null;
@@ -59,12 +63,33 @@ for (const item of media.data) {
       reachStatus = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
     }
   }
+
+  let detail = {};
+  try {
+    const rawDetail = await client.get(item.id, {
+      fields: 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,children{media_type,media_url,thumbnail_url}',
+    });
+    if (rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)) detail = rawDetail;
+  } catch {
+    detail = {};
+  }
+
+  const children = Array.isArray(detail?.children?.data)
+    ? detail.children.data.map((child) => ({
+        mediaType: safeString(child?.media_type),
+        sourceUrl: safeString(child?.thumbnail_url) ?? safeString(child?.media_url),
+      }))
+    : [];
+
   historySample.push({
     id: item.id,
     timestamp: item.timestamp ?? null,
     mediaType: item.media_type ?? null,
     mediaProductType: item.media_product_type ?? null,
     permalink: item.permalink ?? null,
+    caption: safeString(detail?.caption) ?? item.caption ?? null,
+    sourceUrl: safeString(detail?.thumbnail_url) ?? safeString(detail?.media_url),
+    children,
     likeCount: item.like_count ?? null,
     commentsCount: item.comments_count ?? null,
     reach,
@@ -96,7 +121,7 @@ if (insightsScopeGranted) {
 
 console.log(
   JSON.stringify({
-    validation: 'ninety-day-history-sample-page-1',
+    validation: 'history-reconciliation-sample',
     mediaListOk: true,
     returnedMedia: media.data.length,
     firstMediaId: firstMediaId ?? null,
