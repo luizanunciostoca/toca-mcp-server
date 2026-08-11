@@ -26,6 +26,7 @@ export interface EngagementPolicyInput {
   readonly intent: EngagementIntent;
   readonly factsVerified: boolean;
   readonly containsSensitivePersonalData?: boolean;
+  readonly writesEnabled?: boolean;
 }
 
 const HUMAN_REQUIRED = new Set<EngagementIntent>([
@@ -79,6 +80,9 @@ export function evaluateEngagementPolicy(input: EngagementPolicyInput): Engageme
   }
 
   if (AUTO_ELIGIBLE.has(input.intent)) {
+    if (input.writesEnabled !== true) {
+      return decision(input.channel, 'LOW', 'SUGGEST_ONLY', 'engagement_writes_kill_switch');
+    }
     return decision(
       input.channel,
       'LOW',
