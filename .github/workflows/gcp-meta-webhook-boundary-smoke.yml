@@ -109,8 +109,10 @@ jobs:
             fail('META_SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
           }
 
-          async function request(base, path, token, stage, method = 'GET', values = {}) {
-            const response = await fetch(new URL(`${base}/${apiVersion}/${path}`), {
+          const graphBase = 'https://graph.facebook.com';
+
+          async function request(path, token, stage, method = 'GET', values = {}) {
+            const response = await fetch(new URL(`${graphBase}/${apiVersion}/${path}`), {
               method,
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -149,12 +151,8 @@ jobs:
             return granted;
           }
 
-          const facebookBase = 'https://graph.facebook.com';
-          const instagramBase = 'https://graph.instagram.com';
-
           try {
             const permissionsPayload = await request(
-              facebookBase,
               'me/permissions',
               userToken,
               'META_USER_PERMISSIONS',
@@ -174,29 +172,30 @@ jobs:
               }
             }
 
-            const page = await request(
-              facebookBase,
-              `${pageId}?fields=access_token`,
+            const pages = await request(
+              'me/accounts?fields=id,access_token,tasks,instagram_business_account',
               userToken,
-              'META_PAGE_TOKEN',
+              'META_MANAGED_PAGES',
             );
-            const pageToken = page?.access_token;
-            if (typeof pageToken !== 'string' || pageToken.length === 0) {
-              throw new Error('META_PAGE_ACCESS_TOKEN_MISSING');
+            const page = Array.isArray(pages?.data)
+              ? pages.data.find((entry) => entry?.id === pageId)
+              : undefined;
+            if (!page) fail('META_TARGET_PAGE_NOT_MANAGED');
+
+            const pageTasks = Array.isArray(page?.tasks) ? page.tasks : [];
+            if (!pageTasks.includes('MESSAGING')) fail('META_PAGE_MESSAGING_TASK_MISSING');
+
+            const linkedInstagramId = page?.instagram_business_account?.id;
+            if (linkedInstagramId !== instagramAccountId) {
+              fail('META_LINKED_INSTAGRAM_ACCOUNT_MISMATCH');
             }
 
-            const pageWrite = await request(
-              facebookBase,
-              `${pageId}/subscribed_apps`,
-              pageToken,
-              'META_PAGE_SUBSCRIBE',
-              'POST',
-              { subscribed_fields: 'messages' },
-            );
-            if (pageWrite?.success !== true) throw new Error('META_PAGE_SUBSCRIPTION_WRITE_FAILED');
+            const pageToken = page?.access_token;
+            if (typeof pageToken !== 'string' || pageToken.length === 0) {
+              fail('META_PAGE_ACCESS_TOKEN_MISSING');
+            }
 
             const instagramWrite = await request(
-              instagramBase,
               `${instagramAccountId}/subscribed_apps`,
               pageToken,
               'META_INSTAGRAM_SUBSCRIBE',
@@ -204,25 +203,10 @@ jobs:
               { subscribed_fields: 'comments,messages' },
             );
             if (instagramWrite?.success !== true) {
-              throw new Error('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
-            }
-
-            const pageSubscriptions = await request(
-              facebookBase,
-              `${pageId}/subscribed_apps`,
-              pageToken,
-              'META_PAGE_VERIFY',
-            );
-            const pageApp = Array.isArray(pageSubscriptions?.data)
-              ? pageSubscriptions.data.find((entry) => entry?.id === appId)
-              : undefined;
-            const pageFields = Array.isArray(pageApp?.subscribed_fields) ? pageApp.subscribed_fields : [];
-            if (!pageFields.includes('messages')) {
-              throw new Error('META_PAGE_MESSAGES_SUBSCRIPTION_MISSING');
+              fail('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
             }
 
             const instagramSubscriptions = await request(
-              instagramBase,
               `${instagramAccountId}/subscribed_apps`,
               pageToken,
               'META_INSTAGRAM_VERIFY',
@@ -234,10 +218,10 @@ jobs:
               ? instagramApp.subscribed_fields
               : [];
             if (!instagramFields.includes('comments')) {
-              throw new Error('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
+              fail('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
             }
             if (!instagramFields.includes('messages')) {
-              throw new Error('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
+              fail('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
             }
 
             console.log('META_SUBSCRIPTION_RECONCILE_OK');
@@ -296,7 +280,7 @@ jobs:
             exit "$EXECUTE_STATUS"
           fi
 
-          echo 'Meta Page and Instagram professional-account subscriptions reconciled under runtime identity.'
+          echo 'Instagram professional-account webhook subscriptions reconciled under runtime identity.'
 
       - name: Verify MCP remains isolated
         run: |
