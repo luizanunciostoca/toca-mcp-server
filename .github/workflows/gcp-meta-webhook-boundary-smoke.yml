@@ -39,18 +39,6 @@ jobs:
       - name: Configure Docker authentication
         run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
-      - name: Require pre-provisioned webhook verify token secret
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! gcloud secrets describe "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
-            --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "Required Secret Manager secret '$WEBHOOK_VERIFY_TOKEN_SECRET_ID' is missing." >&2
-            echo 'Provision it manually and grant the runtime service account Secret Accessor before rerunning this workflow.' >&2
-            exit 1
-          fi
-          echo 'Pre-provisioned webhook verify token secret is present.'
-
       - name: Build and push webhook boundary image
         run: |
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:webhook-${GITHUB_SHA}"
