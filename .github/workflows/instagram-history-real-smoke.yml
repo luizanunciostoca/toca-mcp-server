@@ -65,15 +65,10 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Execute real read smoke under runtime identity
+      - name: Deploy real read smoke job
         shell: bash
         run: |
           set -euo pipefail
-          cleanup() {
-            gcloud run jobs delete "$READ_SMOKE_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
           gcloud run jobs deploy "$READ_SMOKE_JOB" \
             --image "$IMAGE" \
             --project "$PROJECT_ID" \
@@ -85,23 +80,76 @@ jobs:
             --task-timeout 120s \
             --quiet
 
-          EXECUTION="$(gcloud run jobs execute "$READ_SMOKE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)' --quiet)"
+      - name: Execute real read smoke under runtime identity
+        id: execute
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          gcloud run jobs execute "$READ_SMOKE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+          RC=$?
+          set -e
+
+          EXECUTION="$(gcloud run jobs executions list \
+            --job "$READ_SMOKE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --limit 1 \
+            --sort-by='~metadata.creationTimestamp' \
+            --format='value(metadata.name)')"
           test -n "$EXECUTION"
           echo "EXECUTION=$EXECUTION" >> "$GITHUB_ENV"
+          echo "EXECUTION_RC=$RC" >> "$GITHUB_ENV"
+          echo "Cloud Run execution: $EXECUTION (gcloud rc=$RC)"
+
+      - name: Collect Cloud Run execution diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -n "${EXECUTION:-}" ]; then
+            echo '--- execution describe ---'
+            gcloud run jobs executions describe "$EXECUTION" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" || true
+          fi
+
+          echo '--- recent job logs ---'
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB" \
+            --project "$PROJECT_ID" \
+            --limit 100 \
+            --freshness 20m \
+            --order=asc \
+            --format='value(timestamp,severity,textPayload,jsonPayload.message)' || true
 
       - name: Read and validate smoke result
         shell: bash
         run: |
           set -euo pipefail
-          sleep 3
+          test "${EXECUTION_RC:-1}" = "0"
+          sleep 2
           gcloud logging read \
             "resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB AND textPayload:mediaListOk" \
             --project "$PROJECT_ID" \
             --limit 5 \
-            --freshness 15m \
+            --freshness 20m \
             --format='value(textPayload)' > /tmp/smoke.log
 
           cat /tmp/smoke.log
           grep -q '"mediaListOk":true' /tmp/smoke.log
           grep -q '"instagramBasicGranted":true' /tmp/smoke.log
           echo 'Real Instagram history media.list passed. Insights scope/result is reported above without exposing the token.'
+
+      - name: Cleanup isolated smoke job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$READ_SMOKE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --quiet >/dev/null 2>&1 || true
