@@ -35,8 +35,7 @@ export function registerInstagramHistoryTools(
     'instagram.media.list',
     {
       title: 'List Instagram Media',
-      description:
-        'Read Instagram Business media metadata for TOCA_OS analysis. No side effects.',
+      description: 'Read Instagram Business media metadata for TOCA_OS analysis. No side effects.',
       inputSchema: mediaListInputSchema,
       outputSchema: passthroughOutputSchema,
       annotations: {
