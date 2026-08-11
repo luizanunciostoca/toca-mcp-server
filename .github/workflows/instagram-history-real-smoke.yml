@@ -106,36 +106,6 @@ jobs:
           echo "EXECUTION_RC=$RC" >> "$GITHUB_ENV"
           echo "Cloud Run execution: $EXECUTION (gcloud rc=$RC)"
 
-      - name: Collect Cloud Run execution diagnostics
-        if: always()
-        shell: bash
-        run: |
-          set -uo pipefail
-          if [ -n "${EXECUTION:-}" ]; then
-            echo '--- execution describe ---'
-            gcloud run jobs executions describe "$EXECUTION" \
-              --project "$PROJECT_ID" \
-              --region "$REGION" || true
-          fi
-
-          echo '--- structured smoke payloads ---'
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB AND jsonPayload.mediaListOk=true" \
-            --project "$PROJECT_ID" \
-            --limit 5 \
-            --freshness 20m \
-            --order=asc \
-            --format='json(jsonPayload)' || true
-
-          echo '--- recent errors/text logs ---'
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB" \
-            --project "$PROJECT_ID" \
-            --limit 100 \
-            --freshness 20m \
-            --order=asc \
-            --format='value(timestamp,severity,textPayload)' || true
-
       - name: Read and validate smoke result
         shell: bash
         run: |
@@ -143,25 +113,46 @@ jobs:
           test "${EXECUTION_RC:-1}" = "0"
           sleep 2
 
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB AND jsonPayload.mediaListOk=true" \
+          FILTER="resource.type=cloud_run_job AND resource.labels.job_name=$READ_SMOKE_JOB AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION AND jsonPayload.validation=\"history-reconciliation-sample\""
+          gcloud logging read "$FILTER" \
             --project "$PROJECT_ID" \
             --limit 1 \
             --freshness 20m \
             --order=desc \
-            --format='value(jsonPayload.mediaListOk,jsonPayload.returnedMedia,jsonPayload.instagramBasicGranted,jsonPayload.instagramManageInsightsGranted,jsonPayload.mediaInsightsOk,jsonPayload.mediaInsightsStatus,jsonPayload.accountInsightsOk,jsonPayload.accountInsightsStatus)' > /tmp/smoke-values.txt
+            --format='json(jsonPayload)' > /tmp/reconciliation-raw.json
 
-          cat /tmp/smoke-values.txt
-          read -r MEDIA_LIST_OK RETURNED_MEDIA INSTAGRAM_BASIC INSIGHTS_SCOPE MEDIA_INSIGHTS_OK MEDIA_INSIGHTS_STATUS ACCOUNT_INSIGHTS_OK ACCOUNT_INSIGHTS_STATUS < /tmp/smoke-values.txt
+          test "$(jq 'length' /tmp/reconciliation-raw.json)" -eq 1
+          jq -e '.[0].jsonPayload.mediaListOk == true and .[0].jsonPayload.instagramManageInsightsGranted == true' /tmp/reconciliation-raw.json >/dev/null
+          jq -r '.[0].jsonPayload | [.returnedMedia,.mediaInsightsOk,.mediaInsightsStatus,.accountInsightsOk,.accountInsightsStatus] | @tsv' /tmp/reconciliation-raw.json
 
-          test "$MEDIA_LIST_OK" = "True" -o "$MEDIA_LIST_OK" = "true"
-          test "$INSTAGRAM_BASIC" = "True" -o "$INSTAGRAM_BASIC" = "true"
-          test -n "$RETURNED_MEDIA"
+      - name: Build sanitized visual reconciliation package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/reconciliation/previews
+          jq '.[0].jsonPayload' /tmp/reconciliation-raw.json > /tmp/payload.json
 
-          echo "media.list real-provider validation passed with returnedMedia=$RETURNED_MEDIA"
-          echo "instagram_manage_insights granted=$INSIGHTS_SCOPE"
-          echo "media insights: ok=$MEDIA_INSIGHTS_OK status=$MEDIA_INSIGHTS_STATUS"
-          echo "account insights: ok=$ACCOUNT_INSIGHTS_OK status=$ACCOUNT_INSIGHTS_STATUS"
+          jq -r '.historySample[] | select(.sourceUrl != null) | [.id,.sourceUrl] | @tsv' /tmp/payload.json | \
+          while IFS=$'\t' read -r id url; do
+            curl --fail --location --silent --show-error --retry 2 "$url" -o "/tmp/reconciliation/previews/${id}.jpg" || true
+          done
+
+          jq '.historySample[] | select(.children != null) | .id as $parent | .children | to_entries[] | select(.value.sourceUrl != null) | [$parent, (.key|tostring), .value.sourceUrl] | @tsv' -r /tmp/payload.json | \
+          while IFS=$'\t' read -r parent idx url; do
+            curl --fail --location --silent --show-error --retry 2 "$url" -o "/tmp/reconciliation/previews/${parent}_child_${idx}.jpg" || true
+          done
+
+          jq 'del(.historySample[].sourceUrl) | .historySample[].children |= map(del(.sourceUrl))' /tmp/payload.json > /tmp/reconciliation/metadata.json
+          find /tmp/reconciliation/previews -type f -maxdepth 1 -print | sort
+          test "$(find /tmp/reconciliation/previews -type f | wc -l)" -gt 0
+
+      - name: Upload private reconciliation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-history-reconciliation-${{ github.run_id }}
+          path: /tmp/reconciliation
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Cleanup isolated smoke job
         if: always()
