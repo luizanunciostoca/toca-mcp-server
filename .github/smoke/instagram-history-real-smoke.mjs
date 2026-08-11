@@ -15,7 +15,7 @@ const client = new MetaApiClient(
 );
 const provider = new InstagramHistoryProvider(client, accountId);
 
-const media = await provider.listMedia({ limit: 3 });
+const media = await provider.listMedia({ limit: 10 });
 if (!Array.isArray(media.data)) throw new Error('media.list did not return a data array');
 
 const permissionsResponse = await fetch('https://graph.facebook.com/v24.0/me/permissions', {
@@ -32,18 +32,49 @@ const granted = new Set(
 );
 const insightsScopeGranted = granted.has('instagram_manage_insights');
 
-let mediaInsightsOk = false;
-let mediaInsightsStatus = insightsScopeGranted ? 'NOT_TESTED_NO_MEDIA' : 'SCOPE_NOT_GRANTED';
-const firstMediaId = media.data[0]?.id;
-if (insightsScopeGranted && firstMediaId) {
-  try {
-    const insights = await provider.getMediaInsights({ mediaId: firstMediaId, metrics: ['reach'] });
-    mediaInsightsOk = Array.isArray(insights.data);
-    mediaInsightsStatus = mediaInsightsOk ? 'OK' : 'INVALID_RESPONSE';
-  } catch (error) {
-    mediaInsightsStatus = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
+function metricValue(insights, metricName) {
+  const metric = insights?.data?.find((item) => item?.name === metricName) ?? insights?.data?.[0];
+  if (!metric) return null;
+  if (typeof metric.value === 'number' || typeof metric.value === 'string') return metric.value;
+  if (metric.total_value && (typeof metric.total_value.value === 'number' || typeof metric.total_value.value === 'string')) {
+    return metric.total_value.value;
   }
+  if (Array.isArray(metric.values) && metric.values.length > 0) {
+    const value = metric.values.at(-1)?.value;
+    if (typeof value === 'number' || typeof value === 'string') return value;
+  }
+  return null;
 }
+
+const historySample = [];
+for (const item of media.data) {
+  let reach = null;
+  let reachStatus = insightsScopeGranted ? 'NOT_TESTED' : 'SCOPE_NOT_GRANTED';
+  if (insightsScopeGranted) {
+    try {
+      const insights = await provider.getMediaInsights({ mediaId: item.id, metrics: ['reach'] });
+      reach = metricValue(insights, 'reach');
+      reachStatus = 'OK';
+    } catch (error) {
+      reachStatus = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
+    }
+  }
+  historySample.push({
+    id: item.id,
+    timestamp: item.timestamp ?? null,
+    mediaType: item.media_type ?? null,
+    mediaProductType: item.media_product_type ?? null,
+    permalink: item.permalink ?? null,
+    likeCount: item.like_count ?? null,
+    commentsCount: item.comments_count ?? null,
+    reach,
+    reachStatus,
+  });
+}
+
+const firstMediaId = media.data[0]?.id;
+const mediaInsightsOk = historySample.some((item) => item.reachStatus === 'OK');
+const mediaInsightsStatus = mediaInsightsOk ? 'OK' : historySample[0]?.reachStatus ?? 'NOT_TESTED_NO_MEDIA';
 
 let accountInsightsOk = false;
 let accountInsightsStatus = insightsScopeGranted ? 'NOT_TESTED' : 'SCOPE_NOT_GRANTED';
@@ -65,7 +96,7 @@ if (insightsScopeGranted) {
 
 console.log(
   JSON.stringify({
-    validation: 'post-oauth-insights-grant',
+    validation: 'ten-media-history-sample',
     mediaListOk: true,
     returnedMedia: media.data.length,
     firstMediaId: firstMediaId ?? null,
@@ -75,5 +106,6 @@ console.log(
     mediaInsightsStatus,
     accountInsightsOk,
     accountInsightsStatus,
+    historySample,
   }),
 );
