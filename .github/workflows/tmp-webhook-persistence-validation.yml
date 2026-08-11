@@ -45,6 +45,8 @@ jobs:
           set -euo pipefail
 
           cat > validate-webhook-persistence.ts <<'NODE'
+          import { readdir, readFile } from 'node:fs/promises';
+          import { join } from 'node:path';
           import { createPostgresPool } from './src/persistence/postgres.js';
           import { PostgresMetaWebhookEventStore } from './src/persistence/meta-webhook-event-store.js';
 
@@ -56,47 +58,92 @@ jobs:
             process.exit(1);
           }
 
+          function classify(error: unknown, prefix = 'DATABASE'): never {
+            const value = error as { code?: string; message?: string };
+            const code = value?.code ?? '';
+            const message = (value?.message ?? '').toLowerCase();
+            if (code === '28P01' || message.includes('authentication failed')) fail(`${prefix}_AUTH_FAILED`);
+            if (code === '42501' || message.includes('permission denied')) fail(`${prefix}_PERMISSION_DENIED`);
+            if (code === '3D000') fail(`${prefix}_DATABASE_NOT_FOUND`);
+            if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ENOENT' || message.includes('connect')) fail(`${prefix}_CONNECT_FAILED`);
+            if (message.includes('invalid url') || message.includes('connection string') || message.includes('sasl')) fail(`${prefix}_URL_OR_CREDENTIAL_FORMAT_INVALID`);
+            fail(`${prefix}_UNKNOWN_FAILURE`);
+          }
+
           if (!runId) fail('RUN_ID_MISSING');
           if (!connectionString) fail('DATABASE_URL_MISSING');
 
           const pool = createPostgresPool({ connectionString, ssl: false });
-          const store = new PostgresMetaWebhookEventStore(pool);
-          const eventId = `validation:${runId}:fixed-event`;
-          const occurredAt = new Date().toISOString();
-          const event = {
-            eventId,
-            channel: 'DIRECT' as const,
-            senderId: 'redacted',
-            text: 'redacted',
-            occurredAt,
-          };
 
           try {
-            const first = await store.persist([event]);
-            const second = await store.persist([event]);
-            if (first.accepted.length !== 1 || first.duplicates.length !== 0) fail('FIRST_INSERT_NOT_ACCEPTED_ONCE');
-            if (second.accepted.length !== 0 || second.duplicates.length !== 1) fail('SECOND_INSERT_NOT_DEDUPLICATED');
+            try {
+              await pool.query('select 1');
+            } catch (error) {
+              classify(error, 'DATABASE');
+            }
 
-            const eventCount = await pool.query('select count(*)::int as count from meta_webhook_events where event_id = $1', [eventId]);
-            if (eventCount.rows[0]?.count !== 1) fail('EVENT_ROW_COUNT_NOT_ONE');
+            try {
+              await pool.query('create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now())');
+              const files = (await readdir('migrations')).filter((file) => file.endsWith('.sql')).sort();
+              for (const file of files) {
+                const exists = await pool.query('select 1 from schema_migrations where version = $1', [file]);
+                if (exists.rowCount) continue;
+                const client = await pool.connect();
+                try {
+                  await client.query('begin');
+                  await client.query(await readFile(join('migrations', file), 'utf8'));
+                  await client.query('insert into schema_migrations(version) values ($1)', [file]);
+                  await client.query('commit');
+                } catch (error) {
+                  await client.query('rollback');
+                  classify(error, 'MIGRATION');
+                } finally {
+                  client.release();
+                }
+              }
+            } catch (error) {
+              classify(error, 'MIGRATION');
+            }
 
-            const auditCount = await pool.query(
-              `select count(*)::int as count from audit_events where correlation_id = $1 and tool_name = 'instagram.engagement.webhook.receive' and decision = 'ACCEPTED'`,
-              [eventId],
-            );
-            if (auditCount.rows[0]?.count !== 1) fail('AUDIT_ROW_COUNT_NOT_ONE');
+            const store = new PostgresMetaWebhookEventStore(pool);
+            const eventId = `validation:${runId}:fixed-event`;
+            const occurredAt = new Date().toISOString();
+            const event = {
+              eventId,
+              channel: 'DIRECT' as const,
+              senderId: 'redacted',
+              text: 'redacted',
+              occurredAt,
+            };
 
-            const auditPayload = await pool.query(
-              'select normalized_payload, provider_result from audit_events where correlation_id = $1 limit 1',
-              [eventId],
-            );
-            const serialized = JSON.stringify(auditPayload.rows[0] ?? {});
-            if (serialized.includes('redacted')) fail('SENSITIVE_CONTENT_PERSISTED');
+            try {
+              const first = await store.persist([event]);
+              const second = await store.persist([event]);
+              if (first.accepted.length !== 1 || first.duplicates.length !== 0) fail('FIRST_INSERT_NOT_ACCEPTED_ONCE');
+              if (second.accepted.length !== 0 || second.duplicates.length !== 1) fail('SECOND_INSERT_NOT_DEDUPLICATED');
+
+              const eventCount = await pool.query('select count(*)::int as count from meta_webhook_events where event_id = $1', [eventId]);
+              if (eventCount.rows[0]?.count !== 1) fail('EVENT_ROW_COUNT_NOT_ONE');
+
+              const auditCount = await pool.query(
+                `select count(*)::int as count from audit_events where correlation_id = $1 and tool_name = 'instagram.engagement.webhook.receive' and decision = 'ACCEPTED'`,
+                [eventId],
+              );
+              if (auditCount.rows[0]?.count !== 1) fail('AUDIT_ROW_COUNT_NOT_ONE');
+
+              const auditPayload = await pool.query(
+                'select normalized_payload, provider_result from audit_events where correlation_id = $1 limit 1',
+                [eventId],
+              );
+              if (JSON.stringify(auditPayload.rows[0] ?? {}).includes('redacted')) fail('SENSITIVE_CONTENT_PERSISTED');
+            } catch (error) {
+              const marker = error instanceof Error ? error.message : '';
+              if (marker.startsWith('PERSISTENCE_RUN_')) throw error;
+              classify(error, 'IDEMPOTENCY');
+            }
 
             console.log(`PERSISTENCE_RUN_${runId}_IDEMPOTENCY_OK`);
             console.log(`PERSISTENCE_RUN_${runId}_AUDIT_OK`);
-          } catch {
-            fail('VALIDATION_FAILED');
           } finally {
             await pool.end().catch(() => undefined);
           }
@@ -110,11 +157,10 @@ jobs:
           RUN pnpm install --frozen-lockfile
           COPY tsconfig.json ./
           COPY src ./src
-          COPY scripts ./scripts
           COPY migrations ./migrations
           COPY validate-webhook-persistence.ts ./validate-webhook-persistence.ts
           USER node
-          CMD ["sh", "-c", "pnpm migrate && pnpm exec tsx validate-webhook-persistence.ts"]
+          CMD ["pnpm", "exec", "tsx", "validate-webhook-persistence.ts"]
           DOCKER
 
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/webhook-persistence-validate:${GITHUB_SHA}"
@@ -148,20 +194,24 @@ jobs:
           STATUS=$?
           set -e
 
+          MARKERS=''
+          for ATTEMPT in 1 2 3 4 5; do
+            MARKERS="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"PERSISTENCE_RUN_${GITHUB_RUN_ID}_\"" \
+              --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null \
+              | grep -E "^PERSISTENCE_RUN_${GITHUB_RUN_ID}_[A-Z0-9_]+$" | sort -u || true)"
+            [ -n "$MARKERS" ] && break
+            sleep 2
+          done
+
+          if [ -n "$MARKERS" ]; then
+            echo "$MARKERS"
+          fi
+
           if [ "$STATUS" -ne 0 ]; then
-            echo 'Persistence validation failed. Sanitized marker follows:' >&2
-            for ATTEMPT in 1 2 3 4 5; do
-              MARKER="$(gcloud logging read \
-                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"PERSISTENCE_RUN_${GITHUB_RUN_ID}_\"" \
-                --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null \
-                | grep -E "^PERSISTENCE_RUN_${GITHUB_RUN_ID}_[A-Z0-9_]+$" | head -n 1 || true)"
-              if [ -n "$MARKER" ]; then
-                echo "$MARKER"
-                break
-              fi
-              sleep 2
-            done
             exit "$STATUS"
           fi
 
+          echo "$MARKERS" | grep -q "PERSISTENCE_RUN_${GITHUB_RUN_ID}_IDEMPOTENCY_OK"
+          echo "$MARKERS" | grep -q "PERSISTENCE_RUN_${GITHUB_RUN_ID}_AUDIT_OK"
           echo 'Persistent webhook idempotency and audit validation completed successfully.'
