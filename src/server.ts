@@ -1,5 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
+import { loadConfig } from './config.js';
+import {
+  mediaAssetSelectionRequestSchema,
+  mediaAssetSelectionResultSchema,
+} from './contracts/media-assets.js';
+import { EnvironmentSecretResolver, type SecretResolver } from './core/secrets.js';
+import { GoogleSheetsRestClient, type FetchLike } from './providers/google-sheets/client.js';
+import { GoogleSheetsMediaAssetAdapter } from './providers/google-sheets/media-assets.js';
 import { createToolRegistry } from './registry.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
@@ -23,13 +31,24 @@ const riskClassSchema = z.enum([
   'DESTRUCTIVE',
 ]);
 
-export function createTocaServer(): McpServer {
+export interface TocaServerOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly secretResolver?: SecretResolver;
+  readonly fetcher?: FetchLike;
+}
+
+export function createTocaServer(options: TocaServerOptions = {}): McpServer {
+  const config = loadConfig(options.env);
+  const spreadsheetId = config.TOCA_OS_MEDIA_SPREADSHEET_ID;
+  const tokenEnvKey = config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY;
+  const mediaAssetsRankEnabled = spreadsheetId !== undefined && tokenEnvKey !== undefined;
+
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
     description: 'Execution tools for ChatGPT governed by TOCA_OS.',
   });
-  const registry = createToolRegistry();
+  const registry = createToolRegistry({ mediaAssetsRankEnabled });
 
   server.registerTool(
     'system.health',
@@ -108,5 +127,64 @@ export function createTocaServer(): McpServer {
     },
   );
 
+  if (spreadsheetId !== undefined && tokenEnvKey !== undefined) {
+    const runtimeOptions: MediaAssetsRankRuntimeOptions = {
+      spreadsheetId,
+      tokenEnvKey,
+      ...(options.env !== undefined ? { env: options.env } : {}),
+      ...(options.secretResolver !== undefined ? { secretResolver: options.secretResolver } : {}),
+      ...(options.fetcher !== undefined ? { fetcher: options.fetcher } : {}),
+    };
+    registerMediaAssetsRankTool(server, runtimeOptions);
+  }
+
   return server;
+}
+
+interface MediaAssetsRankRuntimeOptions {
+  readonly spreadsheetId: string;
+  readonly tokenEnvKey: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly secretResolver?: SecretResolver;
+  readonly fetcher?: FetchLike;
+}
+
+function registerMediaAssetsRankTool(
+  server: McpServer,
+  options: MediaAssetsRankRuntimeOptions,
+): void {
+  const secrets = options.secretResolver ?? new EnvironmentSecretResolver(options.env);
+  const clientOptions = {
+    tokenReference: { provider: 'env', key: options.tokenEnvKey },
+  } as const;
+  const client = options.fetcher
+    ? new GoogleSheetsRestClient(secrets, clientOptions, options.fetcher)
+    : new GoogleSheetsRestClient(secrets, clientOptions);
+  const adapter = new GoogleSheetsMediaAssetAdapter(client, {
+    spreadsheetId: options.spreadsheetId,
+  });
+
+  server.registerTool(
+    'media.assets.rank',
+    {
+      title: 'Rank TOCA media assets',
+      description:
+        'Rank selectable SUNSET media assets from TOCA_OS for a content item, format and optional theme.',
+      inputSchema: mediaAssetSelectionRequestSchema,
+      outputSchema: mediaAssetSelectionResultSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input) => {
+      const output = await adapter.rank(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output) }],
+        structuredContent: output,
+      };
+    },
+  );
 }
