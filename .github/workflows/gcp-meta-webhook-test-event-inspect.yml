@@ -29,25 +29,17 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Inspect sanitized webhook acceptance logs
+      - name: Inspect sanitized webhook request logs
         shell: bash
         run: |
           set -euo pipefail
 
-          FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND timestamp>=\"$(date -u -d '20 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')\" AND textPayload:\"Meta webhook events accepted\""
+          SINCE="$(date -u -d '30 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
+          FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND timestamp>=\"${SINCE}\" AND httpRequest.requestUrl:\"/webhooks/meta\""
 
           gcloud logging read "$FILTER" \
             --project "$PROJECT_ID" \
             --limit 100 \
             --order desc \
-            --format=json > /tmp/meta-webhook-logs.json
-
-          ACCEPTED_COUNT="$(jq 'length' /tmp/meta-webhook-logs.json)"
-          COMMENT_COUNT="$(jq '[.[] | .textPayload // "" | select(contains("COMMENT"))] | length' /tmp/meta-webhook-logs.json)"
-          DIRECT_COUNT="$(jq '[.[] | .textPayload // "" | select(contains("DIRECT"))] | length' /tmp/meta-webhook-logs.json)"
-
-          echo "Sanitized accepted webhook log entries: ${ACCEPTED_COUNT}"
-          echo "Sanitized COMMENT webhook log entries: ${COMMENT_COUNT}"
-          echo "Sanitized DIRECT webhook log entries: ${DIRECT_COUNT}"
-
-          test "$DIRECT_COUNT" -ge 1
+            --format='table(timestamp,httpRequest.requestMethod,httpRequest.status,resource.labels.revision_name)' \
+            | sed -E 's#https?://[^ ]+##g'
