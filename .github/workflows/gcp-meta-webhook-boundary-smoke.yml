@@ -119,14 +119,61 @@ jobs:
               },
               ...(method === 'POST' ? { body: new URLSearchParams(values).toString() } : {}),
             });
-            if (!response.ok) throw new Error(`${stage}_HTTP_${response.status}`);
-            return response.json();
+
+            let body;
+            try {
+              body = await response.json();
+            } catch {
+              body = {};
+            }
+
+            if (!response.ok) {
+              const graphCode = Number.isInteger(body?.error?.code) ? body.error.code : 0;
+              const graphSubcode = Number.isInteger(body?.error?.error_subcode)
+                ? body.error.error_subcode
+                : 0;
+              throw new Error(
+                `${stage}_HTTP_${response.status}_CODE_${graphCode}_SUBCODE_${graphSubcode}`,
+              );
+            }
+            return body;
+          }
+
+          function grantedPermissions(payload) {
+            const granted = new Set();
+            for (const entry of Array.isArray(payload?.data) ? payload.data : []) {
+              if (entry?.status === 'granted' && typeof entry?.permission === 'string') {
+                granted.add(entry.permission);
+              }
+            }
+            return granted;
           }
 
           const facebookBase = 'https://graph.facebook.com';
           const instagramBase = 'https://graph.instagram.com';
 
           try {
+            const permissionsPayload = await request(
+              facebookBase,
+              'me/permissions',
+              userToken,
+              'META_USER_PERMISSIONS',
+            );
+            const granted = grantedPermissions(permissionsPayload);
+            const requiredPermissions = [
+              'pages_show_list',
+              'pages_read_engagement',
+              'pages_manage_metadata',
+              'instagram_basic',
+              'instagram_manage_comments',
+              'instagram_manage_messages',
+            ];
+            for (const permission of requiredPermissions) {
+              if (!granted.has(permission)) {
+                fail(`META_PERMISSION_${permission.toUpperCase()}_NOT_GRANTED`);
+              }
+            }
+
             const page = await request(
               facebookBase,
               `${pageId}?fields=access_token`,
