@@ -99,14 +99,15 @@ jobs:
           const apiVersion = process.env.META_GRAPH_API_VERSION;
           const pageId = process.env.PAGE_ID;
           const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const runId = process.env.RECONCILE_RUN_ID;
 
           function fail(code) {
-            console.error(code);
+            console.error(`META_RUN_${runId}_${code}`);
             process.exit(1);
           }
 
-          if (!userToken || !appId || !apiVersion || !pageId || !instagramAccountId) {
-            fail('META_SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
+          if (!userToken || !appId || !apiVersion || !pageId || !instagramAccountId || !runId) {
+            fail('SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
           }
 
           const graphBase = 'https://graph.facebook.com';
@@ -155,7 +156,7 @@ jobs:
             const permissionsPayload = await request(
               'me/permissions',
               userToken,
-              'META_USER_PERMISSIONS',
+              'USER_PERMISSIONS',
             );
             const granted = grantedPermissions(permissionsPayload);
             const requiredPermissions = [
@@ -168,48 +169,48 @@ jobs:
             ];
             for (const permission of requiredPermissions) {
               if (!granted.has(permission)) {
-                fail(`META_PERMISSION_${permission.toUpperCase()}_NOT_GRANTED`);
+                fail(`PERMISSION_${permission.toUpperCase()}_NOT_GRANTED`);
               }
             }
 
             const pages = await request(
               'me/accounts?fields=id,access_token,tasks,instagram_business_account',
               userToken,
-              'META_MANAGED_PAGES',
+              'MANAGED_PAGES',
             );
             const page = Array.isArray(pages?.data)
               ? pages.data.find((entry) => entry?.id === pageId)
               : undefined;
-            if (!page) fail('META_TARGET_PAGE_NOT_MANAGED');
+            if (!page) fail('TARGET_PAGE_NOT_MANAGED');
 
             const pageTasks = Array.isArray(page?.tasks) ? page.tasks : [];
-            if (!pageTasks.includes('MESSAGING')) fail('META_PAGE_MESSAGING_TASK_MISSING');
+            if (!pageTasks.includes('MESSAGING')) fail('PAGE_MESSAGING_TASK_MISSING');
 
             const linkedInstagramId = page?.instagram_business_account?.id;
             if (linkedInstagramId !== instagramAccountId) {
-              fail('META_LINKED_INSTAGRAM_ACCOUNT_MISMATCH');
+              fail('LINKED_INSTAGRAM_ACCOUNT_MISMATCH');
             }
 
             const pageToken = page?.access_token;
             if (typeof pageToken !== 'string' || pageToken.length === 0) {
-              fail('META_PAGE_ACCESS_TOKEN_MISSING');
+              fail('PAGE_ACCESS_TOKEN_MISSING');
             }
 
             const instagramWrite = await request(
               `${instagramAccountId}/subscribed_apps`,
               pageToken,
-              'META_INSTAGRAM_SUBSCRIBE',
+              'INSTAGRAM_SUBSCRIBE',
               'POST',
               { subscribed_fields: 'comments,messages' },
             );
             if (instagramWrite?.success !== true) {
-              fail('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
+              fail('INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
             }
 
             const instagramSubscriptions = await request(
               `${instagramAccountId}/subscribed_apps`,
               pageToken,
-              'META_INSTAGRAM_VERIFY',
+              'INSTAGRAM_VERIFY',
             );
             const instagramApp = Array.isArray(instagramSubscriptions?.data)
               ? instagramSubscriptions.data.find((entry) => entry?.id === appId)
@@ -218,15 +219,15 @@ jobs:
               ? instagramApp.subscribed_fields
               : [];
             if (!instagramFields.includes('comments')) {
-              fail('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
+              fail('INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
             }
             if (!instagramFields.includes('messages')) {
-              fail('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
+              fail('INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
             }
 
-            console.log('META_SUBSCRIPTION_RECONCILE_OK');
+            console.log(`META_RUN_${runId}_SUBSCRIPTION_RECONCILE_OK`);
           } catch (error) {
-            fail(error instanceof Error ? error.message : 'META_SUBSCRIPTION_RECONCILE_UNKNOWN');
+            fail(error instanceof Error ? error.message : 'SUBSCRIPTION_RECONCILE_UNKNOWN');
           }
           NODE
 
@@ -257,7 +258,7 @@ jobs:
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "META_APP_ID=$META_APP_ID,META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --set-env-vars "META_APP_ID=$META_APP_ID,META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,RECONCILE_RUN_ID=$GITHUB_RUN_ID" \
             --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
             --max-retries 0 \
             --task-timeout 120s \
@@ -270,13 +271,20 @@ jobs:
 
           if [ "$EXECUTE_STATUS" -ne 0 ]; then
             echo 'Meta reconciliation failed; sanitized application marker follows:' >&2
-            gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$RECONCILE_JOB\" AND textPayload:\"META_\"" \
-              --project "$PROJECT_ID" \
-              --freshness=10m \
-              --limit=10 \
-              --format='value(textPayload)' \
-              2>/dev/null | grep -E '^META_[A-Z0-9_]+$' | head -n 1 || true
+            for ATTEMPT in 1 2 3 4 5; do
+              MARKER="$(gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$RECONCILE_JOB\" AND textPayload:\"META_RUN_${GITHUB_RUN_ID}_\"" \
+                --project "$PROJECT_ID" \
+                --freshness=10m \
+                --limit=10 \
+                --format='value(textPayload)' \
+                2>/dev/null | grep -E "^META_RUN_${GITHUB_RUN_ID}_[A-Z0-9_]+$" | head -n 1 || true)"
+              if [ -n "$MARKER" ]; then
+                echo "$MARKER"
+                break
+              fi
+              sleep 2
+            done
             exit "$EXECUTE_STATUS"
           fi
 
