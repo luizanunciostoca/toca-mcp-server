@@ -43,6 +43,65 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          cat > validate-webhook-persistence.ts <<'NODE'
+          import { createPostgresPool } from './src/persistence/postgres.js';
+          import { PostgresMetaWebhookEventStore } from './src/persistence/meta-webhook-event-store.js';
+
+          const runId = process.env.VALIDATION_RUN_ID;
+          const connectionString = process.env.DATABASE_URL;
+
+          function fail(code: string): never {
+            console.error(`PERSISTENCE_RUN_${runId ?? 'UNKNOWN'}_${code}`);
+            process.exit(1);
+          }
+
+          if (!runId) fail('RUN_ID_MISSING');
+          if (!connectionString) fail('DATABASE_URL_MISSING');
+
+          const pool = createPostgresPool({ connectionString, ssl: false });
+          const store = new PostgresMetaWebhookEventStore(pool);
+          const eventId = `validation:${runId}:fixed-event`;
+          const occurredAt = new Date().toISOString();
+          const event = {
+            eventId,
+            channel: 'DIRECT' as const,
+            senderId: 'redacted',
+            text: 'redacted',
+            occurredAt,
+          };
+
+          try {
+            const first = await store.persist([event]);
+            const second = await store.persist([event]);
+            if (first.accepted.length !== 1 || first.duplicates.length !== 0) fail('FIRST_INSERT_NOT_ACCEPTED_ONCE');
+            if (second.accepted.length !== 0 || second.duplicates.length !== 1) fail('SECOND_INSERT_NOT_DEDUPLICATED');
+
+            const eventCount = await pool.query('select count(*)::int as count from meta_webhook_events where event_id = $1', [eventId]);
+            if (eventCount.rows[0]?.count !== 1) fail('EVENT_ROW_COUNT_NOT_ONE');
+
+            const auditCount = await pool.query(
+              `select count(*)::int as count from audit_events where correlation_id = $1 and tool_name = 'instagram.engagement.webhook.receive' and decision = 'ACCEPTED'`,
+              [eventId],
+            );
+            if (auditCount.rows[0]?.count !== 1) fail('AUDIT_ROW_COUNT_NOT_ONE');
+
+            const auditPayload = await pool.query(
+              'select normalized_payload, provider_result from audit_events where correlation_id = $1 limit 1',
+              [eventId],
+            );
+            const serialized = JSON.stringify(auditPayload.rows[0] ?? {});
+            if (serialized.includes('redacted')) fail('SENSITIVE_CONTENT_PERSISTED');
+
+            console.log(`PERSISTENCE_RUN_${runId}_IDEMPOTENCY_OK`);
+            console.log(`PERSISTENCE_RUN_${runId}_AUDIT_OK`);
+          } catch {
+            fail('VALIDATION_FAILED');
+          } finally {
+            await pool.end().catch(() => undefined);
+          }
+          NODE
+
           cat > Dockerfile.persistence-validation <<'DOCKER'
           FROM node:24-bookworm-slim
           WORKDIR /app
@@ -53,7 +112,7 @@ jobs:
           COPY src ./src
           COPY scripts ./scripts
           COPY migrations ./migrations
-          COPY .github/tmp/validate-webhook-persistence.ts ./validate-webhook-persistence.ts
+          COPY validate-webhook-persistence.ts ./validate-webhook-persistence.ts
           USER node
           CMD ["sh", "-c", "pnpm migrate && pnpm exec tsx validate-webhook-persistence.ts"]
           DOCKER
