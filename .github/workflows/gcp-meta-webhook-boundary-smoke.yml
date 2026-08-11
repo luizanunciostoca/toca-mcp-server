@@ -2,9 +2,10 @@ name: GCP Meta Webhook Boundary Smoke
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
+
+concurrency:
+  group: gcp-meta-webhook-boundary-smoke
+  cancel-in-progress: false
 
 permissions:
   contents: read
