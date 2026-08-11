@@ -15,6 +15,7 @@ env:
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   READ_SMOKE_JOB: toca-meta-read-smoke
 
@@ -42,15 +43,15 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Deploy isolated real Meta OAuth boundary
+      - name: Deploy isolated real Meta OAuth and webhook boundary
         run: |
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
-            --set-secrets META_APP_SECRET=toca-meta-app-secret:1 \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest" \
             --min-instances 0 \
             --max-instances 1 \
             --ingress all \
@@ -93,6 +94,14 @@ jobs:
           echo "$LOCATION" | grep -q 'state='
           echo "$LOCATION" | grep -q 'business_management'
           echo 'OAuth start returned a valid Meta authorization redirect.'
+
+      - name: Verify webhook remains enabled after OAuth deploy
+        run: |
+          STATUS="$(curl --silent --output /tmp/webhook-invalid.json --write-out '%{http_code}' \
+            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=invalid-token&hub.challenge=challenge-rejected")"
+          test "$STATUS" = "403"
+          grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
+          echo 'Webhook remains enabled after OAuth boundary deployment.'
 
       - name: Build read-only Instagram smoke image
         shell: bash
