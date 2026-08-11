@@ -245,7 +245,7 @@ jobs:
               --freshness=10m \
               --limit=10 \
               --format='value(textPayload)' \
-              2>/dev/null | grep -E '^META_[A-Z0-9_]+$' | tail -n 1 || true
+              2>/dev/null | grep -E '^META_[A-Z0-9_]+$' | head -n 1 || true
             exit "$EXECUTE_STATUS"
           fi
 
