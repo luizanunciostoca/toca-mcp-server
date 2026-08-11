@@ -25,14 +25,13 @@ jobs:
         run: |
           set -euo pipefail
           PROJECT_ID=toca-mcp-production
-          if gcloud secrets describe toca-database-url --project "$PROJECT_ID" --format='value(name)' >/dev/null 2>&1; then
-            echo 'DATABASE_SECRET_PRESENT=true'
-          else
-            echo 'DATABASE_SECRET_PRESENT=false'
-          fi
-          SQL_COUNT="$(gcloud sql instances list --project "$PROJECT_ID" --format='value(name)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
-          echo "CLOUD_SQL_INSTANCE_COUNT=$SQL_COUNT"
-          gcloud sql instances list --project "$PROJECT_ID" --format='value(name,connectionName)' 2>/dev/null | head -n 10 || true
-          echo 'DATABASE_RELATED_SECRET_NAMES_BEGIN'
-          gcloud secrets list --project "$PROJECT_ID" --format='value(name)' 2>/dev/null | grep -Ei 'database|postgres|db|sql' | head -n 20 || true
-          echo 'DATABASE_RELATED_SECRET_NAMES_END'
+          INSTANCE=toca-mcp-db
+          echo 'SQL_DATABASES_BEGIN'
+          gcloud sql databases list --project "$PROJECT_ID" --instance "$INSTANCE" --format='value(name)' 2>/dev/null | head -n 20 || true
+          echo 'SQL_DATABASES_END'
+          echo 'SQL_USERS_BEGIN'
+          gcloud sql users list --project "$PROJECT_ID" --instance "$INSTANCE" --format='value(name,type)' 2>/dev/null | head -n 20 || true
+          echo 'SQL_USERS_END'
+          echo 'SQL_INSTANCE_SETTINGS_BEGIN'
+          gcloud sql instances describe "$INSTANCE" --project "$PROJECT_ID" --format='value(databaseVersion,settings.ipConfiguration.ipv4Enabled,settings.ipConfiguration.privateNetwork)' 2>/dev/null || true
+          echo 'SQL_INSTANCE_SETTINGS_END'
