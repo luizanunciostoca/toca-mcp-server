@@ -17,6 +17,7 @@ env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
   REPOSITORY: toca-mcp
+  SERVICE: toca-meta-oauth-staging
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DATABASE_SECRET_ID: toca-database-url
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
@@ -55,7 +56,7 @@ jobs:
             const counts = await pool.query(`
               select channel, count(*)::int as count
               from meta_webhook_events
-              where received_at >= now() - interval '30 minutes'
+              where received_at >= now() - interval '45 minutes'
                 and event_id not like 'validation:%'
               group by channel
             `);
@@ -67,7 +68,7 @@ jobs:
             const audit = await pool.query(`
               select count(*)::int as count
               from audit_events a
-              where a.created_at >= now() - interval '30 minutes'
+              where a.created_at >= now() - interval '45 minutes'
                 and a.tool_name = 'instagram.engagement.webhook.receive'
                 and a.decision = 'ACCEPTED'
                 and a.correlation_id not like 'validation:%'
@@ -102,7 +103,7 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Inspect persisted events under runtime identity
+      - name: Inspect persisted events and sanitized Cloud Run delivery
         shell: bash
         run: |
           set -euo pipefail
@@ -137,8 +138,22 @@ jobs:
             [ -n "$MARKERS" ] && break
             sleep 2
           done
-
           echo "$MARKERS"
+
+          COMMENT_LOG_COUNT="$(gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND textPayload:\"Meta webhook events accepted\" AND textPayload:\"COMMENT\"" \
+            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+          DIRECT_LOG_COUNT="$(gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND textPayload:\"Meta webhook events accepted\" AND textPayload:\"DIRECT\"" \
+            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+          POST_LOG_COUNT="$(gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/webhooks/meta\"" \
+            --project "$PROJECT_ID" --freshness=45m --limit=100 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_COMMENT_ACCEPTED=$COMMENT_LOG_COUNT"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_DIRECT_ACCEPTED=$DIRECT_LOG_COUNT"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_CLOUDRUN_WEBHOOK_POSTS=$POST_LOG_COUNT"
+
           if [ "$EXECUTE_STATUS" -ne 0 ]; then
             exit "$EXECUTE_STATUS"
           fi
