@@ -1,11 +1,6 @@
 name: GCP Meta Webhook Boundary Smoke
 
 on:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
-    paths:
-      - .github/workflows/gcp-meta-webhook-boundary-smoke.yml
   workflow_dispatch:
 
 permissions:
@@ -39,34 +34,17 @@ jobs:
       - name: Configure Docker authentication
         run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
-      - name: Provision dedicated webhook verify token secret
+      - name: Require pre-provisioned webhook verify token secret
         shell: bash
         run: |
           set -euo pipefail
-
           if ! gcloud secrets describe "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
             --project "$PROJECT_ID" >/dev/null 2>&1; then
-            gcloud secrets create "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
-              --project "$PROJECT_ID" \
-              --replication-policy automatic \
-              --quiet
+            echo "Required Secret Manager secret '$WEBHOOK_VERIFY_TOKEN_SECRET_ID' is missing." >&2
+            echo 'Provision it manually and grant the runtime service account Secret Accessor before rerunning this workflow.' >&2
+            exit 1
           fi
-
-          VERIFY_TOKEN="$(openssl rand -hex 32)"
-          echo "::add-mask::$VERIFY_TOKEN"
-          printf '%s' "$VERIFY_TOKEN" | gcloud secrets versions add "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
-            --project "$PROJECT_ID" \
-            --data-file=- \
-            --quiet >/dev/null
-
-          gcloud secrets add-iam-policy-binding "$WEBHOOK_VERIFY_TOKEN_SECRET_ID" \
-            --project "$PROJECT_ID" \
-            --member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
-            --role roles/secretmanager.secretAccessor \
-            --quiet >/dev/null
-
-          echo "VERIFY_TOKEN=$VERIFY_TOKEN" >> "$GITHUB_ENV"
-          echo 'Dedicated webhook verify token secret provisioned without exposing its value.'
+          echo 'Pre-provisioned webhook verify token secret is present.'
 
       - name: Build and push webhook boundary image
         run: |
@@ -111,22 +89,13 @@ jobs:
           echo 'No unauthenticated Cloud Run URL served /health successfully.' >&2
           exit 1
 
-      - name: Validate webhook challenge boundary
-        shell: bash
+      - name: Verify invalid webhook challenge is rejected
         run: |
-          set -euo pipefail
-
-          VALID_STATUS="$(curl --silent --output /tmp/webhook-valid.txt --write-out '%{http_code}' \
-            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=$VERIFY_TOKEN&hub.challenge=challenge-verified")"
-          test "$VALID_STATUS" = "200"
-          test "$(cat /tmp/webhook-valid.txt)" = "challenge-verified"
-
-          INVALID_STATUS="$(curl --silent --output /tmp/webhook-invalid.json --write-out '%{http_code}' \
+          STATUS="$(curl --silent --output /tmp/webhook-invalid.json --write-out '%{http_code}' \
             "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=invalid-token&hub.challenge=challenge-rejected")"
-          test "$INVALID_STATUS" = "403"
+          test "$STATUS" = "403"
           grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
-
-          echo 'Webhook challenge accepts only the secret-backed verify token.'
+          echo 'Webhook boundary rejects an invalid verify token.'
 
       - name: Verify MCP remains isolated
         run: |
