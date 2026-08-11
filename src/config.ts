@@ -31,7 +31,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
   }
 
   if (config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY) {
-    assertReferencedSecret(env, config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY, 'GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
+    assertReferencedSecret(
+      env,
+      config.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY,
+      'GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY',
+    );
   }
 
   if (config.INSTAGRAM_READ_ENABLED) {
