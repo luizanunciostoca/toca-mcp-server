@@ -12,11 +12,22 @@ const configuredEnv: NodeJS.ProcessEnv = {
   TEST_GOOGLE_SHEETS_TOKEN: 'access-token',
 };
 
+const instagramEnv: NodeJS.ProcessEnv = {
+  NODE_ENV: 'test',
+  INSTAGRAM_READ_ENABLED: 'true',
+  INSTAGRAM_BUSINESS_ACCOUNT_ID: '17841402033495654',
+  META_ACCESS_TOKEN_ENV_KEY: 'TEST_META_TOKEN',
+  TEST_META_TOKEN: 'meta-access-token',
+};
+
 describe('TOCA MCP execution-layer boundary', () => {
-  it('keeps Google provider configuration optional for bootstrap runtimes', () => {
-    expect(loadConfig({ NODE_ENV: 'test' })).toEqual({
+  it('keeps external provider configuration optional for bootstrap runtimes', () => {
+    expect(loadConfig({ NODE_ENV: 'test' })).toMatchObject({
       NODE_ENV: 'test',
       LOG_LEVEL: 'info',
+      INSTAGRAM_READ_ENABLED: false,
+      META_GRAPH_BASE_URL: 'https://graph.facebook.com',
+      META_GRAPH_API_VERSION: 'v24.0',
     });
     expect(
       createToolRegistry()
@@ -34,7 +45,7 @@ describe('TOCA MCP execution-layer boundary', () => {
     ).toThrow(/must be configured together/);
   });
 
-  it('fails closed when the referenced environment secret is missing', () => {
+  it('fails closed when a referenced environment secret is missing', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'test',
@@ -42,6 +53,19 @@ describe('TOCA MCP execution-layer boundary', () => {
         GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: 'MISSING_TOKEN',
       }),
     ).toThrow(/Missing environment secret/);
+  });
+
+  it('requires Instagram account and secret reference when reads are enabled', () => {
+    expect(() => loadConfig({ NODE_ENV: 'test', INSTAGRAM_READ_ENABLED: 'true' })).toThrow(
+      /INSTAGRAM_BUSINESS_ACCOUNT_ID/,
+    );
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        INSTAGRAM_READ_ENABLED: 'true',
+        INSTAGRAM_BUSINESS_ACCOUNT_ID: 'account-id',
+      }),
+    ).toThrow(/META_ACCESS_TOKEN_ENV_KEY/);
   });
 
   it('resolves only explicit env secret references', async () => {
@@ -57,15 +81,24 @@ describe('TOCA MCP execution-layer boundary', () => {
 
   it('does not expose creative ranking as an MCP capability', () => {
     expect(createToolRegistry().get('media.assets.rank')).toBeUndefined();
-    expect(
-      createToolRegistry()
-        .list()
-        .map((tool) => tool.name),
-    ).toEqual(['system.capabilities', 'system.health']);
   });
 
-  it('constructs a configured server without turning TOCA_OS intelligence into an MCP tool', () => {
-    const server = createTocaServer({ env: configuredEnv });
-    expect(server).toBeDefined();
+  it('exposes only read-only Instagram capabilities when explicitly enabled', () => {
+    expect(
+      createToolRegistry({ instagramReadsEnabled: true })
+        .list()
+        .map((tool) => tool.name),
+    ).toEqual([
+      'instagram.insights.account',
+      'instagram.insights.media',
+      'instagram.media.list',
+      'system.capabilities',
+      'system.health',
+    ]);
+  });
+
+  it('constructs configured bootstrap and Instagram read runtimes', () => {
+    expect(createTocaServer({ env: configuredEnv })).toBeDefined();
+    expect(createTocaServer({ env: instagramEnv })).toBeDefined();
   });
 });
