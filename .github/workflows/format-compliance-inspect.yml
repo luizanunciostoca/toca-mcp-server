@@ -1,0 +1,29 @@
+name: Format Compliance Inspect
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+    paths:
+      - .github/workflows/format-compliance-inspect.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Show Prettier diff
+        run: |
+          pnpm exec prettier --write src/http-server.ts
+          git diff -- src/http-server.ts
