@@ -85,6 +85,10 @@ function normalizeChange(
 ): InstagramWebhookEvent | undefined {
   if (!field) return undefined;
 
+  if (field === 'messages') {
+    return normalizeDirectValue(accountId, value, raw, field);
+  }
+
   const commentId = stringValue(value.id) ?? stringValue(value.comment_id);
   const mediaId = stringValue(value.media_id) ?? nestedString(value, 'media', 'id');
   const senderId = nestedString(value, 'from', 'id') ?? stringValue(value.from_id);
@@ -110,14 +114,23 @@ function normalizeMessaging(
   accountId: string,
   raw: Record<string, unknown>,
 ): InstagramWebhookEvent | undefined {
-  const message = isRecord(raw.message) ? raw.message : undefined;
+  return normalizeDirectValue(accountId, raw, raw, 'messaging');
+}
+
+function normalizeDirectValue(
+  accountId: string,
+  value: Record<string, unknown>,
+  raw: Record<string, unknown>,
+  rawType: string,
+): InstagramWebhookEvent | undefined {
+  const message = isRecord(value.message) ? value.message : undefined;
   if (!message) return undefined;
 
   const messageId = stringValue(message.mid) ?? stringValue(message.id);
-  const senderId = nestedString(raw, 'sender', 'id');
-  const recipientId = nestedString(raw, 'recipient', 'id');
+  const senderId = nestedString(value, 'sender', 'id');
+  const recipientId = nestedString(value, 'recipient', 'id');
   const text = stringValue(message.text);
-  const occurredAt = normalizeTimestamp(raw.timestamp);
+  const occurredAt = normalizeTimestamp(value.timestamp);
 
   return {
     eventId: deterministicEventId(accountId, 'DIRECT', messageId, occurredAt, raw),
@@ -127,7 +140,7 @@ function normalizeMessaging(
     ...(messageId ? { messageId } : {}),
     ...(text ? { text } : {}),
     ...(occurredAt ? { occurredAt } : {}),
-    rawType: recipientId ? 'messaging' : 'messaging_unknown_recipient',
+    rawType: recipientId ? rawType : `${rawType}_unknown_recipient`,
   };
 }
 
