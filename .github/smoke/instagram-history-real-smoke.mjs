@@ -65,6 +65,7 @@ if (insightsScopeGranted) {
 
 console.log(
   JSON.stringify({
+    validation: 'post-oauth-insights-grant',
     mediaListOk: true,
     returnedMedia: media.data.length,
     firstMediaId: firstMediaId ?? null,
