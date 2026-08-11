@@ -1,6 +1,6 @@
-import { EnvironmentSecretResolver } from '../../dist/core/secrets.js';
-import { InstagramHistoryProvider } from '../../dist/providers/instagram/instagram-history-provider.js';
-import { MetaApiClient } from '../../dist/providers/meta/meta-api-client.js';
+import { EnvironmentSecretResolver } from '../../dist/src/core/secrets.js';
+import { InstagramHistoryProvider } from '../../dist/src/providers/instagram/instagram-history-provider.js';
+import { MetaApiClient } from '../../dist/src/providers/meta/meta-api-client.js';
 
 const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
 const token = process.env.META_ACCESS_TOKEN;
