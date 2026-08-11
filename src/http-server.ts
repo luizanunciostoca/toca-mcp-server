@@ -288,7 +288,9 @@ function termsPage(): CompliancePage {
       },
       {
         heading: '5. Privacidade',
-        paragraphs: ['O tratamento de dados é descrito na Política de Privacidade disponível em /privacy.'],
+        paragraphs: [
+          'O tratamento de dados é descrito na Política de Privacidade disponível em /privacy.',
+        ],
       },
       {
         heading: '6. Contato',
@@ -336,7 +338,8 @@ function writeCompliancePage(response: ServerResponse, page: CompliancePage): vo
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+    'content-security-policy':
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
     'referrer-policy': 'no-referrer',
   });
   response.end(renderCompliancePage(page));
@@ -345,7 +348,9 @@ function writeCompliancePage(response: ServerResponse, page: CompliancePage): vo
 function renderCompliancePage(page: CompliancePage): string {
   const sections = page.sections
     .map((section) => {
-      const paragraphs = section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join('');
+      const paragraphs = section.paragraphs
+        .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+        .join('');
       const items = section.items
         ? `<ul>${section.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
         : '';
