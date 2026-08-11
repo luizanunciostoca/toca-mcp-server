@@ -15,8 +15,11 @@ const configSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     MCP_ENABLED: enabledByDefaultFromEnv,
+    DATABASE_URL: z.string().min(1).optional(),
     META_ENABLED: booleanFromEnv,
     META_WEBHOOK_ENABLED: booleanFromEnv,
+    META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
+    INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
     META_APP_SECRET_KEY: z.string().min(1).optional(),
@@ -37,6 +40,30 @@ const configSchema = z
         code: 'custom',
         path: ['META_WEBHOOK_ENABLED'],
         message: 'META_ENABLED must be true when META_WEBHOOK_ENABLED=true',
+      });
+    }
+
+    if (config.META_WEBHOOK_PERSISTENCE_ENABLED && !config.META_WEBHOOK_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_PERSISTENCE_ENABLED'],
+        message: 'META_WEBHOOK_ENABLED must be true when META_WEBHOOK_PERSISTENCE_ENABLED=true',
+      });
+    }
+
+    if (config.META_WEBHOOK_PERSISTENCE_ENABLED && !config.DATABASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URL is required when META_WEBHOOK_PERSISTENCE_ENABLED=true',
+      });
+    }
+
+    if (config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['INSTAGRAM_ENGAGEMENT_WRITES_ENABLED'],
+        message: 'META_ENABLED must be true when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
       });
     }
 
