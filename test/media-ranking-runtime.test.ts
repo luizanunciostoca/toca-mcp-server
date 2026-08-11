@@ -12,7 +12,7 @@ const configuredEnv: NodeJS.ProcessEnv = {
   TEST_GOOGLE_SHEETS_TOKEN: 'access-token',
 };
 
-describe('media ranking runtime configuration', () => {
+describe('TOCA MCP execution-layer boundary', () => {
   it('keeps Google provider configuration optional for bootstrap runtimes', () => {
     expect(loadConfig({ NODE_ENV: 'test' })).toEqual({
       NODE_ENV: 'test',
@@ -25,7 +25,7 @@ describe('media ranking runtime configuration', () => {
     ).toEqual(['system.capabilities', 'system.health']);
   });
 
-  it('requires spreadsheet and token reference configuration together', () => {
+  it('requires spreadsheet and token reference configuration together when present', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'test',
@@ -55,21 +55,16 @@ describe('media ranking runtime configuration', () => {
     );
   });
 
-  it('exposes media.assets.rank as implemented READ capability when configured', () => {
-    const config = loadConfig(configuredEnv);
-    expect(config.TOCA_OS_MEDIA_SPREADSHEET_ID).toBe('sheet-id');
-
-    const tool = createToolRegistry({ mediaAssetsRankEnabled: true }).get('media.assets.rank');
-    expect(tool).toMatchObject({
-      provider: 'google-sheets',
-      riskClass: 'READ',
-      capabilityStatus: 'IMPLEMENTED',
-      sideEffects: false,
-      idempotent: true,
-    });
+  it('does not expose creative ranking as an MCP capability', () => {
+    expect(createToolRegistry().get('media.assets.rank')).toBeUndefined();
+    expect(
+      createToolRegistry()
+        .list()
+        .map((tool) => tool.name),
+    ).toEqual(['system.capabilities', 'system.health']);
   });
 
-  it('constructs a configured server without contacting Google during bootstrap', () => {
+  it('constructs a configured server without turning TOCA_OS intelligence into an MCP tool', () => {
     const server = createTocaServer({ env: configuredEnv });
     expect(server).toBeDefined();
   });
