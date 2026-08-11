@@ -29,13 +29,24 @@ jobs:
           SERVICE='toca-meta-oauth-staging'
           SINCE="$(date -u -d '6 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
 
-          POST_COUNT="$(gcloud logging read \
-            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND httpRequest.requestMethod=POST AND httpRequest.requestUrl:\"/webhooks/meta\" AND timestamp>=\"${SINCE}\"" \
-            --project "$PROJECT" --limit=1000 --format='value(timestamp)' | wc -l | tr -d ' ')"
+          retry_read() {
+            local filter="$1"
+            local format="$2"
+            local attempt
+            for attempt in 1 2 3 4; do
+              if gcloud logging read "$filter" --project "$PROJECT" --limit=1000 --format="$format"; then
+                return 0
+              fi
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
 
-          ACCEPTED="$(gcloud logging read \
-            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND textPayload:\"Meta webhook events accepted\" AND timestamp>=\"${SINCE}\"" \
-            --project "$PROJECT" --limit=1000 --format='value(textPayload)' || true)"
+          POST_FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND httpRequest.requestMethod=POST AND httpRequest.requestUrl:\"/webhooks/meta\" AND timestamp>=\"${SINCE}\""
+          ACCEPTED_FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND textPayload:\"Meta webhook events accepted\" AND timestamp>=\"${SINCE}\""
+
+          POST_COUNT="$(retry_read "$POST_FILTER" 'value(timestamp)' | wc -l | tr -d ' ')"
+          ACCEPTED="$(retry_read "$ACCEPTED_FILTER" 'value(textPayload)' || true)"
 
           COMMENT_COUNT="$(printf '%s\n' "$ACCEPTED" | grep -c 'COMMENT' || true)"
           DIRECT_COUNT="$(printf '%s\n' "$ACCEPTED" | grep -c 'DIRECT' || true)"
