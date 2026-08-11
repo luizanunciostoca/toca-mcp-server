@@ -32,4 +32,7 @@ jobs:
           fi
           SQL_COUNT="$(gcloud sql instances list --project "$PROJECT_ID" --format='value(name)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
           echo "CLOUD_SQL_INSTANCE_COUNT=$SQL_COUNT"
-          gcloud sql instances list --project "$PROJECT_ID" --format='value(name,connectionName)' 2>/dev/null | sed -E 's/([0-9]{4,})/[id]/g' | head -n 10 || true
+          gcloud sql instances list --project "$PROJECT_ID" --format='value(name,connectionName)' 2>/dev/null | head -n 10 || true
+          echo 'DATABASE_RELATED_SECRET_NAMES_BEGIN'
+          gcloud secrets list --project "$PROJECT_ID" --format='value(name)' 2>/dev/null | grep -Ei 'database|postgres|db|sql' | head -n 20 || true
+          echo 'DATABASE_RELATED_SECRET_NAMES_END'
