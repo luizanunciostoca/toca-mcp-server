@@ -2,6 +2,9 @@ name: GCP Meta Webhook Boundary Smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
 
 permissions:
   contents: read
@@ -16,6 +19,10 @@ env:
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   TOKEN_SECRET_ID: toca-meta-oauth-token
   WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+  META_APP_ID: '2281930145887404'
+  META_GRAPH_API_VERSION: v24.0
+  PAGE_ID: '306103746115875'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
 
 jobs:
   webhook-boundary:
@@ -48,7 +55,7 @@ jobs:
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
             --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest" \
             --min-instances 0 \
             --max-instances 1 \
@@ -84,6 +91,60 @@ jobs:
           test "$STATUS" = "403"
           grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
           echo 'Webhook boundary rejects an invalid verify token.'
+
+      - name: Reconcile Meta asset webhook subscriptions
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRAPH_BASE="https://graph.facebook.com/$META_GRAPH_API_VERSION"
+
+          USER_TOKEN="$(gcloud secrets versions access latest \
+            --secret="$TOKEN_SECRET_ID" \
+            --project="$PROJECT_ID")"
+          test -n "$USER_TOKEN"
+          echo "::add-mask::$USER_TOKEN"
+
+          PAGE_TOKEN_RESPONSE="$(curl --fail-with-body --silent --show-error --get \
+            --header "Authorization: Bearer $USER_TOKEN" \
+            --data-urlencode 'fields=access_token' \
+            "$GRAPH_BASE/$PAGE_ID")"
+          PAGE_TOKEN="$(jq -er '.access_token' <<<"$PAGE_TOKEN_RESPONSE")"
+          test -n "$PAGE_TOKEN"
+          echo "::add-mask::$PAGE_TOKEN"
+          unset USER_TOKEN PAGE_TOKEN_RESPONSE
+
+          curl --fail-with-body --silent --show-error -X POST \
+            --header "Authorization: Bearer $PAGE_TOKEN" \
+            --data-urlencode 'subscribed_fields=messages' \
+            "$GRAPH_BASE/$PAGE_ID/subscribed_apps" \
+            | jq -e '.success == true' >/dev/null
+
+          curl --fail-with-body --silent --show-error -X POST \
+            --header "Authorization: Bearer $PAGE_TOKEN" \
+            --data-urlencode 'subscribed_fields=comments,messages' \
+            "$GRAPH_BASE/$INSTAGRAM_ACCOUNT_ID/subscribed_apps" \
+            | jq -e '.success == true' >/dev/null
+
+          PAGE_SUBSCRIPTIONS="$(curl --fail-with-body --silent --show-error --get \
+            --header "Authorization: Bearer $PAGE_TOKEN" \
+            "$GRAPH_BASE/$PAGE_ID/subscribed_apps")"
+          jq -e --arg app "$META_APP_ID" '
+            any(.data[]?; .id == $app and (.subscribed_fields // [] | index("messages") != null))
+          ' <<<"$PAGE_SUBSCRIPTIONS" >/dev/null
+
+          INSTAGRAM_SUBSCRIPTIONS="$(curl --fail-with-body --silent --show-error --get \
+            --header "Authorization: Bearer $PAGE_TOKEN" \
+            "$GRAPH_BASE/$INSTAGRAM_ACCOUNT_ID/subscribed_apps")"
+          jq -e --arg app "$META_APP_ID" '
+            any(.data[]?;
+              .id == $app and
+              (.subscribed_fields // [] | index("comments") != null) and
+              (.subscribed_fields // [] | index("messages") != null)
+            )
+          ' <<<"$INSTAGRAM_SUBSCRIPTIONS" >/dev/null
+
+          unset PAGE_TOKEN PAGE_SUBSCRIPTIONS INSTAGRAM_SUBSCRIPTIONS
+          echo 'Meta Page and Instagram professional-account webhook subscriptions are reconciled.'
 
       - name: Verify MCP remains isolated
         run: |
