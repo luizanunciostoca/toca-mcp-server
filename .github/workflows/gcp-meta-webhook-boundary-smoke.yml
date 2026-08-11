@@ -1,11 +1,6 @@
 name: GCP Meta Webhook Boundary Smoke
 
 on:
-  push:
-    branches:
-      - feat/instagram-engagement-messaging
-    paths:
-      - .github/workflows/gcp-meta-webhook-boundary-smoke.yml
   workflow_dispatch:
 
 permissions:
