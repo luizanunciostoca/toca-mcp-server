@@ -105,8 +105,13 @@ jobs:
           const pageId = process.env.PAGE_ID;
           const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
 
+          function fail(code) {
+            console.error(code);
+            process.exit(1);
+          }
+
           if (!userToken || !appId || !apiVersion || !pageId || !instagramAccountId) {
-            throw new Error('META_SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
+            fail('META_SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
           }
 
           const graphBase = `https://graph.facebook.com/${apiVersion}`;
@@ -127,64 +132,62 @@ jobs:
             }
 
             const response = await fetch(url, init);
-            if (!response.ok) {
-              throw new Error(`META_SUBSCRIPTION_HTTP_${response.status}`);
-            }
+            if (!response.ok) throw new Error(`META_SUBSCRIPTION_HTTP_${response.status}`);
             return response.json();
           }
 
-          const page = await graph(`${pageId}?fields=access_token`, userToken);
-          const pageToken = page?.access_token;
-          if (typeof pageToken !== 'string' || pageToken.length === 0) {
-            throw new Error('META_PAGE_ACCESS_TOKEN_MISSING');
-          }
+          try {
+            const page = await graph(`${pageId}?fields=access_token`, userToken);
+            const pageToken = page?.access_token;
+            if (typeof pageToken !== 'string' || pageToken.length === 0) {
+              throw new Error('META_PAGE_ACCESS_TOKEN_MISSING');
+            }
 
-          const pageWrite = await graph(`${pageId}/subscribed_apps`, pageToken, 'POST', {
-            subscribed_fields: 'messages',
-          });
-          if (pageWrite?.success !== true) throw new Error('META_PAGE_SUBSCRIPTION_WRITE_FAILED');
+            const pageWrite = await graph(`${pageId}/subscribed_apps`, pageToken, 'POST', {
+              subscribed_fields: 'messages',
+            });
+            if (pageWrite?.success !== true) throw new Error('META_PAGE_SUBSCRIPTION_WRITE_FAILED');
 
-          const instagramWrite = await graph(
-            `${instagramAccountId}/subscribed_apps`,
-            pageToken,
-            'POST',
-            { subscribed_fields: 'comments,messages' },
-          );
-          if (instagramWrite?.success !== true) {
-            throw new Error('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
-          }
+            const instagramWrite = await graph(
+              `${instagramAccountId}/subscribed_apps`,
+              pageToken,
+              'POST',
+              { subscribed_fields: 'comments,messages' },
+            );
+            if (instagramWrite?.success !== true) {
+              throw new Error('META_INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
+            }
 
-          const pageSubscriptions = await graph(`${pageId}/subscribed_apps`, pageToken);
-          const pageApp = Array.isArray(pageSubscriptions?.data)
-            ? pageSubscriptions.data.find((entry) => entry?.id === appId)
-            : undefined;
-          const pageFields = Array.isArray(pageApp?.subscribed_fields) ? pageApp.subscribed_fields : [];
-          if (!pageFields.includes('messages')) {
-            throw new Error('META_PAGE_MESSAGES_SUBSCRIPTION_MISSING');
-          }
+            const pageSubscriptions = await graph(`${pageId}/subscribed_apps`, pageToken);
+            const pageApp = Array.isArray(pageSubscriptions?.data)
+              ? pageSubscriptions.data.find((entry) => entry?.id === appId)
+              : undefined;
+            const pageFields = Array.isArray(pageApp?.subscribed_fields) ? pageApp.subscribed_fields : [];
+            if (!pageFields.includes('messages')) {
+              throw new Error('META_PAGE_MESSAGES_SUBSCRIPTION_MISSING');
+            }
 
-          const instagramSubscriptions = await graph(
-            `${instagramAccountId}/subscribed_apps`,
-            pageToken,
-          );
-          const instagramApp = Array.isArray(instagramSubscriptions?.data)
-            ? instagramSubscriptions.data.find((entry) => entry?.id === appId)
-            : undefined;
-          const instagramFields = Array.isArray(instagramApp?.subscribed_fields)
-            ? instagramApp.subscribed_fields
-            : [];
-          if (!instagramFields.includes('comments')) {
-            throw new Error('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
-          }
-          if (!instagramFields.includes('messages')) {
-            throw new Error('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
-          }
+            const instagramSubscriptions = await graph(
+              `${instagramAccountId}/subscribed_apps`,
+              pageToken,
+            );
+            const instagramApp = Array.isArray(instagramSubscriptions?.data)
+              ? instagramSubscriptions.data.find((entry) => entry?.id === appId)
+              : undefined;
+            const instagramFields = Array.isArray(instagramApp?.subscribed_fields)
+              ? instagramApp.subscribed_fields
+              : [];
+            if (!instagramFields.includes('comments')) {
+              throw new Error('META_INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
+            }
+            if (!instagramFields.includes('messages')) {
+              throw new Error('META_INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
+            }
 
-          console.log(JSON.stringify({
-            pageMessages: true,
-            instagramComments: true,
-            instagramMessages: true,
-          }));
+            console.log('META_SUBSCRIPTION_RECONCILE_OK');
+          } catch (error) {
+            fail(error instanceof Error ? error.message : 'META_SUBSCRIPTION_RECONCILE_UNKNOWN');
+          }
           NODE
 
           cat > /tmp/meta-subscription-reconcile/Dockerfile <<'DOCKER'
@@ -223,11 +226,26 @@ jobs:
             --task-timeout 120s \
             --quiet
 
+          set +e
           gcloud run jobs execute "$RECONCILE_JOB" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --wait \
             --quiet
+          EXECUTE_STATUS=$?
+          set -e
+
+          if [ "$EXECUTE_STATUS" -ne 0 ]; then
+            echo 'Meta reconciliation failed; sanitized application marker follows:' >&2
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$RECONCILE_JOB\" AND textPayload:\"META_\"" \
+              --project "$PROJECT_ID" \
+              --freshness=10m \
+              --limit=10 \
+              --format='value(textPayload)' \
+              2>/dev/null | grep -E '^META_[A-Z0-9_]+$' | tail -n 1 || true
+            exit "$EXECUTE_STATUS"
+          fi
 
           echo 'Meta Page and Instagram professional-account subscriptions reconciled under runtime identity.'
 
