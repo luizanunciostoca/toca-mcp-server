@@ -61,6 +61,9 @@ const insightsSchema = z.object({
   paging: pagingSchema,
 });
 
+export type InstagramMediaListResponse = z.infer<typeof mediaListSchema>;
+export type InstagramInsightsResponse = z.infer<typeof insightsSchema>;
+
 export interface InstagramMediaListInput {
   readonly limit: number;
   readonly after?: string;
@@ -87,7 +90,7 @@ export class InstagramHistoryProvider {
     private readonly instagramBusinessAccountId: string,
   ) {}
 
-  async listMedia(input: InstagramMediaListInput) {
+  async listMedia(input: InstagramMediaListInput): Promise<InstagramMediaListResponse> {
     const query: Record<string, string> = {
       fields:
         'id,caption,media_type,media_product_type,permalink,thumbnail_url,timestamp,username,like_count,comments_count',
@@ -104,7 +107,7 @@ export class InstagramHistoryProvider {
     return parsed.data;
   }
 
-  async getMediaInsights(input: InstagramMediaInsightInput) {
+  async getMediaInsights(input: InstagramMediaInsightInput): Promise<InstagramInsightsResponse> {
     const parsed = insightsSchema.safeParse(
       await this.client.get(`${input.mediaId}/insights`, {
         metric: input.metrics.join(','),
@@ -114,7 +117,9 @@ export class InstagramHistoryProvider {
     return parsed.data;
   }
 
-  async getAccountInsights(input: InstagramAccountInsightInput) {
+  async getAccountInsights(
+    input: InstagramAccountInsightInput,
+  ): Promise<InstagramInsightsResponse> {
     const query: Record<string, string> = { metric: input.metrics.join(',') };
     if (input.period) query.period = input.period;
     if (input.since) query.since = input.since;
