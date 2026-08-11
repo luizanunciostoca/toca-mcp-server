@@ -1,6 +1,8 @@
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
 import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
+import { PostgresMetaWebhookEventStore } from './persistence/meta-webhook-event-store.js';
+import { createPostgresPool } from './persistence/postgres.js';
 import { createMetaHttpRuntime } from './providers/meta/meta-http-runtime.js';
 import { SERVER_NAME } from './server.js';
 
@@ -59,17 +61,27 @@ function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
     key: config.META_WEBHOOK_VERIFY_TOKEN_KEY,
   };
 
+  const eventStore = config.META_WEBHOOK_PERSISTENCE_ENABLED
+    ? new PostgresMetaWebhookEventStore(
+        createPostgresPool({ connectionString: config.DATABASE_URL as string }),
+      )
+    : undefined;
+
   return {
     resolveAppSecret: () => resolver.resolve(appSecretReference),
     resolveVerifyToken: () => resolver.resolve(verifyTokenReference),
-    onEvents: (events) => {
-      const channels = [...new Set(events.map((event) => event.channel))];
+    onEvents: async (events) => {
+      const persistence = eventStore
+        ? await eventStore.persist(events)
+        : { accepted: events, duplicates: [] as typeof events };
+      const channels = [...new Set(persistence.accepted.map((event) => event.channel))];
       console.log(
         'Meta webhook events accepted',
         JSON.stringify({
-          count: events.length,
+          count: persistence.accepted.length,
+          duplicateCount: persistence.duplicates.length,
           channels,
-          eventIds: events.map((event) => event.eventId),
+          eventIds: persistence.accepted.map((event) => event.eventId),
         }),
       );
     },
