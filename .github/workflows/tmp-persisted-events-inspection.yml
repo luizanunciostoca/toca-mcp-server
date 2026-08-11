@@ -1,0 +1,139 @@
+name: Temporary Persisted Event Inspection
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-messaging
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: tmp-persisted-events-inspection
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  JOB: toca-persisted-events-inspect
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build sanitized inspection image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > inspect-persisted-events.mjs <<'NODE'
+          import pg from 'pg';
+
+          const connectionString = process.env.DATABASE_URL;
+          const runId = process.env.INSPECTION_RUN_ID;
+          if (!connectionString || !runId) throw new Error('inspection configuration missing');
+
+          const pool = new pg.Pool({ connectionString, ssl: false, max: 1 });
+          try {
+            const counts = await pool.query(`
+              select channel, count(*)::int as count
+              from meta_webhook_events
+              where received_at >= now() - interval '30 minutes'
+                and event_id not like 'validation:%'
+              group by channel
+            `);
+
+            const byChannel = Object.fromEntries(counts.rows.map((row) => [row.channel, row.count]));
+            const commentCount = byChannel.COMMENT ?? 0;
+            const directCount = byChannel.DIRECT ?? 0;
+
+            const audit = await pool.query(`
+              select count(*)::int as count
+              from audit_events a
+              where a.created_at >= now() - interval '30 minutes'
+                and a.tool_name = 'instagram.engagement.webhook.receive'
+                and a.decision = 'ACCEPTED'
+                and a.correlation_id not like 'validation:%'
+            `);
+            const auditCount = audit.rows[0]?.count ?? 0;
+
+            console.log(`SAFE_RUN_${runId}_COMMENT_COUNT=${commentCount}`);
+            console.log(`SAFE_RUN_${runId}_DIRECT_COUNT=${directCount}`);
+            console.log(`SAFE_RUN_${runId}_AUDIT_COUNT=${auditCount}`);
+
+            if (commentCount < 1) throw new Error('persisted COMMENT missing');
+            if (directCount < 1) throw new Error('persisted DIRECT missing');
+            if (auditCount < commentCount + directCount) throw new Error('audit count below accepted persisted events');
+
+            console.log(`SAFE_RUN_${runId}_PERSISTED_EXTERNAL_EVENTS_OK`);
+          } finally {
+            await pool.end().catch(() => undefined);
+          }
+          NODE
+
+          cat > Dockerfile.persisted-inspection <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          RUN npm init -y >/dev/null 2>&1 && npm install pg@8.16.3 >/dev/null 2>&1
+          COPY inspect-persisted-events.mjs ./inspect-persisted-events.mjs
+          USER node
+          CMD ["node", "inspect-persisted-events.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/persisted-events-inspect:${GITHUB_SHA}"
+          docker build -f Dockerfile.persisted-inspection -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Inspect persisted events under runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSPECTION_RUN_ID=$GITHUB_RUN_ID" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+          MARKERS=''
+          for ATTEMPT in 1 2 3 4 5; do
+            MARKERS="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"SAFE_RUN_${GITHUB_RUN_ID}_\"" \
+              --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null \
+              | grep -E "^SAFE_RUN_${GITHUB_RUN_ID}_(COMMENT_COUNT|DIRECT_COUNT|AUDIT_COUNT)=[0-9]+$|^SAFE_RUN_${GITHUB_RUN_ID}_PERSISTED_EXTERNAL_EVENTS_OK$" | sort -u || true)"
+            [ -n "$MARKERS" ] && break
+            sleep 2
+          done
+
+          echo "$MARKERS"
+          echo "$MARKERS" | grep -q "SAFE_RUN_${GITHUB_RUN_ID}_PERSISTED_EXTERNAL_EVENTS_OK"
