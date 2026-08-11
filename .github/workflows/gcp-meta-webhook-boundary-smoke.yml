@@ -152,6 +152,12 @@ jobs:
             return granted;
           }
 
+          function appSubscription(payload) {
+            return Array.isArray(payload?.data)
+              ? payload.data.find((entry) => entry?.id === appId)
+              : undefined;
+          }
+
           try {
             const permissionsPayload = await request(
               'me/permissions',
@@ -196,33 +202,39 @@ jobs:
               fail('PAGE_ACCESS_TOKEN_MISSING');
             }
 
-            const instagramWrite = await request(
-              `${instagramAccountId}/subscribed_apps`,
+            let subscriptions = await request(
+              `${pageId}/subscribed_apps`,
               pageToken,
-              'INSTAGRAM_SUBSCRIBE',
-              'POST',
-              { subscribed_fields: 'comments,messages' },
+              'PAGE_SUBSCRIPTION_VERIFY',
             );
-            if (instagramWrite?.success !== true) {
-              fail('INSTAGRAM_SUBSCRIPTION_WRITE_FAILED');
+            let installedApp = appSubscription(subscriptions);
+            let subscribedFields = Array.isArray(installedApp?.subscribed_fields)
+              ? installedApp.subscribed_fields
+              : [];
+
+            if (!subscribedFields.includes('messages')) {
+              const pageWrite = await request(
+                `${pageId}/subscribed_apps`,
+                pageToken,
+                'PAGE_SUBSCRIPTION_REPAIR',
+                'POST',
+                { subscribed_fields: 'messages' },
+              );
+              if (pageWrite?.success !== true) fail('PAGE_SUBSCRIPTION_REPAIR_FAILED');
+
+              subscriptions = await request(
+                `${pageId}/subscribed_apps`,
+                pageToken,
+                'PAGE_SUBSCRIPTION_REVERIFY',
+              );
+              installedApp = appSubscription(subscriptions);
+              subscribedFields = Array.isArray(installedApp?.subscribed_fields)
+                ? installedApp.subscribed_fields
+                : [];
             }
 
-            const instagramSubscriptions = await request(
-              `${instagramAccountId}/subscribed_apps`,
-              pageToken,
-              'INSTAGRAM_VERIFY',
-            );
-            const instagramApp = Array.isArray(instagramSubscriptions?.data)
-              ? instagramSubscriptions.data.find((entry) => entry?.id === appId)
-              : undefined;
-            const instagramFields = Array.isArray(instagramApp?.subscribed_fields)
-              ? instagramApp.subscribed_fields
-              : [];
-            if (!instagramFields.includes('comments')) {
-              fail('INSTAGRAM_COMMENTS_SUBSCRIPTION_MISSING');
-            }
-            if (!instagramFields.includes('messages')) {
-              fail('INSTAGRAM_MESSAGES_SUBSCRIPTION_MISSING');
+            if (!subscribedFields.includes('messages')) {
+              fail('PAGE_MESSAGES_SUBSCRIPTION_MISSING');
             }
 
             console.log(`META_RUN_${runId}_SUBSCRIPTION_RECONCILE_OK`);
@@ -288,7 +300,7 @@ jobs:
             exit "$EXECUTE_STATUS"
           fi
 
-          echo 'Instagram professional-account webhook subscriptions reconciled under runtime identity.'
+          echo 'Meta Page installation, Instagram linkage, and messaging webhook subscription are reconciled.'
 
       - name: Verify MCP remains isolated
         run: |
