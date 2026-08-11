@@ -46,17 +46,12 @@ describe('InstagramHistoryProvider', () => {
     });
 
     expect(result.data[0]?.id).toBe('media-1');
-    expect(client.calls).toEqual([
-      {
-        path: 'ig-account/media',
-        query: expect.objectContaining({
-          limit: '25',
-          after: 'after-0',
-          since: '2026-07-01',
-          until: '2026-08-10',
-        }),
-      },
-    ]);
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]?.path).toBe('ig-account/media');
+    expect(client.calls[0]?.query.limit).toBe('25');
+    expect(client.calls[0]?.query.after).toBe('after-0');
+    expect(client.calls[0]?.query.since).toBe('2026-07-01');
+    expect(client.calls[0]?.query.until).toBe('2026-08-10');
   });
 
   it('passes requested media metrics without embedding editorial logic', async () => {
