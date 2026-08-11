@@ -123,7 +123,10 @@ jobs:
             --task-timeout 120s \
             --quiet
 
+          set +e
           gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+          EXECUTE_STATUS=$?
+          set -e
 
           MARKERS=''
           for ATTEMPT in 1 2 3 4 5; do
@@ -136,4 +139,7 @@ jobs:
           done
 
           echo "$MARKERS"
+          if [ "$EXECUTE_STATUS" -ne 0 ]; then
+            exit "$EXECUTE_STATUS"
+          fi
           echo "$MARKERS" | grep -q "SAFE_RUN_${GITHUB_RUN_ID}_PERSISTED_EXTERNAL_EVENTS_OK"
