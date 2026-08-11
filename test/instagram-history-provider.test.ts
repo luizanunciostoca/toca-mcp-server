@@ -9,11 +9,13 @@ class FakeMetaReadClient implements MetaReadClient {
 
   constructor(private readonly responses: unknown[]) {}
 
-  async get(path: string, query: Readonly<Record<string, string>> = {}): Promise<unknown> {
+  get(path: string, query: Readonly<Record<string, string>> = {}): Promise<unknown> {
     this.calls.push({ path, query });
-    const response = this.responses.shift();
-    if (response === undefined) throw new Error('No fake response configured');
-    return response;
+    const providerResponse: unknown = this.responses.shift();
+    if (providerResponse === undefined) {
+      return Promise.reject(new Error('No fake response configured'));
+    }
+    return Promise.resolve(providerResponse);
   }
 }
 
