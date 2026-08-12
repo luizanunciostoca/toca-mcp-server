@@ -33,6 +33,10 @@ const workflowRequirements = [
   'sha256sum infra/control-plane/policy.json',
   infraAdmin,
   'reconcile-publication-assets-bucket',
+  '.publicRead == false',
+  '.deliveryMode == "signed-url"',
+  'allUsers',
+  'allAuthenticatedUsers',
 ];
 
 for (const marker of workflowRequirements) {
@@ -48,6 +52,8 @@ const forbiddenWorkflowMarkers = [
   'roles/owner',
   'roles/editor',
   'storage.buckets.delete',
+  '--member="allUsers"',
+  '--member="allAuthenticatedUsers"',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
@@ -78,7 +84,8 @@ if (
   publicationBucket?.resourceName !== 'toca-mcp-publication-assets' ||
   publicationBucket?.lifecycleDeleteAgeDays !== 7 ||
   publicationBucket?.runtimeRole !== 'roles/storage.objectCreator' ||
-  publicationBucket?.publicRead !== true ||
+  publicationBucket?.publicRead !== false ||
+  publicationBucket?.deliveryMode !== 'signed-url' ||
   publicationBucket?.uniformBucketLevelAccess !== true
 ) {
   console.error('Publication asset bucket is outside the approved envelope');
@@ -92,6 +99,7 @@ const forbiddenPolicyFlags = [
   'bucketDelete',
   'arbitraryGcloud',
   'runtimePrivilegeEscalation',
+  'publicBucketIam',
 ];
 
 for (const key of forbiddenPolicyFlags) {
