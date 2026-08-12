@@ -1,7 +1,10 @@
 import type pg from 'pg';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { PublicationExecutionStore } from '../providers/instagram/instagram-publication-executor.js';
-import type { PublicationRecord, PublicationState } from '../providers/instagram/publication-state.js';
+import type {
+  PublicationRecord,
+  PublicationState,
+} from '../providers/instagram/publication-state.js';
 
 type PublicationRow = {
   correlation_id: string;
@@ -40,7 +43,10 @@ export class PostgresPublicationExecutionStore implements PublicationExecutionSt
     );
     const row = result.rows[0];
     if (!row) throw new Error('INSTAGRAM_PUBLICATION_RESERVATION_MISSING');
-    if (row.correlation_id !== request.correlationId || row.account_id !== request.account.instagramAccountId) {
+    if (
+      row.correlation_id !== request.correlationId ||
+      row.account_id !== request.account.instagramAccountId
+    ) {
       throw new Error('INSTAGRAM_PUBLICATION_IDEMPOTENCY_CONFLICT');
     }
     return mapRow(row);
