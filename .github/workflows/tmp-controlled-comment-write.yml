@@ -76,9 +76,7 @@ jobs:
             }
           }
 
-          if (matches.length !== 1) {
-            throw new Error(`CONTROLLED_WRITE_TARGET_MATCH_COUNT_${matches.length}`);
-          }
+          if (matches.length !== 1) throw new Error(`CONTROLLED_WRITE_TARGET_MATCH_COUNT_${matches.length}`);
 
           const target = matches[0];
           const existingReplies = Array.isArray(target?.replies?.data) ? target.replies.data : [];
@@ -94,14 +92,11 @@ jobs:
             headers: { 'content-type': 'application/x-www-form-urlencoded' },
             body,
           });
-          if (typeof created?.id !== 'string' || created.id.length === 0) {
-            throw new Error('CONTROLLED_WRITE_PROVIDER_ID_MISSING');
-          }
+          if (typeof created?.id !== 'string' || created.id.length === 0) throw new Error('CONTROLLED_WRITE_PROVIDER_ID_MISSING');
 
           const verification = await graph(`${target.id}/replies?fields=id,text&limit=20`);
           const replies = Array.isArray(verification.data) ? verification.data : [];
-          const verified = replies.some((reply) => reply?.text === replyText);
-          if (!verified) throw new Error('CONTROLLED_WRITE_VERIFICATION_FAILED');
+          if (!replies.some((reply) => reply?.text === replyText)) throw new Error('CONTROLLED_WRITE_VERIFICATION_FAILED');
 
           console.log('SAFE_CONTROLLED_COMMENT_WRITE_ALREADY_PRESENT=0');
           console.log('SAFE_CONTROLLED_COMMENT_WRITE_CREATED=1');
@@ -142,11 +137,7 @@ jobs:
             --task-timeout 120s \
             --quiet
 
-          gcloud run jobs execute "$WRITE_JOB" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --wait \
-            --quiet
+          gcloud run jobs execute "$WRITE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
 
           MARKERS=''
           for ATTEMPT in 1 2 3 4 5; do
@@ -162,7 +153,6 @@ jobs:
           CREATED="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_COMMENT_WRITE_CREATED=//p' | tail -1)"
           ALREADY="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_COMMENT_WRITE_ALREADY_PRESENT=//p' | tail -1)"
           VERIFIED="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_COMMENT_WRITE_VERIFIED=//p' | tail -1)"
-
           if [ "${CREATED:-0}" = "1" ]; then
             test "${VERIFIED:-0}" = "1"
           else
@@ -173,9 +163,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VALUE="$(gcloud run services describe toca-meta-oauth-staging \
+          gcloud run services describe toca-meta-oauth-staging \
             --project "$PROJECT_ID" \
             --region "$REGION" \
-            --format='value(spec.template.spec.containers[0].env[?name="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED"].value)')"
+            --format=json > /tmp/service.json
+
+          VALUE="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value][0] // "__MISSING__"' /tmp/service.json)"
           test "$VALUE" = "false"
           echo 'SAFE_PUBLIC_BOUNDARY_WRITES_ENABLED=0'
