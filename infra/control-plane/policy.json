@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -8,7 +8,8 @@
     "reconcile-publication-assets-bucket": {
       "resourceType": "gcs-bucket",
       "resourceName": "toca-mcp-publication-assets",
-      "publicRead": true,
+      "publicRead": false,
+      "deliveryMode": "signed-url",
       "runtimeRole": "roles/storage.objectCreator",
       "lifecycleDeleteAgeDays": 7,
       "uniformBucketLevelAccess": true
@@ -20,6 +21,7 @@
     "serviceAccountKeys": true,
     "bucketDelete": true,
     "arbitraryGcloud": true,
-    "runtimePrivilegeEscalation": true
+    "runtimePrivilegeEscalation": true,
+    "publicBucketIam": true
   }
 }
