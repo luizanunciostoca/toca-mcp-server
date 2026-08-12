@@ -16,6 +16,8 @@ export function createInstagramPublicationRuntimeHandlers(
     pool,
     metaClient: createMetaPublicationApiClient(config),
     writesEnabled: config.INSTAGRAM_PUBLICATION_WRITES_ENABLED,
-    approvedRequestSha256: config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256,
+    ...(config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256
+      ? { approvedRequestSha256: config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256 }
+      : {}),
   });
 }
