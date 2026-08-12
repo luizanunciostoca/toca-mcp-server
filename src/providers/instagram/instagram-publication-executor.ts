@@ -102,7 +102,8 @@ export class InstagramPublicationExecutor {
 }
 
 function withoutLastError(record: PublicationRecord): PublicationRecord {
-  const { lastError: _lastError, ...clean } = record;
+  const clean = { ...record };
+  delete clean.lastError;
   return clean;
 }
 
