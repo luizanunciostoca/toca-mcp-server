@@ -71,6 +71,37 @@ describe('Instagram publication scheduler bridge', () => {
     expect(first.idempotencyKey).toBe('internal:instagram:publication:idem-job-1');
   });
 
+  it('supports internal reschedule, status, list and cancel without crossing job domains', async () => {
+    const scheduler = new InMemoryScheduler();
+    const bridge = new InstagramPublicationJobScheduler(scheduler, () => 'publication-job');
+    await bridge.schedule(request, '2026-08-12T14:00:00.000Z', 'America/Bahia');
+
+    await expect(
+      bridge.reschedule('publication-job', '2026-08-12T15:00:00.000Z', 'America/Bahia'),
+    ).resolves.toMatchObject({
+      runAt: '2026-08-12T15:00:00.000Z',
+      status: 'SCHEDULED',
+    });
+    await expect(bridge.status('publication-job')).resolves.toMatchObject({
+      toolName: INSTAGRAM_PUBLICATION_JOB,
+      runAt: '2026-08-12T15:00:00.000Z',
+    });
+    await expect(bridge.listScheduled()).resolves.toHaveLength(1);
+    await expect(bridge.cancel('publication-job')).resolves.toMatchObject({ status: 'CANCELED' });
+    await expect(bridge.listScheduled()).resolves.toEqual([]);
+
+    await scheduler.schedule({
+      id: 'other-job',
+      toolName: 'internal.other.execute',
+      payload: {},
+      runAt: '2026-08-12T16:00:00.000Z',
+      timezone: 'America/Bahia',
+      idempotencyKey: 'other-idempotency',
+    });
+    await expect(bridge.cancel('other-job')).rejects.toThrow('INSTAGRAM_PUBLICATION_JOB_MISMATCH');
+    await expect(scheduler.get('other-job')).resolves.toMatchObject({ status: 'SCHEDULED' });
+  });
+
   it('signals worker retry while processing and succeeds when the container is finished', async () => {
     const store = new MemoryStore();
     const transport = new Transport();
