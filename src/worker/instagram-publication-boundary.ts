@@ -29,9 +29,12 @@ export class InstagramPublicationApprovalAuditGate implements JobHandler {
       await this.delegate.execute(payload, job);
       await this.audit(job, requestSha256, 'SUCCEEDED', { completed: true });
     } catch (error) {
-      await this.audit(job, requestSha256, 'FAILED', {
-        error: error instanceof Error ? error.message : 'UNKNOWN_PUBLICATION_ERROR',
-      });
+      const normalized = error instanceof Error ? error.message : 'UNKNOWN_PUBLICATION_ERROR';
+      if (normalized === 'INSTAGRAM_PUBLICATION_PROCESSING_PENDING') {
+        await this.audit(job, requestSha256, 'PENDING', { processing: true });
+      } else {
+        await this.audit(job, requestSha256, 'FAILED', { error: normalized });
+      }
       throw error;
     }
   }
@@ -39,7 +42,7 @@ export class InstagramPublicationApprovalAuditGate implements JobHandler {
   private async audit(
     job: ScheduledJob,
     requestSha256: string,
-    decision: 'DENIED' | 'APPROVED' | 'SUCCEEDED' | 'FAILED',
+    decision: 'DENIED' | 'APPROVED' | 'PENDING' | 'SUCCEEDED' | 'FAILED',
     providerResult: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     await this.pool.query(
