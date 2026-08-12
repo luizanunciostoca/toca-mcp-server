@@ -46,7 +46,9 @@ export class InstagramGraphEngagementProvider implements InstagramEngagementProv
     }
 
     const pageMatches = accountsResponse.data.filter((candidate) => {
-      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false;
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        return false;
+      }
       return (candidate as Record<string, unknown>).id === input.pageId;
     });
     if (pageMatches.length !== 1) {
@@ -59,7 +61,10 @@ export class InstagramGraphEngagementProvider implements InstagramEngagementProv
       throw new Error('INSTAGRAM_PAGE_MESSAGING_TASK_MISSING');
     }
 
-    const linkedInstagram = requireObject(page.instagram_business_account, 'instagram_business_account');
+    const linkedInstagram = requireObject(
+      page.instagram_business_account,
+      'instagram_business_account',
+    );
     if (linkedInstagram.id !== input.instagramUserId) {
       throw new Error('INSTAGRAM_LINKED_ACCOUNT_MISMATCH');
     }
