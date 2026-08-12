@@ -82,7 +82,7 @@ export class PostgresScheduler implements Scheduler {
   async list(toolName?: string): Promise<readonly ScheduledJob[]> {
     const result = toolName
       ? await this.pool.query<Row>(
-          `select * from scheduled_jobs where tool_name = $1 order by run_at asc, id asc`,
+          'select * from scheduled_jobs where tool_name = $1 order by run_at asc, id asc',
           [toolName],
         )
       : await this.pool.query<Row>('select * from scheduled_jobs order by run_at asc, id asc');
