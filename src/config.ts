@@ -89,6 +89,18 @@ const configSchema = z
       });
     }
 
+    if (
+      config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
+      config.META_TOKEN_STORE_PROVIDER !== 'gcp-secret-manager'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_TOKEN_STORE_PROVIDER'],
+        message:
+          'META_TOKEN_STORE_PROVIDER must be gcp-secret-manager when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
+      });
+    }
+
     if (!config.META_ENABLED) return;
 
     const required = [
