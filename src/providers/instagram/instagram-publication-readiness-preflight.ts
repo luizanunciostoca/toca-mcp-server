@@ -40,11 +40,8 @@ export async function checkInstagramPublicationReadiness(
 ): Promise<InstagramPublicationReadinessResult> {
   await options.pool.query('select 1');
 
-  const permissions = permissionsSchema.safeParse(
-    await options.metaClient.get('me/permissions'),
-  );
-  if (!permissions.success)
-    throw new Error('INSTAGRAM_PUBLICATION_PERMISSIONS_RESPONSE_INVALID');
+  const permissions = permissionsSchema.safeParse(await options.metaClient.get('me/permissions'));
+  if (!permissions.success) throw new Error('INSTAGRAM_PUBLICATION_PERMISSIONS_RESPONSE_INVALID');
 
   const publishPermission = permissions.data.data.find(
     (permission) => permission.permission === 'instagram_content_publish',
@@ -59,8 +56,7 @@ export async function checkInstagramPublicationReadiness(
       limit: '100',
     }),
   );
-  if (!accounts.success)
-    throw new Error('INSTAGRAM_PUBLICATION_ACCOUNTS_RESPONSE_INVALID');
+  if (!accounts.success) throw new Error('INSTAGRAM_PUBLICATION_ACCOUNTS_RESPONSE_INVALID');
 
   const matches = accounts.data.data.filter(
     (account) => account.instagram_business_account?.id === options.instagramBusinessAccountId,
