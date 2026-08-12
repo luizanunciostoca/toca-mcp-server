@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ScheduledJob } from '../src/scheduler/scheduler-contracts.js';
 import { InstagramPublicationRuntimeGate } from '../src/worker/instagram-publication-runtime-gate.js';
-import type { JobHandler } from '../src/worker/worker.js';
 
 const job: ScheduledJob = {
   id: 'job-1',
@@ -17,7 +16,7 @@ const job: ScheduledJob = {
 describe('InstagramPublicationRuntimeGate', () => {
   it('blocks execution before the delegate when publication writes are disabled', async () => {
     const execute = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const gate = new InstagramPublicationRuntimeGate(false, { execute } as JobHandler);
+    const gate = new InstagramPublicationRuntimeGate(false, { execute });
 
     await expect(gate.execute(job.payload, job)).rejects.toThrow(
       'INSTAGRAM_PUBLICATION_WRITES_DISABLED',
@@ -27,7 +26,7 @@ describe('InstagramPublicationRuntimeGate', () => {
 
   it('delegates execution when publication writes are explicitly enabled', async () => {
     const execute = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const gate = new InstagramPublicationRuntimeGate(true, { execute } as JobHandler);
+    const gate = new InstagramPublicationRuntimeGate(true, { execute });
 
     await expect(gate.execute(job.payload, job)).resolves.toBeUndefined();
     expect(execute).toHaveBeenCalledOnce();
