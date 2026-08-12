@@ -15,10 +15,12 @@ const required = [
   'src/core/execution-context.ts',
   'src/core/executor.ts',
   'src/core/observability.ts',
+  'src/core/structured-logger.ts',
   'src/core/policy.ts',
   'src/core/secrets.ts',
   'src/core/environment-secret-resolver.ts',
   'src/core/tool-registry.ts',
+  'src/health/readiness.ts',
   'src/persistence/postgres.ts',
   'src/providers/meta/meta-api-client.ts',
   'src/providers/meta/meta-assets.ts',
@@ -35,12 +37,17 @@ const required = [
   'src/scheduler/in-memory-scheduler.ts',
   'src/scheduler/postgres-scheduler.ts',
   'src/scheduler/scheduler-contracts.ts',
+  'src/worker/worker.ts',
+  'src/worker/worker-runtime.ts',
+  'src/worker/postgres-dead-letter.ts',
   'migrations/001_production_foundation.sql',
+  'migrations/002_worker_dead_letter.sql',
   'scripts/migrate.ts',
   'Dockerfile',
   'infra/cloudrun/service.template.yaml',
   '.github/workflows/deploy-gcp.yml',
   'docs/deployment/gcp.md',
+  'docs/operations/worker-runbook.md',
   'test/config.test.ts',
   'test/core.test.ts',
   'test/http-server.test.ts',
@@ -51,6 +58,8 @@ const required = [
   'test/preconnection-runtime.test.ts',
   'test/secrets.test.ts',
   'test/gcp-foundation.test.ts',
+  'test/worker.test.ts',
+  'test/readiness.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/architecture/preconnection-roadmap.md',
@@ -119,6 +128,18 @@ if (/META_(APP_SECRET|ACCESS_TOKEN)=\S+/.test(envExample)) {
   process.exit(1);
 }
 
+const worker = readFileSync('src/worker/worker.ts', 'utf8');
+if (!worker.includes('deadLetters.put') || !worker.includes(':retry:')) {
+  console.error('Worker must preserve retry and dead-letter behavior');
+  process.exit(1);
+}
+
+const httpServer = readFileSync('src/http-server.ts', 'utf8');
+if (!httpServer.includes("'/healthz'") || !httpServer.includes("'/readyz'")) {
+  console.error('Runtime must expose separate liveness and readiness probes');
+  process.exit(1);
+}
+
 const validationGate = readFileSync('docs/integrations/phase-1-real-validation.md', 'utf8');
 if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
   console.error('Phase 1 must retain the real-provider and ChatGPT validation gate');
@@ -128,6 +149,7 @@ if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
 for (const temporary of [
   '.github/workflows/preconnection-format.yml',
   '.github/workflows/gcp-foundation-normalize.yml',
+  '.github/workflows/gcp-format.yml',
 ]) {
   if (existsSync(temporary)) {
     console.error(`Temporary workflow must be removed before validation: ${temporary}`);
