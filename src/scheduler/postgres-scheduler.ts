@@ -55,6 +55,17 @@ export class PostgresScheduler implements Scheduler {
     return result.rows[0] ? mapRow<TPayload>(result.rows[0]) : undefined;
   }
 
+  async reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined> {
+    const result = await this.pool.query<Row>(
+      `update scheduled_jobs
+       set run_at = $2::timestamptz, timezone = $3, updated_at = now()
+       where id = $1 and status = 'SCHEDULED'
+       returning *`,
+      [id, runAt, timezone],
+    );
+    return result.rows[0] ? mapRow(result.rows[0]) : this.get(id);
+  }
+
   async cancel(id: string): Promise<ScheduledJob | undefined> {
     const result = await this.pool.query<Row>(
       `update scheduled_jobs set status = 'CANCELED', updated_at = now()
@@ -62,6 +73,16 @@ export class PostgresScheduler implements Scheduler {
       [id],
     );
     return result.rows[0] ? mapRow(result.rows[0]) : this.get(id);
+  }
+
+  async list(toolName?: string): Promise<readonly ScheduledJob[]> {
+    const result = toolName
+      ? await this.pool.query<Row>(
+          'select * from scheduled_jobs where tool_name = $1 order by run_at asc, id asc',
+          [toolName],
+        )
+      : await this.pool.query<Row>('select * from scheduled_jobs order by run_at asc, id asc');
+    return result.rows.map((row) => mapRow(row));
   }
 
   async claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]> {
