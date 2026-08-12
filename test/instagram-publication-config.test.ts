@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 
+const approvedRequestSha256 = 'a'.repeat(64);
+
 const completeMetaEnv = {
   NODE_ENV: 'test',
   LOG_LEVEL: 'info',
@@ -29,6 +31,7 @@ describe('Instagram publication runtime configuration', () => {
         NODE_ENV: 'test',
         META_ENABLED: 'false',
         INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+        INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: approvedRequestSha256,
         DATABASE_URL: 'postgres://example',
       }),
     ).toThrow('META_ENABLED must be true');
@@ -39,6 +42,7 @@ describe('Instagram publication runtime configuration', () => {
       loadConfig({
         ...completeMetaEnv,
         INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+        INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: approvedRequestSha256,
       }),
     ).toThrow('DATABASE_URL is required');
   });
@@ -48,13 +52,14 @@ describe('Instagram publication runtime configuration', () => {
       loadConfig({
         ...completeMetaEnv,
         INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+        INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: approvedRequestSha256,
         DATABASE_URL: 'postgres://example',
       }),
     ).toThrow('META_TOKEN_STORE_PROVIDER must be gcp-secret-manager');
   });
 
-  it('accepts publication enablement only with Meta, database and OAuth token secret configured', () => {
-    expect(
+  it('requires a pre-approved request hash before publication writes can be enabled', () => {
+    expect(() =>
       loadConfig({
         ...completeMetaEnv,
         INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
@@ -63,9 +68,24 @@ describe('Instagram publication runtime configuration', () => {
         GCP_PROJECT_ID: 'toca-mcp-production',
         META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
       }),
+    ).toThrow('INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256 is required');
+  });
+
+  it('accepts publication enablement only with Meta, database, token secret and approval configured', () => {
+    expect(
+      loadConfig({
+        ...completeMetaEnv,
+        INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+        INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: approvedRequestSha256,
+        DATABASE_URL: 'postgres://example',
+        META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+        GCP_PROJECT_ID: 'toca-mcp-production',
+        META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
+      }),
     ).toMatchObject({
       META_ENABLED: true,
       INSTAGRAM_PUBLICATION_WRITES_ENABLED: true,
+      INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: approvedRequestSha256,
       DATABASE_URL: 'postgres://example',
       META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
       GCP_PROJECT_ID: 'toca-mcp-production',
