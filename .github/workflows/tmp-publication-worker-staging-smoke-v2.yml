@@ -1,0 +1,41 @@
+name: Temporary Publication Worker Staging Smoke V2
+
+on:
+  push:
+    branches:
+      - chore/tmp-publication-worker-staging-smoke-v2
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'false'
+      META_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Run production publication worker command with writes disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          test -z "${GCP_PROJECT_ID:-}"
+          output="$(pnpm start:instagram-publication-worker 2>&1)"
+          printf '%s\n' "$output"
+          grep -F 'instagram.publication.worker.disabled' <<<"$output"
+          if grep -q 'worker.completed' <<<"$output"; then
+            echo 'Unexpected worker execution while writes are disabled' >&2
+            exit 1
+          fi
+          echo 'SAFE_DISABLED_BINARY_PROOF=1'
