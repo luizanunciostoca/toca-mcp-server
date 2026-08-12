@@ -18,21 +18,32 @@ const required = [
   'src/core/policy.ts',
   'src/core/secrets.ts',
   'src/core/tool-registry.ts',
+  'src/providers/meta/meta-api-client.ts',
   'src/providers/meta/meta-assets.ts',
   'src/providers/meta/meta-connection.ts',
   'src/providers/meta/meta-connection-service.ts',
   'src/providers/meta/meta-discovery.ts',
   'src/providers/meta/meta-graph.ts',
   'src/providers/meta/meta-oauth.ts',
+  'src/providers/instagram/instagram-capabilities.ts',
+  'src/providers/instagram/instagram-contracts.ts',
+  'src/providers/meta-ads/budget-guardrail.ts',
+  'src/providers/meta-ads/meta-ads-contracts.ts',
+  'src/providers/meta-ads/meta-ads-graph-provider.ts',
+  'src/scheduler/in-memory-scheduler.ts',
+  'src/scheduler/scheduler-contracts.ts',
   'test/config.test.ts',
   'test/core.test.ts',
   'test/http-server.test.ts',
   'test/meta.test.ts',
   'test/meta-assets.test.ts',
   'test/meta-graph.test.ts',
+  'test/preconnection-contracts.test.ts',
+  'test/preconnection-runtime.test.ts',
   'test/secrets.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
+  'docs/architecture/preconnection-roadmap.md',
   'docs/integrations/meta.md',
   'docs/integrations/phase-1-real-validation.md',
   '.env.example',
@@ -69,7 +80,9 @@ if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
 
 const registry = readFileSync('src/registry.ts', 'utf8');
 if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
-  console.error('Phase 1 must not advertise Instagram or Meta Ads write capabilities');
+  console.error(
+    'Preconnection branches must not advertise Instagram or Meta Ads write capabilities',
+  );
   process.exit(1);
 }
 
@@ -82,6 +95,11 @@ if (/META_(APP_SECRET|ACCESS_TOKEN)=\S+/.test(envExample)) {
 const validationGate = readFileSync('docs/integrations/phase-1-real-validation.md', 'utf8');
 if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
   console.error('Phase 1 must retain the real-provider and ChatGPT validation gate');
+  process.exit(1);
+}
+
+if (existsSync('.github/workflows/preconnection-format.yml')) {
+  console.error('Temporary preconnection formatter workflow must be removed before validation');
   process.exit(1);
 }
 

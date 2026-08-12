@@ -40,18 +40,39 @@ export class MetaApiClient {
   ) {}
 
   async get(path: string, query: Readonly<Record<string, string>> = {}): Promise<unknown> {
+    return this.request('GET', path, query);
+  }
+
+  async post(path: string, body: Readonly<Record<string, string>>): Promise<unknown> {
+    return this.request('POST', path, body);
+  }
+
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    values: Readonly<Record<string, string>>,
+  ): Promise<unknown> {
     const token = await this.secrets.resolve(this.accessToken);
     const base = this.config.graphBaseUrl.replace(/\/$/, '');
     const normalizedPath = path.replace(/^\//, '');
     const url = new URL(`${base}/${this.config.apiVersion}/${normalizedPath}`);
-    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+    let body: string | undefined;
+
+    if (method === 'GET') {
+      for (const [key, value] of Object.entries(values)) url.searchParams.set(key, value);
+    } else {
+      headers['content-type'] = 'application/x-www-form-urlencoded';
+      body = new URLSearchParams(values).toString();
+    }
 
     const response = await this.transport.request(url.toString(), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      method,
+      headers,
+      ...(body ? { body } : {}),
     });
 
     if (!response.ok) throw new MetaApiError(response.status, `META_HTTP_${response.status}`);
