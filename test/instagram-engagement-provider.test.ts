@@ -20,8 +20,13 @@ function response(body: unknown, status = 200): MetaApiResponse {
   };
 }
 
+function jsonBody(init: RequestInit): unknown {
+  if (typeof init.body !== 'string') throw new Error('Expected JSON string body');
+  return JSON.parse(init.body) as unknown;
+}
+
 async function createProvider(
-  handler: (url: string, init: RequestInit) => Promise<MetaApiResponse>,
+  handler: (url: string, init: RequestInit) => MetaApiResponse | Promise<MetaApiResponse>,
 ): Promise<{ provider: InstagramGraphEngagementProvider; requests: RecordedRequest[] }> {
   const secrets = new InMemorySecretStore();
   const accessToken = await secrets.put('meta-user-token', 'USER_TOKEN');
@@ -29,7 +34,7 @@ async function createProvider(
   const transport: MetaApiTransport = {
     async request(url, init) {
       requests.push({ url, init });
-      return handler(url, init);
+      return await handler(url, init);
     },
   };
   const client = new MetaApiClient(
@@ -43,7 +48,7 @@ async function createProvider(
 
 describe('InstagramGraphEngagementProvider Direct routing', () => {
   it('resolves the Page token and sends through PAGE_ID/messages with RESPONSE semantics', async () => {
-    const { provider, requests } = await createProvider(async (url, init) => {
+    const { provider, requests } = await createProvider((url, init) => {
       if (init.method === 'GET') {
         return response({
           data: [
@@ -58,7 +63,7 @@ describe('InstagramGraphEngagementProvider Direct routing', () => {
       }
       expect(url).toBe('https://graph.facebook.com/v24.0/PAGE_1/messages');
       expect(new Headers(init.headers).get('authorization')).toBe('Bearer PAGE_TOKEN');
-      expect(JSON.parse(String(init.body))).toEqual({
+      expect(jsonBody(init)).toEqual({
         recipient: { id: 'IGSID_1' },
         messaging_type: 'RESPONSE',
         message: { text: 'Olá' },
@@ -81,7 +86,7 @@ describe('InstagramGraphEngagementProvider Direct routing', () => {
   });
 
   it('fails closed before POST when the selected Page is linked to a different Instagram account', async () => {
-    const { provider, requests } = await createProvider(async () =>
+    const { provider, requests } = await createProvider(() =>
       response({
         data: [
           {
@@ -107,7 +112,7 @@ describe('InstagramGraphEngagementProvider Direct routing', () => {
   });
 
   it('rejects a provider acknowledgement for a different recipient', async () => {
-    const { provider } = await createProvider(async (_url, init) => {
+    const { provider } = await createProvider((_url, init) => {
       if (init.method === 'GET') {
         return response({
           data: [
