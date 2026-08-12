@@ -57,6 +57,17 @@ export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebho
     const accountId = stringValue(entryValue.id);
     if (!accountId) continue;
 
+    // Meta currently emits Instagram comment webhooks in two supported shapes:
+    // 1) entry.changes[] with { field, value }
+    // 2) entry-level { field, value }
+    // Normalize both through the same path so neither is silently acknowledged as an empty batch.
+    const entryField = stringValue(entryValue.field);
+    const entryValuePayload = isRecord(entryValue.value) ? entryValue.value : undefined;
+    if (entryField && entryValuePayload) {
+      const event = normalizeChange(accountId, entryField, entryValuePayload, entryValue);
+      if (event) events.push(event);
+    }
+
     const changes = Array.isArray(entryValue.changes) ? entryValue.changes : [];
     for (const changeValue of changes) {
       if (!isRecord(changeValue)) continue;
@@ -74,7 +85,7 @@ export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebho
     }
   }
 
-  return events;
+  return deduplicateEvents(events);
 }
 
 function normalizeChange(
@@ -142,6 +153,16 @@ function normalizeDirectValue(
     ...(occurredAt ? { occurredAt } : {}),
     rawType: recipientId ? rawType : `${rawType}_unknown_recipient`,
   };
+}
+
+function deduplicateEvents(
+  events: readonly InstagramWebhookEvent[],
+): readonly InstagramWebhookEvent[] {
+  const unique = new Map<string, InstagramWebhookEvent>();
+  for (const event of events) {
+    if (!unique.has(event.eventId)) unique.set(event.eventId, event);
+  }
+  return [...unique.values()];
 }
 
 function deterministicEventId(
