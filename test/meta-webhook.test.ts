@@ -75,6 +75,69 @@ describe('Meta webhook boundary', () => {
     expect(first[0]?.eventId).toBe(second[0]?.eventId);
   });
 
+  it('normalizes entry-level Instagram comment webhooks', () => {
+    const events = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              time: 1_700_000_010,
+              field: 'comments',
+              value: {
+                id: 'comment-entry-level-1',
+                from: { id: 'sender-entry-level-1', username: 'external-user' },
+                text: 'Comentário de teste',
+                media: { id: 'media-entry-level-1', media_product_type: 'FEED' },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      accountId: '17841402033495654',
+      channel: 'COMMENT',
+      senderId: 'sender-entry-level-1',
+      commentId: 'comment-entry-level-1',
+      mediaId: 'media-entry-level-1',
+      text: 'Comentário de teste',
+      rawType: 'comments',
+    });
+  });
+
+  it('deduplicates the same comment represented at entry and changes level', () => {
+    const events = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              field: 'comments',
+              value: { id: 'comment-duplicate', text: 'Mesmo comentário' },
+              changes: [
+                {
+                  field: 'comments',
+                  value: { id: 'comment-duplicate', text: 'Mesmo comentário' },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      channel: 'COMMENT',
+      commentId: 'comment-duplicate',
+    });
+  });
+
   it('normalizes direct messages without authorizing a reply', () => {
     const events = parseMetaWebhookEvents(
       Buffer.from(
