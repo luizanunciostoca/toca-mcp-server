@@ -29,11 +29,15 @@ describe('TOCA MCP execution-layer boundary', () => {
       META_GRAPH_BASE_URL: 'https://graph.facebook.com',
       META_GRAPH_API_VERSION: 'v24.0',
     });
+
+    const registry = createToolRegistry();
     expect(
-      createToolRegistry()
+      registry
         .list()
+        .filter((tool) => tool.capabilityStatus !== 'PLANNED')
         .map((tool) => tool.name),
     ).toEqual(['system.capabilities', 'system.health']);
+    expect(registry.get('instagram.publish.image')?.capabilityStatus).toBe('PLANNED');
   });
 
   it('requires spreadsheet and token reference configuration together when present', () => {
@@ -83,10 +87,12 @@ describe('TOCA MCP execution-layer boundary', () => {
     expect(createToolRegistry().get('media.assets.rank')).toBeUndefined();
   });
 
-  it('exposes only read-only Instagram capabilities when explicitly enabled', () => {
+  it('exposes implemented read-only Instagram capabilities only when explicitly enabled', () => {
+    const registry = createToolRegistry({ instagramReadsEnabled: true });
     expect(
-      createToolRegistry({ instagramReadsEnabled: true })
+      registry
         .list()
+        .filter((tool) => tool.capabilityStatus === 'IMPLEMENTED')
         .map((tool) => tool.name),
     ).toEqual([
       'instagram.insights.account',
@@ -95,6 +101,7 @@ describe('TOCA MCP execution-layer boundary', () => {
       'system.capabilities',
       'system.health',
     ]);
+    expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
   });
 
   it('constructs configured bootstrap and Instagram read runtimes', () => {
