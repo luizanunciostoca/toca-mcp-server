@@ -11,6 +11,12 @@ import {
 
 const FIXTURE_SHA256 = '32461d5bd1773012acef0ba15636752949bd7c2ce50f9172159d9f56cf0dd9af';
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 describe('GCS publication asset staging', () => {
   it('builds deterministic content-addressed object names', () => {
     expect(
@@ -102,15 +108,18 @@ describe('GCS publication asset staging', () => {
     });
 
     const existenceRequest = fetchImpl.mock.calls[0];
-    expect(String(existenceRequest?.[0])).toBe(result.publicUrl);
+    expect(existenceRequest).toBeDefined();
+    expect(requestUrl(existenceRequest![0])).toBe(result.publicUrl);
 
     const tokenRequest = fetchImpl.mock.calls[1];
-    expect(String(tokenRequest?.[0])).toContain('metadata.google.internal');
-    expect(tokenRequest?.[1]).toMatchObject({ headers: { 'Metadata-Flavor': 'Google' } });
+    expect(tokenRequest).toBeDefined();
+    expect(requestUrl(tokenRequest![0])).toContain('metadata.google.internal');
+    expect(tokenRequest![1]).toMatchObject({ headers: { 'Metadata-Flavor': 'Google' } });
 
     const uploadRequest = fetchImpl.mock.calls[2];
-    expect(String(uploadRequest?.[0])).toContain('upload/storage/v1/b/toca-publication-assets/o');
-    expect(uploadRequest?.[1]).toMatchObject({
+    expect(uploadRequest).toBeDefined();
+    expect(requestUrl(uploadRequest![0])).toContain('upload/storage/v1/b/toca-publication-assets/o');
+    expect(uploadRequest![1]).toMatchObject({
       method: 'POST',
       headers: expect.objectContaining({
         Authorization: 'Bearer runtime-token',
@@ -119,8 +128,9 @@ describe('GCS publication asset staging', () => {
     });
 
     const validationRequest = fetchImpl.mock.calls[3];
-    expect(String(validationRequest?.[0])).toBe(result.publicUrl);
-    expect(validationRequest?.[1]).toMatchObject({
+    expect(validationRequest).toBeDefined();
+    expect(requestUrl(validationRequest![0])).toBe(result.publicUrl);
+    expect(validationRequest![1]).toMatchObject({
       method: 'GET',
       headers: { Range: 'bytes=0-0' },
     });
