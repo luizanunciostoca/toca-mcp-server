@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           BUCKET_URI="gs://${PUBLICATION_ASSET_BUCKET}"
           POLICY="$(gcloud storage buckets get-iam-policy "$BUCKET_URI" --project "$GCP_PROJECT_ID" --format=json)"
-          CONFIG="$(gcloud storage buckets describe "$BUCKET_URI" --project "$GCP_PROJECT_ID" --format=json)"
+          CONFIG="$(gcloud storage buckets describe "$BUCKET_URI" --project "$GCP_PROJECT_ID" --raw --format=json)"
           jq -e --arg sa "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" 'any(.bindings[]?; .role == "roles/storage.objectCreator" and any(.members[]?; . == $sa))' <<<"$POLICY" >/dev/null
           jq -e 'all(.bindings[]?; all(.members[]?; . != "allUsers" and . != "allAuthenticatedUsers"))' <<<"$POLICY" >/dev/null
           jq -e 'any(.lifecycle.rule[]?; .action.type == "Delete" and .condition.age == 7)' <<<"$CONFIG" >/dev/null
