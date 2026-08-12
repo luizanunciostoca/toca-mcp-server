@@ -47,8 +47,10 @@ jobs:
           test "$OPERATION" = "reconcile-publication-assets-bucket"
           jq -e '.projectId == "toca-mcp-production"' infra/control-plane/policy.json >/dev/null
           jq -e '.adminServiceAccount == "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com"' infra/control-plane/policy.json >/dev/null
-          jq -e '.forbidden.projectOwner == true and .forbidden.projectEditor == true and .forbidden.serviceAccountKeys == true and .forbidden.bucketDelete == true and .forbidden.arbitraryGcloud == true and .forbidden.runtimePrivilegeEscalation == true' infra/control-plane/policy.json >/dev/null
+          jq -e '.forbidden.projectOwner == true and .forbidden.projectEditor == true and .forbidden.serviceAccountKeys == true and .forbidden.bucketDelete == true and .forbidden.arbitraryGcloud == true and .forbidden.runtimePrivilegeEscalation == true and .forbidden.publicBucketIam == true' infra/control-plane/policy.json >/dev/null
           jq -e '.allowedOperations["reconcile-publication-assets-bucket"].resourceName == "toca-mcp-publication-assets"' infra/control-plane/policy.json >/dev/null
+          jq -e '.allowedOperations["reconcile-publication-assets-bucket"].publicRead == false' infra/control-plane/policy.json >/dev/null
+          jq -e '.allowedOperations["reconcile-publication-assets-bucket"].deliveryMode == "signed-url"' infra/control-plane/policy.json >/dev/null
           echo "INFRA_POLICY_BOUNDARY_OK=1"
 
       - name: Authenticate as infrastructure administrator
@@ -87,11 +89,6 @@ jobs:
             --member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
             --role="roles/storage.objectCreator"
 
-          gcloud storage buckets add-iam-policy-binding "$BUCKET_URI" \
-            --project "$GCP_PROJECT_ID" \
-            --member="allUsers" \
-            --role="roles/storage.objectViewer"
-
       - name: Verify infrastructure state
         shell: bash
         run: |
@@ -100,6 +97,6 @@ jobs:
           POLICY="$(gcloud storage buckets get-iam-policy "$BUCKET_URI" --project "$GCP_PROJECT_ID" --format=json)"
           CONFIG="$(gcloud storage buckets describe "$BUCKET_URI" --project "$GCP_PROJECT_ID" --format=json)"
           jq -e --arg sa "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" 'any(.bindings[]?; .role == "roles/storage.objectCreator" and any(.members[]?; . == $sa))' <<<"$POLICY" >/dev/null
-          jq -e 'any(.bindings[]?; .role == "roles/storage.objectViewer" and any(.members[]?; . == "allUsers"))' <<<"$POLICY" >/dev/null
+          jq -e 'all(.bindings[]?; all(.members[]?; . != "allUsers" and . != "allAuthenticatedUsers"))' <<<"$POLICY" >/dev/null
           jq -e 'any(.lifecycle.rule[]?; .action.type == "Delete" and .condition.age == 7)' <<<"$CONFIG" >/dev/null
           echo "INFRA_CONTROL_PLANE_RECONCILED=1"
