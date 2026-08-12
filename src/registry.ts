@@ -56,13 +56,108 @@ const instagramReadTools: readonly ToolDefinition[] = [
   },
 ];
 
+const plannedInstagramPublicationTools: readonly ToolDefinition[] = [
+  {
+    name: 'instagram.publish.image',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['instagram_content_publish'],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publish.carousel',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['instagram_content_publish'],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publish.reel',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['instagram_content_publish'],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publish.story',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['instagram_content_publish'],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publication.schedule',
+    version: '1.0.0',
+    provider: 'toca-mcp+Meta/Instagram',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['instagram_content_publish'],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publication.reschedule',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'WRITE_REVERSIBLE',
+    requiredScopes: [],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publication.cancel_scheduled',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'WRITE_REVERSIBLE',
+    requiredScopes: [],
+    capabilityStatus: 'PLANNED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publication.list_scheduled',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'READ',
+    requiredScopes: [],
+    capabilityStatus: 'PLANNED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.publication.status',
+    version: '1.0.0',
+    provider: 'toca-mcp+Meta/Instagram',
+    riskClass: 'READ',
+    requiredScopes: [],
+    capabilityStatus: 'PLANNED',
+    sideEffects: false,
+    idempotent: true,
+  },
+];
+
 export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry();
-  for (const tool of bootstrapTools) registry.register(tool);
+  for (const tool of [...bootstrapTools, ...plannedInstagramPublicationTools]) {
+    registry.register(tool);
+  }
   if (options.instagramReadsEnabled) {
     for (const tool of instagramReadTools) registry.register(tool);
   }
