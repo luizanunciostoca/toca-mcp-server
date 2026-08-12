@@ -81,6 +81,11 @@ jobs:
               });
               const body = await response.json().catch(() => ({}));
               if (response.ok) return body;
+              const providerCode = body?.error?.code;
+              const providerSubcode = body?.error?.error_subcode;
+              console.log(`SAFE_CONTROLLED_DIRECT_WEBHOOK_${stage}_HTTP_STATUS=${response.status}`);
+              if (Number.isInteger(providerCode)) console.log(`SAFE_CONTROLLED_DIRECT_WEBHOOK_${stage}_PROVIDER_CODE=${providerCode}`);
+              if (Number.isInteger(providerSubcode)) console.log(`SAFE_CONTROLLED_DIRECT_WEBHOOK_${stage}_PROVIDER_SUBCODE=${providerSubcode}`);
               const transient = response.status === 429 || response.status >= 500;
               if (method === 'GET' && transient && attempt < maxAttempts) {
                 console.log(`SAFE_CONTROLLED_DIRECT_WEBHOOK_${stage}_TRANSIENT_RETRY=${attempt}`);
@@ -92,7 +97,6 @@ jobs:
             throw new Error(`CONTROLLED_DIRECT_WEBHOOK_${stage}_RETRY_EXHAUSTED`);
           }
 
-          let pendingCorrelationId;
           try {
             const matches = await pool.query(
               `select event_id, sender_scoped_id, provider_message_id, received_at
@@ -120,7 +124,6 @@ jobs:
               `instagram-direct-controlled|${target.provider_message_id}|${replyHash}`,
             );
             const correlationId = `controlled-direct:${idempotencyKey}`;
-            pendingCorrelationId = correlationId;
 
             const client = await pool.connect();
             try {
@@ -154,12 +157,12 @@ jobs:
                 if (state === 'SUCCEEDED') {
                   console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_ALREADY_PRESENT=1');
                   console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_CREATED=0');
-                  process.exitCode = 0;
                   return;
                 }
                 throw new Error(`CONTROLLED_DIRECT_WEBHOOK_IDEMPOTENCY_AMBIGUOUS_${String(state ?? 'MISSING')}`);
               }
               await client.query('commit');
+              console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_IDEMPOTENCY_RESERVED=1');
             } catch (error) {
               await client.query('rollback').catch(() => undefined);
               throw error;
@@ -176,9 +179,11 @@ jobs:
             const pageToken = page?.access_token;
             const linkedAccountId = page?.instagram_business_account?.id;
             if (typeof pageToken !== 'string' || pageToken.length === 0) {
+              await pool.query(`update provider_publications set state='FAILED', last_error='PAGE_TOKEN_MISSING', updated_at=now() where correlation_id=$1 and state='PENDING'`, [correlationId]);
               throw new Error('CONTROLLED_DIRECT_WEBHOOK_PAGE_TOKEN_MISSING');
             }
             if (linkedAccountId !== accountId) {
+              await pool.query(`update provider_publications set state='FAILED', last_error='LINKED_ACCOUNT_MISMATCH', updated_at=now() where correlation_id=$1 and state='PENDING'`, [correlationId]);
               throw new Error('CONTROLLED_DIRECT_WEBHOOK_LINKED_ACCOUNT_MISMATCH');
             }
             console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_PAGE_TOKEN_RESOLVED=1');
@@ -200,9 +205,7 @@ jobs:
               );
             } catch (error) {
               await pool.query(
-                `update provider_publications
-                    set state = 'FAILED', last_error = $2, updated_at = now()
-                  where correlation_id = $1 and state = 'PENDING'`,
+                `update provider_publications set state = 'FAILED', last_error = $2, updated_at = now() where correlation_id = $1 and state = 'PENDING'`,
                 [correlationId, error instanceof Error ? error.message : 'UNKNOWN_SEND_FAILURE'],
               );
               throw error;
@@ -210,19 +213,14 @@ jobs:
 
             if (typeof created?.message_id !== 'string' || typeof created?.recipient_id !== 'string') {
               await pool.query(
-                `update provider_publications
-                    set state = 'FAILED', last_error = 'PROVIDER_IDS_MISSING', updated_at = now()
-                  where correlation_id = $1 and state = 'PENDING'`,
+                `update provider_publications set state = 'FAILED', last_error = 'PROVIDER_IDS_MISSING', updated_at = now() where correlation_id = $1 and state = 'PENDING'`,
                 [correlationId],
               );
               throw new Error('CONTROLLED_DIRECT_WEBHOOK_PROVIDER_IDS_MISSING');
             }
             if (created.recipient_id !== target.sender_scoped_id) {
               await pool.query(
-                `update provider_publications
-                    set state = 'FAILED', external_resource_id = $2,
-                        last_error = 'RECIPIENT_MISMATCH', updated_at = now()
-                  where correlation_id = $1 and state = 'PENDING'`,
+                `update provider_publications set state = 'FAILED', external_resource_id = $2, last_error = 'RECIPIENT_MISMATCH', updated_at = now() where correlation_id = $1 and state = 'PENDING'`,
                 [correlationId, created.message_id],
               );
               throw new Error('CONTROLLED_DIRECT_WEBHOOK_RECIPIENT_MISMATCH');
@@ -233,20 +231,20 @@ jobs:
                   set state = 'SUCCEEDED', external_resource_id = $2,
                       payload = payload || $3::jsonb, last_error = null, updated_at = now()
                 where correlation_id = $1 and state = 'PENDING'`,
-              [
-                correlationId,
-                created.message_id,
-                JSON.stringify({
-                  providerMessageIdHash: sha256(created.message_id),
-                  recipientHash: sha256(created.recipient_id),
-                  providerAcknowledged: true,
-                }),
-              ],
+              [correlationId, created.message_id, JSON.stringify({
+                providerMessageIdHash: sha256(created.message_id),
+                recipientHash: sha256(created.recipient_id),
+                providerAcknowledged: true,
+              })],
             );
 
             console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_ALREADY_PRESENT=0');
             console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_CREATED=1');
             console.log('SAFE_CONTROLLED_DIRECT_WEBHOOK_PROVIDER_ACKNOWLEDGED=1');
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'UNKNOWN';
+            console.error(`CONTROLLED_DIRECT_WEBHOOK_FATAL=${message}`);
+            throw error;
           } finally {
             await pool.end();
           }
@@ -289,25 +287,31 @@ jobs:
             --max-retries 0 --task-timeout 180s --quiet
 
           set +e
-          gcloud run jobs execute "$WRITE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+          EXEC_OUTPUT="$(gcloud run jobs execute "$WRITE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)' 2>&1)"
           EXEC_STATUS=$?
           set -e
+          echo "$EXEC_OUTPUT"
+          EXECUTION="$(echo "$EXEC_OUTPUT" | grep -Eo 'toca-controlled-direct-webhook-write-[a-z0-9]+' | tail -1 || true)"
 
-          MARKERS="$(gcloud logging read \
-            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$WRITE_JOB\" AND textPayload:\"SAFE_CONTROLLED_DIRECT_WEBHOOK_\"" \
-            --project "$PROJECT_ID" --freshness=10m --limit=100 --format='value(textPayload)' 2>/dev/null \
-            | grep -E '^SAFE_CONTROLLED_DIRECT_WEBHOOK_([A-Z_]+_TRANSIENT_RETRY=[0-9]+|TARGET_MATCHES=[0-9]+|PAGE_TOKEN_RESOLVED=1|WRITE_(ALREADY_PRESENT|CREATED)=[01]|PROVIDER_ACKNOWLEDGED=1)$' | sort -u || true)"
-          echo "$MARKERS"
+          if [ -n "$EXECUTION" ]; then
+            for i in $(seq 1 12); do
+              LOGS="$(gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$WRITE_JOB\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION\"" \
+                --project "$PROJECT_ID" --freshness=15m --limit=100 --format='value(textPayload)' 2>/dev/null || true)"
+              if echo "$LOGS" | grep -Eq 'SAFE_CONTROLLED_DIRECT_WEBHOOK_|CONTROLLED_DIRECT_WEBHOOK_FATAL='; then
+                echo '--- CONTROLLED DIRECT EXECUTION LOGS ---'
+                echo "$LOGS" | grep -E 'SAFE_CONTROLLED_DIRECT_WEBHOOK_|CONTROLLED_DIRECT_WEBHOOK_FATAL=|Error:' || true
+                break
+              fi
+              sleep 5
+            done
+          fi
 
           if [ "$EXEC_STATUS" -ne 0 ]; then
-            ERROR_MARKER="$(gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$WRITE_JOB\" AND textPayload:(\"CONTROLLED_DIRECT_WEBHOOK_\" OR \"META_CONTROLLED_DIRECT_WEBHOOK_\")" \
-              --project "$PROJECT_ID" --freshness=10m --limit=50 --format='value(textPayload)' 2>/dev/null \
-              | grep -Eo '(CONTROLLED_DIRECT_WEBHOOK_[A-Z0-9_]+|META_CONTROLLED_DIRECT_WEBHOOK_[A-Z_]+_HTTP_[0-9]+)' | sort -u | tail -20 || true)"
-            echo "$ERROR_MARKER"
             exit "$EXEC_STATUS"
           fi
 
+          MARKERS="$(echo "$LOGS" | grep -E '^SAFE_CONTROLLED_DIRECT_WEBHOOK_' | sort -u || true)"
           CREATED="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_CREATED=//p' | tail -1)"
           ALREADY="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WEBHOOK_WRITE_ALREADY_PRESENT=//p' | tail -1)"
           ACK="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WEBHOOK_PROVIDER_ACKNOWLEDGED=//p' | tail -1)"
