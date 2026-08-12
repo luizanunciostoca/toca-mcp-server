@@ -3,6 +3,7 @@ import { PostgresPublicationExecutionStore } from '../persistence/postgres-publi
 import { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
 import { MetaInstagramPublicationTransport } from '../providers/instagram/meta-instagram-publication-transport.js';
 import type { MetaApiClient } from '../providers/meta/meta-api-client.js';
+import { InstagramPublicationApprovalAuditGate } from './instagram-publication-boundary.js';
 import {
   INSTAGRAM_PUBLICATION_JOB,
   InstagramPublicationJobHandler,
@@ -14,6 +15,7 @@ export interface InstagramPublicationWorkerCompositionOptions {
   readonly pool: pg.Pool;
   readonly metaClient: MetaApiClient;
   readonly writesEnabled: boolean;
+  readonly approvedRequestSha256?: string;
 }
 
 export function createInstagramPublicationWorkerHandlers(
@@ -23,7 +25,12 @@ export function createInstagramPublicationWorkerHandlers(
   const transport = new MetaInstagramPublicationTransport(options.metaClient);
   const executor = new InstagramPublicationExecutor(store, transport);
   const handler = new InstagramPublicationJobHandler(executor);
-  const gated = new InstagramPublicationRuntimeGate(options.writesEnabled, handler);
+  const approvalAudit = new InstagramPublicationApprovalAuditGate(
+    options.pool,
+    options.approvedRequestSha256,
+    handler,
+  );
+  const gated = new InstagramPublicationRuntimeGate(options.writesEnabled, approvalAudit);
 
   return new Map([[INSTAGRAM_PUBLICATION_JOB, gated]]);
 }
