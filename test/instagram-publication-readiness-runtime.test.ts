@@ -29,11 +29,13 @@ function createPool(): pg.Pool {
 }
 
 function createMetaClient(): MetaApiClient {
-  const get = vi.fn(async (path: string) => {
+  const get = vi.fn((path: string) => {
     if (path === 'me/permissions') {
-      return { data: [{ permission: 'instagram_content_publish', status: 'granted' }] };
+      return Promise.resolve({
+        data: [{ permission: 'instagram_content_publish', status: 'granted' }],
+      });
     }
-    return {
+    return Promise.resolve({
       data: [
         {
           id: 'page-123',
@@ -41,7 +43,7 @@ function createMetaClient(): MetaApiClient {
           instagram_business_account: { id: 'ig-123' },
         },
       ],
-    };
+    });
   });
   return { get } as unknown as MetaApiClient;
 }
