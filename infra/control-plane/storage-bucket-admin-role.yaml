@@ -1,0 +1,9 @@
+title: TOCA MCP Infrastructure Storage Admin
+description: Controlled infrastructure permissions for creating and configuring TOCA MCP Cloud Storage buckets without bucket deletion or project-wide IAM administration.
+stage: GA
+includedPermissions:
+  - storage.buckets.create
+  - storage.buckets.get
+  - storage.buckets.getIamPolicy
+  - storage.buckets.setIamPolicy
+  - storage.buckets.update
