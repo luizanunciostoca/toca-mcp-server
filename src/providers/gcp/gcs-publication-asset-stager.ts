@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 export interface PublicationAssetStageRequest {
@@ -12,6 +13,7 @@ export interface PublicationAssetStageResult {
   readonly publicUrl: string;
   readonly contentType: string;
   readonly sizeBytes: number;
+  readonly sha256: string;
 }
 
 export interface GcsPublicationAssetStagerOptions {
@@ -31,8 +33,22 @@ export class GcsPublicationAssetStager {
     const bytes = await readFile(request.sourcePath);
     if (bytes.byteLength === 0) throw new Error('PUBLICATION_ASSET_EMPTY');
 
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const objectName = buildPublicationAssetObjectName(request, sha256);
+    const publicUrl = buildPublicGcsObjectUrl(this.options.bucketName, objectName);
+
+    const existingContentType = await tryValidatePublicImageUrl(publicUrl, this.fetchImpl);
+    if (existingContentType) {
+      return {
+        objectName,
+        publicUrl,
+        contentType: existingContentType,
+        sizeBytes: bytes.byteLength,
+        sha256,
+      };
+    }
+
     const accessToken = await this.fetchAccessToken();
-    const objectName = buildPublicationAssetObjectName(request);
     const uploadUrl = new URL(
       `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(this.options.bucketName)}/o`,
     );
@@ -52,7 +68,6 @@ export class GcsPublicationAssetStager {
       throw new Error(`PUBLICATION_ASSET_UPLOAD_FAILED:${uploadResponse.status}`);
     }
 
-    const publicUrl = buildPublicGcsObjectUrl(this.options.bucketName, objectName);
     const validatedContentType = await validatePublicImageUrl(publicUrl, this.fetchImpl);
 
     return {
@@ -60,6 +75,7 @@ export class GcsPublicationAssetStager {
       publicUrl,
       contentType: validatedContentType,
       sizeBytes: bytes.byteLength,
+      sha256,
     };
   }
 
@@ -79,11 +95,13 @@ export class GcsPublicationAssetStager {
 
 export function buildPublicationAssetObjectName(
   request: Pick<PublicationAssetStageRequest, 'assetId' | 'correlationId' | 'contentType'>,
+  sha256: string,
 ): string {
   const assetId = sanitizeSegment(request.assetId, 'assetId');
   const correlationId = sanitizeSegment(request.correlationId, 'correlationId');
+  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('PUBLICATION_ASSET_SHA256_INVALID');
   const extension = extensionFor(request.contentType);
-  return `instagram/${correlationId}/${assetId}.${extension}`;
+  return `instagram/${correlationId}/${assetId}-${sha256.slice(0, 16)}.${extension}`;
 }
 
 export function buildPublicGcsObjectUrl(bucketName: string, objectName: string): string {
@@ -109,6 +127,26 @@ export async function validatePublicImageUrl(
   const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
   if (!contentType?.startsWith('image/')) {
     throw new Error(`PUBLICATION_ASSET_PUBLIC_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`);
+  }
+  return contentType;
+}
+
+async function tryValidatePublicImageUrl(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<string | undefined> {
+  const response = await fetchImpl(url, {
+    method: 'GET',
+    headers: { Range: 'bytes=0-0' },
+    redirect: 'follow',
+  });
+  if (response.status === 404) return undefined;
+  if (!(response.status === 200 || response.status === 206)) {
+    throw new Error(`PUBLICATION_ASSET_EXISTING_FETCH_FAILED:${response.status}`);
+  }
+  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
+  if (!contentType?.startsWith('image/')) {
+    throw new Error(`PUBLICATION_ASSET_EXISTING_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`);
   }
   return contentType;
 }
