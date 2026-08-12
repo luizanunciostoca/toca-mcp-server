@@ -1,4 +1,3 @@
-# Recheck after controlled-write attempt c5a1300
 name: Temporary Direct Webhook Diagnostics
 
 on:
@@ -32,7 +31,7 @@ jobs:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Build read-only DB diagnostic image
+      - name: Build rollback-only DB diagnostic image
         shell: bash
         run: |
           set -euo pipefail
@@ -46,43 +45,33 @@ jobs:
           const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
           const targetHash = sha256('TESTE TOCA MCP DIRECT WEBHOOK 002');
           const replyHash = sha256('TESTE TOCA MCP DIRECT REPLY CONTROLADO 002');
+          const accountId = '17841402033495654';
           const since = new Date('2026-08-12T01:19:06Z');
           try {
-            const targetRows = await pool.query(`
-              select event_id, provider_message_id, sender_scoped_id, received_at
-              from meta_webhook_events
-              where channel = 'DIRECT' and text_sha256 = $1 and received_at >= $2
-              order by received_at desc limit 2
-            `, [targetHash, since]);
-            let publication = { found: false };
-            if (targetRows.rowCount === 1 && typeof targetRows.rows[0].provider_message_id === 'string') {
-              const idempotencyKey = sha256(`instagram-direct-controlled|${targetRows.rows[0].provider_message_id}|${replyHash}`);
-              const pub = await pool.query(`
-                select state, external_resource_id, last_error, payload, created_at, updated_at
-                from provider_publications where idempotency_key = $1 limit 1
-              `, [idempotencyKey]);
-              if (pub.rowCount === 1) {
-                const row = pub.rows[0];
-                publication = {
-                  found: true,
-                  state: row.state,
-                  has_external_resource_id: typeof row.external_resource_id === 'string' && row.external_resource_id.length > 0,
-                  last_error: row.last_error ?? null,
-                  provider_acknowledged: row.payload?.providerAcknowledged === true,
-                  created_at: row.created_at,
-                  updated_at: row.updated_at,
-                };
-              }
-            }
-            const recent = await pool.query(`
-              select state, last_error, external_resource_id is not null as has_external_resource_id, created_at, updated_at
-              from provider_publications
-              where provider='meta' and created_at >= $1
-              order by created_at desc limit 10
-            `, [since]);
+            const targetRows = await pool.query(`select event_id, provider_message_id, sender_scoped_id from meta_webhook_events where channel='DIRECT' and text_sha256=$1 and received_at >= $2 order by received_at desc limit 2`, [targetHash, since]);
             console.log('SAFE_DIRECT_DIAG_TARGET_MATCHES=' + targetRows.rowCount);
-            console.log('SAFE_DIRECT_DIAG_PUBLICATION=' + JSON.stringify(publication));
-            console.log('SAFE_DIRECT_DIAG_RECENT_PUBLICATIONS=' + JSON.stringify(recent.rows));
+            if (targetRows.rowCount !== 1) throw new Error('TARGET_COUNT_INVALID');
+            const target = targetRows.rows[0];
+            const idempotencyKey = sha256(`instagram-direct-controlled|${target.provider_message_id}|${replyHash}`);
+            const correlationId = `controlled-direct:${idempotencyKey}`;
+
+            const columns = await pool.query(`select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema='public' and table_name='provider_publications' order by ordinal_position`);
+            const constraints = await pool.query(`select conname, pg_get_constraintdef(oid) as definition from pg_constraint where conrelid='public.provider_publications'::regclass order by conname`);
+            console.log('SAFE_DIRECT_DIAG_COLUMNS=' + JSON.stringify(columns.rows));
+            console.log('SAFE_DIRECT_DIAG_CONSTRAINTS=' + JSON.stringify(constraints.rows));
+
+            const client = await pool.connect();
+            try {
+              await client.query('begin');
+              try {
+                const inserted = await client.query(`insert into provider_publications (correlation_id, provider, account_id, state, idempotency_key, payload) values ($1,'meta',$2,'PENDING',$3,$4::jsonb) returning correlation_id`, [correlationId, accountId, idempotencyKey, JSON.stringify({ channel:'DIRECT', targetEventIdHash:sha256(target.event_id), providerMessageIdHash:sha256(target.provider_message_id), replyHash })]);
+                console.log('SAFE_DIRECT_DIAG_ROLLBACK_INSERT_SUCCEEDED=' + inserted.rowCount);
+              } catch (error) {
+                console.log('SAFE_DIRECT_DIAG_INSERT_ERROR=' + JSON.stringify({ name:error?.name ?? null, code:error?.code ?? null, constraint:error?.constraint ?? null, column:error?.column ?? null, table:error?.table ?? null, message:error?.message ?? null }));
+              } finally {
+                await client.query('rollback').catch(() => undefined);
+              }
+            } finally { client.release(); }
           } finally { await pool.end(); }
           NODE
           cat > /tmp/direct-webhook-diag/Dockerfile <<'DOCKER'
@@ -100,18 +89,16 @@ jobs:
           docker build -t "$IMAGE" /tmp/direct-webhook-diag
           docker push "$IMAGE"
           echo "DIAG_IMAGE=$IMAGE" >> "$GITHUB_ENV"
-      - name: Run read-only DB diagnostics
+      - name: Run rollback-only DB diagnostics
         shell: bash
         run: |
           set -euo pipefail
           cleanup() { gcloud run jobs delete "$DIAG_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          gcloud run jobs deploy "$DIAG_JOB" --image "$DIAG_IMAGE" --project "$PROJECT_ID" --region "$REGION" \
-            --service-account "$RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
-            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs deploy "$DIAG_JOB" --image "$DIAG_IMAGE" --project "$PROJECT_ID" --region "$REGION" --service-account "$RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" --max-retries 0 --task-timeout 120s --quiet
           EXECUTION="$(gcloud run jobs execute "$DIAG_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
-          for i in 1 2 3 4 5 6; do
-            OUT="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$DIAG_JOB\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION\" AND textPayload:\"SAFE_DIRECT_DIAG_\"" --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null || true)"
+          for i in $(seq 1 8); do
+            OUT="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$DIAG_JOB\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION\" AND textPayload:\"SAFE_DIRECT_DIAG_\"" --project "$PROJECT_ID" --freshness=10m --limit=30 --format='value(textPayload)' 2>/dev/null || true)"
             if [ -n "$OUT" ]; then echo "$OUT"; exit 0; fi
             sleep 5
           done
