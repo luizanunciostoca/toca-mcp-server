@@ -192,8 +192,9 @@ export class MetaOAuthService {
     authorizationUrl.searchParams.set('client_id', this.config.appId);
     authorizationUrl.searchParams.set('redirect_uri', this.config.redirectUri);
     authorizationUrl.searchParams.set('response_type', 'code');
-    const requestedScopes = [...new Set([...this.config.requestedScopes, requiredPublicationOAuthScope])]
-      .sort();
+    const requestedScopes = this.config.requestedScopes.includes('instagram_basic')
+      ? [...new Set([...this.config.requestedScopes, requiredPublicationOAuthScope])].sort()
+      : [...this.config.requestedScopes];
     authorizationUrl.searchParams.set('scope', requestedScopes.join(','));
     authorizationUrl.searchParams.set('state', state);
 
