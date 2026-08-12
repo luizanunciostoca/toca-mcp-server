@@ -49,6 +49,7 @@ const required = [
   'Dockerfile',
   'infra/cloudrun/service.template.yaml',
   '.github/workflows/deploy-gcp.yml',
+  '.github/workflows/deploy-instagram-publication-worker-gcp.yml',
   'docs/deployment/gcp.md',
   'docs/operations/worker-runbook.md',
   'docs/integrations/instagram-engagement.md',
@@ -116,6 +117,35 @@ if (
 }
 if (deployWorkflow.includes('service_account_key') || deployWorkflow.includes('credentials_json')) {
   console.error('Long-lived Google service-account keys are forbidden');
+  process.exit(1);
+}
+
+const publicationWorkerDeployWorkflow = readFileSync(
+  '.github/workflows/deploy-instagram-publication-worker-gcp.yml',
+  'utf8',
+);
+if (
+  !publicationWorkerDeployWorkflow.includes('id-token: write') ||
+  !publicationWorkerDeployWorkflow.includes('workload_identity_provider')
+) {
+  console.error('Publication worker GCP deployment must use GitHub OIDC / Workload Identity Federation');
+  process.exit(1);
+}
+if (
+  !publicationWorkerDeployWorkflow.includes('dist/src/instagram-publication-worker.js') ||
+  !publicationWorkerDeployWorkflow.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=false') ||
+  !publicationWorkerDeployWorkflow.includes('META_ENABLED=false')
+) {
+  console.error('Publication worker deployment must remain explicitly disabled and use its dedicated entrypoint');
+  process.exit(1);
+}
+if (
+  publicationWorkerDeployWorkflow.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=true') ||
+  publicationWorkerDeployWorkflow.includes('META_ENABLED=true') ||
+  publicationWorkerDeployWorkflow.includes('service_account_key') ||
+  publicationWorkerDeployWorkflow.includes('credentials_json')
+) {
+  console.error('Publication worker deployment cannot arm writes or use long-lived GCP credentials');
   process.exit(1);
 }
 
