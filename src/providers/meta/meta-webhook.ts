@@ -114,9 +114,7 @@ function normalizeChange(
   const mediaId = stringValue(value.media_id) ?? nestedString(value, 'media', 'id');
   const senderId = nestedString(value, 'from', 'id') ?? stringValue(value.from_id);
   const text = stringValue(value.text) ?? stringValue(value.message);
-  const occurredAt = normalizeTimestamp(
-    value.created_time ?? value.timestamp ?? fallbackTimestamp,
-  );
+  const occurredAt = normalizeTimestamp(value.created_time ?? value.timestamp ?? fallbackTimestamp);
 
   if (!commentId && !field.includes('comment')) return undefined;
 
