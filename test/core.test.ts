@@ -47,12 +47,26 @@ describe('ToolRegistry', () => {
     expect(() => registry.register(readTool)).toThrow(/already registered/);
   });
 
-  it('exposes no Meta write capability before provider validation', () => {
-    expect(
-      createToolRegistry()
-        .list()
-        .map((tool) => tool.name),
-    ).toEqual(['system.capabilities', 'system.health']);
+  it('exposes planned publication discovery without making writes executable', () => {
+    const registry = createToolRegistry();
+    const names = registry.list().map((tool) => tool.name);
+
+    expect(names).toContain('system.capabilities');
+    expect(names).toContain('system.health');
+    expect(names).toContain('instagram.publish.image');
+    expect(names).toContain('instagram.publication.schedule');
+    expect(names).toContain('instagram.publication.status');
+    expect(registry.get('instagram.publish.image')?.capabilityStatus).toBe('PLANNED');
+    expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
+  });
+
+  it('preserves implemented Instagram reads when the provider-backed read boundary is enabled', () => {
+    const registry = createToolRegistry({ instagramReadsEnabled: true });
+    expect(registry.get('instagram.media.list')).toMatchObject({
+      capabilityStatus: 'IMPLEMENTED',
+      riskClass: 'READ',
+    });
+    expect(registry.get('instagram.publish.image')?.capabilityStatus).toBe('PLANNED');
   });
 });
 
