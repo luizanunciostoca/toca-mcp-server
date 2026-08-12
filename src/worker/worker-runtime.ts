@@ -17,6 +17,7 @@ export interface WorkerRuntimeOptions {
   readonly logger?: StructuredLogger;
   readonly retry?: RetryPolicy;
   readonly batchSize?: number;
+  readonly claimToolName?: string;
 }
 
 export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<number> {
@@ -33,6 +34,7 @@ export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<num
       maxDelayMs: 30 * 60_000,
     },
     ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
+    ...(options.claimToolName === undefined ? {} : { claimToolName: options.claimToolName }),
   });
 
   const claimed = await worker.runOnce();

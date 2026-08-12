@@ -43,6 +43,7 @@ export interface WorkerOptions {
   readonly logger: WorkerLogger;
   readonly retry: RetryPolicy;
   readonly batchSize?: number;
+  readonly claimToolName?: string;
   readonly now?: () => Date;
   readonly createId?: () => string;
 }
@@ -79,7 +80,11 @@ export class SchedulerWorker {
 
   async runOnce(): Promise<number> {
     const startedAt = this.#now();
-    const jobs = await this.options.scheduler.claimDue(startedAt.toISOString(), this.#batchSize);
+    const jobs = await this.options.scheduler.claimDue(
+      startedAt.toISOString(),
+      this.#batchSize,
+      this.options.claimToolName,
+    );
     this.options.telemetry.record('worker.claimed_jobs', jobs.length);
 
     for (const job of jobs) {
