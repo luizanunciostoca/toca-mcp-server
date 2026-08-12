@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/http.ts",
     "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -21,6 +23,7 @@
     "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.0.0"
   },

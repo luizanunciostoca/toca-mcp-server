@@ -4,6 +4,11 @@ import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
+import {
+  metaOAuthConfigSchema,
+  type MetaOAuthTransport,
+} from '../src/providers/meta/meta-connection.js';
+import { InMemoryOAuthStateStore, MetaOAuthService } from '../src/providers/meta/meta-oauth.js';
 import { createToolRegistry } from '../src/registry.js';
 
 const readTool: ToolDefinition = {
@@ -42,7 +47,7 @@ describe('ToolRegistry', () => {
     expect(() => registry.register(readTool)).toThrow(/already registered/);
   });
 
-  it('exposes only bootstrap system capabilities before providers exist', () => {
+  it('exposes no Meta write capability before provider validation', () => {
     expect(
       createToolRegistry()
         .list()
@@ -136,5 +141,83 @@ describe('ExecutionContext', () => {
         budgetAuthorized: -1,
       }),
     ).toThrow();
+  });
+});
+
+const validMetaOAuthConfig = {
+  appId: 'app-id',
+  appSecret: { provider: 'env', key: 'META_APP_SECRET' },
+  authorizationEndpoint: 'https://www.facebook.com/dialog/oauth',
+  tokenEndpoint: 'https://graph.facebook.com/oauth/access_token',
+  redirectUri: 'https://example.com/oauth/meta/callback',
+  requestedScopes: ['pages_show_list'],
+};
+
+describe('Meta OAuth configuration', () => {
+  it('accepts secret references instead of raw app secrets', () => {
+    expect(metaOAuthConfigSchema.parse(validMetaOAuthConfig)).toEqual(validMetaOAuthConfig);
+  });
+
+  it('rejects invalid redirect URIs and empty scope sets', () => {
+    expect(() =>
+      metaOAuthConfigSchema.parse({
+        ...validMetaOAuthConfig,
+        redirectUri: 'not-a-url',
+        requestedScopes: [],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('Meta OAuth state flow', () => {
+  const createTransport = (): MetaOAuthTransport => ({
+    exchangeAuthorizationCode: () =>
+      Promise.resolve({
+        accessToken: { provider: 'test-secret-store', key: 'meta/access-token' },
+        grantedScopes: ['pages_show_list'],
+      }),
+  });
+
+  it('generates an authorization URL with state and exchanges a valid callback once', async () => {
+    const now = new Date('2026-08-09T02:00:00.000Z');
+    const service = new MetaOAuthService(
+      metaOAuthConfigSchema.parse(validMetaOAuthConfig),
+      new InMemoryOAuthStateStore(),
+      createTransport(),
+      { now: () => now },
+    );
+
+    const authorization = await service.beginAuthorization();
+    const url = new URL(authorization.authorizationUrl);
+    expect(url.searchParams.get('state')).toBe(authorization.state);
+    expect(url.searchParams.get('client_id')).toBe('app-id');
+    expect(url.searchParams.get('scope')).toBe('pages_show_list');
+
+    await expect(
+      service.completeAuthorization({ code: 'authorization-code', state: authorization.state }),
+    ).resolves.toMatchObject({
+      accessToken: { provider: 'test-secret-store', key: 'meta/access-token' },
+    });
+
+    await expect(
+      service.completeAuthorization({ code: 'replay', state: authorization.state }),
+    ).rejects.toThrow(/already-consumed/);
+  });
+
+  it('rejects expired state before token exchange', async () => {
+    let now = new Date('2026-08-09T02:00:00.000Z');
+    const service = new MetaOAuthService(
+      metaOAuthConfigSchema.parse(validMetaOAuthConfig),
+      new InMemoryOAuthStateStore(),
+      createTransport(),
+      { stateTtlMs: 1000, now: () => now },
+    );
+
+    const authorization = await service.beginAuthorization();
+    now = new Date('2026-08-09T02:00:02.000Z');
+
+    await expect(
+      service.completeAuthorization({ code: 'authorization-code', state: authorization.state }),
+    ).rejects.toThrow(/expired/);
   });
 });
