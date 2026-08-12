@@ -118,7 +118,9 @@ describe('GCS publication asset staging', () => {
 
     const uploadRequest = fetchImpl.mock.calls[2];
     expect(uploadRequest).toBeDefined();
-    expect(requestUrl(uploadRequest![0])).toContain('upload/storage/v1/b/toca-publication-assets/o');
+    expect(requestUrl(uploadRequest![0])).toContain(
+      'upload/storage/v1/b/toca-publication-assets/o',
+    );
     expect(uploadRequest![1]).toMatchObject({
       method: 'POST',
       headers: expect.objectContaining({
