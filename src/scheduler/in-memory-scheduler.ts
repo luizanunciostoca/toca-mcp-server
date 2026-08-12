@@ -22,12 +22,28 @@ export class InMemoryScheduler implements Scheduler {
     return Promise.resolve(this.jobs.get(id) as ScheduledJob<TPayload> | undefined);
   }
 
+  reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined> {
+    const current = this.jobs.get(id);
+    if (!current || current.status !== 'SCHEDULED') return Promise.resolve(current);
+    const rescheduled: ScheduledJob = { ...current, runAt, timezone };
+    this.jobs.set(id, rescheduled);
+    return Promise.resolve(rescheduled);
+  }
+
   cancel(id: string): Promise<ScheduledJob | undefined> {
     const current = this.jobs.get(id);
     if (!current || current.status === 'SUCCEEDED') return Promise.resolve(current);
     const canceled: ScheduledJob = { ...current, status: 'CANCELED' };
     this.jobs.set(id, canceled);
     return Promise.resolve(canceled);
+  }
+
+  list(toolName?: string): Promise<readonly ScheduledJob[]> {
+    return Promise.resolve(
+      [...this.jobs.values()]
+        .filter((job) => toolName === undefined || job.toolName === toolName)
+        .sort((left, right) => left.runAt.localeCompare(right.runAt) || left.id.localeCompare(right.id)),
+    );
   }
 
   claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]> {
