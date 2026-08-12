@@ -30,7 +30,7 @@ export class InstagramPublicationJobScheduler {
     runAt: string,
     timezone: string,
   ): Promise<ScheduledJob<InstagramPublishRequest>> {
-    const payload = instagramPublishRequestSchema.parse(request);
+    const payload = parseInstagramPublishRequest(request);
     return this.scheduler.schedule({
       id: this.createId(),
       toolName: INSTAGRAM_PUBLICATION_JOB,
@@ -46,10 +46,22 @@ export class InstagramPublicationJobHandler implements JobHandler {
   constructor(private readonly executor: InstagramPublicationExecutor) {}
 
   async execute(payload: unknown): Promise<void> {
-    const request = instagramPublishRequestSchema.parse(payload);
+    const request = parseInstagramPublishRequest(payload);
     const result = await this.executor.execute(request);
     if (!result.completed) {
       throw new Error('INSTAGRAM_PUBLICATION_PROCESSING_PENDING');
     }
   }
+}
+
+function parseInstagramPublishRequest(value: unknown): InstagramPublishRequest {
+  const parsed = instagramPublishRequestSchema.parse(value);
+  return {
+    account: parsed.account,
+    mediaType: parsed.mediaType,
+    mediaUrls: parsed.mediaUrls,
+    correlationId: parsed.correlationId,
+    idempotencyKey: parsed.idempotencyKey,
+    ...(parsed.caption !== undefined ? { caption: parsed.caption } : {}),
+  };
 }
