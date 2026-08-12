@@ -28,11 +28,18 @@ jobs:
       - name: Run compiled publication worker with writes disabled
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           test -z "${DATABASE_URL:-}"
           test -z "${GCP_PROJECT_ID:-}"
+          set +e
           output="$(node dist/instagram-publication-worker.js 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$output"
+          echo "WORKER_EXIT_CODE=$status"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           grep -Fx 'instagram.publication.worker.disabled' <<<"$output"
           if grep -q 'worker.completed' <<<"$output"; then
             echo 'Unexpected worker execution while writes are disabled' >&2
