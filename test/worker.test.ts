@@ -113,4 +113,49 @@ describe('SchedulerWorker', () => {
       lastError: 'Error: boom',
     });
   });
+
+  it('claims only the configured tool name for a dedicated worker', async () => {
+    const scheduler = new InMemoryScheduler();
+    const deadLetters = new MemoryDeadLetters();
+    const executed: string[] = [];
+    await scheduler.schedule({
+      id: 'publication-job',
+      toolName: 'internal.instagram.publication.execute',
+      payload: {},
+      runAt: '2026-08-09T11:59:00.000Z',
+      timezone: 'America/Bahia',
+      idempotencyKey: 'publication-key',
+    });
+    await scheduler.schedule({
+      id: 'other-job',
+      toolName: 'internal.other.execute',
+      payload: {},
+      runAt: '2026-08-09T11:58:00.000Z',
+      timezone: 'America/Bahia',
+      idempotencyKey: 'other-key',
+    });
+
+    const worker = new SchedulerWorker({
+      scheduler,
+      handlers: new MapJobHandlerRegistry(
+        new Map([
+          [
+            'internal.instagram.publication.execute',
+            { execute: (_payload, job) => Promise.resolve(executed.push(job.id)).then(() => undefined) },
+          ],
+        ]),
+      ),
+      deadLetters,
+      telemetry: new NoopTelemetry(),
+      logger,
+      retry: { maxAttempts: 1, baseDelayMs: 1_000, maxDelayMs: 10_000 },
+      claimToolName: 'internal.instagram.publication.execute',
+      now: () => new Date('2026-08-09T12:00:00.000Z'),
+    });
+
+    expect(await worker.runOnce()).toBe(1);
+    expect(executed).toEqual(['publication-job']);
+    expect((await scheduler.get('publication-job'))?.status).toBe('SUCCEEDED');
+    expect((await scheduler.get('other-job'))?.status).toBe('SCHEDULED');
+  });
 });
