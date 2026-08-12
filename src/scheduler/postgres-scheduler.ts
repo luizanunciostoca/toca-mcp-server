@@ -85,18 +85,27 @@ export class PostgresScheduler implements Scheduler {
     return result.rows.map((row) => mapRow(row));
   }
 
-  async claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]> {
+  async claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      const selected = await client.query<Row>(
-        `select * from scheduled_jobs
-         where status = 'SCHEDULED' and run_at <= $1::timestamptz
-         order by run_at asc
-         for update skip locked
-         limit $2`,
-        [nowIso, limit],
-      );
+      const selected = toolName
+        ? await client.query<Row>(
+            `select * from scheduled_jobs
+             where status = 'SCHEDULED' and run_at <= $1::timestamptz and tool_name = $3
+             order by run_at asc
+             for update skip locked
+             limit $2`,
+            [nowIso, limit, toolName],
+          )
+        : await client.query<Row>(
+            `select * from scheduled_jobs
+             where status = 'SCHEDULED' and run_at <= $1::timestamptz
+             order by run_at asc
+             for update skip locked
+             limit $2`,
+            [nowIso, limit],
+          );
       const claimed: ScheduledJob[] = [];
       for (const row of selected.rows) {
         const updated = await client.query<Row>(
