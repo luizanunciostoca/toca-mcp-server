@@ -45,7 +45,7 @@ jobs:
           const pageId = process.env.PAGE_ID;
           const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
           const writesEnabled = process.env.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED === 'true';
-          const targetText = 'TESTE TOCA MCP PERSIST DIRECT 001';
+          const targetText = 'TESTE TOCA MCP DIRECT WRITE 001';
           const replyText = 'TESTE TOCA MCP DIRECT REPLY CONTROLADO 001';
 
           if (!oauthToken || !pageId || !accountId) throw new Error('CONTROLLED_DIRECT_CONFIGURATION_MISSING');
@@ -88,9 +88,6 @@ jobs:
           if (linkedAccountId !== accountId) throw new Error('CONTROLLED_DIRECT_LINKED_ACCOUNT_MISMATCH');
           console.log('SAFE_CONTROLLED_DIRECT_PAGE_TOKEN_RESOLVED=1');
 
-          // Use Meta's canonical Page conversations listing. We deliberately avoid
-          // guessing a recipient: the write is permitted only after the known test
-          // DM is found exactly once across the returned conversations.
           const conversations = await request(
             `${pageId}/conversations?fields=id&limit=50`,
             pageToken,
