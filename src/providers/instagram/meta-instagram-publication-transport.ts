@@ -8,7 +8,6 @@ import {
 import type { InstagramPublicationTransport } from './instagram-publication-executor.js';
 
 type IdResponse = { readonly id: string };
-type StatusResponse = { readonly status_code: string };
 
 export class MetaInstagramPublicationTransport implements InstagramPublicationTransport {
   constructor(private readonly client: MetaApiClient) {}
