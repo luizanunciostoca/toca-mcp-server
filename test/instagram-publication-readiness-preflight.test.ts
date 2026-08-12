@@ -9,7 +9,7 @@ function createPool() {
 }
 
 function createMetaClient(responses: Readonly<Record<string, unknown>>) {
-  const get = vi.fn(async (path: string) => responses[path]);
+  const get = vi.fn((path: string) => Promise.resolve(responses[path]));
   const post = vi.fn();
   return {
     client: { get, post } as unknown as MetaApiClient,
