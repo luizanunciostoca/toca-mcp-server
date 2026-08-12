@@ -15,7 +15,7 @@
     "start:http": "node dist/http.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --write . && git diff -- src/scheduler/in-memory-scheduler.ts src/scheduler/postgres-scheduler.ts && exit 1",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
