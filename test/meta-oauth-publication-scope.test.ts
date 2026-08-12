@@ -34,13 +34,10 @@ describe('Meta OAuth Instagram publication scope', () => {
       'pages_show_list',
       'instagram_basic',
     ]).beginAuthorization();
-    const scopes = new URL(authorization.authorizationUrl).searchParams.get('scope')?.split(',') ?? [];
+    const scopes =
+      new URL(authorization.authorizationUrl).searchParams.get('scope')?.split(',') ?? [];
 
-    expect(scopes).toEqual([
-      'instagram_basic',
-      'instagram_content_publish',
-      'pages_show_list',
-    ]);
+    expect(scopes).toEqual(['instagram_basic', 'instagram_content_publish', 'pages_show_list']);
   });
 
   it('does not broaden non-Instagram Meta authorization requests', async () => {
