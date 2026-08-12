@@ -33,6 +33,7 @@ export class InstagramPublicationExecutor {
 
   async execute(request: InstagramPublishRequest): Promise<PublicationExecutionResult> {
     let record = await this.store.reserve(request, this.now());
+    let publishingAuthorizedThisRun = false;
 
     if (record.state === 'PUBLISHED') {
       return { publication: record, completed: true };
@@ -40,6 +41,10 @@ export class InstagramPublicationExecutor {
 
     if (record.state === 'CANCELED') {
       throw new Error('INSTAGRAM_PUBLICATION_CANCELED');
+    }
+
+    if (record.state === 'PUBLISHING' || isPublishUncertain(record)) {
+      throw new Error('INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED');
     }
 
     try {
@@ -71,28 +76,43 @@ export class InstagramPublicationExecutor {
         }
         record = transitionPublication(record, 'PUBLISHING', this.now());
         await this.store.save(record);
+        publishingAuthorizedThisRun = true;
       }
 
       if (record.state === 'PUBLISHING') {
+        if (!publishingAuthorizedThisRun) {
+          throw new Error('INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED');
+        }
         if (!record.externalContainerId) {
           throw new Error('INSTAGRAM_PUBLICATION_CONTAINER_ID_MISSING');
         }
-        const published = await this.transport.publishContainer(
-          request.account.instagramAccountId,
-          record.externalContainerId,
-        );
-        record = transitionPublication(record, 'PUBLISHED', this.now(), {
-          externalMediaId: published.mediaId,
-        });
-        await this.store.save(record);
+        try {
+          const published = await this.transport.publishContainer(
+            request.account.instagramAccountId,
+            record.externalContainerId,
+          );
+          record = transitionPublication(record, 'PUBLISHED', this.now(), {
+            externalMediaId: published.mediaId,
+          });
+          await this.store.save(record);
+        } catch (error) {
+          if (record.state === 'PUBLISHING') {
+            const normalized = normalizeError(error);
+            const failed = transitionPublication(record, 'FAILED', this.now(), {
+              lastError: `PUBLISH_UNCERTAIN:${normalized}`,
+            });
+            await this.store.save(failed);
+            record = failed;
+          }
+          throw error;
+        }
       }
 
       return { publication: record, completed: record.state === 'PUBLISHED' };
     } catch (error) {
       if (canFail(record.state)) {
-        const normalized = error instanceof Error ? error.message : 'UNKNOWN_PUBLICATION_ERROR';
         const failed = transitionPublication(record, 'FAILED', this.now(), {
-          lastError: normalized,
+          lastError: normalizeError(error),
         });
         await this.store.save(failed);
       }
@@ -107,11 +127,14 @@ function withoutLastError(record: PublicationRecord): PublicationRecord {
   return clean;
 }
 
+function isPublishUncertain(record: PublicationRecord): boolean {
+  return record.state === 'FAILED' && record.lastError?.startsWith('PUBLISH_UNCERTAIN:') === true;
+}
+
+function normalizeError(error: unknown): string {
+  return error instanceof Error ? error.message : 'UNKNOWN_PUBLICATION_ERROR';
+}
+
 function canFail(state: PublicationState): boolean {
-  return (
-    state === 'SCHEDULED' ||
-    state === 'CREATING_CONTAINER' ||
-    state === 'PROCESSING' ||
-    state === 'PUBLISHING'
-  );
+  return state === 'SCHEDULED' || state === 'CREATING_CONTAINER' || state === 'PROCESSING';
 }
