@@ -1,0 +1,40 @@
+name: Temporary Controlled Publication Disabled Smoke
+
+on:
+  push:
+    branches:
+      - chore/tmp-controlled-publication-disabled-smoke
+    paths:
+      - '.github/workflows/tmp-controlled-publication-disabled-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Execute compiled controlled entrypoint with writes disabled
+        shell: bash
+        env:
+          NODE_ENV: production
+          META_ENABLED: 'false'
+          MCP_ENABLED: 'false'
+          INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          OUTPUT="$(pnpm start:instagram-controlled-publication 2>&1)"
+          printf '%s\n' "$OUTPUT"
+          grep -q 'instagram.controlled-publication.disabled' <<<"$OUTPUT"
+          echo 'CONTROLLED_PUBLICATION_DISABLED_SMOKE=1'
