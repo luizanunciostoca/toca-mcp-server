@@ -70,12 +70,13 @@ describe('Meta webhook boundary', () => {
       commentId: 'comment-1',
       mediaId: 'media-1',
       text: 'Olá',
+      occurredAt: '2023-11-14T22:13:20.000Z',
       rawType: 'comments',
     });
     expect(first[0]?.eventId).toBe(second[0]?.eventId);
   });
 
-  it('normalizes entry-level Instagram comment webhooks', () => {
+  it('normalizes entry-level Instagram comment webhooks with entry.time fallback', () => {
     const events = parseMetaWebhookEvents(
       Buffer.from(
         JSON.stringify({
@@ -105,7 +106,41 @@ describe('Meta webhook boundary', () => {
       commentId: 'comment-entry-level-1',
       mediaId: 'media-entry-level-1',
       text: 'Comentário de teste',
+      occurredAt: '2023-11-14T22:13:30.000Z',
       rawType: 'comments',
+    });
+  });
+
+  it('uses entry.time when a changes-level comment omits its own timestamp', () => {
+    const events = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              time: 1_700_000_020,
+              changes: [
+                {
+                  field: 'comments',
+                  value: {
+                    id: 'comment-entry-time-fallback',
+                    media_id: 'media-entry-time-fallback',
+                    text: 'Sem timestamp no value',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      channel: 'COMMENT',
+      commentId: 'comment-entry-time-fallback',
+      occurredAt: '2023-11-14T22:13:40.000Z',
     });
   });
 
@@ -117,6 +152,7 @@ describe('Meta webhook boundary', () => {
           entry: [
             {
               id: '17841402033495654',
+              time: 1_700_000_030,
               field: 'comments',
               value: { id: 'comment-duplicate', text: 'Mesmo comentário' },
               changes: [
@@ -135,6 +171,7 @@ describe('Meta webhook boundary', () => {
     expect(events[0]).toMatchObject({
       channel: 'COMMENT',
       commentId: 'comment-duplicate',
+      occurredAt: '2023-11-14T22:13:50.000Z',
     });
   });
 
