@@ -25,6 +25,7 @@ const configSchema = z
     META_WEBHOOK_ENABLED: booleanFromEnv,
     META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
     INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
+    INSTAGRAM_PUBLICATION_WRITES_ENABLED: booleanFromEnv,
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
     META_APP_SECRET_KEY: z.string().min(1).optional(),
@@ -69,6 +70,22 @@ const configSchema = z
         code: 'custom',
         path: ['INSTAGRAM_ENGAGEMENT_WRITES_ENABLED'],
         message: 'META_ENABLED must be true when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      });
+    }
+
+    if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['INSTAGRAM_PUBLICATION_WRITES_ENABLED'],
+        message: 'META_ENABLED must be true when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
+      });
+    }
+
+    if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && !config.DATABASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URL is required when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
       });
     }
 
