@@ -33,7 +33,9 @@ describe('Controlled Instagram publication runner', () => {
   });
 
   it('does not retry deterministic or uncertain publication failures', async () => {
-    const execute = vi.fn().mockRejectedValue(new Error('INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED'));
+    const execute = vi
+      .fn()
+      .mockRejectedValue(new Error('INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED'));
     const sleep = vi.fn().mockResolvedValue(undefined);
 
     await expect(
@@ -51,7 +53,9 @@ describe('Controlled Instagram publication runner', () => {
   });
 
   it('fails closed when processing never finishes within the bounded attempts', async () => {
-    const execute = vi.fn().mockRejectedValue(new Error('INSTAGRAM_PUBLICATION_PROCESSING_PENDING'));
+    const execute = vi
+      .fn()
+      .mockRejectedValue(new Error('INSTAGRAM_PUBLICATION_PROCESSING_PENDING'));
     const sleep = vi.fn().mockResolvedValue(undefined);
 
     await expect(
