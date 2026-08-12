@@ -1,0 +1,93 @@
+name: Temporary OAuth Publication Scope Redeploy Proof
+
+on:
+  push:
+    branches:
+      - chore/tmp-oauth-publication-scope-redeploy-proof
+    paths:
+      - '.github/workflows/tmp-oauth-publication-scope-redeploy-proof.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-meta-oauth-staging
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+  DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+
+jobs:
+  redeploy-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push current image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:oauth-publication-scope-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Redeploy OAuth boundary with writes closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --ingress all \
+            --default-url \
+            --no-invoker-iam-check \
+            --quiet
+
+      - name: Verify OAuth redirect includes publication permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
+          STATUS="$(curl --silent --output /dev/null --dump-header /tmp/oauth-headers.txt --write-out '%{http_code}' "$SERVICE_URL/oauth/meta/start")"
+          test "$STATUS" = "302"
+          LOCATION="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/oauth-headers.txt)"
+          test -n "$LOCATION"
+          echo "$LOCATION" | grep -q 'instagram_basic'
+          echo "$LOCATION" | grep -q 'instagram_content_publish'
+          echo 'OAUTH_PUBLICATION_SCOPE_PRESENT=1'
+
+      - name: Verify public writes remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          ENGAGEMENT_VALUE="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value' <<<"$CONFIG")"
+          PUBLICATION_VALUE="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value' <<<"$CONFIG")"
+          test "$ENGAGEMENT_VALUE" = "false"
+          test "$PUBLICATION_VALUE" = "false"
+          echo 'SAFE_PUBLIC_WRITES_DISABLED=1'
