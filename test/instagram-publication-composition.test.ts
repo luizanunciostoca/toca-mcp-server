@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type pg from 'pg';
 import type { MetaApiClient } from '../src/providers/meta/meta-api-client.js';
 import type { ScheduledJob } from '../src/scheduler/scheduler-contracts.js';
+import { hashInstagramPublicationApprovalPayload } from '../src/worker/instagram-publication-boundary.js';
 import { createInstagramPublicationWorkerHandlers } from '../src/worker/instagram-publication-composition.js';
 import { INSTAGRAM_PUBLICATION_JOB } from '../src/worker/instagram-publication-job.js';
 
@@ -23,7 +24,7 @@ function createDependencies(): {
   get: ReturnType<typeof vi.fn>;
   post: ReturnType<typeof vi.fn>;
 } {
-  const query = vi.fn();
+  const query = vi.fn().mockResolvedValue({ rowCount: 1, rows: [] });
   const get = vi.fn();
   const post = vi.fn();
   const pool = { query } as unknown as pg.Pool;
@@ -50,7 +51,7 @@ describe('Instagram publication worker composition', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('reaches payload validation when the runtime gate is explicitly enabled', async () => {
+  it('denies enabled writes when no exact approved request hash is configured', async () => {
     const { pool, metaClient, query, get, post } = createDependencies();
     const handlers = createInstagramPublicationWorkerHandlers({
       pool,
@@ -59,8 +60,44 @@ describe('Instagram publication worker composition', () => {
     });
     const handler = handlers.get(INSTAGRAM_PUBLICATION_JOB);
 
+    await expect(handler?.execute(job.payload, job)).rejects.toThrow(
+      'INSTAGRAM_PUBLICATION_APPROVAL_REQUIRED',
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('denies a request whose payload does not match the approved hash', async () => {
+    const { pool, metaClient, query, get, post } = createDependencies();
+    const handlers = createInstagramPublicationWorkerHandlers({
+      pool,
+      metaClient,
+      writesEnabled: true,
+      approvedRequestSha256: 'a'.repeat(64),
+    });
+    const handler = handlers.get(INSTAGRAM_PUBLICATION_JOB);
+
+    await expect(handler?.execute(job.payload, job)).rejects.toThrow(
+      'INSTAGRAM_PUBLICATION_APPROVAL_MISMATCH',
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('reaches payload validation only after the exact payload has been approved and audited', async () => {
+    const { pool, metaClient, query, get, post } = createDependencies();
+    const handlers = createInstagramPublicationWorkerHandlers({
+      pool,
+      metaClient,
+      writesEnabled: true,
+      approvedRequestSha256: hashInstagramPublicationApprovalPayload(job.payload),
+    });
+    const handler = handlers.get(INSTAGRAM_PUBLICATION_JOB);
+
     await expect(handler?.execute(job.payload, job)).rejects.toThrow();
-    expect(query).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(2);
     expect(get).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });

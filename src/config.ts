@@ -26,6 +26,10 @@ const configSchema = z
     META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
     INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
     INSTAGRAM_PUBLICATION_WRITES_ENABLED: booleanFromEnv,
+    INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
     META_APP_SECRET_KEY: z.string().min(1).optional(),
@@ -98,6 +102,18 @@ const configSchema = z
         path: ['META_TOKEN_STORE_PROVIDER'],
         message:
           'META_TOKEN_STORE_PROVIDER must be gcp-secret-manager when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
+      });
+    }
+
+    if (
+      config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
+      !config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256'],
+        message:
+          'INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256 is required when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
       });
     }
 

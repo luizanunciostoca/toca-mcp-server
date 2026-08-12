@@ -13,6 +13,7 @@ const publicationEnv = {
   META_REDIRECT_URI: 'https://example.com/oauth/meta/callback',
   META_REQUESTED_SCOPES: 'pages_show_list,instagram_basic,instagram_content_publish',
   INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+  INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: 'a'.repeat(64),
   DATABASE_URL: 'postgres://example',
   META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
   GCP_PROJECT_ID: 'toca-mcp-production',
