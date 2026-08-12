@@ -85,7 +85,11 @@ export class PostgresScheduler implements Scheduler {
     return result.rows.map((row) => mapRow(row));
   }
 
-  async claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]> {
+  async claimDue(
+    nowIso: string,
+    limit: number,
+    toolName?: string,
+  ): Promise<readonly ScheduledJob[]> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
