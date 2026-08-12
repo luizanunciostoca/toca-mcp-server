@@ -1,0 +1,94 @@
+name: Temporary GCP Publication Worker Disabled Smoke
+
+on:
+  push:
+    branches:
+      - chore/tmp-gcp-publication-worker-disabled-smoke
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  JOB_NAME: toca-instagram-publication-staging-smoke
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server:publication-disabled-smoke-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy disabled publication worker job
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/instagram-publication-worker.js \
+            --set-env-vars NODE_ENV=production,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,META_ENABLED=false \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 60s \
+            --quiet
+
+      - name: Execute disabled publication worker job
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Verify disabled marker and no execution marker
+        run: |
+          set -euo pipefail
+          sleep 5
+          LOGS="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND timestamp>=\"$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)\"" \
+            --project "$GCP_PROJECT_ID" \
+            --limit 100 \
+            --format='value(textPayload)' 2>/dev/null || true)"
+          printf '%s\n' "$LOGS"
+          grep -F 'instagram.publication.worker.disabled' <<<"$LOGS"
+          if grep -q 'instagram.publication.worker.completed' <<<"$LOGS"; then
+            echo 'Unexpected publication worker execution marker detected.' >&2
+            exit 1
+          fi
+          echo 'GCP_DISABLED_WORKER_PROOF=1'
+
+      - name: Delete temporary Cloud Run Job
+        if: always()
+        run: |
+          gcloud run jobs delete "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --quiet || true
