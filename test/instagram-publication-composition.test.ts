@@ -16,7 +16,11 @@ const job: ScheduledJob = {
   attempts: 1,
 };
 
-function createDependencies(): { pool: pg.Pool; metaClient: MetaApiClient; query: ReturnType<typeof vi.fn> } {
+function createDependencies(): {
+  pool: pg.Pool;
+  metaClient: MetaApiClient;
+  query: ReturnType<typeof vi.fn>;
+} {
   const query = vi.fn();
   const pool = { query } as unknown as pg.Pool;
   const metaClient = {
