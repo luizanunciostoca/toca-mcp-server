@@ -43,17 +43,33 @@ describe('Instagram publication runtime configuration', () => {
     ).toThrow('DATABASE_URL is required');
   });
 
-  it('accepts explicit publication enablement only with Meta and persistence configured', () => {
-    expect(
+  it('requires the persistent OAuth Secret Manager token store', () => {
+    expect(() =>
       loadConfig({
         ...completeMetaEnv,
         INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
         DATABASE_URL: 'postgres://example',
       }),
+    ).toThrow('META_TOKEN_STORE_PROVIDER must be gcp-secret-manager');
+  });
+
+  it('accepts publication enablement only with Meta, database and OAuth token secret configured', () => {
+    expect(
+      loadConfig({
+        ...completeMetaEnv,
+        INSTAGRAM_PUBLICATION_WRITES_ENABLED: 'true',
+        DATABASE_URL: 'postgres://example',
+        META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+        GCP_PROJECT_ID: 'toca-mcp-production',
+        META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
+      }),
     ).toMatchObject({
       META_ENABLED: true,
       INSTAGRAM_PUBLICATION_WRITES_ENABLED: true,
       DATABASE_URL: 'postgres://example',
+      META_TOKEN_STORE_PROVIDER: 'gcp-secret-manager',
+      GCP_PROJECT_ID: 'toca-mcp-production',
+      META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
     });
   });
 });
