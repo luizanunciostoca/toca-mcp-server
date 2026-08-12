@@ -121,13 +121,10 @@ describe('GCS publication asset staging', () => {
     expect(requestUrl(uploadRequest![0])).toContain(
       'upload/storage/v1/b/toca-publication-assets/o',
     );
-    expect(uploadRequest![1]).toMatchObject({
-      method: 'POST',
-      headers: expect.objectContaining({
-        Authorization: 'Bearer runtime-token',
-        'Content-Type': 'image/jpeg',
-      }),
-    });
+    expect(uploadRequest![1]?.method).toBe('POST');
+    const uploadHeaders = new Headers(uploadRequest![1]?.headers);
+    expect(uploadHeaders.get('Authorization')).toBe('Bearer runtime-token');
+    expect(uploadHeaders.get('Content-Type')).toBe('image/jpeg');
 
     const validationRequest = fetchImpl.mock.calls[3];
     expect(validationRequest).toBeDefined();
