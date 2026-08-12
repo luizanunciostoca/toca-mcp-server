@@ -1,97 +1,83 @@
-# TOCA MCP Infrastructure Control Plane
+# Infrastructure Control Plane
 
-## Objetivo
+## Purpose
 
-Permitir que o TOCA OS administre infraestrutura aprovada sem conceder privilégios administrativos ao runtime ou ao deployer cotidiano.
+The TOCA MCP infrastructure control plane is the only approved path for infrastructure mutations that require permissions beyond the regular deployer/runtime boundaries. It is deliberately narrow, manual, auditable, and fail-closed.
 
-## Separação de identidades
+The runtime and normal deployer must not receive project-wide Owner/Editor privileges, service-account key creation privileges, bucket deletion privileges, or arbitrary infrastructure administration.
 
-- `toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com`: runtime de produção. Recebe apenas permissões necessárias durante a execução da aplicação.
-- `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`: deploy cotidiano. Não é administrador de infraestrutura.
-- `toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`: identidade dedicada ao Infrastructure Control Plane. Autentica somente via GitHub OIDC / Workload Identity Federation e nunca usa chave JSON.
+## Identity boundary
 
-## Envelope de autoridade
+The dedicated administrative identity is:
 
-A identidade de infraestrutura não recebe `roles/owner`, `roles/editor` nem capacidade de gerar service-account keys. O primeiro custom role contém somente:
+`toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`
 
-- `storage.buckets.create`
-- `storage.buckets.get`
-- `storage.buckets.getIamPolicy`
-- `storage.buckets.setIamPolicy`
-- `storage.buckets.update`
+GitHub authenticates to it through Workload Identity Federation. No long-lived service-account key is used.
 
-`storage.buckets.delete` fica deliberadamente ausente.
+The runtime identity remains:
 
-A definição canônica do papel é `infra/control-plane/storage-bucket-admin-role.yaml`.
+`toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com`
 
-## Policy boundary
+The infrastructure administrator and runtime identities must remain separate.
 
-`infra/control-plane/policy.json` é a fonte versionada das operações permitidas. O workflow calcula o SHA-256 desse arquivo e exige que o chamador informe exatamente esse hash. Se o policy mudar, uma autorização baseada no hash anterior não executa.
+## Approved operation
 
-O workflow também valida o nome exato do recurso e a operação permitida. Não existe parâmetro para shell arbitrário ou `gcloud` livre.
+The current approved operation is:
 
-## Workflow protegido
+`reconcile-publication-assets-bucket`
 
-`.github/workflows/infrastructure-control-plane.yml`:
+It manages only the dedicated bucket:
 
-- somente `workflow_dispatch`;
-- checkout obrigatório de `main`;
-- GitHub Environment `infrastructure-admin`;
-- OIDC/WIF, sem chave longa;
-- autenticação somente como `toca-mcp-infra-admin`;
-- operação tipada e enumerada;
-- verificação pós-execução obrigatória.
+`toca-mcp-publication-assets`
 
-A configuração do GitHub Environment deve restringir deployments ao branch `main`. Se a organização desejar aprovação humana para mudanças de alto impacto, adicionar required reviewers ao Environment. A ausência de reviewer não altera o boundary criptográfico/policy do workflow, mas reduz a barreira humana.
+The operation may:
 
-## Bootstrap único
+- create the bucket if it does not exist;
+- enable Uniform Bucket-Level Access;
+- configure a seven-day object lifecycle;
+- grant the runtime `roles/storage.objectCreator` on that bucket;
+- verify the resulting state.
 
-A criação inicial da identidade administrativa e do custom role precisa ser feita por uma identidade humana/administrativa já autorizada no projeto. Isso é intencional: o sistema não pode conceder a si próprio poderes novos.
+The bucket must remain private. Public IAM bindings such as `allUsers` and `allAuthenticatedUsers` are forbidden. Media delivery to Meta uses short-lived object-specific signed URLs instead of public bucket access.
 
-Com uma identidade administrativa no Cloud Shell:
+## Signed delivery
 
-```bash
-PROJECT_ID=toca-mcp-production
-PROJECT_NUMBER=990081828836
-POOL=github
-REPO=luizidebook/toca-mcp-server
-INFRA_SA=toca-mcp-infra-admin
-ROLE_ID=tocaMcpInfrastructureStorageAdmin
+Publication staging creates a Google Cloud Storage V4 signed GET URL for the exact staged object. The runtime obtains its short-lived access token and service-account identity from the metadata service and uses the IAM Credentials `signBlob` API. No private service-account key is stored or distributed.
 
-gcloud iam service-accounts create "$INFRA_SA" \
-  --project "$PROJECT_ID" \
-  --display-name="TOCA MCP Infrastructure Control Plane"
+The current signed URL lifetime is six hours. The application validates that the signed URL can be fetched externally and resolves to an image before it can be used in a publication request.
 
-gcloud iam roles create "$ROLE_ID" \
-  --project "$PROJECT_ID" \
-  --file=infra/control-plane/storage-bucket-admin-role.yaml
+If the runtime lacks `iam.serviceAccounts.signBlob` on the signing identity, staging must fail closed. Any bootstrap grant for signing must be scoped to the runtime service account and must not grant project-wide administrative privileges.
 
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:${INFRA_SA}@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="projects/${PROJECT_ID}/roles/${ROLE_ID}"
+## Policy envelope
 
-gcloud iam service-accounts add-iam-policy-binding \
-  "${INFRA_SA}@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --project "$PROJECT_ID" \
-  --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL}/attribute.repository/${REPO}"
-```
+`infra/control-plane/policy.json` is the authoritative machine-readable envelope. A manual workflow run must receive the expected SHA-256 of that file and must refuse execution when the supplied hash differs from the checked-out `main` policy.
 
-Antes do comando de criação do custom role, o arquivo YAML deve estar disponível localmente no Cloud Shell (por clone do repositório ou upload controlado).
+The policy explicitly forbids:
 
-## Evolução futura
+- project Owner;
+- project Editor;
+- service-account key creation;
+- bucket deletion;
+- arbitrary `gcloud` execution outside the typed operation;
+- runtime privilege escalation;
+- public IAM on the publication asset bucket.
 
-Novos tipos de infraestrutura devem entrar em milestones próprios. Cada expansão deve:
+## Workflow
 
-1. adicionar permissões mínimas a um custom role versionado ou criar um novo papel específico;
-2. adicionar uma operação enumerada ao `policy.json`;
-3. adicionar execução explícita ao workflow;
-4. adicionar verificações no architecture check;
-5. passar pelo Quality Gate;
-6. nunca conceder Owner/Editor ou permissão de autoelevação.
+The permanent workflow is:
 
-A ampliação do envelope IAM continua sendo uma ação excepcional de bootstrap/admin. Operações dentro do envelope passam a ser autônomas e repetíveis.
+`.github/workflows/infrastructure-control-plane.yml`
 
-## Modelo de segurança
+It runs only through `workflow_dispatch` and uses the `infrastructure-admin` GitHub Environment. It checks out `main`, verifies the policy hash and approved operation, authenticates as the infrastructure administrator, executes the typed reconciliation, and verifies the final state.
 
-O TOCA OS pode evoluir e reconciliar sua infraestrutura, mas não pode ampliar sozinho os próprios privilégios. Essa separação preserva autonomia operacional sem criar um caminho de privilege escalation.
+The workflow must never gain automatic `push` or `pull_request` triggers.
+
+## Bootstrap
+
+Creation of the infrastructure administrator service account, Workload Identity binding, and custom role is an exceptional bootstrap action. After bootstrap, operations covered by the policy envelope should be executed through the permanent control-plane workflow.
+
+Any permission required for signed URL generation must be added separately and minimally. The preferred boundary is service-account-level `iam.serviceAccounts.signBlob` for `toca-mcp-runtime` on its own signing identity rather than project-wide Token Creator access.
+
+## Publication safety
+
+Infrastructure readiness does not enable Instagram publication writes. `INSTAGRAM_PUBLICATION_WRITES_ENABLED` remains independently fail-closed, and an exact approved publication request SHA-256 is still required before the controlled publication entrypoint can write to Meta.

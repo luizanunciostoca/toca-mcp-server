@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const required = [
   '.github/workflows/infrastructure-control-plane.yml',
+  '.github/workflows/provision-instagram-publication-assets-gcs.yml',
   'infra/control-plane/policy.json',
   'infra/control-plane/storage-bucket-admin-role.yaml',
   'docs/operations/infrastructure-control-plane.md',
@@ -15,12 +16,14 @@ for (const path of required) {
 }
 
 const workflowPath = '.github/workflows/infrastructure-control-plane.yml';
+const legacyProvisionPath = '.github/workflows/provision-instagram-publication-assets-gcs.yml';
 const policyPath = 'infra/control-plane/policy.json';
 const rolePath = 'infra/control-plane/storage-bucket-admin-role.yaml';
 const infraAdmin = 'toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com';
 const runtime = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com';
 
 const workflow = readFileSync(workflowPath, 'utf8');
+const legacyProvision = readFileSync(legacyProvisionPath, 'utf8');
 const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
 const role = readFileSync(rolePath, 'utf8');
 
@@ -33,6 +36,10 @@ const workflowRequirements = [
   'sha256sum infra/control-plane/policy.json',
   infraAdmin,
   'reconcile-publication-assets-bucket',
+  '.publicRead == false',
+  '.deliveryMode == "signed-url"',
+  'allUsers',
+  'allAuthenticatedUsers',
 ];
 
 for (const marker of workflowRequirements) {
@@ -48,11 +55,20 @@ const forbiddenWorkflowMarkers = [
   'roles/owner',
   'roles/editor',
   'storage.buckets.delete',
+  '--member="allUsers"',
+  '--member="allAuthenticatedUsers"',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
   if (workflow.includes(forbidden)) {
     console.error(`Infrastructure workflow contains forbidden capability: ${forbidden}`);
+    process.exit(1);
+  }
+}
+
+for (const forbidden of ['--member="allUsers"', '--member="allAuthenticatedUsers"']) {
+  if (legacyProvision.includes(forbidden)) {
+    console.error(`Legacy publication provisioning contains forbidden public IAM: ${forbidden}`);
     process.exit(1);
   }
 }
@@ -78,7 +94,8 @@ if (
   publicationBucket?.resourceName !== 'toca-mcp-publication-assets' ||
   publicationBucket?.lifecycleDeleteAgeDays !== 7 ||
   publicationBucket?.runtimeRole !== 'roles/storage.objectCreator' ||
-  publicationBucket?.publicRead !== true ||
+  publicationBucket?.publicRead !== false ||
+  publicationBucket?.deliveryMode !== 'signed-url' ||
   publicationBucket?.uniformBucketLevelAccess !== true
 ) {
   console.error('Publication asset bucket is outside the approved envelope');
@@ -92,6 +109,7 @@ const forbiddenPolicyFlags = [
   'bucketDelete',
   'arbitraryGcloud',
   'runtimePrivilegeEscalation',
+  'publicBucketIam',
 ];
 
 for (const key of forbiddenPolicyFlags) {

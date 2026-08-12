@@ -63,11 +63,6 @@ jobs:
             --member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
             --role="roles/storage.objectCreator"
 
-          gcloud storage buckets add-iam-policy-binding "$BUCKET_URI" \
-            --project "$GCP_PROJECT_ID" \
-            --member="allUsers" \
-            --role="roles/storage.objectViewer"
-
       - name: Verify bucket policy and lifecycle
         shell: bash
         run: |
@@ -81,11 +76,11 @@ jobs:
           ' <<<"$POLICY" >/dev/null
 
           jq -e '
-            any(.bindings[]?; .role == "roles/storage.objectViewer" and any(.members[]?; . == "allUsers"))
+            all(.bindings[]?; all(.members[]?; . != "allUsers" and . != "allAuthenticatedUsers"))
           ' <<<"$POLICY" >/dev/null
 
           jq -e '
             any(.lifecycle.rule[]?; .action.type == "Delete" and .condition.age == 7)
           ' <<<"$CONFIG" >/dev/null
 
-          echo 'GCS_PUBLICATION_ASSET_BUCKET_READY=1'
+          echo 'GCS_PUBLICATION_ASSET_BUCKET_PRIVATE_READY=1'
