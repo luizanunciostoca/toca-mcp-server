@@ -55,11 +55,7 @@ export class PostgresScheduler implements Scheduler {
     return result.rows[0] ? mapRow<TPayload>(result.rows[0]) : undefined;
   }
 
-  async reschedule(
-    id: string,
-    runAt: string,
-    timezone: string,
-  ): Promise<ScheduledJob | undefined> {
+  async reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined> {
     const result = await this.pool.query<Row>(
       `update scheduled_jobs
        set run_at = $2::timestamptz, timezone = $3, updated_at = now()
