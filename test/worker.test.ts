@@ -141,7 +141,10 @@ describe('SchedulerWorker', () => {
         new Map([
           [
             'internal.instagram.publication.execute',
-            { execute: (_payload, job) => Promise.resolve(executed.push(job.id)).then(() => undefined) },
+            {
+              execute: (_payload, job) =>
+                Promise.resolve(executed.push(job.id)).then(() => undefined),
+            },
           ],
         ]),
       ),
