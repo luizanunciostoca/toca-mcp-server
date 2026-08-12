@@ -121,13 +121,34 @@ if (deployWorkflow.includes('service_account_key') || deployWorkflow.includes('c
 
 const registry = readFileSync('src/registry.ts', 'utf8');
 if (
-  registry.includes('instagram.publish') ||
   registry.includes('instagram.comments.reply') ||
   registry.includes('instagram.messaging.') ||
   registry.includes('meta_ads.')
 ) {
-  console.error('Preconnection branches must not advertise external write capabilities');
+  console.error('Unpromoted external write capabilities must not be advertised');
   process.exit(1);
+}
+
+const plannedPublicationNames = [
+  'instagram.publish.image',
+  'instagram.publish.carousel',
+  'instagram.publish.reel',
+  'instagram.publish.story',
+  'instagram.publication.schedule',
+  'instagram.publication.reschedule',
+  'instagram.publication.cancel_scheduled',
+];
+
+for (const name of plannedPublicationNames) {
+  const marker = `name: '${name}'`;
+  const start = registry.indexOf(marker);
+  if (start === -1) continue;
+  const end = registry.indexOf('\n  },', start);
+  const definition = registry.slice(start, end === -1 ? registry.length : end);
+  if (!definition.includes("capabilityStatus: 'PLANNED'")) {
+    console.error(`Publication capability must remain PLANNED until explicit promotion: ${name}`);
+    process.exit(1);
+  }
 }
 
 const envExample = readFileSync('.env.example', 'utf8');
