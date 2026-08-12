@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import type { InstagramWebhookEvent } from '../providers/instagram/instagram-engagement-contracts.js';
 
@@ -19,12 +20,23 @@ export class PostgresMetaWebhookEventStore {
     try {
       await client.query('begin');
       for (const event of events) {
+        const textSha256 = event.text
+          ? createHash('sha256').update(event.text, 'utf8').digest('hex')
+          : null;
         const result = await client.query(
-          `insert into meta_webhook_events (event_id, channel, occurred_at)
-           values ($1, $2, $3)
+          `insert into meta_webhook_events
+             (event_id, channel, occurred_at, sender_scoped_id, provider_message_id, text_sha256)
+           values ($1, $2, $3, $4, $5, $6)
            on conflict (event_id) do nothing
            returning event_id`,
-          [event.eventId, event.channel, event.occurredAt],
+          [
+            event.eventId,
+            event.channel,
+            event.occurredAt,
+            event.senderId ?? null,
+            event.messageId ?? null,
+            textSha256,
+          ],
         );
 
         if (result.rowCount === 1) {
@@ -38,7 +50,13 @@ export class PostgresMetaWebhookEventStore {
               'instagram.engagement.webhook.receive',
               'READ',
               'ACCEPTED',
-              JSON.stringify({ channel: event.channel, occurredAt: event.occurredAt }),
+              JSON.stringify({
+                channel: event.channel,
+                occurredAt: event.occurredAt,
+                hasSenderScopedId: Boolean(event.senderId),
+                hasProviderMessageId: Boolean(event.messageId),
+                hasTextHash: Boolean(textSha256),
+              }),
               JSON.stringify({ provider: 'meta', deduplicated: false }),
             ],
           );
