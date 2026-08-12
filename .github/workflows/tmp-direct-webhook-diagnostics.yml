@@ -14,8 +14,7 @@ permissions:
 env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
-  WRITE_JOB: toca-controlled-direct-webhook-write
-  WRITE_EXECUTION: toca-controlled-direct-webhook-write-qtwjl
+  WRITE_EXECUTION: toca-controlled-direct-webhook-write-v2-cnhgw
 
 jobs:
   diagnose:
@@ -28,31 +27,12 @@ jobs:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Inspect failed controlled Direct execution
+      - name: Inspect Meta 400 markers
         shell: bash
         run: |
           set -euo pipefail
-          echo '--- EXECUTION RESOURCE ---'
-          gcloud run jobs executions describe "$WRITE_EXECUTION" \
-            --project "$PROJECT_ID" --region "$REGION" \
-            --format='yaml(metadata.name,status.conditions,status.failedCount,status.succeededCount,status.logUri)' || true
-
-          echo '--- EXECUTION TEXT LOGS ---'
           gcloud logging read \
             "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$WRITE_EXECUTION\"" \
-            --project "$PROJECT_ID" --freshness=60m --limit=200 \
-            --format='table(timestamp,severity,textPayload)' || true
-
-          echo '--- EXECUTION STRUCTURED ERRORS ---'
-          gcloud logging read \
-            "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$WRITE_EXECUTION\" AND severity>=ERROR" \
-            --project "$PROJECT_ID" --freshness=60m --limit=100 \
-            --format=json || true
-
-          echo '--- SECRET ACCESS / RUN SYSTEM ERRORS ---'
-          gcloud logging read \
-            '(resource.type="cloud_run_job" OR resource.type="audited_resource") AND ("toca-controlled-direct-webhook-write" OR "toca-meta-oauth-token") AND severity>=WARNING' \
-            --project "$PROJECT_ID" --freshness=60m --limit=100 \
-            --format='table(timestamp,severity,logName,textPayload,protoPayload.status.message)' || true
-
-          echo 'SAFE_DIRECT_STARTUP_DIAGNOSTIC_COMPLETE=1'
+            --project "$PROJECT_ID" --freshness=30m --limit=100 \
+            --format='value(textPayload)' | grep -E 'SAFE_DIRECT_V2_|DIRECT_V2_FATAL=|Error:' || true
+          echo 'SAFE_DIRECT_META_400_DIAGNOSTIC_COMPLETE=1'
