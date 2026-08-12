@@ -88,8 +88,11 @@ jobs:
           if (linkedAccountId !== accountId) throw new Error('CONTROLLED_DIRECT_LINKED_ACCOUNT_MISMATCH');
           console.log('SAFE_CONTROLLED_DIRECT_PAGE_TOKEN_RESOLVED=1');
 
+          // Use Meta's canonical Page conversations listing. We deliberately avoid
+          // guessing a recipient: the write is permitted only after the known test
+          // DM is found exactly once across the returned conversations.
           const conversations = await request(
-            `${pageId}/conversations?platform=instagram&fields=id&limit=50`,
+            `${pageId}/conversations?fields=id&limit=50`,
             pageToken,
             {},
             'CONVERSATIONS',
