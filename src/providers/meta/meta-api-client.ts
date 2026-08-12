@@ -52,7 +52,11 @@ export class MetaApiClient {
     return this.postJsonWithAccessToken(path, body, token);
   }
 
-  async postJsonWithAccessToken(path: string, body: unknown, accessToken: string): Promise<unknown> {
+  async postJsonWithAccessToken(
+    path: string,
+    body: unknown,
+    accessToken: string,
+  ): Promise<unknown> {
     if (accessToken.length === 0) throw new Error('META_ACCESS_TOKEN_EMPTY');
 
     const url = this.buildUrl(path);
