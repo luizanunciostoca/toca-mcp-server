@@ -49,6 +49,7 @@ jobs:
             if (!r.ok) {
               console.log(`SAFE_DIRECT_PERM_HTTP_${r.status}=1`);
               if (Number.isInteger(b?.error?.code)) console.log(`SAFE_DIRECT_PERM_PROVIDER_CODE=${b.error.code}`);
+              if (Number.isInteger(b?.error?.error_subcode)) console.log(`SAFE_DIRECT_PERM_PROVIDER_SUBCODE=${b.error.error_subcode}`);
               throw new Error(`GET_FAILED_${r.status}`);
             }
             return b;
@@ -58,13 +59,18 @@ jobs:
           for (const name of ['instagram_basic','instagram_manage_messages','pages_manage_metadata','pages_read_engagement','pages_messaging','pages_show_list']) {
             console.log(`SAFE_DIRECT_PERM_${name.toUpperCase()}=${granted.has(name) ? 1 : 0}`);
           }
-          const page = await get(`${pageId}?fields=id,name,access_token,tasks,instagram_business_account`);
-          const tasks = new Set(page.tasks ?? []);
+          const accounts = await get('me/accounts?fields=id,name,access_token,tasks,instagram_business_account&limit=100');
+          const matches = (accounts.data ?? []).filter((page) => String(page?.id ?? '') === pageId);
+          console.log(`SAFE_DIRECT_PERM_PAGE_MATCHES=${matches.length}`);
+          if (matches.length !== 1) throw new Error(`PAGE_MATCH_COUNT_${matches.length}`);
+          const page = matches[0];
+          const tasks = new Set(Array.isArray(page.tasks) ? page.tasks : []);
           console.log(`SAFE_DIRECT_PERM_PAGE_MESSAGING_TASK=${tasks.has('MESSAGING') ? 1 : 0}`);
           console.log(`SAFE_DIRECT_PERM_LINKED_IG_MATCH=${String(page?.instagram_business_account?.id ?? '') === igId ? 1 : 0}`);
+          console.log(`SAFE_DIRECT_PERM_PAGE_TOKEN_PRESENT=${typeof page.access_token === 'string' && page.access_token.length > 0 ? 1 : 0}`);
+          if (!tasks.has('MESSAGING')) throw new Error('PAGE_MESSAGING_TASK_MISSING');
+          if (String(page?.instagram_business_account?.id ?? '') !== igId) throw new Error('LINKED_IG_MISMATCH');
           if (typeof page.access_token !== 'string' || !page.access_token) throw new Error('PAGE_TOKEN_MISSING');
-          const ig = await get(`${igId}?fields=id,username`, page.access_token);
-          console.log(`SAFE_DIRECT_PERM_PAGE_TOKEN_IG_READ=${String(ig?.id ?? '') === igId ? 1 : 0}`);
           console.log('SAFE_DIRECT_PERM_DIAGNOSTIC_COMPLETE=1');
           NODE
           cat > /tmp/direct-perm-diag/Dockerfile <<'DOCKER'
