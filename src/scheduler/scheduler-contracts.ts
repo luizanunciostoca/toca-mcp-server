@@ -17,7 +17,9 @@ export interface Scheduler {
     job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
   ): Promise<ScheduledJob<TPayload>>;
   get<TPayload = unknown>(id: string): Promise<ScheduledJob<TPayload> | undefined>;
+  reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined>;
   cancel(id: string): Promise<ScheduledJob | undefined>;
+  list(toolName?: string): Promise<readonly ScheduledJob[]>;
   claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]>;
   markSucceeded(id: string): Promise<void>;
   markFailed(id: string, normalizedError: string): Promise<void>;
