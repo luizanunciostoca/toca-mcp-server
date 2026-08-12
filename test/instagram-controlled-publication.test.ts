@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runControlledInstagramPublication } from '../src/worker/instagram-controlled-publication.js';
-import type { JobHandler } from '../src/worker/worker.js';
 
 const payload = {
   account: { pageId: 'page-1', instagramAccountId: 'ig-1' },
@@ -21,7 +20,7 @@ describe('Controlled Instagram publication runner', () => {
 
     await runControlledInstagramPublication({
       payload,
-      handler: { execute } as JobHandler,
+      handler: { execute },
       maxAttempts: 3,
       pollIntervalMs: 1,
       sleep,
@@ -41,7 +40,7 @@ describe('Controlled Instagram publication runner', () => {
     await expect(
       runControlledInstagramPublication({
         payload,
-        handler: { execute } as JobHandler,
+        handler: { execute },
         maxAttempts: 5,
         pollIntervalMs: 1,
         sleep,
@@ -61,7 +60,7 @@ describe('Controlled Instagram publication runner', () => {
     await expect(
       runControlledInstagramPublication({
         payload,
-        handler: { execute } as JobHandler,
+        handler: { execute },
         maxAttempts: 2,
         pollIntervalMs: 1,
         sleep,
