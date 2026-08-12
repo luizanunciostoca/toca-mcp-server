@@ -29,6 +29,7 @@ export interface CommentReplyInput {
 }
 
 export interface DirectReplyInput {
+  readonly pageId: string;
   readonly instagramUserId: string;
   readonly recipientScopedId: string;
   readonly message: string;
