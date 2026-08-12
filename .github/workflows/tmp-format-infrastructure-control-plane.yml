@@ -1,0 +1,40 @@
+name: Temporary Format Infrastructure Control Plane
+
+on:
+  push:
+    branches:
+      - feat/infrastructure-control-plane
+    paths:
+      - '.github/workflows/tmp-format-infrastructure-control-plane.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/infrastructure-control-plane
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --write scripts/infrastructure-control-plane-check.mjs
+      - name: Commit normalized formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/infrastructure-control-plane-check.mjs
+          git commit -m 'style: apply Prettier to infrastructure control-plane check'
+          git push origin HEAD:feat/infrastructure-control-plane
