@@ -1,4 +1,4 @@
-name: Temporary Instagram Sunset Publication Preflight
+name: Temporary Instagram Sunset Approval Manifest
 
 on:
   push:
@@ -9,90 +9,23 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-
-env:
-  PROJECT_ID: toca-mcp-production
-  REGION: southamerica-east1
-  REPOSITORY: toca-mcp
-  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  JOB_NAME: toca-instagram-sunset-publication-preflight
-  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
-  TOKEN_SECRET_ID: toca-meta-oauth-token
-  DATABASE_SECRET_ID: toca-database-url
-  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
-  IMAGE_URL: 'https://drive.google.com/uc?export=download&id=1kQOkD7igGJTT4ttx-lCkj_BwQqMSPiPS'
 
 jobs:
-  preflight:
+  manifest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - uses: pnpm/action-setup@v4
         with:
-          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-
-      - uses: google-github-actions/setup-gcloud@v2
-
-      - name: Verify public media URL
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fLsS --max-time 30 -o /tmp/sunset.jpg "$IMAGE_URL"
-          TYPE="$(file --brief --mime-type /tmp/sunset.jpg)"
-          test "$TYPE" = 'image/jpeg'
-          test "$(wc -c < /tmp/sunset.jpg)" -gt 100000
-          echo "PUBLIC_MEDIA_URL_OK=1"
-
-      - name: Configure Docker authentication
-        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-
-      - name: Build and push current image
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:sunset-publication-preflight-${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-
-      - name: Deploy read-only publication readiness job
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run jobs deploy "$JOB_NAME" \
-            --image "$IMAGE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
-            --command node \
-            --args dist/src/instagram-publication-readiness-preflight.js \
-            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@META_ENABLED=true@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback@META_REQUESTED_SCOPES=pages_show_list,instagram_basic,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false" \
-            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --tasks 1 \
-            --max-retries 0 \
-            --task-timeout 120s \
-            --quiet
-
-      - name: Execute and capture readiness
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
-          sleep 5
-          LOGS="$(gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND timestamp>=\"$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)\"" \
-            --project "$PROJECT_ID" --limit 100 --format='value(textPayload)' 2>/dev/null || true)"
-          printf '%s\n' "$LOGS"
-          grep -q 'instagram.publication.readiness.ready' <<<"$LOGS"
-          grep -q '17841402033495654' <<<"$LOGS"
-          echo 'SUNSET_PUBLICATION_READINESS=1'
-
-      - name: Delete temporary Cloud Run Job
-        if: always()
-        run: |
-          gcloud run jobs delete "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet || true
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Generate exact approval manifest
+        env:
+          INSTAGRAM_PUBLICATION_REQUEST_JSON: >-
+            {"account":{"pageId":"306103746115875","instagramAccountId":"17841402033495654"},"mediaType":"IMAGE","mediaUrls":["https://drive.google.com/uc?export=download&id=1kQOkD7igGJTT4ttx-lCkj_BwQqMSPiPS"],"caption":"Há fins de tarde que não pedem pressa. 🌅🦇\n\nNa Toca do Morcego, o sol encontra o mar e, por alguns minutos, tudo desacelera. O horizonte vira cenário, os encontros ganham outro ritmo e um instante simples se transforma em memória. ✨🌊\n\nSunset é isso: estar presente, sentir a energia e lembrar que celebrar a vida também mora nesses momentos. 💛🥂\n\nCom quem você viveria esse pôr do sol? 🌅\n\n🎟️ Garanta seu ingresso pelo link na bio.\n\n#TocadoMorcego #Sunset #MorroDeSaoPaulo #CelebrarAVida","correlationId":"instagram-sunset-2026-08-12-001","idempotencyKey":"sunset-feed-2026-08-12-v1"}
+        run: pnpm start:instagram-publication-approval-manifest
