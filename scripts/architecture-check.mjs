@@ -128,7 +128,9 @@ if (
   !publicationWorkerDeployWorkflow.includes('id-token: write') ||
   !publicationWorkerDeployWorkflow.includes('workload_identity_provider')
 ) {
-  console.error('Publication worker GCP deployment must use GitHub OIDC / Workload Identity Federation');
+  console.error(
+    'Publication worker GCP deployment must use GitHub OIDC / Workload Identity Federation',
+  );
   process.exit(1);
 }
 if (
@@ -136,7 +138,9 @@ if (
   !publicationWorkerDeployWorkflow.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=false') ||
   !publicationWorkerDeployWorkflow.includes('META_ENABLED=false')
 ) {
-  console.error('Publication worker deployment must remain explicitly disabled and use its dedicated entrypoint');
+  console.error(
+    'Publication worker deployment must remain explicitly disabled and use its dedicated entrypoint',
+  );
   process.exit(1);
 }
 if (
@@ -145,7 +149,9 @@ if (
   publicationWorkerDeployWorkflow.includes('service_account_key') ||
   publicationWorkerDeployWorkflow.includes('credentials_json')
 ) {
-  console.error('Publication worker deployment cannot arm writes or use long-lived GCP credentials');
+  console.error(
+    'Publication worker deployment cannot arm writes or use long-lived GCP credentials',
+  );
   process.exit(1);
 }
 
