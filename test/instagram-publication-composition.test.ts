@@ -20,19 +20,20 @@ function createDependencies(): {
   pool: pg.Pool;
   metaClient: MetaApiClient;
   query: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
+  post: ReturnType<typeof vi.fn>;
 } {
   const query = vi.fn();
+  const get = vi.fn();
+  const post = vi.fn();
   const pool = { query } as unknown as pg.Pool;
-  const metaClient = {
-    get: vi.fn(),
-    post: vi.fn(),
-  } as unknown as MetaApiClient;
-  return { pool, metaClient, query };
+  const metaClient = { get, post } as unknown as MetaApiClient;
+  return { pool, metaClient, query, get, post };
 }
 
 describe('Instagram publication worker composition', () => {
   it('registers only the internal publication job behind the disabled runtime gate', async () => {
-    const { pool, metaClient, query } = createDependencies();
+    const { pool, metaClient, query, get, post } = createDependencies();
     const handlers = createInstagramPublicationWorkerHandlers({
       pool,
       metaClient,
@@ -45,12 +46,12 @@ describe('Instagram publication worker composition', () => {
       'INSTAGRAM_PUBLICATION_WRITES_DISABLED',
     );
     expect(query).not.toHaveBeenCalled();
-    expect(metaClient.get).not.toHaveBeenCalled();
-    expect(metaClient.post).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('reaches payload validation when the runtime gate is explicitly enabled', async () => {
-    const { pool, metaClient, query } = createDependencies();
+    const { pool, metaClient, query, get, post } = createDependencies();
     const handlers = createInstagramPublicationWorkerHandlers({
       pool,
       metaClient,
@@ -60,7 +61,7 @@ describe('Instagram publication worker composition', () => {
 
     await expect(handler?.execute(job.payload, job)).rejects.toThrow();
     expect(query).not.toHaveBeenCalled();
-    expect(metaClient.get).not.toHaveBeenCalled();
-    expect(metaClient.post).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 });
