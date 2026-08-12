@@ -5,27 +5,73 @@ const booleanFromEnv = z
   .default('false')
   .transform((value) => value === 'true');
 
+const enabledByDefaultFromEnv = z
+  .enum(['true', 'false'])
+  .default('true')
+  .transform((value) => value === 'true');
+
 const configSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    MCP_ENABLED: enabledByDefaultFromEnv,
+    DATABASE_URL: z.string().min(1).optional(),
     TOCA_OS_MEDIA_SPREADSHEET_ID: z.string().trim().min(1).optional(),
     GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     INSTAGRAM_READ_ENABLED: booleanFromEnv,
     INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().trim().min(1).optional(),
     META_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     META_ENABLED: booleanFromEnv,
+    META_WEBHOOK_ENABLED: booleanFromEnv,
+    META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
+    INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
     META_APP_ID: z.string().min(1).optional(),
     META_APP_SECRET_PROVIDER: z.string().min(1).optional(),
     META_APP_SECRET_KEY: z.string().min(1).optional(),
+    META_WEBHOOK_VERIFY_TOKEN_KEY: z.string().min(1).optional(),
     META_AUTHORIZATION_ENDPOINT: z.string().url().optional(),
     META_TOKEN_ENDPOINT: z.string().url().optional(),
     META_REDIRECT_URI: z.string().url().optional(),
     META_REQUESTED_SCOPES: z.string().min(1).optional(),
     META_GRAPH_BASE_URL: z.string().url().default('https://graph.facebook.com'),
     META_GRAPH_API_VERSION: z.string().min(1).default('v24.0'),
+    META_TOKEN_STORE_PROVIDER: z.enum(['memory', 'gcp-secret-manager']).default('memory'),
+    META_TOKEN_SECRET_ID: z.string().min(1).optional(),
+    GCP_PROJECT_ID: z.string().min(1).optional(),
   })
   .superRefine((config, context) => {
+    if (config.META_WEBHOOK_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_ENABLED'],
+        message: 'META_ENABLED must be true when META_WEBHOOK_ENABLED=true',
+      });
+    }
+
+    if (config.META_WEBHOOK_PERSISTENCE_ENABLED && !config.META_WEBHOOK_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_PERSISTENCE_ENABLED'],
+        message: 'META_WEBHOOK_ENABLED must be true when META_WEBHOOK_PERSISTENCE_ENABLED=true',
+      });
+    }
+
+    if (config.META_WEBHOOK_PERSISTENCE_ENABLED && !config.DATABASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URL is required when META_WEBHOOK_PERSISTENCE_ENABLED=true',
+      });
+    }
+
+    if (config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['INSTAGRAM_ENGAGEMENT_WRITES_ENABLED'],
+        message: 'META_ENABLED must be true when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      });
+    }
+
     if (!config.META_ENABLED) return;
 
     const required = [
@@ -46,6 +92,32 @@ const configSchema = z
           code: 'custom',
           path: [field],
           message: `${field} is required when META_ENABLED=true`,
+        });
+      }
+    }
+
+    if (config.META_WEBHOOK_ENABLED && !config.META_WEBHOOK_VERIFY_TOKEN_KEY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_WEBHOOK_VERIFY_TOKEN_KEY'],
+        message: 'META_WEBHOOK_VERIFY_TOKEN_KEY is required when META_WEBHOOK_ENABLED=true',
+      });
+    }
+
+    if (config.META_TOKEN_STORE_PROVIDER === 'gcp-secret-manager') {
+      if (!config.GCP_PROJECT_ID) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GCP_PROJECT_ID'],
+          message: 'GCP_PROJECT_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
+        });
+      }
+      if (!config.META_TOKEN_SECRET_ID) {
+        context.addIssue({
+          code: 'custom',
+          path: ['META_TOKEN_SECRET_ID'],
+          message:
+            'META_TOKEN_SECRET_ID is required when META_TOKEN_STORE_PROVIDER=gcp-secret-manager',
         });
       }
     }

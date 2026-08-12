@@ -22,6 +22,7 @@ const required = [
   'src/core/tool-registry.ts',
   'src/health/readiness.ts',
   'src/persistence/postgres.ts',
+  'src/policy/engagement-policy.ts',
   'src/providers/meta/meta-api-client.ts',
   'src/providers/meta/meta-assets.ts',
   'src/providers/meta/meta-connection.ts',
@@ -31,6 +32,8 @@ const required = [
   'src/providers/meta/meta-oauth.ts',
   'src/providers/instagram/instagram-capabilities.ts',
   'src/providers/instagram/instagram-contracts.ts',
+  'src/providers/instagram/instagram-engagement-contracts.ts',
+  'src/providers/instagram/instagram-engagement-provider.ts',
   'src/providers/meta-ads/budget-guardrail.ts',
   'src/providers/meta-ads/meta-ads-contracts.ts',
   'src/providers/meta-ads/meta-ads-graph-provider.ts',
@@ -48,6 +51,7 @@ const required = [
   '.github/workflows/deploy-gcp.yml',
   'docs/deployment/gcp.md',
   'docs/operations/worker-runbook.md',
+  'docs/integrations/instagram-engagement.md',
   'test/config.test.ts',
   'test/core.test.ts',
   'test/http-server.test.ts',
@@ -60,6 +64,7 @@ const required = [
   'test/gcp-foundation.test.ts',
   'test/worker.test.ts',
   'test/readiness.test.ts',
+  'test/engagement-policy.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/architecture/preconnection-roadmap.md',
@@ -115,10 +120,13 @@ if (deployWorkflow.includes('service_account_key') || deployWorkflow.includes('c
 }
 
 const registry = readFileSync('src/registry.ts', 'utf8');
-if (registry.includes('instagram.publish') || registry.includes('meta_ads.')) {
-  console.error(
-    'Preconnection branches must not advertise Instagram or Meta Ads write capabilities',
-  );
+if (
+  registry.includes('instagram.publish') ||
+  registry.includes('instagram.comments.reply') ||
+  registry.includes('instagram.messaging.') ||
+  registry.includes('meta_ads.')
+) {
+  console.error('Preconnection branches must not advertise external write capabilities');
   process.exit(1);
 }
 

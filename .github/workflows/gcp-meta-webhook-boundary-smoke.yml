@@ -1,0 +1,318 @@
+name: GCP Meta Webhook Boundary Smoke
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gcp-meta-webhook-boundary-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-meta-oauth-staging
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+  DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  META_APP_ID: '2281930145887404'
+  META_GRAPH_API_VERSION: v24.0
+  PAGE_ID: '306103746115875'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  RECONCILE_JOB: toca-meta-subscription-reconcile
+
+jobs:
+  webhook-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push webhook boundary image
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:webhook-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated public OAuth and webhook boundary
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --ingress all \
+            --default-url \
+            --no-invoker-iam-check \
+            --quiet
+
+      - name: Resolve public service URL
+        run: |
+          CANONICAL_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
+          STATUS_URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          for CANDIDATE in "$CANONICAL_URL" "$STATUS_URL"; do
+            [ -n "$CANDIDATE" ] || continue
+            STATUS="$(curl --silent --output /tmp/health-response.json --write-out '%{http_code}' "$CANDIDATE/health")"
+            if [ "$STATUS" = "200" ] && grep -q '"status":"ok"' /tmp/health-response.json; then
+              echo "SERVICE_URL=$CANDIDATE" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo 'No unauthenticated Cloud Run URL served /health successfully.' >&2
+          exit 1
+
+      - name: Verify invalid webhook challenge is rejected
+        run: |
+          STATUS="$(curl --silent --output /tmp/webhook-invalid.json --write-out '%{http_code}' \
+            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=invalid-token&hub.challenge=challenge-rejected")"
+          test "$STATUS" = "403"
+          grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook-invalid.json
+          echo 'Webhook boundary rejects an invalid verify token.'
+
+      - name: Build Meta subscription reconciliation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-subscription-reconcile
+          cat > /tmp/meta-subscription-reconcile/reconcile.mjs <<'NODE'
+          const userToken = process.env.META_ACCESS_TOKEN;
+          const appId = process.env.META_APP_ID;
+          const apiVersion = process.env.META_GRAPH_API_VERSION;
+          const pageId = process.env.PAGE_ID;
+          const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const runId = process.env.RECONCILE_RUN_ID;
+
+          function fail(code) {
+            console.error(`META_RUN_${runId}_${code}`);
+            process.exit(1);
+          }
+
+          if (!userToken || !appId || !apiVersion || !pageId || !instagramAccountId || !runId) {
+            fail('SUBSCRIPTION_RECONCILE_CONFIG_MISSING');
+          }
+
+          const graphBase = 'https://graph.facebook.com';
+
+          async function request(path, token, stage, method = 'GET', values = {}) {
+            const response = await fetch(new URL(`${graphBase}/${apiVersion}/${path}`), {
+              method,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+                ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+              },
+              ...(method === 'POST' ? { body: new URLSearchParams(values).toString() } : {}),
+            });
+
+            let body;
+            try {
+              body = await response.json();
+            } catch {
+              body = {};
+            }
+
+            if (!response.ok) {
+              const graphCode = Number.isInteger(body?.error?.code) ? body.error.code : 0;
+              const graphSubcode = Number.isInteger(body?.error?.error_subcode)
+                ? body.error.error_subcode
+                : 0;
+              throw new Error(
+                `${stage}_HTTP_${response.status}_CODE_${graphCode}_SUBCODE_${graphSubcode}`,
+              );
+            }
+            return body;
+          }
+
+          function grantedPermissions(payload) {
+            const granted = new Set();
+            for (const entry of Array.isArray(payload?.data) ? payload.data : []) {
+              if (entry?.status === 'granted' && typeof entry?.permission === 'string') {
+                granted.add(entry.permission);
+              }
+            }
+            return granted;
+          }
+
+          function appSubscription(payload) {
+            return Array.isArray(payload?.data)
+              ? payload.data.find((entry) => entry?.id === appId)
+              : undefined;
+          }
+
+          try {
+            const permissionsPayload = await request(
+              'me/permissions',
+              userToken,
+              'USER_PERMISSIONS',
+            );
+            const granted = grantedPermissions(permissionsPayload);
+            const requiredPermissions = [
+              'pages_show_list',
+              'pages_read_engagement',
+              'pages_manage_metadata',
+              'instagram_basic',
+              'instagram_manage_comments',
+              'instagram_manage_messages',
+            ];
+            for (const permission of requiredPermissions) {
+              if (!granted.has(permission)) {
+                fail(`PERMISSION_${permission.toUpperCase()}_NOT_GRANTED`);
+              }
+            }
+
+            const pages = await request(
+              'me/accounts?fields=id,access_token,tasks,instagram_business_account',
+              userToken,
+              'MANAGED_PAGES',
+            );
+            const page = Array.isArray(pages?.data)
+              ? pages.data.find((entry) => entry?.id === pageId)
+              : undefined;
+            if (!page) fail('TARGET_PAGE_NOT_MANAGED');
+
+            const pageTasks = Array.isArray(page?.tasks) ? page.tasks : [];
+            if (!pageTasks.includes('MESSAGING')) fail('PAGE_MESSAGING_TASK_MISSING');
+
+            const linkedInstagramId = page?.instagram_business_account?.id;
+            if (linkedInstagramId !== instagramAccountId) {
+              fail('LINKED_INSTAGRAM_ACCOUNT_MISMATCH');
+            }
+
+            const pageToken = page?.access_token;
+            if (typeof pageToken !== 'string' || pageToken.length === 0) {
+              fail('PAGE_ACCESS_TOKEN_MISSING');
+            }
+
+            let subscriptions = await request(
+              `${pageId}/subscribed_apps`,
+              pageToken,
+              'PAGE_SUBSCRIPTION_VERIFY',
+            );
+            let installedApp = appSubscription(subscriptions);
+            let subscribedFields = Array.isArray(installedApp?.subscribed_fields)
+              ? installedApp.subscribed_fields
+              : [];
+
+            if (!subscribedFields.includes('messages')) {
+              if (!granted.has('pages_messaging')) {
+                fail('PAGE_MESSAGES_SUBSCRIPTION_REQUIRES_PAGES_MESSAGING_REAUTH');
+              }
+
+              const pageWrite = await request(
+                `${pageId}/subscribed_apps`,
+                pageToken,
+                'PAGE_SUBSCRIPTION_REPAIR',
+                'POST',
+                { subscribed_fields: 'messages' },
+              );
+              if (pageWrite?.success !== true) fail('PAGE_SUBSCRIPTION_REPAIR_FAILED');
+
+              subscriptions = await request(
+                `${pageId}/subscribed_apps`,
+                pageToken,
+                'PAGE_SUBSCRIPTION_REVERIFY',
+              );
+              installedApp = appSubscription(subscriptions);
+              subscribedFields = Array.isArray(installedApp?.subscribed_fields)
+                ? installedApp.subscribed_fields
+                : [];
+            }
+
+            if (!subscribedFields.includes('messages')) {
+              fail('PAGE_MESSAGES_SUBSCRIPTION_MISSING');
+            }
+
+            console.log(`META_RUN_${runId}_SUBSCRIPTION_RECONCILE_OK`);
+          } catch (error) {
+            fail(error instanceof Error ? error.message : 'SUBSCRIPTION_RECONCILE_UNKNOWN');
+          }
+          NODE
+
+          cat > /tmp/meta-subscription-reconcile/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY reconcile.mjs ./reconcile.mjs
+          USER node
+          CMD ["node", "reconcile.mjs"]
+          DOCKER
+
+          RECONCILE_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-subscription-reconcile:${GITHUB_SHA}"
+          docker build -t "$RECONCILE_IMAGE" /tmp/meta-subscription-reconcile
+          docker push "$RECONCILE_IMAGE"
+          echo "RECONCILE_IMAGE=$RECONCILE_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Reconcile Meta asset subscriptions under runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$RECONCILE_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$RECONCILE_JOB" \
+            --image "$RECONCILE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_APP_ID=$META_APP_ID,META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,RECONCILE_RUN_ID=$GITHUB_RUN_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          set +e
+          gcloud run jobs execute "$RECONCILE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+          EXECUTE_STATUS=$?
+          set -e
+
+          if [ "$EXECUTE_STATUS" -ne 0 ]; then
+            echo 'Meta reconciliation failed; sanitized application marker follows:' >&2
+            for ATTEMPT in 1 2 3 4 5; do
+              MARKER="$(gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$RECONCILE_JOB\" AND textPayload:\"META_RUN_${GITHUB_RUN_ID}_\"" \
+                --project "$PROJECT_ID" \
+                --freshness=10m \
+                --limit=10 \
+                --format='value(textPayload)' \
+                2>/dev/null | grep -E "^META_RUN_${GITHUB_RUN_ID}_[A-Z0-9_]+$" | head -n 1 || true)"
+              if [ -n "$MARKER" ]; then
+                echo "$MARKER"
+                break
+              fi
+              sleep 2
+            done
+            exit "$EXECUTE_STATUS"
+          fi
+
+          echo 'Meta Page installation, Instagram linkage, and messaging webhook subscription are reconciled.'
+
+      - name: Verify MCP remains isolated
+        run: |
+          STATUS="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' -X POST "$SERVICE_URL/mcp")"
+          test "$STATUS" = "404"
+          grep -q '"error":"not_found"' /tmp/mcp-response.json
+          echo 'MCP remains disabled on the public OAuth/webhook boundary.'
