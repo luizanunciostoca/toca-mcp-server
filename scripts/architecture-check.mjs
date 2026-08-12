@@ -7,6 +7,7 @@ const required = [
   'src/http-server.ts',
   'src/config.ts',
   'src/registry.ts',
+  'src/instagram-publication-readiness-preflight.ts',
   'src/core/auth.ts',
   'src/core/audit.ts',
   'src/core/connected-account.ts',
@@ -34,6 +35,8 @@ const required = [
   'src/providers/instagram/instagram-contracts.ts',
   'src/providers/instagram/instagram-engagement-contracts.ts',
   'src/providers/instagram/instagram-engagement-provider.ts',
+  'src/providers/instagram/instagram-publication-readiness-preflight.ts',
+  'src/providers/instagram/instagram-publication-readiness-runtime.ts',
   'src/providers/meta-ads/budget-guardrail.ts',
   'src/providers/meta-ads/meta-ads-contracts.ts',
   'src/providers/meta-ads/meta-ads-graph-provider.ts',
@@ -66,6 +69,8 @@ const required = [
   'test/worker.test.ts',
   'test/readiness.test.ts',
   'test/engagement-policy.test.ts',
+  'test/instagram-publication-readiness-preflight.test.ts',
+  'test/instagram-publication-readiness-runtime.test.ts',
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/architecture/preconnection-roadmap.md',
@@ -98,6 +103,13 @@ if (!packageJson.dependencies?.pg || !packageJson.scripts?.migrate) {
 }
 if (!packageJson.scripts?.['start:http']) {
   console.error('Remote MCP start script is required');
+  process.exit(1);
+}
+if (
+  packageJson.scripts?.['start:instagram-publication-readiness'] !==
+  'node dist/src/instagram-publication-readiness-preflight.js'
+) {
+  console.error('Publication readiness preflight must use its dedicated compiled entrypoint');
   process.exit(1);
 }
 
@@ -152,6 +164,21 @@ if (
   console.error(
     'Publication worker deployment cannot arm writes or use long-lived GCP credentials',
   );
+  process.exit(1);
+}
+
+const publicationReadinessPreflight = readFileSync(
+  'src/providers/instagram/instagram-publication-readiness-preflight.ts',
+  'utf8',
+);
+if (
+  !publicationReadinessPreflight.includes("metaClient.get('me/permissions')") ||
+  !publicationReadinessPreflight.includes("metaClient.get('me/accounts'") ||
+  publicationReadinessPreflight.includes('.post(') ||
+  publicationReadinessPreflight.includes('media_publish') ||
+  publicationReadinessPreflight.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=true')
+) {
+  console.error('Publication readiness preflight must remain read-only and GET-only');
   process.exit(1);
 }
 
