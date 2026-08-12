@@ -45,6 +45,7 @@ class FakePublicationTransport implements InstagramPublicationTransport {
   statusCalls = 0;
   publishCalls = 0;
   status: 'IN_PROGRESS' | 'FINISHED' | 'ERROR' = 'IN_PROGRESS';
+  publishError: Error | undefined;
 
   createContainer(): Promise<{ readonly containerId: string }> {
     this.createCalls += 1;
@@ -58,7 +59,9 @@ class FakePublicationTransport implements InstagramPublicationTransport {
 
   publishContainer(): Promise<{ readonly mediaId: string }> {
     this.publishCalls += 1;
-    return Promise.resolve({ mediaId: 'media-1' });
+    return this.publishError
+      ? Promise.reject(this.publishError)
+      : Promise.resolve({ mediaId: 'media-1' });
   }
 }
 
@@ -103,6 +106,46 @@ describe('InstagramPublicationExecutor', () => {
     );
     expect(store.record?.state).toBe('FAILED');
     expect(store.record?.lastError).toBe('INSTAGRAM_PUBLICATION_CONTAINER_PROCESSING_FAILED');
+    expect(transport.publishCalls).toBe(0);
+  });
+
+  it('fails closed after an ambiguous publish failure and never posts again automatically', async () => {
+    const store = new MemoryPublicationStore();
+    const transport = new FakePublicationTransport();
+    transport.status = 'FINISHED';
+    transport.publishError = new Error('connection reset after send');
+    const executor = new InstagramPublicationExecutor(store, transport);
+
+    await expect(executor.execute(request)).rejects.toThrow('connection reset after send');
+    expect(store.record?.state).toBe('FAILED');
+    expect(store.record?.lastError).toBe('PUBLISH_UNCERTAIN:connection reset after send');
+    expect(transport.createCalls).toBe(1);
+    expect(transport.publishCalls).toBe(1);
+
+    transport.publishError = undefined;
+    await expect(executor.execute(request)).rejects.toThrow(
+      'INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED',
+    );
+    expect(transport.createCalls).toBe(1);
+    expect(transport.publishCalls).toBe(1);
+  });
+
+  it('does not issue media_publish when a previous run persisted PUBLISHING', async () => {
+    const store = new MemoryPublicationStore();
+    store.record = {
+      publicationId: request.correlationId,
+      correlationId: request.correlationId,
+      idempotencyKey: request.idempotencyKey,
+      state: 'PUBLISHING',
+      externalContainerId: 'container-existing',
+      updatedAt: '2026-08-12T13:00:00.000Z',
+    };
+    const transport = new FakePublicationTransport();
+    const executor = new InstagramPublicationExecutor(store, transport);
+
+    await expect(executor.execute(request)).rejects.toThrow(
+      'INSTAGRAM_PUBLICATION_MANUAL_RECONCILIATION_REQUIRED',
+    );
     expect(transport.publishCalls).toBe(0);
   });
 });
