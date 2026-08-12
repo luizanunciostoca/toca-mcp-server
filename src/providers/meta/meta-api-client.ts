@@ -49,12 +49,18 @@ export class MetaApiClient {
 
   async postJson(path: string, body: unknown): Promise<unknown> {
     const token = await this.secrets.resolve(this.accessToken);
+    return this.postJsonWithAccessToken(path, body, token);
+  }
+
+  async postJsonWithAccessToken(path: string, body: unknown, accessToken: string): Promise<unknown> {
+    if (accessToken.length === 0) throw new Error('META_ACCESS_TOKEN_EMPTY');
+
     const url = this.buildUrl(path);
     const response = await this.transport.request(url.toString(), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify(body),
