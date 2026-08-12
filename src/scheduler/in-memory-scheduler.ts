@@ -48,10 +48,15 @@ export class InMemoryScheduler implements Scheduler {
     );
   }
 
-  claimDue(nowIso: string, limit: number): Promise<readonly ScheduledJob[]> {
+  claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]> {
     const now = Date.parse(nowIso);
     const due = [...this.jobs.values()]
-      .filter((job) => job.status === 'SCHEDULED' && Date.parse(job.runAt) <= now)
+      .filter(
+        (job) =>
+          job.status === 'SCHEDULED' &&
+          Date.parse(job.runAt) <= now &&
+          (toolName === undefined || job.toolName === toolName),
+      )
       .sort((a, b) => a.runAt.localeCompare(b.runAt))
       .slice(0, limit);
 
