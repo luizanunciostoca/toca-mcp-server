@@ -93,7 +93,7 @@ function assertPublicationJob(job: ScheduledJob): void {
   }
 }
 
-function parseInstagramPublishRequest(value: unknown): InstagramPublishRequest {
+export function parseInstagramPublishRequest(value: unknown): InstagramPublishRequest {
   const parsed = instagramPublishRequestSchema.parse(value);
   return {
     account: parsed.account,
