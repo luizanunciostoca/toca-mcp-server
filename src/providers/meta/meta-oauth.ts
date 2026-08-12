@@ -8,6 +8,8 @@ import type {
   MetaTokenExchangeResult,
 } from './meta-connection.js';
 
+const requiredPublicationOAuthScope = 'instagram_content_publish';
+
 interface OAuthStateRecord {
   readonly state: string;
   readonly createdAt: string;
@@ -190,7 +192,10 @@ export class MetaOAuthService {
     authorizationUrl.searchParams.set('client_id', this.config.appId);
     authorizationUrl.searchParams.set('redirect_uri', this.config.redirectUri);
     authorizationUrl.searchParams.set('response_type', 'code');
-    authorizationUrl.searchParams.set('scope', this.config.requestedScopes.join(','));
+    const requestedScopes = this.config.requestedScopes.includes('instagram_basic')
+      ? [...new Set([...this.config.requestedScopes, requiredPublicationOAuthScope])].sort()
+      : [...this.config.requestedScopes];
+    authorizationUrl.searchParams.set('scope', requestedScopes.join(','));
     authorizationUrl.searchParams.set('state', state);
 
     return { authorizationUrl: authorizationUrl.toString(), state, expiresAt };
