@@ -106,5 +106,10 @@ export class InstagramPublicationExecutor {
 }
 
 function canFail(state: PublicationState): boolean {
-  return state === 'SCHEDULED' || state === 'CREATING_CONTAINER' || state === 'PROCESSING';
+  return (
+    state === 'SCHEDULED' ||
+    state === 'CREATING_CONTAINER' ||
+    state === 'PROCESSING' ||
+    state === 'PUBLISHING'
+  );
 }
