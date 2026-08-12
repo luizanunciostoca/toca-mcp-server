@@ -44,15 +44,12 @@ export class InstagramPublicationExecutor {
 
     try {
       if (record.state === 'DRAFT' || record.state === 'FAILED') {
-        record = transitionPublication(record, 'CREATING_CONTAINER', this.now(), {
-          lastError: undefined,
-        });
+        record = transitionPublication(withoutLastError(record), 'CREATING_CONTAINER', this.now());
         await this.store.save(record);
 
         const created = await this.transport.createContainer(request);
         record = transitionPublication(record, 'PROCESSING', this.now(), {
           externalContainerId: created.containerId,
-          lastError: undefined,
         });
         await this.store.save(record);
       }
@@ -86,7 +83,6 @@ export class InstagramPublicationExecutor {
         );
         record = transitionPublication(record, 'PUBLISHED', this.now(), {
           externalMediaId: published.mediaId,
-          lastError: undefined,
         });
         await this.store.save(record);
       }
@@ -103,6 +99,11 @@ export class InstagramPublicationExecutor {
       throw error;
     }
   }
+}
+
+function withoutLastError(record: PublicationRecord): PublicationRecord {
+  const { lastError: _lastError, ...clean } = record;
+  return clean;
 }
 
 function canFail(state: PublicationState): boolean {
