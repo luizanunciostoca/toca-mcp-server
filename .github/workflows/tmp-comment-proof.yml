@@ -31,49 +31,29 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Classify sanitized webhook errors
+      - name: Identify sanitized constraint
         shell: bash
         run: |
           set -euo pipefail
-          REQUEST_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="'"$SERVICE"'" AND httpRequest.requestMethod="POST" AND httpRequest.requestUrl:"/webhooks/meta"'
           ERROR_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="'"$SERVICE"'" AND textPayload:"HTTP request failed"'
 
-          count_request() {
-            local suffix="$1"
-            gcloud logging read "$REQUEST_FILTER $suffix" --project "$PROJECT_ID" --freshness=90m --limit=200 --format='value(insertId)' 2>/dev/null \
-              | sed '/^$/d' | wc -l | tr -d ' '
-          }
-
-          count_error_pattern() {
+          count_pattern() {
             local pattern="$1"
-            gcloud logging read "$ERROR_FILTER AND textPayload:\"$pattern\"" --project "$PROJECT_ID" --freshness=90m --limit=200 --format='value(insertId)' 2>/dev/null \
+            gcloud logging read "$ERROR_FILTER AND textPayload:\"$pattern\"" \
+              --project "$PROJECT_ID" --freshness=120m --limit=200 --format='value(insertId)' 2>/dev/null \
               | sed '/^$/d' | wc -l | tr -d ' '
           }
 
-          TOTAL="$(count_request '')"
-          S200="$(count_request 'AND httpRequest.status=200')"
-          S400="$(count_request 'AND httpRequest.status=400')"
-          ERROR_TOTAL="$(gcloud logging read "$ERROR_FILTER" --project "$PROJECT_ID" --freshness=90m --limit=200 --format='value(insertId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
-          EXPECTED="$(count_error_pattern 'expected')"
-          ZOD="$(count_error_pattern 'Zod')"
-          JSON_SYNTAX="$(count_error_pattern 'Unexpected')"
-          VIOLATES="$(count_error_pattern 'violates')"
-          INVALID_INPUT="$(count_error_pattern 'invalid input syntax')"
-          DUPLICATE="$(count_error_pattern 'duplicate key')"
-          ECONN="$(count_error_pattern 'ECONN')"
-          DATABASE="$(count_error_pattern 'database')"
+          OCCURRED_AT="$(count_pattern 'occurred_at')"
+          NOT_NULL="$(count_pattern 'not-null')"
+          CHANNEL="$(count_pattern 'channel')"
+          EVENT_ID="$(count_pattern 'event_id')"
+          AUDIT_EVENTS="$(count_pattern 'audit_events')"
 
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_POST_TOTAL=$TOTAL"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_STATUS_200=$S200"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_STATUS_400=$S400"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_HTTP_ERROR_TOTAL=$ERROR_TOTAL"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_SCHEMA_EXPECTED_MATCHES=$EXPECTED"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_ZOD_MATCHES=$ZOD"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_JSON_SYNTAX_MATCHES=$JSON_SYNTAX"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_DB_VIOLATION_MATCHES=$VIOLATES"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_DB_INVALID_INPUT_MATCHES=$INVALID_INPUT"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_DB_DUPLICATE_MATCHES=$DUPLICATE"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_DB_CONNECTION_MATCHES=$ECONN"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_DATABASE_WORD_MATCHES=$DATABASE"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_OCCURRED_AT_MATCHES=$OCCURRED_AT"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_NOT_NULL_MATCHES=$NOT_NULL"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_CHANNEL_MATCHES=$CHANNEL"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_EVENT_ID_MATCHES=$EVENT_ID"
+          echo "SAFE_RUN_${GITHUB_RUN_ID}_AUDIT_EVENTS_MATCHES=$AUDIT_EVENTS"
 
-          test "$TOTAL" -ge 1
+          test "$OCCURRED_AT" -ge 1
