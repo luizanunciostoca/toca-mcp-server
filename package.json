@@ -13,6 +13,7 @@
     "dev:http": "tsx src/http.ts",
     "start": "node dist/index.js",
     "start:http": "node dist/http.js",
+    "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -25,11 +26,13 @@
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "pg": "^8.16.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.5",
     "eslint": "^9.0.0",
     "globals": "^16.0.0",
     "prettier": "^3.6.0",

@@ -1,0 +1,53 @@
+name: Deploy GCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+      - name: Build and push image
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/toca-mcp/server:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy Cloud Run revision
+        run: |
+          gcloud run deploy "toca-mcp-${{ inputs.environment }}" \
+            --image "$IMAGE" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --service-account "toca-mcp-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --add-cloudsql-instances "${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ vars.CLOUD_SQL_INSTANCE }}" \
+            --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-access-token:latest" \
+            --no-allow-unauthenticated
