@@ -19,14 +19,32 @@ export interface PublicationAssetStageResult {
 export interface GcsPublicationAssetStagerOptions {
   readonly projectId: string;
   readonly bucketName: string;
+  readonly signedUrlTtlSeconds?: number;
   readonly fetchImpl?: typeof fetch;
+  readonly now?: () => Date;
+}
+
+interface RuntimeIdentity {
+  readonly accessToken: string;
+  readonly serviceAccountEmail: string;
 }
 
 export class GcsPublicationAssetStager {
   private readonly fetchImpl: typeof fetch;
+  private readonly now: () => Date;
+  private readonly signedUrlTtlSeconds: number;
 
   constructor(private readonly options: GcsPublicationAssetStagerOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? (() => new Date());
+    this.signedUrlTtlSeconds = options.signedUrlTtlSeconds ?? 6 * 60 * 60;
+    if (
+      !Number.isInteger(this.signedUrlTtlSeconds) ||
+      this.signedUrlTtlSeconds < 60 ||
+      this.signedUrlTtlSeconds > 12 * 60 * 60
+    ) {
+      throw new Error('PUBLICATION_ASSET_SIGNED_URL_TTL_INVALID');
+    }
   }
 
   async stage(request: PublicationAssetStageRequest): Promise<PublicationAssetStageResult> {
@@ -35,20 +53,20 @@ export class GcsPublicationAssetStager {
 
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const objectName = buildPublicationAssetObjectName(request, sha256);
-    const publicUrl = buildPublicGcsObjectUrl(this.options.bucketName, objectName);
+    const identity = await this.fetchRuntimeIdentity();
+    const deliveryUrl = await this.createSignedDownloadUrl(objectName, identity);
 
-    const existingContentType = await tryValidatePublicImageUrl(publicUrl, this.fetchImpl);
+    const existingContentType = await tryValidateExternalImageUrl(deliveryUrl, this.fetchImpl);
     if (existingContentType) {
       return {
         objectName,
-        publicUrl,
+        publicUrl: deliveryUrl,
         contentType: existingContentType,
         sizeBytes: bytes.byteLength,
         sha256,
       };
     }
 
-    const accessToken = await this.fetchAccessToken();
     const uploadUrl = new URL(
       `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(this.options.bucketName)}/o`,
     );
@@ -58,7 +76,7 @@ export class GcsPublicationAssetStager {
     const uploadResponse = await this.fetchImpl(uploadUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${identity.accessToken}`,
         'Content-Type': request.contentType,
         'X-Goog-User-Project': this.options.projectId,
       },
@@ -68,28 +86,98 @@ export class GcsPublicationAssetStager {
       throw new Error(`PUBLICATION_ASSET_UPLOAD_FAILED:${uploadResponse.status}`);
     }
 
-    const validatedContentType = await validatePublicImageUrl(publicUrl, this.fetchImpl);
+    const validatedContentType = await validatePublicImageUrl(deliveryUrl, this.fetchImpl);
 
     return {
       objectName,
-      publicUrl,
+      publicUrl: deliveryUrl,
       contentType: validatedContentType,
       sizeBytes: bytes.byteLength,
       sha256,
     };
   }
 
-  private async fetchAccessToken(): Promise<string> {
-    const response = await this.fetchImpl(
-      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
-      { headers: { 'Metadata-Flavor': 'Google' } },
-    );
-    if (!response.ok) throw new Error(`GCP_METADATA_TOKEN_FAILED:${response.status}`);
-    const payload = (await response.json()) as { access_token?: unknown };
-    if (typeof payload.access_token !== 'string' || !payload.access_token.trim()) {
+  private async fetchRuntimeIdentity(): Promise<RuntimeIdentity> {
+    const [tokenResponse, emailResponse] = await Promise.all([
+      this.fetchImpl(
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+        { headers: { 'Metadata-Flavor': 'Google' } },
+      ),
+      this.fetchImpl(
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+        { headers: { 'Metadata-Flavor': 'Google' } },
+      ),
+    ]);
+
+    if (!tokenResponse.ok) throw new Error(`GCP_METADATA_TOKEN_FAILED:${tokenResponse.status}`);
+    if (!emailResponse.ok) throw new Error(`GCP_METADATA_EMAIL_FAILED:${emailResponse.status}`);
+
+    const tokenPayload = (await tokenResponse.json()) as { access_token?: unknown };
+    if (typeof tokenPayload.access_token !== 'string' || !tokenPayload.access_token.trim()) {
       throw new Error('GCP_METADATA_TOKEN_INVALID');
     }
-    return payload.access_token;
+
+    const serviceAccountEmail = (await emailResponse.text()).trim();
+    if (!/^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/.test(serviceAccountEmail)) {
+      throw new Error('GCP_METADATA_EMAIL_INVALID');
+    }
+
+    return { accessToken: tokenPayload.access_token, serviceAccountEmail };
+  }
+
+  private async createSignedDownloadUrl(
+    objectName: string,
+    identity: RuntimeIdentity,
+  ): Promise<string> {
+    const timestamp = formatV4Timestamp(this.now());
+    const datestamp = timestamp.slice(0, 8);
+    const credentialScope = `${datestamp}/auto/storage/goog4_request`;
+    const canonicalUri = buildCanonicalObjectPath(this.options.bucketName, objectName);
+    const query: Record<string, string> = {
+      'X-Goog-Algorithm': 'GOOG4-RSA-SHA256',
+      'X-Goog-Credential': `${identity.serviceAccountEmail}/${credentialScope}`,
+      'X-Goog-Date': timestamp,
+      'X-Goog-Expires': String(this.signedUrlTtlSeconds),
+      'X-Goog-SignedHeaders': 'host',
+    };
+    const canonicalQuery = canonicalizeQuery(query);
+    const canonicalRequest = [
+      'GET',
+      canonicalUri,
+      canonicalQuery,
+      'host:storage.googleapis.com\n',
+      'host',
+      'UNSIGNED-PAYLOAD',
+    ].join('\n');
+    const canonicalRequestHash = createHash('sha256').update(canonicalRequest).digest('hex');
+    const stringToSign = [
+      'GOOG4-RSA-SHA256',
+      timestamp,
+      credentialScope,
+      canonicalRequestHash,
+    ].join('\n');
+
+    const signResponse = await this.fetchImpl(
+      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(identity.serviceAccountEmail)}:signBlob`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${identity.accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Goog-User-Project': this.options.projectId,
+        },
+        body: JSON.stringify({ payload: Buffer.from(stringToSign).toString('base64') }),
+      },
+    );
+    if (!signResponse.ok) {
+      throw new Error(`PUBLICATION_ASSET_SIGN_BLOB_FAILED:${signResponse.status}`);
+    }
+    const signPayload = (await signResponse.json()) as { signedBlob?: unknown };
+    if (typeof signPayload.signedBlob !== 'string' || !signPayload.signedBlob.trim()) {
+      throw new Error('PUBLICATION_ASSET_SIGN_BLOB_INVALID');
+    }
+    const signature = Buffer.from(signPayload.signedBlob, 'base64').toString('hex');
+    return `https://storage.googleapis.com${canonicalUri}?${canonicalQuery}&X-Goog-Signature=${signature}`;
   }
 }
 
@@ -105,11 +193,7 @@ export function buildPublicationAssetObjectName(
 }
 
 export function buildPublicGcsObjectUrl(bucketName: string, objectName: string): string {
-  const encodedObject = objectName
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-  return `https://storage.googleapis.com/${encodeURIComponent(bucketName)}/${encodedObject}`;
+  return `https://storage.googleapis.com${buildCanonicalObjectPath(bucketName, objectName)}`;
 }
 
 export async function validatePublicImageUrl(
@@ -131,7 +215,7 @@ export async function validatePublicImageUrl(
   return contentType;
 }
 
-async function tryValidatePublicImageUrl(
+async function tryValidateExternalImageUrl(
   url: string,
   fetchImpl: typeof fetch,
 ): Promise<string | undefined> {
@@ -149,6 +233,33 @@ async function tryValidatePublicImageUrl(
     throw new Error(`PUBLICATION_ASSET_EXISTING_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`);
   }
   return contentType;
+}
+
+function buildCanonicalObjectPath(bucketName: string, objectName: string): string {
+  const encodedBucket = encodeRfc3986(bucketName);
+  const encodedObject = objectName
+    .split('/')
+    .map((segment) => encodeRfc3986(segment))
+    .join('/');
+  return `/${encodedBucket}/${encodedObject}`;
+}
+
+function canonicalizeQuery(query: Record<string, string>): string {
+  return Object.entries(query)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${encodeRfc3986(key)}=${encodeRfc3986(value)}`)
+    .join('&');
+}
+
+function encodeRfc3986(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function formatV4Timestamp(date: Date): string {
+  if (Number.isNaN(date.getTime())) throw new Error('PUBLICATION_ASSET_SIGNING_TIME_INVALID');
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
 }
 
 function sanitizeSegment(value: string, field: string): string {
