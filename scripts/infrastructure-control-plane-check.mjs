@@ -31,7 +31,9 @@ const workflowRequirements = [
 
 for (const marker of workflowRequirements) {
   if (!workflow.includes(marker)) {
-    console.error(`Infrastructure control-plane workflow missing boundary marker: ${marker}`);
+    console.error(
+      `Infrastructure control-plane workflow missing boundary marker: ${marker}`,
+    );
     process.exit(1);
   }
 }
@@ -44,13 +46,17 @@ for (const forbidden of [
   'storage.buckets.delete',
 ]) {
   if (workflow.includes(forbidden)) {
-    console.error(`Infrastructure control-plane workflow contains forbidden capability: ${forbidden}`);
+    console.error(
+      `Infrastructure control-plane workflow contains forbidden capability: ${forbidden}`,
+    );
     process.exit(1);
   }
 }
 
 if (workflow.includes('push:') || workflow.includes('pull_request:')) {
-  console.error('Infrastructure control plane must never execute automatically from push or pull_request');
+  console.error(
+    'Infrastructure control plane must never execute automatically from push or pull_request',
+  );
   process.exit(1);
 }
 
@@ -110,7 +116,9 @@ for (const forbiddenPermission of [
   'resourcemanager.projects.setIamPolicy',
 ]) {
   if (role.includes(forbiddenPermission)) {
-    console.error(`Infrastructure custom role contains forbidden permission: ${forbiddenPermission}`);
+    console.error(
+      `Infrastructure custom role contains forbidden permission: ${forbiddenPermission}`,
+    );
     process.exit(1);
   }
 }
