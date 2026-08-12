@@ -42,7 +42,10 @@ export class InMemoryScheduler implements Scheduler {
     return Promise.resolve(
       [...this.jobs.values()]
         .filter((job) => toolName === undefined || job.toolName === toolName)
-        .sort((left, right) => left.runAt.localeCompare(right.runAt) || left.id.localeCompare(right.id)),
+        .sort(
+          (left, right) =>
+            left.runAt.localeCompare(right.runAt) || left.id.localeCompare(right.id),
+        ),
     );
   }
 
