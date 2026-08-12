@@ -15,10 +15,21 @@ concurrency:
 
 env:
   PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
   SERVICE: toca-meta-oauth-staging
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_VERIFY_TOKEN_SECRET_ID: toca-meta-webhook-verify-token
+  DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  META_APP_ID: '2281930145887404'
+  META_GRAPH_API_VERSION: v24.0
+  INSPECTION_JOB: toca-comment-retry-inspect
 
 jobs:
-  verify:
+  deploy-and-inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,29 +42,150 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Identify sanitized constraint
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build corrected boundary image
         shell: bash
         run: |
           set -euo pipefail
-          ERROR_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="'"$SERVICE"'" AND textPayload:"HTTP request failed"'
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:comment-time-fix-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-          count_pattern() {
-            local pattern="$1"
-            gcloud logging read "$ERROR_FILTER AND textPayload:\"$pattern\"" \
-              --project "$PROJECT_ID" --freshness=120m --limit=200 --format='value(insertId)' 2>/dev/null \
-              | sed '/^$/d' | wc -l | tr -d ' '
+      - name: Deploy persistence-on writes-off boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSPECTION_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "INSPECTION_SINCE=$INSPECTION_SINCE" >> "$GITHUB_ENV"
+
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-env-vars "^@^NODE_ENV=production@META_ENABLED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@MCP_ENABLED=false@LOG_LEVEL=info@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_WEBHOOK_VERIFY_TOKEN_KEY=META_WEBHOOK_VERIFY_TOKEN@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --ingress all \
+            --default-url \
+            --no-invoker-iam-check \
+            --quiet
+
+      - name: Verify corrected boundary remains safe
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app"
+
+          for ATTEMPT in 1 2 3 4 5; do
+            HEALTH="$(curl --silent --output /tmp/health.json --write-out '%{http_code}' "$SERVICE_URL/health")"
+            [ "$HEALTH" = "200" ] && grep -q '"status":"ok"' /tmp/health.json && break
+            sleep 2
+          done
+          test "$HEALTH" = "200"
+          grep -q '"status":"ok"' /tmp/health.json
+
+          WEBHOOK="$(curl --silent --output /tmp/webhook.json --write-out '%{http_code}' \
+            "$SERVICE_URL/webhooks/meta?hub.mode=subscribe&hub.verify_token=invalid-token&hub.challenge=rejected")"
+          test "$WEBHOOK" = "403"
+          grep -q '"error":"meta_webhook_verification_rejected"' /tmp/webhook.json
+
+          MCP="$(curl --silent --output /tmp/mcp.json --write-out '%{http_code}' -X POST "$SERVICE_URL/mcp")"
+          test "$MCP" = "404"
+          grep -q '"error":"not_found"' /tmp/mcp.json
+
+          echo 'Corrected Meta boundary deployed with persistence enabled, writes disabled, and MCP isolated.'
+
+      - name: Build sanitized retry inspector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/comment-retry-inspect
+          cat > /tmp/comment-retry-inspect/inspect.mjs <<'NODE'
+          import pg from 'pg';
+
+          const connectionString = process.env.DATABASE_URL;
+          const since = process.env.INSPECTION_SINCE;
+          const runId = process.env.INSPECTION_RUN_ID;
+          if (!connectionString || !since || !runId) throw new Error('inspection configuration missing');
+
+          const pool = new pg.Pool({ connectionString, ssl: false, max: 1 });
+          try {
+            const persisted = await pool.query(
+              `select count(*)::int as count
+                 from meta_webhook_events
+                where channel = 'COMMENT'
+                  and received_at >= $1::timestamptz`,
+              [since],
+            );
+            const audit = await pool.query(
+              `select count(*)::int as count
+                 from audit_events a
+                 join meta_webhook_events e on e.event_id = a.correlation_id
+                where e.channel = 'COMMENT'
+                  and e.received_at >= $1::timestamptz
+                  and a.tool_name = 'instagram.engagement.webhook.receive'
+                  and a.decision = 'ACCEPTED'`,
+              [since],
+            );
+            console.log(`SAFE_RUN_${runId}_RETRIED_COMMENT_PERSISTED=${persisted.rows[0]?.count ?? 0}`);
+            console.log(`SAFE_RUN_${runId}_RETRIED_COMMENT_AUDITED=${audit.rows[0]?.count ?? 0}`);
+          } finally {
+            await pool.end().catch(() => undefined);
           }
+          NODE
 
-          OCCURRED_AT="$(count_pattern 'occurred_at')"
-          NOT_NULL="$(count_pattern 'not-null')"
-          CHANNEL="$(count_pattern 'channel')"
-          EVENT_ID="$(count_pattern 'event_id')"
-          AUDIT_EVENTS="$(count_pattern 'audit_events')"
+          cat > /tmp/comment-retry-inspect/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          RUN npm init -y >/dev/null 2>&1 && npm install pg@8.23.0 >/dev/null 2>&1
+          COPY inspect.mjs ./inspect.mjs
+          USER node
+          CMD ["node", "inspect.mjs"]
+          DOCKER
 
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_OCCURRED_AT_MATCHES=$OCCURRED_AT"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_NOT_NULL_MATCHES=$NOT_NULL"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_CHANNEL_MATCHES=$CHANNEL"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_EVENT_ID_MATCHES=$EVENT_ID"
-          echo "SAFE_RUN_${GITHUB_RUN_ID}_AUDIT_EVENTS_MATCHES=$AUDIT_EVENTS"
+          INSPECT_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/comment-retry-inspect:${GITHUB_SHA}"
+          docker build -t "$INSPECT_IMAGE" /tmp/comment-retry-inspect
+          docker push "$INSPECT_IMAGE"
+          echo "INSPECT_IMAGE=$INSPECT_IMAGE" >> "$GITHUB_ENV"
 
-          test "$OCCURRED_AT" -ge 1
+      - name: Inspect automatic Meta retry safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$INSPECTION_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          sleep 20
+
+          gcloud run jobs deploy "$INSPECTION_JOB" \
+            --image "$INSPECT_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSPECTION_SINCE=$INSPECTION_SINCE,INSPECTION_RUN_ID=$GITHUB_RUN_ID" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$INSPECTION_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+          MARKERS=''
+          for ATTEMPT in 1 2 3 4 5; do
+            MARKERS="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$INSPECTION_JOB\" AND textPayload:\"SAFE_RUN_${GITHUB_RUN_ID}_\"" \
+              --project "$PROJECT_ID" --freshness=10m --limit=20 --format='value(textPayload)' 2>/dev/null \
+              | grep -E "^SAFE_RUN_${GITHUB_RUN_ID}_RETRIED_COMMENT_(PERSISTED|AUDITED)=[0-9]+$" | sort -u || true)"
+            [ -n "$MARKERS" ] && break
+            sleep 2
+          done
+          echo "$MARKERS"
