@@ -51,22 +51,31 @@ jobs:
           if (!oauthToken || !pageId || !accountId) throw new Error('CONTROLLED_DIRECT_CONFIGURATION_MISSING');
           if (!writesEnabled) throw new Error('CONTROLLED_DIRECT_KILL_SWITCH_CLOSED');
 
-          async function request(path, token, options = {}, stage = 'UNKNOWN') {
-            const response = await fetch(`https://graph.facebook.com/v24.0/${path}`, {
-              ...options,
-              headers: {
-                Authorization: `Bearer ${token}`,
-                Accept: 'application/json',
-                ...(options.headers ?? {}),
-              },
-            });
-            const body = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(`META_CONTROLLED_DIRECT_${stage}_HTTP_${response.status}`);
-            return body;
+          async function request(path, token, options = {}, stage = 'UNKNOWN', retryReads = true) {
+            const method = String(options.method ?? 'GET').toUpperCase();
+            const maxAttempts = retryReads && method === 'GET' ? 4 : 1;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              const response = await fetch(`https://graph.facebook.com/v24.0/${path}`, {
+                ...options,
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  Accept: 'application/json',
+                  ...(options.headers ?? {}),
+                },
+              });
+              const body = await response.json().catch(() => ({}));
+              if (response.ok) return body;
+              const transient = response.status === 429 || response.status >= 500;
+              if (transient && attempt < maxAttempts) {
+                console.log(`SAFE_CONTROLLED_DIRECT_${stage}_TRANSIENT_RETRY=${attempt}`);
+                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+                continue;
+              }
+              throw new Error(`META_CONTROLLED_DIRECT_${stage}_HTTP_${response.status}`);
+            }
+            throw new Error(`CONTROLLED_DIRECT_${stage}_RETRY_EXHAUSTED`);
           }
 
-          // Facebook Login messaging requires a Page Access Token. Derive it in memory
-          // from the already-authorized OAuth token and never emit it to logs.
           const page = await request(
             `${pageId}?fields=access_token,instagram_business_account`,
             oauthToken,
@@ -75,9 +84,7 @@ jobs:
           );
           const pageToken = page?.access_token;
           const linkedAccountId = page?.instagram_business_account?.id;
-          if (typeof pageToken !== 'string' || pageToken.length === 0) {
-            throw new Error('CONTROLLED_DIRECT_PAGE_TOKEN_MISSING');
-          }
+          if (typeof pageToken !== 'string' || pageToken.length === 0) throw new Error('CONTROLLED_DIRECT_PAGE_TOKEN_MISSING');
           if (linkedAccountId !== accountId) throw new Error('CONTROLLED_DIRECT_LINKED_ACCOUNT_MISMATCH');
           console.log('SAFE_CONTROLLED_DIRECT_PAGE_TOKEN_RESOLVED=1');
 
@@ -94,12 +101,7 @@ jobs:
           for (const conversation of conversations.data) {
             if (typeof conversation?.id !== 'string') continue;
             const fields = encodeURIComponent('messages.limit(100){id,message,from,to,created_time}');
-            const detail = await request(
-              `${conversation.id}?fields=${fields}`,
-              pageToken,
-              {},
-              'CONVERSATION_DETAIL',
-            );
+            const detail = await request(`${conversation.id}?fields=${fields}`, pageToken, {}, 'CONVERSATION_DETAIL');
             const messages = Array.isArray(detail?.messages?.data) ? detail.messages.data : [];
             snapshots.set(conversation.id, messages);
             for (const message of messages) {
@@ -125,12 +127,10 @@ jobs:
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                recipient: { id: target.recipientId },
-                message: { text: replyText },
-              }),
+              body: JSON.stringify({ recipient: { id: target.recipientId }, message: { text: replyText } }),
             },
             'SEND',
+            false,
           );
           if (typeof created?.message_id !== 'string' || typeof created?.recipient_id !== 'string') {
             throw new Error('CONTROLLED_DIRECT_PROVIDER_IDS_MISSING');
@@ -139,12 +139,7 @@ jobs:
           let verified = false;
           for (let attempt = 0; attempt < 5; attempt += 1) {
             const fields = encodeURIComponent('messages.limit(100){id,message,from,to,created_time}');
-            const detail = await request(
-              `${target.conversationId}?fields=${fields}`,
-              pageToken,
-              {},
-              'VERIFY',
-            );
+            const detail = await request(`${target.conversationId}?fields=${fields}`, pageToken, {}, 'VERIFY');
             const messages = Array.isArray(detail?.messages?.data) ? detail.messages.data : [];
             verified = messages.some((message) => message?.message === replyText);
             if (verified) break;
@@ -179,17 +174,12 @@ jobs:
             gcloud run jobs delete "$WRITE_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-
           gcloud run jobs deploy "$WRITE_JOB" \
-            --image "$WRITE_IMAGE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
+            --image "$WRITE_IMAGE" --project "$PROJECT_ID" --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --set-env-vars "PAGE_ID=$PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true" \
             --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
-            --max-retries 0 \
-            --task-timeout 180s \
-            --quiet
+            --max-retries 0 --task-timeout 180s --quiet
 
           set +e
           gcloud run jobs execute "$WRITE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
@@ -198,14 +188,14 @@ jobs:
 
           MARKERS="$(gcloud logging read \
             "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$WRITE_JOB\" AND textPayload:\"SAFE_CONTROLLED_DIRECT_\"" \
-            --project "$PROJECT_ID" --freshness=10m --limit=50 --format='value(textPayload)' 2>/dev/null \
-            | grep -E '^SAFE_CONTROLLED_DIRECT_(PAGE_TOKEN_RESOLVED=1|TARGET_MATCHES=[0-9]+|WRITE_(ALREADY_PRESENT|CREATED|VERIFIED)=[01])$' | sort -u || true)"
+            --project "$PROJECT_ID" --freshness=10m --limit=100 --format='value(textPayload)' 2>/dev/null \
+            | grep -E '^SAFE_CONTROLLED_DIRECT_([A-Z_]+_TRANSIENT_RETRY=[0-9]+|PAGE_TOKEN_RESOLVED=1|TARGET_MATCHES=[0-9]+|WRITE_(ALREADY_PRESENT|CREATED|VERIFIED)=[01])$' | sort -u || true)"
           echo "$MARKERS"
 
           if [ "$EXEC_STATUS" -ne 0 ]; then
             ERROR_MARKER="$(gcloud logging read \
               "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$WRITE_JOB\" AND textPayload:(\"CONTROLLED_DIRECT_\" OR \"META_CONTROLLED_DIRECT_\")" \
-              --project "$PROJECT_ID" --freshness=10m --limit=30 --format='value(textPayload)' 2>/dev/null \
+              --project "$PROJECT_ID" --freshness=10m --limit=50 --format='value(textPayload)' 2>/dev/null \
               | grep -Eo '(CONTROLLED_DIRECT_[A-Z0-9_]+|META_CONTROLLED_DIRECT_[A-Z_]+_HTTP_[0-9]+)' | sort -u | tail -10 || true)"
             echo "$ERROR_MARKER"
             exit "$EXEC_STATUS"
@@ -214,21 +204,14 @@ jobs:
           CREATED="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WRITE_CREATED=//p' | tail -1)"
           ALREADY="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WRITE_ALREADY_PRESENT=//p' | tail -1)"
           VERIFIED="$(echo "$MARKERS" | sed -n 's/^SAFE_CONTROLLED_DIRECT_WRITE_VERIFIED=//p' | tail -1)"
-          if [ "${CREATED:-0}" = "1" ]; then
-            test "${VERIFIED:-0}" = "1"
-          else
-            test "${ALREADY:-0}" = "1"
-          fi
+          if [ "${CREATED:-0}" = "1" ]; then test "${VERIFIED:-0}" = "1"; else test "${ALREADY:-0}" = "1"; fi
 
       - name: Confirm public boundary remains writes-off
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          gcloud run services describe toca-meta-oauth-staging \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --format=json > /tmp/service.json
+          gcloud run services describe toca-meta-oauth-staging --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
           VALUE="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value][0] // "__MISSING__"' /tmp/service.json)"
           test "$VALUE" = "false"
           echo 'SAFE_PUBLIC_BOUNDARY_WRITES_ENABLED=0'
