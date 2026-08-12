@@ -60,11 +60,20 @@ export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebho
     // Meta currently emits Instagram comment webhooks in two supported shapes:
     // 1) entry.changes[] with { field, value }
     // 2) entry-level { field, value }
-    // Normalize both through the same path so neither is silently acknowledged as an empty batch.
+    // In both shapes the provider event timestamp may live on entry.time rather than value.
+    // Normalize all variants through the same path so valid events cannot fail persistence
+    // merely because Meta placed their occurrence timestamp on the envelope.
+    const entryTimestamp = entryValue.time;
     const entryField = stringValue(entryValue.field);
     const entryValuePayload = isRecord(entryValue.value) ? entryValue.value : undefined;
     if (entryField && entryValuePayload) {
-      const event = normalizeChange(accountId, entryField, entryValuePayload, entryValue);
+      const event = normalizeChange(
+        accountId,
+        entryField,
+        entryValuePayload,
+        entryValue,
+        entryTimestamp,
+      );
       if (event) events.push(event);
     }
 
@@ -73,7 +82,7 @@ export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebho
       if (!isRecord(changeValue)) continue;
       const field = stringValue(changeValue.field);
       const value = isRecord(changeValue.value) ? changeValue.value : {};
-      const event = normalizeChange(accountId, field, value, changeValue);
+      const event = normalizeChange(accountId, field, value, changeValue, entryTimestamp);
       if (event) events.push(event);
     }
 
@@ -93,6 +102,7 @@ function normalizeChange(
   field: string | undefined,
   value: Record<string, unknown>,
   raw: Record<string, unknown>,
+  fallbackTimestamp?: unknown,
 ): InstagramWebhookEvent | undefined {
   if (!field) return undefined;
 
@@ -104,7 +114,9 @@ function normalizeChange(
   const mediaId = stringValue(value.media_id) ?? nestedString(value, 'media', 'id');
   const senderId = nestedString(value, 'from', 'id') ?? stringValue(value.from_id);
   const text = stringValue(value.text) ?? stringValue(value.message);
-  const occurredAt = normalizeTimestamp(value.created_time ?? value.timestamp);
+  const occurredAt = normalizeTimestamp(
+    value.created_time ?? value.timestamp ?? fallbackTimestamp,
+  );
 
   if (!commentId && !field.includes('comment')) return undefined;
 
