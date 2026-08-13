@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "commandId": "noop-provider-native-scheduling-required-1730",
   "action": "NOOP",
-  "issuedAt": "2026-08-13T16:32:00-03:00",
+  "issuedAt": "2026-08-13T16:44:00-03:00",
   "contentItemId": "MKT-20260813-SUNSET-FEED-1500",
   "scheduledAt": "2026-08-13T17:30:00-03:00",
   "timezone": "America/Bahia",
@@ -18,5 +18,7 @@
   "idempotencyKey": "NOOP-MKT-20260813-SUNSET-FEED-1730",
   "approvalMode": "BLOCKED",
   "approvalStatus": "BLOCKED_POLICY",
-  "approvedRequestSha256": ""
+  "approvedRequestSha256": "",
+  "schedulingPolicy": "NATIVE_PROVIDER_SCHEDULING_ONLY",
+  "publicationIntent": "NATIVE_SCHEDULE"
 }
