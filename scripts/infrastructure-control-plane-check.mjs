@@ -42,6 +42,17 @@ const workflowRequirements = [
   'roles/storage.objectViewer',
   'allUsers',
   'allAuthenticatedUsers',
+  'reconcile-toca-managed-instagram-heartbeat',
+  'worker_image',
+  'server@sha256:',
+  'TOCA_MANAGED_JOB_NAME: toca-managed-instagram-publication-worker',
+  'TOCA_MANAGED_SCHEDULER_NAME: toca-managed-instagram-publication-heartbeat',
+  'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=false',
+  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false',
+  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false',
+  'META_ENABLED=false',
+  'roles/run.invoker',
+  'gcloud scheduler jobs pause',
 ];
 
 for (const marker of workflowRequirements) {
@@ -59,6 +70,9 @@ const forbiddenWorkflowMarkers = [
   'storage.buckets.delete',
   '--member="allUsers"',
   '--member="allAuthenticatedUsers"',
+  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
+  'gcloud scheduler jobs resume',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
