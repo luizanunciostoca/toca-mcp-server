@@ -63,9 +63,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   }
   const rawContentType = required(values, 'content-type');
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(rawContentType)) {
-    throw new Error(
-      `STORY_COMPOSE_CONTENT_TYPE_UNSUPPORTED:${rawContentType}`,
-    );
+    throw new Error(`STORY_COMPOSE_CONTENT_TYPE_UNSUPPORTED:${rawContentType}`);
   }
   return {
     source: required(values, 'source'),
@@ -75,12 +73,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
     masterAssetId: required(values, 'master-asset-id'),
     masterDriveFileId: required(values, 'master-drive-file-id'),
     contentType: rawContentType as CliArgs['contentType'],
-    ...(values.get('template-id')
-      ? { templateId: values.get('template-id') }
-      : {}),
-    ...(values.get('headline')
-      ? { headline: values.get('headline') }
-      : {}),
+    ...(values.get('template-id') ? { templateId: values.get('template-id') } : {}),
+    ...(values.get('headline') ? { headline: values.get('headline') } : {}),
     ...(values.get('body') ? { body: values.get('body') } : {}),
     ...(values.get('cta') ? { cta: values.get('cta') } : {}),
   };
