@@ -80,7 +80,9 @@ jobs:
             --source-drive-file-id "$SOURCE_DRIVE_FILE_ID" \
             --content-type image/jpeg \
             --provider local \
-            | tee .image-edit-smoke/result.json
+            | tee .image-edit-smoke/command.log
+          tail -n 1 .image-edit-smoke/command.log > .image-edit-smoke/result.json
+          jq -e . .image-edit-smoke/result.json >/dev/null
 
       - name: Validate binding evidence and output
         shell: bash
