@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "commandId": "prepare-MKT-20260813-SUNSET-FEED-1630-V2",
-  "action": "PREPARE",
-  "issuedAt": "2026-08-13T15:38:00-03:00",
+  "commandId": "noop-provider-native-scheduling-required",
+  "action": "NOOP",
+  "issuedAt": "2026-08-13T15:49:00-03:00",
   "contentItemId": "MKT-20260813-SUNSET-FEED-1500",
   "scheduledAt": "2026-08-13T16:30:00-03:00",
   "timezone": "America/Bahia",
@@ -17,6 +17,6 @@
   "correlationId": "CORR-MKT-20260813-FEED1630-V2",
   "idempotencyKey": "PREP-MKT-20260813-SUNSET-FEED-1630-V2",
   "approvalMode": "EXPLICIT_APPROVAL",
-  "approvalStatus": "PENDING_REVIEW",
-  "approvedRequestSha256": ""
+  "approvalStatus": "APPROVED",
+  "approvedRequestSha256": "ae3fe524432f541686dffec59cdb1ad24b3b10e4dbbace18ecbbeb4a658c8fc7"
 }
