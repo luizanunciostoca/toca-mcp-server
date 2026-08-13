@@ -191,20 +191,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RESULT_LINE="$(gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
-            --project "$PROJECT_ID" \
-            --freshness=30m \
-            --limit=20 \
-            --order=desc \
-            --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=' | head -n1)"
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=30m \
+              --limit=50 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=' | head -n1 || true)"
+            if [ -n "$RESULT_LINE" ]; then
+              break
+            fi
+            echo "Verification log not visible yet (attempt ${attempt}/12); waiting 5s..."
+            sleep 5
+          done
           test -n "$RESULT_LINE"
           RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=}"
           printf '%s\n' "$RESULT_JSON" | jq -e \
-            --arg sha "$EXPECTED_REQUEST_SHA256" '
+            --arg sha "$EXPECTED_REQUEST_SHA256" \
+            --arg correlation "$CORRELATION_ID" '
               .requestSha256 == $sha and
               .status == "PUBLISHED" and
-              (.publicationId | length > 0)
+              (.publicationId | length > 0) and
+              .correlationId == $correlation
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > first-publication-execution.json
 
