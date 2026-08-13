@@ -12,10 +12,12 @@ permissions:
   id-token: write
 
 env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  CREATIVE_BUCKET: toca-mcp-creative-assets
   SOURCE_ASSET_ID: SUN-0087
   SOURCE_DRIVE_FILE_ID: 1j6cUBD82Hw8an3Bu9Cx19WesaUF4Gr7b
-  DESTINATION_FOLDER_ID: 1ypXOYJpPA41e6THr1x4tPadd13tBBbk4
-  DESTINATION_NAME: MKT-20260813-SUNSET-FEED-0900__SUN-0087__LOCAL_ENHANCED_V1.jpg
+  CREATIVE_OBJECT: creatives/MKT-20260813-SUNSET-FEED-0900/v1.jpg
 
 jobs:
   persist:
@@ -47,9 +49,11 @@ jobs:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
 
-      - name: Download canonical source
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download canonical Drive source
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
@@ -73,36 +77,36 @@ jobs:
             --provider local \
             | tee .creative-once/command.log
           tail -n 1 .creative-once/command.log > .creative-once/result.json
-          jq -e '.sourceImageBound == true and .editorProvider == "LOCAL_IMAGEMAGICK"' .creative-once/result.json >/dev/null
+          jq -e '.sourceImageBound == true and .editorProvider == "LOCAL_IMAGEMAGICK" and .pipelineVersion == "local-photo-enhancer-v1"' .creative-once/result.json >/dev/null
+          sha256sum .creative-once/output.jpg | awk '{print $1}' > .creative-once/local.sha256
 
-      - name: Upload creative to canonical Instagram folder
-        id: upload
-        env:
-          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+      - name: Reconcile private canonical creative bucket
         run: |
           set -euo pipefail
-          printf '{"name":"%s","parents":["%s"]}' "$DESTINATION_NAME" "$DESTINATION_FOLDER_ID" > .creative-once/metadata.json
-          curl --fail --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
-            --form 'metadata=<.creative-once/metadata.json;type=application/json;charset=UTF-8' \
-            --form 'file=@.creative-once/output.jpg;type=image/jpeg' \
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,size,mimeType' \
-            | tee .creative-once/upload.json
-          jq -e '.id and .mimeType == "image/jpeg"' .creative-once/upload.json >/dev/null
-          echo "creative_drive_file_id=$(jq -r .id .creative-once/upload.json)" >> "$GITHUB_OUTPUT"
+          BUCKET_URI="gs://${CREATIVE_BUCKET}"
+          if ! gcloud storage buckets describe "$BUCKET_URI" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            gcloud storage buckets create "$BUCKET_URI" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$GCP_REGION" \
+              --uniform-bucket-level-access \
+              --public-access-prevention
+          fi
+          gcloud storage buckets update "$BUCKET_URI" \
+            --project "$GCP_PROJECT_ID" \
+            --uniform-bucket-level-access \
+            --public-access-prevention
 
-      - name: Validate persisted creative metadata
-        env:
-          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CREATIVE_DRIVE_FILE_ID: ${{ steps.upload.outputs.creative_drive_file_id }}
+      - name: Persist canonical creative
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
-            "https://www.googleapis.com/drive/v3/files/${CREATIVE_DRIVE_FILE_ID}?supportsAllDrives=true&fields=id,name,mimeType,size,parents,webViewLink" \
-            | tee .creative-once/persisted.json
-          jq -e --arg folder "$DESTINATION_FOLDER_ID" '.mimeType == "image/jpeg" and (.parents | index($folder)) != null and (.size|tonumber) > 0' .creative-once/persisted.json >/dev/null
+          URI="gs://${CREATIVE_BUCKET}/${CREATIVE_OBJECT}"
+          gcloud storage cp .creative-once/output.jpg "$URI" --project "$GCP_PROJECT_ID"
+          gcloud storage cp "$URI" .creative-once/persisted.jpg --project "$GCP_PROJECT_ID"
+          sha256sum .creative-once/persisted.jpg | awk '{print $1}' > .creative-once/persisted.sha256
+          test "$(cat .creative-once/local.sha256)" = "$(cat .creative-once/persisted.sha256)"
+          gcloud storage objects describe "$URI" --project "$GCP_PROJECT_ID" --format=json > .creative-once/persisted.json
+          echo "$URI" > .creative-once/creative-uri.txt
+          echo "CANONICAL_CREATIVE_URI=$URI"
 
       - name: Upload execution evidence
         uses: actions/upload-artifact@v4
@@ -110,6 +114,8 @@ jobs:
           name: sun-0087-canonical-creative-evidence
           path: |
             .creative-once/result.json
-            .creative-once/upload.json
+            .creative-once/local.sha256
+            .creative-once/persisted.sha256
             .creative-once/persisted.json
+            .creative-once/creative-uri.txt
           retention-days: 7
