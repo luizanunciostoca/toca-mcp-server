@@ -53,11 +53,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! gcloud secrets describe "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "OPENAI_API_KEY_SECRET_MISSING:$OPENAI_API_KEY_SECRET_ID" >&2
-            exit 42
+          set +e
+          DESCRIBE_ERROR="$(gcloud secrets describe "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" --format='value(name)' 2>&1 >/dev/null)"
+          DESCRIBE_STATUS=$?
+          set -e
+          if [ "$DESCRIBE_STATUS" -ne 0 ]; then
+            if printf '%s' "$DESCRIBE_ERROR" | grep -Eqi 'NOT_FOUND|not found|does not exist'; then
+              echo "OPENAI_API_KEY_SECRET_NOT_FOUND:$OPENAI_API_KEY_SECRET_ID" >&2
+              exit 42
+            fi
+            if printf '%s' "$DESCRIBE_ERROR" | grep -Eqi 'PERMISSION_DENIED|permission|denied'; then
+              echo "OPENAI_API_KEY_SECRET_DESCRIBE_DENIED:$OPENAI_API_KEY_SECRET_ID" >&2
+              exit 43
+            fi
+            echo "OPENAI_API_KEY_SECRET_PREFLIGHT_FAILED:$OPENAI_API_KEY_SECRET_ID" >&2
+            printf '%s\n' "$DESCRIBE_ERROR" >&2
+            exit 44
           fi
-          OPENAI_API_KEY="$(gcloud secrets versions access latest --secret "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID")"
+
+          set +e
+          OPENAI_API_KEY="$(gcloud secrets versions access latest --secret "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" 2>.image-edit-secret-error)"
+          ACCESS_STATUS=$?
+          set -e
+          if [ "$ACCESS_STATUS" -ne 0 ]; then
+            if grep -Eqi 'PERMISSION_DENIED|permission|denied' .image-edit-secret-error; then
+              echo "OPENAI_API_KEY_SECRET_ACCESS_DENIED:$OPENAI_API_KEY_SECRET_ID" >&2
+              exit 45
+            fi
+            if grep -Eqi 'NOT_FOUND|not found|does not exist' .image-edit-secret-error; then
+              echo "OPENAI_API_KEY_SECRET_VERSION_NOT_FOUND:$OPENAI_API_KEY_SECRET_ID" >&2
+              exit 46
+            fi
+            echo "OPENAI_API_KEY_SECRET_ACCESS_FAILED:$OPENAI_API_KEY_SECRET_ID" >&2
+            cat .image-edit-secret-error >&2
+            exit 47
+          fi
+          rm -f .image-edit-secret-error
           test -n "$OPENAI_API_KEY"
           echo "::add-mask::$OPENAI_API_KEY"
           echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
