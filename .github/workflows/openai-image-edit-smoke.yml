@@ -1,4 +1,4 @@
-name: OpenAI Image Edit Smoke
+name: Local Photo Enhancer Smoke
 
 on:
   push:
@@ -6,9 +6,10 @@ on:
       - fix/marketing-autopilot-source-image-binding
     paths:
       - '.github/workflows/openai-image-edit-smoke.yml'
-      - 'src/providers/openai/openai-image-edit-provider.ts'
+      - 'src/providers/local/local-photo-enhancer.ts'
       - 'src/marketing-autopilot-image-edit.ts'
-      - 'test/openai-image-edit-provider.test.ts'
+      - 'test/local-photo-enhancer.test.ts'
+      - 'Dockerfile'
   workflow_dispatch:
 
 permissions:
@@ -19,9 +20,6 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     env:
-      PROJECT_ID: toca-mcp-production
-      OPENAI_API_KEY_SECRET_ID: toca-openai-api-key
-      OPENAI_API_KEY_FROM_GITHUB: ${{ secrets.OPENAI_API_KEY }}
       SOURCE_ASSET_ID: SUN-0087
       SOURCE_DRIVE_FILE_ID: 1j6cUBD82Hw8an3Bu9Cx19WesaUF4Gr7b
     steps:
@@ -39,6 +37,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm quality
 
+      - name: Install local image runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends imagemagick
+          convert -version
+
       - name: Authenticate to Google Cloud and Drive
         id: auth
         uses: google-github-actions/auth@v2
@@ -46,64 +52,7 @@ jobs:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
-
-      - uses: google-github-actions/setup-gcloud@v2
-
-      - name: Resolve OpenAI key
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "${OPENAI_API_KEY_FROM_GITHUB:-}" ]; then
-            echo "OPENAI_API_KEY_SOURCE=GITHUB_ACTIONS_SECRET"
-            echo "::add-mask::$OPENAI_API_KEY_FROM_GITHUB"
-            echo "OPENAI_API_KEY=$OPENAI_API_KEY_FROM_GITHUB" >> "$GITHUB_ENV"
-            echo "OPENAI_API_KEY_ENV_KEY=OPENAI_API_KEY" >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          echo "OPENAI_API_KEY_SOURCE=GCP_SECRET_MANAGER_FALLBACK"
-          set +e
-          DESCRIBE_ERROR="$(gcloud secrets describe "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" --format='value(name)' 2>&1 >/dev/null)"
-          DESCRIBE_STATUS=$?
-          set -e
-          if [ "$DESCRIBE_STATUS" -ne 0 ]; then
-            if printf '%s' "$DESCRIBE_ERROR" | grep -Eqi 'NOT_FOUND|not found|does not exist'; then
-              echo "OPENAI_API_KEY_SECRET_NOT_FOUND:$OPENAI_API_KEY_SECRET_ID" >&2
-              exit 42
-            fi
-            if printf '%s' "$DESCRIBE_ERROR" | grep -Eqi 'PERMISSION_DENIED|permission|denied'; then
-              echo "OPENAI_API_KEY_SECRET_DESCRIBE_DENIED:$OPENAI_API_KEY_SECRET_ID" >&2
-              exit 43
-            fi
-            echo "OPENAI_API_KEY_SECRET_PREFLIGHT_FAILED:$OPENAI_API_KEY_SECRET_ID" >&2
-            printf '%s\n' "$DESCRIBE_ERROR" >&2
-            exit 44
-          fi
-
-          set +e
-          OPENAI_API_KEY="$(gcloud secrets versions access latest --secret "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" 2>.image-edit-secret-error)"
-          ACCESS_STATUS=$?
-          set -e
-          if [ "$ACCESS_STATUS" -ne 0 ]; then
-            if grep -Eqi 'PERMISSION_DENIED|permission|denied' .image-edit-secret-error; then
-              echo "OPENAI_API_KEY_SECRET_ACCESS_DENIED:$OPENAI_API_KEY_SECRET_ID" >&2
-              exit 45
-            fi
-            if grep -Eqi 'NOT_FOUND|not found|does not exist' .image-edit-secret-error; then
-              echo "OPENAI_API_KEY_SECRET_VERSION_NOT_FOUND:$OPENAI_API_KEY_SECRET_ID" >&2
-              exit 46
-            fi
-            echo "OPENAI_API_KEY_SECRET_ACCESS_FAILED:$OPENAI_API_KEY_SECRET_ID" >&2
-            cat .image-edit-secret-error >&2
-            exit 47
-          fi
-          rm -f .image-edit-secret-error
-          test -n "$OPENAI_API_KEY"
-          echo "::add-mask::$OPENAI_API_KEY"
-          echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
-          echo "OPENAI_API_KEY_ENV_KEY=OPENAI_API_KEY" >> "$GITHUB_ENV"
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
 
       - name: Download exact source image from Drive
         shell: bash
@@ -120,7 +69,7 @@ jobs:
           test "$(file --brief --mime-type .image-edit-smoke/source.jpg)" = "image/jpeg"
           sha256sum .image-edit-smoke/source.jpg | tee .image-edit-smoke/source.sha256
 
-      - name: Execute explicit image edit
+      - name: Execute deterministic local enhancement
         shell: bash
         run: |
           set -euo pipefail
@@ -130,6 +79,7 @@ jobs:
             --source-asset-id "$SOURCE_ASSET_ID" \
             --source-drive-file-id "$SOURCE_DRIVE_FILE_ID" \
             --content-type image/jpeg \
+            --provider local \
             | tee .image-edit-smoke/result.json
 
       - name: Validate binding evidence and output
@@ -142,10 +92,10 @@ jobs:
             '.sourceAssetId == $asset and
              .sourceDriveFileId == $drive and
              .sourceImageBound == true and
-             .editMode == "EDIT_EXISTING_IMAGE" and
-             .editorProvider == "OPENAI_IMAGE_EDIT" and
-             .inputFidelity == "high" and
-             .requestedQuality == "high" and
+             .editMode == "ENHANCE_EXISTING_IMAGE" and
+             .editorProvider == "LOCAL_IMAGEMAGICK" and
+             .pipelineVersion == "local-photo-enhancer-v1" and
+             .requestedScale == "200%" and
              .requestedOutputFormat == "jpeg" and
              .outputContentType == "image/jpeg" and
              .outputSizeBytes > 0 and
@@ -155,14 +105,30 @@ jobs:
           test "$(file --brief --mime-type .image-edit-smoke/output.jpg)" = "image/jpeg"
           sha256sum .image-edit-smoke/output.jpg | tee .image-edit-smoke/output.sha256
 
+      - name: Validate dimensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$(identify -format '%wx%h' .image-edit-smoke/source.jpg)"
+          OUT="$(identify -format '%wx%h' .image-edit-smoke/output.jpg)"
+          echo "source_dimensions=$SRC" | tee .image-edit-smoke/dimensions.txt
+          echo "output_dimensions=$OUT" | tee -a .image-edit-smoke/dimensions.txt
+          SRC_W="${SRC%x*}"
+          SRC_H="${SRC#*x}"
+          OUT_W="${OUT%x*}"
+          OUT_H="${OUT#*x}"
+          test "$OUT_W" -eq $((SRC_W * 2))
+          test "$OUT_H" -eq $((SRC_H * 2))
+
       - name: Upload smoke evidence
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: openai-image-edit-smoke-evidence
+          name: local-photo-enhancer-smoke-evidence
           path: |
             .image-edit-smoke/result.json
             .image-edit-smoke/source.sha256
             .image-edit-smoke/output.sha256
+            .image-edit-smoke/dimensions.txt
             .image-edit-smoke/output.jpg
           retention-days: 7
