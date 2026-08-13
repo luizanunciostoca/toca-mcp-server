@@ -19,6 +19,7 @@ const configSchema = z
     TOCA_OS_MEDIA_SPREADSHEET_ID: z.string().trim().min(1).optional(),
     GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     INSTAGRAM_READ_ENABLED: booleanFromEnv,
+    META_ADS_READ_ENABLED: booleanFromEnv,
     INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().trim().min(1).optional(),
     META_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     META_ENABLED: booleanFromEnv,
@@ -195,6 +196,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     }
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_READ_ENABLED=true');
+    }
+    assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
+  }
+
+  if (config.META_ADS_READ_ENABLED) {
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+      throw new Error('META_ACCESS_TOKEN_ENV_KEY is required when META_ADS_READ_ENABLED=true');
     }
     assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
   }
