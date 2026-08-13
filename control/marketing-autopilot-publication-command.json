@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "commandId": "prep-MKT-20260813-SUNSET-FEED-1500-V1",
-  "action": "PREPARE",
-  "issuedAt": "2026-08-13T15:16:00-03:00",
+  "commandId": "publish-MKT-20260813-SUNSET-FEED-1500-V1",
+  "action": "PUBLISH",
+  "issuedAt": "2026-08-13T15:26:00-03:00",
   "contentItemId": "MKT-20260813-SUNSET-FEED-1500",
   "scheduledAt": "2026-08-13T15:00:00-03:00",
   "timezone": "America/Bahia",
@@ -17,6 +17,6 @@
   "correlationId": "CORR-MKT-20260813-FEED1500-V1",
   "idempotencyKey": "PREP-MKT-20260813-SUNSET-FEED-1500-V1",
   "approvalMode": "EXPLICIT_APPROVAL",
-  "approvalStatus": "PENDING_REVIEW",
-  "approvedRequestSha256": ""
+  "approvalStatus": "APPROVED",
+  "approvedRequestSha256": "c8e4ddfeda9edc18fb39e5af81de8e207ce5826ac442a18d6cc70f74f660a285"
 }
