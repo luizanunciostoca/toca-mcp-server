@@ -56,7 +56,7 @@ const manifest = createInstagramPublicationApprovalManifest({
   idempotencyKey: env.INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY,
 });
 
-process.stdout.write(`${JSON.stringify({ asset, manifest })}\n`);
+process.stdout.write(`INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=${JSON.stringify({ asset, manifest })}\n`);
 
 function findPageIdForInstagramAccount(value: unknown, instagramAccountId: string): string {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
