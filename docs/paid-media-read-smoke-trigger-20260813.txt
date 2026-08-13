@@ -1,0 +1,1 @@
+Trigger a fresh read-only validation run after Meta OAuth reauthorization. No provider write actions are permitted by this branch.
