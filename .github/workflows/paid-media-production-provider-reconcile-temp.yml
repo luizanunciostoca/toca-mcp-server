@@ -21,7 +21,7 @@ jobs:
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: id_token
           id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
-      - name: Pinpoint final February Meta Ads delivery date read-only through production MCP
+      - name: Identify final delivering campaigns read-only through production MCP
         env:
           TOKEN: ${{ steps.auth.outputs.id_token }}
           URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
@@ -30,8 +30,8 @@ jobs:
           set -euo pipefail
           mcp_call() {
             local id="$1" day="$2"
-            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"meta_ads.insights.get","arguments":{"adAccountId":"311793958882290","currency":"BRL","level":"account","fields":["account_id","account_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"%s","until":"%s"}}}' "$id" "$day" "$day" > /tmp/request.json
-            echo "===== DAY $day ====="
+            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"meta_ads.insights.get","arguments":{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"%s","until":"%s"}}}' "$id" "$day" "$day" > /tmp/request.json
+            echo "===== CAMPAIGN DAY $day ====="
             curl -fsS -X POST "$URL" \
               -H "Authorization: Bearer $TOKEN" \
               -H 'Content-Type: application/json' \
@@ -40,12 +40,7 @@ jobs:
             echo
           }
 
-          mcp_call 30 2026-02-22
-          mcp_call 31 2026-02-23
-          mcp_call 32 2026-02-24
-          mcp_call 33 2026-02-25
-          mcp_call 34 2026-02-26
-          mcp_call 35 2026-02-27
-          mcp_call 36 2026-02-28
+          mcp_call 40 2026-02-27
+          mcp_call 41 2026-02-28
 
-          echo 'Read-only daily delivery localization completed through production MCP.'
+          echo 'Read-only final-delivering-campaign identification completed through production MCP.'
