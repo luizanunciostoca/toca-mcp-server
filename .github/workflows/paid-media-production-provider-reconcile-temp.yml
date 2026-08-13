@@ -21,7 +21,7 @@ jobs:
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: id_token
           id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
-      - name: Locate latest official Meta Ads delivery month read-only through production MCP
+      - name: Locate final February Meta Ads delivery week read-only through production MCP
         env:
           TOKEN: ${{ steps.auth.outputs.id_token }}
           URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
@@ -40,13 +40,9 @@ jobs:
             echo
           }
 
-          mcp_call 10 2026-01-01 2026-01-31
-          mcp_call 11 2026-02-01 2026-02-28
-          mcp_call 12 2026-03-01 2026-03-31
-          mcp_call 13 2026-04-01 2026-04-30
-          mcp_call 14 2026-05-01 2026-05-31
-          mcp_call 15 2026-06-01 2026-06-30
-          mcp_call 16 2026-07-01 2026-07-31
-          mcp_call 17 2026-08-01 2026-08-12
+          mcp_call 20 2026-02-01 2026-02-07
+          mcp_call 21 2026-02-08 2026-02-14
+          mcp_call 22 2026-02-15 2026-02-21
+          mcp_call 23 2026-02-22 2026-02-28
 
-          echo 'Read-only monthly delivery localization completed through production MCP.'
+          echo 'Read-only weekly delivery localization completed through production MCP.'
