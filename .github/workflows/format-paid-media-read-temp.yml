@@ -1,0 +1,41 @@
+name: Format Paid Media Read TEMP
+
+on:
+  push:
+    branches:
+      - feat/paid-media-read-adsets-ads
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/paid-media-read-adsets-ads
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format changed source files
+        run: pnpm exec prettier --write scripts/architecture-check.mjs src/registry.ts src/tools/register-meta-ads-read.ts src/providers/meta-ads/meta-ads-read-provider.ts
+      - name: Commit formatted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/architecture-check.mjs src/registry.ts src/tools/register-meta-ads-read.ts src/providers/meta-ads/meta-ads-read-provider.ts
+          if git diff --cached --quiet; then
+            echo 'No formatting changes needed.'
+            exit 0
+          fi
+          git commit -m 'style: format paid media read expansion'
+          git push origin HEAD:feat/paid-media-read-adsets-ads
