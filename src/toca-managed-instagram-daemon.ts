@@ -1,6 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
 import { createPostgresPool } from './persistence/postgres.js';
+import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
+import {
+  TocaManagedInstagramScheduler,
+  hashTocaManagedInstagramApprovalDescriptor,
+  type TocaManagedInstagramApprovalDescriptor,
+  type TocaManagedInstagramSchedulePayload,
+} from './scheduler/toca-managed-instagram-scheduler.js';
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
@@ -34,6 +42,79 @@ let lastRunFinishedAt: string | null = null;
 let lastClaimed = 0;
 let lastError: string | null = null;
 
+async function verifySchedulerPersistence(): Promise<void> {
+  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
+  const smokeId = randomUUID();
+  const jobIds: string[] = [];
+
+  const descriptor = (
+    scheduledFor: string,
+    suffix: string,
+  ): TocaManagedInstagramApprovalDescriptor => ({
+    schemaVersion: 1,
+    contentItemId: `SMOKE-TOCA-SCHEDULER-${smokeId}-${suffix}`,
+    scheduledFor,
+    timezone: 'America/Bahia',
+    account: {
+      pageId: 'SMOKE_PAGE_NO_PROVIDER_CALL',
+      instagramAccountId: 'SMOKE_INSTAGRAM_NO_PROVIDER_CALL',
+    },
+    mediaType: 'IMAGE',
+    asset: {
+      assetId: `SMOKE-ASSET-${smokeId}`,
+      objectName: `smoke/${smokeId}.jpg`,
+      sha256: '0'.repeat(64),
+      contentType: 'image/jpeg',
+    },
+    caption: 'TOCA scheduler persistence self-test; provider call prohibited',
+    correlationId: `CORR-SMOKE-${smokeId}`,
+    publicationIdempotencyKey: `PUB-SMOKE-${smokeId}-${suffix}`,
+  });
+
+  const approved = (
+    value: TocaManagedInstagramApprovalDescriptor,
+  ): TocaManagedInstagramSchedulePayload => ({
+    ...value,
+    approval: {
+      mode: 'EXPLICIT_APPROVAL',
+      status: 'APPROVED',
+      approvedDescriptorSha256: hashTocaManagedInstagramApprovalDescriptor(value),
+    },
+  });
+
+  try {
+    const first = await scheduler.schedule(approved(descriptor('2099-01-01T12:00:00-03:00', 'V1')));
+    jobIds.push(first.id);
+    if (first.status !== 'SCHEDULED') throw new Error('SCHEDULER_SELF_TEST_CREATE_FAILED');
+
+    const read = await scheduler.status(first.id);
+    if (!read || read.status !== 'SCHEDULED') throw new Error('SCHEDULER_SELF_TEST_READ_FAILED');
+
+    const replacement = await scheduler.reschedule(
+      first.id,
+      approved(descriptor('2099-01-01T13:00:00-03:00', 'V2')),
+    );
+    jobIds.push(replacement.id);
+    if (replacement.status !== 'SCHEDULED') {
+      throw new Error('SCHEDULER_SELF_TEST_RESCHEDULE_FAILED');
+    }
+
+    const old = await scheduler.status(first.id);
+    if (!old || old.status !== 'CANCELED') throw new Error('SCHEDULER_SELF_TEST_OLD_JOB_ACTIVE');
+
+    const canceled = await scheduler.cancel(replacement.id);
+    if (!canceled || canceled.status !== 'CANCELED') {
+      throw new Error('SCHEDULER_SELF_TEST_CANCEL_FAILED');
+    }
+
+    console.info('toca.managed.instagram.daemon.scheduler_self_test.passed', { smokeId });
+  } finally {
+    if (jobIds.length > 0) {
+      await pool.query('delete from scheduled_jobs where id = any($1::text[])', [jobIds]);
+    }
+  }
+}
+
 async function tick(): Promise<void> {
   if (running || stopping) return;
   running = true;
@@ -51,6 +132,8 @@ async function tick(): Promise<void> {
   }
 }
 
+await verifySchedulerPersistence();
+
 const server = createServer((request, response) => {
   if (request.url !== '/healthz') {
     response.statusCode = 404;
@@ -62,6 +145,7 @@ const server = createServer((request, response) => {
   response.end(
     JSON.stringify({
       ok: !stopping,
+      schedulerPersistenceVerified: true,
       running,
       pollIntervalMs,
       lastRunStartedAt,
