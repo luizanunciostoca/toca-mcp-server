@@ -16,6 +16,7 @@ const configSchema = z
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     MCP_ENABLED: enabledByDefaultFromEnv,
     DATABASE_URL: z.string().min(1).optional(),
+    TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: booleanFromEnv,
     TOCA_OS_MEDIA_SPREADSHEET_ID: z.string().trim().min(1).optional(),
     GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     INSTAGRAM_READ_ENABLED: booleanFromEnv,
@@ -46,6 +47,14 @@ const configSchema = z
     GCP_PROJECT_ID: z.string().min(1).optional(),
   })
   .superRefine((config, context) => {
+    if (config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && !config.DATABASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URL is required when TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true',
+      });
+    }
+
     if (config.META_WEBHOOK_ENABLED && !config.META_ENABLED) {
       context.addIssue({
         code: 'custom',
