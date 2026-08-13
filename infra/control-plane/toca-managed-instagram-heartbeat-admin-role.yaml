@@ -1,0 +1,17 @@
+title: TOCA MCP Managed Instagram Heartbeat Admin
+description: Minimal permissions to reconcile the dedicated TOCA-managed Instagram Cloud Run Job and paused Cloud Scheduler heartbeat without delete, forced execution, resume, service-account creation, or project-wide IAM administration.
+stage: GA
+includedPermissions:
+  - run.jobs.create
+  - run.jobs.get
+  - run.jobs.getIamPolicy
+  - run.jobs.setIamPolicy
+  - run.jobs.update
+  - run.locations.get
+  - run.operations.get
+  - cloudscheduler.jobs.create
+  - cloudscheduler.jobs.get
+  - cloudscheduler.jobs.pause
+  - cloudscheduler.jobs.update
+  - cloudscheduler.locations.get
+  - resourcemanager.projects.get
