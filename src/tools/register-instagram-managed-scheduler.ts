@@ -1,11 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import {
-  TocaManagedInstagramScheduler,
   hashTocaManagedInstagramApprovalDescriptor,
   tocaManagedInstagramApprovalDescriptorSchema,
   tocaManagedInstagramSchedulePayloadSchema,
 } from '../scheduler/toca-managed-instagram-scheduler.js';
+import type { TocaManagedInstagramScheduler } from '../scheduler/toca-managed-instagram-scheduler.js';
 
 const jobStatusSchema = z.enum(['SCHEDULED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED']);
 
@@ -40,8 +40,7 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async (input) =>
-      response({ descriptorSha256: hashTocaManagedInstagramApprovalDescriptor(input) }),
+    (input) => response({ descriptorSha256: hashTocaManagedInstagramApprovalDescriptor(input) }),
   );
 
   server.registerTool(
