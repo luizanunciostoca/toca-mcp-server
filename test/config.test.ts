@@ -17,11 +17,32 @@ const completeMetaEnv = {
 } satisfies NodeJS.ProcessEnv;
 
 describe('runtime configuration', () => {
-  it('starts with Meta disabled without requiring Meta settings', () => {
+  it('starts with Meta and TOCA-managed scheduling disabled without requiring provider settings', () => {
     expect(loadConfig({ NODE_ENV: 'test', META_ENABLED: 'false' })).toMatchObject({
       NODE_ENV: 'test',
       META_ENABLED: false,
       META_WEBHOOK_ENABLED: false,
+      TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: false,
+    });
+  });
+
+  it('requires Postgres when TOCA-managed scheduling is enabled', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: 'true',
+      }),
+    ).toThrow('DATABASE_URL is required when TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true');
+
+    expect(
+      loadConfig({
+        NODE_ENV: 'test',
+        TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: 'true',
+        DATABASE_URL: 'postgres://localhost/toca-test',
+      }),
+    ).toMatchObject({
+      TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: true,
+      DATABASE_URL: 'postgres://localhost/toca-test',
     });
   });
 
