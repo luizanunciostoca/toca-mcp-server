@@ -1,11 +1,11 @@
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { ExecutionError } from '../src/core/errors.js';
+import type { ExecutionError } from '../src/core/errors.js';
 import { LocalPhotoEnhancer } from '../src/providers/local/local-photo-enhancer.js';
 
 describe('LocalPhotoEnhancer', () => {
   it('fails closed when source bytes are missing', async () => {
-    const enhancer = new LocalPhotoEnhancer(async () => undefined);
+    const enhancer = new LocalPhotoEnhancer(() => Promise.resolve());
 
     await expect(
       enhancer.enhance({
@@ -67,11 +67,9 @@ describe('LocalPhotoEnhancer', () => {
   });
 
   it('classifies a missing ImageMagick binary as capability unavailable', async () => {
-    const runner = async () => {
-      const error = new Error('missing') as NodeJS.ErrnoException;
-      error.code = 'ENOENT';
-      throw error;
-    };
+    const error = new Error('missing') as NodeJS.ErrnoException;
+    error.code = 'ENOENT';
+    const runner = () => Promise.reject(error);
     const enhancer = new LocalPhotoEnhancer(runner, 'missing-convert');
 
     await expect(
