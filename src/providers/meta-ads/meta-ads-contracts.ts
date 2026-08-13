@@ -45,6 +45,7 @@ export interface MetaAdsInsightsQuery {
 }
 
 export interface MetaAdsProvider {
+  listAccounts(): Promise<readonly Readonly<Record<string, unknown>>[]>;
   listCampaigns(account: MetaAdAccountRef): Promise<readonly Readonly<Record<string, unknown>>[]>;
   getInsights(
     account: MetaAdAccountRef,
