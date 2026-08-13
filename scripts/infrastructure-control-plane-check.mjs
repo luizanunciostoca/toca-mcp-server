@@ -108,6 +108,21 @@ if (
   process.exit(1);
 }
 
+const heartbeat = policy.allowedOperations?.['reconcile-toca-managed-instagram-heartbeat'];
+if (
+  heartbeat?.resourceType !== 'cloud-run-job+cloud-scheduler-job' ||
+  heartbeat?.cloudRunJobName !== 'toca-managed-instagram-publication-worker' ||
+  heartbeat?.schedulerJobName !== 'toca-managed-instagram-publication-heartbeat' ||
+  heartbeat?.schedule !== '*/5 * * * *' ||
+  heartbeat?.timeZone !== 'America/Bahia' ||
+  heartbeat?.runtimeServiceAccount !== runtime ||
+  heartbeat?.executorEnabledByDefault !== false ||
+  heartbeat?.contentPayloadAllowed !== false
+) {
+  console.error('TOCA-managed Instagram heartbeat is outside the approved envelope');
+  process.exit(1);
+}
+
 const forbiddenPolicyFlags = [
   'projectOwner',
   'projectEditor',
@@ -116,6 +131,7 @@ const forbiddenPolicyFlags = [
   'arbitraryGcloud',
   'runtimePrivilegeEscalation',
   'publicBucketIam',
+  'perContentSchedulerJobs',
 ];
 
 for (const key of forbiddenPolicyFlags) {
