@@ -28,8 +28,8 @@ function createService(requestedScopes: string[]) {
   );
 }
 
-describe('Meta OAuth Instagram publication scope', () => {
-  it('adds instagram_content_publish when Instagram OAuth is requested', async () => {
+describe('Meta OAuth official Instagram scopes', () => {
+  it('adds publication and paid-media read scopes when Instagram OAuth is requested', async () => {
     const authorization = await createService([
       'pages_show_list',
       'instagram_basic',
@@ -37,7 +37,12 @@ describe('Meta OAuth Instagram publication scope', () => {
     const scopes =
       new URL(authorization.authorizationUrl).searchParams.get('scope')?.split(',') ?? [];
 
-    expect(scopes).toEqual(['instagram_basic', 'instagram_content_publish', 'pages_show_list']);
+    expect(scopes).toEqual([
+      'ads_read',
+      'instagram_basic',
+      'instagram_content_publish',
+      'pages_show_list',
+    ]);
   });
 
   it('does not broaden non-Instagram Meta authorization requests', async () => {
