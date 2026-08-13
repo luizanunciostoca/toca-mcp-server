@@ -19,11 +19,18 @@ const dataResponseSchema = z.object({
 export class MetaAdsGraphProvider implements MetaAdsProvider {
   constructor(private readonly api: MetaApiClient) {}
 
+  async listAccounts(): Promise<readonly Readonly<Record<string, unknown>>[]> {
+    const result = await this.api.get('me/adaccounts', {
+      fields: 'id,account_id,name,currency,account_status,disable_reason',
+    });
+    return dataResponseSchema.parse(result).data;
+  }
+
   async listCampaigns(
     account: MetaAdAccountRef,
   ): Promise<readonly Readonly<Record<string, unknown>>[]> {
     const result = await this.api.get(`act_${account.adAccountId}/campaigns`, {
-      fields: 'id,name,objective,status,effective_status',
+      fields: 'id,name,objective,status,effective_status,created_time,updated_time',
     });
     return dataResponseSchema.parse(result).data;
   }
