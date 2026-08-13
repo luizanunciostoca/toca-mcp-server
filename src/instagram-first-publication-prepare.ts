@@ -1,8 +1,8 @@
 import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
-import { createInstagramPublicationApprovalManifest } from './worker/instagram-publication-approval-manifest.js';
 import { GcsPublicationAssetStager } from './providers/gcp/gcs-publication-asset-stager.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
+import { createInstagramPublicationApprovalManifest } from './worker/instagram-publication-approval-manifest.js';
 
 const envSchema = z.object({
   GCP_PROJECT_ID: z.string().min(1),
@@ -11,7 +11,11 @@ const envSchema = z.object({
   INSTAGRAM_PUBLICATION_ASSET_ID: z.string().min(1),
   INSTAGRAM_PUBLICATION_CORRELATION_ID: z.string().min(1),
   INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH: z.string().min(1),
-  INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE: z.enum([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]),
   INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64: z.string().min(1),
   INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY: z.string().min(1),
 });
@@ -41,7 +45,9 @@ const pages = await metaClient.get('me/accounts', {
   limit: '100',
 });
 const pageId = findPageIdForInstagramAccount(pages, env.INSTAGRAM_BUSINESS_ACCOUNT_ID);
-const caption = Buffer.from(env.INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64, 'base64').toString('utf8');
+const caption = Buffer.from(env.INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64, 'base64').toString(
+  'utf8',
+);
 if (!caption.trim()) throw new Error('INSTAGRAM_FIRST_PUBLICATION_CAPTION_EMPTY');
 
 const manifest = createInstagramPublicationApprovalManifest({
@@ -56,7 +62,9 @@ const manifest = createInstagramPublicationApprovalManifest({
   idempotencyKey: env.INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY,
 });
 
-process.stdout.write(`INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=${JSON.stringify({ asset, manifest })}\n`);
+process.stdout.write(
+  `INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=${JSON.stringify({ asset, manifest })}\n`,
+);
 
 function findPageIdForInstagramAccount(value: unknown, instagramAccountId: string): string {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
