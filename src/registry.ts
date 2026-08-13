@@ -78,6 +78,26 @@ const metaAdsReadTools: readonly ToolDefinition[] = [
     idempotent: true,
   },
   {
+    name: 'meta_ads.adsets.list',
+    version: '1.0.0',
+    provider: 'Meta Marketing API',
+    riskClass: 'READ',
+    requiredScopes: ['ads_read'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'meta_ads.ads.list',
+    version: '1.0.0',
+    provider: 'Meta Marketing API',
+    riskClass: 'READ',
+    requiredScopes: ['ads_read'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
     name: 'meta_ads.insights.get',
     version: '1.0.0',
     provider: 'Meta Marketing API',
@@ -189,14 +209,9 @@ export interface ToolRegistryOptions {
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry();
-  for (const tool of [...bootstrapTools, ...plannedInstagramPublicationTools]) {
+  for (const tool of [...bootstrapTools, ...plannedInstagramPublicationTools])
     registry.register(tool);
-  }
-  if (options.instagramReadsEnabled) {
-    for (const tool of instagramReadTools) registry.register(tool);
-  }
-  if (options.metaAdsReadsEnabled) {
-    for (const tool of metaAdsReadTools) registry.register(tool);
-  }
+  if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
+  if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
   return registry;
 }
