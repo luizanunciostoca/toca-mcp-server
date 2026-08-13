@@ -17,6 +17,8 @@ const configSchema = z
     MCP_ENABLED: enabledByDefaultFromEnv,
     DATABASE_URL: z.string().min(1).optional(),
     TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: booleanFromEnv,
+    TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED: booleanFromEnv,
+    INSTAGRAM_PUBLICATION_ASSET_BUCKET: z.string().trim().min(1).optional(),
     TOCA_OS_MEDIA_SPREADSHEET_ID: z.string().trim().min(1).optional(),
     GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     INSTAGRAM_READ_ENABLED: booleanFromEnv,
@@ -52,6 +54,47 @@ const configSchema = z
         code: 'custom',
         path: ['DATABASE_URL'],
         message: 'DATABASE_URL is required when TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true',
+      });
+    }
+
+    if (
+      config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED &&
+      !config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED'],
+        message:
+          'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED must be true when TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+      });
+    }
+
+    if (config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED && !config.META_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_ENABLED'],
+        message: 'META_ENABLED must be true when TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+      });
+    }
+
+    if (
+      config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED &&
+      config.META_TOKEN_STORE_PROVIDER !== 'gcp-secret-manager'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_TOKEN_STORE_PROVIDER'],
+        message:
+          'META_TOKEN_STORE_PROVIDER must be gcp-secret-manager when TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+      });
+    }
+
+    if (config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED && !config.INSTAGRAM_PUBLICATION_ASSET_BUCKET) {
+      context.addIssue({
+        code: 'custom',
+        path: ['INSTAGRAM_PUBLICATION_ASSET_BUCKET'],
+        message:
+          'INSTAGRAM_PUBLICATION_ASSET_BUCKET is required when TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
       });
     }
 
