@@ -1,0 +1,119 @@
+name: Bootstrap TOCA Managed Heartbeat IAM
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_role_sha256:
+        description: SHA-256 of the approved custom role file on main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CUSTOM_ROLE_ID: tocaMcpManagedInstagramHeartbeatAdmin
+  CUSTOM_ROLE_FILE: infra/control-plane/toca-managed-instagram-heartbeat-admin-role.yaml
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Verify immutable bootstrap boundary
+        shell: bash
+        env:
+          EXPECTED_ROLE_SHA256: ${{ inputs.expected_role_sha256 }}
+        run: |
+          set -euo pipefail
+          ACTUAL_ROLE_SHA256="$(sha256sum "$CUSTOM_ROLE_FILE" | awk '{print $1}')"
+          test "$ACTUAL_ROLE_SHA256" = "$EXPECTED_ROLE_SHA256"
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$GCP_INFRA_ADMIN_SERVICE_ACCOUNT" = 'toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com'
+          test "$GCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
+          test "$CUSTOM_ROLE_ID" = 'tocaMcpManagedInstagramHeartbeatAdmin'
+          grep -q '^  - run.jobs.create$' "$CUSTOM_ROLE_FILE"
+          grep -q '^  - cloudscheduler.jobs.pause$' "$CUSTOM_ROLE_FILE"
+          ! grep -Eq 'run.jobs.(delete|run)|cloudscheduler.jobs.(delete|enable|run)|iam.serviceAccounts.(create|delete)|iam.serviceAccountKeys|resourcemanager.projects.setIamPolicy' "$CUSTOM_ROLE_FILE"
+
+      - name: Authenticate as infrastructure administrator
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Reconcile exact custom role
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gcloud iam roles describe "$CUSTOM_ROLE_ID" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam roles update "$CUSTOM_ROLE_ID" \
+              --project "$GCP_PROJECT_ID" \
+              --file "$CUSTOM_ROLE_FILE" \
+              --quiet
+          else
+            gcloud iam roles create "$CUSTOM_ROLE_ID" \
+              --project "$GCP_PROJECT_ID" \
+              --file "$CUSTOM_ROLE_FILE" \
+              --quiet
+          fi
+
+      - name: Grant exact heartbeat role to infrastructure administrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
+            --member="serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}" \
+            --role="projects/${GCP_PROJECT_ID}/roles/${CUSTOM_ROLE_ID}" \
+            --condition=None \
+            --quiet
+
+      - name: Grant actAs only on runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts add-iam-policy-binding "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --project "$GCP_PROJECT_ID" \
+            --member="serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}" \
+            --role='roles/iam.serviceAccountUser' \
+            --quiet
+
+      - name: Grant Artifact Registry read only on application repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud artifacts repositories add-iam-policy-binding "$GCP_ARTIFACT_REPOSITORY" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --member="serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}" \
+            --role='roles/artifactregistry.reader' \
+            --quiet
+
+      - name: Verify exact resulting grants
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud iam roles describe "$CUSTOM_ROLE_ID" --project "$GCP_PROJECT_ID" --format=json > /tmp/role.json
+          jq -e '.includedPermissions | index("run.jobs.create") and index("cloudscheduler.jobs.pause")' /tmp/role.json >/dev/null
+          jq -e 'all(.includedPermissions[]; . != "run.jobs.delete" and . != "run.jobs.run" and . != "cloudscheduler.jobs.delete" and . != "cloudscheduler.jobs.enable" and . != "cloudscheduler.jobs.run" and . != "resourcemanager.projects.setIamPolicy")' /tmp/role.json >/dev/null
+
+          PROJECT_POLICY="$(gcloud projects get-iam-policy "$GCP_PROJECT_ID" --format=json)"
+          jq -e --arg role "projects/${GCP_PROJECT_ID}/roles/${CUSTOM_ROLE_ID}" --arg member "serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$PROJECT_POLICY" >/dev/null
+
+          RUNTIME_POLICY="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json)"
+          jq -e --arg member "serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}" 'any(.bindings[]?; .role == "roles/iam.serviceAccountUser" and any(.members[]?; . == $member))' <<<"$RUNTIME_POLICY" >/dev/null
+
+          echo 'TOCA_MANAGED_HEARTBEAT_IAM_BOOTSTRAP_OK=1'
