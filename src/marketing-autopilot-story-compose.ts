@@ -17,23 +17,25 @@ const result = await new LocalStoryComposer().compose({
 });
 
 await writeFile(args.output, result.outputBytes);
-process.stdout.write(`${JSON.stringify({
-  contentItemId: result.contentItemId,
-  storyCreativeId: result.storyCreativeId,
-  masterAssetId: result.masterAssetId,
-  masterDriveFileId: result.masterDriveFileId,
-  sourceSha256: result.sourceSha256,
-  outputSha256: result.outputSha256,
-  sourceImageBound: result.sourceImageBound,
-  renderMode: result.renderMode,
-  editorProvider: result.editorProvider,
-  pipelineVersion: result.pipelineVersion,
-  templateId: result.templateId,
-  dimensions: result.dimensions,
-  outputContentType: result.outputContentType,
-  outputSizeBytes: result.outputBytes.byteLength,
-  outputPath: args.output,
-})}\n`);
+process.stdout.write(
+  `${JSON.stringify({
+    contentItemId: result.contentItemId,
+    storyCreativeId: result.storyCreativeId,
+    masterAssetId: result.masterAssetId,
+    masterDriveFileId: result.masterDriveFileId,
+    sourceSha256: result.sourceSha256,
+    outputSha256: result.outputSha256,
+    sourceImageBound: result.sourceImageBound,
+    renderMode: result.renderMode,
+    editorProvider: result.editorProvider,
+    pipelineVersion: result.pipelineVersion,
+    templateId: result.templateId,
+    dimensions: result.dimensions,
+    outputContentType: result.outputContentType,
+    outputSizeBytes: result.outputBytes.byteLength,
+    outputPath: args.output,
+  })}\n`,
+);
 
 interface CliArgs {
   readonly source: string;
@@ -54,12 +56,16 @@ function parseArgs(argv: readonly string[]): CliArgs {
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!key?.startsWith('--') || value === undefined) throw new Error('STORY_COMPOSE_ARGS_INVALID');
+    if (!key?.startsWith('--') || value === undefined) {
+      throw new Error('STORY_COMPOSE_ARGS_INVALID');
+    }
     values.set(key.slice(2), value);
   }
   const rawContentType = required(values, 'content-type');
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(rawContentType)) {
-    throw new Error(`STORY_COMPOSE_CONTENT_TYPE_UNSUPPORTED:${rawContentType}`);
+    throw new Error(
+      `STORY_COMPOSE_CONTENT_TYPE_UNSUPPORTED:${rawContentType}`,
+    );
   }
   return {
     source: required(values, 'source'),
@@ -69,8 +75,12 @@ function parseArgs(argv: readonly string[]): CliArgs {
     masterAssetId: required(values, 'master-asset-id'),
     masterDriveFileId: required(values, 'master-drive-file-id'),
     contentType: rawContentType as CliArgs['contentType'],
-    ...(values.get('template-id') ? { templateId: values.get('template-id') } : {}),
-    ...(values.get('headline') ? { headline: values.get('headline') } : {}),
+    ...(values.get('template-id')
+      ? { templateId: values.get('template-id') }
+      : {}),
+    ...(values.get('headline')
+      ? { headline: values.get('headline') }
+      : {}),
     ...(values.get('body') ? { body: values.get('body') } : {}),
     ...(values.get('cta') ? { cta: values.get('cta') } : {}),
   };

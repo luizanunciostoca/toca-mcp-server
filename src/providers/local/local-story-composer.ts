@@ -45,37 +45,87 @@ export type LocalStoryComposerCommandRunner = (
 
 export class LocalStoryComposer {
   constructor(
-    private readonly commandRunner: LocalStoryComposerCommandRunner = defaultCommandRunner,
-    private readonly convertBinary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
-    private readonly identifyBinary = process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() || 'identify',
+    private readonly commandRunner: LocalStoryComposerCommandRunner =
+      defaultCommandRunner,
+    private readonly convertBinary =
+      process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
+    private readonly identifyBinary =
+      process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() || 'identify',
   ) {}
 
   async compose(input: LocalStoryComposeInput): Promise<LocalStoryComposeResult> {
     validateInput(input);
     const templateId = input.templateId?.trim() || 'TOCA_STORY_FULLBLEED_V1';
     const workspace = await mkdtemp(join(tmpdir(), 'toca-story-composer-'));
-    const sourcePath = join(workspace, `source${extensionFor(input.contentType)}`);
+    const sourcePath = join(
+      workspace,
+      `source${extensionFor(input.contentType)}`,
+    );
     const overlayPath = join(workspace, 'overlay.svg');
     const outputPath = join(workspace, 'story.jpg');
 
     try {
       await writeFile(sourcePath, input.imageBytes);
-      const hasOverlay = Boolean(input.headline?.trim() || input.body?.trim() || input.cta?.trim());
+      const hasOverlay = Boolean(
+        input.headline?.trim() || input.body?.trim() || input.cta?.trim(),
+      );
       if (hasOverlay) await writeFile(overlayPath, renderOverlaySvg(input));
 
-      const args = [sourcePath, '-auto-orient', '-colorspace', 'sRGB', '-filter', 'Lanczos', '-resize', '1080x1920^', '-gravity', 'center', '-extent', '1080x1920'];
-      if (hasOverlay) args.push(overlayPath, '-gravity', 'center', '-compose', 'over', '-composite');
-      args.push('-quality', '95', '-define', 'jpeg:dct-method=float', outputPath);
+      const args = [
+        sourcePath,
+        '-auto-orient',
+        '-colorspace',
+        'sRGB',
+        '-filter',
+        'Lanczos',
+        '-resize',
+        '1080x1920^',
+        '-gravity',
+        'center',
+        '-extent',
+        '1080x1920',
+      ];
+      if (hasOverlay) {
+        args.push(
+          overlayPath,
+          '-gravity',
+          'center',
+          '-compose',
+          'over',
+          '-composite',
+        );
+      }
+      args.push(
+        '-quality',
+        '95',
+        '-define',
+        'jpeg:dct-method=float',
+        outputPath,
+      );
 
       await this.commandRunner(this.convertBinary, args);
       const outputBytes = await readFile(outputPath);
       if (outputBytes.byteLength === 0 || !isJpeg(outputBytes)) {
-        throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_OUTPUT_INVALID', false);
+        throw new ExecutionError(
+          'QUALITY_GATE_FAILED',
+          'LOCAL_STORY_COMPOSER_OUTPUT_INVALID',
+          false,
+        );
       }
 
-      const dimensions = (await this.commandRunner(this.identifyBinary, ['-format', '%wx%h', outputPath])).trim();
+      const dimensions = (
+        await this.commandRunner(this.identifyBinary, [
+          '-format',
+          '%wx%h',
+          outputPath,
+        ])
+      ).trim();
       if (dimensions !== '1080x1920') {
-        throw new ExecutionError('OUTPUT_TECH_SPEC_MISMATCH', `LOCAL_STORY_COMPOSER_DIMENSIONS_INVALID:${dimensions}`, false);
+        throw new ExecutionError(
+          'OUTPUT_TECH_SPEC_MISMATCH',
+          `LOCAL_STORY_COMPOSER_DIMENSIONS_INVALID:${dimensions}`,
+          false,
+        );
       }
 
       return {
@@ -98,29 +148,61 @@ export class LocalStoryComposer {
       if (error instanceof ExecutionError) throw error;
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code === 'ENOENT') {
-        throw new ExecutionError('CAPABILITY_UNAVAILABLE', 'LOCAL_STORY_COMPOSER_IMAGEMAGICK_UNAVAILABLE', false);
+        throw new ExecutionError(
+          'CAPABILITY_UNAVAILABLE',
+          'LOCAL_STORY_COMPOSER_IMAGEMAGICK_UNAVAILABLE',
+          false,
+        );
       }
-      throw new ExecutionError('PROVIDER_UNAVAILABLE', `LOCAL_STORY_COMPOSER_FAILED:${error instanceof Error ? error.message : String(error)}`, true);
+      throw new ExecutionError(
+        'PROVIDER_UNAVAILABLE',
+        `LOCAL_STORY_COMPOSER_FAILED:${error instanceof Error ? error.message : String(error)}`,
+        true,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   }
 }
 
-async function defaultCommandRunner(command: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync(command, [...args], { maxBuffer: 1024 * 1024 });
+async function defaultCommandRunner(
+  command: string,
+  args: readonly string[],
+): Promise<string> {
+  const { stdout } = await execFileAsync(command, [...args], {
+    maxBuffer: 1024 * 1024,
+  });
   return stdout;
 }
 
 function validateInput(input: LocalStoryComposeInput): void {
-  if (!input.contentItemId.trim() || !input.storyCreativeId.trim() || !input.masterAssetId.trim() || !input.masterDriveFileId.trim()) {
-    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'LOCAL_STORY_COMPOSER_LINEAGE_REQUIRED', false);
+  if (
+    !input.contentItemId.trim() ||
+    !input.storyCreativeId.trim() ||
+    !input.masterAssetId.trim() ||
+    !input.masterDriveFileId.trim()
+  ) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'LOCAL_STORY_COMPOSER_LINEAGE_REQUIRED',
+      false,
+    );
   }
   if (input.imageBytes.byteLength === 0) {
-    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'LOCAL_STORY_COMPOSER_SOURCE_BYTES_REQUIRED', false);
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'LOCAL_STORY_COMPOSER_SOURCE_BYTES_REQUIRED',
+      false,
+    );
   }
   for (const value of [input.headline, input.body, input.cta]) {
-    if (value && value.length > 220) throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_TEXT_TOO_LONG', false);
+    if (value && value.length > 220) {
+      throw new ExecutionError(
+        'QUALITY_GATE_FAILED',
+        'LOCAL_STORY_COMPOSER_TEXT_TOO_LONG',
+        false,
+      );
+    }
   }
 }
 
@@ -132,7 +214,12 @@ function renderOverlaySvg(input: LocalStoryComposeInput): string {
 }
 
 function escapeXml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
 }
 
 function extensionFor(contentType: LocalStoryComposeInput['contentType']): string {
