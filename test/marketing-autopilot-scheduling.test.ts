@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertScheduledStateClaim,
+  assertSchedulingPolicyAllowsIntent,
   deriveSchedulingDisposition,
 } from '../src/marketing-autopilot-scheduling.js';
 
@@ -37,5 +38,30 @@ describe('scheduling guards', () => {
         providerNativeApiAvailable: false,
       }),
     ).toBe('READY_TO_PUBLISH_AT_WINDOW');
+  });
+
+  it('blocks timed media_publish under native-provider-only policy', () => {
+    expect(() =>
+      assertSchedulingPolicyAllowsIntent(
+        'NATIVE_PROVIDER_SCHEDULING_ONLY',
+        'PUBLISH_AT_WINDOW',
+      ),
+    ).toThrow('NATIVE_PROVIDER_SCHEDULING_ONLY_POLICY_DENIED');
+  });
+
+  it('allows only native scheduling under native-provider-only policy', () => {
+    expect(() =>
+      assertSchedulingPolicyAllowsIntent(
+        'NATIVE_PROVIDER_SCHEDULING_ONLY',
+        'NATIVE_SCHEDULE',
+      ),
+    ).not.toThrow();
+  });
+
+  it('keeps SHARE_NOW as a separate explicit policy', () => {
+    expect(() => assertSchedulingPolicyAllowsIntent('SHARE_NOW', 'SHARE_NOW')).not.toThrow();
+    expect(() =>
+      assertSchedulingPolicyAllowsIntent('SHARE_NOW', 'PUBLISH_AT_WINDOW'),
+    ).toThrow('SHARE_NOW_POLICY_DENIED');
   });
 });
