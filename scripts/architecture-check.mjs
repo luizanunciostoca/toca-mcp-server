@@ -40,6 +40,8 @@ const required = [
   'src/providers/meta-ads/budget-guardrail.ts',
   'src/providers/meta-ads/meta-ads-contracts.ts',
   'src/providers/meta-ads/meta-ads-graph-provider.ts',
+  'src/providers/meta-ads/meta-ads-read-provider.ts',
+  'src/tools/register-meta-ads-read.ts',
   'src/scheduler/in-memory-scheduler.ts',
   'src/scheduler/postgres-scheduler.ts',
   'src/scheduler/scheduler-contracts.ts',
@@ -183,12 +185,49 @@ if (
 }
 
 const registry = readFileSync('src/registry.ts', 'utf8');
-if (
-  registry.includes('instagram.comments.reply') ||
-  registry.includes('instagram.messaging.') ||
-  registry.includes('meta_ads.')
-) {
+if (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {
   console.error('Unpromoted external write capabilities must not be advertised');
+  process.exit(1);
+}
+
+const allowedMetaAdsReadNames = new Set([
+  'meta_ads.accounts.list',
+  'meta_ads.campaigns.list',
+  'meta_ads.insights.get',
+]);
+const advertisedMetaAdsNames = [...registry.matchAll(/name: '(meta_ads\.[^']+)'/g)].map(
+  (match) => match[1],
+);
+for (const name of advertisedMetaAdsNames) {
+  if (!allowedMetaAdsReadNames.has(name)) {
+    console.error(`Unpromoted Meta Ads capability must not be advertised: ${name}`);
+    process.exit(1);
+  }
+  const marker = `name: '${name}'`;
+  const start = registry.indexOf(marker);
+  const end = registry.indexOf('\n  },', start);
+  const definition = registry.slice(start, end === -1 ? registry.length : end);
+  if (
+    !definition.includes("riskClass: 'READ'") ||
+    !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
+    !definition.includes('sideEffects: false')
+  ) {
+    console.error(`Meta Ads read capability violates the read-only boundary: ${name}`);
+    process.exit(1);
+  }
+}
+
+const metaAdsReadProvider = readFileSync(
+  'src/providers/meta-ads/meta-ads-read-provider.ts',
+  'utf8',
+);
+if (
+  metaAdsReadProvider.includes('.post(') ||
+  metaAdsReadProvider.includes('createCampaign') ||
+  metaAdsReadProvider.includes('updateBudget') ||
+  metaAdsReadProvider.includes('updateStatus')
+) {
+  console.error('Meta Ads read provider must remain GET-only and mutation-free');
   process.exit(1);
 }
 
