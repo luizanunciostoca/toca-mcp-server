@@ -36,6 +36,26 @@ export class MetaAdsReadProvider {
     return dataResponseSchema.parse(result).data;
   }
 
+  async listAdSets(
+    account: MetaAdsReadAccountRef,
+  ): Promise<readonly Readonly<Record<string, unknown>>[]> {
+    const result = await this.api.get(`act_${account.adAccountId}/adsets`, {
+      fields:
+        'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,budget_remaining,bid_strategy,optimization_goal,billing_event,start_time,end_time,created_time,updated_time,targeting',
+    });
+    return dataResponseSchema.parse(result).data;
+  }
+
+  async listAds(
+    account: MetaAdsReadAccountRef,
+  ): Promise<readonly Readonly<Record<string, unknown>>[]> {
+    const result = await this.api.get(`act_${account.adAccountId}/ads`, {
+      fields:
+        'id,name,adset_id,campaign_id,status,effective_status,created_time,updated_time,creative{id,name,title,body,object_story_id,thumbnail_url}',
+    });
+    return dataResponseSchema.parse(result).data;
+  }
+
   async getInsights(
     account: MetaAdsReadAccountRef,
     query: MetaAdsReadInsightsQuery,

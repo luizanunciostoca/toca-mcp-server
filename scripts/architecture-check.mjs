@@ -83,13 +83,11 @@ const required = [
   '.gitignore',
   'pnpm-lock.yaml',
 ];
-
 const missing = required.filter((path) => !existsSync(path));
 if (missing.length > 0) {
   console.error(`Missing required architecture files: ${missing.join(', ')}`);
   process.exit(1);
 }
-
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 if (packageJson.name !== 'toca-mcp-server' || packageJson.private !== true) {
   console.error('package.json violates repository architecture contract');
@@ -114,13 +112,11 @@ if (
   console.error('Publication readiness preflight must use its dedicated compiled entrypoint');
   process.exit(1);
 }
-
 const qualityWorkflow = readFileSync('.github/workflows/quality.yml', 'utf8');
 if (!qualityWorkflow.includes('pnpm install --frozen-lockfile')) {
   console.error('Quality Gate must enforce frozen lockfile installation');
   process.exit(1);
 }
-
 const deployWorkflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
 if (
   !deployWorkflow.includes('id-token: write') ||
@@ -133,7 +129,6 @@ if (deployWorkflow.includes('service_account_key') || deployWorkflow.includes('c
   console.error('Long-lived Google service-account keys are forbidden');
   process.exit(1);
 }
-
 const publicationWorkerDeployWorkflow = readFileSync(
   '.github/workflows/deploy-instagram-publication-worker-gcp.yml',
   'utf8',
@@ -168,7 +163,6 @@ if (
   );
   process.exit(1);
 }
-
 const publicationReadinessPreflight = readFileSync(
   'src/providers/instagram/instagram-publication-readiness-preflight.ts',
   'utf8',
@@ -183,16 +177,16 @@ if (
   console.error('Publication readiness preflight must remain read-only and GET-only');
   process.exit(1);
 }
-
 const registry = readFileSync('src/registry.ts', 'utf8');
 if (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {
   console.error('Unpromoted external write capabilities must not be advertised');
   process.exit(1);
 }
-
 const allowedMetaAdsReadNames = new Set([
   'meta_ads.accounts.list',
   'meta_ads.campaigns.list',
+  'meta_ads.adsets.list',
+  'meta_ads.ads.list',
   'meta_ads.insights.get',
 ]);
 const advertisedMetaAdsNames = [...registry.matchAll(/name: '(meta_ads\.[^']+)'/g)].map(
@@ -216,7 +210,6 @@ for (const name of advertisedMetaAdsNames) {
     process.exit(1);
   }
 }
-
 const metaAdsReadProvider = readFileSync(
   'src/providers/meta-ads/meta-ads-read-provider.ts',
   'utf8',
@@ -230,7 +223,6 @@ if (
   console.error('Meta Ads read provider must remain GET-only and mutation-free');
   process.exit(1);
 }
-
 const plannedPublicationNames = [
   'instagram.publish.image',
   'instagram.publish.carousel',
@@ -240,7 +232,6 @@ const plannedPublicationNames = [
   'instagram.publication.reschedule',
   'instagram.publication.cancel_scheduled',
 ];
-
 for (const name of plannedPublicationNames) {
   const marker = `name: '${name}'`;
   const start = registry.indexOf(marker);
@@ -252,31 +243,26 @@ for (const name of plannedPublicationNames) {
     process.exit(1);
   }
 }
-
 const envExample = readFileSync('.env.example', 'utf8');
 if (/META_(APP_SECRET|ACCESS_TOKEN)=\S+/.test(envExample)) {
   console.error('.env.example must not contain raw Meta secrets or tokens');
   process.exit(1);
 }
-
 const worker = readFileSync('src/worker/worker.ts', 'utf8');
 if (!worker.includes('deadLetters.put') || !worker.includes(':retry:')) {
   console.error('Worker must preserve retry and dead-letter behavior');
   process.exit(1);
 }
-
 const httpServer = readFileSync('src/http-server.ts', 'utf8');
 if (!httpServer.includes("'/healthz'") || !httpServer.includes("'/readyz'")) {
   console.error('Runtime must expose separate liveness and readiness probes');
   process.exit(1);
 }
-
 const validationGate = readFileSync('docs/integrations/phase-1-real-validation.md', 'utf8');
 if (!validationGate.includes('real-provider plus real-ChatGPT evidence')) {
   console.error('Phase 1 must retain the real-provider and ChatGPT validation gate');
   process.exit(1);
 }
-
 for (const temporary of [
   '.github/workflows/preconnection-format.yml',
   '.github/workflows/gcp-foundation-normalize.yml',
@@ -287,5 +273,4 @@ for (const temporary of [
     process.exit(1);
   }
 }
-
 console.log('Architecture check passed.');
