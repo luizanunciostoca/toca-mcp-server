@@ -1,0 +1,58 @@
+name: Paid Media Baseline Capture TEMP
+on:
+  push:
+    branches: [ops/paid-media-baseline-capture-20260813]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Capture official account structure READ-only
+        shell: bash
+        env:
+          PROJECT_ID: toca-mcp-production
+          REGION: southamerica-east1
+          SERVICE: toca-mcp-production
+          ACCOUNT_ID: '311793958882290'
+          CURRENCY: BRL
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
+          call_tool() {
+            local name="$1" args="$2" out="$3"
+            curl --fail-with-body -sS "$URL/mcp" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args}}" > "$out"
+          }
+          mkdir -p baseline
+          ARGS="{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\"}"
+          call_tool meta_ads.campaigns.list "$ARGS" baseline/campaigns.json
+          call_tool meta_ads.adsets.list "$ARGS" baseline/adsets.json
+          call_tool meta_ads.ads.list "$ARGS" baseline/ads.json
+          call_tool meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"campaign\",\"fields\":[\"campaign_id\",\"campaign_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/campaign-insights.json
+          call_tool meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"adset\",\"fields\":[\"campaign_id\",\"campaign_name\",\"adset_id\",\"adset_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/adset-insights.json
+          call_tool meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"ad\",\"fields\":[\"campaign_id\",\"campaign_name\",\"adset_id\",\"adset_name\",\"ad_id\",\"ad_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/ad-insights.json
+          python - <<'PY'
+          import json, pathlib
+          for p in pathlib.Path('baseline').glob('*.json'):
+              text=p.read_text()
+              if 'error' in text.lower() and '"data"' not in text:
+                  raise SystemExit(f'Invalid MCP result in {p}')
+          PY
+      - name: Upload baseline evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: paid-media-baseline-readonly
+          path: baseline/
+          retention-days: 7
