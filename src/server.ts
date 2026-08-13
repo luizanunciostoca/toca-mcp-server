@@ -3,9 +3,11 @@ import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
+import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
 import { registerInstagramHistoryTools } from './tools/register-instagram-history.js';
+import { registerMetaAdsReadTools } from './tools/register-meta-ads-read.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.1.0';
@@ -41,7 +43,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     version: SERVER_VERSION,
     description: 'Deterministic execution tools for ChatGPT governed by TOCA_OS.',
   });
-  const registry = createToolRegistry({ instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED });
+  const registry = createToolRegistry({
+    instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
+    metaAdsReadsEnabled: config.INSTAGRAM_READ_ENABLED,
+  });
 
   server.registerTool(
     'system.health',
@@ -136,6 +141,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     );
     const provider = new InstagramHistoryProvider(client, config.INSTAGRAM_BUSINESS_ACCOUNT_ID);
     registerInstagramHistoryTools(server, provider);
+    registerMetaAdsReadTools(server, new MetaAdsReadProvider(client));
   }
 
   return server;
