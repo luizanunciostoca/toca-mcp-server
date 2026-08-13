@@ -15,20 +15,23 @@ permissions:
 env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
+  REPOSITORY: toca-mcp
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
   TOKEN_SECRET_ID: toca-meta-oauth-token
   JOB_NAME: toca-instagram-first-publication-execute
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   CORRELATION_ID: toca-instagram-first-real-publication-2026-08-12-sunset-001
   IDEMPOTENCY_KEY: toca-instagram-first-real-publication-2026-08-12-sunset-001
   EXPECTED_REQUEST_SHA256: e38b81ed8504691749adc11a9b039117173e6ce0b0e18370458b01484ae17d78
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
 
 jobs:
   execute:
     runs-on: ubuntu-latest
-    environment: instagram-production
     steps:
       - uses: actions/checkout@v4
 
@@ -89,52 +92,114 @@ jobs:
               (.manifest.request.caption | length > 0)
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > first-publication-approved-request.json
-          echo "MEDIA_URL=$(jq -r '.manifest.request.mediaUrls[0]' first-publication-approved-request.json)" >> "$GITHUB_ENV"
-          echo "CAPTION_BASE64=$(jq -r '.manifest.request.caption' first-publication-approved-request.json | base64 -w0)" >> "$GITHUB_ENV"
+          REQUEST_JSON="$(printf '%s' "$RESULT_JSON" | jq -c .manifest.request)"
+          echo "REQUEST_BASE64=$(printf '%s' "$REQUEST_JSON" | base64 -w0)" >> "$GITHUB_ENV"
 
-      - name: Verify publication worker is deployed fail-closed by default
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable execution image
         shell: bash
         run: |
           set -euo pipefail
-          SERVICE_JSON="$(gcloud run services describe toca-instagram-publication-worker --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          printf '%s' "$SERVICE_JSON" | jq -e '
-            [.spec.template.spec.containers[0].env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]
-          ' >/dev/null
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:first-publication-execute-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Execute one-time approved publication
+      - name: Deploy one-time approved publication job
+        shell: bash
+        env:
+          APPROVED_REQUEST_SHA256: ${{ inputs.approved_request_sha256 }}
+        run: |
+          set -euo pipefail
+          REQUEST_JSON="$(printf '%s' "$REQUEST_BASE64" | base64 --decode)"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/instagram-controlled-publication.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=true~INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_PUBLICATION_REQUEST_JSON=$REQUEST_JSON~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 3 \
+            --task-timeout 180s \
+            --quiet
+
+      - name: Verify deployed execution gate is exact and write-scoped
+        shell: bash
+        env:
+          APPROVED_REQUEST_SHA256: ${{ inputs.approved_request_sha256 }}
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e \
+            --arg sha "$APPROVED_REQUEST_SHA256" '
+              .spec.template.spec.template.spec.containers[0] as $container |
+              ($container.command == ["node"]) and
+              ($container.args == ["dist/src/instagram-controlled-publication.js"]) and
+              ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
+              ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256") | .value] == [$sha])
+            ' >/dev/null
+
+      - name: Execute exactly one approved publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Disable write capability immediately
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs update "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --update-env-vars INSTAGRAM_PUBLICATION_WRITES_ENABLED=false \
+            --quiet || true
+
+      - name: Deploy read-only verification mode
         shell: bash
         env:
           APPROVED_REQUEST_SHA256: ${{ inputs.approved_request_sha256 }}
         run: |
           set -euo pipefail
           gcloud run jobs deploy "$JOB_NAME" \
-            --image "$REGION-docker.pkg.dev/$PROJECT_ID/toca-mcp/server:latest" \
+            --image "$IMAGE" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --command node \
-            --args dist/src/instagram-first-publication-execute.js \
-            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=true@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256@INSTAGRAM_FIRST_PUBLICATION_MEDIA_URL=$MEDIA_URL@INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64=$CAPTION_BASE64@INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID@INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY" \
-            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1" \
+            --args dist/src/instagram-first-publication-verify.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID~INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --tasks 1 \
             --max-retries 0 \
-            --task-timeout 180s \
+            --task-timeout 120s \
             --quiet
           gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
 
-      - name: Verify published result
+      - name: Capture verified published result
         shell: bash
         run: |
           set -euo pipefail
           RESULT_LINE="$(gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_EXECUTE_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
             --project "$PROJECT_ID" \
             --freshness=30m \
             --limit=20 \
             --order=desc \
-            --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_EXECUTE_RESULT=' | head -n1)"
+            --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=' | head -n1)"
           test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_EXECUTE_RESULT=}"
+          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=}"
           printf '%s\n' "$RESULT_JSON" | jq -e \
             --arg sha "$EXPECTED_REQUEST_SHA256" '
               .requestSha256 == $sha and
@@ -143,10 +208,19 @@ jobs:
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > first-publication-execution.json
 
-      - name: Upload publication evidence
+      - name: Upload immutable publication evidence
         uses: actions/upload-artifact@v4
         with:
           name: instagram-first-publication-execution-${{ github.sha }}
           path: first-publication-execution.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Remove one-time execution job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --quiet || true
