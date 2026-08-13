@@ -11,20 +11,16 @@ permissions:
 
 env:
   PROJECT_ID: toca-mcp-production
-  EXECUTION: toca-paid-media-read-smoke-temp-t7tkh
+  REVISION: toca-mcp-staging-00007-fd2
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Read failed execution logs
-        shell: bash
-        run: |
-          gcloud logging read "resource.type=cloud_run_job AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION" --project "$PROJECT_ID" --limit 100 --freshness 30m --format='value(textPayload,jsonPayload.message)'
+      - run: gcloud logging read "resource.type=cloud_run_revision AND resource.labels.revision_name=$REVISION" --project "$PROJECT_ID" --limit 100 --freshness 30m --format='value(timestamp,severity,textPayload,jsonPayload.message)'
