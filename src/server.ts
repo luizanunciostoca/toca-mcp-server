@@ -50,6 +50,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
+    tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
   });
 
   server.registerTool(
