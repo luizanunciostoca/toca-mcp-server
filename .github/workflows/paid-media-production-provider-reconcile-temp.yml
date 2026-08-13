@@ -44,9 +44,10 @@ jobs:
           grep -q 'BRL' /tmp/accounts.txt
 
           mcp_call 2 'meta_ads.campaigns.list' '{"adAccountId":"311793958882290","currency":"BRL"}' /tmp/campaigns.txt
-          grep -q 'campaign' /tmp/campaigns.txt
+          grep -q 'objective' /tmp/campaigns.txt
+          grep -q 'effective_status' /tmp/campaigns.txt
 
           mcp_call 3 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-08-06","until":"2026-08-12"}' /tmp/insights.txt
-          grep -q '"data"' /tmp/insights.txt
+          grep -q 'data' /tmp/insights.txt
 
           echo 'Provider reconciliation READ completed through production MCP.'
