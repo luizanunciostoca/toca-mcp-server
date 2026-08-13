@@ -78,7 +78,6 @@ export class GcsPublicationAssetStager {
       headers: {
         Authorization: `Bearer ${identity.accessToken}`,
         'Content-Type': request.contentType,
-        'X-Goog-User-Project': this.options.projectId,
       },
       body: bytes,
     });
