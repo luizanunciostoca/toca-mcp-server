@@ -5,10 +5,9 @@ import { OpenAiImageEditProvider } from './providers/openai/openai-image-edit-pr
 
 const args = parseArgs(process.argv.slice(2));
 const sourceBytes = await readFile(args.source);
-const provider = args.provider ?? 'local';
 
 const result =
-  provider === 'openai'
+  args.provider === 'openai'
     ? await editWithOpenAi(args, sourceBytes)
     : await new LocalPhotoEnhancer().enhance({
         sourceAssetId: args.sourceAssetId,
@@ -64,7 +63,7 @@ interface CliArgs {
   readonly sourceAssetId: string;
   readonly sourceDriveFileId: string;
   readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
-  readonly provider?: 'local' | 'openai';
+  readonly provider: 'local' | 'openai';
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
@@ -85,8 +84,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
     throw new Error(`IMAGE_EDIT_CONTENT_TYPE_UNSUPPORTED:${rawContentType}`);
   }
 
-  const rawProvider = values.get('provider')?.trim().toLowerCase();
-  if (rawProvider && !['local', 'openai'].includes(rawProvider)) {
+  const rawProvider = values.get('provider')?.trim().toLowerCase() ?? 'local';
+  if (!['local', 'openai'].includes(rawProvider)) {
     throw new Error(`IMAGE_EDIT_PROVIDER_UNSUPPORTED:${rawProvider}`);
   }
 
