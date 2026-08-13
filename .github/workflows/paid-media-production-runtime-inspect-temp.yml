@@ -1,4 +1,4 @@
-name: Paid Media Production Runtime Repair TEMP
+name: Paid Media Production MCP Discovery TEMP
 
 on:
   push:
@@ -12,69 +12,72 @@ permissions:
 env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
-  REPOSITORY: toca-mcp
   SERVICE: toca-mcp-production
-  CLOUD_SQL_INSTANCE: toca-mcp-db
-  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
-  repair-and-verify:
+  discover:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.15.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm quality
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Configure Docker auth
-        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-      - name: Build and push image
+      - name: Discover production MCP tools read-only
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/server:${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-      - name: Repair production Paid Media READ runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run deploy "$SERVICE" \
-            --image "$IMAGE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --add-cloudsql-instances "${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" \
-            --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-oauth-token:latest" \
-            --update-env-vars "META_ENABLED=false,MCP_ENABLED=true,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
-            --no-allow-unauthenticated \
-            --quiet
-      - name: Verify repaired production runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          READY="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.conditions[0].status)')"
-          REVISION="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.latestReadyRevisionName)')"
-          ENV_DUMP="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='json(spec.template.spec.containers[0].env)')"
-          echo "READY=$READY"
-          echo "REVISION=$REVISION"
-          printf '%s\n' "$ENV_DUMP"
-          test "$READY" = "True"
-          printf '%s' "$ENV_DUMP" | grep -q '"name": "META_ENABLED"'
-          printf '%s' "$ENV_DUMP" | grep -q '"value": "false"'
-          printf '%s' "$ENV_DUMP" | grep -q '"name": "MCP_ENABLED"'
-          printf '%s' "$ENV_DUMP" | grep -q '"name": "META_ADS_READ_ENABLED"'
-          printf '%s' "$ENV_DUMP" | grep -q '"name": "META_ACCESS_TOKEN_ENV_KEY"'
-          printf '%s' "$ENV_DUMP" | grep -q 'toca-meta-oauth-token'
+          SERVICE_URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+          ID_TOKEN="$(gcloud auth print-identity-token)"
+
+          cat >/tmp/initialize.json <<'JSON'
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"toca-paid-media-runtime-proof","version":"1.0.0"}}}
+          JSON
+
+          curl --fail-with-body --silent --show-error \
+            -D /tmp/init-headers.txt \
+            -o /tmp/init-body.txt \
+            -X POST "$SERVICE_URL/mcp" \
+            -H "Authorization: Bearer $ID_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data-binary @/tmp/initialize.json
+
+          cat /tmp/init-body.txt
+          SESSION_ID="$(awk 'BEGIN{IGNORECASE=1} /^mcp-session-id:/ {sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/init-headers.txt)"
+          test -n "$SESSION_ID"
+
+          curl --fail-with-body --silent --show-error \
+            -o /tmp/initialized-body.txt \
+            -X POST "$SERVICE_URL/mcp" \
+            -H "Authorization: Bearer $ID_TOKEN" \
+            -H "Mcp-Session-Id: $SESSION_ID" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+          curl --fail-with-body --silent --show-error \
+            -o /tmp/tools-body.txt \
+            -X POST "$SERVICE_URL/mcp" \
+            -H "Authorization: Bearer $ID_TOKEN" \
+            -H "Mcp-Session-Id: $SESSION_ID" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+          cat /tmp/tools-body.txt
+          grep -q 'system.health' /tmp/tools-body.txt
+          grep -q 'system.capabilities' /tmp/tools-body.txt
+          grep -q 'meta_ads.accounts.list' /tmp/tools-body.txt
+          grep -q 'meta_ads.campaigns.list' /tmp/tools-body.txt
+          grep -q 'meta_ads.insights.get' /tmp/tools-body.txt
+
+          if grep -Eq 'meta_ads\.(campaigns\.create|campaigns\.update|campaigns\.pause|campaigns\.activate|adsets\.|ads\.|creatives\.|budget|target)' /tmp/tools-body.txt; then
+            echo 'Unexpected Meta Ads write capability exposed in production MCP.' >&2
+            exit 1
+          fi
+
+          echo 'Production MCP capability discovery passed: expected Meta Ads READ tools exposed and no known Meta Ads WRITE tools detected.'
