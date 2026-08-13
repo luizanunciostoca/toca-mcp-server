@@ -3,6 +3,7 @@ export type CapabilityStatus =
   | 'IMPLEMENTED'
   | 'CONNECTED'
   | 'PRODUCTION_VALIDATED'
+  | 'PROVIDER_UNAVAILABLE'
   | 'SUSPENDED'
   | 'DEPRECATED'
   | 'REMOVED';
@@ -15,6 +16,9 @@ export type ContentLifecycleStatus =
   | 'PRODUCED'
   | 'REVIEW'
   | 'READY_FOR_SCHEDULING'
+  | 'READY_FOR_NATIVE_SCHEDULING'
+  | 'MANUAL_HANDOFF_REQUIRED'
+  | 'SCHEDULED'
   | 'MISSED_WINDOW'
   | 'PUBLISHED';
 
@@ -61,6 +65,7 @@ export function deriveLifecycleStatus(
   slotWindowState: SlotWindowState,
 ): ContentLifecycleStatus {
   if (currentStatus === 'PUBLISHED') return 'PUBLISHED';
+  if (currentStatus === 'SCHEDULED') return 'SCHEDULED';
   if (slotWindowState === 'EXPIRED') return 'MISSED_WINDOW';
   return currentStatus;
 }
@@ -96,8 +101,11 @@ function hasReached(
     PRODUCED: 2,
     REVIEW: 2,
     READY_FOR_SCHEDULING: 3,
+    READY_FOR_NATIVE_SCHEDULING: 3,
+    MANUAL_HANDOFF_REQUIRED: 3,
+    SCHEDULED: 4,
     MISSED_WINDOW: -1,
-    PUBLISHED: 4,
+    PUBLISHED: 5,
   };
   const thresholdRank = rank[threshold];
   return rank[status] >= thresholdRank;
