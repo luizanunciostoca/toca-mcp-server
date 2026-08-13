@@ -217,7 +217,10 @@ for (const name of advertisedMetaAdsNames) {
   }
 }
 
-const metaAdsReadProvider = readFileSync('src/providers/meta-ads/meta-ads-read-provider.ts', 'utf8');
+const metaAdsReadProvider = readFileSync(
+  'src/providers/meta-ads/meta-ads-read-provider.ts',
+  'utf8',
+);
 if (
   metaAdsReadProvider.includes('.post(') ||
   metaAdsReadProvider.includes('createCampaign') ||
