@@ -109,6 +109,69 @@ const metaAdsReadTools: readonly ToolDefinition[] = [
   },
 ];
 
+const tocaManagedInstagramSchedulerTools: readonly ToolDefinition[] = [
+  {
+    name: 'instagram.toca_schedule.prepare',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'READ',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.toca_schedule.create',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'WRITE_REVERSIBLE',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.toca_schedule.reschedule',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'WRITE_REVERSIBLE',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.toca_schedule.cancel',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'WRITE_REVERSIBLE',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.toca_schedule.status',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'READ',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.toca_schedule.list',
+    version: '1.0.0',
+    provider: 'toca-mcp',
+    riskClass: 'READ',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+];
+
 const plannedInstagramPublicationTools: readonly ToolDefinition[] = [
   {
     name: 'instagram.publish.image',
@@ -205,6 +268,7 @@ const plannedInstagramPublicationTools: readonly ToolDefinition[] = [
 export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
   readonly metaAdsReadsEnabled?: boolean;
+  readonly tocaManagedInstagramSchedulerEnabled?: boolean;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
@@ -213,5 +277,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
     registry.register(tool);
   if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
   if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
+  if (options.tocaManagedInstagramSchedulerEnabled)
+    for (const tool of tocaManagedInstagramSchedulerTools) registry.register(tool);
   return registry;
 }
