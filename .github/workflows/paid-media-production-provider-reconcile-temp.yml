@@ -1,0 +1,52 @@
+name: Paid Media Production Provider Reconcile TEMP
+
+on:
+  push:
+    branches:
+      - ops/paid-media-production-runtime-inspect-20260813
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
+      - name: Read official account campaigns and completed-week insights through production MCP
+        env:
+          TOKEN: ${{ steps.auth.outputs.id_token }}
+          URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
+        shell: bash
+        run: |
+          set -euo pipefail
+          mcp_call() {
+            local id="$1" name="$2" arguments="$3" output="$4"
+            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$id" "$name" "$arguments" > /tmp/request.json
+            curl -fsS -o "$output" -X POST "$URL" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              --data-binary @/tmp/request.json
+            cat "$output"
+          }
+
+          mcp_call 1 'meta_ads.accounts.list' '{}' /tmp/accounts.txt
+          grep -q '311793958882290' /tmp/accounts.txt
+          grep -q 'BRL' /tmp/accounts.txt
+
+          mcp_call 2 'meta_ads.campaigns.list' '{"adAccountId":"311793958882290","currency":"BRL"}' /tmp/campaigns.txt
+          grep -q 'campaign' /tmp/campaigns.txt
+
+          mcp_call 3 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-08-06","until":"2026-08-12"}' /tmp/insights.txt
+          grep -q '"data"' /tmp/insights.txt
+
+          echo 'Provider reconciliation READ completed through production MCP.'
