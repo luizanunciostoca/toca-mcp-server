@@ -22,10 +22,13 @@ describe('GcsPublicationAssetDelivery', () => {
         return response('runtime@toca-mcp-production.iam.gserviceaccount.com', { status: 200 });
       }
       if (url.includes(':signBlob')) {
-        return response(JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        return response(
+          JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       }
       if (url.startsWith('https://storage.googleapis.com/')) {
         return response('x', { status: 206, headers: { 'content-type': 'image/jpeg' } });
