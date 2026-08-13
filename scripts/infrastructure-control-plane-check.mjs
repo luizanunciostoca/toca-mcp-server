@@ -117,6 +117,7 @@ if (
   heartbeat?.timeZone !== 'America/Bahia' ||
   heartbeat?.runtimeServiceAccount !== runtime ||
   heartbeat?.executorEnabledByDefault !== false ||
+  heartbeat?.schedulerPausedByDefault !== true ||
   heartbeat?.contentPayloadAllowed !== false
 ) {
   console.error('TOCA-managed Instagram heartbeat is outside the approved envelope');
