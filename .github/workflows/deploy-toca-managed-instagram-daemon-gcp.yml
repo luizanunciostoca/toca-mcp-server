@@ -22,6 +22,7 @@ env:
   REGION: southamerica-east1
   REPOSITORY: toca-mcp
   SERVICE_NAME: toca-managed-instagram-daemon
+  MCP_SERVICE_NAME: toca-mcp-production
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
@@ -109,3 +110,34 @@ jobs:
             ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
           ' >/dev/null
           echo 'TOCA_MANAGED_INSTAGRAM_DAEMON_DEPLOYED=1'
+
+      - name: Deploy MCP production scheduler surface
+        run: |
+          set -euo pipefail
+          gcloud run deploy "$MCP_SERVICE_NAME" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --update-env-vars "NODE_ENV=production,MCP_ENABLED=true,TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true,TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,META_ENABLED=false,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
+            --no-allow-unauthenticated \
+            --quiet
+
+      - name: Verify MCP scheduler surface remains fail-closed
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([$container.env[] | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
+            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+          echo 'TOCA_MCP_PRODUCTION_SCHEDULER_TOOLS_DEPLOYED=1'
