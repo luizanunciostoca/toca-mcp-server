@@ -9,6 +9,7 @@ import {
   TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB,
   TocaManagedInstagramPublicationJobHandler,
 } from '../scheduler/toca-managed-instagram-scheduler.js';
+import { TocaManagedInstagramApprovalAuditGate } from './toca-managed-instagram-approval-audit.js';
 import { runWorkerBatch } from './worker-runtime.js';
 import type { JobHandler } from './worker.js';
 
@@ -36,7 +37,8 @@ export function createTocaManagedInstagramRuntimeHandlers(
     bucketName: config.INSTAGRAM_PUBLICATION_ASSET_BUCKET,
     signedUrlTtlSeconds: 15 * 60,
   });
-  const handler = new TocaManagedInstagramPublicationJobHandler(delivery, executor);
+  const publication = new TocaManagedInstagramPublicationJobHandler(delivery, executor);
+  const handler = new TocaManagedInstagramApprovalAuditGate(pool, publication);
 
   return new Map([[TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB, handler]]);
 }
