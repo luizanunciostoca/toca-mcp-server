@@ -10,6 +10,7 @@ RUN pnpm build
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+RUN apt-get update && apt-get install -y imagemagick && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
