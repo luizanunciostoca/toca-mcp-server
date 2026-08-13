@@ -1,0 +1,463 @@
+name: Marketing Autopilot Publication
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - control/marketing-autopilot-publication-command.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: marketing-autopilot-instagram-publication
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  PREPARE_JOB_NAME: toca-marketing-autopilot-prepare
+  EXECUTE_JOB_NAME: toca-marketing-autopilot-execute
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+
+jobs:
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Validate and load immutable command
+        id: command
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMAND=control/marketing-autopilot-publication-command.json
+          jq -e '
+            .schemaVersion == 1 and
+            (.commandId | type == "string") and
+            (.action | IN("NOOP", "PREPARE", "PUBLISH")) and
+            .timezone == "America/Bahia" and
+            (.operation | IN("SUNSET", "THE_PARTY")) and
+            .channel == "INSTAGRAM" and
+            (.format | IN("FEED_IMAGE", "STORY_IMAGE")) and
+            (.contentType | IN("image/jpeg", "image/png", "image/webp")) and
+            .instagramAccountId == "17841402033495654" and
+            (.approvalMode | IN("BLOCKED", "EXPLICIT_APPROVAL", "PREAPPROVED_CLASS")) and
+            (.approvalStatus | IN("BLOCKED_POLICY", "PENDING_REVIEW", "APPROVED", "PREAPPROVED_CLASS"))
+          ' "$COMMAND" >/dev/null
+
+          ACTION="$(jq -r .action "$COMMAND")"
+          COMMAND_ID="$(jq -r .commandId "$COMMAND")"
+          printf '%s' "$COMMAND_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+          if [ "$ACTION" = "NOOP" ]; then
+            echo "NOOP command accepted."
+            exit 0
+          fi
+
+          jq -e '
+            (.contentItemId | length > 0) and
+            (.scheduledAt | length > 0) and
+            (.assetId | length > 0) and
+            (.driveFileId | length > 0) and
+            (.caption | length > 0) and
+            (.correlationId | length > 0) and
+            (.idempotencyKey | length > 0)
+          ' "$COMMAND" >/dev/null
+
+          CONTENT_ITEM_ID="$(jq -r .contentItemId "$COMMAND")"
+          ASSET_ID="$(jq -r .assetId "$COMMAND")"
+          DRIVE_FILE_ID="$(jq -r .driveFileId "$COMMAND")"
+          CORRELATION_ID="$(jq -r .correlationId "$COMMAND")"
+          IDEMPOTENCY_KEY="$(jq -r .idempotencyKey "$COMMAND")"
+          for value in "$CONTENT_ITEM_ID" "$ASSET_ID" "$CORRELATION_ID" "$IDEMPOTENCY_KEY"; do
+            printf '%s' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          done
+          printf '%s' "$DRIVE_FILE_ID" | grep -Eq '^[A-Za-z0-9_-]{10,128}$'
+
+          FORMAT="$(jq -r .format "$COMMAND")"
+          if [ "$FORMAT" = "FEED_IMAGE" ]; then
+            MEDIA_TYPE=IMAGE
+          else
+            MEDIA_TYPE=STORY
+          fi
+
+          echo "content_item_id=$CONTENT_ITEM_ID" >> "$GITHUB_OUTPUT"
+          echo "scheduled_at=$(jq -r .scheduledAt "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "operation=$(jq -r .operation "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "format=$FORMAT" >> "$GITHUB_OUTPUT"
+          echo "media_type=$MEDIA_TYPE" >> "$GITHUB_OUTPUT"
+          echo "asset_id=$ASSET_ID" >> "$GITHUB_OUTPUT"
+          echo "drive_file_id=$DRIVE_FILE_ID" >> "$GITHUB_OUTPUT"
+          echo "content_type=$(jq -r .contentType "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "correlation_id=$CORRELATION_ID" >> "$GITHUB_OUTPUT"
+          echo "idempotency_key=$IDEMPOTENCY_KEY" >> "$GITHUB_OUTPUT"
+          echo "approval_mode=$(jq -r .approvalMode "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "approval_status=$(jq -r .approvalStatus "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "approved_request_sha256=$(jq -r .approvedRequestSha256 "$COMMAND")" >> "$GITHUB_OUTPUT"
+          echo "caption_base64=$(jq -r .caption "$COMMAND" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud and Drive
+        if: steps.command.outputs.action != 'NOOP'
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - if: steps.command.outputs.action != 'NOOP'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        if: steps.command.outputs.action != 'NOOP'
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Download source asset privately
+        if: steps.command.outputs.action == 'PREPARE'
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          DRIVE_FILE_ID: ${{ steps.command.outputs.drive_file_id }}
+          CONTENT_TYPE: ${{ steps.command.outputs.content_type }}
+        run: |
+          set -euo pipefail
+          mkdir -p .autopilot-publication
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}?alt=media" \
+            --output .autopilot-publication/asset
+          test -s .autopilot-publication/asset
+          FILE_TYPE="$(file --brief --mime-type .autopilot-publication/asset)"
+          test "$FILE_TYPE" = "$CONTENT_TYPE"
+          echo "SOURCE_ASSET_SHA256=$(sha256sum .autopilot-publication/asset | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Build immutable preparation image
+        if: steps.command.outputs.action == 'PREPARE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:autopilot-prepare-app-${GITHUB_SHA}"
+          PREP_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:autopilot-prepare-${GITHUB_SHA}"
+          docker build -t "$APP_IMAGE" .
+          docker push "$APP_IMAGE"
+          cat >/tmp/autopilot-prepare.Dockerfile <<'EOF'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          USER root
+          COPY .autopilot-publication/asset /app/autopilot-publication-asset
+          RUN chown node:node /app/autopilot-publication-asset && chmod 0444 /app/autopilot-publication-asset
+          USER node
+          EOF
+          docker build \
+            --build-arg "BASE_IMAGE=$APP_IMAGE" \
+            -f /tmp/autopilot-prepare.Dockerfile \
+            -t "$PREP_IMAGE" .
+          docker push "$PREP_IMAGE"
+          echo "PREP_IMAGE=$PREP_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy fail-closed preparation job
+        if: steps.command.outputs.action == 'PREPARE'
+        shell: bash
+        env:
+          ASSET_ID: ${{ steps.command.outputs.asset_id }}
+          CONTENT_TYPE: ${{ steps.command.outputs.content_type }}
+          MEDIA_TYPE: ${{ steps.command.outputs.media_type }}
+          CORRELATION_ID: ${{ steps.command.outputs.correlation_id }}
+          IDEMPOTENCY_KEY: ${{ steps.command.outputs.idempotency_key }}
+          CAPTION_BASE64: ${{ steps.command.outputs.caption_base64 }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$PREPARE_JOB_NAME" \
+            --image "$PREP_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/instagram-first-publication-prepare.js \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_ASSET_BUCKET@INSTAGRAM_PUBLICATION_ASSET_ID=$ASSET_ID@INSTAGRAM_PUBLICATION_CORRELATION_ID=$CORRELATION_ID@INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH=/app/autopilot-publication-asset@INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE=$CONTENT_TYPE@INSTAGRAM_PUBLICATION_MEDIA_TYPE=$MEDIA_TYPE@INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64=$CAPTION_BASE64@INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+      - name: Verify preparation cannot publish
+        if: steps.command.outputs.action == 'PREPARE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$PREPARE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args == ["dist/src/instagram-first-publication-prepare.js"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute preparation
+        if: steps.command.outputs.action == 'PREPARE'
+        run: gcloud run jobs execute "$PREPARE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Capture immutable preparation evidence
+        if: steps.command.outputs.action == 'PREPARE'
+        shell: bash
+        env:
+          COMMAND_ID: ${{ steps.command.outputs.command_id }}
+          CONTENT_ITEM_ID: ${{ steps.command.outputs.content_item_id }}
+          MEDIA_TYPE: ${{ steps.command.outputs.media_type }}
+          CORRELATION_ID: ${{ steps.command.outputs.correlation_id }}
+          IDEMPOTENCY_KEY: ${{ steps.command.outputs.idempotency_key }}
+        run: |
+          set -euo pipefail
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${PREPARE_JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+              --project "$PROJECT_ID" --freshness=30m --limit=50 --order=desc \
+              --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg media "$MEDIA_TYPE" \
+            --arg correlation "$CORRELATION_ID" \
+            --arg idempotency "$IDEMPOTENCY_KEY" '
+              (.asset.sha256 | test("^[a-f0-9]{64}$")) and
+              (.asset.publicUrl | startswith("https://storage.googleapis.com/")) and
+              (.manifest.requestSha256 | test("^[a-f0-9]{64}$")) and
+              .manifest.request.account.instagramAccountId == $ig and
+              .manifest.request.mediaType == $media and
+              .manifest.request.correlationId == $correlation and
+              .manifest.request.idempotencyKey == $idempotency and
+              (.manifest.request.mediaUrls | length == 1)
+            ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq \
+            --arg commandId "$COMMAND_ID" \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            '. + {commandId: $commandId, contentItemId: $contentItemId}' \
+            > marketing-autopilot-preparation.json
+          echo "MARKETING_AUTOPILOT_PREPARED=1"
+          echo "CONTENT_ITEM_ID=$CONTENT_ITEM_ID"
+          echo "REQUEST_SHA256=$(jq -r .manifest.requestSha256 marketing-autopilot-preparation.json)"
+
+      - name: Upload preparation evidence
+        if: steps.command.outputs.action == 'PREPARE'
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketing-autopilot-preparation-${{ steps.command.outputs.command_id }}
+          path: marketing-autopilot-preparation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify approval, prepared manifest, and publication window
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        env:
+          APPROVAL_MODE: ${{ steps.command.outputs.approval_mode }}
+          APPROVAL_STATUS: ${{ steps.command.outputs.approval_status }}
+          APPROVED_REQUEST_SHA256: ${{ steps.command.outputs.approved_request_sha256 }}
+          SCHEDULED_AT: ${{ steps.command.outputs.scheduled_at }}
+          MEDIA_TYPE: ${{ steps.command.outputs.media_type }}
+          CORRELATION_ID: ${{ steps.command.outputs.correlation_id }}
+          IDEMPOTENCY_KEY: ${{ steps.command.outputs.idempotency_key }}
+          CAPTION_BASE64: ${{ steps.command.outputs.caption_base64 }}
+        run: |
+          set -euo pipefail
+          case "$APPROVAL_MODE:$APPROVAL_STATUS" in
+            EXPLICIT_APPROVAL:APPROVED|PREAPPROVED_CLASS:PREAPPROVED_CLASS) ;;
+            *) echo "Approval gate not satisfied" >&2; exit 1 ;;
+          esac
+          printf '%s' "$APPROVED_REQUEST_SHA256" | grep -Eq '^[a-f0-9]{64}$'
+
+          NOW_EPOCH="$(date +%s)"
+          DUE_EPOCH="$(date -d "$SCHEDULED_AT" +%s)"
+          DELTA=$((NOW_EPOCH - DUE_EPOCH))
+          test "$DELTA" -ge -900
+          test "$DELTA" -le 1800
+
+          RESULT_LINE="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${PREPARE_JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+            --project "$PROJECT_ID" --freshness=7d --limit=100 --order=desc \
+            --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=' | head -n1)"
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=}"
+          PREPARED_SHA256="$(printf '%s' "$RESULT_JSON" | jq -r .manifest.requestSha256)"
+          test "$PREPARED_SHA256" = "$APPROVED_REQUEST_SHA256"
+          EXPECTED_CAPTION="$(printf '%s' "$CAPTION_BASE64" | base64 --decode)"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg media "$MEDIA_TYPE" \
+            --arg correlation "$CORRELATION_ID" \
+            --arg idempotency "$IDEMPOTENCY_KEY" \
+            --arg caption "$EXPECTED_CAPTION" '
+              .manifest.request.account.instagramAccountId == $ig and
+              .manifest.request.mediaType == $media and
+              .manifest.request.correlationId == $correlation and
+              .manifest.request.idempotencyKey == $idempotency and
+              .manifest.request.caption == $caption and
+              (.manifest.request.mediaUrls | length == 1)
+            ' >/dev/null
+          REQUEST_JSON="$(printf '%s' "$RESULT_JSON" | jq -c .manifest.request)"
+          echo "REQUEST_BASE64=$(printf '%s' "$REQUEST_JSON" | base64 -w0)" >> "$GITHUB_ENV"
+
+      - name: Build immutable execution image
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:autopilot-execute-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "EXEC_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy exact approved publication job
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        env:
+          APPROVED_REQUEST_SHA256: ${{ steps.command.outputs.approved_request_sha256 }}
+        run: |
+          set -euo pipefail
+          REQUEST_JSON="$(printf '%s' "$REQUEST_BASE64" | base64 --decode)"
+          gcloud run jobs deploy "$EXECUTE_JOB_NAME" \
+            --image "$EXEC_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/instagram-controlled-publication.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=true~INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_PUBLICATION_REQUEST_JSON=$REQUEST_JSON~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 --max-retries 3 --task-timeout 180s --quiet
+
+      - name: Verify exact write-scoped execution gate
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        env:
+          APPROVED_REQUEST_SHA256: ${{ steps.command.outputs.approved_request_sha256 }}
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e --arg sha "$APPROVED_REQUEST_SHA256" '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args == ["dist/src/instagram-controlled-publication.js"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256") | .value] == [$sha])
+          ' >/dev/null
+
+      - name: Execute exactly one approved publication
+        if: steps.command.outputs.action == 'PUBLISH'
+        run: gcloud run jobs execute "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Disable write capability immediately
+        if: always() && steps.command.outputs.action == 'PUBLISH'
+        run: |
+          gcloud run jobs update "$EXECUTE_JOB_NAME" \
+            --project "$PROJECT_ID" --region "$REGION" \
+            --update-env-vars INSTAGRAM_PUBLICATION_WRITES_ENABLED=false --quiet || true
+
+      - name: Deploy read-only verification mode
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        env:
+          APPROVED_REQUEST_SHA256: ${{ steps.command.outputs.approved_request_sha256 }}
+          CORRELATION_ID: ${{ steps.command.outputs.correlation_id }}
+          IDEMPOTENCY_KEY: ${{ steps.command.outputs.idempotency_key }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$EXECUTE_JOB_NAME" \
+            --image "$EXEC_IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node --args dist/src/instagram-first-publication-verify.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID~INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Capture verified publication and immutable evidence
+        if: steps.command.outputs.action == 'PUBLISH'
+        shell: bash
+        env:
+          COMMAND_ID: ${{ steps.command.outputs.command_id }}
+          CONTENT_ITEM_ID: ${{ steps.command.outputs.content_item_id }}
+          APPROVED_REQUEST_SHA256: ${{ steps.command.outputs.approved_request_sha256 }}
+          CORRELATION_ID: ${{ steps.command.outputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${EXECUTE_JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+              --project "$PROJECT_ID" --freshness=30m --limit=50 --order=desc \
+              --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg sha "$APPROVED_REQUEST_SHA256" \
+            --arg correlation "$CORRELATION_ID" '
+              .requestSha256 == $sha and
+              .status == "PUBLISHED" and
+              (.publicationId | length > 0) and
+              .correlationId == $correlation
+            ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq \
+            --arg commandId "$COMMAND_ID" \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            '. + {commandId: $commandId, contentItemId: $contentItemId}' \
+            > marketing-autopilot-publication.json
+          echo "MARKETING_AUTOPILOT_PUBLISHED=1"
+          jq '{status, publicationId, permalink, requestSha256, correlationId, idempotencyKey, commandId, contentItemId}' marketing-autopilot-publication.json
+
+      - name: Upload publication evidence
+        if: steps.command.outputs.action == 'PUBLISH'
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketing-autopilot-publication-${{ steps.command.outputs.command_id }}
+          path: marketing-autopilot-publication.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove temporary preparation job
+        if: always() && steps.command.outputs.action == 'PREPARE'
+        run: gcloud run jobs delete "$PREPARE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet || true
+
+      - name: Remove temporary execution job
+        if: always() && steps.command.outputs.action == 'PUBLISH'
+        run: gcloud run jobs delete "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet || true
