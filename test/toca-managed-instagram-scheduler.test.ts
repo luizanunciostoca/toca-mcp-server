@@ -48,7 +48,7 @@ describe('TOCA-managed Instagram scheduler', () => {
     expect(job.id).toBe('job-1');
     expect(job.status).toBe('SCHEDULED');
     expect(job.toolName).toBe('internal.instagram.publication.toca-managed.execute');
-    expect(job.runAt).toBe('2026-08-14T12:00:00.000Z');
+    expect(job.runAt).toBe('2026-08-14T09:00:00-03:00');
   });
 
   it('rejects a changed schedule when the approved descriptor hash is stale', async () => {
