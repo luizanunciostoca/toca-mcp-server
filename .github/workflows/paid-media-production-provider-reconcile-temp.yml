@@ -21,7 +21,7 @@ jobs:
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: id_token
           id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
-      - name: Audit recent Meta Ads delivery read-only through production MCP
+      - name: Audit 2026 Meta Ads delivery history read-only through production MCP
         env:
           TOKEN: ${{ steps.auth.outputs.id_token }}
           URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
@@ -45,10 +45,10 @@ jobs:
 
           id=10
           for account in 311793958882290 394512749760530 2036212826847237 1737287297102678; do
-            mcp_call "$id" 'meta_ads.insights.get' "{\"adAccountId\":\"$account\",\"currency\":\"BRL\",\"level\":\"account\",\"fields\":[\"account_id\",\"account_name\",\"impressions\",\"reach\",\"clicks\",\"spend\",\"cpc\",\"ctr\",\"actions\"],\"since\":\"2026-08-01\",\"until\":\"2026-08-12\"}" "/tmp/account-$account.txt"
+            mcp_call "$id" 'meta_ads.insights.get' "{\"adAccountId\":\"$account\",\"currency\":\"BRL\",\"level\":\"account\",\"fields\":[\"account_id\",\"account_name\",\"impressions\",\"reach\",\"clicks\",\"spend\",\"cpc\",\"ctr\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-08-12\"}" "/tmp/account-$account.txt"
             id=$((id+1))
           done
 
-          mcp_call 20 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-07-01","until":"2026-08-12"}' /tmp/official-extended.txt
+          mcp_call 20 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-01-01","until":"2026-08-12"}' /tmp/official-ytd.txt
 
-          echo 'Read-only recent-delivery audit completed through production MCP.'
+          echo 'Read-only 2026 delivery-history audit completed through production MCP.'
