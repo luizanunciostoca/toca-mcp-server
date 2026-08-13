@@ -18,7 +18,7 @@ Target runtime: Cloud Run + Artifact Registry + Secret Manager + Cloud SQL for P
 4. Create PostgreSQL Cloud SQL instances/databases for staging and production.
 5. Create runtime and deploy service accounts with least privilege.
 6. Configure GitHub Workload Identity Federation and repository environment variables/secrets.
-7. Create Secret Manager resources `toca-database-url`, `toca-meta-app-secret`, and `toca-meta-access-token` without pasting values into GitHub or chat.
+7. Create Secret Manager resources `toca-database-url`, `toca-meta-app-secret`, and the canonical OAuth token resource `toca-meta-oauth-token` without pasting values into GitHub or chat. The runtime environment variable `TOCA_SECRET_META_ACCESS_TOKEN` binds to `toca-meta-oauth-token`; do not create or reference the deprecated/nonexistent `toca-meta-access-token` resource.
 8. Run migrations against each database before promoting traffic.
 
 ## Instagram publication worker deployment gate
