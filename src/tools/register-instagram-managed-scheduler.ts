@@ -40,7 +40,8 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async (input) => response({ descriptorSha256: hashTocaManagedInstagramApprovalDescriptor(input) }),
+    async (input) =>
+      response({ descriptorSha256: hashTocaManagedInstagramApprovalDescriptor(input) }),
   );
 
   server.registerTool(
