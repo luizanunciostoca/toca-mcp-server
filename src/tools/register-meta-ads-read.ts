@@ -31,7 +31,12 @@ export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsRea
 
   server.registerTool(
     'meta_ads.campaigns.list',
-    { title: 'List Meta Ads Campaigns', inputSchema: accountInputSchema, outputSchema, annotations },
+    {
+      title: 'List Meta Ads Campaigns',
+      inputSchema: accountInputSchema,
+      outputSchema,
+      annotations,
+    },
     async (input) => response(await provider.listCampaigns(input)),
   );
 
@@ -49,7 +54,12 @@ export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsRea
 
   server.registerTool(
     'meta_ads.insights.get',
-    { title: 'Read Meta Ads Insights', inputSchema: insightsInputSchema, outputSchema, annotations },
+    {
+      title: 'Read Meta Ads Insights',
+      inputSchema: insightsInputSchema,
+      outputSchema,
+      annotations,
+    },
     async (input) =>
       response(
         await provider.getInsights(
