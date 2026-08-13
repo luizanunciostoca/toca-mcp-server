@@ -1,0 +1,29 @@
+name: Format TOCA Managed Executor Debug
+on:
+  push:
+    branches:
+      - feat/toca-managed-instagram-scheduler-executor-v2
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Print canonical Prettier output
+        run: |
+          pnpm exec prettier src/config.ts test/gcs-publication-asset-delivery.test.ts --write
+          echo '===CONFIG_START==='
+          cat src/config.ts
+          echo '===CONFIG_END==='
+          echo '===TEST_START==='
+          cat test/gcs-publication-asset-delivery.test.ts
+          echo '===TEST_END==='
