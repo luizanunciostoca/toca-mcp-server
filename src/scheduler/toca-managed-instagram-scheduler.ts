@@ -165,10 +165,7 @@ export function hashTocaManagedInstagramApprovalDescriptor(
 export function assertApprovedTocaManagedDescriptor(
   payload: TocaManagedInstagramSchedulePayload,
 ): void {
-  if (
-    payload.approval.mode === 'EXPLICIT_APPROVAL' &&
-    payload.approval.status !== 'APPROVED'
-  ) {
+  if (payload.approval.mode === 'EXPLICIT_APPROVAL' && payload.approval.status !== 'APPROVED') {
     throw new Error('TOCA_MANAGED_INSTAGRAM_APPROVAL_REQUIRED');
   }
   if (
