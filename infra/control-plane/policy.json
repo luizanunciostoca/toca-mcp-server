@@ -10,10 +10,7 @@
       "resourceName": "toca-mcp-publication-assets",
       "publicRead": false,
       "deliveryMode": "signed-url",
-      "runtimeRoles": [
-        "roles/storage.objectCreator",
-        "roles/storage.objectViewer"
-      ],
+      "runtimeRoles": ["roles/storage.objectCreator", "roles/storage.objectViewer"],
       "lifecycleDeleteAgeDays": 7,
       "uniformBucketLevelAccess": true
     }
