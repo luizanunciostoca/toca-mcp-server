@@ -1,6 +1,5 @@
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExecutionError } from '../src/core/errors.js';
 import { LocalPhotoEnhancer } from '../src/providers/local/local-photo-enhancer.js';
 
 describe('LocalPhotoEnhancer', () => {
@@ -14,7 +13,7 @@ describe('LocalPhotoEnhancer', () => {
         imageBytes: new Uint8Array(),
         contentType: 'image/jpeg',
       }),
-    ).rejects.toMatchObject<Partial<ExecutionError>>({
+    ).rejects.toMatchObject({
       code: 'SOURCE_IMAGE_BINDING_FAILURE',
     });
   });
@@ -79,7 +78,7 @@ describe('LocalPhotoEnhancer', () => {
         imageBytes: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
         contentType: 'image/jpeg',
       }),
-    ).rejects.toMatchObject<Partial<ExecutionError>>({
+    ).rejects.toMatchObject({
       code: 'CAPABILITY_UNAVAILABLE',
       retryable: false,
     });
