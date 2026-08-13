@@ -9,6 +9,7 @@ import type {
 } from './meta-connection.js';
 
 const requiredPublicationOAuthScope = 'instagram_content_publish';
+const requiredPaidMediaReadOAuthScope = 'ads_read';
 
 interface OAuthStateRecord {
   readonly state: string;
@@ -193,7 +194,13 @@ export class MetaOAuthService {
     authorizationUrl.searchParams.set('redirect_uri', this.config.redirectUri);
     authorizationUrl.searchParams.set('response_type', 'code');
     const requestedScopes = this.config.requestedScopes.includes('instagram_basic')
-      ? [...new Set([...this.config.requestedScopes, requiredPublicationOAuthScope])].sort()
+      ? [
+          ...new Set([
+            ...this.config.requestedScopes,
+            requiredPublicationOAuthScope,
+            requiredPaidMediaReadOAuthScope,
+          ]),
+        ].sort()
       : [...this.config.requestedScopes];
     authorizationUrl.searchParams.set('scope', requestedScopes.join(','));
     authorizationUrl.searchParams.set('state', state);
