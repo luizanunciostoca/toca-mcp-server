@@ -2,11 +2,15 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
+import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
+import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagram-scheduler.js';
 import { registerInstagramHistoryTools } from './tools/register-instagram-history.js';
+import { registerInstagramManagedSchedulerTools } from './tools/register-instagram-managed-scheduler.js';
 import { registerMetaAdsReadTools } from './tools/register-meta-ads-read.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
@@ -139,6 +143,12 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       { provider: 'env', key: config.META_ACCESS_TOKEN_ENV_KEY },
     );
   };
+
+  if (config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && config.DATABASE_URL) {
+    const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
+    const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
+    registerInstagramManagedSchedulerTools(server, scheduler);
+  }
 
   if (
     config.INSTAGRAM_READ_ENABLED &&
