@@ -12,6 +12,7 @@ const envSchema = z.object({
   INSTAGRAM_PUBLICATION_CORRELATION_ID: z.string().min(1),
   INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH: z.string().min(1),
   INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  INSTAGRAM_PUBLICATION_MEDIA_TYPE: z.enum(['IMAGE', 'STORY']).default('IMAGE'),
   INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64: z.string().min(1),
   INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY: z.string().min(1),
 });
@@ -51,7 +52,7 @@ const manifest = createInstagramPublicationApprovalManifest({
     pageId,
     instagramAccountId: env.INSTAGRAM_BUSINESS_ACCOUNT_ID,
   },
-  mediaType: 'IMAGE',
+  mediaType: env.INSTAGRAM_PUBLICATION_MEDIA_TYPE,
   mediaUrls: [asset.publicUrl],
   caption,
   correlationId: env.INSTAGRAM_PUBLICATION_CORRELATION_ID,
