@@ -45,7 +45,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   });
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
-    metaAdsReadsEnabled: config.INSTAGRAM_READ_ENABLED,
+    metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
   });
 
   server.registerTool(
@@ -125,13 +125,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     },
   );
 
-  if (
-    config.INSTAGRAM_READ_ENABLED &&
-    config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
-    config.META_ACCESS_TOKEN_ENV_KEY
-  ) {
-    const secrets = new EnvironmentSecretResolver(env);
-    const client = new MetaApiClient(
+  const secrets = new EnvironmentSecretResolver(env);
+  const createMetaClient = () => {
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
+    return new MetaApiClient(
       {
         graphBaseUrl: config.META_GRAPH_BASE_URL,
         apiVersion: config.META_GRAPH_API_VERSION,
@@ -139,9 +136,19 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       secrets,
       { provider: 'env', key: config.META_ACCESS_TOKEN_ENV_KEY },
     );
-    const provider = new InstagramHistoryProvider(client, config.INSTAGRAM_BUSINESS_ACCOUNT_ID);
+  };
+
+  if (
+    config.INSTAGRAM_READ_ENABLED &&
+    config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
+    config.META_ACCESS_TOKEN_ENV_KEY
+  ) {
+    const provider = new InstagramHistoryProvider(createMetaClient(), config.INSTAGRAM_BUSINESS_ACCOUNT_ID);
     registerInstagramHistoryTools(server, provider);
-    registerMetaAdsReadTools(server, new MetaAdsReadProvider(client));
+  }
+
+  if (config.META_ADS_READ_ENABLED && config.META_ACCESS_TOKEN_ENV_KEY) {
+    registerMetaAdsReadTools(server, new MetaAdsReadProvider(createMetaClient()));
   }
 
   return server;
