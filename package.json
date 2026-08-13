@@ -16,6 +16,7 @@
     "dev:instagram-controlled-publication": "tsx src/instagram-controlled-publication.ts",
     "dev:instagram-publication-approval-manifest": "tsx src/instagram-publication-approval-manifest.ts",
     "dev:instagram-publication-asset-staging": "tsx src/instagram-publication-asset-staging.ts",
+    "dev:marketing-autopilot-image-edit": "tsx src/marketing-autopilot-image-edit.ts",
     "start": "node dist/src/index.js",
     "start:http": "node dist/src/http.js",
     "start:instagram-publication-worker": "node dist/src/instagram-publication-worker.js",
@@ -23,6 +24,7 @@
     "start:instagram-controlled-publication": "node dist/src/instagram-controlled-publication.js",
     "start:instagram-publication-approval-manifest": "node dist/src/instagram-publication-approval-manifest.js",
     "start:instagram-publication-asset-staging": "node dist/src/instagram-publication-asset-staging.js",
+    "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -31,9 +33,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs",
-    "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pn`m build",
-    "dev:marketing-autopilot-image-edit": "tsx src/marketing-autopilot-image-edit.ts",
-    "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js"
+    "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
