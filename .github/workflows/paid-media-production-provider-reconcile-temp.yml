@@ -21,7 +21,7 @@ jobs:
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: id_token
           id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
-      - name: Read official account campaigns and completed-week insights through production MCP
+      - name: Audit recent Meta Ads delivery read-only through production MCP
         env:
           TOKEN: ${{ steps.auth.outputs.id_token }}
           URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
@@ -36,18 +36,19 @@ jobs:
               -H 'Content-Type: application/json' \
               -H 'Accept: application/json, text/event-stream' \
               --data-binary @/tmp/request.json
+            echo "===== $name / $arguments ====="
             cat "$output"
+            echo
           }
 
           mcp_call 1 'meta_ads.accounts.list' '{}' /tmp/accounts.txt
-          grep -q '311793958882290' /tmp/accounts.txt
-          grep -q 'BRL' /tmp/accounts.txt
 
-          mcp_call 2 'meta_ads.campaigns.list' '{"adAccountId":"311793958882290","currency":"BRL"}' /tmp/campaigns.txt
-          grep -q 'objective' /tmp/campaigns.txt
-          grep -q 'effective_status' /tmp/campaigns.txt
+          id=10
+          for account in 311793958882290 394512749760530 2036212826847237 1737287297102678; do
+            mcp_call "$id" 'meta_ads.insights.get' "{\"adAccountId\":\"$account\",\"currency\":\"BRL\",\"level\":\"account\",\"fields\":[\"account_id\",\"account_name\",\"impressions\",\"reach\",\"clicks\",\"spend\",\"cpc\",\"ctr\",\"actions\"],\"since\":\"2026-08-01\",\"until\":\"2026-08-12\"}" "/tmp/account-$account.txt"
+            id=$((id+1))
+          done
 
-          mcp_call 3 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-08-06","until":"2026-08-12"}' /tmp/insights.txt
-          grep -q 'data' /tmp/insights.txt
+          mcp_call 20 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-07-01","until":"2026-08-12"}' /tmp/official-extended.txt
 
-          echo 'Provider reconciliation READ completed through production MCP.'
+          echo 'Read-only recent-delivery audit completed through production MCP.'
