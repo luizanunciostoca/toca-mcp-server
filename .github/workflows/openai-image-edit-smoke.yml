@@ -21,6 +21,7 @@ jobs:
     env:
       PROJECT_ID: toca-mcp-production
       OPENAI_API_KEY_SECRET_ID: toca-openai-api-key
+      OPENAI_API_KEY_FROM_GITHUB: ${{ secrets.OPENAI_API_KEY }}
       SOURCE_ASSET_ID: SUN-0087
       SOURCE_DRIVE_FILE_ID: 1j6cUBD82Hw8an3Bu9Cx19WesaUF4Gr7b
     steps:
@@ -49,10 +50,20 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Load OpenAI key from Secret Manager
+      - name: Resolve OpenAI key
         shell: bash
         run: |
           set -euo pipefail
+
+          if [ -n "${OPENAI_API_KEY_FROM_GITHUB:-}" ]; then
+            echo "OPENAI_API_KEY_SOURCE=GITHUB_ACTIONS_SECRET"
+            echo "::add-mask::$OPENAI_API_KEY_FROM_GITHUB"
+            echo "OPENAI_API_KEY=$OPENAI_API_KEY_FROM_GITHUB" >> "$GITHUB_ENV"
+            echo "OPENAI_API_KEY_ENV_KEY=OPENAI_API_KEY" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "OPENAI_API_KEY_SOURCE=GCP_SECRET_MANAGER_FALLBACK"
           set +e
           DESCRIBE_ERROR="$(gcloud secrets describe "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" --format='value(name)' 2>&1 >/dev/null)"
           DESCRIBE_STATUS=$?
