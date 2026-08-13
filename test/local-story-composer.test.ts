@@ -54,7 +54,7 @@ describe('LocalStoryComposer', () => {
     });
   });
 
-  it('renders message, CTA and brand before persistence', async () => {
+  it('renders wrapped message, CTA and brand inside the Story safe area', async () => {
     const runner = vi.fn(async (_command: string, args: readonly string[]) => {
       const outputPath = args.at(-1);
       if (!outputPath) throw new Error('output path missing');
@@ -79,11 +79,16 @@ describe('LocalStoryComposer', () => {
       expect.arrayContaining([
         '-draw',
         'rectangle 0,1250 1080,1920',
+        '-size',
+        '936x250',
+        'caption:A atmosfera da Toca começa antes do pôr do sol.',
+        '-geometry',
+        '+72+250',
+        '-composite',
+        '936x90',
+        'caption:Venha viver esse momento.',
+        '+72+90',
         '-annotate',
-        '+72+300',
-        'A atmosfera da Toca começa antes do pôr do sol.',
-        '+72+145',
-        'Venha viver esse momento.',
         '+72+72',
         'TOCA DO MORCEGO',
       ]),
