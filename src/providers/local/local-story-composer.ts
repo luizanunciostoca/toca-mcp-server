@@ -193,18 +193,10 @@ function validateInput(input: LocalStoryComposeInput): void {
     );
   }
   if (input.templateId !== 'PHOTO_ONLY' && !input.message?.trim()) {
-    throw new ExecutionError(
-      'QUALITY_GATE_FAILED',
-      'LOCAL_STORY_COMPOSER_MESSAGE_REQUIRED',
-      false,
-    );
+    throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_MESSAGE_REQUIRED', false);
   }
   if ((input.message?.trim().length ?? 0) > 90 || (input.cta?.trim().length ?? 0) > 60) {
-    throw new ExecutionError(
-      'QUALITY_GATE_FAILED',
-      'LOCAL_STORY_COMPOSER_TEXT_TOO_LONG',
-      false,
-    );
+    throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_TEXT_TOO_LONG', false);
   }
 }
 
