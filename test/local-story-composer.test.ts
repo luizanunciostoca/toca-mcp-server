@@ -39,14 +39,7 @@ describe('LocalStoryComposer', () => {
 
     const [, args] = runner.mock.calls[0] ?? [];
     expect(args).toEqual(
-      expect.arrayContaining([
-        '-resize',
-        '1080x1920^',
-        '-extent',
-        '1080x1920',
-        '-quality',
-        '95',
-      ]),
+      expect.arrayContaining(['-resize', '1080x1920^', '-extent', '1080x1920', '-quality', '95']),
     );
     expect(args).not.toContain('-annotate');
     expect(result).toMatchObject({
@@ -108,9 +101,9 @@ describe('LocalStoryComposer', () => {
       contentType: 'image/jpeg' as const,
     };
 
-    await expect(
-      composer.compose({ ...base, templateId: 'EDITORIAL_TEXT' }),
-    ).rejects.toMatchObject({ code: 'QUALITY_GATE_FAILED' });
+    await expect(composer.compose({ ...base, templateId: 'EDITORIAL_TEXT' })).rejects.toMatchObject(
+      { code: 'QUALITY_GATE_FAILED' },
+    );
 
     await expect(
       composer.compose({
