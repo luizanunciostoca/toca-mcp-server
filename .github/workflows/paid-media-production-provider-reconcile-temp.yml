@@ -21,7 +21,7 @@ jobs:
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
           token_format: id_token
           id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
-      - name: Audit 2026 Meta Ads delivery history read-only through production MCP
+      - name: Locate latest official Meta Ads delivery month read-only through production MCP
         env:
           TOKEN: ${{ steps.auth.outputs.id_token }}
           URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
@@ -29,26 +29,24 @@ jobs:
         run: |
           set -euo pipefail
           mcp_call() {
-            local id="$1" name="$2" arguments="$3" output="$4"
-            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$id" "$name" "$arguments" > /tmp/request.json
-            curl -fsS -o "$output" -X POST "$URL" \
+            local id="$1" since="$2" until="$3"
+            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"meta_ads.insights.get","arguments":{"adAccountId":"311793958882290","currency":"BRL","level":"account","fields":["account_id","account_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"%s","until":"%s"}}}' "$id" "$since" "$until" > /tmp/request.json
+            echo "===== PERIOD $since -> $until ====="
+            curl -fsS -X POST "$URL" \
               -H "Authorization: Bearer $TOKEN" \
               -H 'Content-Type: application/json' \
               -H 'Accept: application/json, text/event-stream' \
               --data-binary @/tmp/request.json
-            echo "===== $name / $arguments ====="
-            cat "$output"
             echo
           }
 
-          mcp_call 1 'meta_ads.accounts.list' '{}' /tmp/accounts.txt
+          mcp_call 10 2026-01-01 2026-01-31
+          mcp_call 11 2026-02-01 2026-02-28
+          mcp_call 12 2026-03-01 2026-03-31
+          mcp_call 13 2026-04-01 2026-04-30
+          mcp_call 14 2026-05-01 2026-05-31
+          mcp_call 15 2026-06-01 2026-06-30
+          mcp_call 16 2026-07-01 2026-07-31
+          mcp_call 17 2026-08-01 2026-08-12
 
-          id=10
-          for account in 311793958882290 394512749760530 2036212826847237 1737287297102678; do
-            mcp_call "$id" 'meta_ads.insights.get' "{\"adAccountId\":\"$account\",\"currency\":\"BRL\",\"level\":\"account\",\"fields\":[\"account_id\",\"account_name\",\"impressions\",\"reach\",\"clicks\",\"spend\",\"cpc\",\"ctr\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-08-12\"}" "/tmp/account-$account.txt"
-            id=$((id+1))
-          done
-
-          mcp_call 20 'meta_ads.insights.get' '{"adAccountId":"311793958882290","currency":"BRL","level":"campaign","fields":["campaign_id","campaign_name","impressions","reach","clicks","spend","cpc","ctr","actions"],"since":"2026-01-01","until":"2026-08-12"}' /tmp/official-ytd.txt
-
-          echo 'Read-only 2026 delivery-history audit completed through production MCP.'
+          echo 'Read-only monthly delivery localization completed through production MCP.'
