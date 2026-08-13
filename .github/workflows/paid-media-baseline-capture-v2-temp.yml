@@ -1,0 +1,50 @@
+name: Paid Media Baseline Capture V2 TEMP
+on:
+  push:
+    branches: [ops/paid-media-baseline-capture-20260813]
+permissions:
+  contents: read
+  id-token: write
+env:
+  URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  ACCOUNT_ID: '311793958882290'
+  CURRENCY: BRL
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: runtime_auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
+      - name: Capture official account READ evidence
+        shell: bash
+        env:
+          TOKEN: ${{ steps.runtime_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          call_tool() {
+            local id="$1" name="$2" args="$3" out="$4"
+            printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$id" "$name" "$args" > /tmp/request.json
+            curl -fsS -X POST "$URL" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data-binary @/tmp/request.json > "$out"
+          }
+          mkdir -p baseline
+          ARGS="{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\"}"
+          call_tool 1 meta_ads.campaigns.list "$ARGS" baseline/campaigns.json
+          call_tool 2 meta_ads.adsets.list "$ARGS" baseline/adsets.json
+          call_tool 3 meta_ads.ads.list "$ARGS" baseline/ads.json
+          call_tool 4 meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"campaign\",\"fields\":[\"campaign_id\",\"campaign_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/campaign-insights.json
+          call_tool 5 meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"adset\",\"fields\":[\"campaign_id\",\"campaign_name\",\"adset_id\",\"adset_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/adset-insights.json
+          call_tool 6 meta_ads.insights.get "{\"adAccountId\":\"$ACCOUNT_ID\",\"currency\":\"$CURRENCY\",\"level\":\"ad\",\"fields\":[\"campaign_id\",\"campaign_name\",\"adset_id\",\"adset_name\",\"ad_id\",\"ad_name\",\"spend\",\"impressions\",\"reach\",\"clicks\",\"ctr\",\"cpc\",\"cpm\",\"actions\"],\"since\":\"2026-01-01\",\"until\":\"2026-02-28\"}" baseline/ad-insights.json
+          for f in baseline/*.json; do grep -q 'data' "$f"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paid-media-baseline-readonly-v2
+          path: baseline/
+          retention-days: 7
