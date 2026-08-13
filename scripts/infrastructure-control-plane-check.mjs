@@ -42,6 +42,17 @@ const workflowRequirements = [
   'roles/storage.objectViewer',
   'allUsers',
   'allAuthenticatedUsers',
+  'reconcile-toca-managed-instagram-heartbeat',
+  'worker_image',
+  'server@sha256:',
+  'TOCA_MANAGED_JOB_NAME: toca-managed-instagram-publication-worker',
+  'TOCA_MANAGED_SCHEDULER_NAME: toca-managed-instagram-publication-heartbeat',
+  'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=false',
+  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false',
+  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false',
+  'META_ENABLED=false',
+  'roles/run.invoker',
+  'gcloud scheduler jobs pause',
 ];
 
 for (const marker of workflowRequirements) {
@@ -59,6 +70,9 @@ const forbiddenWorkflowMarkers = [
   'storage.buckets.delete',
   '--member="allUsers"',
   '--member="allAuthenticatedUsers"',
+  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
+  'gcloud scheduler jobs resume',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
@@ -108,6 +122,22 @@ if (
   process.exit(1);
 }
 
+const heartbeat = policy.allowedOperations?.['reconcile-toca-managed-instagram-heartbeat'];
+if (
+  heartbeat?.resourceType !== 'cloud-run-job+cloud-scheduler-job' ||
+  heartbeat?.cloudRunJobName !== 'toca-managed-instagram-publication-worker' ||
+  heartbeat?.schedulerJobName !== 'toca-managed-instagram-publication-heartbeat' ||
+  heartbeat?.schedule !== '*/5 * * * *' ||
+  heartbeat?.timeZone !== 'America/Bahia' ||
+  heartbeat?.runtimeServiceAccount !== runtime ||
+  heartbeat?.executorEnabledByDefault !== false ||
+  heartbeat?.schedulerPausedByDefault !== true ||
+  heartbeat?.contentPayloadAllowed !== false
+) {
+  console.error('TOCA-managed Instagram heartbeat is outside the approved envelope');
+  process.exit(1);
+}
+
 const forbiddenPolicyFlags = [
   'projectOwner',
   'projectEditor',
@@ -116,6 +146,7 @@ const forbiddenPolicyFlags = [
   'arbitraryGcloud',
   'runtimePrivilegeEscalation',
   'publicBucketIam',
+  'perContentSchedulerJobs',
 ];
 
 for (const key of forbiddenPolicyFlags) {
