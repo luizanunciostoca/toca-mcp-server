@@ -10,8 +10,7 @@ if (!config.INSTAGRAM_PUBLICATION_WRITES_ENABLED) {
   console.info('instagram.controlled-publication.disabled');
 } else {
   if (!config.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
-  const rawRequest = process.env.INSTAGRAM_PUBLICATION_REQUEST_JSON;
-  if (!rawRequest?.trim()) throw new Error('INSTAGRAM_PUBLICATION_REQUEST_JSON_REQUIRED');
+  const rawRequest = readPublicationRequest(process.env);
 
   let payload: unknown;
   try {
@@ -31,4 +30,17 @@ if (!config.INSTAGRAM_PUBLICATION_WRITES_ENABLED) {
   } finally {
     await pool.end();
   }
+}
+
+function readPublicationRequest(env: NodeJS.ProcessEnv): string {
+  const base64 = env.INSTAGRAM_PUBLICATION_REQUEST_BASE64?.trim();
+  if (base64) {
+    const decoded = Buffer.from(base64, 'base64').toString('utf8');
+    if (!decoded.trim()) throw new Error('INSTAGRAM_PUBLICATION_REQUEST_JSON_REQUIRED');
+    return decoded;
+  }
+
+  const json = env.INSTAGRAM_PUBLICATION_REQUEST_JSON;
+  if (!json?.trim()) throw new Error('INSTAGRAM_PUBLICATION_REQUEST_JSON_REQUIRED');
+  return json;
 }

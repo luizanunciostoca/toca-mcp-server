@@ -33,12 +33,16 @@ export function buildInstagramContainerPlan(
           ...optionalCaption(request.caption),
         },
       };
-    case 'STORY':
+    case 'STORY': {
       if (request.mediaUrls.length !== 1) throw new Error('STORY requires exactly one media URL');
+      const url = request.mediaUrls[0]!;
       return {
         path,
-        body: { media_type: 'STORIES', video_url: request.mediaUrls[0]! },
+        body: isImageMediaUrl(url)
+          ? { media_type: 'STORIES', image_url: url }
+          : { media_type: 'STORIES', video_url: url },
       };
+    }
     case 'CAROUSEL': {
       if (request.mediaUrls.length < 2)
         throw new Error('CAROUSEL requires at least two media URLs');
@@ -56,6 +60,15 @@ export function buildInstagramContainerPlan(
         children,
       };
     }
+  }
+}
+
+function isImageMediaUrl(value: string): boolean {
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    return /\.(?:jpe?g|png|webp)$/.test(pathname);
+  } catch {
+    return false;
   }
 }
 

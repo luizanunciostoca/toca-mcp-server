@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "commandId": "bootstrap-noop",
+  "action": "NOOP",
+  "issuedAt": "2026-08-13T00:00:00-03:00",
+  "contentItemId": "",
+  "scheduledAt": "",
+  "timezone": "America/Bahia",
+  "operation": "SUNSET",
+  "channel": "INSTAGRAM",
+  "format": "FEED_IMAGE",
+  "assetId": "",
+  "driveFileId": "",
+  "contentType": "image/jpeg",
+  "instagramAccountId": "17841402033495654",
+  "caption": "",
+  "correlationId": "",
+  "idempotencyKey": "",
+  "approvalMode": "BLOCKED",
+  "approvalStatus": "BLOCKED_POLICY",
+  "approvedRequestSha256": ""
+}
