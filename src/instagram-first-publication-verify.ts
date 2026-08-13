@@ -8,7 +8,9 @@ const envSchema = z.object({
   INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().min(1),
   INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY: z.string().min(1),
   INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID: z.string().min(1),
-  INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256: z.string().regex(/^[a-f0-9]{64}$/),
+  INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/),
 });
 
 const env = envSchema.parse(process.env);
@@ -44,7 +46,9 @@ try {
   if (!row.external_resource_id) throw new Error('FIRST_PUBLICATION_MEDIA_ID_MISSING');
 
   const metaClient = createMetaPublicationApiClient(config);
-  const media = await metaClient.get(row.external_resource_id, { fields: 'id,media_type,permalink' });
+  const media = await metaClient.get(row.external_resource_id, {
+    fields: 'id,media_type,permalink',
+  });
   if (
     typeof media !== 'object' ||
     media === null ||
