@@ -1,30 +1,50 @@
-# Marketing Autopilot source-image binding
+# Marketing Autopilot source-image enhancement
 
-Status: implementation candidate. This bridge exists to prevent the TOCA Marketing Autopilot from treating a prompt-only image generation as if it were an edit of the selected Drive photograph.
+Status: local-first implementation candidate. This pipeline exists to prevent the TOCA Marketing Autopilot from treating prompt-only generation as if it were an enhancement of the selected Drive photograph, while keeping the standard production path independent from Adobe and paid image-generation APIs.
 
-## Boundary
+## Canonical hierarchy
 
-The bridge accepts bytes that were already resolved from the canonical Drive asset, sends those exact bytes as the multipart `image` field to the OpenAI Image Edit endpoint, and returns edited JPEG bytes plus SHA-256 evidence for source and output. It does not publish, schedule, approve, or mutate Instagram state.
+The standard path is deterministic and local:
 
-The source is considered technically bound only when all of these are true:
+`Drive source bytes -> LocalPhotoEnhancer -> Fidelity/Quality Gate -> persisted creative`
+
+The OpenAI Image Edit provider remains available only as an explicit optional escalation with `--provider openai`. It is not an automatic fallback, is not required for standard treatment, and must not block the local path because of missing credentials, billing, quota, or provider availability.
+
+## Source binding
+
+The source is considered technically bound only when:
 
 - `sourceAssetId` and `sourceDriveFileId` are present;
+- the exact canonical Drive bytes were downloaded successfully;
 - source bytes are non-empty and use an allowed image MIME type;
-- the request is sent to `/v1/images/edits` with an actual multipart `image` part;
-- `input_fidelity=high`;
-- an edited image payload is returned successfully.
+- the enhancer processes those bytes as the input image rather than creating a replacement scene;
+- the output is a valid, non-empty image with independent SHA-256 evidence.
 
-This proves transport/binding, not visual fidelity. The TOCA OS Fidelity Gate and Brand/Quality Gate must still compare source and output before the asset can advance to REVIEW or APPROVED.
+Local evidence uses `sourceImageBound=true`, `editMode=ENHANCE_EXISTING_IMAGE`, and `editorProvider=LOCAL_IMAGEMAGICK`.
 
-## Canonical treatment
+This proves transport and transformation lineage, not visual approval. The TOCA OS Fidelity Gate and Brand/Quality Gate must still inspect source versus output before the asset can advance to REVIEW or APPROVED.
 
-The provider embeds the TOCA canonical treatment prompt verbatim. The execution requests `quality=high`, `size=auto`, `output_format=jpeg` and maximum JPEG compression quality. References to 8K or ProRes in the creative prompt remain intent only; the runtime must never claim those technical properties unless the produced file actually has them.
+## Deterministic local treatment
+
+`LocalPhotoEnhancer` currently performs a conservative source-faithful pipeline with ImageMagick:
+
+- auto orientation;
+- sRGB normalization;
+- Lanczos upscale to 200% of the original width and height;
+- conservative unsharp sharpening;
+- JPEG output at quality 95.
+
+It does not crop, recompose, replace people or objects, invent micro-details, reconstruct the scene, add text, or perform generative synthesis. The natural-language TOCA treatment prompt remains the creative quality target and policy boundary; the local pipeline implements only the deterministic enhancement operations that are compatible with strict source preservation.
+
+Statements such as “8K” or “ProRes” in the creative prompt are quality intent only. The runtime must never record those as technical file properties unless the produced file actually has them.
+
+## Optional OpenAI escalation
+
+The explicit OpenAI route remains available for cases where a future policy authorizes semantic image editing and the local output is insufficient. It is invoked only with `--provider openai`, requires `OPENAI_API_KEY_ENV_KEY`, and sends the real image bytes to the image-edit endpoint. There is no automatic provider switch from local to OpenAI.
 
 ## Execution
 
-The CLI is `src/marketing-autopilot-image-edit.ts`. It requires source path, output path, source asset ID, source Drive file ID and source MIME type. The OpenAI API key is resolved indirectly from the environment variable named by `OPENAI_API_KEY_ENV_KEY`; no key may be committed to the repository.
-
-Example shape:
+The CLI is `src/marketing-autopilot-image-edit.ts`. It requires source path, output path, source asset ID, source Drive file ID and source MIME type. Provider defaults to `local`.
 
 ```text
 pnpm dev:marketing-autopilot-image-edit -- \
@@ -32,11 +52,16 @@ pnpm dev:marketing-autopilot-image-edit -- \
   --output .autopilot/treated.jpg \
   --source-asset-id SUN-0087 \
   --source-drive-file-id <drive-file-id> \
-  --content-type image/jpeg
+  --content-type image/jpeg \
+  --provider local
 ```
 
-The CLI prints machine-readable evidence including source/output SHA-256, `sourceImageBound=true`, `editMode=EDIT_EXISTING_IMAGE`, provider, requested fidelity/quality and output byte size.
+The local CLI prints machine-readable evidence including source/output SHA-256, `sourceImageBound=true`, `editMode=ENHANCE_EXISTING_IMAGE`, pipeline version, requested scale and output byte size.
+
+## Runtime dependency
+
+The production container includes ImageMagick. Missing local image runtime is classified as `CAPABILITY_UNAVAILABLE` and fails closed rather than switching to a generative provider.
 
 ## Fail-closed behavior
 
-`SOURCE_IMAGE_FETCH_BLOCK`, `SOURCE_IMAGE_BINDING_FAILURE`, `NATIVE_IMAGE_EDIT_BINDING_FAILED`, `GENERATION_CONTEXT_DRIFT`, `FIDELITY_GATE_FAILED`, `OUTPUT_TECH_SPEC_MISMATCH`, and `QUALITY_GATE_FAILED` are reserved treatment errors. A missing source, malformed response, or provider failure must never be converted into a generated replacement image. No PREPARE or PUBLISH command is eligible until the treated asset passes the canonical gates and is written back to TOCA OS.
+`SOURCE_IMAGE_FETCH_BLOCK`, `SOURCE_IMAGE_BINDING_FAILURE`, `NATIVE_IMAGE_EDIT_BINDING_FAILED`, `GENERATION_CONTEXT_DRIFT`, `FIDELITY_GATE_FAILED`, `OUTPUT_TECH_SPEC_MISMATCH`, and `QUALITY_GATE_FAILED` remain reserved treatment errors. A missing source, malformed output or provider failure must never be converted into a generated replacement image. No PREPARE or PUBLISH command is eligible until the treated asset passes the canonical gates and is written back to TOCA OS.
