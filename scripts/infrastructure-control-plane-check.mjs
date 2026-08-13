@@ -38,6 +38,8 @@ const workflowRequirements = [
   'reconcile-publication-assets-bucket',
   '.publicRead == false',
   '.deliveryMode == "signed-url"',
+  'roles/storage.objectCreator',
+  'roles/storage.objectViewer',
   'allUsers',
   'allAuthenticatedUsers',
 ];
@@ -89,11 +91,15 @@ if (
 
 const operation = 'reconcile-publication-assets-bucket';
 const publicationBucket = policy.allowedOperations?.[operation];
+const runtimeRoles = publicationBucket?.runtimeRoles;
 
 if (
   publicationBucket?.resourceName !== 'toca-mcp-publication-assets' ||
   publicationBucket?.lifecycleDeleteAgeDays !== 7 ||
-  publicationBucket?.runtimeRole !== 'roles/storage.objectCreator' ||
+  !Array.isArray(runtimeRoles) ||
+  runtimeRoles.length !== 2 ||
+  !runtimeRoles.includes('roles/storage.objectCreator') ||
+  !runtimeRoles.includes('roles/storage.objectViewer') ||
   publicationBucket?.publicRead !== false ||
   publicationBucket?.deliveryMode !== 'signed-url' ||
   publicationBucket?.uniformBucketLevelAccess !== true
