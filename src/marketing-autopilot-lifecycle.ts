@@ -71,10 +71,7 @@ export function assertExternalWriteCapability(status: CapabilityStatus): void {
   }
 }
 
-export function buildProductionIdempotencyKey(
-  contentItemId: string,
-  version: string,
-): string {
+export function buildProductionIdempotencyKey(contentItemId: string, version: string): string {
   const item = contentItemId.trim();
   const normalizedVersion = version.trim().toUpperCase();
   if (!item || !normalizedVersion) {
@@ -120,10 +117,7 @@ export function deriveCompleteDayCoverage(
 
   let completeDays = 0;
   for (const dayItems of byDate.values()) {
-    if (
-      dayItems.length > 0 &&
-      dayItems.every((item) => hasReached(item.status, threshold))
-    ) {
+    if (dayItems.length > 0 && dayItems.every((item) => hasReached(item.status, threshold))) {
       completeDays += 1;
     }
   }
@@ -138,10 +132,7 @@ export interface Reservation {
   expiresAt: string;
 }
 
-export function isReservationExpired(
-  reservation: Reservation,
-  now: string,
-): boolean {
+export function isReservationExpired(reservation: Reservation, now: string): boolean {
   const expiry = Date.parse(reservation.expiresAt);
   const current = Date.parse(now);
   if (!Number.isFinite(expiry) || !Number.isFinite(current)) {
