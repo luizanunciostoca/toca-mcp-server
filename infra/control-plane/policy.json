@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -10,7 +10,10 @@
       "resourceName": "toca-mcp-publication-assets",
       "publicRead": false,
       "deliveryMode": "signed-url",
-      "runtimeRole": "roles/storage.objectCreator",
+      "runtimeRoles": [
+        "roles/storage.objectCreator",
+        "roles/storage.objectViewer"
+      ],
       "lifecycleDeleteAgeDays": 7,
       "uniformBucketLevelAccess": true
     }
