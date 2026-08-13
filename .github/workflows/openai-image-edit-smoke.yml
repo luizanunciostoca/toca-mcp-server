@@ -1,0 +1,126 @@
+name: OpenAI Image Edit Smoke
+
+on:
+  push:
+    branches:
+      - fix/marketing-autopilot-source-image-binding
+    paths:
+      - '.github/workflows/openai-image-edit-smoke.yml'
+      - 'src/providers/openai/openai-image-edit-provider.ts'
+      - 'src/marketing-autopilot-image-edit.ts'
+      - 'test/openai-image-edit-provider.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: toca-mcp-production
+      OPENAI_API_KEY_SECRET_ID: toca-openai-api-key
+      SOURCE_ASSET_ID: SUN-0087
+      SOURCE_DRIVE_FILE_ID: 1j6cUBD82Hw8an3Bu9Cx19WesaUF4Gr7b
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Load OpenAI key from Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gcloud secrets describe "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "OPENAI_API_KEY_SECRET_MISSING:$OPENAI_API_KEY_SECRET_ID" >&2
+            exit 42
+          fi
+          OPENAI_API_KEY="$(gcloud secrets versions access latest --secret "$OPENAI_API_KEY_SECRET_ID" --project "$PROJECT_ID")"
+          test -n "$OPENAI_API_KEY"
+          echo "::add-mask::$OPENAI_API_KEY"
+          echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
+          echo "OPENAI_API_KEY_ENV_KEY=OPENAI_API_KEY" >> "$GITHUB_ENV"
+
+      - name: Download exact source image from Drive
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .image-edit-smoke
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media" \
+            --output .image-edit-smoke/source.jpg
+          test -s .image-edit-smoke/source.jpg
+          test "$(file --brief --mime-type .image-edit-smoke/source.jpg)" = "image/jpeg"
+          sha256sum .image-edit-smoke/source.jpg | tee .image-edit-smoke/source.sha256
+
+      - name: Execute explicit image edit
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm dev:marketing-autopilot-image-edit \
+            --source .image-edit-smoke/source.jpg \
+            --output .image-edit-smoke/output.jpg \
+            --source-asset-id "$SOURCE_ASSET_ID" \
+            --source-drive-file-id "$SOURCE_DRIVE_FILE_ID" \
+            --content-type image/jpeg \
+            | tee .image-edit-smoke/result.json
+
+      - name: Validate binding evidence and output
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg asset "$SOURCE_ASSET_ID" \
+            --arg drive "$SOURCE_DRIVE_FILE_ID" \
+            '.sourceAssetId == $asset and
+             .sourceDriveFileId == $drive and
+             .sourceImageBound == true and
+             .editMode == "EDIT_EXISTING_IMAGE" and
+             .editorProvider == "OPENAI_IMAGE_EDIT" and
+             .inputFidelity == "high" and
+             .requestedQuality == "high" and
+             .requestedOutputFormat == "jpeg" and
+             .outputContentType == "image/jpeg" and
+             .outputSizeBytes > 0 and
+             .sourceSha256 != .outputSha256' \
+            .image-edit-smoke/result.json >/dev/null
+          test -s .image-edit-smoke/output.jpg
+          test "$(file --brief --mime-type .image-edit-smoke/output.jpg)" = "image/jpeg"
+          sha256sum .image-edit-smoke/output.jpg | tee .image-edit-smoke/output.sha256
+
+      - name: Upload smoke evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openai-image-edit-smoke-evidence
+          path: |
+            .image-edit-smoke/result.json
+            .image-edit-smoke/source.sha256
+            .image-edit-smoke/output.sha256
+            .image-edit-smoke/output.jpg
+          retention-days: 7
