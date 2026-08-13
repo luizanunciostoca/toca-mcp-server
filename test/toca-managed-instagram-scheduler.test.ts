@@ -51,15 +51,13 @@ describe('TOCA-managed Instagram scheduler', () => {
     expect(job.runAt).toBe('2026-08-14T09:00:00-03:00');
   });
 
-  it('rejects a changed schedule when the approved descriptor hash is stale', async () => {
+  it('rejects a changed schedule when the approved descriptor hash is stale', () => {
     const scheduler = new InMemoryScheduler();
     const managed = new TocaManagedInstagramScheduler(scheduler);
     const approved = payload();
     const changed = { ...approved, scheduledFor: '2026-08-14T10:00:00-03:00' };
 
-    await expect(managed.schedule(changed)).rejects.toThrow(
-      'TOCA_MANAGED_INSTAGRAM_APPROVAL_MISMATCH',
-    );
+    expect(() => managed.schedule(changed)).toThrow('TOCA_MANAGED_INSTAGRAM_APPROVAL_MISMATCH');
   });
 
   it('reschedule cancels the old immutable job and creates a new one', async () => {
