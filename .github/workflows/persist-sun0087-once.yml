@@ -1,0 +1,115 @@
+name: Persist SUN-0087 Creative Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/persist-sun0087-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SOURCE_ASSET_ID: SUN-0087
+  SOURCE_DRIVE_FILE_ID: 1j6cUBD82Hw8an3Bu9Cx19WesaUF4Gr7b
+  DESTINATION_FOLDER_ID: 1ypXOYJpPA41e6THr1x4tPadd13tBBbk4
+  DESTINATION_NAME: MKT-20260813-SUNSET-FEED-0900__SUN-0087__LOCAL_ENHANCED_V1.jpg
+
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Install local image runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends imagemagick
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+
+      - name: Download canonical source
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .creative-once
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media&supportsAllDrives=true" \
+            --output .creative-once/source.jpg
+          test -s .creative-once/source.jpg
+
+      - name: Enhance exact source locally
+        run: |
+          set -euo pipefail
+          pnpm dev:marketing-autopilot-image-edit \
+            --source .creative-once/source.jpg \
+            --output .creative-once/output.jpg \
+            --source-asset-id "$SOURCE_ASSET_ID" \
+            --source-drive-file-id "$SOURCE_DRIVE_FILE_ID" \
+            --content-type image/jpeg \
+            --provider local \
+            | tee .creative-once/command.log
+          tail -n 1 .creative-once/command.log > .creative-once/result.json
+          jq -e '.sourceImageBound == true and .editorProvider == "LOCAL_IMAGEMAGICK"' .creative-once/result.json >/dev/null
+
+      - name: Upload creative to canonical Instagram folder
+        id: upload
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          printf '{"name":"%s","parents":["%s"]}' "$DESTINATION_NAME" "$DESTINATION_FOLDER_ID" > .creative-once/metadata.json
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            --form 'metadata=<.creative-once/metadata.json;type=application/json;charset=UTF-8' \
+            --form 'file=@.creative-once/output.jpg;type=image/jpeg' \
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,size,mimeType' \
+            | tee .creative-once/upload.json
+          jq -e '.id and .mimeType == "image/jpeg"' .creative-once/upload.json >/dev/null
+          echo "creative_drive_file_id=$(jq -r .id .creative-once/upload.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate persisted creative metadata
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          CREATIVE_DRIVE_FILE_ID: ${{ steps.upload.outputs.creative_drive_file_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${CREATIVE_DRIVE_FILE_ID}?supportsAllDrives=true&fields=id,name,mimeType,size,parents,webViewLink" \
+            | tee .creative-once/persisted.json
+          jq -e --arg folder "$DESTINATION_FOLDER_ID" '.mimeType == "image/jpeg" and (.parents | index($folder)) != null and (.size|tonumber) > 0' .creative-once/persisted.json >/dev/null
+
+      - name: Upload execution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sun-0087-canonical-creative-evidence
+          path: |
+            .creative-once/result.json
+            .creative-once/upload.json
+            .creative-once/persisted.json
+          retention-days: 7
