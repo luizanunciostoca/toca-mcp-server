@@ -1,15 +1,6 @@
 name: Local Photo Enhancer Smoke
 
 on:
-  push:
-    branches:
-      - fix/marketing-autopilot-source-image-binding
-    paths:
-      - '.github/workflows/openai-image-edit-smoke.yml'
-      - 'src/providers/local/local-photo-enhancer.ts'
-      - 'src/marketing-autopilot-image-edit.ts'
-      - 'test/local-photo-enhancer.test.ts'
-      - 'Dockerfile'
   workflow_dispatch:
 
 permissions:
