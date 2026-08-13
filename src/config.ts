@@ -89,7 +89,10 @@ const configSchema = z
       });
     }
 
-    if (config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED && !config.INSTAGRAM_PUBLICATION_ASSET_BUCKET) {
+    if (
+      config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED &&
+      !config.INSTAGRAM_PUBLICATION_ASSET_BUCKET
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['INSTAGRAM_PUBLICATION_ASSET_BUCKET'],
