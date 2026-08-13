@@ -2,15 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
-import type { ScheduledJob, Scheduler } from './scheduler-contracts.js';
 import type { JobHandler } from '../worker/worker.js';
+import type { ScheduledJob, Scheduler } from './scheduler-contracts.js';
 
 export const TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB =
   'internal.instagram.publication.toca-managed.execute';
 
 export const tocaManagedApprovalStatusSchema = z.enum(['APPROVED', 'PREAPPROVED_CLASS']);
 
-export const tocaManagedInstagramSchedulePayloadSchema = z.object({
+export const tocaManagedInstagramApprovalDescriptorSchema = z.object({
   schemaVersion: z.literal(1),
   contentItemId: z.string().min(1),
   scheduledFor: z.string().datetime({ offset: true }),
@@ -29,13 +29,20 @@ export const tocaManagedInstagramSchedulePayloadSchema = z.object({
   caption: z.string().optional(),
   correlationId: z.string().min(1),
   publicationIdempotencyKey: z.string().min(1),
-  approval: z.object({
-    mode: z.enum(['EXPLICIT_APPROVAL', 'PREAPPROVED_CLASS']),
-    status: tocaManagedApprovalStatusSchema,
-    approvedDescriptorSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }),
 });
 
+export const tocaManagedInstagramSchedulePayloadSchema =
+  tocaManagedInstagramApprovalDescriptorSchema.extend({
+    approval: z.object({
+      mode: z.enum(['EXPLICIT_APPROVAL', 'PREAPPROVED_CLASS']),
+      status: tocaManagedApprovalStatusSchema,
+      approvedDescriptorSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    }),
+  });
+
+export type TocaManagedInstagramApprovalDescriptor = z.infer<
+  typeof tocaManagedInstagramApprovalDescriptorSchema
+>;
 export type TocaManagedInstagramSchedulePayload = z.infer<
   typeof tocaManagedInstagramSchedulePayloadSchema
 >;
@@ -136,6 +143,12 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
   }
 }
 
+export function parseTocaManagedInstagramApprovalDescriptor(
+  value: unknown,
+): TocaManagedInstagramApprovalDescriptor {
+  return tocaManagedInstagramApprovalDescriptorSchema.parse(value);
+}
+
 export function parseTocaManagedInstagramSchedulePayload(
   value: unknown,
 ): TocaManagedInstagramSchedulePayload {
@@ -143,20 +156,9 @@ export function parseTocaManagedInstagramSchedulePayload(
 }
 
 export function hashTocaManagedInstagramApprovalDescriptor(
-  payload: TocaManagedInstagramSchedulePayload,
+  value: TocaManagedInstagramApprovalDescriptor,
 ): string {
-  const descriptor = {
-    schemaVersion: payload.schemaVersion,
-    contentItemId: payload.contentItemId,
-    scheduledFor: payload.scheduledFor,
-    timezone: payload.timezone,
-    account: payload.account,
-    mediaType: payload.mediaType,
-    asset: payload.asset,
-    caption: payload.caption,
-    correlationId: payload.correlationId,
-    publicationIdempotencyKey: payload.publicationIdempotencyKey,
-  };
+  const descriptor = parseTocaManagedInstagramApprovalDescriptor(value);
   return createHash('sha256').update(stableJson(descriptor), 'utf8').digest('hex');
 }
 
