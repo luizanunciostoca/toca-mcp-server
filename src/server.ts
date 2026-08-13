@@ -127,7 +127,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
 
   const secrets = new EnvironmentSecretResolver(env);
   const createMetaClient = () => {
-    if (!config.META_ACCESS_TOKEN_ENV_KEY) throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+      throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
+    }
     return new MetaApiClient(
       {
         graphBaseUrl: config.META_GRAPH_BASE_URL,
@@ -143,7 +145,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
     config.META_ACCESS_TOKEN_ENV_KEY
   ) {
-    const provider = new InstagramHistoryProvider(createMetaClient(), config.INSTAGRAM_BUSINESS_ACCOUNT_ID);
+    const provider = new InstagramHistoryProvider(
+      createMetaClient(),
+      config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+    );
     registerInstagramHistoryTools(server, provider);
   }
 
