@@ -25,12 +25,7 @@ const annotations = {
 export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsReadProvider): void {
   server.registerTool(
     'meta_ads.accounts.list',
-    {
-      title: 'List Meta Ad Accounts',
-      inputSchema: z.object({}),
-      outputSchema,
-      annotations,
-    },
+    { title: 'List Meta Ad Accounts', inputSchema: z.object({}), outputSchema, annotations },
     async () => response(await provider.listAccounts()),
   );
 
@@ -46,6 +41,18 @@ export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsRea
   );
 
   server.registerTool(
+    'meta_ads.adsets.list',
+    { title: 'List Meta Ads Ad Sets', inputSchema: accountInputSchema, outputSchema, annotations },
+    async (input) => response(await provider.listAdSets(input)),
+  );
+
+  server.registerTool(
+    'meta_ads.ads.list',
+    { title: 'List Meta Ads Ads', inputSchema: accountInputSchema, outputSchema, annotations },
+    async (input) => response(await provider.listAds(input)),
+  );
+
+  server.registerTool(
     'meta_ads.insights.get',
     {
       title: 'Read Meta Ads Insights',
@@ -57,12 +64,7 @@ export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsRea
       response(
         await provider.getInsights(
           { adAccountId: input.adAccountId, currency: input.currency },
-          {
-            level: input.level,
-            fields: input.fields,
-            since: input.since,
-            until: input.until,
-          },
+          { level: input.level, fields: input.fields, since: input.since, until: input.until },
         ),
       ),
   );
