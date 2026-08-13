@@ -1,0 +1,42 @@
+name: Paid Media Production MCP Tools TEMP
+
+on:
+  push:
+    branches:
+      - ops/paid-media-production-runtime-inspect-20260813
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
+      - name: Verify MCP READ tool list
+        env:
+          TOKEN: ${{ steps.auth.outputs.id_token }}
+          URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app/mcp
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -o /tmp/tools.txt -X POST "$URL" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+          cat /tmp/tools.txt
+          grep -q 'system.health' /tmp/tools.txt
+          grep -q 'system.capabilities' /tmp/tools.txt
+          grep -q 'meta_ads.accounts.list' /tmp/tools.txt
+          grep -q 'meta_ads.campaigns.list' /tmp/tools.txt
+          grep -q 'meta_ads.insights.get' /tmp/tools.txt
+          ! grep -Eq 'meta_ads\.(campaigns\.create|campaigns\.update|campaigns\.pause|campaigns\.activate|adsets\.|ads\.|creatives\.|budget|target)' /tmp/tools.txt
