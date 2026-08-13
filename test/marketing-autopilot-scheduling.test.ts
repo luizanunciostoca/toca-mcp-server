@@ -59,7 +59,9 @@ describe('scheduling guards', () => {
   });
 
   it('keeps SHARE_NOW as a separate explicit policy', () => {
-    expect(() => assertSchedulingPolicyAllowsIntent('SHARE_NOW', 'SHARE_NOW')).not.toThrow();
+    expect(() =>
+      assertSchedulingPolicyAllowsIntent('SHARE_NOW', 'SHARE_NOW'),
+    ).not.toThrow();
     expect(() =>
       assertSchedulingPolicyAllowsIntent('SHARE_NOW', 'PUBLISH_AT_WINDOW'),
     ).toThrow('SHARE_NOW_POLICY_DENIED');
