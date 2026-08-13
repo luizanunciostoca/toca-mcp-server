@@ -22,6 +22,7 @@
       "timeZone": "America/Bahia",
       "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
       "executorEnabledByDefault": false,
+      "schedulerPausedByDefault": true,
       "contentPayloadAllowed": false
     }
   },
