@@ -1,0 +1,37 @@
+name: Story Composer Format Artifact
+
+on:
+  push:
+    branches:
+      - fix/autopilot-e2e-hardening
+    paths:
+      - '.github/workflows/story-composer-format-artifact.yml'
+      - 'src/marketing-autopilot-story-compose.ts'
+      - 'src/providers/local/local-story-composer.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format target files
+        run: pnpm exec prettier --write src/marketing-autopilot-story-compose.ts src/providers/local/local-story-composer.ts
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-composer-formatted
+          path: |
+            src/marketing-autopilot-story-compose.ts
+            src/providers/local/local-story-composer.ts
+          retention-days: 1
