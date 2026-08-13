@@ -5,6 +5,10 @@ export type SchedulingState =
   | 'SCHEDULED'
   | 'PUBLISHED';
 
+export type SchedulingPolicy = 'NATIVE_PROVIDER_SCHEDULING_ONLY' | 'SHARE_NOW';
+
+export type PublicationIntent = 'NATIVE_SCHEDULE' | 'PUBLISH_AT_WINDOW' | 'SHARE_NOW';
+
 export interface ProviderScheduleEvidence {
   providerScheduleId: string;
   providerScheduledAt: string;
@@ -28,6 +32,19 @@ export function assertScheduledStateClaim(
   if (state !== 'SCHEDULED') return;
   if (!evidence) throw new Error('PROVIDER_SCHEDULE_EVIDENCE_REQUIRED');
   assertProviderScheduleEvidence(evidence);
+}
+
+export function assertSchedulingPolicyAllowsIntent(
+  policy: SchedulingPolicy,
+  intent: PublicationIntent,
+): void {
+  if (policy === 'NATIVE_PROVIDER_SCHEDULING_ONLY' && intent !== 'NATIVE_SCHEDULE') {
+    throw new Error('NATIVE_PROVIDER_SCHEDULING_ONLY_POLICY_DENIED');
+  }
+
+  if (policy === 'SHARE_NOW' && intent !== 'SHARE_NOW') {
+    throw new Error('SHARE_NOW_POLICY_DENIED');
+  }
 }
 
 export function deriveSchedulingDisposition(input: {
