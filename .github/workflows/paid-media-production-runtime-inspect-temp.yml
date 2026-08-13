@@ -10,74 +10,42 @@ permissions:
   id-token: write
 
 env:
-  PROJECT_ID: toca-mcp-production
-  REGION: southamerica-east1
-  SERVICE: toca-mcp-production
+  SERVICE_URL: https://toca-mcp-production-990081828836.southamerica-east1.run.app
 
 jobs:
   discover:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud and mint Cloud Run identity token
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
           service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-      - uses: google-github-actions/setup-gcloud@v2
+          token_format: id_token
+          id_token_audience: https://toca-mcp-production-990081828836.southamerica-east1.run.app
       - name: Discover production MCP tools read-only
         shell: bash
+        env:
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
         run: |
           set -euo pipefail
-          SERVICE_URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
-          test -n "$SERVICE_URL"
-          ID_TOKEN="$(gcloud auth print-identity-token)"
-
+          test -n "$ID_TOKEN"
           cat >/tmp/initialize.json <<'JSON'
           {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"toca-paid-media-runtime-proof","version":"1.0.0"}}}
           JSON
-
-          curl --fail-with-body --silent --show-error \
-            -D /tmp/init-headers.txt \
-            -o /tmp/init-body.txt \
-            -X POST "$SERVICE_URL/mcp" \
-            -H "Authorization: Bearer $ID_TOKEN" \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json, text/event-stream' \
-            --data-binary @/tmp/initialize.json
-
+          curl --fail-with-body --silent --show-error -D /tmp/init-headers.txt -o /tmp/init-body.txt -X POST "$SERVICE_URL/mcp" -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data-binary @/tmp/initialize.json
           cat /tmp/init-body.txt
           SESSION_ID="$(awk 'BEGIN{IGNORECASE=1} /^mcp-session-id:/ {sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/init-headers.txt)"
           test -n "$SESSION_ID"
-
-          curl --fail-with-body --silent --show-error \
-            -o /tmp/initialized-body.txt \
-            -X POST "$SERVICE_URL/mcp" \
-            -H "Authorization: Bearer $ID_TOKEN" \
-            -H "Mcp-Session-Id: $SESSION_ID" \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json, text/event-stream' \
-            --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-
-          curl --fail-with-body --silent --show-error \
-            -o /tmp/tools-body.txt \
-            -X POST "$SERVICE_URL/mcp" \
-            -H "Authorization: Bearer $ID_TOKEN" \
-            -H "Mcp-Session-Id: $SESSION_ID" \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json, text/event-stream' \
-            --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-
+          curl --fail-with-body --silent --show-error -o /tmp/initialized-body.txt -X POST "$SERVICE_URL/mcp" -H "Authorization: Bearer $ID_TOKEN" -H "Mcp-Session-Id: $SESSION_ID" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+          curl --fail-with-body --silent --show-error -o /tmp/tools-body.txt -X POST "$SERVICE_URL/mcp" -H "Authorization: Bearer $ID_TOKEN" -H "Mcp-Session-Id: $SESSION_ID" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
           cat /tmp/tools-body.txt
           grep -q 'system.health' /tmp/tools-body.txt
           grep -q 'system.capabilities' /tmp/tools-body.txt
           grep -q 'meta_ads.accounts.list' /tmp/tools-body.txt
           grep -q 'meta_ads.campaigns.list' /tmp/tools-body.txt
           grep -q 'meta_ads.insights.get' /tmp/tools-body.txt
-
-          if grep -Eq 'meta_ads\.(campaigns\.create|campaigns\.update|campaigns\.pause|campaigns\.activate|adsets\.|ads\.|creatives\.|budget|target)' /tmp/tools-body.txt; then
-            echo 'Unexpected Meta Ads write capability exposed in production MCP.' >&2
-            exit 1
-          fi
-
-          echo 'Production MCP capability discovery passed: expected Meta Ads READ tools exposed and no known Meta Ads WRITE tools detected.'
+          if grep -Eq 'meta_ads\.(campaigns\.create|campaigns\.update|campaigns\.pause|campaigns\.activate|adsets\.|ads\.|creatives\.|budget|target)' /tmp/tools-body.txt; then exit 1; fi
+          echo 'Production MCP capability discovery passed.'
