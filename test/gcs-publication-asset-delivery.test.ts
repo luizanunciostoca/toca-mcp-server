@@ -5,35 +5,46 @@ function response(body: BodyInit | null, init: ResponseInit): Response {
   return new Response(body, init);
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (input instanceof URL) return input.href;
+  if (input instanceof Request) return input.url;
+  return input;
+}
+
 describe('GcsPublicationAssetDelivery', () => {
   it('creates a short-lived signed URL for an existing private image', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const url = String(input);
+    const fetchImpl: typeof fetch = (input, init) => {
+      const url = requestUrl(input);
       calls.push({ url, ...(init ? { init } : {}) });
 
       if (url.endsWith('/token')) {
-        return response(JSON.stringify({ access_token: 'runtime-token' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      if (url.endsWith('/email')) {
-        return response('runtime@toca-mcp-production.iam.gserviceaccount.com', { status: 200 });
-      }
-      if (url.includes(':signBlob')) {
-        return response(
-          JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }),
-          {
+        return Promise.resolve(
+          response(JSON.stringify({ access_token: 'runtime-token' }), {
             status: 200,
             headers: { 'content-type': 'application/json' },
-          },
+          }),
+        );
+      }
+      if (url.endsWith('/email')) {
+        return Promise.resolve(
+          response('runtime@toca-mcp-production.iam.gserviceaccount.com', { status: 200 }),
+        );
+      }
+      if (url.includes(':signBlob')) {
+        return Promise.resolve(
+          response(JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
         );
       }
       if (url.startsWith('https://storage.googleapis.com/')) {
-        return response('x', { status: 206, headers: { 'content-type': 'image/jpeg' } });
+        return Promise.resolve(
+          response('x', { status: 206, headers: { 'content-type': 'image/jpeg' } }),
+        );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
     };
 
     const delivery = new GcsPublicationAssetDelivery({
@@ -58,9 +69,7 @@ describe('GcsPublicationAssetDelivery', () => {
     const delivery = new GcsPublicationAssetDelivery({
       projectId: 'toca-mcp-production',
       bucketName: 'toca-mcp-publication-assets',
-      fetchImpl: async () => {
-        throw new Error('fetch must not run');
-      },
+      fetchImpl: () => Promise.reject(new Error('fetch must not run')),
     });
 
     await expect(delivery.createDeliveryUrl('../secret.jpg')).rejects.toThrow(
