@@ -33,7 +33,7 @@ spec:
             - name: TOCA_SECRET_META_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: toca-meta-access-token
+                  name: toca-meta-oauth-token
                   key: latest
           resources:
             limits:
