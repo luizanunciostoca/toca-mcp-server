@@ -1,0 +1,131 @@
+name: Paid Media Provider Read Smoke TEMP
+
+on:
+  push:
+    branches:
+      - ops/paid-media-read-smoke-20260813
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-paid-media-read-smoke-temp
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push read-only smoke image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/paid-media-read-smoke
+          cat > /tmp/paid-media-read-smoke/smoke.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          if (!token) throw new Error('META_ACCESS_TOKEN missing');
+
+          async function graph(path) {
+            const response = await fetch(`https://graph.facebook.com/v24.0/${path}`, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              const msg = body?.error?.message ?? `HTTP ${response.status}`;
+              throw new Error(`Meta Graph read failed for ${path.split('?')[0]}: ${msg}`);
+            }
+            return body;
+          }
+
+          const permissions = await graph('me/permissions');
+          const permissionRows = Array.isArray(permissions.data) ? permissions.data : [];
+          const adsRead = permissionRows.find((row) => row.permission === 'ads_read');
+          if (!adsRead || adsRead.status !== 'granted') {
+            throw new Error(`ads_read is not granted: ${adsRead?.status ?? 'missing'}`);
+          }
+
+          const accountsPayload = await graph('me/adaccounts?fields=id,name,account_status,currency,timezone_name&limit=25');
+          const accounts = Array.isArray(accountsPayload.data) ? accountsPayload.data : [];
+          if (accounts.length === 0) throw new Error('No ad accounts returned for authorized Meta user');
+
+          const result = { adsReadGranted: true, accounts: [] };
+          for (const account of accounts) {
+            const campaignsPayload = await graph(`${account.id}/campaigns?fields=id,name,status,effective_status,objective,updated_time&limit=25`);
+            const campaigns = Array.isArray(campaignsPayload.data) ? campaignsPayload.data : [];
+            const insightsPayload = await graph(`${account.id}/insights?fields=spend,impressions,clicks,reach,ctr,cpc,cpm&date_preset=last_7d&limit=1`);
+            const insights = Array.isArray(insightsPayload.data) ? insightsPayload.data : [];
+            result.accounts.push({
+              id: account.id,
+              name: account.name ?? null,
+              accountStatus: account.account_status ?? null,
+              currency: account.currency ?? null,
+              timezoneName: account.timezone_name ?? null,
+              campaignCountReturned: campaigns.length,
+              campaigns: campaigns.slice(0, 10),
+              insightsLast7d: insights[0] ?? null,
+            });
+          }
+
+          console.log('PAID_MEDIA_READ_SMOKE_RESULT=' + JSON.stringify(result));
+          NODE
+
+          cat > /tmp/paid-media-read-smoke/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY smoke.mjs ./smoke.mjs
+          USER node
+          CMD ["node", "smoke.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/paid-media-read-smoke:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/paid-media-read-smoke
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Execute provider-backed read smoke under runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          EXECUTION="$(gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          echo "EXECUTION=$EXECUTION"
+
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=$JOB AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION" \
+            --project "$PROJECT_ID" \
+            --limit 50 \
+            --freshness 10m \
+            --format='value(textPayload)' | grep 'PAID_MEDIA_READ_SMOKE_RESULT=' | tail -n 1
