@@ -60,7 +60,7 @@ jobs:
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-oauth-token:latest" \
-            --update-env-vars "MCP_ENABLED=true,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
+            --update-env-vars "META_ENABLED=false,MCP_ENABLED=true,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
             --no-allow-unauthenticated \
             --quiet
       - name: Verify deployed staging configuration
@@ -72,6 +72,7 @@ jobs:
           echo "READY=$READY"
           printf '%s\n' "$ENV_DUMP"
           test "$READY" = "True"
+          printf '%s' "$ENV_DUMP" | grep -q 'META_ENABLED'
           printf '%s' "$ENV_DUMP" | grep -q 'META_ADS_READ_ENABLED'
           printf '%s' "$ENV_DUMP" | grep -q 'META_ACCESS_TOKEN_ENV_KEY'
           printf '%s' "$ENV_DUMP" | grep -q 'MCP_ENABLED'
