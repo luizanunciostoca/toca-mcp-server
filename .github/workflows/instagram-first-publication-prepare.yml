@@ -1,0 +1,191 @@
+name: Instagram First Publication Prepare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  JOB_NAME: toca-instagram-first-publication-prepare
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Load immutable publication candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .assetId == "SUN-0001" and
+            .driveFileId == "1u6ngIQVgUBTezAM07g0Jh8v3Bgt7-L6F" and
+            .contentType == "image/jpeg" and
+            .instagramAccountId == "17841402033495654" and
+            (.caption | length > 0) and
+            (.correlationId | length > 0) and
+            (.idempotencyKey | length > 0)
+          ' publication/first-real-publication.json >/dev/null
+          echo "DRIVE_FILE_ID=$(jq -r .driveFileId publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "ASSET_ID=$(jq -r .assetId publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "CONTENT_TYPE=$(jq -r .contentType publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "INSTAGRAM_ACCOUNT_ID=$(jq -r .instagramAccountId publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "CORRELATION_ID=$(jq -r .correlationId publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "IDEMPOTENCY_KEY=$(jq -r .idempotencyKey publication/first-real-publication.json)" >> "$GITHUB_ENV"
+          echo "CAPTION_BASE64=$(jq -r .caption publication/first-real-publication.json | base64 -w0)" >> "$GITHUB_ENV"
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download approved Drive asset privately
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .first-publication
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}?alt=media" \
+            --output .first-publication/asset.jpg
+          test -s .first-publication/asset.jpg
+          FILE_TYPE="$(file --brief --mime-type .first-publication/asset.jpg)"
+          test "$FILE_TYPE" = "image/jpeg"
+          echo "DRIVE_ASSET_SHA256=$(sha256sum .first-publication/asset.jpg | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable preparation image with approved asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:first-publication-prepare-app-${GITHUB_SHA}"
+          PREP_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:first-publication-prepare-${GITHUB_SHA}"
+          docker build -t "$APP_IMAGE" .
+          docker push "$APP_IMAGE"
+          cat >/tmp/first-publication.Dockerfile <<'EOF'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          USER root
+          COPY .first-publication/asset.jpg /app/first-publication-asset.jpg
+          RUN chown node:node /app/first-publication-asset.jpg && chmod 0444 /app/first-publication-asset.jpg
+          USER node
+          EOF
+          docker build \
+            --build-arg "BASE_IMAGE=$APP_IMAGE" \
+            -f /tmp/first-publication.Dockerfile \
+            -t "$PREP_IMAGE" .
+          docker push "$PREP_IMAGE"
+          echo "PREP_IMAGE=$PREP_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy fail-closed preparation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$PREP_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/instagram-first-publication-prepare.js \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_ASSET_BUCKET@INSTAGRAM_PUBLICATION_ASSET_ID=$ASSET_ID@INSTAGRAM_PUBLICATION_CORRELATION_ID=$CORRELATION_ID@INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH=/app/first-publication-asset.jpg@INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE=$CONTENT_TYPE@INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64=$CAPTION_BASE64@INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY" \
+            --set-secrets "META_APP_SECRET=toca-meta-app-secret:1" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+      - name: Verify preparation job cannot publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args == ["dist/src/instagram-first-publication-prepare.js"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute preparation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture approval manifest and request SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=\" AND textPayload:\"${CORRELATION_ID}\"" \
+            --project "$PROJECT_ID" \
+            --freshness=30m \
+            --limit=20 \
+            --order=desc \
+            --format='value(textPayload)' | grep 'INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=' | head -n1)"
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg correlation "$CORRELATION_ID" \
+            --arg idempotency "$IDEMPOTENCY_KEY" '
+              (.asset.sha256 | test("^[a-f0-9]{64}$")) and
+              (.asset.publicUrl | startswith("https://storage.googleapis.com/")) and
+              (.manifest.requestSha256 | test("^[a-f0-9]{64}$")) and
+              (.manifest.request.account.instagramAccountId == $ig) and
+              (.manifest.request.correlationId == $correlation) and
+              (.manifest.request.idempotencyKey == $idempotency) and
+              (.manifest.request.mediaType == "IMAGE") and
+              (.manifest.request.mediaUrls | length == 1)
+            ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > first-publication-preparation.json
+          echo "APPROVED_REQUEST_SHA256=$(jq -r .manifest.requestSha256 first-publication-preparation.json)" >> "$GITHUB_ENV"
+          echo "FIRST_PUBLICATION_PREPARED=1"
+          echo "REQUEST_SHA256=$(jq -r .manifest.requestSha256 first-publication-preparation.json)"
+
+      - name: Upload immutable preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-first-publication-preparation-${{ github.sha }}
+          path: first-publication-preparation.json
+          if-no-files-found: error
+          retention-days: 7
