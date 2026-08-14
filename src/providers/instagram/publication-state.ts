@@ -68,11 +68,12 @@ export function reconcilePublishedPublication(
   if (current.state === 'CANCELED') {
     throw new Error('INSTAGRAM_PUBLICATION_RECONCILIATION_CANCELED');
   }
+  const clean = { ...current };
+  delete clean.lastError;
   return {
-    ...current,
+    ...clean,
     ...evidence,
     state: 'PUBLISHED',
-    lastError: undefined,
     updatedAt: nowIso,
   };
 }
