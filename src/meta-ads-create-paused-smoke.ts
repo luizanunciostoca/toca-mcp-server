@@ -72,6 +72,7 @@ async function preparePlan(): Promise<{
       optimizationGoal: 'OFFSITE_CONVERSIONS',
       targeting: {
         geo_locations: { custom_locations: [geoTarget] },
+        targeting_automation: { advantage_audience: 0 },
       },
       promotedObject: {
         pixel_id: pixelId,
