@@ -19,6 +19,12 @@ const TRANSIENT_EFFECTIVE_STATUSES = new Set(['IN_PROCESS', 'PENDING_REVIEW', 'P
 const AD_SET_SAFE_EFFECTIVE_STATUSES = new Set(['PAUSED', 'CAMPAIGN_PAUSED']);
 const AD_SAFE_EFFECTIVE_STATUSES = new Set(['PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED']);
 const VALIDATION_AD_SET_STATUSES = new Set(['ACTIVE', 'PAUSED']);
+const INVALID_VALIDATION_EFFECTIVE_STATUSES = new Set([
+  'WITH_ISSUES',
+  'DELETED',
+  'ARCHIVED',
+  'DISAPPROVED',
+]);
 
 export function evaluateMetaAdsProviderSmokeReadiness(
   snapshot: MetaAdsProviderSmokeSnapshot,
@@ -58,7 +64,13 @@ export function selectMetaAdsValidationAdSet(
   return adSets.find((adSet) => {
     const id = scalarString(adSet.id);
     const status = scalarString(adSet.status);
-    return Boolean(id) && VALIDATION_AD_SET_STATUSES.has(status);
+    const effectiveStatus = scalarString(adSet.effective_status);
+    return (
+      Boolean(id) &&
+      VALIDATION_AD_SET_STATUSES.has(status) &&
+      !INVALID_VALIDATION_EFFECTIVE_STATUSES.has(effectiveStatus) &&
+      !nonEmptyCollection(adSet.issues_info)
+    );
   });
 }
 
