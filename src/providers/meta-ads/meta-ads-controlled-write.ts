@@ -71,6 +71,7 @@ export interface ControlledCreatePausedResult {
   readonly status: 'PAUSED';
 }
 
+// External provider-access changes must be revalidated through a fresh CREATE_PAUSED smoke before activation.
 export class MetaAdsControlledWriteService {
   constructor(
     private readonly provider: MetaAdsProvider,
