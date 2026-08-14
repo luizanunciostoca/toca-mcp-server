@@ -1,0 +1,67 @@
+name: Meta Ads The Party Failure Diagnostic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - control/meta-ads-the-party-2026-08-15.diagnose
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  FAILED_JOB_NAME: toca-meta-ads-party-31774472725
+  EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31774472725
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate read-only diagnostic trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -f control/meta-ads-the-party-2026-08-15.diagnose
+          test "$(tr -d '\r\n' < control/meta-ads-the-party-2026-08-15.diagnose)" = "$EXPECTED_MARKER"
+          CHANGED_FILES="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+          test "$CHANGED_FILES" = "control/meta-ads-the-party-2026-08-15.diagnose"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Read failed Cloud Run job logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND timestamp>=\"2026-08-14T05:56:35Z\" AND timestamp<=\"2026-08-14T05:57:25Z\"" \
+            --project "$GCP_PROJECT_ID" \
+            --order=asc \
+            --limit=500 \
+            --format=json > meta-ads-the-party-failure-diagnostic.json
+          test -s meta-ads-the-party-failure-diagnostic.json
+          echo '--- CLOUD RUN FAILURE DIAGNOSTIC ---'
+          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-the-party-failure-diagnostic.json
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-ads-the-party-failure-diagnostic-31774472725
+          path: meta-ads-the-party-failure-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
