@@ -94,10 +94,7 @@ export function registerMetaAdsWriteTools(
       },
     },
     async ({ plan, approvalSha256 }) => {
-      const output = await service.createPaused(
-        plan as ControlledCreatePausedPlan,
-        approvalSha256,
-      );
+      const output = await service.createPaused(plan as ControlledCreatePausedPlan, approvalSha256);
       return {
         content: [{ type: 'text', text: JSON.stringify(output) }],
         structuredContent: output,
