@@ -20,6 +20,9 @@ export interface MetaAdSetDraft {
   readonly billingEvent?: string;
   readonly optimizationGoal?: string;
   readonly targeting: Readonly<Record<string, unknown>>;
+  readonly promotedObject?: Readonly<Record<string, unknown>>;
+  readonly startTime?: string;
+  readonly endTime?: string;
   readonly status: 'PAUSED';
 }
 
