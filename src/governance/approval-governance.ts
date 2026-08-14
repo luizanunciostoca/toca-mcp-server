@@ -103,7 +103,7 @@ export class InMemoryApprovalStore implements ApprovalStore {
   readonly #current = new Map<string, ApprovalRecord>();
   readonly #history = new Map<string, ApprovalRecord[]>();
 
-  put(record: ApprovalRecord, expectedVersion?: number): Promise<void> {
+  async put(record: ApprovalRecord, expectedVersion?: number): Promise<void> {
     const current = this.#current.get(record.approvalId);
     if (expectedVersion !== undefined && current?.version !== expectedVersion)
       throw new Error('APPROVAL_VERSION_CONFLICT');
@@ -112,7 +112,6 @@ export class InMemoryApprovalStore implements ApprovalStore {
     if (!current && record.version !== 1) throw new Error('APPROVAL_INITIAL_VERSION_INVALID');
     this.#current.set(record.approvalId, record);
     this.#history.set(record.approvalId, [...(this.#history.get(record.approvalId) ?? []), record]);
-    return Promise.resolve();
   }
 
   get(approvalId: string): Promise<ApprovalRecord | undefined> {
