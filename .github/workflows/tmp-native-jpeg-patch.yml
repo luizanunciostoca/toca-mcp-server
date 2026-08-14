@@ -1,0 +1,55 @@
+name: Temporary The Party Native JPEG Patch
+
+on:
+  push:
+    branches:
+      - feat/meta-ads-the-party-2026-08-15-execution
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Patch native JPEG loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/meta-ads-the-party-2026-08-15.ts')
+          text = path.read_text()
+          old = """  for (const asset of descriptor.assets) {
+              const basePath = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+              const parts = await Promise.all(
+                Array.from({ length: asset.partCount }, async (_, index) =>
+                  readFile(`${basePath}.part-${String(index + 1).padStart(2, '0')}`, 'utf8'),
+                ),
+              );
+              const base64 = parts.join('').replace(/\\s+/g, '');
+              const bytes = Buffer.from(base64, 'base64');"""
+          new = """  for (const asset of descriptor.assets) {
+              const path = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+              const bytes = await readFile(path);
+              const base64 = bytes.toString('base64');"""
+          if old not in text:
+              raise SystemExit('native JPEG loader anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier src/meta-ads-the-party-2026-08-15.ts --write
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/meta-ads-the-party-2026-08-15.ts
+          git commit -m 'refactor(meta-ads): load approved creatives as native JPEGs'
+          git push origin HEAD:feat/meta-ads-the-party-2026-08-15-execution
