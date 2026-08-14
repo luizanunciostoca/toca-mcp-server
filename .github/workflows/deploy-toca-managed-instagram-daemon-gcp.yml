@@ -30,6 +30,7 @@ env:
   PUBLICATION_BUCKET: toca-mcp-publication-assets
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
   MCP_SERVICE_NAME: toca-mcp-production
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
 
@@ -71,7 +72,56 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Deploy singleton scheduler daemon
+      - name: Provision authenticated minute trigger before scale-to-zero
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+
+          gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --role="roles/run.invoker" \
+            --quiet
+
+          if gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$SCHEDULER_JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$GCP_REGION" \
+              --schedule='* * * * *' \
+              --time-zone='America/Bahia' \
+              --uri="${SERVICE_URL}/tick" \
+              --http-method=POST \
+              --oidc-service-account-email="$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --oidc-token-audience="$SERVICE_URL" \
+              --attempt-deadline=120s \
+              --max-retry-attempts=0 \
+              --quiet
+          else
+            gcloud scheduler jobs create http "$SCHEDULER_JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$GCP_REGION" \
+              --schedule='* * * * *' \
+              --time-zone='America/Bahia' \
+              --uri="${SERVICE_URL}/tick" \
+              --http-method=POST \
+              --oidc-service-account-email="$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --oidc-token-audience="$SERVICE_URL" \
+              --attempt-deadline=120s \
+              --max-retry-attempts=0 \
+              --quiet
+          fi
+
+          echo "DAEMON_SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
+
+      - name: Deploy scale-to-zero scheduler executor
         run: |
           set -euo pipefail
           gcloud run deploy "$SERVICE_NAME" \
@@ -82,19 +132,19 @@ jobs:
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --command node \
             --args dist/src/toca-managed-instagram-daemon.js \
-            --min-instances 1 \
+            --min-instances 0 \
             --max-instances 1 \
             --concurrency 1 \
-            --no-cpu-throttling \
+            --cpu-throttling \
             --memory 512Mi \
             --cpu 1 \
-            --timeout 60s \
+            --timeout 120s \
             --no-allow-unauthenticated \
-            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true@TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS=60000@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_READ_ENABLED=false@META_ADS_READ_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_BUCKET@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$GCP_PROJECT_ID" \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_READ_ENABLED=false@META_ADS_READ_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_BUCKET@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$GCP_PROJECT_ID" \
             --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --quiet
 
-      - name: Verify singleton daemon configuration
+      - name: Verify low-cost scheduler executor topology
         run: |
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" \
@@ -108,9 +158,33 @@ jobs:
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
-            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_BOOTSTRAP_SCHEDULE_B64")] | length == 0)
+            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_BOOTSTRAP_SCHEDULE_B64")] | length == 0) and
+            ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
+            (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
+            ((.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"] // "true") == "true")
           ' >/dev/null
-          echo 'TOCA_MANAGED_INSTAGRAM_DAEMON_DEPLOYED=1'
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_SERVICE_URL}/tick" \
+            --arg audience "$DAEMON_SERVICE_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .schedule == "* * * * *" and
+              .timeZone == "America/Bahia" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+
+          gcloud scheduler jobs run "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --quiet
+          echo 'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_READY=1'
 
       - name: Deploy MCP production scheduler surface
         run: |
@@ -123,10 +197,15 @@ jobs:
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
             --update-env-vars "NODE_ENV=production,MCP_ENABLED=true,TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true,TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,META_ENABLED=false,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --cpu-throttling \
+            --memory 512Mi \
+            --cpu 1 \
             --no-allow-unauthenticated \
             --quiet
 
-      - name: Verify MCP scheduler surface remains fail-closed
+      - name: Verify MCP scheduler surface remains fail-closed and scale-to-zero
         run: |
           set -euo pipefail
           MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
@@ -139,6 +218,8 @@ jobs:
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
             ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
-            ([$container.env[] | select(.name == "META_ENABLED") | .value] == ["false"])
+            ([$container.env[] | select(.name == "META_ENABLED") | .value] == ["false"]) and
+            ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
+            (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1")
           ' >/dev/null
           echo 'TOCA_MCP_PRODUCTION_SCHEDULER_TOOLS_DEPLOYED=1'
