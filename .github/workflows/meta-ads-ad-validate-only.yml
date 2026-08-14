@@ -1,0 +1,152 @@
+name: Meta Ads Ad Validate Only
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-ad-validate-only.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-ad-validate-only
+  ACCOUNT_ID: '311793958882290'
+  ADSET_ID: '52617448786665'
+  CREATIVE_ID: '24628562856774168'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable validate-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ad-validate
+          cat > /tmp/ad-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const adSetId = process.env.ADSET_ID;
+          const creativeId = process.env.CREATIVE_ID;
+          if (!token || !accountId || !adSetId || !creativeId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(`READ_FAILED_${response.status}`);
+            return body;
+          };
+
+          const adSet = await get(`${adSetId}?fields=id,name,status,effective_status`);
+          if (adSet.status !== 'PAUSED' || adSet.effective_status === 'ACTIVE') throw new Error('ADSET_NOT_SAFELY_PAUSED');
+          const creative = await get(`${creativeId}?fields=id,name`);
+          if (String(creative.id ?? '') !== creativeId) throw new Error('CREATIVE_ID_MISMATCH');
+
+          const params = new URLSearchParams({
+            name: 'P0 Ad VALIDATE_ONLY | final payload',
+            adset_id: adSetId,
+            creative: JSON.stringify({ creative_id: creativeId }),
+            status: 'PAUSED',
+            execution_options: JSON.stringify(['validate_only']),
+          });
+          const response = await fetch(`${graph}/act_${accountId}/ads`, {
+            method: 'POST',
+            headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          });
+          const body = await response.json().catch(() => ({}));
+          const error = body?.error ?? {};
+          const result = response.ok
+            ? { httpStatus: response.status, ok: true, returnedId: body?.id ?? null, adSetStatus: adSet.status, adSetEffectiveStatus: adSet.effective_status }
+            : {
+                httpStatus: response.status,
+                ok: false,
+                type: sanitize(error.type),
+                code: Number(error.code) || null,
+                subcode: Number(error.error_subcode) || null,
+                userTitle: sanitize(error.error_user_title),
+                userMessage: sanitize(error.error_user_msg),
+                message: sanitize(error.message),
+              };
+          console.log(`META_ADS_AD_VALIDATE_ONLY=${JSON.stringify(result)}`);
+          if (!response.ok) process.exit(2);
+          if (body?.id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+          NODE
+
+          cat > /tmp/ad-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-ad-validate-only:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/ad-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,ADSET_ID=$ADSET_ID,CREATIVE_ID=$CREATIVE_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+
+      - name: Execute validate-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=""
+          for attempt in $(seq 1 12); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_AD_VALIDATE_ONLY=\"" \
+              --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)')"
+            [ -n "$RESULT" ] && break
+            sleep 3
+          done
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT"
+
+      - name: Remove validation job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
