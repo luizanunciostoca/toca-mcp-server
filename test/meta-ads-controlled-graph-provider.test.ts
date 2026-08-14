@@ -103,6 +103,58 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
     });
   });
 
+  it('maps Instagram creatives to instagram_user_id and removes redundant video image_url', async () => {
+    const { api, post } = createApiMock();
+    const provider = new MetaAdsControlledGraphProvider(api);
+    const videoData = {
+      call_to_action: { type: 'LEARN_MORE', value: { link: 'https://example.com' } },
+      image_hash: 'hash-1',
+      image_url: 'https://example.com/thumbnail.jpg',
+      message: 'Creative message',
+      video_id: 'video-1',
+    };
+    const objectStorySpec = {
+      page_id: 'legacy-page',
+      instagram_actor_id: 'legacy-actor',
+      instagram_user_id: 'legacy-user',
+      video_data: videoData,
+    };
+
+    await expect(
+      provider.createCreative(
+        { adAccountId: '311793958882290', currency: 'BRL' },
+        {
+          name: 'P0 Smoke Creative',
+          pageId: '306103746115875',
+          instagramActorId: '17841402033495654',
+          objectStorySpec,
+        },
+      ),
+    ).resolves.toEqual({ id: 'provider-id-1' });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('act_311793958882290/adcreatives', {
+      name: 'P0 Smoke Creative',
+      object_story_spec: JSON.stringify({
+        video_data: {
+          call_to_action: { type: 'LEARN_MORE', value: { link: 'https://example.com' } },
+          image_hash: 'hash-1',
+          message: 'Creative message',
+          video_id: 'video-1',
+        },
+        page_id: '306103746115875',
+        instagram_user_id: '17841402033495654',
+      }),
+    });
+    expect(objectStorySpec).toEqual({
+      page_id: 'legacy-page',
+      instagram_actor_id: 'legacy-actor',
+      instagram_user_id: 'legacy-user',
+      video_data: videoData,
+    });
+    expect(videoData).toHaveProperty('image_url');
+  });
+
   it('does not expose status or budget mutation through the controlled provider', async () => {
     const { api } = createApiMock();
     const provider = new MetaAdsControlledGraphProvider(api);
