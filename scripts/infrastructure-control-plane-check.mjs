@@ -291,21 +291,32 @@ for (const marker of daemonRequirements) {
   }
 }
 
-for (const forbidden of ['--min-instances 1', '--no-cpu-throttling', 'TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS']) {
+for (const forbidden of [
+  '--min-instances 1',
+  '--no-cpu-throttling',
+  'TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS',
+]) {
   if (daemonWorkflow.includes(forbidden)) {
     console.error(`Daemon deploy workflow retains always-on cost marker: ${forbidden}`);
     process.exit(1);
   }
 }
 
-for (const marker of ["request.url === '/tick'", "request.method !== 'POST'", "triggerMode: 'cloud-scheduler-http'"]) {
+for (const marker of [
+  "request.url === '/tick'",
+  "request.method !== 'POST'",
+  "triggerMode: 'cloud-scheduler-http'",
+]) {
   if (!daemonSource.includes(marker)) {
     console.error(`Daemon source missing request-driven marker: ${marker}`);
     process.exit(1);
   }
 }
 
-if (daemonSource.includes('setInterval(') || daemonSource.includes('TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS')) {
+if (
+  daemonSource.includes('setInterval(') ||
+  daemonSource.includes('TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS')
+) {
   console.error('Daemon source must not retain background polling when scale-to-zero is active');
   process.exit(1);
 }
