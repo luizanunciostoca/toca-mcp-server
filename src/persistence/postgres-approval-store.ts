@@ -64,10 +64,9 @@ export class PostgresApprovalStore implements ApprovalStore {
   }
 
   async get(approvalId: string): Promise<ApprovalRecord | undefined> {
-    const result = await this.pool.query(
-      'select * from approval_records where approval_id = $1',
-      [approvalId],
-    );
+    const result = await this.pool.query('select * from approval_records where approval_id = $1', [
+      approvalId,
+    ]);
     const row = result.rows[0] as ApprovalRow | undefined;
     return row ? fromRow(row) : undefined;
   }
