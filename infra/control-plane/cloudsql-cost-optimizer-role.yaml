@@ -1,0 +1,12 @@
+title: TOCA MCP Cloud SQL Cost Optimizer
+description: Least-privilege permissions for the allowlisted TOCA MCP Cloud SQL cost optimization operation. Cannot create, clone, delete, restore, import, mutate users, mutate SSL certificates, change IAM, or alter billing.
+stage: GA
+includedPermissions:
+  - cloudsql.instances.get
+  - cloudsql.instances.list
+  - cloudsql.instances.update
+  - cloudsql.backupRuns.get
+  - cloudsql.backupRuns.list
+  - resourcemanager.projects.get
+  - serviceusage.services.get
+  - serviceusage.services.use
