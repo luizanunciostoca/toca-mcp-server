@@ -18,7 +18,7 @@ env:
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   FAILED_JOB_NAME: toca-meta-ads-create-paused-smoke
-  EXPECTED_MARKER: DIAGNOSE_META_ADS_SMOKE_31778462622
+  EXPECTED_MARKER: RECONCILE_META_ADS_SMOKE_DUPLICATES_31778462622
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
@@ -52,7 +52,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Read failed Cloud Run job logs
+      - name: Read failed smoke logs
         shell: bash
         run: |
           set -euo pipefail
@@ -61,12 +61,10 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --order=asc \
             --limit=500 \
-            --format=json > meta-ads-the-party-failure-diagnostic.json
-          test -s meta-ads-the-party-failure-diagnostic.json
-          echo '--- CLOUD RUN FAILURE DIAGNOSTIC ---'
-          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-the-party-failure-diagnostic.json
+            --format=json > meta-ads-smoke-failure-diagnostic.json
+          test -s meta-ads-smoke-failure-diagnostic.json
 
-      - name: Reconcile provider state through runtime identity
+      - name: Reconcile all exact-name smoke campaigns through runtime identity
         shell: bash
         run: |
           set -euo pipefail
@@ -86,35 +84,38 @@ jobs:
           const accountId = process.env.META_AD_ACCOUNT_ID;
           const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
           if (!token || !base || !version || !accountId || !expectedName) throw new Error('RECON_CONFIG_MISSING');
-          async function graph(path, params) {
+          async function graph(path, params = {}) {
             const url = new URL(`${base}/${version}/${path}`);
-            for (const [key, value] of Object.entries(params || {})) url.searchParams.set(key, value);
+            for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
             const payload = await response.json();
             if (!response.ok) throw new Error(`RECON_META_HTTP_${response.status}`);
             return payload;
           }
-          const campaigns = await graph(`act_${accountId}/campaigns`, {
-            fields: 'id,name,status,effective_status,objective,special_ad_categories',
+          const campaignsPayload = await graph(`act_${accountId}/campaigns`, {
+            fields: 'id,name,status,effective_status,objective,special_ad_categories,created_time,updated_time',
             limit: '100',
           });
-          const matches = (Array.isArray(campaigns.data) ? campaigns.data : []).filter((item) => item.name === expectedName);
-          if (matches.length !== 1) throw new Error(`RECON_CAMPAIGN_MATCH_COUNT_${matches.length}`);
-          const campaign = matches[0];
-          const adSetsPayload = await graph(`${campaign.id}/adsets`, {
-            fields: 'id,name,status,effective_status,start_time,end_time,daily_budget,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting',
-            limit: '100',
-          });
-          const adsPayload = await graph(`${campaign.id}/ads`, {
-            fields: 'id,name,status,effective_status,creative',
-            limit: '100',
-          });
-          const result = {
-            campaign,
-            adSets: Array.isArray(adSetsPayload.data) ? adSetsPayload.data : [],
-            ads: Array.isArray(adsPayload.data) ? adsPayload.data : [],
-          };
-          console.log(`META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=${JSON.stringify(result)}`);
+          const matches = (Array.isArray(campaignsPayload.data) ? campaignsPayload.data : [])
+            .filter((item) => item.name === expectedName);
+          if (matches.length === 0) throw new Error('RECON_CAMPAIGN_MATCH_COUNT_0');
+          const results = [];
+          for (const campaign of matches) {
+            const adSetsPayload = await graph(`${campaign.id}/adsets`, {
+              fields: 'id,name,status,effective_status,start_time,end_time,daily_budget,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting,created_time,updated_time',
+              limit: '100',
+            });
+            const adsPayload = await graph(`${campaign.id}/ads`, {
+              fields: 'id,name,status,effective_status,creative,created_time,updated_time',
+              limit: '100',
+            });
+            results.push({
+              campaign,
+              adSets: Array.isArray(adSetsPayload.data) ? adSetsPayload.data : [],
+              ads: Array.isArray(adsPayload.data) ? adsPayload.data : [],
+            });
+          }
+          console.log(`META_ADS_SMOKE_DUPLICATE_RECONCILIATION=${JSON.stringify({ matchCount: results.length, results })}`);
           NODE
           )"
 
@@ -141,27 +142,27 @@ jobs:
           RESULT_LINE=""
           for attempt in $(seq 1 12); do
             RESULT_LINE="$(gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${RECON_JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=\"" \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${RECON_JOB_NAME} AND textPayload:\"META_ADS_SMOKE_DUPLICATE_RECONCILIATION=\"" \
               --project "$GCP_PROJECT_ID" \
               --freshness=15m \
               --limit=20 \
               --order=desc \
-              --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=' | head -n1 || true)"
+              --format='value(textPayload)' | grep 'META_ADS_SMOKE_DUPLICATE_RECONCILIATION=' | head -n1 || true)"
             [ -n "$RESULT_LINE" ] && break
             sleep 5
           done
           test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=}"
-          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-provider-reconciliation.json
-          echo '--- META PROVIDER RECONCILIATION ---'
-          printf '%s\n' "$RESULT_JSON" | jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}'
+          RESULT_JSON="${RESULT_LINE#META_ADS_SMOKE_DUPLICATE_RECONCILIATION=}"
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-smoke-duplicate-reconciliation.json
+          echo '--- META SMOKE DUPLICATE RECONCILIATION ---'
+          printf '%s\n' "$RESULT_JSON" | jq '{matchCount, results: [.results[] | {campaign: .campaign, adSetCount: (.adSets|length), adSets: .adSets, adCount: (.ads|length), ads: .ads}]}'
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-provider-smoke-failure-diagnostic-31778462622
+          name: meta-ads-provider-smoke-duplicate-diagnostic-31778462622
           path: |
-            meta-ads-the-party-failure-diagnostic.json
-            meta-ads-the-party-provider-reconciliation.json
+            meta-ads-smoke-failure-diagnostic.json
+            meta-ads-smoke-duplicate-reconciliation.json
           if-no-files-found: error
           retention-days: 30
