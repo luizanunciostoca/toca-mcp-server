@@ -1,0 +1,183 @@
+name: Meta Ads Pixel Access Read-Only Discovery V2
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-pixel-access-readonly-discovery-v2.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-pixel-access-readonly-discovery-v2
+  ACCOUNT_ID: '311793958882290'
+  CONFIGURED_PIXEL_ID: '461233076843065'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build immutable GET-only discovery image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pixel-discovery-v2
+          cat > /tmp/pixel-discovery-v2/discover.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const configuredPixelId = process.env.CONFIGURED_PIXEL_ID;
+          if (!token || !accountId || !configuredPixelId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            return { response, body };
+          };
+          const rows = (body) => Array.isArray(body?.data) ? body.data : [];
+          const errorOf = (result) => {
+            const e = result.body?.error ?? {};
+            return { httpStatus: result.response.status, code: Number(e.code) || null, subcode: Number(e.error_subcode) || null, message: sanitize(e.message) };
+          };
+          const idOf = (value) => {
+            if (!value) return '';
+            if (typeof value === 'string' || typeof value === 'number') return String(value);
+            if (typeof value === 'object' && value.id) return String(value.id);
+            return '';
+          };
+          const nameOf = (value) => value && typeof value === 'object' ? value.name ?? null : null;
+
+          const account = await get(`act_${accountId}?fields=id,account_id,name,account_status,currency,business,owner_business`);
+          if (!account.response.ok) {
+            console.log(`META_ADS_PIXEL_ACCOUNT_READ_ERROR=${JSON.stringify(errorOf(account))}`);
+            process.exit(2);
+          }
+          const accountMeta = account.body;
+          console.log(`META_ADS_PIXEL_ACCOUNT_META=${JSON.stringify({
+            id: String(accountMeta.id ?? ''), accountId: String(accountMeta.account_id ?? ''), name: accountMeta.name ?? null,
+            accountStatus: accountMeta.account_status ?? null, currency: accountMeta.currency ?? null,
+            businessId: idOf(accountMeta.business), businessName: nameOf(accountMeta.business),
+            ownerBusinessId: idOf(accountMeta.owner_business), ownerBusinessName: nameOf(accountMeta.owner_business),
+          })}`);
+
+          const businessMap = new Map();
+          for (const [source, value] of [['account_business', accountMeta.business], ['account_owner_business', accountMeta.owner_business]]) {
+            const id = idOf(value);
+            if (!id) continue;
+            businessMap.set(id, { id, name: nameOf(value), sources: [source] });
+          }
+          const businesses = await get('me/businesses?fields=id,name&limit=200');
+          const businessDiscoveryError = businesses.response.ok ? null : errorOf(businesses);
+          if (businesses.response.ok) {
+            for (const business of rows(businesses.body)) {
+              const id = idOf(business);
+              if (!id) continue;
+              const existing = businessMap.get(id);
+              if (existing) existing.sources.push('me_businesses');
+              else businessMap.set(id, { id, name: business.name ?? null, sources: ['me_businesses'] });
+            }
+          }
+
+          const pixelMap = new Map();
+          const edgeResults = [];
+          for (const business of businessMap.values()) {
+            for (const edge of ['adspixels', 'owned_pixels', 'client_pixels']) {
+              const result = await get(`${business.id}/${edge}?fields=id,name,last_fired_time,is_unavailable&limit=200`);
+              edgeResults.push({ businessId: business.id, businessName: business.name, edge, ok: result.response.ok, count: result.response.ok ? rows(result.body).length : null, error: result.response.ok ? null : errorOf(result) });
+              if (!result.response.ok) continue;
+              for (const pixel of rows(result.body)) {
+                const id = idOf(pixel);
+                if (!id) continue;
+                const existing = pixelMap.get(id) ?? { id, name: pixel.name ?? null, lastFiredTime: pixel.last_fired_time ?? null, isUnavailable: pixel.is_unavailable ?? null, discoveredFrom: [] };
+                existing.discoveredFrom.push({ businessId: business.id, businessName: business.name, edge });
+                pixelMap.set(id, existing);
+              }
+            }
+          }
+
+          const configuredDirect = await get(`${configuredPixelId}?fields=id,name,last_fired_time,is_unavailable`);
+          const configuredDirectResult = configuredDirect.response.ok
+            ? { ok: true, id: idOf(configuredDirect.body), name: configuredDirect.body?.name ?? null, lastFiredTime: configuredDirect.body?.last_fired_time ?? null, isUnavailable: configuredDirect.body?.is_unavailable ?? null }
+            : { ok: false, error: errorOf(configuredDirect) };
+          if (configuredDirect.response.ok && configuredDirect.body?.id && !pixelMap.has(configuredPixelId)) {
+            pixelMap.set(configuredPixelId, { id: configuredPixelId, name: configuredDirect.body.name ?? null, lastFiredTime: configuredDirect.body.last_fired_time ?? null, isUnavailable: configuredDirect.body.is_unavailable ?? null, discoveredFrom: [{ edge: 'direct_configured_pixel_read' }] });
+          }
+
+          const pixels = [];
+          for (const pixel of pixelMap.values()) {
+            const assigned = await get(`${pixel.id}/adaccounts?fields=id,account_id,name,account_status&limit=200`);
+            const assignedAccounts = assigned.response.ok ? rows(assigned.body).map((item) => ({
+              id: idOf(item), accountId: String(item?.account_id ?? ''), name: item?.name ?? null, accountStatus: item?.account_status ?? null,
+            })) : [];
+            pixels.push({
+              ...pixel,
+              assignedAccounts,
+              targetAccountAssigned: assignedAccounts.some((item) => item.accountId === accountId || item.id === `act_${accountId}` || item.id === accountId),
+              assignmentReadError: assigned.response.ok ? null : errorOf(assigned),
+            });
+          }
+          pixels.sort((a, b) => Number(b.targetAccountAssigned) - Number(a.targetAccountAssigned) || String(a.name ?? '').localeCompare(String(b.name ?? '')));
+          const assignedCandidates = pixels.filter((pixel) => pixel.targetAccountAssigned && pixel.isUnavailable !== true);
+
+          console.log(`META_ADS_PIXEL_ACCESS_DISCOVERY_V2=${JSON.stringify({
+            configuredPixelId,
+            businesses: [...businessMap.values()],
+            businessDiscoveryError,
+            edgeResults,
+            configuredDirectResult,
+            pixels,
+            assignedCandidates,
+          })}`);
+          NODE
+          cat > /tmp/pixel-discovery-v2/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY discover.mjs ./discover.mjs
+          USER node
+          CMD ["node", "discover.mjs"]
+          DOCKER
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-pixel-readonly-discovery-v2:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/pixel-discovery-v2
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy GET-only discovery job
+        run: |
+          gcloud run jobs deploy "$JOB" --image "$IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,CONFIGURED_PIXEL_ID=$CONFIGURED_PIXEL_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+      - name: Execute GET-only discovery
+        run: gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+      - name: Print persisted sanitized discovery
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND timestamp>=\"$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)\"" \
+            --project "$PROJECT_ID" --order=asc --limit=300 --format='value(textPayload)' | \
+            grep -E 'META_ADS_PIXEL_(ACCOUNT_READ_ERROR|ACCOUNT_META|ACCESS_DISCOVERY_V2)=' || true
+      - name: Remove GET-only discovery job
+        if: always()
+        run: gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
