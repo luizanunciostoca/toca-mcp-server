@@ -13,10 +13,18 @@ permissions:
 
 env:
   GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  EXPECTED_MARKER: INSPECT_META_ADS_RECONCILIATION_31778980116
-  RECON_JOB_NAME: toca-meta-ads-reconcile-31778980116
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_GRAPH_BASE_URL: https://graph.facebook.com
+  META_GRAPH_API_VERSION: v24.0
+  META_AD_ACCOUNT_ID: '311793958882290'
+  EXPECTED_CAMPAIGN_NAME: TOCA | P0 SMOKE CREATE_PAUSED | c2d756371e6d
+  EXPECTED_MARKER: VERIFY_STALE_SMOKE_PLAN_C2D756_31778462622
+  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:meta-ads-smoke-4f26826402e7455a6281b30efd1b1a75b07844da
+  OLD_SMOKE_JOB_NAME: toca-meta-ads-create-paused-smoke
 
 jobs:
   diagnose:
@@ -26,7 +34,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Validate read-only diagnostic trigger
+      - name: Validate exact read-only trigger
         shell: bash
         run: |
           set -euo pipefail
@@ -44,24 +52,117 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Read reconciliation Cloud Run logs only
+      - name: Read old smoke execution logs
         shell: bash
         run: |
           set -euo pipefail
           gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${RECON_JOB_NAME} AND timestamp>=\"2026-08-14T07:12:10Z\" AND timestamp<=\"2026-08-14T07:12:30Z\"" \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${OLD_SMOKE_JOB_NAME} AND timestamp>=\"2026-08-14T06:58:40Z\" AND timestamp<=\"2026-08-14T06:59:05Z\"" \
             --project "$GCP_PROJECT_ID" \
             --order=asc \
             --limit=500 \
-            --format=json > meta-ads-reconciliation-failure.json
-          test -s meta-ads-reconciliation-failure.json
-          echo '--- RECONCILIATION FAILURE ---'
-          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-reconciliation-failure.json
+            --format=json > old-smoke-c2d756-logs.json
+          test -s old-smoke-c2d756-logs.json
+          echo '--- OLD SMOKE C2D756 LOGS ---'
+          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' old-smoke-c2d756-logs.json
+
+      - name: Reconcile exact c2d756 campaign read-only through runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-meta-ads-stale-plan-reconcile-${GITHUB_RUN_ID}"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          JS_CODE="$(cat <<'NODE'
+          const token = process.env.META_TOKEN;
+          const base = process.env.META_GRAPH_BASE_URL;
+          const version = process.env.META_GRAPH_API_VERSION;
+          const accountId = process.env.META_AD_ACCOUNT_ID;
+          const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
+          if (!token || !base || !version || !accountId || !expectedName) throw new Error('STALE_RECON_CONFIG_MISSING');
+          async function graph(path, params = {}) {
+            const url = new URL(`${base}/${version}/${path}`);
+            for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+            const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(`STALE_RECON_HTTP_${response.status}`);
+            return payload;
+          }
+          const campaignsPayload = await graph(`act_${accountId}/campaigns`, {
+            fields: 'id,name,status,effective_status,objective,special_ad_categories',
+            limit: '100',
+          });
+          const matches = (Array.isArray(campaignsPayload.data) ? campaignsPayload.data : [])
+            .filter((item) => item.name === expectedName);
+          if (matches.length !== 1) throw new Error(`STALE_RECON_MATCH_COUNT_${matches.length}`);
+          const campaign = matches[0];
+          const adSetsPayload = await graph(`${campaign.id}/adsets`, {
+            fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting,start_time,end_time',
+            limit: '100',
+          });
+          const adsPayload = await graph(`${campaign.id}/ads`, {
+            fields: 'id,name,status,effective_status,creative',
+            limit: '100',
+          });
+          const result = {
+            campaign,
+            adSets: Array.isArray(adSetsPayload.data) ? adSetsPayload.data : [],
+            ads: Array.isArray(adsPayload.data) ? adsPayload.data : [],
+          };
+          console.log(`META_ADS_STALE_PLAN_RECONCILIATION=${JSON.stringify(result)}`);
+          NODE
+          )"
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$RECON_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args "^~^-e~$JS_CODE" \
+            --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_AD_ACCOUNT_ID=$META_AD_ACCOUNT_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_STALE_PLAN_RECONCILIATION=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=15m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_STALE_PLAN_RECONCILIATION=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_STALE_PLAN_RECONCILIATION=}"
+          printf '%s\n' "$RESULT_JSON" | jq . > stale-smoke-c2d756-provider-state.json
+          echo '--- C2D756 PROVIDER STATE ---'
+          printf '%s\n' "$RESULT_JSON" | jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}'
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-reconciliation-failure-31778980116
-          path: meta-ads-reconciliation-failure.json
+          name: meta-ads-stale-plan-verification-${{ github.sha }}
+          path: |
+            old-smoke-c2d756-logs.json
+            stale-smoke-c2d756-provider-state.json
           if-no-files-found: error
           retention-days: 30
