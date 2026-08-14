@@ -7,6 +7,7 @@ on:
       - 'src/meta-ads-create-paused-smoke.ts'
       - 'src/providers/meta-ads/meta-ads-controlled-graph-provider.ts'
       - 'src/providers/meta-ads/meta-ads-controlled-write.ts'
+      - 'src/providers/meta-ads/meta-ads-smoke-readiness.ts'
       - '.github/workflows/meta-ads-create-paused-provider-smoke.yml'
 
 permissions:
@@ -27,7 +28,7 @@ env:
   JOB_NAME: toca-meta-ads-create-paused-smoke
   META_APP_ID: '2281930145887404'
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
-  META_ADS_ACCOUNT_ID: '311793958882290'
+  META_ADS_ACCOUNT_ID: '394512749760530'
   META_ADS_CURRENCY: BRL
   META_ADS_PIXEL_ID: '461233076843065'
   META_ADS_PAGE_ID: '306103746115875'
@@ -139,10 +140,16 @@ jobs:
             --arg currency "$META_ADS_CURRENCY" '
               (.requestSha256 | test("^[a-f0-9]{64}$")) and
               (.planBase64 | length > 0) and
-              (.geo.key | tostring | length > 0) and
+              (.geo.mode == "custom_location") and
+              (.geo.latitude == -13.3833) and
+              (.geo.longitude == -38.9167) and
+              (.geo.radius <= 15) and
               (.sourceCreativeId | length > 0) and
               (.account.id | tostring | endswith($account)) and
               .account.currency == $currency and
+              .pixelAccess.pixelId == "461233076843065" and
+              .pixelAccess.accountId == $account and
+              .pixelAccess.assigned == true and
               (.grantedScopes | index("ads_management") != null)
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-smoke-prepare.json
@@ -181,7 +188,7 @@ jobs:
             --wait \
             --quiet
 
-      - name: Capture provider-backed PAUSED evidence
+      - name: Capture provider-backed settled PAUSED evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -206,11 +213,14 @@ jobs:
             (.creativeIds | length == 1) and
             (.adIds | length == 1) and
             .providerVerification.campaign.status == "PAUSED" and
+            .providerVerification.campaign.effective_status == "PAUSED" and
             .providerVerification.adSet.status == "PAUSED" and
-            ([.providerVerification.ads[].status] | all(. == "PAUSED")) and
-            (.providerVerification.campaign.effective_status != "ACTIVE") and
-            (.providerVerification.adSet.effective_status != "ACTIVE") and
-            ([.providerVerification.ads[].effective_status] | all(. != "ACTIVE"))
+            (["PAUSED", "CAMPAIGN_PAUSED"] | index(.providerVerification.adSet.effective_status) != null) and
+            ((.providerVerification.adSet.issues_info // []) | length == 0) and
+            ([.providerVerification.ads[] | .status == "PAUSED"] | all) and
+            ([.providerVerification.ads[] | (["PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED"] | index(.effective_status) != null)] | all) and
+            ([.providerVerification.ads[] | ((.issues_info // []) | length == 0)] | all) and
+            ([.providerVerification.ads[] | ((.failed_delivery_checks // []) | length == 0)] | all)
           ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-smoke-execute.json
           echo 'META_ADS_CREATE_PAUSED_PROVIDER_VALIDATED=1'
