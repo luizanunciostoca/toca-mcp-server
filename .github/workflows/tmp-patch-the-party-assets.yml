@@ -1,0 +1,93 @@
+name: Temporary The Party Asset Loader Patch
+
+on:
+  push:
+    branches:
+      - feat/meta-ads-the-party-2026-08-15-execution
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Patch runner deterministically
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/meta-ads-the-party-2026-08-15.ts')
+          text = path.read_text()
+
+          old_prepare = """  const descriptor = buildTheParty20260815Descriptor();
+            assertExactTheParty20260815Descriptor(descriptor);
+            const assets = await loadAndVerifyAssets(descriptor);"""
+          new_prepare = """  const descriptor = buildTheParty20260815Descriptor();
+            assertExactTheParty20260815Descriptor(descriptor);
+            assertCampaignStartStillFuture(descriptor);
+            const assets = await loadAndVerifyAssets(descriptor);"""
+          if old_prepare not in text:
+              raise SystemExit('prepare insertion anchor not found')
+          text = text.replace(old_prepare, new_prepare, 1)
+
+          old_execute = """  assertExactTheParty20260815Descriptor(descriptor);
+            const computedSha256 = theParty20260815DescriptorSha256(descriptor);"""
+          new_execute = """  assertExactTheParty20260815Descriptor(descriptor);
+            assertCampaignStartStillFuture(descriptor);
+            const computedSha256 = theParty20260815DescriptorSha256(descriptor);"""
+          if old_execute not in text:
+              raise SystemExit('execute insertion anchor not found')
+          text = text.replace(old_execute, new_execute, 1)
+
+          old_loader = """  for (const asset of descriptor.assets) {
+              const path = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+              const base64 = (await readFile(path, 'utf8')).replace(/\\s+/g, '');
+              const bytes = Buffer.from(base64, 'base64');"""
+          new_loader = """  for (const asset of descriptor.assets) {
+              const basePath = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+              const parts = await Promise.all(
+                Array.from({ length: asset.partCount }, async (_, index) =>
+                  readFile(`${basePath}.part-${String(index + 1).padStart(2, '0')}`, 'utf8'),
+                ),
+              );
+              const base64 = parts.join('').replace(/\\s+/g, '');
+              const bytes = Buffer.from(base64, 'base64');"""
+          if old_loader not in text:
+              raise SystemExit('asset loader anchor not found')
+          text = text.replace(old_loader, new_loader, 1)
+
+          anchor = """function requiredEnv(name: string): string {"""
+          time_lock = """function assertCampaignStartStillFuture(
+            descriptor: TheParty20260815CampaignDescriptor,
+          ): void {
+            const startTime = new Date(descriptor.adSet.startTime).getTime();
+            if (!Number.isFinite(startTime) || Date.now() >= startTime) {
+              throw new Error('META_ADS_THE_PARTY_START_ALREADY_REACHED');
+            }
+          }
+
+          function requiredEnv(name: string): string {"""
+          if anchor not in text:
+              raise SystemExit('time lock anchor not found')
+          text = text.replace(anchor, time_lock, 1)
+          path.write_text(text)
+          PY
+          pnpm exec prettier src/meta-ads-the-party-2026-08-15.ts --write
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/meta-ads-the-party-2026-08-15.ts
+          git commit -m 'feat(meta-ads): verify chunked creatives and campaign time lock'
+          git push origin HEAD:feat/meta-ads-the-party-2026-08-15-execution
