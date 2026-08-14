@@ -15,16 +15,14 @@ export const THE_PARTY_2026_08_15_END_TIME = '2026-08-16T01:00:00-03:00';
 export const THE_PARTY_2026_08_15_ASSETS = [
   {
     key: 'creative-1',
-    fileName: 'creative-1.jpg.b64',
-    partCount: 4,
+    fileName: 'creative-1.jpg',
     sourceSha256: 'ee8128a08cf5143c581fba135384f2cf8d2f95c2d7258d4ff8c6740469351022',
     creativeName: 'The Party 15-08 | Festa da ilha',
     adName: 'The Party 15-08 | Creative 01 | Festa da ilha',
   },
   {
     key: 'creative-2',
-    fileName: 'creative-2.jpg.b64',
-    partCount: 5,
+    fileName: 'creative-2.jpg',
     sourceSha256: '2adab63d6ecac535d4a5ac5b1adea45ee99b5be7edc3c867a712eb4ce2fa770d',
     creativeName: 'The Party 15-08 | Bar dobrado 2x1',
     adName: 'The Party 15-08 | Creative 02 | Bar dobrado 2x1',
@@ -76,7 +74,6 @@ export interface TheParty20260815CampaignDescriptor {
   readonly assets: readonly {
     readonly key: string;
     readonly fileName: string;
-    readonly partCount: number;
     readonly sourceSha256: string;
     readonly creativeName: string;
     readonly adName: string;
