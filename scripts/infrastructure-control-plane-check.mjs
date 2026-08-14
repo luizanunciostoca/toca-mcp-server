@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const required = [
   '.github/workflows/infrastructure-control-plane.yml',
+  '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
   '.github/workflows/provision-instagram-publication-assets-gcs.yml',
   'infra/control-plane/policy.json',
   'infra/control-plane/storage-bucket-admin-role.yaml',
@@ -16,6 +17,7 @@ for (const path of required) {
 }
 
 const workflowPath = '.github/workflows/infrastructure-control-plane.yml';
+const daemonWorkflowPath = '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml';
 const legacyProvisionPath = '.github/workflows/provision-instagram-publication-assets-gcs.yml';
 const policyPath = 'infra/control-plane/policy.json';
 const rolePath = 'infra/control-plane/storage-bucket-admin-role.yaml';
@@ -23,6 +25,7 @@ const infraAdmin = 'toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount
 const runtime = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com';
 
 const workflow = readFileSync(workflowPath, 'utf8');
+const daemonWorkflow = readFileSync(daemonWorkflowPath, 'utf8');
 const legacyProvision = readFileSync(legacyProvisionPath, 'utf8');
 const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
 const role = readFileSync(rolePath, 'utf8');
@@ -42,17 +45,6 @@ const workflowRequirements = [
   'roles/storage.objectViewer',
   'allUsers',
   'allAuthenticatedUsers',
-  'reconcile-toca-managed-instagram-heartbeat',
-  'worker_image',
-  'server@sha256:',
-  'TOCA_MANAGED_JOB_NAME: toca-managed-instagram-publication-worker',
-  'TOCA_MANAGED_SCHEDULER_NAME: toca-managed-instagram-publication-heartbeat',
-  'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=false',
-  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false',
-  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false',
-  'META_ENABLED=false',
-  'roles/run.invoker',
-  'gcloud scheduler jobs pause',
 ];
 
 for (const marker of workflowRequirements) {
@@ -70,14 +62,14 @@ const forbiddenWorkflowMarkers = [
   'storage.buckets.delete',
   '--member="allUsers"',
   '--member="allAuthenticatedUsers"',
-  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
-  'INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
-  'gcloud scheduler jobs resume',
+  'reconcile-toca-managed-instagram-heartbeat',
+  'gcloud scheduler jobs',
+  'gcloud run jobs deploy',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
   if (workflow.includes(forbidden)) {
-    console.error(`Infrastructure workflow contains forbidden capability: ${forbidden}`);
+    console.error(`Infrastructure workflow contains forbidden/superseded capability: ${forbidden}`);
     process.exit(1);
   }
 }
@@ -103,8 +95,7 @@ if (
   process.exit(1);
 }
 
-const operation = 'reconcile-publication-assets-bucket';
-const publicationBucket = policy.allowedOperations?.[operation];
+const publicationBucket = policy.allowedOperations?.['reconcile-publication-assets-bucket'];
 const runtimeRoles = publicationBucket?.runtimeRoles;
 
 if (
@@ -122,20 +113,46 @@ if (
   process.exit(1);
 }
 
-const heartbeat = policy.allowedOperations?.['reconcile-toca-managed-instagram-heartbeat'];
-if (
-  heartbeat?.resourceType !== 'cloud-run-job+cloud-scheduler-job' ||
-  heartbeat?.cloudRunJobName !== 'toca-managed-instagram-publication-worker' ||
-  heartbeat?.schedulerJobName !== 'toca-managed-instagram-publication-heartbeat' ||
-  heartbeat?.schedule !== '*/5 * * * *' ||
-  heartbeat?.timeZone !== 'America/Bahia' ||
-  heartbeat?.runtimeServiceAccount !== runtime ||
-  heartbeat?.executorEnabledByDefault !== false ||
-  heartbeat?.schedulerPausedByDefault !== true ||
-  heartbeat?.contentPayloadAllowed !== false
-) {
-  console.error('TOCA-managed Instagram heartbeat is outside the approved envelope');
+if (policy.allowedOperations?.['reconcile-toca-managed-instagram-heartbeat']) {
+  console.error('Legacy heartbeat must not remain an active infrastructure operation');
   process.exit(1);
+}
+
+const daemon = policy.activeRuntime?.tocaManagedInstagramScheduler;
+if (
+  daemon?.resourceType !== 'cloud-run-service' ||
+  daemon?.resourceName !== 'toca-managed-instagram-daemon' ||
+  daemon?.runtimeServiceAccount !== runtime ||
+  daemon?.private !== true ||
+  daemon?.minInstances !== 1 ||
+  daemon?.maxInstances !== 1 ||
+  daemon?.concurrency !== 1 ||
+  daemon?.pollIntervalMs !== 60000 ||
+  daemon?.schedulerBackend !== 'postgresql' ||
+  daemon?.scheduleTransport !== 'protected-mcp' ||
+  daemon?.contentPayloadInInfrastructureTimer !== false ||
+  daemon?.legacyHeartbeatSuperseded !== true
+) {
+  console.error('TOCA-managed Instagram daemon topology is outside the approved envelope');
+  process.exit(1);
+}
+
+const daemonRequirements = [
+  'SERVICE_NAME: toca-managed-instagram-daemon',
+  '--min-instances 1',
+  '--max-instances 1',
+  '--concurrency 1',
+  '--no-allow-unauthenticated',
+  'TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS=60000',
+  'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true',
+  'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+];
+
+for (const marker of daemonRequirements) {
+  if (!daemonWorkflow.includes(marker)) {
+    console.error(`Daemon deploy workflow missing active topology marker: ${marker}`);
+    process.exit(1);
+  }
 }
 
 const forbiddenPolicyFlags = [
@@ -147,6 +164,8 @@ const forbiddenPolicyFlags = [
   'runtimePrivilegeEscalation',
   'publicBucketIam',
   'perContentSchedulerJobs',
+  'legacyHeartbeatRecreation',
+  'deployAsSchedulingTransport',
 ];
 
 for (const key of forbiddenPolicyFlags) {
