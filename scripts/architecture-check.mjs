@@ -271,8 +271,8 @@ if (
   !metaAdsControlledWrite.includes('META_ADS_APPROVAL_SHA256_MISMATCH') ||
   !metaAdsControlledWrite.includes('META_ADS_DUPLICATE_CAMPAIGN_NAME') ||
   metaAdsControlledWrite.includes("status: 'ACTIVE'") ||
-  metaAdsControlledWrite.includes("updateStatus(") ||
-  metaAdsControlledWrite.includes("updateBudget(")
+  metaAdsControlledWrite.includes('updateStatus(') ||
+  metaAdsControlledWrite.includes('updateBudget(')
 ) {
   console.error('Meta Ads controlled write must remain create-paused-only and approval-bound');
   process.exit(1);
