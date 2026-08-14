@@ -50,6 +50,9 @@ export interface TheParty20260815CampaignDescriptor {
     readonly targeting: {
       readonly age_min: 21;
       readonly age_max: 45;
+      readonly targeting_automation: {
+        readonly advantage_audience: 0;
+      };
       readonly geo_locations: {
         readonly custom_locations: readonly [
           {
@@ -103,6 +106,9 @@ export function buildTheParty20260815Descriptor(): TheParty20260815CampaignDescr
       targeting: {
         age_min: 21,
         age_max: 45,
+        targeting_automation: {
+          advantage_audience: 0,
+        },
         geo_locations: {
           custom_locations: [
             {
