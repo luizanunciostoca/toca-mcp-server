@@ -37,12 +37,13 @@ describe('The Party 2026-08-15 approved Meta Ads descriptor', () => {
     expect(() => assertExactTheParty20260815Descriptor(descriptor)).not.toThrow();
   });
 
-  it('pins broad-local Morro targeting without interests or explicit placements', () => {
+  it('pins broad-local Morro targeting with original audience options', () => {
     const descriptor = buildTheParty20260815Descriptor();
     const targeting = descriptor.adSet.targeting as unknown as Record<string, unknown>;
 
     expect(targeting.age_min).toBe(21);
     expect(targeting.age_max).toBe(45);
+    expect(targeting.targeting_automation).toEqual({ advantage_audience: 0 });
     expect(targeting.geo_locations).toEqual({
       custom_locations: [
         {
@@ -74,6 +75,18 @@ describe('The Party 2026-08-15 approved Meta Ads descriptor', () => {
     expect(() => assertExactTheParty20260815Descriptor(mutated)).toThrow(
       'META_ADS_THE_PARTY_DESCRIPTOR_NOT_CANONICAL',
     );
+  });
+
+  it('fails closed if Advantage Audience is enabled', () => {
+    const mutated = structuredClone(buildTheParty20260815Descriptor()) as unknown as {
+      adSet: { targeting: { targeting_automation: { advantage_audience: number } } };
+    };
+    mutated.adSet.targeting.targeting_automation.advantage_audience = 1;
+    expect(() =>
+      assertExactTheParty20260815Descriptor(
+        mutated as unknown as TheParty20260815CampaignDescriptor,
+      ),
+    ).toThrow('META_ADS_THE_PARTY_DESCRIPTOR_NOT_CANONICAL');
   });
 
   it('pins the exact two approved Drive-backed creative sources and checksums', () => {
