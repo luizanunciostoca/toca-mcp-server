@@ -21,7 +21,7 @@ export interface Scheduler {
   cancel(id: string): Promise<ScheduledJob | undefined>;
   list(toolName?: string): Promise<readonly ScheduledJob[]>;
   claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]>;
-  markSucceeded(id: string): Promise<void>;
+  markSucceeded(id: string, result?: unknown): Promise<void>;
   markFailed(id: string, normalizedError: string): Promise<void>;
 }
 
