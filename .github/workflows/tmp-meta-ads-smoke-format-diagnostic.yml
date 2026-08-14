@@ -1,0 +1,33 @@
+name: Temporary Meta Ads Smoke Format Diagnostic
+
+on:
+  push:
+    branches:
+      - fix/meta-ads-smoke-run-isolation
+    paths:
+      - src/meta-ads-create-paused-smoke.ts
+      - .github/workflows/tmp-meta-ads-smoke-format-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  format-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Print exact Prettier diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier src/meta-ads-create-paused-smoke.ts --write
+          git diff -- src/meta-ads-create-paused-smoke.ts
+          test -n "$(git diff -- src/meta-ads-create-paused-smoke.ts)"
