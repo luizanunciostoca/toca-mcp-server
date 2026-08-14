@@ -62,9 +62,7 @@ export class PostgresPublicationExecutionStore implements PublicationExecutionSt
     const evidence: PublicationEvidencePayload = {
       ...(record.permalink ? { permalink: record.permalink } : {}),
       ...(record.providerPublishedAt ? { providerPublishedAt: record.providerPublishedAt } : {}),
-      ...(record.reconciliationSource
-        ? { reconciliationSource: record.reconciliationSource }
-        : {}),
+      ...(record.reconciliationSource ? { reconciliationSource: record.reconciliationSource } : {}),
     };
     const result = await this.pool.query(
       `update provider_publications
@@ -107,9 +105,7 @@ function mapRow(row: PublicationRow): PublicationRecord {
         ? { externalContainerId: row.external_resource_id }
         : {}),
     ...(evidence?.permalink ? { permalink: evidence.permalink } : {}),
-    ...(evidence?.providerPublishedAt
-      ? { providerPublishedAt: evidence.providerPublishedAt }
-      : {}),
+    ...(evidence?.providerPublishedAt ? { providerPublishedAt: evidence.providerPublishedAt } : {}),
     ...(evidence?.reconciliationSource
       ? { reconciliationSource: evidence.reconciliationSource }
       : {}),
