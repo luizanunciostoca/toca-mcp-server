@@ -13,8 +13,10 @@ permissions:
 
 env:
   GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   FAILED_JOB_NAME: toca-meta-ads-party-31774472725
   EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31774472725
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
@@ -22,6 +24,7 @@ env:
   META_GRAPH_API_VERSION: v24.0
   META_AD_ACCOUNT_ID: '311793958882290'
   EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
+  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-81be90a0beb688dff0ad25999bdd3db081118e63
 
 jobs:
   diagnose:
@@ -60,62 +63,101 @@ jobs:
             --limit=500 \
             --format=json > meta-ads-the-party-failure-diagnostic.json
           test -s meta-ads-the-party-failure-diagnostic.json
-          echo '--- CLOUD RUN FAILURE DIAGNOSTIC ---'
-          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-the-party-failure-diagnostic.json
 
-      - name: Reconcile provider state read-only
+      - name: Reconcile provider state through runtime identity
         shell: bash
         run: |
           set -euo pipefail
-          META_TOKEN="$(gcloud secrets versions access latest \
-            --secret "$META_TOKEN_SECRET_ID" \
-            --project "$GCP_PROJECT_ID")"
-          test -n "$META_TOKEN"
+          RECON_JOB_NAME="toca-meta-ads-reconcile-${GITHUB_RUN_ID}"
+          cleanup() {
+            gcloud run jobs delete "$RECON_JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
 
-          curl --fail --silent --show-error --get \
-            -H "Authorization: Bearer $META_TOKEN" \
-            --data-urlencode 'fields=id,name,status,effective_status,objective,special_ad_categories' \
-            --data-urlencode 'limit=100' \
-            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/act_$META_AD_ACCOUNT_ID/campaigns" \
-            > /tmp/campaigns.json
+          JS_CODE="$(cat <<'NODE'
+          const token = process.env.META_TOKEN;
+          const base = process.env.META_GRAPH_BASE_URL;
+          const version = process.env.META_GRAPH_API_VERSION;
+          const accountId = process.env.META_AD_ACCOUNT_ID;
+          const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
+          if (!token || !base || !version || !accountId || !expectedName) throw new Error('RECON_CONFIG_MISSING');
+          async function graph(path, params) {
+            const url = new URL(`${base}/${version}/${path}`);
+            for (const [key, value] of Object.entries(params || {})) url.searchParams.set(key, value);
+            const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(`RECON_META_HTTP_${response.status}`);
+            return payload;
+          }
+          const campaigns = await graph(`act_${accountId}/campaigns`, {
+            fields: 'id,name,status,effective_status,objective,special_ad_categories',
+            limit: '100',
+          });
+          const matches = (Array.isArray(campaigns.data) ? campaigns.data : []).filter((item) => item.name === expectedName);
+          if (matches.length !== 1) throw new Error(`RECON_CAMPAIGN_MATCH_COUNT_${matches.length}`);
+          const campaign = matches[0];
+          const adSetsPayload = await graph(`${campaign.id}/adsets`, {
+            fields: 'id,name,status,effective_status,start_time,end_time,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting',
+            limit: '100',
+          });
+          const adsPayload = await graph(`${campaign.id}/ads`, {
+            fields: 'id,name,status,effective_status,creative',
+            limit: '100',
+          });
+          const result = {
+            campaign,
+            adSets: Array.isArray(adSetsPayload.data) ? adSetsPayload.data : [],
+            ads: Array.isArray(adsPayload.data) ? adsPayload.data : [],
+          };
+          console.log(`META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=${JSON.stringify(result)}`);
+          NODE
+          )"
 
-          jq --arg name "$EXPECTED_CAMPAIGN_NAME" \
-            '[.data[] | select(.name == $name)]' /tmp/campaigns.json \
-            > /tmp/matches.json
-          MATCH_COUNT="$(jq 'length' /tmp/matches.json)"
-          test "$MATCH_COUNT" -eq 1
-          CAMPAIGN_ID="$(jq -r '.[0].id' /tmp/matches.json)"
-          test -n "$CAMPAIGN_ID"
+          gcloud run jobs deploy "$RECON_JOB_NAME" \
+            --image "$RECON_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args "^~^-e~$JS_CODE" \
+            --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_AD_ACCOUNT_ID=$META_AD_ACCOUNT_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
 
-          curl --fail --silent --show-error --get \
-            -H "Authorization: Bearer $META_TOKEN" \
-            --data-urlencode 'fields=id,name,status,effective_status,start_time,end_time,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting' \
-            --data-urlencode 'limit=100' \
-            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/$CAMPAIGN_ID/adsets" \
-            > /tmp/adsets.json
+          gcloud run jobs execute "$RECON_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
 
-          curl --fail --silent --show-error --get \
-            -H "Authorization: Bearer $META_TOKEN" \
-            --data-urlencode 'fields=id,name,status,effective_status,creative' \
-            --data-urlencode 'limit=100' \
-            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/$CAMPAIGN_ID/ads" \
-            > /tmp/ads.json
-
-          jq -n \
-            --slurpfile campaign /tmp/matches.json \
-            --slurpfile adsets /tmp/adsets.json \
-            --slurpfile ads /tmp/ads.json \
-            '{campaign: $campaign[0][0], adSets: ($adsets[0].data // []), ads: ($ads[0].data // [])}' \
-            > meta-ads-the-party-provider-reconciliation.json
-
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${RECON_JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=15m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_PROVIDER_RECONCILIATION=}"
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-provider-reconciliation.json
           echo '--- META PROVIDER RECONCILIATION ---'
-          jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}' \
-            meta-ads-the-party-provider-reconciliation.json
+          printf '%s\n' "$RESULT_JSON" | jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}'
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-the-party-failure-diagnostic-31774472725-v2
+          name: meta-ads-the-party-failure-diagnostic-31774472725-v3
           path: |
             meta-ads-the-party-failure-diagnostic.json
             meta-ads-the-party-provider-reconciliation.json
