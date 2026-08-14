@@ -155,6 +155,53 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
     expect(videoData).toHaveProperty('image_url');
   });
 
+  it('requests the created ad id explicitly and still requires an id response', async () => {
+    const { api, post } = createApiMock();
+    const provider = new MetaAdsControlledGraphProvider(api);
+
+    await expect(
+      provider.createAd(
+        { adAccountId: '311793958882290', currency: 'BRL' },
+        {
+          name: 'The Party | Creative 01',
+          adSetId: 'adset-1',
+          creativeId: 'creative-1',
+          status: 'PAUSED',
+        },
+      ),
+    ).resolves.toEqual({ id: 'provider-id-1' });
+
+    expect(post).toHaveBeenCalledWith('act_311793958882290/ads', {
+      name: 'The Party | Creative 01',
+      adset_id: 'adset-1',
+      creative: JSON.stringify({ creative_id: 'creative-1' }),
+      status: 'PAUSED',
+      fields: 'id',
+    });
+  });
+
+  it('fails closed when Meta does not return an ad id', async () => {
+    const api = {
+      get: vi.fn(),
+      post: vi.fn().mockResolvedValue({ success: true }),
+      postJson: vi.fn(),
+      postJsonWithAccessToken: vi.fn(),
+    } as unknown as MetaApiClient;
+    const provider = new MetaAdsControlledGraphProvider(api);
+
+    await expect(
+      provider.createAd(
+        { adAccountId: '311793958882290', currency: 'BRL' },
+        {
+          name: 'The Party | Creative 01',
+          adSetId: 'adset-1',
+          creativeId: 'creative-1',
+          status: 'PAUSED',
+        },
+      ),
+    ).rejects.toThrow();
+  });
+
   it('does not expose status or budget mutation through the controlled provider', async () => {
     const { api } = createApiMock();
     const provider = new MetaAdsControlledGraphProvider(api);
