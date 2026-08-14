@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -19,7 +19,7 @@
       "resourceName": "toca-mcp-db",
       "databaseVersion": "POSTGRES_18",
       "requireRecentSuccessfulBackupHours": 36,
-      "source": {
+      "originalSource": {
         "edition": "ENTERPRISE_PLUS",
         "availabilityType": "REGIONAL",
         "tier": "db-perf-optimized-N-8",
@@ -28,18 +28,47 @@
       },
       "storageShrink": {
         "enabled": true,
+        "completed": true,
         "sourceSizeGb": 250,
-        "minimumStorageGb": 10,
+        "providerMinimalTargetSizeGb": 56,
         "reserveBufferGb": 100,
-        "strategy": "minimal-target-plus-buffer",
-        "autoResizeHeadroomGb": 50,
-        "maximumAutoResizeLimitGb": 250,
+        "targetSizeGb": 156,
+        "autoIncreaseHeadroomGb": 50,
+        "autoIncreaseLimitGb": 206,
+        "completedProviderRunId": 31844320778,
+        "completedAt": "2026-08-14T22:01:48Z",
         "mustRunBeforeSharedCore": true
       },
+      "allowedResumeStates": [
+        {
+          "name": "STORAGE_SHRUNK",
+          "edition": "ENTERPRISE_PLUS",
+          "availabilityType": "REGIONAL",
+          "tier": "db-perf-optimized-N-8",
+          "dataDiskSizeGb": 156
+        },
+        {
+          "name": "HA_DISABLED",
+          "edition": "ENTERPRISE_PLUS",
+          "availabilityType": "ZONAL",
+          "tier": "db-perf-optimized-N-8",
+          "dataDiskSizeGb": 156
+        },
+        {
+          "name": "EDITION_TIER_DOWNGRADED",
+          "edition": "ENTERPRISE",
+          "availabilityType": "ZONAL",
+          "tier": "db-g1-small",
+          "dataDiskSizeGb": 156
+        }
+      ],
       "target": {
         "edition": "ENTERPRISE",
         "availabilityType": "ZONAL",
         "tier": "db-g1-small",
+        "dataDiskType": "PD_SSD",
+        "dataDiskSizeGb": 156,
+        "storageAutoIncreaseLimitGb": 206,
         "retainedBackups": 7,
         "transactionLogRetentionDays": 7
       },
@@ -59,6 +88,7 @@
         "sslMutation": true,
         "iamMutation": true,
         "billingMutation": true,
+        "secondStorageShrink": true,
         "unguardedDiskShrink": true
       }
     }
