@@ -5,6 +5,14 @@ import {
   type PublicationState,
 } from './publication-state.js';
 
+export interface PublishedMediaEvidence {
+  readonly mediaId: string;
+  readonly caption?: string;
+  readonly mediaType?: string;
+  readonly permalink?: string;
+  readonly timestamp?: string;
+}
+
 export interface InstagramPublicationTransport {
   createContainer(request: InstagramPublishRequest): Promise<{ readonly containerId: string }>;
   getContainerStatus(containerId: string): Promise<'IN_PROGRESS' | 'FINISHED' | 'ERROR'>;
@@ -12,6 +20,11 @@ export interface InstagramPublicationTransport {
     instagramAccountId: string,
     containerId: string,
   ): Promise<{ readonly mediaId: string }>;
+  getPublishedMedia(mediaId: string): Promise<PublishedMediaEvidence>;
+  listRecentPublishedMedia(
+    instagramAccountId: string,
+    limit?: number,
+  ): Promise<readonly PublishedMediaEvidence[]>;
 }
 
 export interface PublicationExecutionStore {
