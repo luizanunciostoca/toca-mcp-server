@@ -79,8 +79,8 @@ describe('The Party 2026-08-15 approved Meta Ads descriptor', () => {
   it('pins the exact two approved asset checksums', () => {
     const descriptor = buildTheParty20260815Descriptor();
     expect(descriptor.assets.map((asset) => asset.sourceSha256)).toEqual([
-      'd2dfcef77e213bb783c8c2a7e479ab96653ecc8ea990c3152106267b945736cd',
-      '7a1858b003edfc61e4be0beb2e10b8f3486caaddbb6d74033732146833af1cf4',
+      'ee8128a08cf5143c581fba135384f2cf8d2f95c2d7258d4ff8c6740469351022',
+      '2adab63d6ecac535d4a5ac5b1adea45ee99b5be7edc3c867a712eb4ce2fa770d',
     ]);
   });
 });
