@@ -17,6 +17,11 @@ env:
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   FAILED_JOB_NAME: toca-meta-ads-party-31774472725
   EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31774472725
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_GRAPH_BASE_URL: https://graph.facebook.com
+  META_GRAPH_API_VERSION: v24.0
+  META_AD_ACCOUNT_ID: '311793958882290'
+  EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
 
 jobs:
   diagnose:
@@ -58,10 +63,61 @@ jobs:
           echo '--- CLOUD RUN FAILURE DIAGNOSTIC ---'
           jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-the-party-failure-diagnostic.json
 
+      - name: Reconcile provider state read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          META_TOKEN="$(gcloud secrets versions access latest \
+            --secret "$META_TOKEN_SECRET_ID" \
+            --project "$GCP_PROJECT_ID")"
+          test -n "$META_TOKEN"
+
+          curl --fail --silent --show-error --get \
+            -H "Authorization: Bearer $META_TOKEN" \
+            --data-urlencode 'fields=id,name,status,effective_status,objective,special_ad_categories' \
+            --data-urlencode 'limit=100' \
+            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/act_$META_AD_ACCOUNT_ID/campaigns" \
+            > /tmp/campaigns.json
+
+          jq --arg name "$EXPECTED_CAMPAIGN_NAME" \
+            '[.data[] | select(.name == $name)]' /tmp/campaigns.json \
+            > /tmp/matches.json
+          MATCH_COUNT="$(jq 'length' /tmp/matches.json)"
+          test "$MATCH_COUNT" -eq 1
+          CAMPAIGN_ID="$(jq -r '.[0].id' /tmp/matches.json)"
+          test -n "$CAMPAIGN_ID"
+
+          curl --fail --silent --show-error --get \
+            -H "Authorization: Bearer $META_TOKEN" \
+            --data-urlencode 'fields=id,name,status,effective_status,start_time,end_time,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting' \
+            --data-urlencode 'limit=100' \
+            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/$CAMPAIGN_ID/adsets" \
+            > /tmp/adsets.json
+
+          curl --fail --silent --show-error --get \
+            -H "Authorization: Bearer $META_TOKEN" \
+            --data-urlencode 'fields=id,name,status,effective_status,creative' \
+            --data-urlencode 'limit=100' \
+            "$META_GRAPH_BASE_URL/$META_GRAPH_API_VERSION/$CAMPAIGN_ID/ads" \
+            > /tmp/ads.json
+
+          jq -n \
+            --slurpfile campaign /tmp/matches.json \
+            --slurpfile adsets /tmp/adsets.json \
+            --slurpfile ads /tmp/ads.json \
+            '{campaign: $campaign[0][0], adSets: ($adsets[0].data // []), ads: ($ads[0].data // [])}' \
+            > meta-ads-the-party-provider-reconciliation.json
+
+          echo '--- META PROVIDER RECONCILIATION ---'
+          jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}' \
+            meta-ads-the-party-provider-reconciliation.json
+
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-the-party-failure-diagnostic-31774472725
-          path: meta-ads-the-party-failure-diagnostic.json
+          name: meta-ads-the-party-failure-diagnostic-31774472725-v2
+          path: |
+            meta-ads-the-party-failure-diagnostic.json
+            meta-ads-the-party-provider-reconciliation.json
           if-no-files-found: error
           retention-days: 30
