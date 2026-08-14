@@ -71,13 +71,11 @@ if (gate === 'PERMISSIONS') {
     }),
   );
   const data = Array.isArray(response.data) ? response.data : [];
-  const eligible = data
-    .map(asRecord)
-    .filter((item) => {
-      const spec = asRecord(item.object_story_spec);
-      if (!scalarString(item.id) || scalarString(spec.page_id) !== pageId) return false;
-      return Boolean(spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
-    });
+  const eligible = data.map(asRecord).filter((item) => {
+    const spec = asRecord(item.object_story_spec);
+    if (!scalarString(item.id) || scalarString(spec.page_id) !== pageId) return false;
+    return Boolean(spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
+  });
   if (eligible.length === 0) throw new Error('META_ADS_DIAGNOSTIC_SOURCE_CREATIVE_NOT_FOUND');
   console.log(`META_ADS_DIAGNOSTIC_CREATIVE_OK=${eligible.length}`);
 } else {
