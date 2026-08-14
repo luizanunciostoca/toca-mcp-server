@@ -60,15 +60,19 @@ export function isTerminalState<State extends string>(
 export function validateStateMachineDefinition<State extends string>(
   definition: StateMachineDefinition<State>,
 ): void {
-  const states = new Set<string>([
-    definition.initialState,
-    ...definition.terminalStates,
-    ...Object.keys(definition.transitions),
-    ...Object.values(definition.transitions).flat(),
-  ]);
+  const transitionStates = Object.keys(definition.transitions) as State[];
+  const states = new Set<string>(transitionStates);
   if (!states.has(definition.initialState)) throw new Error('STATE_MACHINE_INITIAL_STATE_MISSING');
   for (const terminal of definition.terminalStates) {
+    if (!states.has(terminal))
+      throw new Error(`STATE_MACHINE_TERMINAL_STATE_MISSING:${terminal}`);
     if ((definition.transitions[terminal] ?? []).length > 0)
       throw new Error(`STATE_MACHINE_TERMINAL_HAS_TRANSITIONS:${terminal}`);
+  }
+  for (const state of transitionStates) {
+    for (const target of definition.transitions[state] ?? []) {
+      if (!states.has(target))
+        throw new Error(`STATE_MACHINE_TARGET_STATE_MISSING:${target}`);
+    }
   }
 }

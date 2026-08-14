@@ -25,8 +25,16 @@ import {
 describe('R24-R26 and R28-R32 structural lifecycles', () => {
   it('defines valid deterministic transition graphs', () => {
     expect(STRUCTURAL_LIFECYCLES).toHaveLength(8);
-    for (const definition of STRUCTURAL_LIFECYCLES)
-      expect(() => validateStateMachineDefinition(definition)).not.toThrow();
+    expect(() => {
+      validateStateMachineDefinition(SECURITY_LIFECYCLE);
+      validateStateMachineDefinition(INCIDENT_LIFECYCLE);
+      validateStateMachineDefinition(DISASTER_RECOVERY_LIFECYCLE);
+      validateStateMachineDefinition(META_ADS_LIFECYCLE);
+      validateStateMachineDefinition(CONTENT_ITEM_LIFECYCLE);
+      validateStateMachineDefinition(ENGAGEMENT_LIFECYCLE);
+      validateStateMachineDefinition(PERFORMANCE_LEARNING_LIFECYCLE);
+      validateStateMachineDefinition(REGISTRY_GOVERNANCE_LIFECYCLE);
+    }).not.toThrow();
     expect([
       SECURITY_LIFECYCLE.id,
       INCIDENT_LIFECYCLE.id,
