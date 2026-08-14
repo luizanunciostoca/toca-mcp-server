@@ -30,6 +30,9 @@ export class InstagramPublicationReconciler {
     const record = await this.store.reserve(request, this.now());
     if (record.state === 'PUBLISHED') return { publication: record, completed: true };
     if (record.state === 'CANCELED') return undefined;
+    if (!this.transport.listRecentPublishedMedia) {
+      throw new Error('INSTAGRAM_PUBLICATION_RECONCILIATION_UNAVAILABLE');
+    }
 
     const recent = await this.transport.listRecentPublishedMedia(
       request.account.instagramAccountId,
@@ -77,7 +80,7 @@ function normalizeCaption(value: string | undefined): string {
 
 function normalizeMediaType(value: string | undefined): InstagramPublishRequest['mediaType'] | undefined {
   if (value === 'IMAGE') return 'IMAGE';
-  if (value === 'VIDEO' || value === 'REELS') return 'VIDEO';
+  if (value === 'VIDEO' || value === 'REELS') return 'REEL';
   if (value === 'CAROUSEL_ALBUM') return 'CAROUSEL';
   return undefined;
 }
