@@ -271,14 +271,9 @@ async function loadAndVerifyAssets(
 ): Promise<readonly VerifiedAsset[]> {
   const verified: VerifiedAsset[] = [];
   for (const asset of descriptor.assets) {
-    const basePath = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
-    const parts = await Promise.all(
-      Array.from({ length: asset.partCount }, async (_, index) =>
-        readFile(`${basePath}.part-${String(index + 1).padStart(2, '0')}`, 'utf8'),
-      ),
-    );
-    const base64 = parts.join('').replace(/\s+/g, '');
-    const bytes = Buffer.from(base64, 'base64');
+    const path = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+    const bytes = await readFile(path);
+    const base64 = bytes.toString('base64');
     if (bytes.length < 100_000 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
       throw new Error(`META_ADS_THE_PARTY_ASSET_INVALID_${asset.key}`);
     }
