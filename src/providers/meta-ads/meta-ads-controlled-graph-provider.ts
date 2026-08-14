@@ -102,19 +102,26 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
   }
 
   updateStatus(
-    _account: MetaAdAccountRef,
-    _entityId: string,
-    _status: MetaAdEntityStatus,
+    account: MetaAdAccountRef,
+    entityId: string,
+    status: MetaAdEntityStatus,
   ): Promise<void> {
+    void account;
+    void entityId;
+    void status;
     return Promise.reject(new Error('META_ADS_STATUS_MUTATION_NOT_ALLOWED'));
   }
 
   updateBudget(
-    _account: MetaAdAccountRef,
-    _adSetId: string,
-    _budgetMinor: number,
-    _budgetType: 'DAILY' | 'LIFETIME',
+    account: MetaAdAccountRef,
+    adSetId: string,
+    budgetMinor: number,
+    budgetType: 'DAILY' | 'LIFETIME',
   ): Promise<void> {
+    void account;
+    void adSetId;
+    void budgetMinor;
+    void budgetType;
     return Promise.reject(new Error('META_ADS_BUDGET_MUTATION_NOT_ALLOWED'));
   }
 }
