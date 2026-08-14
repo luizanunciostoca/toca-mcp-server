@@ -47,6 +47,10 @@ const workflowRequirements = [
   '.deliveryMode == "signed-url"',
   'roles/storage.objectCreator',
   'roles/storage.objectViewer',
+  'get-storage-shrink-config',
+  'perform-storage-shrink',
+  '--no-async',
+  '--storage-auto-increase-limit',
   '--availability-type=zonal',
   '--edition=enterprise',
   '--tier=db-g1-small',
@@ -142,6 +146,14 @@ if (
   cloudSqlOptimization?.source?.tier !== 'db-perf-optimized-N-8' ||
   cloudSqlOptimization?.source?.dataDiskType !== 'PD_SSD' ||
   cloudSqlOptimization?.source?.dataDiskSizeGb !== 250 ||
+  cloudSqlOptimization?.storageShrink?.enabled !== true ||
+  cloudSqlOptimization?.storageShrink?.sourceSizeGb !== 250 ||
+  cloudSqlOptimization?.storageShrink?.minimumStorageGb !== 10 ||
+  cloudSqlOptimization?.storageShrink?.reserveBufferGb !== 100 ||
+  cloudSqlOptimization?.storageShrink?.strategy !== 'minimal-target-plus-buffer' ||
+  cloudSqlOptimization?.storageShrink?.autoResizeHeadroomGb !== 50 ||
+  cloudSqlOptimization?.storageShrink?.maximumAutoResizeLimitGb !== 250 ||
+  cloudSqlOptimization?.storageShrink?.mustRunBeforeSharedCore !== true ||
   cloudSqlOptimization?.target?.edition !== 'ENTERPRISE' ||
   cloudSqlOptimization?.target?.availabilityType !== 'ZONAL' ||
   cloudSqlOptimization?.target?.tier !== 'db-g1-small' ||
@@ -149,10 +161,10 @@ if (
   cloudSqlOptimization?.target?.transactionLogRetentionDays !== 7 ||
   cloudSqlOptimization?.preserve?.databaseVersion !== true ||
   cloudSqlOptimization?.preserve?.dataDiskType !== true ||
-  cloudSqlOptimization?.preserve?.dataDiskSizeGb !== true ||
   cloudSqlOptimization?.preserve?.deletionProtection !== true ||
   cloudSqlOptimization?.preserve?.automatedBackups !== true ||
   cloudSqlOptimization?.preserve?.pointInTimeRecovery !== true ||
+  cloudSqlOptimization?.preserve?.storageAutoResize !== true ||
   cloudSqlOptimization?.forbid?.instanceDelete !== true ||
   cloudSqlOptimization?.forbid?.databaseDelete !== true ||
   cloudSqlOptimization?.forbid?.backupDelete !== true ||
@@ -160,7 +172,7 @@ if (
   cloudSqlOptimization?.forbid?.sslMutation !== true ||
   cloudSqlOptimization?.forbid?.iamMutation !== true ||
   cloudSqlOptimization?.forbid?.billingMutation !== true ||
-  cloudSqlOptimization?.forbid?.diskShrinkInPlace !== true
+  cloudSqlOptimization?.forbid?.unguardedDiskShrink !== true
 ) {
   console.error('Cloud SQL cost optimization is outside the approved envelope');
   process.exit(1);
@@ -247,6 +259,8 @@ const requiredCloudSqlPermissions = [
   'cloudsql.instances.get',
   'cloudsql.instances.list',
   'cloudsql.instances.update',
+  'cloudsql.instances.getDiskShrinkConfig',
+  'cloudsql.instances.performDiskShrink',
   'cloudsql.backupRuns.get',
   'cloudsql.backupRuns.list',
   'resourcemanager.projects.get',
