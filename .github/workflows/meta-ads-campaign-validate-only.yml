@@ -43,13 +43,15 @@ jobs:
           cat > /tmp/meta-campaign-validate/validate.mjs <<'NODE'
           const token = process.env.META_ACCESS_TOKEN;
           const accountId = process.env.META_ADS_ACCOUNT_ID;
-          if (!token || !accountId) throw new Error('VALIDATE_ONLY_CONFIGURATION_MISSING');
+          const validationId = process.env.META_ADS_VALIDATION_ID;
+          if (!token || !accountId || !validationId) throw new Error('VALIDATE_ONLY_CONFIGURATION_MISSING');
 
           const params = new URLSearchParams({
-            name: 'TOCA | P0 VALIDATE_ONLY | 2026-08-14',
+            name: `TOCA | P0 VALIDATE_ONLY | ${validationId}`,
             objective: 'OUTCOME_SALES',
             status: 'PAUSED',
             special_ad_categories: JSON.stringify([]),
+            is_adset_budget_sharing_enabled: 'false',
             execution_options: JSON.stringify(['validate_only']),
           });
           const response = await fetch(`https://graph.facebook.com/v24.0/act_${accountId}/campaigns`, {
@@ -72,6 +74,7 @@ jobs:
 
           if (!response.ok) {
             console.log(`META_ADS_VALIDATE_ONLY_RESULT=${JSON.stringify({
+              validationId,
               httpStatus: response.status,
               type: sanitize(error.type),
               code: Number.isFinite(Number(error.code)) ? Number(error.code) : null,
@@ -84,7 +87,7 @@ jobs:
           }
 
           const id = body && typeof body === 'object' && !Array.isArray(body) ? body.id : undefined;
-          console.log(`META_ADS_VALIDATE_ONLY_RESULT=${JSON.stringify({ httpStatus: response.status, ok: true, returnedId: id ?? null })}`);
+          console.log(`META_ADS_VALIDATE_ONLY_RESULT=${JSON.stringify({ validationId, httpStatus: response.status, ok: true, returnedId: id ?? null })}`);
           if (id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
           NODE
 
@@ -100,6 +103,7 @@ jobs:
           docker build -t "$IMAGE" /tmp/meta-campaign-validate
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "VALIDATION_ID=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       - name: Deploy validate-only Cloud Run Job
         shell: bash
@@ -110,7 +114,7 @@ jobs:
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "META_ADS_ACCOUNT_ID=$ACCOUNT_ID" \
+            --set-env-vars "META_ADS_ACCOUNT_ID=$ACCOUNT_ID,META_ADS_VALIDATION_ID=$VALIDATION_ID" \
             --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
             --tasks 1 \
             --max-retries 0 \
@@ -131,13 +135,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gcloud logging read \
-            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_VALIDATE_ONLY_RESULT=\"" \
-            --project "$PROJECT_ID" \
-            --freshness=10m \
-            --order=desc \
-            --limit=1 \
-            --format='value(textPayload)'
+          for attempt in $(seq 1 12); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_VALIDATE_ONLY_RESULT=\" AND textPayload:\"$VALIDATION_ID\"" \
+              --project "$PROJECT_ID" \
+              --freshness=10m \
+              --order=desc \
+              --limit=1 \
+              --format='value(textPayload)')"
+            if [ -n "$RESULT" ]; then
+              printf '%s\n' "$RESULT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'No validate-only provider result was visible in Cloud Logging.' >&2
+          exit 1
 
       - name: Remove validate-only job
         if: always()
