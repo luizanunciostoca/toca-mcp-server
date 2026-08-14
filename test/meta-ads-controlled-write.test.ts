@@ -7,6 +7,13 @@ import {
 } from '../src/providers/meta-ads/meta-ads-controlled-write.js';
 import type { MetaAdsProvider } from '../src/providers/meta-ads/meta-ads-contracts.js';
 
+const MORRO_LOCATION = {
+  latitude: -13.3833,
+  longitude: -38.9167,
+  radius: 15,
+  distance_unit: 'kilometer',
+} as const;
+
 const plan: ControlledCreatePausedPlan = {
   account: { adAccountId: '311793958882290', currency: 'BRL' },
   campaign: {
@@ -15,13 +22,13 @@ const plan: ControlledCreatePausedPlan = {
     specialAdCategories: [],
   },
   adSet: {
-    name: 'Morro broad | Purchase',
+    name: 'Morro locality | Purchase',
     dailyBudgetMinor: 17_000,
     billingEvent: 'IMPRESSIONS',
     optimizationGoal: 'OFFSITE_CONVERSIONS',
     targeting: {
       geo_locations: {
-        cities: [{ key: 'MORRO_CITY_KEY' }],
+        custom_locations: [MORRO_LOCATION],
       },
     },
     promotedObject: {
@@ -56,7 +63,14 @@ function guardrails(overrides: Partial<MetaAdsWriteGuardrails> = {}): MetaAdsWri
     allowedAccountId: '311793958882290',
     allowedCurrency: 'BRL',
     maxDailyBudgetMinor: 100_000,
-    allowedGeoKeys: ['MORRO_CITY_KEY'],
+    allowedCustomLocations: [
+      {
+        latitude: -13.3833,
+        longitude: -38.9167,
+        maxRadius: 15,
+        distanceUnit: 'kilometer',
+      },
+    ],
     allowedPixelId: '461233076843065',
     allowedPageId: '306103746115875',
     allowedInstagramActorId: '17841402033495654',
@@ -86,10 +100,22 @@ function withDailyBudget(dailyBudgetMinor: number): ControlledCreatePausedPlan {
   return { ...plan, adSet: { ...plan.adSet, dailyBudgetMinor } };
 }
 
-function withGeoKey(key: string): ControlledCreatePausedPlan {
+function withCustomLocation(overrides: {
+  latitude?: number;
+  longitude?: number;
+  radius?: number;
+  distance_unit?: 'kilometer' | 'mile';
+}): ControlledCreatePausedPlan {
   return {
     ...plan,
-    adSet: { ...plan.adSet, targeting: { geo_locations: { cities: [{ key }] } } },
+    adSet: {
+      ...plan.adSet,
+      targeting: {
+        geo_locations: {
+          custom_locations: [{ ...MORRO_LOCATION, ...overrides }],
+        },
+      },
+    },
   };
 }
 
@@ -129,11 +155,66 @@ describe('Meta Ads controlled create-paused service', () => {
     );
   });
 
-  it('blocks any city outside the approved Morro geo key', () => {
+  it('accepts only the approved Morro custom-location center within the maximum radius', () => {
     const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
-    expect(() => service.prepare(withGeoKey('SALVADOR_CITY_KEY'))).toThrow(
-      'META_ADS_GEO_KEY_NOT_ALLOWED',
+    expect(() => service.prepare(plan)).not.toThrow();
+    expect(() => service.prepare(withCustomLocation({ radius: 16 }))).toThrow(
+      'META_ADS_CUSTOM_LOCATION_NOT_ALLOWED',
     );
+    expect(() => service.prepare(withCustomLocation({ latitude: -13.3 }))).toThrow(
+      'META_ADS_CUSTOM_LOCATION_NOT_ALLOWED',
+    );
+  });
+
+  it('blocks broader country or region targeting', () => {
+    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    expect(() =>
+      service.prepare({
+        ...plan,
+        adSet: {
+          ...plan.adSet,
+          targeting: { geo_locations: { countries: ['BR'] } },
+        },
+      }),
+    ).toThrow('META_ADS_GEO_SCOPE_NOT_ALLOWED');
+    expect(() =>
+      service.prepare({
+        ...plan,
+        adSet: {
+          ...plan.adSet,
+          targeting: { geo_locations: { regions: [{ key: 'BA' }] } },
+        },
+      }),
+    ).toThrow('META_ADS_GEO_SCOPE_NOT_ALLOWED');
+  });
+
+  it('keeps explicit allowlisted city-key support without allowing mixed geo modes', () => {
+    const cityPlan: ControlledCreatePausedPlan = {
+      ...plan,
+      adSet: {
+        ...plan.adSet,
+        targeting: { geo_locations: { cities: [{ key: 'APPROVED_CITY' }] } },
+      },
+    };
+    const service = new MetaAdsControlledWriteService(
+      createProvider(),
+      guardrails({ allowedGeoKeys: ['APPROVED_CITY'] }),
+    );
+    expect(() => service.prepare(cityPlan)).not.toThrow();
+    expect(() =>
+      service.prepare({
+        ...cityPlan,
+        adSet: {
+          ...cityPlan.adSet,
+          targeting: {
+            geo_locations: {
+              cities: [{ key: 'APPROVED_CITY' }],
+              custom_locations: [MORRO_LOCATION],
+            },
+          },
+        },
+      }),
+    ).toThrow('META_ADS_GEO_SCOPE_NOT_ALLOWED');
   });
 
   it('blocks a pixel other than the approved ticketing pixel', () => {
