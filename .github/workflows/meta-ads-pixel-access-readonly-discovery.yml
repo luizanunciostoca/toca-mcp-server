@@ -88,10 +88,14 @@ jobs:
 
           const pixels = [];
           for (const pixel of pixelMap.values()) {
-            const assigned = await get(`${pixel.id}/adaccounts?fields=id,account_id,name,account_status&limit=200`);
+            const businessId = pixel.discoveredFrom.find((source) => source.businessId)?.businessId ?? null;
+            const assigned = businessId
+              ? await get(`${pixel.id}/adaccounts?business=${encodeURIComponent(businessId)}&fields=id,account_id,name,account_status&limit=200`)
+              : { response: { ok: false, status: 0 }, body: { error: { message: 'No business context discovered for pixel' } } };
             const assignedAccounts = assigned.response.ok ? rows(assigned.body).map((item) => ({ id: String(item?.id ?? ''), accountId: String(item?.account_id ?? ''), name: item?.name ?? null, accountStatus: item?.account_status ?? null })) : [];
             pixels.push({
               ...pixel,
+              assignmentBusinessId: businessId,
               assignedAccounts,
               targetAccountAssigned: assignedAccounts.some((item) => item.accountId === accountId || item.id === `act_${accountId}` || item.id === accountId),
               assignmentReadError: assigned.response.ok ? null : errorOf(assigned),
