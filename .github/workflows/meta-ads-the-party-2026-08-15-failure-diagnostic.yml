@@ -17,14 +17,14 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  FAILED_JOB_NAME: toca-meta-ads-party-31777075807
-  EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31777075807
+  FAILED_JOB_NAME: toca-meta-ads-create-paused-smoke
+  EXPECTED_MARKER: DIAGNOSE_META_ADS_SMOKE_31778462622
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
   META_AD_ACCOUNT_ID: '311793958882290'
-  EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
-  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-57ecb96754d2ae36dfdaa2e2586cb1ad4b6c790c
+  EXPECTED_CAMPAIGN_NAME: TOCA | P0 SMOKE CREATE_PAUSED | 4f26826402e7
+  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:meta-ads-smoke-4f26826402e7455a6281b30efd1b1a75b07844da
 
 jobs:
   diagnose:
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND timestamp>=\"2026-08-14T06:42:30Z\" AND timestamp<=\"2026-08-14T06:43:20Z\"" \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND timestamp>=\"2026-08-14T07:05:50Z\" AND timestamp<=\"2026-08-14T07:06:20Z\"" \
             --project "$GCP_PROJECT_ID" \
             --order=asc \
             --limit=500 \
@@ -102,7 +102,7 @@ jobs:
           if (matches.length !== 1) throw new Error(`RECON_CAMPAIGN_MATCH_COUNT_${matches.length}`);
           const campaign = matches[0];
           const adSetsPayload = await graph(`${campaign.id}/adsets`, {
-            fields: 'id,name,status,effective_status,start_time,end_time,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting',
+            fields: 'id,name,status,effective_status,start_time,end_time,daily_budget,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting',
             limit: '100',
           });
           const adsPayload = await graph(`${campaign.id}/ads`, {
@@ -159,7 +159,7 @@ jobs:
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-the-party-failure-diagnostic-31777075807
+          name: meta-ads-provider-smoke-failure-diagnostic-31778462622
           path: |
             meta-ads-the-party-failure-diagnostic.json
             meta-ads-the-party-provider-reconciliation.json
