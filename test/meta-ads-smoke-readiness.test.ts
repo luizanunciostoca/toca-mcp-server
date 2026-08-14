@@ -100,9 +100,16 @@ describe('Meta Ads provider smoke readiness', () => {
     ).toBe(false);
   });
 
-  it('selects an existing ACTIVE or PAUSED ad set for no-side-effect validation', () => {
+  it('selects only a usable existing ad set for no-side-effect validation', () => {
     expect(
       selectMetaAdsValidationAdSet([
+        { id: 'broken-1', status: 'PAUSED', effective_status: 'WITH_ISSUES' },
+        {
+          id: 'broken-2',
+          status: 'ACTIVE',
+          effective_status: 'ACTIVE',
+          issues_info: [{ level: 'ERROR' }],
+        },
         { id: 'archived-1', status: 'ARCHIVED' },
         { id: '', status: 'PAUSED' },
         { id: 'paused-1', status: 'PAUSED', effective_status: 'CAMPAIGN_PAUSED' },
