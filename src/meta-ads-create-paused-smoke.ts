@@ -237,7 +237,9 @@ async function verifyAccount(): Promise<Readonly<Record<string, unknown>>> {
 }
 
 async function verifyPixelAccess(): Promise<Readonly<Record<string, unknown>>> {
-  const businessesResponse = asRecord(await api.get('me/businesses', { fields: 'id,name', limit: '200' }));
+  const businessesResponse = asRecord(
+    await api.get('me/businesses', { fields: 'id,name', limit: '200' }),
+  );
   const businesses = Array.isArray(businessesResponse.data)
     ? businessesResponse.data.map(asRecord)
     : [];

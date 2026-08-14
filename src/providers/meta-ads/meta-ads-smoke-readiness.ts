@@ -13,8 +13,7 @@ export interface MetaAdsProviderSmokeSnapshot {
 }
 
 export type MetaAdsProviderSmokeReadiness =
-  | { readonly state: 'READY' }
-  | { readonly state: 'PENDING'; readonly entities: readonly string[] };
+  { readonly state: 'READY' } | { readonly state: 'PENDING'; readonly entities: readonly string[] };
 
 const TRANSIENT_EFFECTIVE_STATUSES = new Set(['IN_PROCESS', 'PENDING_REVIEW', 'PREAPPROVED']);
 const AD_SET_SAFE_EFFECTIVE_STATUSES = new Set(['PAUSED', 'CAMPAIGN_PAUSED']);
@@ -64,7 +63,9 @@ function evaluateEffectiveStatus(
     pending.push(`${kind}:${effectiveStatus}`);
     return;
   }
-  throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_UNSAFE_EFFECTIVE_STATUS_${token(effectiveStatus)}`);
+  throw new Error(
+    `META_ADS_SMOKE_${kind.toUpperCase()}_UNSAFE_EFFECTIVE_STATUS_${token(effectiveStatus)}`,
+  );
 }
 
 function assertConfiguredPaused(kind: string, entity: MetaAdsProviderEntitySnapshot): void {
