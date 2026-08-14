@@ -157,7 +157,11 @@ async function executePlan(): Promise<{
       'meta_ads.campaign.create_paused',
       'WRITE_EXTERNAL',
       'SMOKE_STARTED',
-      JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
+      JSON.stringify({
+        requestSha256: approvedSha256,
+        smokeId,
+        campaignName: plan.campaign.name,
+      }),
       JSON.stringify({ status: 'STARTED' }),
     ],
   );
@@ -190,7 +194,11 @@ async function executePlan(): Promise<{
         'meta_ads.campaign.create_paused',
         'WRITE_EXTERNAL',
         'SMOKE_SUCCEEDED',
-        JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
+        JSON.stringify({
+          requestSha256: approvedSha256,
+          smokeId,
+          campaignName: plan.campaign.name,
+        }),
         JSON.stringify({
           campaignId: result.campaignId,
           adSetId: result.adSetId,
@@ -221,7 +229,11 @@ async function executePlan(): Promise<{
         'meta_ads.campaign.create_paused',
         'WRITE_EXTERNAL',
         'SMOKE_FAILED',
-        JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
+        JSON.stringify({
+          requestSha256: approvedSha256,
+          smokeId,
+          campaignName: plan.campaign.name,
+        }),
         JSON.stringify({ error: normalizeError(error) }),
       ],
     );
@@ -238,7 +250,10 @@ function assertExactSmokePlanEnvelope(plan: ControlledCreatePausedPlan): void {
   if (plan.adSet.name !== expectedAdSetName()) {
     throw new Error('META_ADS_SMOKE_PLAN_ADSET_NAME_MISMATCH');
   }
-  if (plan.creatives.length !== 1 || plan.creatives[0]?.name !== expectedCreativeName()) {
+  if (
+    plan.creatives.length !== 1 ||
+    plan.creatives[0]?.name !== expectedCreativeName()
+  ) {
     throw new Error('META_ADS_SMOKE_PLAN_CREATIVE_NAME_MISMATCH');
   }
   if (
