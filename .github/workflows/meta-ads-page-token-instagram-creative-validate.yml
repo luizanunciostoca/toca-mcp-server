@@ -1,0 +1,250 @@
+name: Meta Ads Page Token Instagram Creative Validate
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-page-token-instagram-creative-validate.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-page-token-ig-creative-validate
+  ACCOUNT_ID: '311793958882290'
+  PAGE_ID: '306103746115875'
+  CONFIGURED_IG_ID: '17841402033495654'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable validation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/page-token-ig-validate
+          cat > /tmp/page-token-ig-validate/validate.mjs <<'NODE'
+          const userToken = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const pageId = process.env.PAGE_ID;
+          const configuredIgId = process.env.CONFIGURED_IG_ID;
+          if (!userToken || !accountId || !pageId || !configuredIgId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const get = async (path, token = userToken) => {
+            const response = await fetch(`${graph}/${path}`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            const body = await response.json().catch(() => ({}));
+            return { response, body };
+          };
+
+          const permissionsResult = await get('me/permissions');
+          const grantedScopes = (Array.isArray(permissionsResult.body?.data) ? permissionsResult.body.data : [])
+            .filter((item) => item?.status === 'granted')
+            .map((item) => String(item.permission ?? ''))
+            .filter(Boolean)
+            .sort();
+          console.log(`META_ADS_PAGE_TOKEN_SCOPE_DISCOVERY=${JSON.stringify({ grantedScopes })}`);
+
+          const accounts = await get('me/accounts?fields=id,name,access_token&limit=200');
+          if (!accounts.response.ok) {
+            const error = accounts.body?.error ?? {};
+            console.log(`META_ADS_PAGE_TOKEN_ACCOUNTS_ERROR=${JSON.stringify({
+              httpStatus: accounts.response.status,
+              code: Number(error.code) || null,
+              subcode: Number(error.error_subcode) || null,
+              message: sanitize(error.message),
+            })}`);
+            process.exit(2);
+          }
+          const page = (Array.isArray(accounts.body?.data) ? accounts.body.data : []).find((item) => String(item?.id ?? '') === pageId);
+          if (!page?.access_token) {
+            console.log(`META_ADS_PAGE_TOKEN_NOT_FOUND=${JSON.stringify({
+              pageId,
+              visiblePageIds: (Array.isArray(accounts.body?.data) ? accounts.body.data : []).map((item) => String(item?.id ?? '')).filter(Boolean),
+            })}`);
+            process.exit(3);
+          }
+          const pageToken = String(page.access_token);
+          console.log(`META_ADS_PAGE_TOKEN_FOUND=${JSON.stringify({ pageId, pageName: page.name ?? null })}`);
+
+          const pageFields = [
+            'id', 'name',
+            'instagram_business_account{id,username}',
+            'connected_instagram_account{id,username}',
+            'connected_page_backed_instagram_account{id,username}',
+          ].join(',');
+          const pageDetail = await get(`${pageId}?fields=${encodeURIComponent(pageFields)}`, pageToken);
+          if (!pageDetail.response.ok) {
+            const error = pageDetail.body?.error ?? {};
+            console.log(`META_ADS_PAGE_IG_DETAIL_ERROR=${JSON.stringify({
+              httpStatus: pageDetail.response.status,
+              code: Number(error.code) || null,
+              subcode: Number(error.error_subcode) || null,
+              message: sanitize(error.message),
+            })}`);
+            process.exit(4);
+          }
+
+          const creativeList = await get(`act_${accountId}/adcreatives?fields=id,name,object_story_spec&limit=100`);
+          if (!creativeList.response.ok) throw new Error(`SOURCE_CREATIVE_LIST_FAILED_${creativeList.response.status}`);
+          const eligible = (Array.isArray(creativeList.body?.data) ? creativeList.body.data : []).filter((item) => {
+            const spec = item?.object_story_spec;
+            return item?.id && spec?.page_id === pageId && (spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
+          });
+          if (eligible.length === 0) throw new Error('SOURCE_CREATIVE_NOT_FOUND');
+          const source = eligible[0];
+          const sourceSpec = source.object_story_spec ?? {};
+
+          const rawCandidates = [
+            ['instagram_business_account', pageDetail.body?.instagram_business_account],
+            ['connected_instagram_account', pageDetail.body?.connected_instagram_account],
+            ['connected_page_backed_instagram_account', pageDetail.body?.connected_page_backed_instagram_account],
+            ['source_instagram_user_id', sourceSpec?.instagram_user_id ? { id: sourceSpec.instagram_user_id } : null],
+            ['source_instagram_actor_id', sourceSpec?.instagram_actor_id ? { id: sourceSpec.instagram_actor_id } : null],
+            ['configured', { id: configuredIgId }],
+          ];
+          const candidates = [];
+          for (const [sourceName, value] of rawCandidates) {
+            if (!value?.id) continue;
+            const id = String(value.id);
+            const existing = candidates.find((item) => item.id === id);
+            if (existing) {
+              existing.sources.push(sourceName);
+            } else {
+              candidates.push({ id, username: value.username ?? null, sources: [sourceName] });
+            }
+          }
+          console.log(`META_ADS_PAGE_IG_CANDIDATES=${JSON.stringify({
+            pageId,
+            pageName: pageDetail.body?.name ?? page.name ?? null,
+            configuredIgId,
+            sourceCreativeId: String(source.id),
+            sourceLegacyInstagramActorId: sourceSpec?.instagram_actor_id ? String(sourceSpec.instagram_actor_id) : null,
+            sourceInstagramUserId: sourceSpec?.instagram_user_id ? String(sourceSpec.instagram_user_id) : null,
+            candidates,
+          })}`);
+          if (candidates.length === 0) throw new Error('NO_INSTAGRAM_USER_CANDIDATES');
+
+          const baseObjectStorySpec = { ...sourceSpec };
+          delete baseObjectStorySpec.page_id;
+          delete baseObjectStorySpec.instagram_actor_id;
+          delete baseObjectStorySpec.instagram_user_id;
+          baseObjectStorySpec.page_id = pageId;
+
+          const validations = [];
+          let accepted = null;
+          for (const candidate of candidates) {
+            const objectStorySpec = { ...baseObjectStorySpec, instagram_user_id: candidate.id };
+            const params = new URLSearchParams({
+              name: `P0 Creative VALIDATE_ONLY | ig_user | ${candidate.id}`,
+              object_story_spec: JSON.stringify(objectStorySpec),
+              execution_options: JSON.stringify(['validate_only']),
+            });
+            const response = await fetch(`${graph}/act_${accountId}/adcreatives`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${userToken}`,
+                Accept: 'application/json',
+                'content-type': 'application/x-www-form-urlencoded',
+              },
+              body: params.toString(),
+            });
+            const body = await response.json().catch(() => ({}));
+            const error = body?.error ?? {};
+            const result = response.ok
+              ? { id: candidate.id, sources: candidate.sources, httpStatus: response.status, ok: true, returnedId: body?.id ?? null }
+              : {
+                  id: candidate.id,
+                  sources: candidate.sources,
+                  httpStatus: response.status,
+                  ok: false,
+                  type: sanitize(error.type),
+                  code: Number(error.code) || null,
+                  subcode: Number(error.error_subcode) || null,
+                  userTitle: sanitize(error.error_user_title),
+                  userMessage: sanitize(error.error_user_msg),
+                  message: sanitize(error.message),
+                };
+            validations.push(result);
+            if (response.ok) {
+              if (body?.id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+              accepted = candidate;
+              break;
+            }
+          }
+
+          console.log(`META_ADS_CREATIVE_CANDIDATE_VALIDATIONS=${JSON.stringify({ validations, accepted })}`);
+          if (!accepted) process.exit(5);
+          NODE
+
+          cat > /tmp/page-token-ig-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-page-token-ig-validate:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/page-token-ig-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,PAGE_ID=$PAGE_ID,CONFIGURED_IG_ID=$CONFIGURED_IG_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+      - name: Execute resolution and validate-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted sanitized results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND timestamp>=\"$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)\"" \
+            --project "$PROJECT_ID" --order=asc --limit=300 --format='value(textPayload)' | \
+            grep -E 'META_ADS_(PAGE_TOKEN_SCOPE_DISCOVERY|PAGE_TOKEN_ACCOUNTS_ERROR|PAGE_TOKEN_NOT_FOUND|PAGE_TOKEN_FOUND|PAGE_IG_DETAIL_ERROR|PAGE_IG_CANDIDATES|CREATIVE_CANDIDATE_VALIDATIONS)=' || true
+
+      - name: Remove validation job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
