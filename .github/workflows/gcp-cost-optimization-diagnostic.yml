@@ -1,0 +1,108 @@
+name: GCP Cost Optimization Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/gcp-cost-optimization-20260814
+    paths:
+      - '.github/workflows/gcp-cost-optimization-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  SQL_INSTANCE: toca-mcp-db
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cloud SQL configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$SQL_INSTANCE" \
+            --project "$PROJECT_ID" \
+            --format='json(name,state,databaseVersion,region,gceZone,secondaryGceZone,settings.tier,settings.edition,settings.availabilityType,settings.dataDiskType,settings.dataDiskSizeGb,settings.storageAutoResize,settings.storageAutoResizeLimit,settings.backupConfiguration,settings.databaseFlags,settings.ipConfiguration,settings.activationPolicy,settings.deletionProtectionEnabled)'
+
+      - name: Cloud Run service configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in toca-mcp-production toca-mcp-staging toca-meta-oauth-staging toca-managed-instagram-daemon; do
+            if gcloud run services describe "$service" --project "$PROJECT_ID" --region "$REGION" >/dev/null 2>&1; then
+              echo "=== $service ==="
+              gcloud run services describe "$service" \
+                --project "$PROJECT_ID" \
+                --region "$REGION" \
+                --format='json(metadata.name,spec.template.metadata.annotations,spec.template.spec.containerConcurrency,spec.template.spec.timeoutSeconds,spec.template.spec.containers[0].resources,status.url)'
+            fi
+          done
+
+      - name: Cloud Run jobs configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs list --project "$PROJECT_ID" --region "$REGION" --format='table(name,taskCount,latestCreatedExecution.name)' || true
+
+      - name: Artifact Registry footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud artifacts docker images list "$REGION-docker.pkg.dev/$PROJECT_ID/toca-mcp" \
+            --project "$PROJECT_ID" \
+            --include-tags \
+            --format='table(package,version,tags,updateTime)' \
+            --limit=200 || true
+
+      - name: Billing attachment state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud billing projects describe "$PROJECT_ID" --format='json(projectId,billingEnabled,billingAccountName)' || true
+
+      - name: Recent Cloud SQL utilization from Monitoring
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          DB_ID="$PROJECT_ID:$SQL_INSTANCE"
+          query_metric() {
+            local metric="$1"
+            local label="$2"
+            local filter
+            filter="metric.type=\"$metric\" AND resource.type=\"cloudsql_database\" AND resource.label.database_id=\"$DB_ID\""
+            echo "=== $label ==="
+            curl --fail --silent --show-error --get \
+              -H "Authorization: Bearer $TOKEN" \
+              --data-urlencode "filter=$filter" \
+              --data-urlencode "interval.startTime=$START" \
+              --data-urlencode "interval.endTime=$END" \
+              --data-urlencode 'aggregation.alignmentPeriod=3600s' \
+              --data-urlencode 'aggregation.perSeriesAligner=ALIGN_MAX' \
+              --data-urlencode 'view=FULL' \
+              "https://monitoring.googleapis.com/v3/projects/$PROJECT_ID/timeSeries" \
+              | jq '{series: [.timeSeries[]? | {metric: .metric.type, points: (.points[0:168] // [])}]}'
+          }
+          query_metric 'cloudsql.googleapis.com/database/cpu/utilization' 'CPU utilization'
+          query_metric 'cloudsql.googleapis.com/database/memory/utilization' 'Memory utilization'
+          query_metric 'cloudsql.googleapis.com/database/disk/bytes_used' 'Disk bytes used'
+          query_metric 'cloudsql.googleapis.com/database/postgresql/num_backends' 'PostgreSQL connections'
