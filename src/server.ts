@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
@@ -14,7 +15,7 @@ import { registerInstagramManagedSchedulerTools } from './tools/register-instagr
 import { registerMetaAdsReadTools } from './tools/register-meta-ads-read.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 
 const capabilityStatusSchema = z.enum([
   'PLANNED',
@@ -57,13 +58,13 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     'system.health',
     {
       title: 'TOCA MCP Health',
-      description: 'Return the health and bootstrap state of the TOCA MCP server.',
+      description: 'Return the health and active production-foundation state of the TOCA MCP server.',
       inputSchema: z.object({}),
       outputSchema: z.object({
         status: z.literal('ok'),
         service: z.string(),
         version: z.string(),
-        phase: z.literal('bootstrap'),
+        phase: z.literal('production-foundation'),
       }),
       annotations: {
         readOnlyHint: true,
@@ -77,7 +78,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
         status: 'ok' as const,
         service: SERVER_NAME,
         version: SERVER_VERSION,
-        phase: 'bootstrap' as const,
+        phase: 'production-foundation' as const,
       };
 
       return {
@@ -92,7 +93,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     {
       title: 'TOCA MCP Capabilities',
       description:
-        'List deterministic execution tools registered in this runtime and their implementation status. This does not imply external provider connectivity.',
+        'List deterministic execution tools registered in this runtime and their declared lifecycle status. Provider connectivity still requires environment/provider evidence.',
       inputSchema: z.object({}),
       outputSchema: z.object({
         tools: z.array(
@@ -148,7 +149,11 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   if (config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && config.DATABASE_URL) {
     const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
     const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
-    registerInstagramManagedSchedulerTools(server, scheduler);
+    registerInstagramManagedSchedulerTools(server, scheduler, {
+      registry,
+      auditSink: new PostgresAuditSink(pool, registry),
+      requester: 'mcp-client',
+    });
   }
 
   if (
