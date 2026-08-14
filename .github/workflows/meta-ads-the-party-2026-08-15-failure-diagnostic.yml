@@ -21,10 +21,9 @@ env:
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
   META_AD_ACCOUNT_ID: '311793958882290'
-  EXPECTED_CAMPAIGN_NAME: TOCA | P0 SMOKE CREATE_PAUSED | c2d756371e6d
-  EXPECTED_MARKER: VERIFY_STALE_SMOKE_PLAN_C2D756_31778462622
-  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:meta-ads-smoke-4f26826402e7455a6281b30efd1b1a75b07844da
-  OLD_SMOKE_JOB_NAME: toca-meta-ads-create-paused-smoke
+  META_PIXEL_ID: '461233076843065'
+  EXPECTED_MARKER: AUDIT_META_PIXEL_ACCESS_461233076843065
+  DIAGNOSTIC_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:meta-ads-smoke-4f26826402e7455a6281b30efd1b1a75b07844da
 
 jobs:
   diagnose:
@@ -52,25 +51,11 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Read old smoke execution logs
+      - name: Audit pixel visibility through runtime identity
         shell: bash
         run: |
           set -euo pipefail
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${OLD_SMOKE_JOB_NAME} AND timestamp>=\"2026-08-14T06:58:40Z\" AND timestamp<=\"2026-08-14T06:59:05Z\"" \
-            --project "$GCP_PROJECT_ID" \
-            --order=asc \
-            --limit=500 \
-            --format=json > old-smoke-c2d756-logs.json
-          test -s old-smoke-c2d756-logs.json
-          echo '--- OLD SMOKE C2D756 LOGS ---'
-          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' old-smoke-c2d756-logs.json
-
-      - name: Reconcile exact c2d756 campaign read-only through runtime identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          JOB_NAME="toca-meta-ads-stale-plan-reconcile-${GITHUB_RUN_ID}"
+          JOB_NAME="toca-meta-pixel-audit-${GITHUB_RUN_ID}"
           cleanup() {
             gcloud run jobs delete "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
@@ -84,50 +69,62 @@ jobs:
           const base = process.env.META_GRAPH_BASE_URL;
           const version = process.env.META_GRAPH_API_VERSION;
           const accountId = process.env.META_AD_ACCOUNT_ID;
-          const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
-          if (!token || !base || !version || !accountId || !expectedName) throw new Error('STALE_RECON_CONFIG_MISSING');
+          const pixelId = process.env.META_PIXEL_ID;
+          if (!token || !base || !version || !accountId || !pixelId) throw new Error('PIXEL_AUDIT_CONFIG_MISSING');
+
           async function graph(path, params = {}) {
             const url = new URL(`${base}/${version}/${path}`);
             for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(`STALE_RECON_HTTP_${response.status}`);
-            return payload;
+            let payload;
+            try {
+              payload = await response.json();
+            } catch {
+              payload = { parse_error: true };
+            }
+            return { ok: response.ok, status: response.status, payload };
           }
-          const campaignsPayload = await graph(`act_${accountId}/campaigns`, {
-            fields: 'id,name,status,effective_status,objective,special_ad_categories',
+
+          const account = await graph(`act_${accountId}`, {
+            fields: 'id,name,currency,account_status,business',
+          });
+          const accountPixels = await graph(`act_${accountId}/adspixels`, {
+            fields: 'id,name,last_fired_time,owner_ad_account,owner_business,is_unavailable',
             limit: '100',
           });
-          const matches = (Array.isArray(campaignsPayload.data) ? campaignsPayload.data : [])
-            .filter((item) => item.name === expectedName);
-          if (matches.length !== 1) throw new Error(`STALE_RECON_MATCH_COUNT_${matches.length}`);
-          const campaign = matches[0];
-          const adSetsPayload = await graph(`${campaign.id}/adsets`, {
-            fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting,start_time,end_time',
+          const pixel = await graph(pixelId, {
+            fields: 'id,name,last_fired_time,owner_ad_account,owner_business,is_unavailable',
+          });
+          const pixelAdAccounts = await graph(`${pixelId}/adaccounts`, {
+            fields: 'id,name,currency,account_status',
             limit: '100',
           });
-          const adsPayload = await graph(`${campaign.id}/ads`, {
-            fields: 'id,name,status,effective_status,creative',
-            limit: '100',
-          });
+
+          const accountPixelRows = Array.isArray(accountPixels.payload?.data) ? accountPixels.payload.data : [];
+          const pixelAccountRows = Array.isArray(pixelAdAccounts.payload?.data) ? pixelAdAccounts.payload.data : [];
           const result = {
-            campaign,
-            adSets: Array.isArray(adSetsPayload.data) ? adSetsPayload.data : [],
-            ads: Array.isArray(adsPayload.data) ? adsPayload.data : [],
+            accountId,
+            pixelId,
+            account,
+            accountPixels,
+            pixel,
+            pixelAdAccounts,
+            accountListsPixel: accountPixelRows.some((item) => String(item?.id ?? '') === pixelId),
+            pixelListsAccount: pixelAccountRows.some((item) => String(item?.id ?? '').replace(/^act_/, '') === accountId),
           };
-          console.log(`META_ADS_STALE_PLAN_RECONCILIATION=${JSON.stringify(result)}`);
+          console.log(`META_PIXEL_ACCESS_AUDIT=${JSON.stringify(result)}`);
           NODE
           )"
 
           gcloud run jobs deploy "$JOB_NAME" \
-            --image "$RECON_IMAGE" \
+            --image "$DIAGNOSTIC_IMAGE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --command node \
             --args "^~^-e~$JS_CODE" \
             --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
-            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_AD_ACCOUNT_ID=$META_AD_ACCOUNT_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_AD_ACCOUNT_ID=$META_AD_ACCOUNT_ID~META_PIXEL_ID=$META_PIXEL_ID" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 120s \
@@ -142,27 +139,25 @@ jobs:
           RESULT_LINE=""
           for attempt in $(seq 1 12); do
             RESULT_LINE="$(gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_STALE_PLAN_RECONCILIATION=\"" \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_PIXEL_ACCESS_AUDIT=\"" \
               --project "$GCP_PROJECT_ID" \
               --freshness=15m \
               --limit=20 \
               --order=desc \
-              --format='value(textPayload)' | grep 'META_ADS_STALE_PLAN_RECONCILIATION=' | head -n1 || true)"
+              --format='value(textPayload)' | grep 'META_PIXEL_ACCESS_AUDIT=' | head -n1 || true)"
             [ -n "$RESULT_LINE" ] && break
             sleep 5
           done
           test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#META_ADS_STALE_PLAN_RECONCILIATION=}"
-          printf '%s\n' "$RESULT_JSON" | jq . > stale-smoke-c2d756-provider-state.json
-          echo '--- C2D756 PROVIDER STATE ---'
-          printf '%s\n' "$RESULT_JSON" | jq '{campaign, adSetCount: (.adSets|length), adSets, adCount: (.ads|length), ads}'
+          RESULT_JSON="${RESULT_LINE#META_PIXEL_ACCESS_AUDIT=}"
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-pixel-access-audit.json
+          echo '--- META PIXEL ACCESS AUDIT ---'
+          printf '%s\n' "$RESULT_JSON" | jq '{accountId,pixelId,accountListsPixel,pixelListsAccount,account:{ok:.account.ok,status:.account.status,payload:.account.payload},accountPixels:{ok:.accountPixels.ok,status:.accountPixels.status,payload:.accountPixels.payload},pixel:{ok:.pixel.ok,status:.pixel.status,payload:.pixel.payload},pixelAdAccounts:{ok:.pixelAdAccounts.ok,status:.pixelAdAccounts.status,payload:.pixelAdAccounts.payload}}'
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-stale-plan-verification-${{ github.sha }}
-          path: |
-            old-smoke-c2d756-logs.json
-            stale-smoke-c2d756-provider-state.json
+          name: meta-pixel-access-audit-${{ github.sha }}
+          path: meta-pixel-access-audit.json
           if-no-files-found: error
           retention-days: 30
