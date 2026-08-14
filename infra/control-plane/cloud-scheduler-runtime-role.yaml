@@ -1,0 +1,12 @@
+title: TOCA MCP Cloud Scheduler Runtime Manager
+description: Least-privilege permissions for the deployer to create, read, update and smoke-run the single allowlisted TOCA managed minute trigger. Cannot delete, pause, enable, list or administer arbitrary infrastructure.
+stage: GA
+includedPermissions:
+  - cloudscheduler.jobs.create
+  - cloudscheduler.jobs.get
+  - cloudscheduler.jobs.update
+  - cloudscheduler.jobs.run
+  - cloudscheduler.locations.get
+  - resourcemanager.projects.get
+  - serviceusage.services.get
+  - serviceusage.services.use
