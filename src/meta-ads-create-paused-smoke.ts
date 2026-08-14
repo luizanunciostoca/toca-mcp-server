@@ -19,9 +19,7 @@ const pageId = requiredEnv('META_ADS_SMOKE_PAGE_ID');
 const instagramActorId = requiredEnv('META_ADS_SMOKE_INSTAGRAM_ACTOR_ID');
 const smokeId = requiredEnv('META_ADS_SMOKE_ID');
 const dailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_DAILY_BUDGET_MINOR'));
-const maxDailyBudgetMinor = parsePositiveInt(
-  requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'),
-);
+const maxDailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'));
 
 const api = createMetaPublicationApiClient(config);
 const provider = new MetaAdsControlledGraphProvider(api);
@@ -117,7 +115,9 @@ async function executePlan(): Promise<{
   if (!config.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
   const approvedSha256 = requiredEnv('META_ADS_SMOKE_APPROVED_SHA256');
   const planBase64 = requiredEnv('META_ADS_SMOKE_PLAN_B64');
-  const plan = JSON.parse(Buffer.from(planBase64, 'base64').toString('utf8')) as ControlledCreatePausedPlan;
+  const plan = JSON.parse(
+    Buffer.from(planBase64, 'base64').toString('utf8'),
+  ) as ControlledCreatePausedPlan;
   const computed = requestSha256(plan);
   if (computed !== approvedSha256) throw new Error('META_ADS_SMOKE_APPROVED_SHA_MISMATCH');
   if (plan.account.adAccountId !== accountId || plan.account.currency !== currency) {
@@ -127,7 +127,10 @@ async function executePlan(): Promise<{
   await verifyPermissions();
   await verifyAccount();
   const geoKeys = extractGeoKeys(plan.adSet.targeting);
-  const service = new MetaAdsControlledWriteService(provider, guardrailsFor(geoKeys, approvedSha256));
+  const service = new MetaAdsControlledWriteService(
+    provider,
+    guardrailsFor(geoKeys, approvedSha256),
+  );
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
   const correlationId = `meta-ads:p0-smoke:${smokeId}:${approvedSha256}`;
 
@@ -218,7 +221,8 @@ async function verifyPermissions(): Promise<readonly string[]> {
     .filter((item) => item.status === 'granted')
     .map((item) => scalarString(item.permission))
     .filter(Boolean);
-  if (!granted.includes('ads_management')) throw new Error('META_ADS_SMOKE_ADS_MANAGEMENT_REQUIRED');
+  if (!granted.includes('ads_management'))
+    throw new Error('META_ADS_SMOKE_ADS_MANAGEMENT_REQUIRED');
   return granted.sort();
 }
 
@@ -226,8 +230,10 @@ async function verifyAccount(): Promise<Readonly<Record<string, unknown>>> {
   const account = asRecord(
     await api.get(`act_${accountId}`, { fields: 'id,name,currency,account_status' }),
   );
-  if (scalarString(account.currency) !== currency) throw new Error('META_ADS_SMOKE_CURRENCY_MISMATCH');
-  if (!scalarString(account.id).endsWith(accountId)) throw new Error('META_ADS_SMOKE_ACCOUNT_ID_MISMATCH');
+  if (scalarString(account.currency) !== currency)
+    throw new Error('META_ADS_SMOKE_CURRENCY_MISMATCH');
+  if (!scalarString(account.id).endsWith(accountId))
+    throw new Error('META_ADS_SMOKE_ACCOUNT_ID_MISMATCH');
   return account;
 }
 
@@ -293,7 +299,10 @@ async function resolveSourceCreative(): Promise<{
   return { id: selected.id, objectStorySpec: spec };
 }
 
-function guardrailsFor(geoKeys: readonly string[], approvedRequestSha256: string): MetaAdsWriteGuardrails {
+function guardrailsFor(
+  geoKeys: readonly string[],
+  approvedRequestSha256: string,
+): MetaAdsWriteGuardrails {
   return {
     allowedAccountId: accountId,
     allowedCurrency: currency,
@@ -318,7 +327,8 @@ function assertProviderPaused(kind: string, entity: Readonly<Record<string, unkn
   const status = scalarString(entity.status);
   const effective = scalarString(entity.effective_status);
   if (status !== 'PAUSED') throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_NOT_PAUSED`);
-  if (effective === 'ACTIVE') throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_EFFECTIVE_ACTIVE`);
+  if (effective === 'ACTIVE')
+    throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_EFFECTIVE_ACTIVE`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -347,7 +357,8 @@ function requiredEnv(name: string): string {
 
 function parsePositiveInt(value: string): number {
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error('META_ADS_SMOKE_INTEGER_INVALID');
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
+    throw new Error('META_ADS_SMOKE_INTEGER_INVALID');
   return parsed;
 }
 
