@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -26,6 +26,16 @@
         "dataDiskType": "PD_SSD",
         "dataDiskSizeGb": 250
       },
+      "storageShrink": {
+        "enabled": true,
+        "sourceSizeGb": 250,
+        "minimumStorageGb": 10,
+        "reserveBufferGb": 100,
+        "strategy": "minimal-target-plus-buffer",
+        "autoResizeHeadroomGb": 50,
+        "maximumAutoResizeLimitGb": 250,
+        "mustRunBeforeSharedCore": true
+      },
       "target": {
         "edition": "ENTERPRISE",
         "availabilityType": "ZONAL",
@@ -36,10 +46,10 @@
       "preserve": {
         "databaseVersion": true,
         "dataDiskType": true,
-        "dataDiskSizeGb": true,
         "deletionProtection": true,
         "automatedBackups": true,
-        "pointInTimeRecovery": true
+        "pointInTimeRecovery": true,
+        "storageAutoResize": true
       },
       "forbid": {
         "instanceDelete": true,
@@ -49,7 +59,7 @@
         "sslMutation": true,
         "iamMutation": true,
         "billingMutation": true,
-        "diskShrinkInPlace": true
+        "unguardedDiskShrink": true
       }
     }
   },
