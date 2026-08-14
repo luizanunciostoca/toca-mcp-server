@@ -6,6 +6,12 @@ import type {
   PublicationState,
 } from '../providers/instagram/publication-state.js';
 
+type PublicationEvidencePayload = {
+  readonly permalink?: string;
+  readonly providerPublishedAt?: string;
+  readonly reconciliationSource?: 'WRITE_RESPONSE' | 'PROVIDER_LOOKUP';
+};
+
 type PublicationRow = {
   correlation_id: string;
   account_id: string;
@@ -53,12 +59,18 @@ export class PostgresPublicationExecutionStore implements PublicationExecutionSt
   }
 
   async save(record: PublicationRecord): Promise<void> {
+    const evidence: PublicationEvidencePayload = {
+      ...(record.permalink ? { permalink: record.permalink } : {}),
+      ...(record.providerPublishedAt ? { providerPublishedAt: record.providerPublishedAt } : {}),
+      ...(record.reconciliationSource ? { reconciliationSource: record.reconciliationSource } : {}),
+    };
     const result = await this.pool.query(
       `update provider_publications
        set state = $2,
            external_resource_id = coalesce($3, external_resource_id),
            last_error = $4,
-           updated_at = $5::timestamptz
+           updated_at = $5::timestamptz,
+           payload = payload || $7::jsonb
        where correlation_id = $1 and idempotency_key = $6`,
       [
         record.correlationId,
@@ -67,6 +79,7 @@ export class PostgresPublicationExecutionStore implements PublicationExecutionSt
         record.lastError ?? null,
         record.updatedAt,
         record.idempotencyKey,
+        JSON.stringify({ _providerEvidence: evidence }),
       ],
     );
     if (result.rowCount !== 1) throw new Error('INSTAGRAM_PUBLICATION_UPDATE_CONFLICT');
@@ -77,7 +90,9 @@ function mapRow(row: PublicationRow): PublicationRecord {
   const payload = row.payload as Partial<InstagramPublishRequest> & {
     externalContainerId?: string;
     externalMediaId?: string;
+    _providerEvidence?: PublicationEvidencePayload;
   };
+  const evidence = payload._providerEvidence;
   return {
     publicationId: row.correlation_id,
     correlationId: row.correlation_id,
@@ -89,6 +104,11 @@ function mapRow(row: PublicationRow): PublicationRecord {
       : row.external_resource_id
         ? { externalContainerId: row.external_resource_id }
         : {}),
+    ...(evidence?.permalink ? { permalink: evidence.permalink } : {}),
+    ...(evidence?.providerPublishedAt ? { providerPublishedAt: evidence.providerPublishedAt } : {}),
+    ...(evidence?.reconciliationSource
+      ? { reconciliationSource: evidence.reconciliationSource }
+      : {}),
     ...(row.last_error ? { lastError: row.last_error } : {}),
     updatedAt: row.updated_at.toISOString(),
   };

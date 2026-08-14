@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
+import type { InstagramPublicationReconciler } from '../providers/instagram/instagram-publication-reconciler.js';
 import type { JobHandler } from '../worker/worker.js';
 import type { ScheduledJob, Scheduler } from './scheduler-contracts.js';
 
@@ -120,6 +121,7 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
   constructor(
     private readonly delivery: PublicationAssetDeliveryProvider,
     private readonly executor: InstagramPublicationExecutor,
+    private readonly reconciler?: InstagramPublicationReconciler,
   ) {}
 
   async execute(payload: unknown): Promise<void> {
@@ -135,6 +137,15 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
       idempotencyKey: schedule.publicationIdempotencyKey,
       ...(schedule.caption !== undefined ? { caption: schedule.caption } : {}),
     };
+
+    if (this.reconciler) {
+      const reconciled = await this.reconciler.reconcile(request, {
+        scheduledFor: schedule.scheduledFor,
+        mediaType: schedule.mediaType,
+        ...(schedule.caption !== undefined ? { caption: schedule.caption } : {}),
+      });
+      if (reconciled?.completed) return;
+    }
 
     const result = await this.executor.execute(request);
     if (!result.completed) {

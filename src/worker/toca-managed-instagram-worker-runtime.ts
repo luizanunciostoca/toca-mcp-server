@@ -3,6 +3,7 @@ import type { RuntimeConfig } from '../config.js';
 import { PostgresPublicationExecutionStore } from '../persistence/postgres-publication-store.js';
 import { GcsPublicationAssetDelivery } from '../providers/gcp/gcs-publication-asset-delivery.js';
 import { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
+import { InstagramPublicationReconciler } from '../providers/instagram/instagram-publication-reconciler.js';
 import { MetaInstagramPublicationTransport } from '../providers/instagram/meta-instagram-publication-transport.js';
 import { createMetaPublicationApiClient } from '../providers/meta/meta-publication-client.js';
 import {
@@ -32,12 +33,13 @@ export function createTocaManagedInstagramRuntimeHandlers(
   const store = new PostgresPublicationExecutionStore(pool);
   const transport = new MetaInstagramPublicationTransport(createMetaPublicationApiClient(config));
   const executor = new InstagramPublicationExecutor(store, transport);
+  const reconciler = new InstagramPublicationReconciler(store, transport);
   const delivery = new GcsPublicationAssetDelivery({
     projectId: config.GCP_PROJECT_ID,
     bucketName: config.INSTAGRAM_PUBLICATION_ASSET_BUCKET,
     signedUrlTtlSeconds: 15 * 60,
   });
-  const publication = new TocaManagedInstagramPublicationJobHandler(delivery, executor);
+  const publication = new TocaManagedInstagramPublicationJobHandler(delivery, executor, reconciler);
   const handler = new TocaManagedInstagramApprovalAuditGate(pool, publication);
 
   return new Map([[TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB, handler]]);

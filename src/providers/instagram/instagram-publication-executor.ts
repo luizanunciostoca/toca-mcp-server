@@ -5,6 +5,14 @@ import {
   type PublicationState,
 } from './publication-state.js';
 
+export interface PublishedMediaEvidence {
+  readonly mediaId: string;
+  readonly caption?: string;
+  readonly mediaType?: string;
+  readonly permalink?: string;
+  readonly timestamp?: string;
+}
+
 export interface InstagramPublicationTransport {
   createContainer(request: InstagramPublishRequest): Promise<{ readonly containerId: string }>;
   getContainerStatus(containerId: string): Promise<'IN_PROGRESS' | 'FINISHED' | 'ERROR'>;
@@ -12,6 +20,11 @@ export interface InstagramPublicationTransport {
     instagramAccountId: string,
     containerId: string,
   ): Promise<{ readonly mediaId: string }>;
+  getPublishedMedia?(mediaId: string): Promise<PublishedMediaEvidence>;
+  listRecentPublishedMedia?(
+    instagramAccountId: string,
+    limit?: number,
+  ): Promise<readonly PublishedMediaEvidence[]>;
 }
 
 export interface PublicationExecutionStore {
@@ -91,8 +104,12 @@ export class InstagramPublicationExecutor {
             request.account.instagramAccountId,
             record.externalContainerId,
           );
+          const evidence = await getPublishedEvidence(this.transport, published.mediaId);
           record = transitionPublication(record, 'PUBLISHED', this.now(), {
             externalMediaId: published.mediaId,
+            ...(evidence.permalink ? { permalink: evidence.permalink } : {}),
+            ...(evidence.timestamp ? { providerPublishedAt: evidence.timestamp } : {}),
+            reconciliationSource: 'WRITE_RESPONSE',
           });
           await this.store.save(record);
         } catch (error) {
@@ -118,6 +135,18 @@ export class InstagramPublicationExecutor {
       }
       throw error;
     }
+  }
+}
+
+async function getPublishedEvidence(
+  transport: InstagramPublicationTransport,
+  mediaId: string,
+): Promise<PublishedMediaEvidence> {
+  if (!transport.getPublishedMedia) return { mediaId };
+  try {
+    return await transport.getPublishedMedia(mediaId);
+  } catch {
+    return { mediaId };
   }
 }
 
