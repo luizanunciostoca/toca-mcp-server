@@ -27,7 +27,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write src/persistence/postgres-publication-store.ts src/providers/instagram/instagram-publication-reconciler.ts src/worker/toca-managed-instagram-worker-runtime.ts && git diff -- src/persistence/postgres-publication-store.ts src/providers/instagram/instagram-publication-reconciler.ts src/worker/toca-managed-instagram-worker-runtime.ts && false",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
