@@ -58,7 +58,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     'system.health',
     {
       title: 'TOCA MCP Health',
-      description: 'Return the health and active production-foundation state of the TOCA MCP server.',
+      description:
+        'Return the health and active production-foundation state of the TOCA MCP server.',
       inputSchema: z.object({}),
       outputSchema: z.object({
         status: z.literal('ok'),

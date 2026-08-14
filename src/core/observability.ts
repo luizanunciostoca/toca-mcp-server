@@ -66,7 +66,9 @@ export class RuntimeTelemetry implements Telemetry {
 
   snapshot(): TelemetrySnapshot {
     return {
-      counters: Object.fromEntries([...this.counters.entries()].sort(([a], [b]) => a.localeCompare(b))),
+      counters: Object.fromEntries(
+        [...this.counters.entries()].sort(([a], [b]) => a.localeCompare(b)),
+      ),
       observations: Object.fromEntries(
         [...this.observations.entries()].sort(([a], [b]) => a.localeCompare(b)),
       ),
@@ -75,7 +77,9 @@ export class RuntimeTelemetry implements Telemetry {
 
   renderPrometheus(): string {
     const lines: string[] = [];
-    for (const [key, value] of [...this.counters.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [key, value] of [...this.counters.entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
       const parsed = parseMetricKey(key);
       lines.push(`${prometheusName(parsed.name)}${prometheusLabels(parsed.attributes)} ${value}`);
     }
