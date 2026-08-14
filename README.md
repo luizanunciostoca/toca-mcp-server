@@ -52,4 +52,6 @@ pnpm test
 pnpm build
 ```
 
-See `docs/architecture/README.md`, `docs/architecture/toca-managed-instagram-scheduler-v1.md` and `docs/operations/infrastructure-control-plane.md` for the current contracts.
+See `docs/architecture/README.md`, `docs/architecture/routes-capabilities-v1.md`,
+`docs/architecture/toca-managed-instagram-scheduler-v1.md` and
+`docs/operations/infrastructure-control-plane.md` for the current contracts.

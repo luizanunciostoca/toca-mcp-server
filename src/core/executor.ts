@@ -25,6 +25,9 @@ function createAuditEvent(
     requester: options.policyContext.requester,
     status,
     createdAt: new Date().toISOString(),
+    ...(options.policyContext.approval
+      ? { approvalId: options.policyContext.approval.approvalId }
+      : {}),
     ...(options.policyContext.connectedAccount
       ? { connectedAccount: options.policyContext.connectedAccount }
       : {}),
