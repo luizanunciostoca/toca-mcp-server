@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
@@ -6,6 +7,7 @@ import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import {
   TocaManagedInstagramScheduler,
   hashTocaManagedInstagramApprovalDescriptor,
+  parseTocaManagedInstagramSchedulePayload,
   type TocaManagedInstagramApprovalDescriptor,
   type TocaManagedInstagramSchedulePayload,
 } from './scheduler/toca-managed-instagram-scheduler.js';
@@ -41,6 +43,8 @@ let lastRunStartedAt: string | null = null;
 let lastRunFinishedAt: string | null = null;
 let lastClaimed = 0;
 let lastError: string | null = null;
+let bootstrapScheduleJobId: string | null = null;
+let bootstrapScheduleStatus: string | null = null;
 
 async function verifySchedulerPersistence(): Promise<void> {
   const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
@@ -115,6 +119,53 @@ async function verifySchedulerPersistence(): Promise<void> {
   }
 }
 
+async function persistBootstrapSchedule(): Promise<void> {
+  const encoded = process.env.TOCA_MANAGED_INSTAGRAM_BOOTSTRAP_SCHEDULE_B64;
+  if (!encoded) return;
+
+  const raw = Buffer.from(encoded, 'base64').toString('utf8');
+  const envelope = JSON.parse(raw) as {
+    schemaVersion?: unknown;
+    action?: unknown;
+    commandId?: unknown;
+    requestedBy?: unknown;
+    requestedAt?: unknown;
+    payload?: unknown;
+  };
+
+  if (envelope.schemaVersion !== 1) throw new Error('TOCA_BOOTSTRAP_SCHEDULE_SCHEMA_UNSUPPORTED');
+  if (envelope.action !== 'CREATE') throw new Error('TOCA_BOOTSTRAP_SCHEDULE_ACTION_UNSUPPORTED');
+  if (typeof envelope.commandId !== 'string' || !envelope.commandId.trim()) {
+    throw new Error('TOCA_BOOTSTRAP_SCHEDULE_COMMAND_ID_REQUIRED');
+  }
+  if (typeof envelope.requestedBy !== 'string' || !envelope.requestedBy.trim()) {
+    throw new Error('TOCA_BOOTSTRAP_SCHEDULE_REQUESTED_BY_REQUIRED');
+  }
+  if (typeof envelope.requestedAt !== 'string' || !envelope.requestedAt.trim()) {
+    throw new Error('TOCA_BOOTSTRAP_SCHEDULE_REQUESTED_AT_REQUIRED');
+  }
+
+  const payload = parseTocaManagedInstagramSchedulePayload(envelope.payload);
+  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
+  const job = await scheduler.schedule(payload);
+  const confirmed = await scheduler.status(job.id);
+  if (!confirmed) throw new Error('TOCA_BOOTSTRAP_SCHEDULE_PERSISTENCE_VERIFICATION_FAILED');
+
+  bootstrapScheduleJobId = confirmed.id;
+  bootstrapScheduleStatus = confirmed.status;
+  console.info('toca.managed.instagram.daemon.bootstrap_schedule.persisted', {
+    commandId: envelope.commandId,
+    requestedBy: envelope.requestedBy,
+    requestedAt: envelope.requestedAt,
+    contentItemId: payload.contentItemId,
+    jobId: confirmed.id,
+    status: confirmed.status,
+    runAt: confirmed.runAt,
+    timezone: confirmed.timezone,
+    idempotencyKey: confirmed.idempotencyKey,
+  });
+}
+
 async function tick(): Promise<void> {
   if (running || stopping) return;
   running = true;
@@ -133,6 +184,7 @@ async function tick(): Promise<void> {
 }
 
 await verifySchedulerPersistence();
+await persistBootstrapSchedule();
 
 const server = createServer((request, response) => {
   if (request.url !== '/healthz') {
@@ -146,6 +198,8 @@ const server = createServer((request, response) => {
     JSON.stringify({
       ok: !stopping,
       schedulerPersistenceVerified: true,
+      bootstrapScheduleJobId,
+      bootstrapScheduleStatus,
       running,
       pollIntervalMs,
       lastRunStartedAt,
