@@ -16,6 +16,7 @@ const dataResponseSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())).default([]),
 });
 
+// Provider smoke revalidation trigger after the external pixel-access grant.
 export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
   constructor(private readonly api: MetaApiClient) {}
 
