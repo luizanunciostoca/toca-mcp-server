@@ -138,6 +138,14 @@ jobs:
         with:
           version: latest
 
+      - name: Install gcloud beta component
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud components install beta --quiet
+          gcloud beta sql instances patch --help >/dev/null
+
       - name: Reconcile publication asset bucket
         if: inputs.operation == 'reconcile-publication-assets-bucket'
         shell: bash
