@@ -20,9 +20,12 @@ const instagramActorId = requiredEnv('META_ADS_SMOKE_INSTAGRAM_ACTOR_ID');
 const smokeId = requiredEnv('META_ADS_SMOKE_ID');
 const dailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_DAILY_BUDGET_MINOR'));
 const maxDailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'));
-const geoLatitude = parseFiniteNumber(requiredEnv('META_ADS_SMOKE_GEO_LATITUDE'));
-const geoLongitude = parseFiniteNumber(requiredEnv('META_ADS_SMOKE_GEO_LONGITUDE'));
-const geoRadiusKm = parsePositiveNumber(requiredEnv('META_ADS_SMOKE_GEO_RADIUS_KM'));
+// Canonical destination envelope from touristic-digital-platform/apps/morro-digital-platform/src/config/destination.ts.
+const geoLatitude = parseFiniteNumber(process.env.META_ADS_SMOKE_GEO_LATITUDE?.trim() || '-13.3833');
+const geoLongitude = parseFiniteNumber(
+  process.env.META_ADS_SMOKE_GEO_LONGITUDE?.trim() || '-38.9167',
+);
+const geoRadiusKm = parsePositiveNumber(process.env.META_ADS_SMOKE_GEO_RADIUS_KM?.trim() || '15');
 
 const api = createMetaPublicationApiClient(config);
 const provider = new MetaAdsControlledGraphProvider(api);
@@ -47,7 +50,7 @@ async function preparePlan(): Promise<{
 }> {
   const grantedScopes = await verifyPermissions();
   const account = await verifyAccount();
-  const geo = canonicalMorroCustomLocation();
+  const geoTarget = canonicalMorroCustomLocation();
   const sourceCreative = await resolveSourceCreative();
 
   const now = new Date();
@@ -66,7 +69,7 @@ async function preparePlan(): Promise<{
       billingEvent: 'IMPRESSIONS',
       optimizationGoal: 'OFFSITE_CONVERSIONS',
       targeting: {
-        geo_locations: { custom_locations: [geo] },
+        geo_locations: { custom_locations: [geoTarget] },
       },
       promotedObject: {
         pixel_id: pixelId,
@@ -94,7 +97,7 @@ async function preparePlan(): Promise<{
   return {
     requestSha256: sha,
     planBase64: Buffer.from(JSON.stringify(plan), 'utf8').toString('base64'),
-    geo,
+    geo: geoEvidence(geoTarget),
     sourceCreativeId: sourceCreative.id,
     account,
     grantedScopes,
@@ -242,6 +245,14 @@ function canonicalMorroCustomLocation(): Readonly<Record<string, unknown>> {
     longitude: geoLongitude,
     radius: geoRadiusKm,
     distance_unit: 'kilometer',
+  };
+}
+
+function geoEvidence(target: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return {
+    key: `custom:${geoLatitude},${geoLongitude}:${geoRadiusKm}km`,
+    mode: 'custom_location',
+    ...target,
   };
 }
 
