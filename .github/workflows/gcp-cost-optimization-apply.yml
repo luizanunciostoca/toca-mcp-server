@@ -1,0 +1,130 @@
+name: GCP Cost Optimization Apply
+
+on:
+  push:
+    branches:
+      - ops/gcp-cost-optimization-20260814
+    paths:
+      - '.github/workflows/gcp-cost-optimization-apply.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SQL_INSTANCE: toca-mcp-db
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  TARGET_TIER: db-g1-small
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fail-closed preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTANCE_JSON="$(gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .settings.edition == "ENTERPRISE_PLUS" and
+            .settings.availabilityType == "REGIONAL" and
+            .settings.tier == "db-perf-optimized-N-8" and
+            .settings.dataDiskType == "PD_SSD" and
+            (.settings.dataDiskSizeGb | tonumber) == 250 and
+            .settings.deletionProtectionEnabled == true
+          ' >/dev/null
+          echo 'PRECHANGE_INSTANCE_GUARD=PASS'
+
+      - name: Require recent successful backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          BACKUPS_JSON="$(gcloud sql backups list --instance "$SQL_INSTANCE" --project "$PROJECT_ID" --limit=20 --format=json)"
+          printf '%s' "$BACKUPS_JSON" > /tmp/backups.json
+          LATEST_END="$(jq -r '[.[] | select(.status == "SUCCESSFUL" and .endTime != null)] | sort_by(.endTime) | last | .endTime // empty' /tmp/backups.json)"
+          test -n "$LATEST_END"
+          NOW_EPOCH="$(date -u +%s)"
+          BACKUP_EPOCH="$(date -u -d "$LATEST_END" +%s)"
+          AGE_SECONDS=$((NOW_EPOCH - BACKUP_EPOCH))
+          test "$AGE_SECONDS" -ge 0
+          test "$AGE_SECONDS" -le 129600
+          echo "RECENT_SUCCESSFUL_BACKUP=PASS age_seconds=$AGE_SECONDS"
+
+      - name: Switch Cloud SQL to minimum practical Enterprise configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$SQL_INSTANCE" \
+            --project "$PROJECT_ID" \
+            --edition=enterprise \
+            --tier="$TARGET_TIER" \
+            --availability-type=zonal \
+            --retained-backups-count=7 \
+            --retained-transaction-log-days=7 \
+            --quiet
+
+      - name: Verify optimized Cloud SQL configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTANCE_JSON="$(gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e --arg tier "$TARGET_TIER" '
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .settings.edition == "ENTERPRISE" and
+            .settings.availabilityType == "ZONAL" and
+            .settings.tier == $tier and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupConfiguration.enabled == true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
+            .settings.backupConfiguration.backupRetentionSettings.retainedBackups == 7 and
+            .settings.backupConfiguration.transactionLogRetentionDays == 7
+          ' >/dev/null
+          echo 'CLOUD_SQL_COST_OPTIMIZATION=VERIFIED'
+          gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" \
+            --format='table(name,state,databaseVersion,settings.edition,settings.availabilityType,settings.tier,settings.dataDiskSizeGb,settings.dataDiskType)'
+
+      - name: Verify Cloud Run services remain ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in toca-mcp-production toca-mcp-staging toca-meta-oauth-staging toca-managed-instagram-daemon; do
+            SERVICE_JSON="$(gcloud run services describe "$service" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+            printf '%s' "$SERVICE_JSON" | jq -e '[.status.conditions[] | select(.type == "Ready")][0].status == "True"' >/dev/null
+            echo "$service READY"
+          done
+
+      - name: Emit post-change evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg project "$PROJECT_ID" \
+            --arg instance "$SQL_INSTANCE" \
+            --arg targetTier "$TARGET_TIER" \
+            --arg changedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{project:$project,instance:$instance,edition:"ENTERPRISE",availabilityType:"ZONAL",tier:$targetTier,retainedBackups:7,transactionLogRetentionDays:7,changedAt:$changedAt}' \
+            > gcp-cost-optimization-evidence.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gcp-cost-optimization-evidence-${{ github.run_id }}
+          path: gcp-cost-optimization-evidence.json
+          if-no-files-found: error
+          retention-days: 30
