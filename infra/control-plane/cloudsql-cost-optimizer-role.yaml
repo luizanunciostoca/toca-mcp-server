@@ -5,6 +5,8 @@ includedPermissions:
   - cloudsql.instances.get
   - cloudsql.instances.list
   - cloudsql.instances.update
+  - cloudsql.instances.getDiskShrinkConfig
+  - cloudsql.instances.performDiskShrink
   - cloudsql.backupRuns.get
   - cloudsql.backupRuns.list
   - resourcemanager.projects.get
