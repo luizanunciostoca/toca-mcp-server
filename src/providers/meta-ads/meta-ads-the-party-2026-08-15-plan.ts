@@ -16,14 +16,14 @@ export const THE_PARTY_2026_08_15_ASSETS = [
   {
     key: 'creative-1',
     fileName: 'creative-1.jpg.b64',
-    sourceSha256: 'd2dfcef77e213bb783c8c2a7e479ab96653ecc8ea990c3152106267b945736cd',
+    sourceSha256: 'ee8128a08cf5143c581fba135384f2cf8d2f95c2d7258d4ff8c6740469351022',
     creativeName: 'The Party 15-08 | Festa da ilha',
     adName: 'The Party 15-08 | Creative 01 | Festa da ilha',
   },
   {
     key: 'creative-2',
     fileName: 'creative-2.jpg.b64',
-    sourceSha256: '7a1858b003edfc61e4be0beb2e10b8f3486caaddbb6d74033732146833af1cf4',
+    sourceSha256: '2adab63d6ecac535d4a5ac5b1adea45ee99b5be7edc3c867a712eb4ce2fa770d',
     creativeName: 'The Party 15-08 | Bar dobrado 2x1',
     adName: 'The Party 15-08 | Creative 02 | Bar dobrado 2x1',
   },
