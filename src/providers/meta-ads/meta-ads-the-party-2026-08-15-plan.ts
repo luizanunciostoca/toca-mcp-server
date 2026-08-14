@@ -16,14 +16,16 @@ export const THE_PARTY_2026_08_15_ASSETS = [
   {
     key: 'creative-1',
     fileName: 'creative-1.jpg',
-    sourceSha256: 'ee8128a08cf5143c581fba135384f2cf8d2f95c2d7258d4ff8c6740469351022',
+    driveFileId: '12hpbIpum6ju8_GFFK2bXTeTB-650Y5B7',
+    sourceSha256: 'ea2784a3a95b946ee81e266b2b660e0b6a571c0d07025fbdcb5f8f27ab319e78',
     creativeName: 'The Party 15-08 | Festa da ilha',
     adName: 'The Party 15-08 | Creative 01 | Festa da ilha',
   },
   {
     key: 'creative-2',
     fileName: 'creative-2.jpg',
-    sourceSha256: '2adab63d6ecac535d4a5ac5b1adea45ee99b5be7edc3c867a712eb4ce2fa770d',
+    driveFileId: '1rWmdzdxJqRhJsIeO8nQxdla7_LYqZDpE',
+    sourceSha256: '6771739c8098e490e0f68682b8f7c7c6dcdab9ebc8aa9064d8a1568afec46fd6',
     creativeName: 'The Party 15-08 | Bar dobrado 2x1',
     adName: 'The Party 15-08 | Creative 02 | Bar dobrado 2x1',
   },
@@ -74,6 +76,7 @@ export interface TheParty20260815CampaignDescriptor {
   readonly assets: readonly {
     readonly key: string;
     readonly fileName: string;
+    readonly driveFileId: string;
     readonly sourceSha256: string;
     readonly creativeName: string;
     readonly adName: string;
