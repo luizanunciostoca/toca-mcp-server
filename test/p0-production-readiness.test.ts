@@ -59,7 +59,10 @@ describe('P0 production scheduler policy', () => {
 
 describe('RuntimeTelemetry', () => {
   it('keeps counters and observations and renders Prometheus metrics', () => {
-    const events: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const events: Array<{
+      event: string;
+      fields: Record<string, unknown> | undefined;
+    }> = [];
     const logger: StructuredLogger = {
       info: (event, fields) => events.push({ event, fields }),
       error: (event, fields) => events.push({ event, fields }),
