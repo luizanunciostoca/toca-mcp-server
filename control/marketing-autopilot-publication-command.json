@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "commandId": "noop-provider-native-scheduling-required-1730",
-  "action": "NOOP",
-  "issuedAt": "2026-08-13T16:44:00-03:00",
-  "contentItemId": "MKT-20260813-SUNSET-FEED-1500",
-  "scheduledAt": "2026-08-13T17:30:00-03:00",
+  "commandId": "prepare-MKT-20260814-SUNSET-FEED-1455-V1",
+  "action": "PREPARE",
+  "issuedAt": "2026-08-14T14:42:00-03:00",
+  "contentItemId": "MKT-20260814-SUNSET-FEED-1455",
+  "scheduledAt": "2026-08-14T14:55:00-03:00",
   "timezone": "America/Bahia",
   "operation": "SUNSET",
   "channel": "INSTAGRAM",
@@ -14,11 +14,11 @@
   "contentType": "image/jpeg",
   "instagramAccountId": "17841402033495654",
   "caption": "Conforto, vista e serviço se encontram para transformar o fim de tarde em experiência.\n\nViva essa experiência na Toca do Morcego.",
-  "correlationId": "CORR-MKT-20260813-FEED1730-MANUAL-HANDOFF",
-  "idempotencyKey": "NOOP-MKT-20260813-SUNSET-FEED-1730",
-  "approvalMode": "BLOCKED",
-  "approvalStatus": "BLOCKED_POLICY",
+  "correlationId": "CORR-MKT-20260814-SUNSET-FEED-1455-V1",
+  "idempotencyKey": "MKT-20260814-SUNSET-FEED-1455-V1",
+  "approvalMode": "EXPLICIT_APPROVAL",
+  "approvalStatus": "PENDING_REVIEW",
   "approvedRequestSha256": "",
-  "schedulingPolicy": "NATIVE_PROVIDER_SCHEDULING_ONLY",
-  "publicationIntent": "NATIVE_SCHEDULE"
+  "schedulingPolicy": "SHARE_NOW",
+  "publicationIntent": "SHARE_NOW"
 }
