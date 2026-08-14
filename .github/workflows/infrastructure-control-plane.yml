@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - reconcile-publication-assets-bucket
+          - optimize-cloud-sql-cost
       expected_policy_sha256:
         description: SHA-256 of infra/control-plane/policy.json
         required: true
@@ -25,6 +26,7 @@ env:
   GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  CLOUD_SQL_INSTANCE: toca-mcp-db
 
 jobs:
   infrastructure:
@@ -55,6 +57,39 @@ jobs:
               jq -e '.allowedOperations["reconcile-publication-assets-bucket"].deliveryMode == "signed-url"' infra/control-plane/policy.json >/dev/null
               jq -e '.allowedOperations["reconcile-publication-assets-bucket"].runtimeRoles == ["roles/storage.objectCreator", "roles/storage.objectViewer"]' infra/control-plane/policy.json >/dev/null
               ;;
+            optimize-cloud-sql-cost)
+              jq -e '
+                .allowedOperations["optimize-cloud-sql-cost"] as $op |
+                $op.resourceType == "cloud-sql-instance" and
+                $op.resourceName == "toca-mcp-db" and
+                $op.databaseVersion == "POSTGRES_18" and
+                $op.requireRecentSuccessfulBackupHours == 36 and
+                $op.source.edition == "ENTERPRISE_PLUS" and
+                $op.source.availabilityType == "REGIONAL" and
+                $op.source.tier == "db-perf-optimized-N-8" and
+                $op.source.dataDiskType == "PD_SSD" and
+                $op.source.dataDiskSizeGb == 250 and
+                $op.target.edition == "ENTERPRISE" and
+                $op.target.availabilityType == "ZONAL" and
+                $op.target.tier == "db-g1-small" and
+                $op.target.retainedBackups == 7 and
+                $op.target.transactionLogRetentionDays == 7 and
+                $op.preserve.databaseVersion == true and
+                $op.preserve.dataDiskType == true and
+                $op.preserve.dataDiskSizeGb == true and
+                $op.preserve.deletionProtection == true and
+                $op.preserve.automatedBackups == true and
+                $op.preserve.pointInTimeRecovery == true and
+                $op.forbid.instanceDelete == true and
+                $op.forbid.databaseDelete == true and
+                $op.forbid.backupDelete == true and
+                $op.forbid.userMutation == true and
+                $op.forbid.sslMutation == true and
+                $op.forbid.iamMutation == true and
+                $op.forbid.billingMutation == true and
+                $op.forbid.diskShrinkInPlace == true
+              ' infra/control-plane/policy.json >/dev/null
+              ;;
             *)
               echo 'INFRA_OPERATION_NOT_ALLOWLISTED' >&2
               exit 1
@@ -71,6 +106,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Reconcile publication asset bucket
+        if: inputs.operation == 'reconcile-publication-assets-bucket'
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +139,7 @@ jobs:
             --role="roles/storage.objectViewer"
 
       - name: Verify publication asset bucket state
+        if: inputs.operation == 'reconcile-publication-assets-bucket'
         shell: bash
         run: |
           set -euo pipefail
@@ -114,3 +151,116 @@ jobs:
           jq -e 'all(.bindings[]?; all(.members[]?; . != "allUsers" and . != "allAuthenticatedUsers"))' <<<"$POLICY" >/dev/null
           jq -e 'any(.lifecycle.rule[]?; .action.type == "Delete" and .condition.age == 7)' <<<"$CONFIG" >/dev/null
           echo 'INFRA_CONTROL_PLANE_RECONCILED=1'
+
+      - name: Preflight Cloud SQL cost optimization
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .settings.edition == "ENTERPRISE_PLUS" and
+            .settings.availabilityType == "REGIONAL" and
+            .settings.tier == "db-perf-optimized-N-8" and
+            .settings.dataDiskType == "PD_SSD" and
+            (.settings.dataDiskSizeGb | tonumber) == 250 and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupConfiguration.enabled == true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled == true
+          ' >/dev/null
+
+          BACKUPS_JSON="$(gcloud sql backups list --instance "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --limit=20 --format=json)"
+          LATEST_END="$(jq -r '[.[] | select(.status == "SUCCESSFUL" and .endTime != null)] | sort_by(.endTime) | last | .endTime // empty' <<<"$BACKUPS_JSON")"
+          test -n "$LATEST_END"
+          NOW_EPOCH="$(date -u +%s)"
+          BACKUP_EPOCH="$(date -u -d "$LATEST_END" +%s)"
+          AGE_SECONDS=$((NOW_EPOCH - BACKUP_EPOCH))
+          test "$AGE_SECONDS" -ge 0
+          test "$AGE_SECONDS" -le 129600
+          echo "CLOUD_SQL_COST_PREFLIGHT=PASS backup_age_seconds=$AGE_SECONDS"
+
+      - name: Disable Cloud SQL regional HA
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --availability-type=zonal \
+            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .settings.availabilityType == "ZONAL" and
+            .settings.edition == "ENTERPRISE_PLUS" and
+            .settings.tier == "db-perf-optimized-N-8"
+          ' >/dev/null
+          echo 'CLOUD_SQL_HA_DISABLED=VERIFIED'
+
+      - name: Downgrade Cloud SQL edition and tier
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --edition=enterprise \
+            --tier=db-g1-small \
+            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .settings.edition == "ENTERPRISE" and
+            .settings.availabilityType == "ZONAL" and
+            .settings.tier == "db-g1-small"
+          ' >/dev/null
+          echo 'CLOUD_SQL_EDITION_TIER=VERIFIED'
+
+      - name: Reduce Cloud SQL backup retention
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --retained-backups-count=7 \
+            --retained-transaction-log-days=7 \
+            --quiet
+
+      - name: Verify optimized Cloud SQL state
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .settings.edition == "ENTERPRISE" and
+            .settings.availabilityType == "ZONAL" and
+            .settings.tier == "db-g1-small" and
+            .settings.dataDiskType == "PD_SSD" and
+            (.settings.dataDiskSizeGb | tonumber) == 250 and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupConfiguration.enabled == true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
+            .settings.backupConfiguration.backupRetentionSettings.retainedBackups == 7 and
+            .settings.backupConfiguration.transactionLogRetentionDays == 7
+          ' >/dev/null
+          jq -n \
+            --arg instance "$CLOUD_SQL_INSTANCE" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{operation:"optimize-cloud-sql-cost",instance:$instance,state:"VERIFIED",edition:"ENTERPRISE",availabilityType:"ZONAL",tier:"db-g1-small",diskType:"PD_SSD",diskSizeGb:250,retainedBackups:7,transactionLogRetentionDays:7,verifiedAt:$verifiedAt}' \
+            > cloudsql-cost-optimization-evidence.json
+          echo 'CLOUD_SQL_COST_OPTIMIZATION=VERIFIED'
+
+      - name: Upload Cloud SQL optimization evidence
+        if: inputs.operation == 'optimize-cloud-sql-cost'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudsql-cost-optimization-${{ github.run_id }}
+          path: cloudsql-cost-optimization-evidence.json
+          if-no-files-found: error
+          retention-days: 30
