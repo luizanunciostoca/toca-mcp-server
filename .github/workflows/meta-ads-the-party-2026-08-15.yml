@@ -7,6 +7,11 @@ on:
         description: Exact approval phrase for the fixed R$170 total campaign
         required: true
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - control/meta-ads-the-party-2026-08-15.execute
 
 permissions:
   contents: read
@@ -38,6 +43,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
         with:
@@ -53,10 +60,22 @@ jobs:
       - name: Validate exact approval and campaign time lock
         shell: bash
         env:
-          PROVIDED_APPROVAL: ${{ inputs.approval }}
+          PROVIDED_APPROVAL: ${{ inputs.approval || '' }}
         run: |
           set -euo pipefail
-          test "$PROVIDED_APPROVAL" = "$EXPECTED_APPROVAL"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$PROVIDED_APPROVAL" = "$EXPECTED_APPROVAL"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$GITHUB_REF" = "refs/heads/main"
+            test -f control/meta-ads-the-party-2026-08-15.execute
+            MARKER_APPROVAL="$(tr -d '\r\n' < control/meta-ads-the-party-2026-08-15.execute)"
+            test "$MARKER_APPROVAL" = "$EXPECTED_APPROVAL"
+            CHANGED_FILES="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+            test "$CHANGED_FILES" = "control/meta-ads-the-party-2026-08-15.execute"
+          else
+            echo "Unsupported event: $GITHUB_EVENT_NAME" >&2
+            exit 1
+          fi
           now_epoch="$(date -u +%s)"
           start_epoch="$(date -u -d "$CAMPAIGN_START_UTC" +%s)"
           test "$now_epoch" -lt "$start_epoch"
