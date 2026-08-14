@@ -21,7 +21,9 @@ const smokeId = requiredEnv('META_ADS_SMOKE_ID');
 const dailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_DAILY_BUDGET_MINOR'));
 const maxDailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'));
 // Canonical destination envelope from touristic-digital-platform/apps/morro-digital-platform/src/config/destination.ts.
-const geoLatitude = parseFiniteNumber(process.env.META_ADS_SMOKE_GEO_LATITUDE?.trim() || '-13.3833');
+const geoLatitude = parseFiniteNumber(
+  process.env.META_ADS_SMOKE_GEO_LATITUDE?.trim() || '-13.3833',
+);
 const geoLongitude = parseFiniteNumber(
   process.env.META_ADS_SMOKE_GEO_LONGITUDE?.trim() || '-38.9167',
 );

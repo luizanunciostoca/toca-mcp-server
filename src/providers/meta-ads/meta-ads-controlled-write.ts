@@ -211,7 +211,13 @@ export class MetaAdsControlledWriteService {
     const cities = Array.isArray(geo.cities) ? geo.cities : [];
     const customLocations = Array.isArray(geo.custom_locations) ? geo.custom_locations : [];
 
-    const alwaysDisallowedGeoFields = ['countries', 'regions', 'zips', 'geo_markets', 'location_types'];
+    const alwaysDisallowedGeoFields = [
+      'countries',
+      'regions',
+      'zips',
+      'geo_markets',
+      'location_types',
+    ];
     if (alwaysDisallowedGeoFields.some((field) => geo[field] !== undefined))
       throw new Error('META_ADS_GEO_SCOPE_NOT_ALLOWED');
     if (cities.length > 0 && customLocations.length > 0)
