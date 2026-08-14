@@ -137,7 +137,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   );
 
   const secrets = new EnvironmentSecretResolver(env);
-  const pool = config.DATABASE_URL ? createPostgresPool({ connectionString: config.DATABASE_URL }) : undefined;
+  const pool = config.DATABASE_URL
+    ? createPostgresPool({ connectionString: config.DATABASE_URL })
+    : undefined;
   const createMetaClient = () => {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
