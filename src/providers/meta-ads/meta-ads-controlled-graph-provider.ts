@@ -49,6 +49,7 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
       objective: draft.objective,
       status: 'PAUSED',
       special_ad_categories: JSON.stringify(draft.specialAdCategories),
+      is_adset_budget_sharing_enabled: 'false',
     });
     return idResponseSchema.parse(result);
   }
