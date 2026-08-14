@@ -185,7 +185,11 @@ export class MetaAdsControlledWriteService {
         throw new Error('META_ADS_INSTAGRAM_ACTOR_NOT_ALLOWED');
     }
     for (const ad of plan.ads) {
-      if (!Number.isInteger(ad.creativeIndex) || ad.creativeIndex < 0 || ad.creativeIndex >= plan.creatives.length)
+      if (
+        !Number.isInteger(ad.creativeIndex) ||
+        ad.creativeIndex < 0 ||
+        ad.creativeIndex >= plan.creatives.length
+      )
         throw new Error('META_ADS_CREATIVE_INDEX_INVALID');
     }
   }
@@ -236,7 +240,7 @@ function stableStringify(value: unknown): string {
       .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
       .join(',')}}`;
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? 'null';
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
