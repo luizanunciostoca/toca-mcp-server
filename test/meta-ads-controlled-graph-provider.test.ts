@@ -3,17 +3,19 @@ import type { MetaApiClient } from '../src/providers/meta/meta-api-client.js';
 import { MetaAdsControlledGraphProvider } from '../src/providers/meta-ads/meta-ads-controlled-graph-provider.js';
 
 function createApiMock() {
-  return {
+  const post = vi.fn().mockResolvedValue({ id: 'campaign-1' });
+  const api = {
     get: vi.fn(),
-    post: vi.fn().mockResolvedValue({ id: 'campaign-1' }),
+    post,
     postJson: vi.fn(),
     postJsonWithAccessToken: vi.fn(),
   } as unknown as MetaApiClient;
+  return { api, post };
 }
 
 describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
   it('creates campaigns PAUSED with ad set budget sharing explicitly disabled', async () => {
-    const api = createApiMock();
+    const { api, post } = createApiMock();
     const provider = new MetaAdsControlledGraphProvider(api);
 
     await expect(
@@ -28,8 +30,8 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
       ),
     ).resolves.toEqual({ id: 'campaign-1' });
 
-    expect(api.post).toHaveBeenCalledTimes(1);
-    expect(api.post).toHaveBeenCalledWith('act_311793958882290/campaigns', {
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('act_311793958882290/campaigns', {
       name: 'TOCA | provider contract',
       objective: 'OUTCOME_SALES',
       status: 'PAUSED',
@@ -39,7 +41,8 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
   });
 
   it('does not expose status or budget mutation through the controlled provider', async () => {
-    const provider = new MetaAdsControlledGraphProvider(createApiMock());
+    const { api } = createApiMock();
+    const provider = new MetaAdsControlledGraphProvider(api);
     const account = { adAccountId: '311793958882290', currency: 'BRL' } as const;
 
     await expect(provider.updateStatus(account, 'campaign-1', 'PAUSED')).rejects.toThrow(
