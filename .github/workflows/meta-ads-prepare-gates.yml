@@ -75,7 +75,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [PERMISSIONS, ACCOUNT, GEO, GEO_CAIRU, CREATIVE]
+        gate:
+          - PERMISSIONS
+          - ACCOUNT
+          - GEO
+          - GEO_CAIRU
+          - GEO_ANY_MORRO
+          - GEO_ANY_CAIRU
+          - GEO_REGION_CAIRU
+          - CREATIVE
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2

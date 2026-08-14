@@ -33,13 +33,26 @@ if (gate === 'PERMISSIONS') {
   }
   console.log(`META_ADS_DIAGNOSTIC_ACCOUNT_OK=${accountId}:${currency}`);
 } else if (gate === 'GEO') {
-  const match = await resolveUniqueCity(['Morro de São Paulo', 'Morro de Sao Paulo'], (name) =>
+  const match = await resolveUniqueLocation(
+    ['Morro de São Paulo', 'Morro de Sao Paulo'],
+    (name) => name.includes('morro de sao paulo'),
+    ['city'],
+  );
+  console.log(`META_ADS_DIAGNOSTIC_GEO_OK=${locationEvidence(match)}`);
+} else if (gate === 'GEO_CAIRU') {
+  const match = await resolveUniqueLocation(['Cairu'], (name) => name === 'cairu', ['city']);
+  console.log(`META_ADS_DIAGNOSTIC_GEO_CAIRU_OK=${locationEvidence(match)}`);
+} else if (gate === 'GEO_ANY_MORRO') {
+  const match = await resolveUniqueLocation(['Morro de São Paulo', 'Morro de Sao Paulo'], (name) =>
     name.includes('morro de sao paulo'),
   );
-  console.log(`META_ADS_DIAGNOSTIC_GEO_OK=${scalarString(match.key)}`);
-} else if (gate === 'GEO_CAIRU') {
-  const match = await resolveUniqueCity(['Cairu'], (name) => name === 'cairu');
-  console.log(`META_ADS_DIAGNOSTIC_GEO_CAIRU_OK=${scalarString(match.key)}`);
+  console.log(`META_ADS_DIAGNOSTIC_GEO_ANY_MORRO_OK=${locationEvidence(match)}`);
+} else if (gate === 'GEO_ANY_CAIRU') {
+  const match = await resolveUniqueLocation(['Cairu'], (name) => name === 'cairu');
+  console.log(`META_ADS_DIAGNOSTIC_GEO_ANY_CAIRU_OK=${locationEvidence(match)}`);
+} else if (gate === 'GEO_REGION_CAIRU') {
+  const match = await resolveUniqueLocation(['Cairu'], (name) => name === 'cairu', ['region']);
+  console.log(`META_ADS_DIAGNOSTIC_GEO_REGION_CAIRU_OK=${locationEvidence(match)}`);
 } else if (gate === 'CREATIVE') {
   const response = asRecord(
     await api.get(`act_${accountId}/adcreatives`, {
@@ -59,20 +72,20 @@ if (gate === 'PERMISSIONS') {
   throw new Error('META_ADS_DIAGNOSTIC_GATE_UNSUPPORTED');
 }
 
-async function resolveUniqueCity(
+async function resolveUniqueLocation(
   queries: readonly string[],
   matchesName: (normalizedName: string) => boolean,
+  locationTypes?: readonly string[],
 ): Promise<Readonly<Record<string, unknown>>> {
   const matches = new Map<string, Readonly<Record<string, unknown>>>();
   for (const query of queries) {
-    const response = asRecord(
-      await api.get('search', {
-        type: 'adgeolocation',
-        location_types: JSON.stringify(['city']),
-        q: query,
-        country_code: 'BR',
-      }),
-    );
+    const params: Record<string, string> = {
+      type: 'adgeolocation',
+      q: query,
+      country_code: 'BR',
+    };
+    if (locationTypes) params.location_types = JSON.stringify(locationTypes);
+    const response = asRecord(await api.get('search', params));
     const data = Array.isArray(response.data) ? response.data : [];
     for (const itemValue of data) {
       const item = asRecord(itemValue);
@@ -84,13 +97,20 @@ async function resolveUniqueCity(
         matchesName(name) &&
         (countryCode === 'BR' || countryCode === 'BRA' || countryCode === '')
       ) {
-        matches.set(key, item);
+        matches.set(`${scalarString(item.type)}:${key}`, item);
       }
     }
   }
   if (matches.size === 0) throw new Error('META_ADS_DIAGNOSTIC_GEO_NOT_FOUND');
   if (matches.size > 1) throw new Error('META_ADS_DIAGNOSTIC_GEO_AMBIGUOUS');
   return [...matches.values()][0]!;
+}
+
+function locationEvidence(item: Readonly<Record<string, unknown>>): string {
+  const key = scalarString(item.key);
+  const type = scalarString(item.type) || 'unknown';
+  if (!key) throw new Error('META_ADS_DIAGNOSTIC_GEO_KEY_MISSING');
+  return `${type}:${key}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
