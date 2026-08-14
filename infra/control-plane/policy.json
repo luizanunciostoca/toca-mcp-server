@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -13,6 +13,44 @@
       "runtimeRoles": ["roles/storage.objectCreator", "roles/storage.objectViewer"],
       "lifecycleDeleteAgeDays": 7,
       "uniformBucketLevelAccess": true
+    },
+    "optimize-cloud-sql-cost": {
+      "resourceType": "cloud-sql-instance",
+      "resourceName": "toca-mcp-db",
+      "databaseVersion": "POSTGRES_18",
+      "requireRecentSuccessfulBackupHours": 36,
+      "source": {
+        "edition": "ENTERPRISE_PLUS",
+        "availabilityType": "REGIONAL",
+        "tier": "db-perf-optimized-N-8",
+        "dataDiskType": "PD_SSD",
+        "dataDiskSizeGb": 250
+      },
+      "target": {
+        "edition": "ENTERPRISE",
+        "availabilityType": "ZONAL",
+        "tier": "db-g1-small",
+        "retainedBackups": 7,
+        "transactionLogRetentionDays": 7
+      },
+      "preserve": {
+        "databaseVersion": true,
+        "dataDiskType": true,
+        "dataDiskSizeGb": true,
+        "deletionProtection": true,
+        "automatedBackups": true,
+        "pointInTimeRecovery": true
+      },
+      "forbid": {
+        "instanceDelete": true,
+        "databaseDelete": true,
+        "backupDelete": true,
+        "userMutation": true,
+        "sslMutation": true,
+        "iamMutation": true,
+        "billingMutation": true,
+        "diskShrinkInPlace": true
+      }
     }
   },
   "activeRuntime": {
