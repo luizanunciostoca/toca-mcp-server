@@ -7,7 +7,6 @@ on:
       - 'src/**'
       - 'scripts/**'
       - 'migrations/**'
-      - 'control/toca-managed-schedule-command.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'Dockerfile'
@@ -53,21 +52,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm quality
 
-      - name: Validate optional schedule command envelope
-        run: |
-          set -euo pipefail
-          if [ -f control/toca-managed-schedule-command.json ]; then
-            jq -e '
-              .schemaVersion == 1 and
-              .action == "CREATE" and
-              (.commandId | type == "string" and length > 0) and
-              (.requestedBy | type == "string" and length > 0) and
-              (.payload.approval.mode == "EXPLICIT_APPROVAL") and
-              (.payload.approval.status == "APPROVED") and
-              (.payload.approval.approvedDescriptorSha256 | test("^[a-f0-9]{64}$"))
-            ' control/toca-managed-schedule-command.json >/dev/null
-          fi
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -90,10 +74,6 @@ jobs:
       - name: Deploy singleton scheduler daemon
         run: |
           set -euo pipefail
-          BOOTSTRAP_SCHEDULE_B64=""
-          if [ -f control/toca-managed-schedule-command.json ]; then
-            BOOTSTRAP_SCHEDULE_B64="$(base64 -w0 control/toca-managed-schedule-command.json)"
-          fi
           gcloud run deploy "$SERVICE_NAME" \
             --image "$IMAGE" \
             --project "$GCP_PROJECT_ID" \
@@ -110,7 +90,7 @@ jobs:
             --cpu 1 \
             --timeout 60s \
             --no-allow-unauthenticated \
-            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true@TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS=60000@TOCA_MANAGED_INSTAGRAM_BOOTSTRAP_SCHEDULE_B64=$BOOTSTRAP_SCHEDULE_B64@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_READ_ENABLED=false@META_ADS_READ_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_BUCKET@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$GCP_PROJECT_ID" \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true@TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS=60000@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_READ_ENABLED=false@META_ADS_READ_ENABLED=false@META_ENABLED=true@META_WEBHOOK_ENABLED=false@META_WEBHOOK_PERSISTENCE_ENABLED=false@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_BUCKET@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@META_APP_ID=2281930145887404@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$REDIRECT_URI@META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@META_TOKEN_STORE_PROVIDER=gcp-secret-manager@META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID@GCP_PROJECT_ID=$GCP_PROJECT_ID" \
             --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --quiet
 
@@ -127,7 +107,8 @@ jobs:
             ($container.args == ["dist/src/toca-managed-instagram-daemon.js"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
-            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_BOOTSTRAP_SCHEDULE_B64")] | length == 0)
           ' >/dev/null
           echo 'TOCA_MANAGED_INSTAGRAM_DAEMON_DEPLOYED=1'
 

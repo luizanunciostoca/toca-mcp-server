@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { NoopTelemetry, type Telemetry } from '../core/observability.js';
+import { RuntimeTelemetry, type Telemetry } from '../core/observability.js';
 import { JsonConsoleLogger, type StructuredLogger } from '../core/structured-logger.js';
 import { PostgresScheduler } from '../scheduler/postgres-scheduler.js';
 import { PostgresDeadLetterSink } from './postgres-dead-letter.js';
@@ -22,11 +22,12 @@ export interface WorkerRuntimeOptions {
 
 export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<number> {
   const logger = options.logger ?? new JsonConsoleLogger();
+  const telemetry = options.telemetry ?? new RuntimeTelemetry(logger);
   const worker = new SchedulerWorker({
     scheduler: new PostgresScheduler(options.pool),
     handlers: new MapJobHandlerRegistry(options.handlers),
     deadLetters: new PostgresDeadLetterSink(options.pool),
-    telemetry: options.telemetry ?? new NoopTelemetry(),
+    telemetry,
     logger,
     retry: options.retry ?? {
       maxAttempts: 5,
@@ -37,7 +38,17 @@ export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<num
     ...(options.claimToolName === undefined ? {} : { claimToolName: options.claimToolName }),
   });
 
-  const claimed = await worker.runOnce();
-  logger.info('worker.batch.completed', { claimed });
-  return claimed;
+  const started = Date.now();
+  try {
+    const claimed = await worker.runOnce();
+    telemetry.increment('worker.batch.succeeded');
+    telemetry.record('worker.batch.claimed_jobs', claimed);
+    telemetry.record('worker.batch.duration_ms', Date.now() - started, { outcome: 'success' });
+    logger.info('worker.batch.completed', { claimed });
+    return claimed;
+  } catch (error) {
+    telemetry.increment('worker.batch.failed');
+    telemetry.record('worker.batch.duration_ms', Date.now() - started, { outcome: 'failure' });
+    throw error;
+  }
 }
