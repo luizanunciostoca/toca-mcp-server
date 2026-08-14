@@ -6,74 +6,90 @@ Provide durable automatic publication timing inside `toca-mcp-server` while pres
 
 ## States
 
-- `TOCA_SCHEDULED`: a publication time is persisted in TOCA Postgres and owned by the TOCA MCP scheduler.
-- `SCHEDULED`: reserved exclusively for scheduling confirmed by the external provider itself.
+- `TOCA_SCHEDULED`: a publication time is persisted in TOCA PostgreSQL and owned by the TOCA scheduler.
+- `SCHEDULED`: reserved exclusively for scheduling confirmed by an external provider.
 - `PUBLISHED`: provider-backed publication confirmation exists.
 
-`TOCA_SCHEDULED` must never populate `provider_schedule_id` or claim that Instagram has a native queued post.
+`TOCA_SCHEDULED` must never populate a provider schedule identifier or claim that Instagram has a native queued post.
 
 ## Source of truth
 
-TOCA OS decides what should be published and at what editorial time. After an approved descriptor is accepted, `scheduled_jobs` in TOCA Postgres becomes the execution-time source of truth for that scheduled operation. TOCA OS mirrors the returned scheduler evidence and reconciles it through status reads.
+TOCA OS decides what should be published and at what editorial time. After an approved descriptor is accepted, `scheduled_jobs` in PostgreSQL becomes the execution-time source of truth. TOCA OS mirrors returned scheduler evidence and reconciles it through status reads and provider evidence.
 
 ## M1 — persistent scheduling control plane
 
-M1 exposes prepare/create/reschedule/cancel/status/list operations. Creation stores an immutable approved descriptor in the existing Postgres scheduler. No Meta request is made by schedule creation itself.
+M1 exposes prepare/create/reschedule/cancel/status/list operations through the protected MCP surface.
 
-Approval is bound to a SHA-256 descriptor containing content item, execution time, timezone, account, media type, stable asset identity/SHA, copy, correlation ID and publication idempotency key. Changing any of these fields requires a new descriptor hash and approval under the active policy.
+Creation stores an immutable approved descriptor in PostgreSQL and does not call Meta. Approval is bound to a SHA-256 descriptor containing content item, execution time, timezone, account, media type, stable asset identity/SHA, copy, correlation ID and publication idempotency key. Changing any field requires a new descriptor hash and approval.
+
+Schedule create/reschedule/cancel are application mutations. They must pass through the generic MCP execution policy/audit layer in addition to the descriptor-specific approval checks.
 
 ## M2 — temporal executor
 
-A single infrastructure heartbeat wakes the TOCA publication worker at a short fixed cadence. The heartbeat is not the source of individual publication times. The worker calls `claimDue()` against Postgres, using the existing transactional `FOR UPDATE SKIP LOCKED` implementation to claim only due jobs.
+The active production topology is a singleton private Cloud Run service named `toca-managed-instagram-daemon`.
 
-At execution time the worker materializes a fresh delivery URL from the stable private asset reference, then invokes the existing idempotent Instagram publication executor. Temporary signed URLs are never part of the long-lived approval descriptor.
+1. The daemon is deployed with one minimum instance, one maximum instance and concurrency 1.
+2. It polls at a short fixed cadence.
+3. Each tick calls `claimDue()` against PostgreSQL for `internal.instagram.publication.toca-managed.execute` only.
+4. `claimDue()` remains transactionally protected with `FOR UPDATE SKIP LOCKED` semantics.
+5. Zero due jobs is a successful no-op.
+6. Due jobs pass through per-job approval/audit, provider reconciliation and the idempotent Instagram publication executor.
+7. The daemon persists success/failure state and exposes private health/metrics endpoints.
 
-The worker records provider state and only promotes to `PUBLISHED` after provider-backed confirmation. Uncertain publish outcomes remain fail-closed and require reconciliation instead of blind retries.
+Individual publication times remain exclusively in PostgreSQL. The daemon may wake late, but it must never execute a future `run_at` early.
 
-### M2a — executor composition
+### Superseded heartbeat topology
 
-M2a provides the fail-closed runtime composition: private GCS asset delivery through short-lived signed URLs, per-job approval auditing, persistent publication execution state and reuse of the existing idempotent Instagram publication executor. `TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED` defaults to `false` and must never be implicitly enabled by deployment.
+The earlier Cloud Scheduler + one-shot Cloud Run Job heartbeat design is superseded by the singleton daemon. Active infrastructure policy must not recreate that topology.
 
-### M2b — heartbeat deployment contract
+Legacy heartbeat artifacts may be retained only as historical evidence until their provider resources are safely decommissioned. They are not an active scheduling path.
 
-M2b uses one infrastructure heartbeat for the entire publication domain. The target topology is:
+## Scheduling transport
 
-1. Cloud Scheduler triggers a dedicated Cloud Run Job at a fixed short cadence.
-2. The Cloud Run Job starts a one-shot TOCA-managed publication worker.
-3. The worker reads the current time and calls `claimDue()` for `internal.instagram.publication.toca-managed.execute` only.
-4. Zero due jobs is a successful no-op.
-5. Claimed jobs execute through the M2a runtime and then the process exits.
+The normal scheduling path is:
 
-The heartbeat must not carry content IDs, captions, asset URLs, publication times or approval data. Individual publication timing remains exclusively in Postgres. The heartbeat may wake late, but it must never cause a job with `run_at` in the future to execute early.
+```text
+ChatGPT / authorized MCP client
+  -> instagram.toca_schedule.prepare
+  -> explicit descriptor approval
+  -> instagram.toca_schedule.create
+  -> PostgreSQL scheduled_jobs
+  -> daemon claimDue()
+```
 
-The production Cloud Scheduler resource and Cloud Run Job must be infrastructure-controlled resources, not application-created resources. Provisioning must be allowlisted through the infrastructure control plane, require the `infrastructure-admin` environment, use Workload Identity/OIDC rather than service-account keys, and remain impossible from pull-request CI.
+A Git commit, control JSON file, GitHub Actions run or application redeploy must not be required to create a routine schedule. A deployment pipeline may deploy scheduler code, but it is not the scheduling API.
 
-The Cloud Run Job must run with the existing runtime service account, use the same private database and Secret Manager boundaries as the publication executor, and receive `TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false` until provider-backed smoke validation explicitly authorizes activation.
+## Execution composition
 
-### M2b activation gates
+At execution time the worker materializes a fresh short-lived delivery URL from the stable private GCS object reference, then invokes the existing idempotent Instagram publication executor. Temporary signed URLs are never part of the long-lived approval descriptor.
 
-Production heartbeat activation is permitted only when all of the following are true:
+The runtime records provider state and only promotes to `PUBLISHED` after provider-backed confirmation. Before a write, it reconciles recent provider media when local state could be stale. A unique provider-backed match promotes local state without repeating `media_publish`. Ambiguous/unavailable evidence and overdue stale drafts fail closed for reconciliation.
 
-- M1 and M2a are present in `main` with a green Quality Gate.
-- The worker entrypoint is buildable and exits successfully when the executor flag is disabled.
-- The infrastructure policy explicitly allowlists only the dedicated worker job and heartbeat scheduler resources.
-- No GitHub Actions cron and no ChatGPT per-content schedule is used as a publication clock.
-- Database migrations required by scheduler, audit and publication execution stores are applied.
-- Runtime identity can read the publication token secret and sign private GCS delivery URLs without static keys.
-- A controlled provider-backed smoke test confirms one approved job from `TOCA_SCHEDULED` through provider confirmation.
-- Kill-switch rollback is verified by setting `TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false` without deleting scheduled content.
+## Activation gates
 
-### Reconciliation after heartbeat execution
+Production automatic execution is permitted only while all of the following remain true:
 
-Worker success is not equivalent to editorial reconciliation. TOCA OS must reconcile scheduler status, publication execution state and provider-backed media evidence before changing the canonical content item to `PUBLISHED`. Failed or uncertain jobs must remain observable and must not be converted to success from scheduler timing alone.
+- scheduler and executor code are in `main` behind a green Quality Gate;
+- database migrations required by scheduler, audit and publication execution stores are applied;
+- runtime identity can read the provider token secret and sign private GCS delivery URLs without static keys;
+- the daemon runs privately as a singleton with the approved runtime identity;
+- a controlled provider-backed smoke has validated the publication path;
+- kill-switch rollback is available through `TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false` without deleting scheduled content;
+- provider reconciliation is executed before retry when local state may be stale.
+
+## Reconciliation
+
+Worker success is not equivalent to editorial reconciliation. TOCA OS must reconcile scheduler status, publication execution state and provider-backed media evidence before changing the canonical content item to `PUBLISHED`.
+
+`PUBLISHING`, `PUBLISH_UNCERTAIN`, ambiguous provider matches and overdue stale drafts must not be converted to success or blindly retried.
 
 ## Safety
 
-- No per-content ChatGPT Scheduled Task is allowed as the publication clock.
-- No per-content GitHub Actions timer is allowed as the publication clock.
+- No per-content ChatGPT Scheduled Task is the publication clock.
+- No per-content GitHub Actions timer is the publication clock.
+- No Git commit/redeploy is the routine scheduling transport.
 - Schedule creation does not call Meta.
-- M2 remains disabled until provider-backed smoke validation.
 - Idempotency exists at both scheduler-job and provider-publication levels.
 - `PREAPPROVED_CLASS` may only be used after TOCA OS governance formally enables it.
-- The heartbeat contains no content-specific payload and cannot override `run_at`.
-- Infrastructure provisioning and runtime publication execution remain separate trust boundaries.
+- The daemon contains no hard-coded per-content schedule.
+- Infrastructure deployment and runtime publication execution remain separate trust boundaries.
