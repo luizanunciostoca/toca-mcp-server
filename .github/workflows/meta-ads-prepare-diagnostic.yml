@@ -22,7 +22,7 @@ env:
   JOB_NAME: toca-meta-ads-prepare-diagnostic
   META_APP_ID: '2281930145887404'
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
-  META_ADS_ACCOUNT_ID: '311793958882290'
+  META_ADS_ACCOUNT_ID: '394512749760530'
   META_ADS_CURRENCY: BRL
   META_ADS_PIXEL_ID: '461233076843065'
   META_ADS_PAGE_ID: '306103746115875'
@@ -70,7 +70,7 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "SMOKE_ID=${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
 
-      - name: Deploy PREPARE-only diagnostic job
+      - name: Deploy PREPARE-only no-side-effect diagnostic job
         shell: bash
         run: |
           set -euo pipefail
@@ -114,7 +114,7 @@ jobs:
             [ .[] |
               (.textPayload // .jsonPayload.message // .jsonPayload.error // empty) |
               tostring |
-              select(test("META_ADS|Error|permission|secret|Graph|OAuth|geolocation|creative|account"; "i"))
+              select(test("META_ADS|Error|permission|secret|Graph|OAuth|geolocation|creative|account|payment|billing"; "i"))
             ] | unique | .[:25] | .[]
           ' /tmp/runtime-logs.json 2>/dev/null \
             | sed -E 's/(access[_-]?token|token)[=:][^ ,}\"]+/\1=[REDACTED]/Ig' \
@@ -134,7 +134,7 @@ jobs:
           ${DIAGNOSTIC}
           \`\`\`
 
-          No Meta Ads write operation is present in this diagnostic workflow; it executes PREPARE only.
+          PREPARE has no ID-producing Meta Ads mutation. It uses provider reads plus an Ad request with \`execution_options=[\"validate_only\"]\` as a no-side-effect readiness gate.
           EOF
           )"
           gh api "repos/${GITHUB_REPOSITORY}/issues/67/comments" -f body="$BODY" >/dev/null
