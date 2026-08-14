@@ -1,0 +1,197 @@
+name: Meta Ads Smoke 15442397 Diagnostic
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-smoke-15442397-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-smoke-15442397-readonly-diagnostic
+  ACCOUNT_ID: '311793958882290'
+  SMOKE_ID: '15442397d48a'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Read sanitized failed execution logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            'resource.type="cloud_run_job" AND resource.labels.job_name="toca-meta-ads-create-paused-smoke" AND timestamp>="2026-08-14T03:21:25Z" AND timestamp<="2026-08-14T03:21:50Z"' \
+            --project "$PROJECT_ID" \
+            --order=asc \
+            --limit=300 \
+            --format=json > /tmp/meta-ads-smoke-15442397-logs.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          entries = json.loads(Path('/tmp/meta-ads-smoke-15442397-logs.json').read_text() or '[]')
+          markers = (
+              'MetaApiError', 'META_HTTP_', 'META_CODE_', 'META_SUBCODE_', 'META_REASON_',
+              'createCampaign', 'createAdSet', 'createCreative', 'createAd',
+              'MetaAdsControlledWriteService', 'SMOKE_FAILED', 'Error:'
+          )
+          matches = []
+          for entry in entries:
+              text = entry.get('textPayload')
+              if not isinstance(text, str):
+                  payload = entry.get('jsonPayload')
+                  if isinstance(payload, dict):
+                      text = json.dumps(payload, sort_keys=True)
+              if isinstance(text, str) and any(marker in text for marker in markers):
+                  matches.append(text[:6000])
+
+          print(f'META_ADS_15442397_DIAGNOSTIC_MATCH_COUNT={len(matches)}')
+          for i, text in enumerate(matches, 1):
+              print(f'--- META_ADS_15442397_DIAGNOSTIC_{i} ---')
+              print(text)
+          if not matches:
+              raise SystemExit('No diagnostic lines found for failed execution')
+          PY
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable read-only Graph discovery image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-ads-partial-discovery
+          cat > /tmp/meta-ads-partial-discovery/discover.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.META_ADS_ACCOUNT_ID;
+          const smokeId = process.env.META_ADS_SMOKE_ID;
+          if (!token || !accountId || !smokeId) throw new Error('READONLY_DIAGNOSTIC_CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(`READONLY_GRAPH_GET_FAILED_${response.status}`);
+            return body;
+          };
+          const rows = (body) => Array.isArray(body?.data) ? body.data : [];
+          const campaignName = `TOCA | P0 SMOKE CREATE_PAUSED | ${smokeId}`;
+          const adSetName = `P0 Smoke | Morro locality | Purchase | ${smokeId}`;
+          const creativeName = `P0 Smoke Creative | ${smokeId}`;
+          const adName = `P0 Smoke Ad | ${smokeId}`;
+
+          const campaignsBody = await get(`act_${accountId}/campaigns?fields=id,name,status,effective_status,created_time&limit=200`);
+          const campaigns = rows(campaignsBody).filter((item) => item?.name === campaignName);
+          const campaignDetails = [];
+          for (const campaign of campaigns) {
+            const adSetsBody = await get(`${campaign.id}/adsets?fields=id,name,status,effective_status,created_time,daily_budget,bid_strategy,start_time,end_time&limit=200`);
+            campaignDetails.push({
+              campaign,
+              adSets: rows(adSetsBody).filter((item) => item?.name === adSetName),
+            });
+          }
+
+          const creativesBody = await get(`act_${accountId}/adcreatives?fields=id,name,status,effective_status&limit=200`);
+          const creatives = rows(creativesBody).filter((item) => item?.name === creativeName);
+          const adsBody = await get(`act_${accountId}/ads?fields=id,name,status,effective_status,adset_id,creative&limit=200`);
+          const ads = rows(adsBody).filter((item) => item?.name === adName);
+
+          const result = { smokeId, campaignDetails, creatives, ads };
+          const entities = [
+            ...campaignDetails.flatMap(({ campaign, adSets }) => [campaign, ...adSets]),
+            ...creatives,
+            ...ads,
+          ];
+          for (const entity of entities) {
+            if (entity?.status === 'ACTIVE' || entity?.effective_status === 'ACTIVE') {
+              throw new Error(`UNSAFE_ACTIVE_PARTIAL_ENTITY_${entity.id ?? 'unknown'}`);
+            }
+          }
+          console.log(`META_ADS_15442397_PARTIALS=${JSON.stringify(result)}`);
+          NODE
+
+          cat > /tmp/meta-ads-partial-discovery/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY discover.mjs ./discover.mjs
+          USER node
+          CMD ["node", "discover.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-readonly-diagnostic:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-ads-partial-discovery
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy read-only partial-object discovery job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_ADS_ACCOUNT_ID=$ACCOUNT_ID,META_ADS_SMOKE_ID=$SMOKE_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+      - name: Execute read-only partial-object discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Print persisted partial-object result
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=""
+          for attempt in $(seq 1 12); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_15442397_PARTIALS=\"" \
+              --project "$PROJECT_ID" \
+              --freshness=10m \
+              --order=desc \
+              --limit=1 \
+              --format='value(textPayload)')"
+            [ -n "$RESULT" ] && break
+            sleep 5
+          done
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT"
+
+      - name: Remove read-only diagnostic job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --quiet || true
