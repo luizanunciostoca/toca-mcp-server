@@ -64,9 +64,10 @@ export class PostgresApprovalStore implements ApprovalStore {
   }
 
   async get(approvalId: string): Promise<ApprovalRecord | undefined> {
-    const result = await this.pool.query('select * from approval_records where approval_id = $1', [
-      approvalId,
-    ]);
+    const result = await this.pool.query(
+      'select * from approval_records where approval_id = $1',
+      [approvalId],
+    );
     const row = result.rows[0] as ApprovalRow | undefined;
     return row ? fromRow(row) : undefined;
   }
@@ -150,9 +151,13 @@ function fromRow(row: ApprovalRow): ApprovalRecord {
 }
 
 function asStringArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
-    throw new Error('APPROVAL_ARRAY_INVALID');
-  return value;
+  if (!Array.isArray(value)) throw new Error('APPROVAL_ARRAY_INVALID');
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') throw new Error('APPROVAL_ARRAY_INVALID');
+    result.push(item);
+  }
+  return result;
 }
 
 function asFinancialCeiling(value: unknown): ApprovalRecord['financialCeiling'] {
