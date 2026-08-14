@@ -81,11 +81,22 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
     account: MetaAdAccountRef,
     draft: MetaCreativeDraft,
   ): Promise<{ readonly id: string }> {
-    const objectStorySpec = {
-      ...draft.objectStorySpec,
-      page_id: draft.pageId,
-      ...(draft.instagramActorId ? { instagram_actor_id: draft.instagramActorId } : {}),
-    };
+    const objectStorySpec: Record<string, unknown> = { ...draft.objectStorySpec };
+    delete objectStorySpec.page_id;
+    delete objectStorySpec.instagram_actor_id;
+    delete objectStorySpec.instagram_user_id;
+    objectStorySpec.page_id = draft.pageId;
+    if (draft.instagramActorId) objectStorySpec.instagram_user_id = draft.instagramActorId;
+
+    const videoData = objectStorySpec.video_data;
+    if (videoData && typeof videoData === 'object' && !Array.isArray(videoData)) {
+      const normalizedVideoData = { ...(videoData as Record<string, unknown>) };
+      if (normalizedVideoData.image_hash && normalizedVideoData.image_url) {
+        delete normalizedVideoData.image_url;
+      }
+      objectStorySpec.video_data = normalizedVideoData;
+    }
+
     const result = await this.api.post(`act_${account.adAccountId}/adcreatives`, {
       name: draft.name,
       object_story_spec: JSON.stringify(objectStorySpec),
