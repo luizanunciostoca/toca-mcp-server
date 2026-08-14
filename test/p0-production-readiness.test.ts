@@ -49,6 +49,7 @@ describe('P0 production scheduler policy', () => {
       'SUCCEEDED',
       JSON.stringify({
         executionId: 'exec-1',
+        approvalId: null,
         connectedAccount: null,
         createdAt: '2026-08-14T01:00:00.000Z',
       }),

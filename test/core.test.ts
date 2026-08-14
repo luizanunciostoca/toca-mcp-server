@@ -5,6 +5,11 @@ import { parseExecutionContext } from '../src/core/execution-context.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import {
+  hashApprovalDescriptor,
+  issueApproval,
+  requestApproval,
+} from '../src/governance/approval-governance.js';
+import {
   metaOAuthConfigSchema,
   type MetaOAuthTransport,
 } from '../src/providers/meta/meta-connection.js';
@@ -85,7 +90,47 @@ describe('evaluatePolicy', () => {
       capabilityStatus: 'PRODUCTION_VALIDATED' as const,
     };
     expect(evaluatePolicy(validated, { requester: 'test' }).decision).toBe('REQUIRE_APPROVAL');
-    expect(evaluatePolicy(validated, { requester: 'test', approved: true }).decision).toBe('ALLOW');
+    expect(evaluatePolicy(validated, { requester: 'test', approved: true }).decision).toBe(
+      'REQUIRE_APPROVAL',
+    );
+
+    const descriptor = { mediaId: 'media-1', caption: 'TOCA' };
+    const requested = requestApproval(
+      {
+        requester: 'test',
+        routeId: 'R02',
+        capabilityId: validated.name,
+        descriptor,
+        targetAccount: 'instagram-account-1',
+        scope: [validated.name],
+        expiresAt: '2026-08-15T00:00:00Z',
+        evidence: ['chatgpt://request/policy-test'],
+        correlationId: 'corr-policy-approval-1',
+      },
+      { now: '2026-08-14T20:00:00Z', createId: () => 'approval-policy-1' },
+    );
+    const approval = issueApproval(requested, {
+      authority: {
+        approver: 'authorized-approver',
+        allowedRouteIds: ['R02'],
+        allowedCapabilityIds: [validated.name],
+        allowedTargetAccounts: ['instagram-account-1'],
+        maxFinancialCeiling: null,
+        validatedAt: '2026-08-14T20:00:30Z',
+        evidence: ['drive://approval-authority/test'],
+      },
+      evidence: ['chatgpt://approval/policy-test'],
+      now: '2026-08-14T20:01:00Z',
+    });
+    expect(
+      evaluatePolicy(validated, {
+        requester: 'test',
+        connectedAccount: 'instagram-account-1',
+        approval,
+        descriptorSha256: hashApprovalDescriptor(descriptor),
+        now: '2026-08-14T20:02:00Z',
+      }).decision,
+    ).toBe('ALLOW');
   });
 });
 

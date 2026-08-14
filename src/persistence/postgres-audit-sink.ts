@@ -24,6 +24,7 @@ export class PostgresAuditSink implements AuditSink {
         event.status,
         JSON.stringify({
           executionId: event.executionId,
+          approvalId: event.approvalId ?? null,
           connectedAccount: event.connectedAccount ?? null,
           createdAt: event.createdAt,
         }),

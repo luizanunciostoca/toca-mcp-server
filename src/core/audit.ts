@@ -6,6 +6,7 @@ export interface AuditEvent {
   readonly toolName: string;
   readonly requester: string;
   readonly status: AuditStatus;
+  readonly approvalId?: string;
   readonly connectedAccount?: string;
   readonly externalResourceId?: string;
   readonly errorCode?: string;

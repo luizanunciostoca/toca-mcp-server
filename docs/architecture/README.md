@@ -43,6 +43,10 @@ Every provider mutation and every application mutation with side effects must fo
 
 Application writes such as TOCA-managed scheduling are not exempt from the generic policy/audit pipeline. Capability-specific checks such as immutable descriptor SHA approval are additive controls, not replacements for core policy.
 
+For governed external, financial and destructive operations, approval means a formal R27
+`ApprovalRecord` bound to requester, route, capability, immutable descriptor hash, target, scope,
+expiry and evidence. A boolean such as `approved: true` has no authorizing effect.
+
 ## Active Instagram scheduling topology
 
 Individual publication times are stored in PostgreSQL `scheduled_jobs`. The production temporal executor is the singleton Cloud Run service `toca-managed-instagram-daemon`, which polls at a short fixed cadence and calls `claimDue()`.
@@ -54,6 +58,10 @@ The former Cloud Scheduler + one-shot Cloud Run Job heartbeat topology is supers
 `system.capabilities` reports tools registered in the running server and their declared lifecycle status. Registration and implementation alone do not prove provider connectivity. Provider-backed capabilities must have explicit production evidence before they are promoted to `PRODUCTION_VALIDATED`.
 
 A documented TOCA_OS capability or an internal implementation never implies that a public MCP tool is available.
+
+The complete R01-R32 macroprocess catalog, capability lifecycle and structural state machines are
+defined in [routes-capabilities-v1.md](routes-capabilities-v1.md). The canonical capability catalog
+is deliberately broader than `src/registry.ts`.
 
 ## Secret boundary
 

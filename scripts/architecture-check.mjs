@@ -21,8 +21,21 @@ const required = [
   'src/core/secrets.ts',
   'src/core/environment-secret-resolver.ts',
   'src/core/tool-registry.ts',
+  'src/governance/approval-governance.ts',
+  'src/governance/capability-catalog.ts',
+  'src/governance/capability-ids.ts',
+  'src/governance/capability-lifecycle.ts',
+  'src/governance/governance-drift.ts',
+  'src/governance/index.ts',
+  'src/governance/release-lifecycle.ts',
+  'src/governance/route-catalog.ts',
+  'src/governance/state-machine.ts',
+  'src/governance/structural-evaluators.ts',
+  'src/governance/structural-lifecycles.ts',
+  'src/governance/types.ts',
   'src/health/readiness.ts',
   'src/persistence/postgres.ts',
+  'src/persistence/postgres-approval-store.ts',
   'src/policy/engagement-policy.ts',
   'src/providers/meta/meta-api-client.ts',
   'src/providers/meta/meta-assets.ts',
@@ -53,6 +66,7 @@ const required = [
   'src/worker/postgres-dead-letter.ts',
   'migrations/001_production_foundation.sql',
   'migrations/002_worker_dead_letter.sql',
+  'migrations/005_approval_governance.sql',
   'scripts/migrate.ts',
   'Dockerfile',
   'infra/cloudrun/service.template.yaml',
@@ -80,6 +94,7 @@ const required = [
   'tests/server.test.ts',
   'docs/architecture/README.md',
   'docs/architecture/preconnection-roadmap.md',
+  'docs/architecture/routes-capabilities-v1.md',
   'docs/integrations/meta.md',
   'docs/integrations/phase-1-real-validation.md',
   '.env.example',
@@ -108,6 +123,43 @@ if (!packageJson.dependencies?.pg || !packageJson.scripts?.migrate) {
 if (!packageJson.scripts?.['start:http']) {
   console.error('Remote MCP start script is required');
   process.exit(1);
+}
+const routeCatalog = readFileSync('src/governance/route-catalog.ts', 'utf8');
+const capabilityCatalog = readFileSync('src/governance/capability-catalog.ts', 'utf8');
+const capabilityIds = readFileSync('src/governance/capability-ids.ts', 'utf8');
+for (let number = 1; number <= 32; number += 1) {
+  const routeId = `R${String(number).padStart(2, '0')}`;
+  if (!routeCatalog.includes(`routeId: '${routeId}'`) || !capabilityIds.includes(`${routeId}: [`)) {
+    console.error(`Official route is missing from the governed catalog: ${routeId}`);
+    process.exit(1);
+  }
+}
+for (const field of [
+  'capability_id',
+  'route_id',
+  'version',
+  'lifecycle_status',
+  'risk_class',
+  'side_effects',
+  'approval_required',
+  'idempotent',
+  'provider',
+  'required_scopes',
+  'required_config',
+  'input_schema',
+  'output_schema',
+  'timeout_ms',
+  'retry_policy',
+  'verification_method',
+  'rollback_method',
+  'owner',
+  'last_validated_at',
+  'evidence',
+]) {
+  if (!capabilityCatalog.includes(field)) {
+    console.error(`Capability catalog is missing mandatory metadata: ${field}`);
+    process.exit(1);
+  }
 }
 if (
   packageJson.scripts?.['start:instagram-publication-readiness'] !==
