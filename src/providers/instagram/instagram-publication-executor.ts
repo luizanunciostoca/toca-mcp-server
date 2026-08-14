@@ -20,8 +20,8 @@ export interface InstagramPublicationTransport {
     instagramAccountId: string,
     containerId: string,
   ): Promise<{ readonly mediaId: string }>;
-  getPublishedMedia(mediaId: string): Promise<PublishedMediaEvidence>;
-  listRecentPublishedMedia(
+  getPublishedMedia?(mediaId: string): Promise<PublishedMediaEvidence>;
+  listRecentPublishedMedia?(
     instagramAccountId: string,
     limit?: number,
   ): Promise<readonly PublishedMediaEvidence[]>;
