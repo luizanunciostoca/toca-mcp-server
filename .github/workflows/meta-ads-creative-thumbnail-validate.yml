@@ -1,0 +1,185 @@
+name: Meta Ads Creative Thumbnail Validate
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-creative-thumbnail-validate.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-creative-thumbnail-validate
+  ACCOUNT_ID: '311793958882290'
+  PAGE_ID: '306103746115875'
+  INSTAGRAM_USER_ID: '17841402033495654'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable validate-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-ads-creative-thumbnail-validate
+          cat > /tmp/meta-ads-creative-thumbnail-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const pageId = process.env.PAGE_ID;
+          const instagramUserId = process.env.INSTAGRAM_USER_ID;
+          if (!token || !accountId || !pageId || !instagramUserId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (value) => String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(`GRAPH_GET_FAILED_${response.status}_${sanitize(body?.error?.message)}`);
+            return body;
+          };
+          const deepClone = (value) => JSON.parse(JSON.stringify(value));
+
+          const creativeList = await get(`act_${accountId}/adcreatives?fields=id,name,object_story_spec&limit=100`);
+          const eligible = (Array.isArray(creativeList?.data) ? creativeList.data : []).filter((item) => {
+            const spec = item?.object_story_spec;
+            return item?.id && spec?.page_id === pageId && (spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
+          });
+          if (eligible.length === 0) throw new Error('SOURCE_CREATIVE_NOT_FOUND');
+          const source = eligible[0];
+          const original = deepClone(source.object_story_spec ?? {});
+          const base = deepClone(original);
+          delete base.page_id;
+          delete base.instagram_actor_id;
+          delete base.instagram_user_id;
+          base.page_id = pageId;
+          base.instagram_user_id = instagramUserId;
+
+          const hasRedundantVideoThumbnail = Boolean(base?.video_data?.image_url && base?.video_data?.image_hash);
+          const modes = hasRedundantVideoThumbnail ? ['KEEP_HASH', 'KEEP_URL'] : ['AS_IS'];
+          const validations = [];
+          let accepted = null;
+
+          for (const mode of modes) {
+            const spec = deepClone(base);
+            if (mode === 'KEEP_HASH' && spec?.video_data) delete spec.video_data.image_url;
+            if (mode === 'KEEP_URL' && spec?.video_data) delete spec.video_data.image_hash;
+
+            const params = new URLSearchParams({
+              name: `P0 Creative VALIDATE_ONLY | canonical | ${mode}`,
+              object_story_spec: JSON.stringify(spec),
+              execution_options: JSON.stringify(['validate_only']),
+            });
+            const response = await fetch(`${graph}/act_${accountId}/adcreatives`, {
+              method: 'POST',
+              headers: {
+                ...headers,
+                'content-type': 'application/x-www-form-urlencoded',
+              },
+              body: params.toString(),
+            });
+            const body = await response.json().catch(() => ({}));
+            const error = body?.error ?? {};
+            const result = response.ok
+              ? { mode, httpStatus: response.status, ok: true, returnedId: body?.id ?? null }
+              : {
+                  mode,
+                  httpStatus: response.status,
+                  ok: false,
+                  type: sanitize(error.type),
+                  code: Number(error.code) || null,
+                  subcode: Number(error.error_subcode) || null,
+                  userTitle: sanitize(error.error_user_title),
+                  userMessage: sanitize(error.error_user_msg),
+                  message: sanitize(error.message),
+                };
+            validations.push(result);
+            if (response.ok) {
+              if (body?.id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+              accepted = mode;
+              break;
+            }
+          }
+
+          console.log(`META_ADS_CANONICAL_CREATIVE_VALIDATION=${JSON.stringify({
+            sourceCreativeId: String(source.id),
+            instagramUserId,
+            hasRedundantVideoThumbnail,
+            validations,
+            accepted,
+          })}`);
+          if (!accepted) process.exit(5);
+          NODE
+
+          cat > /tmp/meta-ads-creative-thumbnail-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-creative-thumbnail-validate:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-ads-creative-thumbnail-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validate-only job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,PAGE_ID=$PAGE_ID,INSTAGRAM_USER_ID=$INSTAGRAM_USER_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+      - name: Execute canonical creative validate-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=""
+          for attempt in $(seq 1 12); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_CANONICAL_CREATIVE_VALIDATION=\"" \
+              --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)')"
+            [ -n "$RESULT" ] && break
+            sleep 5
+          done
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT"
+
+      - name: Remove validate-only job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
