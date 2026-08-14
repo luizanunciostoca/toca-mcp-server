@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -13,17 +13,22 @@
       "runtimeRoles": ["roles/storage.objectCreator", "roles/storage.objectViewer"],
       "lifecycleDeleteAgeDays": 7,
       "uniformBucketLevelAccess": true
-    },
-    "reconcile-toca-managed-instagram-heartbeat": {
-      "resourceType": "cloud-run-job+cloud-scheduler-job",
-      "cloudRunJobName": "toca-managed-instagram-publication-worker",
-      "schedulerJobName": "toca-managed-instagram-publication-heartbeat",
-      "schedule": "*/5 * * * *",
-      "timeZone": "America/Bahia",
+    }
+  },
+  "activeRuntime": {
+    "tocaManagedInstagramScheduler": {
+      "resourceType": "cloud-run-service",
+      "resourceName": "toca-managed-instagram-daemon",
       "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
-      "executorEnabledByDefault": false,
-      "schedulerPausedByDefault": true,
-      "contentPayloadAllowed": false
+      "private": true,
+      "minInstances": 1,
+      "maxInstances": 1,
+      "concurrency": 1,
+      "pollIntervalMs": 60000,
+      "schedulerBackend": "postgresql",
+      "scheduleTransport": "protected-mcp",
+      "contentPayloadInInfrastructureTimer": false,
+      "legacyHeartbeatSuperseded": true
     }
   },
   "forbidden": {
@@ -34,6 +39,8 @@
     "arbitraryGcloud": true,
     "runtimePrivilegeEscalation": true,
     "publicBucketIam": true,
-    "perContentSchedulerJobs": true
+    "perContentSchedulerJobs": true,
+    "legacyHeartbeatRecreation": true,
+    "deployAsSchedulingTransport": true
   }
 }
