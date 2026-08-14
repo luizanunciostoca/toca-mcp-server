@@ -17,14 +17,14 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  FAILED_JOB_NAME: toca-meta-ads-party-31774472725
-  EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31774472725
+  FAILED_JOB_NAME: toca-meta-ads-party-31777075807
+  EXPECTED_MARKER: DIAGNOSE_THE_PARTY_EXECUTION_31777075807
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
   META_AD_ACCOUNT_ID: '311793958882290'
   EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
-  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-81be90a0beb688dff0ad25999bdd3db081118e63
+  RECON_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-57ecb96754d2ae36dfdaa2e2586cb1ad4b6c790c
 
 jobs:
   diagnose:
@@ -57,12 +57,14 @@ jobs:
         run: |
           set -euo pipefail
           gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND timestamp>=\"2026-08-14T05:56:35Z\" AND timestamp<=\"2026-08-14T05:57:25Z\"" \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND timestamp>=\"2026-08-14T06:42:30Z\" AND timestamp<=\"2026-08-14T06:43:20Z\"" \
             --project "$GCP_PROJECT_ID" \
             --order=asc \
             --limit=500 \
             --format=json > meta-ads-the-party-failure-diagnostic.json
           test -s meta-ads-the-party-failure-diagnostic.json
+          echo '--- CLOUD RUN FAILURE DIAGNOSTIC ---'
+          jq -r '.[] | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' meta-ads-the-party-failure-diagnostic.json
 
       - name: Reconcile provider state through runtime identity
         shell: bash
@@ -157,7 +159,7 @@ jobs:
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-ads-the-party-failure-diagnostic-31774472725-v3
+          name: meta-ads-the-party-failure-diagnostic-31777075807
           path: |
             meta-ads-the-party-failure-diagnostic.json
             meta-ads-the-party-provider-reconciliation.json
