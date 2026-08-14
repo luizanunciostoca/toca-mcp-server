@@ -1,0 +1,149 @@
+name: Meta Ads Campaign Validate Only
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-campaign-validate-only
+    paths:
+      - '.github/workflows/meta-ads-campaign-validate-only.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-campaign-validate-only
+  ACCOUNT_ID: '311793958882290'
+
+jobs:
+  validate-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable validate-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-campaign-validate
+          cat > /tmp/meta-campaign-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.META_ADS_ACCOUNT_ID;
+          if (!token || !accountId) throw new Error('VALIDATE_ONLY_CONFIGURATION_MISSING');
+
+          const params = new URLSearchParams({
+            name: 'TOCA | P0 VALIDATE_ONLY | 2026-08-14',
+            objective: 'OUTCOME_SALES',
+            status: 'PAUSED',
+            special_ad_categories: JSON.stringify([]),
+            execution_options: JSON.stringify(['validate_only']),
+          });
+          const response = await fetch(`https://graph.facebook.com/v24.0/act_${accountId}/campaigns`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/json',
+              'content-type': 'application/x-www-form-urlencoded',
+            },
+            body: params.toString(),
+          });
+          const body = await response.json().catch(() => ({}));
+          const error = body && typeof body === 'object' && !Array.isArray(body) && body.error && typeof body.error === 'object' ? body.error : {};
+          const sanitize = (value) => String(value ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 300);
+
+          if (!response.ok) {
+            console.log(`META_ADS_VALIDATE_ONLY_RESULT=${JSON.stringify({
+              httpStatus: response.status,
+              type: sanitize(error.type),
+              code: Number.isFinite(Number(error.code)) ? Number(error.code) : null,
+              subcode: Number.isFinite(Number(error.error_subcode)) ? Number(error.error_subcode) : null,
+              userTitle: sanitize(error.error_user_title),
+              userMessage: sanitize(error.error_user_msg),
+              message: sanitize(error.message),
+            })}`);
+            process.exit(0);
+          }
+
+          const id = body && typeof body === 'object' && !Array.isArray(body) ? body.id : undefined;
+          console.log(`META_ADS_VALIDATE_ONLY_RESULT=${JSON.stringify({ httpStatus: response.status, ok: true, returnedId: id ?? null })}`);
+          if (id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+          NODE
+
+          cat > /tmp/meta-campaign-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-campaign-validate-only:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-campaign-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validate-only Cloud Run Job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_ADS_ACCOUNT_ID=$ACCOUNT_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+      - name: Execute validate-only request
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Print sanitized provider validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_VALIDATE_ONLY_RESULT=\"" \
+            --project "$PROJECT_ID" \
+            --freshness=10m \
+            --order=desc \
+            --limit=1 \
+            --format='value(textPayload)'
+
+      - name: Remove validate-only job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --quiet || true
