@@ -23,6 +23,7 @@ env:
   GCP_ARTIFACT_REPOSITORY: toca-mcp
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
@@ -35,9 +36,11 @@ env:
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
 
 jobs:
-  quality-and-deploy:
+  quality-build-image:
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,7 +56,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm quality
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -65,14 +68,44 @@ jobs:
         run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
 
       - name: Build and push immutable daemon image
+        id: image
         run: |
           set -euo pipefail
           IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:toca-managed-daemon-${GITHUB_SHA}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  provision-minute-trigger:
+    needs: quality-build-image
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    outputs:
+      service_url: ${{ steps.scheduler.outputs.service_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify bounded scheduler target before privileged auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$SERVICE_NAME" = 'toca-managed-instagram-daemon'
+          test "$SCHEDULER_JOB_NAME" = 'toca-managed-instagram-tick'
+          test "$GCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
+          echo 'TOCA_MANAGED_INSTAGRAM_SCHEDULER_BOUNDARY=PASS'
+
+      - name: Authenticate as infrastructure administrator
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
 
       - name: Provision authenticated minute trigger before scale-to-zero
+        id: scheduler
         shell: bash
         run: |
           set -euo pipefail
@@ -119,11 +152,29 @@ jobs:
               --quiet
           fi
 
-          echo "DAEMON_SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+
+  deploy-runtime:
+    needs: [quality-build-image, provision-minute-trigger]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      IMAGE: ${{ needs.quality-build-image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
 
       - name: Deploy scale-to-zero scheduler executor
         run: |
           set -euo pipefail
+          test -n "$IMAGE"
           gcloud run deploy "$SERVICE_NAME" \
             --image "$IMAGE" \
             --project "$GCP_PROJECT_ID" \
@@ -163,28 +214,7 @@ jobs:
             (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
             ((.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"] // "true") == "true")
           ' >/dev/null
-
-          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --location "$GCP_REGION" \
-            --format=json)"
-          printf '%s' "$SCHEDULER_JSON" | jq -e \
-            --arg uri "${DAEMON_SERVICE_URL}/tick" \
-            --arg audience "$DAEMON_SERVICE_URL" \
-            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
-              .schedule == "* * * * *" and
-              .timeZone == "America/Bahia" and
-              .httpTarget.uri == $uri and
-              .httpTarget.httpMethod == "POST" and
-              .httpTarget.oidcToken.serviceAccountEmail == $sa and
-              .httpTarget.oidcToken.audience == $audience
-            ' >/dev/null
-
-          gcloud scheduler jobs run "$SCHEDULER_JOB_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --location "$GCP_REGION" \
-            --quiet
-          echo 'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_READY=1'
+          echo 'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_RUNTIME=VERIFIED'
 
       - name: Deploy MCP production scheduler surface
         run: |
@@ -223,3 +253,45 @@ jobs:
             (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1")
           ' >/dev/null
           echo 'TOCA_MCP_PRODUCTION_SCHEDULER_TOOLS_DEPLOYED=1'
+
+  verify-minute-trigger:
+    needs: [provision-minute-trigger, deploy-runtime]
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    steps:
+      - name: Authenticate as infrastructure administrator
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify authenticated minute trigger and execute smoke tick
+        shell: bash
+        env:
+          DAEMON_SERVICE_URL: ${{ needs.provision-minute-trigger.outputs.service_url }}
+        run: |
+          set -euo pipefail
+          test -n "$DAEMON_SERVICE_URL"
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_SERVICE_URL}/tick" \
+            --arg audience "$DAEMON_SERVICE_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .schedule == "* * * * *" and
+              .timeZone == "America/Bahia" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+
+          gcloud scheduler jobs run "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --quiet
+          echo 'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_READY=1'

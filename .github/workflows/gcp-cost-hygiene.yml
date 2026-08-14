@@ -17,20 +17,31 @@ env:
   GCP_REGION: southamerica-east1
   GCP_ARTIFACT_REPOSITORY: toca-mcp
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
   artifact-registry-cleanup:
     runs-on: ubuntu-latest
-    environment: production
+    environment: infrastructure-admin
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Verify bounded cleanup policy before privileged auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            length == 2 and
+            any(.[]; .name == "delete-images-older-than-30d" and .action.type == "Delete" and .condition.tagState == "any" and .condition.olderThan == "30d") and
+            any(.[]; .name == "keep-last-10-versions" and .action.type == "Keep" and .mostRecentVersions.keepCount == 10)
+          ' infra/artifact-registry-cleanup-policy.json >/dev/null
+          echo 'ARTIFACT_REGISTRY_CLEANUP_POLICY_BOUNDARY=PASS'
+
+      - name: Authenticate as infrastructure administrator
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
