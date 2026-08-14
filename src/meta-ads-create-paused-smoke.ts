@@ -250,10 +250,7 @@ function assertExactSmokePlanEnvelope(plan: ControlledCreatePausedPlan): void {
   if (plan.adSet.name !== expectedAdSetName()) {
     throw new Error('META_ADS_SMOKE_PLAN_ADSET_NAME_MISMATCH');
   }
-  if (
-    plan.creatives.length !== 1 ||
-    plan.creatives[0]?.name !== expectedCreativeName()
-  ) {
+  if (plan.creatives.length !== 1 || plan.creatives[0]?.name !== expectedCreativeName()) {
     throw new Error('META_ADS_SMOKE_PLAN_CREATIVE_NAME_MISMATCH');
   }
   if (
