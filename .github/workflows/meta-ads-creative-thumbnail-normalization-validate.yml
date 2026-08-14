@@ -1,0 +1,191 @@
+name: Meta Ads Creative Thumbnail Normalization Validate
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-creative-thumbnail-normalization-validate.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-creative-thumbnail-normalization-validate
+  ACCOUNT_ID: '311793958882290'
+  PAGE_ID: '306103746115875'
+  INSTAGRAM_USER_ID: '17841402033495654'
+  SOURCE_CREATIVE_ID: '24628562856774168'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable validate-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/creative-thumbnail-validate
+          cat > /tmp/creative-thumbnail-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const pageId = process.env.PAGE_ID;
+          const instagramUserId = process.env.INSTAGRAM_USER_ID;
+          const sourceCreativeId = process.env.SOURCE_CREATIVE_ID;
+          if (!token || !accountId || !pageId || !instagramUserId || !sourceCreativeId) {
+            throw new Error('CONFIGURATION_MISSING');
+          }
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const deepClone = (value) => JSON.parse(JSON.stringify(value));
+
+          const sourceResponse = await fetch(`${graph}/${sourceCreativeId}?fields=id,name,object_story_spec`, { headers });
+          const source = await sourceResponse.json().catch(() => ({}));
+          if (!sourceResponse.ok) throw new Error(`SOURCE_CREATIVE_READ_FAILED_${sourceResponse.status}`);
+          const sourceSpec = source?.object_story_spec;
+          if (!sourceSpec || typeof sourceSpec !== 'object') throw new Error('SOURCE_OBJECT_STORY_SPEC_MISSING');
+
+          const videoData = sourceSpec.video_data && typeof sourceSpec.video_data === 'object' ? sourceSpec.video_data : null;
+          console.log(`META_ADS_SOURCE_CREATIVE_SHAPE=${JSON.stringify({
+            sourceCreativeId: String(source.id ?? ''),
+            storyKeys: Object.keys(sourceSpec).sort(),
+            hasVideoData: Boolean(videoData),
+            videoDataKeys: videoData ? Object.keys(videoData).sort() : [],
+            hasImageHash: Boolean(videoData?.image_hash),
+            hasImageUrl: Boolean(videoData?.image_url),
+            hasVideoId: Boolean(videoData?.video_id),
+          })}`);
+          if (!videoData?.image_hash || !videoData?.image_url) throw new Error('EXPECTED_REDUNDANT_VIDEO_THUMBNAIL_FIELDS_NOT_FOUND');
+
+          const variants = [
+            { name: 'image_hash_only', remove: 'image_url' },
+            { name: 'image_url_only', remove: 'image_hash' },
+          ];
+          const validations = [];
+          let accepted = null;
+
+          for (const variant of variants) {
+            const spec = deepClone(sourceSpec);
+            delete spec.page_id;
+            delete spec.instagram_actor_id;
+            delete spec.instagram_user_id;
+            spec.page_id = pageId;
+            spec.instagram_user_id = instagramUserId;
+            if (spec.video_data && typeof spec.video_data === 'object') delete spec.video_data[variant.remove];
+
+            const params = new URLSearchParams({
+              name: `P0 Creative VALIDATE_ONLY | ${variant.name}`,
+              object_story_spec: JSON.stringify(spec),
+              execution_options: JSON.stringify(['validate_only']),
+            });
+            const response = await fetch(`${graph}/act_${accountId}/adcreatives`, {
+              method: 'POST',
+              headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+              body: params.toString(),
+            });
+            const body = await response.json().catch(() => ({}));
+            const error = body?.error ?? {};
+            const result = response.ok
+              ? { variant: variant.name, httpStatus: response.status, ok: true, returnedId: body?.id ?? null }
+              : {
+                  variant: variant.name,
+                  httpStatus: response.status,
+                  ok: false,
+                  type: sanitize(error.type),
+                  code: Number(error.code) || null,
+                  subcode: Number(error.error_subcode) || null,
+                  userTitle: sanitize(error.error_user_title),
+                  userMessage: sanitize(error.error_user_msg),
+                  message: sanitize(error.message),
+                };
+            validations.push(result);
+            if (response.ok) {
+              if (body?.id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+              accepted = variant.name;
+              break;
+            }
+          }
+
+          console.log(`META_ADS_CREATIVE_THUMBNAIL_VALIDATIONS=${JSON.stringify({ validations, accepted })}`);
+          if (!accepted) process.exit(5);
+          NODE
+
+          cat > /tmp/creative-thumbnail-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-creative-thumbnail-validate:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/creative-thumbnail-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,PAGE_ID=$PAGE_ID,INSTAGRAM_USER_ID=$INSTAGRAM_USER_ID,SOURCE_CREATIVE_ID=$SOURCE_CREATIVE_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+
+      - name: Execute validate-only variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted sanitized results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_CREATIVE_THUMBNAIL_VALIDATIONS=\"" \
+              --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)')"
+            if [ -n "$RESULT" ]; then
+              gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_SOURCE_CREATIVE_SHAPE=\"" \
+                --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)'
+              printf '%s\n' "$RESULT"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'No creative normalization result was visible.' >&2
+          exit 1
+
+      - name: Remove validation job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
