@@ -100,7 +100,12 @@ function withDailyBudget(dailyBudgetMinor: number): ControlledCreatePausedPlan {
   return { ...plan, adSet: { ...plan.adSet, dailyBudgetMinor } };
 }
 
-function withCustomLocation(overrides: Partial<typeof MORRO_LOCATION>): ControlledCreatePausedPlan {
+function withCustomLocation(overrides: {
+  latitude?: number;
+  longitude?: number;
+  radius?: number;
+  distance_unit?: 'kilometer' | 'mile';
+}): ControlledCreatePausedPlan {
   return {
     ...plan,
     adSet: {
