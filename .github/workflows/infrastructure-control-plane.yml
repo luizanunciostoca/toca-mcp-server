@@ -46,6 +46,7 @@ jobs:
           set -euo pipefail
           ACTUAL_POLICY_SHA256="$(sha256sum infra/control-plane/policy.json | awk '{print $1}')"
           test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
+          jq -e '.version == 8' infra/control-plane/policy.json >/dev/null
           jq -e '.projectId == "toca-mcp-production"' infra/control-plane/policy.json >/dev/null
           jq -e '.adminServiceAccount == "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com"' infra/control-plane/policy.json >/dev/null
           jq -e '.forbidden.projectOwner == true and .forbidden.projectEditor == true and .forbidden.serviceAccountKeys == true and .forbidden.bucketDelete == true and .forbidden.arbitraryGcloud == true and .forbidden.runtimePrivilegeEscalation == true and .forbidden.publicBucketIam == true and .forbidden.perContentSchedulerJobs == true and .forbidden.legacyHeartbeatRecreation == true and .forbidden.deployAsSchedulingTransport == true' infra/control-plane/policy.json >/dev/null
@@ -64,22 +65,43 @@ jobs:
                 $op.resourceName == "toca-mcp-db" and
                 $op.databaseVersion == "POSTGRES_18" and
                 $op.requireRecentSuccessfulBackupHours == 36 and
-                $op.source.edition == "ENTERPRISE_PLUS" and
-                $op.source.availabilityType == "REGIONAL" and
-                $op.source.tier == "db-perf-optimized-N-8" and
-                $op.source.dataDiskType == "PD_SSD" and
-                $op.source.dataDiskSizeGb == 250 and
+                $op.originalSource.edition == "ENTERPRISE_PLUS" and
+                $op.originalSource.availabilityType == "REGIONAL" and
+                $op.originalSource.tier == "db-perf-optimized-N-8" and
+                $op.originalSource.dataDiskType == "PD_SSD" and
+                $op.originalSource.dataDiskSizeGb == 250 and
                 $op.storageShrink.enabled == true and
+                $op.storageShrink.completed == true and
                 $op.storageShrink.sourceSizeGb == 250 and
-                $op.storageShrink.minimumStorageGb == 10 and
+                $op.storageShrink.providerMinimalTargetSizeGb == 56 and
                 $op.storageShrink.reserveBufferGb == 100 and
-                $op.storageShrink.strategy == "minimal-target-plus-buffer" and
-                $op.storageShrink.autoResizeHeadroomGb == 50 and
-                $op.storageShrink.maximumAutoResizeLimitGb == 250 and
+                $op.storageShrink.targetSizeGb == 156 and
+                $op.storageShrink.autoIncreaseHeadroomGb == 50 and
+                $op.storageShrink.autoIncreaseLimitGb == 206 and
+                $op.storageShrink.completedProviderRunId == 31844320778 and
                 $op.storageShrink.mustRunBeforeSharedCore == true and
+                ($op.allowedResumeStates | length) == 3 and
+                $op.allowedResumeStates[0].name == "STORAGE_SHRUNK" and
+                $op.allowedResumeStates[0].edition == "ENTERPRISE_PLUS" and
+                $op.allowedResumeStates[0].availabilityType == "REGIONAL" and
+                $op.allowedResumeStates[0].tier == "db-perf-optimized-N-8" and
+                $op.allowedResumeStates[0].dataDiskSizeGb == 156 and
+                $op.allowedResumeStates[1].name == "HA_DISABLED" and
+                $op.allowedResumeStates[1].edition == "ENTERPRISE_PLUS" and
+                $op.allowedResumeStates[1].availabilityType == "ZONAL" and
+                $op.allowedResumeStates[1].tier == "db-perf-optimized-N-8" and
+                $op.allowedResumeStates[1].dataDiskSizeGb == 156 and
+                $op.allowedResumeStates[2].name == "EDITION_TIER_DOWNGRADED" and
+                $op.allowedResumeStates[2].edition == "ENTERPRISE" and
+                $op.allowedResumeStates[2].availabilityType == "ZONAL" and
+                $op.allowedResumeStates[2].tier == "db-g1-small" and
+                $op.allowedResumeStates[2].dataDiskSizeGb == 156 and
                 $op.target.edition == "ENTERPRISE" and
                 $op.target.availabilityType == "ZONAL" and
                 $op.target.tier == "db-g1-small" and
+                $op.target.dataDiskType == "PD_SSD" and
+                $op.target.dataDiskSizeGb == 156 and
+                $op.target.storageAutoIncreaseLimitGb == 206 and
                 $op.target.retainedBackups == 7 and
                 $op.target.transactionLogRetentionDays == 7 and
                 $op.preserve.databaseVersion == true and
@@ -95,6 +117,7 @@ jobs:
                 $op.forbid.sslMutation == true and
                 $op.forbid.iamMutation == true and
                 $op.forbid.billingMutation == true and
+                $op.forbid.secondStorageShrink == true and
                 $op.forbid.unguardedDiskShrink == true
               ' infra/control-plane/policy.json >/dev/null
               ;;
@@ -113,7 +136,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          version: '>= 563.0.0'
+          version: latest
 
       - name: Reconcile publication asset bucket
         if: inputs.operation == 'reconcile-publication-assets-bucket'
@@ -171,18 +194,20 @@ jobs:
           printf '%s' "$INSTANCE_JSON" | jq -e '
             .state == "RUNNABLE" and
             .databaseVersion == "POSTGRES_18" and
-            .settings.edition == "ENTERPRISE_PLUS" and
-            .settings.availabilityType == "REGIONAL" and
-            .settings.tier == "db-perf-optimized-N-8" and
             .settings.dataDiskType == "PD_SSD" and
-            (.settings.dataDiskSizeGb | tonumber) == 250 and
+            (.settings.dataDiskSizeGb | tonumber) == 156 and
             .settings.storageAutoResize == true and
             .settings.deletionProtectionEnabled == true and
             .settings.backupConfiguration.enabled == true and
             .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
             ((.replicaNames // []) | length) == 0 and
             (.onPremisesConfiguration == null) and
-            all(.settings.databaseFlags[]?; .name != "max_wal_size")
+            all(.settings.databaseFlags[]?; .name != "max_wal_size") and
+            (
+              (.settings.edition == "ENTERPRISE_PLUS" and .settings.availabilityType == "REGIONAL" and .settings.tier == "db-perf-optimized-N-8") or
+              (.settings.edition == "ENTERPRISE_PLUS" and .settings.availabilityType == "ZONAL" and .settings.tier == "db-perf-optimized-N-8") or
+              (.settings.edition == "ENTERPRISE" and .settings.availabilityType == "ZONAL" and .settings.tier == "db-g1-small")
+            )
           ' >/dev/null
 
           BACKUPS_JSON="$(gcloud sql backups list --instance "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --limit=20 --format=json)"
@@ -195,69 +220,83 @@ jobs:
           test "$AGE_SECONDS" -le 129600
           echo "CLOUD_SQL_COST_PREFLIGHT=PASS backup_age_seconds=$AGE_SECONDS"
 
-      - name: Shrink oversized Cloud SQL storage safely
+      - name: Verify completed shrink and cap automatic growth
         if: inputs.operation == 'optimize-cloud-sql-cost'
         shell: bash
         run: |
           set -euo pipefail
-          SHRINK_JSON="$(gcloud sql instances get-storage-shrink-config "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
-          MIN_TARGET="$(jq -r '.minimalTargetSizeGb // .minTargetSizeGb // .min_target_size_gb // empty' <<<"$SHRINK_JSON")"
-          printf '%s' "$MIN_TARGET" | grep -Eq '^[0-9]+$'
-
-          TARGET_STORAGE_GB=$((MIN_TARGET + 100))
-          if [ "$TARGET_STORAGE_GB" -lt 10 ]; then TARGET_STORAGE_GB=10; fi
-          if [ "$TARGET_STORAGE_GB" -gt 250 ]; then TARGET_STORAGE_GB=250; fi
-
-          STORAGE_AUTO_RESIZE_LIMIT_GB=$((TARGET_STORAGE_GB + 50))
-          if [ "$STORAGE_AUTO_RESIZE_LIMIT_GB" -gt 250 ]; then STORAGE_AUTO_RESIZE_LIMIT_GB=250; fi
-
-          echo "MINIMAL_TARGET_STORAGE_GB=$MIN_TARGET" >> "$GITHUB_ENV"
+          TARGET_STORAGE_GB=156
+          STORAGE_AUTO_INCREASE_LIMIT_GB=206
+          MINIMAL_TARGET_STORAGE_GB=56
           echo "TARGET_STORAGE_GB=$TARGET_STORAGE_GB" >> "$GITHUB_ENV"
-          echo "STORAGE_AUTO_RESIZE_LIMIT_GB=$STORAGE_AUTO_RESIZE_LIMIT_GB" >> "$GITHUB_ENV"
-          printf '%s\n' "$SHRINK_JSON" > cloudsql-storage-shrink-config.json
+          echo "STORAGE_AUTO_INCREASE_LIMIT_GB=$STORAGE_AUTO_INCREASE_LIMIT_GB" >> "$GITHUB_ENV"
+          echo "MINIMAL_TARGET_STORAGE_GB=$MINIMAL_TARGET_STORAGE_GB" >> "$GITHUB_ENV"
 
-          if [ "$TARGET_STORAGE_GB" -lt 250 ]; then
-            gcloud sql instances perform-storage-shrink "$CLOUD_SQL_INSTANCE" \
-              --project "$GCP_PROJECT_ID" \
-              --storage-size="${TARGET_STORAGE_GB}GB" \
-              --no-async \
-              --quiet
-          else
-            echo 'CLOUD_SQL_STORAGE_SHRINK=SKIPPED_NO_SAFE_REDUCTION'
-          fi
+          BEFORE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$BEFORE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            (.settings.dataDiskSizeGb | tonumber) == 156 and
+            .settings.dataDiskType == "PD_SSD" and
+            .settings.storageAutoResize == true
+          ' >/dev/null
 
-          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+          jq -n \
+            --arg instance "$CLOUD_SQL_INSTANCE" \
+            --argjson priorRunId 31844320778 \
+            --argjson sourceSizeGb 250 \
+            --argjson providerMinimalTargetSizeGb 56 \
+            --argjson targetSizeGb 156 \
+            --arg completedAt "2026-08-14T22:01:48Z" \
+            '{instance:$instance,priorRunId:$priorRunId,sourceSizeGb:$sourceSizeGb,providerMinimalTargetSizeGb:$providerMinimalTargetSizeGb,targetSizeGb:$targetSizeGb,completedAt:$completedAt,state:"STORAGE_SHRINK_PROVIDER_VERIFIED"}' \
+            > cloudsql-storage-resume-evidence.json
+
+          gcloud beta sql instances patch "$CLOUD_SQL_INSTANCE" \
             --project "$GCP_PROJECT_ID" \
-            --storage-auto-increase-limit="$STORAGE_AUTO_RESIZE_LIMIT_GB" \
+            --storage-auto-increase \
+            --storage-auto-increase-limit=206 \
             --quiet
 
-          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
-          printf '%s' "$INSTANCE_JSON" | jq -e \
-            --argjson target "$TARGET_STORAGE_GB" \
-            --argjson limit "$STORAGE_AUTO_RESIZE_LIMIT_GB" '
-              .state == "RUNNABLE" and
-              (.settings.dataDiskSizeGb | tonumber) == $target and
-              .settings.dataDiskType == "PD_SSD" and
-              .settings.storageAutoResize == true and
-              (.settings.storageAutoResizeLimit | tonumber) == $limit
-            ' >/dev/null
-          echo "CLOUD_SQL_STORAGE=VERIFIED target_gb=$TARGET_STORAGE_GB auto_resize_limit_gb=$STORAGE_AUTO_RESIZE_LIMIT_GB"
+          AFTER_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$AFTER_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            (.settings.dataDiskSizeGb | tonumber) == 156 and
+            .settings.dataDiskType == "PD_SSD" and
+            .settings.storageAutoResize == true and
+            (.settings.storageAutoResizeLimit | tonumber) == 206
+          ' >/dev/null
+          echo 'CLOUD_SQL_RESUME_STATE=VERIFIED'
 
       - name: Disable Cloud SQL regional HA
         if: inputs.operation == 'optimize-cloud-sql-cost'
         shell: bash
         run: |
           set -euo pipefail
-          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
-            --project "$GCP_PROJECT_ID" \
-            --availability-type=zonal \
-            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          AVAILABILITY="$(jq -r '.settings.availabilityType' <<<"$INSTANCE_JSON")"
+          EDITION="$(jq -r '.settings.edition' <<<"$INSTANCE_JSON")"
+          TIER="$(jq -r '.settings.tier' <<<"$INSTANCE_JSON")"
+
+          if [ "$AVAILABILITY" = "REGIONAL" ]; then
+            test "$EDITION" = "ENTERPRISE_PLUS"
+            test "$TIER" = "db-perf-optimized-N-8"
+            gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+              --project "$GCP_PROJECT_ID" \
+              --availability-type=zonal \
+              --quiet
+          elif [ "$AVAILABILITY" != "ZONAL" ]; then
+            echo 'CLOUD_SQL_AVAILABILITY_OUTSIDE_RESUME_ENVELOPE' >&2
+            exit 1
+          fi
+
           INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
           printf '%s' "$INSTANCE_JSON" | jq -e '
             .state == "RUNNABLE" and
             .settings.availabilityType == "ZONAL" and
-            .settings.edition == "ENTERPRISE_PLUS" and
-            .settings.tier == "db-perf-optimized-N-8"
+            (.settings.dataDiskSizeGb | tonumber) == 156 and
+            (
+              (.settings.edition == "ENTERPRISE_PLUS" and .settings.tier == "db-perf-optimized-N-8") or
+              (.settings.edition == "ENTERPRISE" and .settings.tier == "db-g1-small")
+            )
           ' >/dev/null
           echo 'CLOUD_SQL_HA_DISABLED=VERIFIED'
 
@@ -266,17 +305,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
-            --project "$GCP_PROJECT_ID" \
-            --edition=enterprise \
-            --tier=db-g1-small \
-            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          EDITION="$(jq -r '.settings.edition' <<<"$INSTANCE_JSON")"
+          TIER="$(jq -r '.settings.tier' <<<"$INSTANCE_JSON")"
+          test "$(jq -r '.settings.availabilityType' <<<"$INSTANCE_JSON")" = "ZONAL"
+
+          if [ "$EDITION" = "ENTERPRISE_PLUS" ]; then
+            test "$TIER" = "db-perf-optimized-N-8"
+            gcloud sql instances patch "$CLOUD_SQL_INSTANCE" \
+              --project "$GCP_PROJECT_ID" \
+              --edition=enterprise \
+              --tier=db-g1-small \
+              --quiet
+          else
+            test "$EDITION" = "ENTERPRISE"
+            test "$TIER" = "db-g1-small"
+          fi
+
           INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
           printf '%s' "$INSTANCE_JSON" | jq -e '
             .state == "RUNNABLE" and
             .settings.edition == "ENTERPRISE" and
             .settings.availabilityType == "ZONAL" and
-            .settings.tier == "db-g1-small"
+            .settings.tier == "db-g1-small" and
+            (.settings.dataDiskSizeGb | tonumber) == 156
           ' >/dev/null
           echo 'CLOUD_SQL_EDITION_TIER=VERIFIED'
 
@@ -297,31 +349,29 @@ jobs:
         run: |
           set -euo pipefail
           INSTANCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
-          printf '%s' "$INSTANCE_JSON" | jq -e \
-            --argjson target "$TARGET_STORAGE_GB" \
-            --argjson limit "$STORAGE_AUTO_RESIZE_LIMIT_GB" '
-              .state == "RUNNABLE" and
-              .databaseVersion == "POSTGRES_18" and
-              .settings.edition == "ENTERPRISE" and
-              .settings.availabilityType == "ZONAL" and
-              .settings.tier == "db-g1-small" and
-              .settings.dataDiskType == "PD_SSD" and
-              (.settings.dataDiskSizeGb | tonumber) == $target and
-              .settings.storageAutoResize == true and
-              (.settings.storageAutoResizeLimit | tonumber) == $limit and
-              .settings.deletionProtectionEnabled == true and
-              .settings.backupConfiguration.enabled == true and
-              .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
-              .settings.backupConfiguration.backupRetentionSettings.retainedBackups == 7 and
-              .settings.backupConfiguration.transactionLogRetentionDays == 7
-            ' >/dev/null
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .settings.edition == "ENTERPRISE" and
+            .settings.availabilityType == "ZONAL" and
+            .settings.tier == "db-g1-small" and
+            .settings.dataDiskType == "PD_SSD" and
+            (.settings.dataDiskSizeGb | tonumber) == 156 and
+            .settings.storageAutoResize == true and
+            (.settings.storageAutoResizeLimit | tonumber) == 206 and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupConfiguration.enabled == true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
+            .settings.backupConfiguration.backupRetentionSettings.retainedBackups == 7 and
+            .settings.backupConfiguration.transactionLogRetentionDays == 7
+          ' >/dev/null
           jq -n \
             --arg instance "$CLOUD_SQL_INSTANCE" \
-            --argjson minimalTargetStorageGb "$MINIMAL_TARGET_STORAGE_GB" \
-            --argjson diskSizeGb "$TARGET_STORAGE_GB" \
-            --argjson storageAutoResizeLimitGb "$STORAGE_AUTO_RESIZE_LIMIT_GB" \
+            --argjson minimalTargetStorageGb 56 \
+            --argjson diskSizeGb 156 \
+            --argjson storageAutoIncreaseLimitGb 206 \
             --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{operation:"optimize-cloud-sql-cost",instance:$instance,state:"VERIFIED",edition:"ENTERPRISE",availabilityType:"ZONAL",tier:"db-g1-small",diskType:"PD_SSD",minimalTargetStorageGb:$minimalTargetStorageGb,diskSizeGb:$diskSizeGb,storageAutoResizeLimitGb:$storageAutoResizeLimitGb,retainedBackups:7,transactionLogRetentionDays:7,verifiedAt:$verifiedAt}' \
+            '{operation:"optimize-cloud-sql-cost",instance:$instance,state:"VERIFIED",edition:"ENTERPRISE",availabilityType:"ZONAL",tier:"db-g1-small",diskType:"PD_SSD",minimalTargetStorageGb:$minimalTargetStorageGb,diskSizeGb:$diskSizeGb,storageAutoIncreaseLimitGb:$storageAutoIncreaseLimitGb,retainedBackups:7,transactionLogRetentionDays:7,verifiedAt:$verifiedAt}' \
             > cloudsql-cost-optimization-evidence.json
           echo 'CLOUD_SQL_COST_OPTIMIZATION=VERIFIED'
 
@@ -332,6 +382,6 @@ jobs:
           name: cloudsql-cost-optimization-${{ github.run_id }}
           path: |
             cloudsql-cost-optimization-evidence.json
-            cloudsql-storage-shrink-config.json
+            cloudsql-storage-resume-evidence.json
           if-no-files-found: error
           retention-days: 30

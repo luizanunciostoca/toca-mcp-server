@@ -38,27 +38,34 @@ The bucket remains private. `allUsers` and `allAuthenticatedUsers` are forbidden
 
 `optimize-cloud-sql-cost`
 
-It manages only the existing `toca-mcp-db` Cloud SQL instance and is intentionally constrained to the approved cost-reduction transition:
+It manages only the existing `toca-mcp-db` Cloud SQL instance and is constrained to the approved cost-reduction transition.
 
-- require the exact known source state: PostgreSQL 18, Enterprise Plus, regional HA, `db-perf-optimized-N-8`, 250 GiB PD-SSD;
-- require a successful backup no older than 36 hours before any mutation;
-- require a standalone primary with no read replicas, no external-server configuration and no explicit `max_wal_size` override;
-- query Cloud SQL's provider-calculated minimum shrink target before touching storage;
-- calculate the storage target as the provider minimum plus a 100 GiB operating buffer, never below 10 GiB and never above the existing 250 GiB;
-- perform the storage shrink synchronously while the instance is still on a non-shared-core tier;
-- keep storage auto-resize enabled and cap future automatic growth at the resulting target plus 50 GiB, never above the current 250 GiB ceiling;
-- disable regional HA by moving the same instance to zonal availability;
-- change the edition to Enterprise and the tier to `db-g1-small`;
-- reduce automated backup retention from 15 to 7 retained backups;
-- reduce transaction-log retention from 14 to 7 days;
-- preserve PostgreSQL version, deletion protection, automated backups, point-in-time recovery and disk type;
-- verify the final provider state and emit immutable workflow evidence including the provider shrink configuration and final disk size.
+The original provider state was PostgreSQL 18, Enterprise Plus, regional HA, `db-perf-optimized-N-8`, 250 GiB PD-SSD. Run `31844320778` passed policy/authentication/preflight and completed the provider-managed storage shrink from 250 GiB to 156 GiB. Cloud SQL reported a provider minimum of 56 GiB; the approved target therefore preserved the 100 GiB operating buffer. The run then stopped before HA/edition/tier changes because the GA gcloud build on the runner did not recognize the auto-growth-limit flag even though the current Cloud SQL SDK documentation exposes it. No second shrink is permitted.
 
-Cloud SQL now supports provider-managed in-place storage shrink for eligible PostgreSQL primary instances. The operation must run before moving to `db-g1-small`, because storage shrink is not supported on shared-core instances. The shrink can cause instance downtime and blocks other Cloud SQL operations while it runs, so it remains inside the explicit manual infrastructure gate.
+The active policy is therefore resumable from three exact intermediate states only:
 
-The operation cannot create/delete/clone/restore instances, delete databases or backups, mutate users or SSL certificates, modify IAM, alter billing or perform an unguarded/hard-coded storage shrink.
+- `STORAGE_SHRUNK`: Enterprise Plus, REGIONAL, `db-perf-optimized-N-8`, 156 GiB;
+- `HA_DISABLED`: Enterprise Plus, ZONAL, `db-perf-optimized-N-8`, 156 GiB;
+- `EDITION_TIER_DOWNGRADED`: Enterprise, ZONAL, `db-g1-small`, 156 GiB.
 
-`infra/control-plane/cloudsql-cost-optimizer-role.yaml` defines the least-privilege permission envelope needed by the infrastructure administrator for this operation. The role contains only existing-instance read/update, provider storage-shrink preflight/execution, backup metadata read and required project/service-usage reads; it deliberately omits create/delete/restore/import/user/SSL/IAM/billing permissions.
+On resume, the operation:
+
+- requires a successful backup no older than 36 hours;
+- requires a standalone primary with no read replicas, no external-server configuration and no explicit `max_wal_size` override;
+- verifies the already-completed 156 GiB shrink instead of attempting another storage decrease;
+- keeps automatic storage increase enabled and caps automatic growth at 206 GiB using the Cloud SQL beta patch surface, which exposes `--storage-auto-increase-limit` on runner versions where the GA surface may lag;
+- disables regional HA by moving the same instance to zonal availability if that step is still pending;
+- changes the edition to Enterprise and the tier to `db-g1-small` if that step is still pending;
+- reduces automated backup retention to 7 retained backups;
+- reduces transaction-log retention to 7 days;
+- preserves PostgreSQL version, deletion protection, automated backups, point-in-time recovery and PD-SSD;
+- verifies final provider state and emits immutable workflow evidence.
+
+Each step is idempotent inside the allowlisted intermediate-state envelope. Any provider state outside those exact stages fails closed. This makes the workflow safe to resume after a provider or CLI interruption without repeating an already-completed storage shrink.
+
+The operation cannot create/delete/clone/restore instances, delete databases or backups, mutate users or SSL certificates, modify IAM, alter billing, perform a second storage shrink or execute an unguarded/hard-coded storage shrink.
+
+`infra/control-plane/cloudsql-cost-optimizer-role.yaml` defines the least-privilege permission envelope needed by the infrastructure administrator. The role contains existing-instance read/update, provider storage-shrink permissions retained for audit/history, backup metadata read and required project/service-usage reads; it deliberately omits create/delete/restore/import/user/SSL/IAM/billing permissions.
 
 ## Active scheduler runtime
 
@@ -100,7 +107,7 @@ The policy explicitly forbids:
 - recreation of the superseded heartbeat;
 - using deploy/redeploy as the routine scheduling transport.
 
-The Cloud SQL operation adds its own stricter deny envelope for instance/database/backup deletion, user/SSL/IAM/billing mutation and any storage shrink that does not first use the provider minimum-target gate and configured buffer.
+The Cloud SQL operation adds its own stricter deny envelope for instance/database/backup deletion, user/SSL/IAM/billing mutation, a second storage shrink and any provider state outside the recorded resume stages.
 
 ## Workflow
 
