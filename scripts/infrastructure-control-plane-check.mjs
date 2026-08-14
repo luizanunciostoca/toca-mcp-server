@@ -47,10 +47,9 @@ const workflowRequirements = [
   '.deliveryMode == "signed-url"',
   'roles/storage.objectCreator',
   'roles/storage.objectViewer',
-  'get-storage-shrink-config',
-  'perform-storage-shrink',
-  '--no-async',
-  '--storage-auto-increase-limit',
+  'CLOUD_SQL_RESUME_STATE=VERIFIED',
+  'gcloud beta sql instances patch',
+  '--storage-auto-increase-limit=206',
   '--availability-type=zonal',
   '--edition=enterprise',
   '--tier=db-g1-small',
@@ -87,6 +86,7 @@ const forbiddenWorkflowMarkers = [
   'gcloud billing',
   'gcloud projects add-iam-policy-binding',
   'gcloud projects remove-iam-policy-binding',
+  'perform-storage-shrink',
 ];
 
 for (const forbidden of forbiddenWorkflowMarkers) {
@@ -109,11 +109,12 @@ if (workflow.includes('push:') || workflow.includes('pull_request:')) {
 }
 
 if (
+  policy.version !== 8 ||
   policy.projectId !== 'toca-mcp-production' ||
   policy.adminServiceAccount !== infraAdmin ||
   policy.runtimeServiceAccount !== runtime
 ) {
-  console.error('Infrastructure identity boundary changed unexpectedly');
+  console.error('Infrastructure identity/policy boundary changed unexpectedly');
   process.exit(1);
 }
 
@@ -136,27 +137,50 @@ if (
 }
 
 const cloudSqlOptimization = policy.allowedOperations?.['optimize-cloud-sql-cost'];
+const resumeStates = cloudSqlOptimization?.allowedResumeStates;
 if (
   cloudSqlOptimization?.resourceType !== 'cloud-sql-instance' ||
   cloudSqlOptimization?.resourceName !== 'toca-mcp-db' ||
   cloudSqlOptimization?.databaseVersion !== 'POSTGRES_18' ||
   cloudSqlOptimization?.requireRecentSuccessfulBackupHours !== 36 ||
-  cloudSqlOptimization?.source?.edition !== 'ENTERPRISE_PLUS' ||
-  cloudSqlOptimization?.source?.availabilityType !== 'REGIONAL' ||
-  cloudSqlOptimization?.source?.tier !== 'db-perf-optimized-N-8' ||
-  cloudSqlOptimization?.source?.dataDiskType !== 'PD_SSD' ||
-  cloudSqlOptimization?.source?.dataDiskSizeGb !== 250 ||
+  cloudSqlOptimization?.originalSource?.edition !== 'ENTERPRISE_PLUS' ||
+  cloudSqlOptimization?.originalSource?.availabilityType !== 'REGIONAL' ||
+  cloudSqlOptimization?.originalSource?.tier !== 'db-perf-optimized-N-8' ||
+  cloudSqlOptimization?.originalSource?.dataDiskType !== 'PD_SSD' ||
+  cloudSqlOptimization?.originalSource?.dataDiskSizeGb !== 250 ||
   cloudSqlOptimization?.storageShrink?.enabled !== true ||
+  cloudSqlOptimization?.storageShrink?.completed !== true ||
   cloudSqlOptimization?.storageShrink?.sourceSizeGb !== 250 ||
-  cloudSqlOptimization?.storageShrink?.minimumStorageGb !== 10 ||
+  cloudSqlOptimization?.storageShrink?.providerMinimalTargetSizeGb !== 56 ||
   cloudSqlOptimization?.storageShrink?.reserveBufferGb !== 100 ||
-  cloudSqlOptimization?.storageShrink?.strategy !== 'minimal-target-plus-buffer' ||
-  cloudSqlOptimization?.storageShrink?.autoResizeHeadroomGb !== 50 ||
-  cloudSqlOptimization?.storageShrink?.maximumAutoResizeLimitGb !== 250 ||
+  cloudSqlOptimization?.storageShrink?.targetSizeGb !== 156 ||
+  cloudSqlOptimization?.storageShrink?.autoIncreaseHeadroomGb !== 50 ||
+  cloudSqlOptimization?.storageShrink?.autoIncreaseLimitGb !== 206 ||
+  cloudSqlOptimization?.storageShrink?.completedProviderRunId !== 31844320778 ||
   cloudSqlOptimization?.storageShrink?.mustRunBeforeSharedCore !== true ||
+  !Array.isArray(resumeStates) ||
+  resumeStates.length !== 3 ||
+  resumeStates[0]?.name !== 'STORAGE_SHRUNK' ||
+  resumeStates[0]?.edition !== 'ENTERPRISE_PLUS' ||
+  resumeStates[0]?.availabilityType !== 'REGIONAL' ||
+  resumeStates[0]?.tier !== 'db-perf-optimized-N-8' ||
+  resumeStates[0]?.dataDiskSizeGb !== 156 ||
+  resumeStates[1]?.name !== 'HA_DISABLED' ||
+  resumeStates[1]?.edition !== 'ENTERPRISE_PLUS' ||
+  resumeStates[1]?.availabilityType !== 'ZONAL' ||
+  resumeStates[1]?.tier !== 'db-perf-optimized-N-8' ||
+  resumeStates[1]?.dataDiskSizeGb !== 156 ||
+  resumeStates[2]?.name !== 'EDITION_TIER_DOWNGRADED' ||
+  resumeStates[2]?.edition !== 'ENTERPRISE' ||
+  resumeStates[2]?.availabilityType !== 'ZONAL' ||
+  resumeStates[2]?.tier !== 'db-g1-small' ||
+  resumeStates[2]?.dataDiskSizeGb !== 156 ||
   cloudSqlOptimization?.target?.edition !== 'ENTERPRISE' ||
   cloudSqlOptimization?.target?.availabilityType !== 'ZONAL' ||
   cloudSqlOptimization?.target?.tier !== 'db-g1-small' ||
+  cloudSqlOptimization?.target?.dataDiskType !== 'PD_SSD' ||
+  cloudSqlOptimization?.target?.dataDiskSizeGb !== 156 ||
+  cloudSqlOptimization?.target?.storageAutoIncreaseLimitGb !== 206 ||
   cloudSqlOptimization?.target?.retainedBackups !== 7 ||
   cloudSqlOptimization?.target?.transactionLogRetentionDays !== 7 ||
   cloudSqlOptimization?.preserve?.databaseVersion !== true ||
@@ -172,9 +196,10 @@ if (
   cloudSqlOptimization?.forbid?.sslMutation !== true ||
   cloudSqlOptimization?.forbid?.iamMutation !== true ||
   cloudSqlOptimization?.forbid?.billingMutation !== true ||
+  cloudSqlOptimization?.forbid?.secondStorageShrink !== true ||
   cloudSqlOptimization?.forbid?.unguardedDiskShrink !== true
 ) {
-  console.error('Cloud SQL cost optimization is outside the approved envelope');
+  console.error('Cloud SQL cost optimization is outside the approved resumable envelope');
   process.exit(1);
 }
 
