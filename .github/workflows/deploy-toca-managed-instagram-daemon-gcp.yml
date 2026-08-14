@@ -23,7 +23,6 @@ env:
   GCP_ARTIFACT_REPOSITORY: toca-mcp
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
@@ -79,13 +78,13 @@ jobs:
   provision-minute-trigger:
     needs: quality-build-image
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
+    environment: production
     outputs:
       service_url: ${{ steps.scheduler.outputs.service_url }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify bounded scheduler target before privileged auth
+      - name: Verify bounded scheduler target before deployer auth
         shell: bash
         run: |
           set -euo pipefail
@@ -96,11 +95,11 @@ jobs:
           test "$GCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
           echo 'TOCA_MANAGED_INSTAGRAM_SCHEDULER_BOUNDARY=PASS'
 
-      - name: Authenticate as infrastructure administrator
+      - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
@@ -257,13 +256,13 @@ jobs:
   verify-minute-trigger:
     needs: [provision-minute-trigger, deploy-runtime]
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
+    environment: production
     steps:
-      - name: Authenticate as infrastructure administrator
+      - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
