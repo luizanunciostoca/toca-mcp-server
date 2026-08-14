@@ -6,7 +6,7 @@ on:
       - feat/meta-ads-the-party-2026-08-15-execution
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -21,17 +21,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Render and print canonical Prettier patch
+      - name: Apply canonical Prettier output
         shell: bash
         run: |
           set -euo pipefail
           pnpm exec prettier src/meta-ads-the-party-2026-08-15.ts --write
-          git diff -- src/meta-ads-the-party-2026-08-15.ts | tee prettier.patch
-      - uses: actions/upload-artifact@v4
-        with:
-          name: prettier-the-party-runner
-          path: |
-            src/meta-ads-the-party-2026-08-15.ts
-            prettier.patch
-          if-no-files-found: error
-          retention-days: 1
+          if git diff --quiet -- src/meta-ads-the-party-2026-08-15.ts; then
+            echo 'PRETTIER_ALREADY_CANONICAL=1'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/meta-ads-the-party-2026-08-15.ts
+          git commit -m 'style(meta-ads): format The Party executor'
+          git push origin HEAD:feat/meta-ads-the-party-2026-08-15-execution
