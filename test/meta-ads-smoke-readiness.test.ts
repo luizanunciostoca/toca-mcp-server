@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateMetaAdsProviderSmokeReadiness,
   isMetaAdsPixelAssignedToAccount,
+  selectMetaAdsValidationAdSet,
 } from '../src/providers/meta-ads/meta-ads-smoke-readiness.js';
 
 describe('Meta Ads provider smoke readiness', () => {
@@ -97,5 +98,17 @@ describe('Meta Ads provider smoke readiness', () => {
         '394512749760530',
       ),
     ).toBe(false);
+  });
+
+  it('selects an existing ACTIVE or PAUSED ad set for no-side-effect validation', () => {
+    expect(
+      selectMetaAdsValidationAdSet([
+        { id: 'archived-1', status: 'ARCHIVED' },
+        { id: '', status: 'PAUSED' },
+        { id: 'paused-1', status: 'PAUSED', effective_status: 'CAMPAIGN_PAUSED' },
+        { id: 'active-1', status: 'ACTIVE', effective_status: 'ACTIVE' },
+      ]),
+    ).toEqual({ id: 'paused-1', status: 'PAUSED', effective_status: 'CAMPAIGN_PAUSED' });
+    expect(selectMetaAdsValidationAdSet([{ id: 'archived-1', status: 'ARCHIVED' }])).toBeUndefined();
   });
 });
