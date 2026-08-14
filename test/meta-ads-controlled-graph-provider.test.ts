@@ -103,6 +103,52 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
     });
   });
 
+  it('creates canonical Instagram creatives and prefers image_hash over redundant image_url', async () => {
+    const { api, post } = createApiMock();
+    const provider = new MetaAdsControlledGraphProvider(api);
+    const sourceSpec = {
+      page_id: 'legacy-page',
+      instagram_actor_id: 'legacy-actor',
+      instagram_user_id: 'legacy-user',
+      video_data: {
+        video_id: 'video-1',
+        image_hash: 'hash-1',
+        image_url: 'https://example.com/redundant-thumbnail.jpg',
+        message: 'Celebrate a vida.',
+      },
+    };
+
+    await expect(
+      provider.createCreative(
+        { adAccountId: '311793958882290', currency: 'BRL' },
+        {
+          name: 'P0 Creative | canonical Instagram user',
+          pageId: '306103746115875',
+          instagramActorId: '17841402033495654',
+          objectStorySpec: sourceSpec,
+        },
+      ),
+    ).resolves.toEqual({ id: 'provider-id-1' });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('act_311793958882290/adcreatives', {
+      name: 'P0 Creative | canonical Instagram user',
+      object_story_spec: JSON.stringify({
+        video_data: {
+          video_id: 'video-1',
+          image_hash: 'hash-1',
+          message: 'Celebrate a vida.',
+        },
+        page_id: '306103746115875',
+        instagram_user_id: '17841402033495654',
+      }),
+    });
+    expect(sourceSpec.video_data.image_url).toBe(
+      'https://example.com/redundant-thumbnail.jpg',
+    );
+    expect(sourceSpec.instagram_actor_id).toBe('legacy-actor');
+  });
+
   it('does not expose status or budget mutation through the controlled provider', async () => {
     const { api } = createApiMock();
     const provider = new MetaAdsControlledGraphProvider(api);
