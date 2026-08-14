@@ -136,14 +136,14 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
     expect(post).toHaveBeenCalledWith('act_311793958882290/adcreatives', {
       name: 'P0 Smoke Creative',
       object_story_spec: JSON.stringify({
-        page_id: '306103746115875',
-        instagram_user_id: '17841402033495654',
         video_data: {
           call_to_action: { type: 'LEARN_MORE', value: { link: 'https://example.com' } },
           image_hash: 'hash-1',
           message: 'Creative message',
           video_id: 'video-1',
         },
+        page_id: '306103746115875',
+        instagram_user_id: '17841402033495654',
       }),
     });
     expect(objectStorySpec).toEqual({
