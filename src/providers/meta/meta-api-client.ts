@@ -171,7 +171,7 @@ function formatMetaApiErrorMessage(code: string, details: MetaApiProviderErrorDe
 function sanitizeProviderReason(value: string): string {
   if (!value) return '';
   return value
-    .replace(/(?i:access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/g, '[REDACTED]')
+    .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
