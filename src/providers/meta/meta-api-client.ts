@@ -21,13 +21,30 @@ export class FetchMetaApiTransport implements MetaApiTransport {
   }
 }
 
+export interface MetaApiProviderErrorDetails {
+  readonly type?: string;
+  readonly providerCode?: number;
+  readonly providerSubcode?: number;
+  readonly reason?: string;
+}
+
 export class MetaApiError extends Error {
+  readonly type?: string;
+  readonly providerCode?: number;
+  readonly providerSubcode?: number;
+  readonly reason?: string;
+
   constructor(
     readonly status: number,
     readonly code: string,
+    details: MetaApiProviderErrorDetails = {},
   ) {
-    super(code);
+    super(formatMetaApiErrorMessage(code, details));
     this.name = 'MetaApiError';
+    if (details.type !== undefined) this.type = details.type;
+    if (details.providerCode !== undefined) this.providerCode = details.providerCode;
+    if (details.providerSubcode !== undefined) this.providerSubcode = details.providerSubcode;
+    if (details.reason !== undefined) this.reason = details.reason;
   }
 }
 
@@ -70,7 +87,7 @@ export class MetaApiClient {
       body: JSON.stringify(body),
     });
 
-    if (!response.ok) throw new MetaApiError(response.status, `META_HTTP_${response.status}`);
+    if (!response.ok) await throwMetaApiError(response);
     return response.json();
   }
 
@@ -106,7 +123,79 @@ export class MetaApiClient {
       ...(body ? { body } : {}),
     });
 
-    if (!response.ok) throw new MetaApiError(response.status, `META_HTTP_${response.status}`);
+    if (!response.ok) await throwMetaApiError(response);
     return response.json();
   }
+}
+
+async function throwMetaApiError(response: MetaApiResponse): Promise<never> {
+  const fallbackCode = `META_HTTP_${response.status}`;
+  let details: MetaApiProviderErrorDetails = {};
+  try {
+    details = extractMetaProviderError(await response.json());
+  } catch {
+    // Keep the coarse HTTP code when Meta does not return parseable JSON.
+  }
+  throw new MetaApiError(response.status, fallbackCode, details);
+}
+
+function extractMetaProviderError(value: unknown): MetaApiProviderErrorDetails {
+  const root = asRecord(value);
+  const error = asRecord(root.error);
+  const type = safeScalarString(error.type);
+  const providerCode = finiteInteger(error.code);
+  const providerSubcode = finiteInteger(error.error_subcode);
+  const reasonSource =
+    safeScalarString(error.error_user_msg) ||
+    safeScalarString(error.error_user_title) ||
+    safeScalarString(error.message);
+  const reason = sanitizeProviderReason(reasonSource);
+
+  return {
+    ...(type ? { type } : {}),
+    ...(providerCode !== undefined ? { providerCode } : {}),
+    ...(providerSubcode !== undefined ? { providerSubcode } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function formatMetaApiErrorMessage(code: string, details: MetaApiProviderErrorDetails): string {
+  const parts = [code];
+  if (details.providerCode !== undefined) parts.push(`META_CODE_${details.providerCode}`);
+  if (details.providerSubcode !== undefined) parts.push(`META_SUBCODE_${details.providerSubcode}`);
+  if (details.type) parts.push(`META_TYPE_${sanitizeToken(details.type)}`);
+  if (details.reason) parts.push(`META_REASON_${details.reason}`);
+  return parts.join('|');
+}
+
+function sanitizeProviderReason(value: string): string {
+  if (!value) return '';
+  return value
+    .replace(/(?i:access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/g, '[REDACTED]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+function sanitizeToken(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function safeScalarString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function finiteInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return undefined;
 }
