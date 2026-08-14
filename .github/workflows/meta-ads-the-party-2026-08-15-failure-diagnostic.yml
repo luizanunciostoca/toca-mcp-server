@@ -20,8 +20,11 @@ env:
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
+  META_AD_ACCOUNT_ID: '311793958882290'
   META_PIXEL_ID: '461233076843065'
-  EXPECTED_MARKER: AUDIT_META_PIXEL_ACROSS_VISIBLE_BUSINESSES_461233076843065
+  PIXEL_OWNER_BUSINESS_ID: '232421267344387'
+  ISOLATED_SMOKE_JOB_NAME: toca-meta-ads-create-paused-smoke-31780473667
+  EXPECTED_MARKER: AUDIT_META_PIXEL_SHARING_AND_SMOKE_31780473667
   DIAGNOSTIC_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:meta-ads-smoke-4f26826402e7455a6281b30efd1b1a75b07844da
 
 jobs:
@@ -50,11 +53,25 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Audit target pixel across visible businesses
+      - name: Read isolated smoke Cloud Run logs
         shell: bash
         run: |
           set -euo pipefail
-          JOB_NAME="toca-meta-business-pixel-audit-${GITHUB_RUN_ID}"
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${ISOLATED_SMOKE_JOB_NAME} AND timestamp>=\"2026-08-14T07:34:45Z\" AND timestamp<=\"2026-08-14T07:38:40Z\"" \
+            --project "$GCP_PROJECT_ID" \
+            --order=asc \
+            --limit=1000 \
+            --format=json > isolated-smoke-31780473667-logs.json
+          test -s isolated-smoke-31780473667-logs.json
+          echo '--- ISOLATED SMOKE ERRORS ---'
+          jq -r '.[] | select((.severity // "") == "ERROR" or ((.textPayload // "") | test("MetaApiError|META_|ZodError|error"; "i"))) | [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // (.jsonPayload|tostring) // "")] | @tsv' isolated-smoke-31780473667-logs.json
+
+      - name: Audit ad-account owner and pixel sharing read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-meta-pixel-sharing-audit-${GITHUB_RUN_ID}"
           cleanup() {
             gcloud run jobs delete "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
@@ -67,8 +84,12 @@ jobs:
           const token = process.env.META_TOKEN;
           const base = process.env.META_GRAPH_BASE_URL;
           const version = process.env.META_GRAPH_API_VERSION;
+          const accountId = process.env.META_AD_ACCOUNT_ID;
           const pixelId = process.env.META_PIXEL_ID;
-          if (!token || !base || !version || !pixelId) throw new Error('BUSINESS_PIXEL_AUDIT_CONFIG_MISSING');
+          const pixelOwnerBusinessId = process.env.PIXEL_OWNER_BUSINESS_ID;
+          if (!token || !base || !version || !accountId || !pixelId || !pixelOwnerBusinessId) {
+            throw new Error('PIXEL_SHARING_AUDIT_CONFIG_MISSING');
+          }
 
           async function graph(path, params = {}) {
             const url = new URL(`${base}/${version}/${path}`);
@@ -79,60 +100,59 @@ jobs:
             return { ok: response.ok, status: response.status, payload };
           }
 
-          const permissions = await graph('me/permissions');
-          const businessesResponse = await graph('me/businesses', { fields: 'id,name', limit: '100' });
-          const visibleBusinesses = Array.isArray(businessesResponse.payload?.data)
-            ? businessesResponse.payload.data
-            : [];
-          const businessIds = new Set([
-            ...visibleBusinesses.map((item) => String(item?.id ?? '')).filter(Boolean),
-            '232421267344387',
-            '1123355242505391',
-          ]);
-
-          const audited = [];
-          for (const businessId of businessIds) {
-            const business = await graph(businessId, { fields: 'id,name' });
-            const ownedPixels = await graph(`${businessId}/owned_pixels`, { fields: 'id,name', limit: '100' });
-            const clientPixels = await graph(`${businessId}/client_pixels`, { fields: 'id,name', limit: '100' });
-            const adPixels = await graph(`${businessId}/adspixels`, { fields: 'id,name', limit: '100' });
-            const ownedAdAccounts = await graph(`${businessId}/owned_ad_accounts`, {
-              fields: 'id,account_id,name,currency,account_status', limit: '100',
-            });
-            const clientAdAccounts = await graph(`${businessId}/client_ad_accounts`, {
-              fields: 'id,account_id,name,currency,account_status', limit: '100',
-            });
-            const pixelAdAccounts = await graph(`${pixelId}/adaccounts`, {
-              business: businessId,
-              fields: 'id,account_id,name,currency,account_status',
-              limit: '100',
-            });
-            const edgeRows = [ownedPixels, clientPixels, adPixels]
-              .flatMap((edge) => Array.isArray(edge.payload?.data) ? edge.payload.data : []);
-            audited.push({
-              businessId,
-              business,
-              ownedPixels,
-              clientPixels,
-              adPixels,
-              ownedAdAccounts,
-              clientAdAccounts,
-              pixelAdAccounts,
-              listsTargetPixel: edgeRows.some((item) => String(item?.id ?? '') === pixelId),
-            });
-          }
+          const account = await graph(`act_${accountId}`, {
+            fields: 'id,account_id,name,currency,account_status,business,owner_business',
+          });
+          const pixel = await graph(pixelId, {
+            fields: 'id,name,owner_ad_account,owner_business,last_fired_time,is_unavailable',
+          });
+          const agencies = await graph(`${pixelId}/agencies`, {
+            fields: 'id,name',
+            limit: '100',
+          });
+          const assignedUsers = await graph(`${pixelId}/assigned_users`, {
+            fields: 'id,name,permitted_tasks',
+            limit: '100',
+          });
+          const pixelAdAccounts = await graph(`${pixelId}/adaccounts`, {
+            business: pixelOwnerBusinessId,
+            fields: 'id,account_id,name,currency,account_status,business,owner_business',
+            limit: '100',
+          });
+          const ownerBusiness = await graph(pixelOwnerBusinessId, { fields: 'id,name' });
+          const ownerBusinessClientAccounts = await graph(`${pixelOwnerBusinessId}/client_ad_accounts`, {
+            fields: 'id,account_id,name,currency,account_status,business,owner_business',
+            limit: '100',
+          });
+          const ownerBusinessOwnedAccounts = await graph(`${pixelOwnerBusinessId}/owned_ad_accounts`, {
+            fields: 'id,account_id,name,currency,account_status,business,owner_business',
+            limit: '100',
+          });
+          const ownerBusinessOwnedPixels = await graph(`${pixelOwnerBusinessId}/owned_pixels`, {
+            fields: 'id,name',
+            limit: '100',
+          });
+          const ownerBusinessClientPixels = await graph(`${pixelOwnerBusinessId}/client_pixels`, {
+            fields: 'id,name',
+            limit: '100',
+          });
 
           const result = {
+            accountId,
             pixelId,
-            permissions,
-            businessesResponse,
-            visibleBusinesses,
-            audited,
-            matchingBusinesses: audited
-              .filter((item) => item.listsTargetPixel)
-              .map((item) => ({ businessId: item.businessId, business: item.business.payload })),
+            pixelOwnerBusinessId,
+            account,
+            pixel,
+            agencies,
+            assignedUsers,
+            pixelAdAccounts,
+            ownerBusiness,
+            ownerBusinessClientAccounts,
+            ownerBusinessOwnedAccounts,
+            ownerBusinessOwnedPixels,
+            ownerBusinessClientPixels,
           };
-          console.log(`META_PIXEL_BUSINESS_AUDIT=${JSON.stringify(result)}`);
+          console.log(`META_PIXEL_SHARING_AUDIT=${JSON.stringify(result)}`);
           NODE
           )"
 
@@ -144,7 +164,7 @@ jobs:
             --command node \
             --args "^~^-e~$JS_CODE" \
             --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
-            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_PIXEL_ID=$META_PIXEL_ID" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_AD_ACCOUNT_ID=$META_AD_ACCOUNT_ID~META_PIXEL_ID=$META_PIXEL_ID~PIXEL_OWNER_BUSINESS_ID=$PIXEL_OWNER_BUSINESS_ID" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 120s \
@@ -159,25 +179,27 @@ jobs:
           RESULT_LINE=""
           for attempt in $(seq 1 12); do
             RESULT_LINE="$(gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_PIXEL_BUSINESS_AUDIT=\"" \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_PIXEL_SHARING_AUDIT=\"" \
               --project "$GCP_PROJECT_ID" \
               --freshness=15m \
               --limit=20 \
               --order=desc \
-              --format='value(textPayload)' | grep 'META_PIXEL_BUSINESS_AUDIT=' | head -n1 || true)"
+              --format='value(textPayload)' | grep 'META_PIXEL_SHARING_AUDIT=' | head -n1 || true)"
             [ -n "$RESULT_LINE" ] && break
             sleep 5
           done
           test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#META_PIXEL_BUSINESS_AUDIT=}"
-          printf '%s\n' "$RESULT_JSON" | jq . > meta-pixel-business-audit.json
-          echo '--- META PIXEL BUSINESS AUDIT ---'
-          printf '%s\n' "$RESULT_JSON" | jq '{pixelId,visibleBusinesses,matchingBusinesses,audited:[.audited[]|{businessId,business:.business,listsTargetPixel,ownedPixels:.ownedPixels,clientPixels:.clientPixels,adPixels:.adPixels,ownedAdAccounts:.ownedAdAccounts,clientAdAccounts:.clientAdAccounts,pixelAdAccounts:.pixelAdAccounts}]}'
+          RESULT_JSON="${RESULT_LINE#META_PIXEL_SHARING_AUDIT=}"
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-pixel-sharing-audit.json
+          echo '--- META PIXEL SHARING AUDIT ---'
+          printf '%s\n' "$RESULT_JSON" | jq '{accountId,pixelId,pixelOwnerBusinessId,account,pixel,agencies,assignedUsers,pixelAdAccounts,ownerBusiness,ownerBusinessClientAccounts,ownerBusinessOwnedAccounts,ownerBusinessOwnedPixels,ownerBusinessClientPixels}'
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
-          name: meta-pixel-business-audit-${{ github.sha }}
-          path: meta-pixel-business-audit.json
+          name: meta-pixel-sharing-and-smoke-audit-${{ github.sha }}
+          path: |
+            isolated-smoke-31780473667-logs.json
+            meta-pixel-sharing-audit.json
           if-no-files-found: error
           retention-days: 30
