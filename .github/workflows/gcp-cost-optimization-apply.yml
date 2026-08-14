@@ -66,7 +66,7 @@ jobs:
           test "$AGE_SECONDS" -le 129600
           echo "RECENT_SUCCESSFUL_BACKUP=PASS age_seconds=$AGE_SECONDS"
 
-      - name: Switch Cloud SQL to minimum practical Enterprise configuration
+      - name: Phase 1 - downgrade edition and machine tier
         shell: bash
         run: |
           set -euo pipefail
@@ -74,10 +74,40 @@ jobs:
             --project "$PROJECT_ID" \
             --edition=enterprise \
             --tier="$TARGET_TIER" \
+            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e --arg tier "$TARGET_TIER" '
+            .state == "RUNNABLE" and
+            .settings.edition == "ENTERPRISE" and
+            .settings.tier == $tier
+          ' >/dev/null
+          echo 'PHASE_1_EDITION_TIER=PASS'
+
+      - name: Phase 2 - disable regional HA
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$SQL_INSTANCE" \
+            --project "$PROJECT_ID" \
             --availability-type=zonal \
+            --quiet
+          INSTANCE_JSON="$(gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json)"
+          printf '%s' "$INSTANCE_JSON" | jq -e '
+            .state == "RUNNABLE" and
+            .settings.availabilityType == "ZONAL"
+          ' >/dev/null
+          echo 'PHASE_2_AVAILABILITY=PASS'
+
+      - name: Phase 3 - reduce backup and WAL retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances patch "$SQL_INSTANCE" \
+            --project "$PROJECT_ID" \
             --retained-backups-count=7 \
             --retained-transaction-log-days=7 \
             --quiet
+          echo 'PHASE_3_RETENTION_PATCH=COMPLETE'
 
       - name: Verify optimized Cloud SQL configuration
         shell: bash
@@ -90,6 +120,8 @@ jobs:
             .settings.edition == "ENTERPRISE" and
             .settings.availabilityType == "ZONAL" and
             .settings.tier == $tier and
+            .settings.dataDiskType == "PD_SSD" and
+            (.settings.dataDiskSizeGb | tonumber) == 250 and
             .settings.deletionProtectionEnabled == true and
             .settings.backupConfiguration.enabled == true and
             .settings.backupConfiguration.pointInTimeRecoveryEnabled == true and
@@ -119,7 +151,7 @@ jobs:
             --arg instance "$SQL_INSTANCE" \
             --arg targetTier "$TARGET_TIER" \
             --arg changedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{project:$project,instance:$instance,edition:"ENTERPRISE",availabilityType:"ZONAL",tier:$targetTier,retainedBackups:7,transactionLogRetentionDays:7,changedAt:$changedAt}' \
+            '{project:$project,instance:$instance,edition:"ENTERPRISE",availabilityType:"ZONAL",tier:$targetTier,retainedBackups:7,transactionLogRetentionDays:7,storageGb:250,changedAt:$changedAt}' \
             > gcp-cost-optimization-evidence.json
 
       - uses: actions/upload-artifact@v4
