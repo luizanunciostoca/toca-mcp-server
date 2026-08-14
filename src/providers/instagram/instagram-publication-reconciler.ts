@@ -42,10 +42,7 @@ export class InstagramPublicationReconciler {
     );
     const matches = recent.filter((candidate) => matchesDescriptor(candidate, descriptor));
     if (matches.length === 0) {
-      if (
-        record.state === 'DRAFT' &&
-        isPastAutomaticDraftWindow(descriptor.scheduledFor, nowIso)
-      ) {
+      if (record.state === 'DRAFT' && isPastAutomaticDraftWindow(descriptor.scheduledFor, nowIso)) {
         throw new Error('INSTAGRAM_PUBLICATION_OVERDUE_RECONCILIATION_REQUIRED');
       }
       return undefined;
