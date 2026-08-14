@@ -72,6 +72,7 @@ async function preparePlan(): Promise<{
       optimizationGoal: 'OFFSITE_CONVERSIONS',
       targeting: {
         geo_locations: { custom_locations: [geoTarget] },
+        targeting_automation: { advantage_audience: 0 },
       },
       promotedObject: {
         pixel_id: pixelId,
@@ -201,15 +202,15 @@ async function executePlan(): Promise<{
       `insert into audit_events
          (correlation_id, actor_id, tool_name, risk_class, decision, normalized_payload, provider_result)
        values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
-      [
-        correlationId,
-        'github-actions/provider-smoke',
-        'meta_ads.campaign.create_paused',
-        'WRITE_EXTERNAL',
-        'SMOKE_FAILED',
-        JSON.stringify({ requestSha256: approvedSha256, smokeId }),
-        JSON.stringify({ error: normalizeError(error) }),
-      ],
+    [
+      correlationId,
+      'github-actions/provider-smoke',
+      'meta_ads.campaign.create_paused',
+      'WRITE_EXTERNAL',
+      'SMOKE_FAILED',
+      JSON.stringify({ requestSha256: approvedSha256, smokeId }),
+      JSON.stringify({ error: normalizeError(error) }),
+    ],
     );
     throw error;
   } finally {
