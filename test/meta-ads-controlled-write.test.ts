@@ -217,9 +217,16 @@ describe('Meta Ads controlled create-paused service', () => {
       }),
     );
     expect(provider.createAd).toHaveBeenCalledTimes(2);
-    for (const call of provider.createAd.mock.calls) {
-      expect(call[1].status).toBe('PAUSED');
-    }
+    expect(provider.createAd).toHaveBeenNthCalledWith(
+      1,
+      plan.account,
+      expect.objectContaining({ status: 'PAUSED' }),
+    );
+    expect(provider.createAd).toHaveBeenNthCalledWith(
+      2,
+      plan.account,
+      expect.objectContaining({ status: 'PAUSED' }),
+    );
     expect(provider.updateStatus).not.toHaveBeenCalled();
     expect(provider.updateBudget).not.toHaveBeenCalled();
   });
