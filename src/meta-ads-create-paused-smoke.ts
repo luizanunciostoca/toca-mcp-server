@@ -8,6 +8,7 @@ import {
   type MetaAdsWriteGuardrails,
 } from './providers/meta-ads/meta-ads-controlled-write.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
+import { validateMetaAdsAdWriteReadiness } from './providers/meta-ads/meta-ads-provider-preflight.js';
 import {
   evaluateMetaAdsProviderSmokeReadiness,
   isMetaAdsPixelAssignedToAccount,
@@ -54,6 +55,7 @@ async function preparePlan(): Promise<{
   readonly sourceCreativeId: string;
   readonly account: Readonly<Record<string, unknown>>;
   readonly pixelAccess: Readonly<Record<string, unknown>>;
+  readonly writeReadiness: Readonly<Record<string, unknown>>;
   readonly grantedScopes: readonly string[];
 }> {
   const grantedScopes = await verifyPermissions();
@@ -61,6 +63,11 @@ async function preparePlan(): Promise<{
   const pixelAccess = await verifyPixelAccess();
   const geoTarget = canonicalMorroCustomLocation();
   const sourceCreative = await resolveSourceCreative();
+  const writeReadiness = await validateMetaAdsAdWriteReadiness(api, {
+    accountId,
+    creativeId: sourceCreative.id,
+    validationId: `prepare-${smokeId}`,
+  });
 
   const now = new Date();
   const start = new Date(now.getTime() + 30 * 60 * 1000);
@@ -110,6 +117,7 @@ async function preparePlan(): Promise<{
     sourceCreativeId: sourceCreative.id,
     account,
     pixelAccess,
+    writeReadiness,
     grantedScopes,
   };
 }
@@ -138,6 +146,12 @@ async function executePlan(): Promise<{
   await verifyPermissions();
   await verifyAccount();
   await verifyPixelAccess();
+  const sourceCreative = await resolveSourceCreative();
+  await validateMetaAdsAdWriteReadiness(api, {
+    accountId,
+    creativeId: sourceCreative.id,
+    validationId: `execute-${smokeId}`,
+  });
   const service = new MetaAdsControlledWriteService(provider, guardrailsFor(approvedSha256));
   service.prepare(plan);
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
