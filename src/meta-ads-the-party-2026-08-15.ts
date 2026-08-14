@@ -36,6 +36,7 @@ if (mode === 'PREPARE') {
 async function prepare(): Promise<Readonly<Record<string, unknown>>> {
   const descriptor = buildTheParty20260815Descriptor();
   assertExactTheParty20260815Descriptor(descriptor);
+  assertCampaignStartStillFuture(descriptor);
   const assets = await loadAndVerifyAssets(descriptor);
   const grantedScopes = await verifyPermissions();
   const account = await verifyAccount(descriptor);
@@ -78,6 +79,7 @@ async function execute(): Promise<Readonly<Record<string, unknown>>> {
   ) as TheParty20260815CampaignDescriptor;
 
   assertExactTheParty20260815Descriptor(descriptor);
+  assertCampaignStartStillFuture(descriptor);
   const computedSha256 = theParty20260815DescriptorSha256(descriptor);
   if (computedSha256 !== approvedSha256) {
     throw new Error('META_ADS_THE_PARTY_APPROVED_SHA256_MISMATCH');
@@ -269,8 +271,13 @@ async function loadAndVerifyAssets(
 ): Promise<readonly VerifiedAsset[]> {
   const verified: VerifiedAsset[] = [];
   for (const asset of descriptor.assets) {
-    const path = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
-    const base64 = (await readFile(path, 'utf8')).replace(/\s+/g, '');
+    const basePath = `ops/meta-ads/the-party-2026-08-15/${asset.fileName}`;
+    const parts = await Promise.all(
+      Array.from({ length: asset.partCount }, async (_, index) =>
+        readFile(`${basePath}.part-${String(index + 1).padStart(2, '0')}`, 'utf8'),
+      ),
+    );
+    const base64 = parts.join('').replace(/\s+/g, '');
     const bytes = Buffer.from(base64, 'base64');
     if (bytes.length < 100_000 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
       throw new Error(`META_ADS_THE_PARTY_ASSET_INVALID_${asset.key}`);
@@ -569,6 +576,13 @@ function finiteNumber(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+}
+
+function assertCampaignStartStillFuture(descriptor: TheParty20260815CampaignDescriptor): void {
+  const startTime = new Date(descriptor.adSet.startTime).getTime();
+  if (!Number.isFinite(startTime) || Date.now() >= startTime) {
+    throw new Error('META_ADS_THE_PARTY_START_ALREADY_REACHED');
+  }
 }
 
 function requiredEnv(name: string): string {
