@@ -43,6 +43,8 @@ if (mode === 'PREPARE') {
 }
 
 async function preparePlan(): Promise<{
+  readonly smokeId: string;
+  readonly campaignName: string;
   readonly requestSha256: string;
   readonly planBase64: string;
   readonly geo: Readonly<Record<string, unknown>>;
@@ -61,12 +63,12 @@ async function preparePlan(): Promise<{
   const plan: ControlledCreatePausedPlan = {
     account: { adAccountId: accountId, currency },
     campaign: {
-      name: `TOCA | P0 SMOKE CREATE_PAUSED | ${smokeId}`,
+      name: expectedCampaignName(),
       objective: 'OUTCOME_SALES',
       specialAdCategories: [],
     },
     adSet: {
-      name: `P0 Smoke | Morro locality | Purchase | ${smokeId}`,
+      name: expectedAdSetName(),
       dailyBudgetMinor,
       billingEvent: 'IMPRESSIONS',
       optimizationGoal: 'OFFSITE_CONVERSIONS',
@@ -83,21 +85,24 @@ async function preparePlan(): Promise<{
     },
     creatives: [
       {
-        name: `P0 Smoke Creative | ${smokeId}`,
+        name: expectedCreativeName(),
         pageId,
         instagramActorId,
         objectStorySpec: sourceCreative.objectStorySpec,
       },
     ],
-    ads: [{ name: `P0 Smoke Ad | ${smokeId}`, creativeIndex: 0 }],
+    ads: [{ name: expectedAdName(), creativeIndex: 0 }],
   };
 
+  assertExactSmokePlanEnvelope(plan);
   const sha = requestSha256(plan);
   const service = new MetaAdsControlledWriteService(provider, guardrailsFor(sha));
   const validation = service.prepare(plan);
   if (validation.requestSha256 !== sha) throw new Error('META_ADS_SMOKE_PREPARE_HASH_MISMATCH');
 
   return {
+    smokeId,
+    campaignName: plan.campaign.name,
     requestSha256: sha,
     planBase64: Buffer.from(JSON.stringify(plan), 'utf8').toString('base64'),
     geo: geoEvidence(geoTarget),
@@ -108,6 +113,8 @@ async function preparePlan(): Promise<{
 }
 
 async function executePlan(): Promise<{
+  readonly smokeId: string;
+  readonly campaignName: string;
   readonly requestSha256: string;
   readonly campaignId: string;
   readonly adSetId: string;
@@ -126,6 +133,7 @@ async function executePlan(): Promise<{
   const plan = JSON.parse(
     Buffer.from(planBase64, 'base64').toString('utf8'),
   ) as ControlledCreatePausedPlan;
+  assertExactSmokePlanEnvelope(plan);
   const computed = requestSha256(plan);
   if (computed !== approvedSha256) throw new Error('META_ADS_SMOKE_APPROVED_SHA_MISMATCH');
   if (plan.account.adAccountId !== accountId || plan.account.currency !== currency) {
@@ -149,7 +157,7 @@ async function executePlan(): Promise<{
       'meta_ads.campaign.create_paused',
       'WRITE_EXTERNAL',
       'SMOKE_STARTED',
-      JSON.stringify({ requestSha256: approvedSha256, smokeId }),
+      JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
       JSON.stringify({ status: 'STARTED' }),
     ],
   );
@@ -182,7 +190,7 @@ async function executePlan(): Promise<{
         'meta_ads.campaign.create_paused',
         'WRITE_EXTERNAL',
         'SMOKE_SUCCEEDED',
-        JSON.stringify({ requestSha256: approvedSha256, smokeId }),
+        JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
         JSON.stringify({
           campaignId: result.campaignId,
           adSetId: result.adSetId,
@@ -196,7 +204,12 @@ async function executePlan(): Promise<{
       ],
     );
 
-    return { ...result, providerVerification: { campaign, adSet, ads } };
+    return {
+      smokeId,
+      campaignName: plan.campaign.name,
+      ...result,
+      providerVerification: { campaign, adSet, ads },
+    };
   } catch (error) {
     await pool.query(
       `insert into audit_events
@@ -208,7 +221,7 @@ async function executePlan(): Promise<{
         'meta_ads.campaign.create_paused',
         'WRITE_EXTERNAL',
         'SMOKE_FAILED',
-        JSON.stringify({ requestSha256: approvedSha256, smokeId }),
+        JSON.stringify({ requestSha256: approvedSha256, smokeId, campaignName: plan.campaign.name }),
         JSON.stringify({ error: normalizeError(error) }),
       ],
     );
@@ -216,6 +229,46 @@ async function executePlan(): Promise<{
   } finally {
     await pool.end();
   }
+}
+
+function assertExactSmokePlanEnvelope(plan: ControlledCreatePausedPlan): void {
+  if (plan.campaign.name !== expectedCampaignName()) {
+    throw new Error('META_ADS_SMOKE_PLAN_CAMPAIGN_NAME_MISMATCH');
+  }
+  if (plan.adSet.name !== expectedAdSetName()) {
+    throw new Error('META_ADS_SMOKE_PLAN_ADSET_NAME_MISMATCH');
+  }
+  if (plan.creatives.length !== 1 || plan.creatives[0]?.name !== expectedCreativeName()) {
+    throw new Error('META_ADS_SMOKE_PLAN_CREATIVE_NAME_MISMATCH');
+  }
+  if (
+    plan.ads.length !== 1 ||
+    plan.ads[0]?.name !== expectedAdName() ||
+    plan.ads[0]?.creativeIndex !== 0
+  ) {
+    throw new Error('META_ADS_SMOKE_PLAN_AD_NAME_MISMATCH');
+  }
+  const targeting = asRecord(plan.adSet.targeting);
+  const targetingAutomation = asRecord(targeting.targeting_automation);
+  if (finiteNumber(targetingAutomation.advantage_audience) !== 0) {
+    throw new Error('META_ADS_SMOKE_PLAN_ADVANTAGE_AUDIENCE_MISMATCH');
+  }
+}
+
+function expectedCampaignName(): string {
+  return `TOCA | P0 SMOKE CREATE_PAUSED | ${smokeId}`;
+}
+
+function expectedAdSetName(): string {
+  return `P0 Smoke | Morro locality | Purchase | ${smokeId}`;
+}
+
+function expectedCreativeName(): string {
+  return `P0 Smoke Creative | ${smokeId}`;
+}
+
+function expectedAdName(): string {
+  return `P0 Smoke Ad | ${smokeId}`;
 }
 
 async function verifyPermissions(): Promise<readonly string[]> {
@@ -325,6 +378,15 @@ function scalarString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return '';
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function requiredEnv(name: string): string {
