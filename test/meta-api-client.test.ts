@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SecretResolver } from '../src/core/secrets.js';
 import {
   MetaApiClient,
-  MetaApiError,
+  type MetaApiError,
   type MetaApiResponse,
   type MetaApiTransport,
 } from '../src/providers/meta/meta-api-client.js';
