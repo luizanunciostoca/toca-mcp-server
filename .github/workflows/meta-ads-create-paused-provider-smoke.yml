@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'src/meta-ads-create-paused-smoke.ts'
+      - 'src/providers/meta-ads/meta-ads-controlled-graph-provider.ts'
+      - 'src/providers/meta-ads/meta-ads-controlled-write.ts'
       - '.github/workflows/meta-ads-create-paused-provider-smoke.yml'
 
 permissions:
@@ -214,6 +216,7 @@ jobs:
           echo 'META_ADS_CREATE_PAUSED_PROVIDER_VALIDATED=1'
 
       - name: Reassert public MCP Meta Ads writes remain disabled
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -228,6 +231,7 @@ jobs:
           echo 'META_ADS_PUBLIC_WRITE_DISABLED_AFTER_SMOKE=1'
 
       - name: Upload immutable smoke evidence
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: meta-ads-create-paused-smoke-${{ github.sha }}
