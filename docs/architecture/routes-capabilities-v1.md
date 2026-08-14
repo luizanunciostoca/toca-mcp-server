@@ -21,20 +21,20 @@ provider capability merely because it is present in the catalog.
 
 ## Structural routes R21-R32
 
-| Route | Name | Priority | Deterministic outcome |
-| --- | --- | --- | --- |
-| R21 | `GOVERNANCE_DRIFT_RECONCILIATION` | P0 | `RECONCILED` or `BLOCKED_PENDING_HUMAN_DECISION` |
-| R22 | `CAPABILITY_LIFECYCLE_VALIDATION` | P0 | evidence-backed promotion, demotion or suspension |
-| R23 | `RELEASE_DEPLOYMENT_ROLLBACK` | P0 | `COMPLETED`, `ROLLBACK_VERIFIED` or `FAILED` |
-| R24 | `SECURITY_AND_SUPPLY_CHAIN` | P1 | `SECURITY_POSTURE_VALIDATED` or remediation/block |
-| R25 | `OBSERVABILITY_AND_INCIDENT_RESPONSE` | P1 | `POSTMORTEM_COMPLETE` |
-| R26 | `BACKUP_RESTORE_DISASTER_RECOVERY` | P1 | proven `RECOVERY_VALIDATED` or recorded gaps |
-| R27 | `APPROVAL_GOVERNANCE` | P0 | `CONSUMED`, `REVOKED` or `EXPIRED` |
-| R28 | `META_ADS_CONTROLLED_LIFECYCLE` | P1 | paused-first lifecycle ending in `REPORT` or `BLOCKED` |
-| R29 | `CONTENT_ITEM_LIFECYCLE` | P2 | content lineage through `PUBLISHED` and `MEASURED` |
-| R30 | `SOCIAL_ENGAGEMENT_LIFECYCLE` | P2 | provider-confirmed response or human escalation |
-| R31 | `PERFORMANCE_FEEDBACK_OPTIMIZATION` | P2 | `APPROVED_LEARNING` or `REJECTED` |
-| R32 | `MASTER_DATA_AND_REGISTRY_GOVERNANCE` | P1 | validated write-back or `BLOCKED` |
+| Route | Name                                  | Priority | Deterministic outcome                                  |
+| ----- | ------------------------------------- | -------- | ------------------------------------------------------ |
+| R21   | `GOVERNANCE_DRIFT_RECONCILIATION`     | P0       | `RECONCILED` or `BLOCKED_PENDING_HUMAN_DECISION`       |
+| R22   | `CAPABILITY_LIFECYCLE_VALIDATION`     | P0       | evidence-backed promotion, demotion or suspension      |
+| R23   | `RELEASE_DEPLOYMENT_ROLLBACK`         | P0       | `COMPLETED`, `ROLLBACK_VERIFIED` or `FAILED`           |
+| R24   | `SECURITY_AND_SUPPLY_CHAIN`           | P1       | `SECURITY_POSTURE_VALIDATED` or remediation/block      |
+| R25   | `OBSERVABILITY_AND_INCIDENT_RESPONSE` | P1       | `POSTMORTEM_COMPLETE`                                  |
+| R26   | `BACKUP_RESTORE_DISASTER_RECOVERY`    | P1       | proven `RECOVERY_VALIDATED` or recorded gaps           |
+| R27   | `APPROVAL_GOVERNANCE`                 | P0       | `CONSUMED`, `REVOKED` or `EXPIRED`                     |
+| R28   | `META_ADS_CONTROLLED_LIFECYCLE`       | P1       | paused-first lifecycle ending in `REPORT` or `BLOCKED` |
+| R29   | `CONTENT_ITEM_LIFECYCLE`              | P2       | content lineage through `PUBLISHED` and `MEASURED`     |
+| R30   | `SOCIAL_ENGAGEMENT_LIFECYCLE`         | P2       | provider-confirmed response or human escalation        |
+| R31   | `PERFORMANCE_FEEDBACK_OPTIMIZATION`   | P2       | `APPROVED_LEARNING` or `REJECTED`                      |
+| R32   | `MASTER_DATA_AND_REGISTRY_GOVERNANCE` | P1       | validated write-back or `BLOCKED`                      |
 
 R21 compares the physical Drive, canonical registry, current master manual, routing registry,
 Drive capability registry, GitHub/runtime and real provider. It prepares optimistic reconciliation

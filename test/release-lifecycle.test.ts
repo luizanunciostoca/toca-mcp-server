@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  RELEASE_LIFECYCLE,
-  validateReleaseEvidence,
-} from '../src/governance/release-lifecycle.js';
+import { RELEASE_LIFECYCLE, validateReleaseEvidence } from '../src/governance/release-lifecycle.js';
 import { startStateMachine, transitionState } from '../src/governance/state-machine.js';
 
 describe('R23 release, deployment and rollback', () => {

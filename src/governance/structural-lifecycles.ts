@@ -23,11 +23,7 @@ export const SECURITY_LIFECYCLE: StateMachineDefinition<SecurityState> = {
 };
 
 export type IncidentState =
-  | 'DETECTED'
-  | 'TRIAGED'
-  | 'MITIGATING'
-  | 'RESOLVED'
-  | 'POSTMORTEM_COMPLETE';
+  'DETECTED' | 'TRIAGED' | 'MITIGATING' | 'RESOLVED' | 'POSTMORTEM_COMPLETE';
 
 export const INCIDENT_LIFECYCLE: StateMachineDefinition<IncidentState> = {
   id: 'R25_OBSERVABILITY_AND_INCIDENT_RESPONSE',
@@ -199,12 +195,7 @@ export const PERFORMANCE_LEARNING_LIFECYCLE: StateMachineDefinition<PerformanceL
 };
 
 export type RegistryGovernanceState =
-  | 'SCAN'
-  | 'VALIDATE'
-  | 'DIFF'
-  | 'RECONCILE'
-  | 'WRITE_BACK'
-  | 'BLOCKED';
+  'SCAN' | 'VALIDATE' | 'DIFF' | 'RECONCILE' | 'WRITE_BACK' | 'BLOCKED';
 
 export const REGISTRY_GOVERNANCE_LIFECYCLE: StateMachineDefinition<RegistryGovernanceState> = {
   id: 'R32_MASTER_DATA_AND_REGISTRY_GOVERNANCE',

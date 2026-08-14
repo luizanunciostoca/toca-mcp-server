@@ -60,10 +60,7 @@ export interface ReleaseEvidence {
   readonly correlationId: string;
 }
 
-export function validateReleaseEvidence(
-  state: ReleaseState,
-  evidence: ReleaseEvidence,
-): void {
+export function validateReleaseEvidence(state: ReleaseState, evidence: ReleaseEvidence): void {
   if (!evidence.repository || !evidence.baseSha || !evidence.headSha || !evidence.branch)
     throw new Error('RELEASE_SOURCE_EVIDENCE_REQUIRED');
   if (!evidence.rollbackTargetSha) throw new Error('RELEASE_ROLLBACK_TARGET_REQUIRED');

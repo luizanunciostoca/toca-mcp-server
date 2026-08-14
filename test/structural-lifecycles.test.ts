@@ -99,7 +99,12 @@ describe('R24-R26 and R28-R32 structural lifecycles', () => {
     );
     expect(registry.state).toBe('DIFF');
     expect(registry.issues.map((issue) => issue.code)).toEqual(
-      expect.arrayContaining(['OWNER_MISSING', 'PATH_MISSING', 'RESOURCE_NOT_FOUND', 'STALE_VALIDATION']),
+      expect.arrayContaining([
+        'OWNER_MISSING',
+        'PATH_MISSING',
+        'RESOURCE_NOT_FOUND',
+        'STALE_VALIDATION',
+      ]),
     );
   });
 

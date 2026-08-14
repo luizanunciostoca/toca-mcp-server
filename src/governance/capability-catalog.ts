@@ -111,8 +111,10 @@ const runtimeStatuses: Readonly<Record<string, CapabilityStatus>> = {
 const knownRuntimeTools = new Set(Object.keys(runtimeStatuses));
 
 function lifecycleStatus(capabilityId: string): CapabilityStatus {
-  return runtimeStatuses[capabilityId] ??
-    (implementedInternal.has(capabilityId) ? 'IMPLEMENTED' : 'PLANNED');
+  return (
+    runtimeStatuses[capabilityId] ??
+    (implementedInternal.has(capabilityId) ? 'IMPLEMENTED' : 'PLANNED')
+  );
 }
 
 function action(capabilityId: string): string {
@@ -184,8 +186,7 @@ const mutationActions = new Set([
 function isMutationAction(capabilityId: string): boolean {
   const value = action(capabilityId);
   return (
-    mutationActions.has(value) ||
-    /^(activate|assign|create|move|replace|update|write)_/.test(value)
+    mutationActions.has(value) || /^(activate|assign|create|move|replace|update|write)_/.test(value)
   );
 }
 
@@ -201,8 +202,10 @@ function isProviderWrite(capabilityId: string): boolean {
 }
 
 function isFinancial(capabilityId: string): boolean {
-  return /^meta_ads\./.test(capabilityId) &&
-    /\.(activate|resume|update_budget|increase|decrease|budget_adjust)$/.test(capabilityId);
+  return (
+    /^meta_ads\./.test(capabilityId) &&
+    /\.(activate|resume|update_budget|increase|decrease|budget_adjust)$/.test(capabilityId)
+  );
 }
 
 function isMutation(capabilityId: string): boolean {
@@ -211,7 +214,10 @@ function isMutation(capabilityId: string): boolean {
 
 function riskClass(capabilityId: string): RiskClass {
   if (isFinancial(capabilityId)) return 'FINANCIAL_IMPACT';
-  if (/\.(delete|remove)$/.test(capabilityId) && /^(drive|registry|capability)\./.test(capabilityId))
+  if (
+    /\.(delete|remove)$/.test(capabilityId) &&
+    /^(drive|registry|capability)\./.test(capabilityId)
+  )
     return 'DESTRUCTIVE';
   if (isProviderWrite(capabilityId)) return 'WRITE_EXTERNAL';
   if (isMutation(capabilityId)) return 'WRITE_REVERSIBLE';
@@ -225,14 +231,12 @@ function provider(capabilityId: string): string {
   if (/^(release|security)\./.test(capabilityId)) return 'GitHub+GCP';
   if (/^(backup|restore|dr)\./.test(capabilityId)) return 'GCP+PostgreSQL';
   if (/^(observability|incident)\./.test(capabilityId)) return 'TOCA MCP+GCP';
-  if (/^(design|image|copy|presentation|story)\./.test(capabilityId))
-    return 'ChatGPT+TOCA_OS';
+  if (/^(design|image|copy|presentation|story)\./.test(capabilityId)) return 'ChatGPT+TOCA_OS';
   return 'TOCA_OS+toca-mcp';
 }
 
 function scopes(capabilityId: string, risk: RiskClass): readonly string[] {
-  if (/^meta_ads\./.test(capabilityId))
-    return risk === 'READ' ? ['ads_read'] : ['ads_management'];
+  if (/^meta_ads\./.test(capabilityId)) return risk === 'READ' ? ['ads_read'] : ['ads_management'];
   if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     if (/\.(publish|send|reply)$/.test(capabilityId)) return ['instagram_content_publish'];
     return ['instagram_basic'];
@@ -339,10 +343,7 @@ function createDefinition(
 }
 
 function allRouteCapabilityIds(routeId: RouteId): readonly string[] {
-  return [
-    ...ROUTE_CAPABILITY_IDS[routeId],
-    ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? []),
-  ];
+  return [...ROUTE_CAPABILITY_IDS[routeId], ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? [])];
 }
 
 export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [

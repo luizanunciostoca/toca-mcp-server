@@ -36,11 +36,7 @@ describe('R22 capability lifecycle validation', () => {
     );
     expect(connected.recommendedStatus).toBe('CONNECTED');
 
-    const validated = validateCapabilityLifecycle(
-      'example.resource.read',
-      'CONNECTED',
-      allPass(),
-    );
+    const validated = validateCapabilityLifecycle('example.resource.read', 'CONNECTED', allPass());
     expect(validated.recommendedStatus).toBe('PRODUCTION_VALIDATED');
     expect(validated.lastValidatedAt).toBe('2026-08-14T20:00:00Z');
   });

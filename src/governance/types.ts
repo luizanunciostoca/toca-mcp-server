@@ -52,11 +52,7 @@ export interface RouteDefinition {
 }
 
 export type ExecutionSurface =
-  | 'COGNITIVE'
-  | 'CONNECTOR'
-  | 'MCP_TOOL'
-  | 'INTERNAL_ENGINE'
-  | 'CATALOG_ONLY';
+  'COGNITIVE' | 'CONNECTOR' | 'MCP_TOOL' | 'INTERNAL_ENGINE' | 'CATALOG_ONLY';
 
 export interface JsonSchemaReference {
   readonly $id: string;

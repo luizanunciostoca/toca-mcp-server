@@ -44,7 +44,14 @@ const transitionMap: Readonly<Record<CapabilityStatus, readonly CapabilityStatus
   IMPLEMENTED: ['PLANNED', 'CONNECTED', 'SUSPENDED', 'DEPRECATED', 'REMOVED'],
   CONNECTED: ['IMPLEMENTED', 'PRODUCTION_VALIDATED', 'SUSPENDED', 'DEPRECATED', 'REMOVED'],
   PRODUCTION_VALIDATED: ['SUSPENDED', 'DEPRECATED', 'REMOVED'],
-  SUSPENDED: ['PLANNED', 'IMPLEMENTED', 'CONNECTED', 'PRODUCTION_VALIDATED', 'DEPRECATED', 'REMOVED'],
+  SUSPENDED: [
+    'PLANNED',
+    'IMPLEMENTED',
+    'CONNECTED',
+    'PRODUCTION_VALIDATED',
+    'DEPRECATED',
+    'REMOVED',
+  ],
   DEPRECATED: ['SUSPENDED', 'REMOVED'],
   REMOVED: [],
 };
@@ -87,10 +94,7 @@ export function validateCapabilityLifecycle(
     allSatisfied(checks, operationalChecks)
   )
     eligibleStatus = 'CONNECTED';
-  if (
-    eligibleStatus === 'CONNECTED' &&
-    allPassed(checks, productionChecks)
-  )
+  if (eligibleStatus === 'CONNECTED' && allPassed(checks, productionChecks))
     eligibleStatus = 'PRODUCTION_VALIDATED';
 
   const recommendedStatus = nextValidatedStatus(previousStatus, eligibleStatus);
@@ -139,7 +143,10 @@ function report(
     evidence,
     lastValidatedAt:
       recommendedStatus === 'PRODUCTION_VALIDATED'
-        ? entries.map(([, check]) => check.checkedAt).sort().at(-1) ?? null
+        ? (entries
+            .map(([, check]) => check.checkedAt)
+            .sort()
+            .at(-1) ?? null)
         : null,
   };
 }
@@ -148,9 +155,7 @@ function allSatisfied(
   checks: CapabilityLifecycleEvidence,
   names: readonly (keyof CapabilityLifecycleEvidence)[],
 ): boolean {
-  return names.every((name) =>
-    ['PASS', 'NOT_APPLICABLE'].includes(checks[name].result),
-  );
+  return names.every((name) => ['PASS', 'NOT_APPLICABLE'].includes(checks[name].result));
 }
 
 function allPassed(

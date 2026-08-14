@@ -21,19 +21,20 @@ export type GovernanceReconciliationState =
   | 'RECONCILED'
   | 'BLOCKED_PENDING_HUMAN_DECISION';
 
-export const GOVERNANCE_RECONCILIATION_LIFECYCLE: StateMachineDefinition<GovernanceReconciliationState> = {
-  id: 'R21_GOVERNANCE_DRIFT_RECONCILIATION',
-  initialState: 'SCAN',
-  terminalStates: ['RECONCILED', 'BLOCKED_PENDING_HUMAN_DECISION'],
-  transitions: {
-    SCAN: ['GOVERNANCE_DRIFT_DETECTED', 'RECONCILED'],
-    GOVERNANCE_DRIFT_DETECTED: ['CLASSIFIED'],
-    CLASSIFIED: ['RECONCILIATION_PLANNED', 'BLOCKED_PENDING_HUMAN_DECISION'],
-    RECONCILIATION_PLANNED: ['RECONCILED', 'BLOCKED_PENDING_HUMAN_DECISION'],
-    RECONCILED: [],
-    BLOCKED_PENDING_HUMAN_DECISION: [],
-  },
-};
+export const GOVERNANCE_RECONCILIATION_LIFECYCLE: StateMachineDefinition<GovernanceReconciliationState> =
+  {
+    id: 'R21_GOVERNANCE_DRIFT_RECONCILIATION',
+    initialState: 'SCAN',
+    terminalStates: ['RECONCILED', 'BLOCKED_PENDING_HUMAN_DECISION'],
+    transitions: {
+      SCAN: ['GOVERNANCE_DRIFT_DETECTED', 'RECONCILED'],
+      GOVERNANCE_DRIFT_DETECTED: ['CLASSIFIED'],
+      CLASSIFIED: ['RECONCILIATION_PLANNED', 'BLOCKED_PENDING_HUMAN_DECISION'],
+      RECONCILIATION_PLANNED: ['RECONCILED', 'BLOCKED_PENDING_HUMAN_DECISION'],
+      RECONCILED: [],
+      BLOCKED_PENDING_HUMAN_DECISION: [],
+    },
+  };
 
 export interface GovernanceRecord {
   readonly resourceKey: string;
@@ -155,12 +156,20 @@ export function planGovernanceReconciliation(
   for (const drift of scan.drifts) {
     const authoritySource = authorityByField[drift.field];
     const authority = drift.observed.find((item) => item.source === authoritySource);
-    if (!authoritySource || !authority || authority.value === undefined || humanDecisionFields.has(drift.field)) {
+    if (
+      !authoritySource ||
+      !authority ||
+      authority.value === undefined ||
+      humanDecisionFields.has(drift.field)
+    ) {
       blockedDriftIds.push(drift.driftId);
       continue;
     }
     for (const target of drift.observed) {
-      if (target.source === authoritySource || stableJson(target.value) === stableJson(authority.value))
+      if (
+        target.source === authoritySource ||
+        stableJson(target.value) === stableJson(authority.value)
+      )
         continue;
       commands.push({
         targetSource: target.source,
@@ -175,10 +184,7 @@ export function planGovernanceReconciliation(
   }
 
   return {
-    state:
-      blockedDriftIds.length > 0
-        ? 'BLOCKED_PENDING_HUMAN_DECISION'
-        : 'RECONCILIATION_PLANNED',
+    state: blockedDriftIds.length > 0 ? 'BLOCKED_PENDING_HUMAN_DECISION' : 'RECONCILIATION_PLANNED',
     commands,
     blockedDriftIds,
   };
@@ -194,10 +200,7 @@ function assertUniqueSources(snapshots: readonly GovernanceSnapshot[]): void {
   }
 }
 
-function classifyDrift(
-  field: string,
-  observed: GovernanceDrift['observed'],
-): GovernanceDriftType {
+function classifyDrift(field: string, observed: GovernanceDrift['observed']): GovernanceDriftType {
   if (observed.some((item) => item.evidenceRef === null)) return 'MISSING_RECORD';
   if (observed.some((item) => item.value === undefined)) return 'MISSING_FIELD';
   if (/status/i.test(field)) return 'STATUS_CONFLICT';

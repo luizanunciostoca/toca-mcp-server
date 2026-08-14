@@ -1,8 +1,5 @@
 import type { RiskClass, ToolDefinition } from './tool-registry.js';
-import {
-  verifyApproval,
-  type ApprovalRecord,
-} from '../governance/approval-governance.js';
+import { verifyApproval, type ApprovalRecord } from '../governance/approval-governance.js';
 import { getCapabilityDefinition } from '../governance/capability-catalog.js';
 
 export type PolicyDecision = 'ALLOW' | 'REQUIRE_APPROVAL' | 'DENY';

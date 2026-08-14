@@ -111,10 +111,7 @@ export class InMemoryApprovalStore implements ApprovalStore {
       throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
     if (!current && record.version !== 1) throw new Error('APPROVAL_INITIAL_VERSION_INVALID');
     this.#current.set(record.approvalId, record);
-    this.#history.set(record.approvalId, [
-      ...(this.#history.get(record.approvalId) ?? []),
-      record,
-    ]);
+    this.#history.set(record.approvalId, [...(this.#history.get(record.approvalId) ?? []), record]);
     return Promise.resolve();
   }
 
@@ -220,8 +217,7 @@ export function verifyApproval(
     reasons.push('REQUESTER_MISMATCH');
   if (record.routeId !== expectation.routeId) reasons.push('ROUTE_MISMATCH');
   if (record.capabilityId !== expectation.capabilityId) reasons.push('CAPABILITY_MISMATCH');
-  if (record.descriptorSha256 !== expectation.descriptorSha256)
-    reasons.push('DESCRIPTOR_MISMATCH');
+  if (record.descriptorSha256 !== expectation.descriptorSha256) reasons.push('DESCRIPTOR_MISMATCH');
   if (record.targetAccount !== expectation.targetAccount) reasons.push('TARGET_MISMATCH');
   if (expectation.requiredScope.some((scope) => !record.scope.includes(scope)))
     reasons.push('SCOPE_MISMATCH');
@@ -256,8 +252,7 @@ export function revokeApproval(
   evidence: readonly string[],
   now = new Date().toISOString(),
 ): ApprovalRecord {
-  if (!['REQUESTED', 'APPROVED'].includes(record.status))
-    throw new Error('APPROVAL_NOT_REVOCABLE');
+  if (!['REQUESTED', 'APPROVED'].includes(record.status)) throw new Error('APPROVAL_NOT_REVOCABLE');
   if (evidence.length === 0) throw new Error('APPROVAL_REVOCATION_EVIDENCE_REQUIRED');
   return {
     ...record,
@@ -272,8 +267,7 @@ export function expireApproval(
   record: ApprovalRecord,
   now = new Date().toISOString(),
 ): ApprovalRecord {
-  if (!['REQUESTED', 'APPROVED'].includes(record.status))
-    throw new Error('APPROVAL_NOT_EXPIRABLE');
+  if (!['REQUESTED', 'APPROVED'].includes(record.status)) throw new Error('APPROVAL_NOT_EXPIRABLE');
   if (Date.parse(record.expiresAt) > Date.parse(now)) throw new Error('APPROVAL_NOT_EXPIRED');
   return { ...record, status: 'EXPIRED', version: record.version + 1 };
 }
@@ -314,7 +308,10 @@ function assertApprovalRequest(input: ApprovalRequestInput, now: string): void {
   if (!input.correlationId.trim()) throw new Error('APPROVAL_CORRELATION_REQUIRED');
   if (!input.evidence || input.evidence.length === 0)
     throw new Error('APPROVAL_REQUEST_EVIDENCE_REQUIRED');
-  if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.parse(now))
+  if (
+    !Number.isFinite(Date.parse(input.expiresAt)) ||
+    Date.parse(input.expiresAt) <= Date.parse(now)
+  )
     throw new Error('APPROVAL_EXPIRY_INVALID');
   if (input.financialCeiling) {
     if (

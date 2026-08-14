@@ -63,8 +63,8 @@ describe('R21 governance drift reconciliation', () => {
         records: [{ ...snapshots[1]!.records[0]!, values: { owner: 'ChatGPT' } }],
       },
     ]);
-    expect(
-      planGovernanceReconciliation(ownerDrift, { owner: 'CANONICAL_REGISTRY' }).state,
-    ).toBe('BLOCKED_PENDING_HUMAN_DECISION');
+    expect(planGovernanceReconciliation(ownerDrift, { owner: 'CANONICAL_REGISTRY' }).state).toBe(
+      'BLOCKED_PENDING_HUMAN_DECISION',
+    );
   });
 });
