@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "action": "CREATE",
+  "commandId": "schedule-MKT-20260813-SUNSET-FEED-2130-V1",
+  "requestedBy": "LUIZ_EXPLICIT_CHAT_COMMAND",
+  "requestedAt": "2026-08-13T20:56:00-03:00",
+  "payload": {
+    "schemaVersion": 1,
+    "contentItemId": "MKT-20260813-SUNSET-FEED-1500",
+    "scheduledFor": "2026-08-13T21:30:00-03:00",
+    "timezone": "America/Bahia",
+    "account": {
+      "pageId": "306103746115875",
+      "instagramAccountId": "17841402033495654"
+    },
+    "mediaType": "IMAGE",
+    "asset": {
+      "assetId": "MM-SUN-0244-V1",
+      "objectName": "instagram/CORR-MKT-20260813-FEED1630-V2/MM-SUN-0244-V1-eb847042a2e89b0a.jpg",
+      "sha256": "eb847042a2e89b0a7fb166fed506c10483e87f574a0e9defc812c4b5c73b2d44",
+      "contentType": "image/jpeg"
+    },
+    "caption": "Conforto, vista e serviço se encontram para transformar o fim de tarde em experiência.\n\nViva essa experiência na Toca do Morcego.\n",
+    "correlationId": "CORR-MKT-20260813-FEED2130-V1",
+    "publicationIdempotencyKey": "PUB-MKT-20260813-SUNSET-FEED-2130-V1",
+    "approval": {
+      "mode": "EXPLICIT_APPROVAL",
+      "status": "APPROVED",
+      "approvedDescriptorSha256": "6cda1ae69ca9943f99b566ccaaec75bea3bb974c90b3981c37997b54eede3dd0"
+    }
+  }
+}
