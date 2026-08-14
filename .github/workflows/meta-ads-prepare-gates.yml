@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [PERMISSIONS, ACCOUNT, GEO, CREATIVE]
+        gate: [PERMISSIONS, ACCOUNT, GEO, GEO_CAIRU, CREATIVE]
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GATE_LOWER="$(printf '%s' '${{ matrix.gate }}' | tr '[:upper:]' '[:lower:]')"
+          GATE_LOWER="$(printf '%s' '${{ matrix.gate }}' | tr '[:upper:]' '[:lower:]' | tr '_' '-')"
           echo "job=toca-meta-ads-probe-${GATE_LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy read-only gate probe
