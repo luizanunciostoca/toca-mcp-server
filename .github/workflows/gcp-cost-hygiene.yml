@@ -1,0 +1,60 @@
+name: GCP Cost Hygiene
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/artifact-registry-cleanup-policy.json'
+      - '.github/workflows/gcp-cost-hygiene.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  artifact-registry-cleanup:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Apply bounded Artifact Registry cleanup policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud artifacts repositories set-cleanup-policies "$GCP_ARTIFACT_REPOSITORY" \
+            --project="$GCP_PROJECT_ID" \
+            --location="$GCP_REGION" \
+            --policy=infra/artifact-registry-cleanup-policy.json \
+            --no-dry-run \
+            --quiet
+
+      - name: Verify cleanup policies are active
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICIES="$(gcloud artifacts repositories list-cleanup-policies "$GCP_ARTIFACT_REPOSITORY" \
+            --project="$GCP_PROJECT_ID" \
+            --location="$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$POLICIES" | jq -e '
+            any(.[]?; .name == "delete-images-older-than-30d") and
+            any(.[]?; .name == "keep-last-10-versions")
+          ' >/dev/null
+          echo 'ARTIFACT_REGISTRY_COST_HYGIENE=VERIFIED'

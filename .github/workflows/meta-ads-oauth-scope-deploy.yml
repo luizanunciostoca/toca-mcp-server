@@ -76,6 +76,9 @@ jobs:
             --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,META_WEBHOOK_VERIFY_TOKEN=$WEBHOOK_VERIFY_TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --min-instances 0 \
             --max-instances 1 \
+            --cpu-throttling \
+            --memory 512Mi \
+            --cpu 1 \
             --ingress all \
             --default-url \
             --no-invoker-iam-check \

@@ -15,16 +15,9 @@ import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instag
 
 const config = loadConfig(process.env);
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
-const pollIntervalMs = Number.parseInt(
-  process.env.TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS ?? '60000',
-  10,
-);
 
 if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) {
   throw new Error('TOCA_MANAGED_INSTAGRAM_DAEMON_INVALID_PORT');
-}
-if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10000) {
-  throw new Error('TOCA_MANAGED_INSTAGRAM_DAEMON_INVALID_POLL_INTERVAL');
 }
 if (!config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED) {
   throw new Error('TOCA_MANAGED_INSTAGRAM_DAEMON_REQUIRES_SCHEDULER');
@@ -125,8 +118,18 @@ async function verifySchedulerPersistence(): Promise<void> {
   }
 }
 
-async function tick(): Promise<void> {
-  if (running || stopping) return;
+type TickResult = {
+  claimed: number;
+  error: string | null;
+  skipped: boolean;
+};
+
+async function tick(): Promise<TickResult> {
+  if (running || stopping) {
+    telemetry.increment('daemon.tick.skipped');
+    return { claimed: 0, error: null, skipped: true };
+  }
+
   running = true;
   lastRunStartedAt = new Date().toISOString();
   const started = Date.now();
@@ -137,10 +140,12 @@ async function tick(): Promise<void> {
     telemetry.increment('daemon.tick.succeeded');
     telemetry.record('daemon.tick.claimed_jobs', lastClaimed);
     logger.info('toca.managed.instagram.daemon.tick.completed', { claimed: lastClaimed });
+    return { claimed: lastClaimed, error: null, skipped: false };
   } catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
     telemetry.increment('daemon.tick.failed');
     logger.error('toca.managed.instagram.daemon.tick.failed', { error: lastError });
+    return { claimed: 0, error: lastError, skipped: false };
   } finally {
     telemetry.record('daemon.tick.duration_ms', Date.now() - started);
     lastRunFinishedAt = new Date().toISOString();
@@ -151,51 +156,72 @@ async function tick(): Promise<void> {
 await verifySchedulerPersistence();
 
 const server = createServer((request, response) => {
-  if (request.url === '/metrics') {
+  if (request.url === '/metrics' && request.method === 'GET') {
     response.statusCode = 200;
     response.setHeader('content-type', 'text/plain; version=0.0.4; charset=utf-8');
     response.end(telemetry.renderPrometheus());
     return;
   }
 
-  if (request.url !== '/healthz') {
-    response.statusCode = 404;
-    response.end('not found');
+  if (request.url === '/healthz' && request.method === 'GET') {
+    response.statusCode = 200;
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      JSON.stringify({
+        ok: !stopping,
+        schedulerPersistenceVerified: true,
+        schedulingTransport: 'protected-mcp',
+        triggerMode: 'cloud-scheduler-http',
+        running,
+        lastRunStartedAt,
+        lastRunFinishedAt,
+        lastClaimed,
+        lastError,
+        telemetry: telemetry.snapshot(),
+      }),
+    );
     return;
   }
 
-  response.setHeader('content-type', 'application/json');
-  response.end(
-    JSON.stringify({
-      ok: !stopping,
-      schedulerPersistenceVerified: true,
-      schedulingTransport: 'protected-mcp',
-      running,
-      pollIntervalMs,
-      lastRunStartedAt,
-      lastRunFinishedAt,
-      lastClaimed,
-      lastError,
-      telemetry: telemetry.snapshot(),
-    }),
-  );
+  if (request.url === '/tick') {
+    if (request.method !== 'POST') {
+      response.statusCode = 405;
+      response.setHeader('allow', 'POST');
+      response.end('method not allowed');
+      return;
+    }
+
+    void tick()
+      .then((result) => {
+        response.statusCode = result.error ? 500 : 200;
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ ok: !result.error, ...result }));
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('toca.managed.instagram.daemon.tick.request_failed', { error: message });
+        response.statusCode = 500;
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ ok: false, error: message }));
+      });
+    return;
+  }
+
+  response.statusCode = 404;
+  response.end('not found');
 });
 
 server.listen(port, '0.0.0.0', () => {
   telemetry.increment('daemon.started');
-  logger.info('toca.managed.instagram.daemon.started', { port, pollIntervalMs });
+  logger.info('toca.managed.instagram.daemon.started', {
+    port,
+    triggerMode: 'cloud-scheduler-http',
+  });
 });
-
-const timer = setInterval(() => {
-  void tick();
-}, pollIntervalMs);
-timer.unref();
-void tick();
 
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
-  clearInterval(timer);
   telemetry.increment('daemon.stopping', { signal });
   logger.info('toca.managed.instagram.daemon.stopping', { signal });
   await new Promise<void>((resolve) => server.close(() => resolve()));

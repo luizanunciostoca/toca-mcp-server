@@ -60,7 +60,7 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Deploy Cloud Run revision
+      - name: Deploy Cloud Run revision with bounded scale-to-zero
         run: |
           gcloud run deploy "toca-mcp-${{ inputs.environment }}" \
             --image "$IMAGE" \
@@ -70,4 +70,9 @@ jobs:
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-oauth-token:latest" \
             --update-env-vars "META_ENABLED=false,MCP_ENABLED=true,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
+            --min-instances 0 \
+            --max-instances 1 \
+            --cpu-throttling \
+            --memory 512Mi \
+            --cpu 1 \
             --no-allow-unauthenticated

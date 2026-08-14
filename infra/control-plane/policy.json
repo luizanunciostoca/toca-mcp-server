@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -99,15 +99,44 @@
       "resourceName": "toca-managed-instagram-daemon",
       "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
       "private": true,
-      "minInstances": 1,
+      "minInstances": 0,
       "maxInstances": 1,
       "concurrency": 1,
-      "pollIntervalMs": 60000,
+      "cpuThrottling": true,
+      "requestBasedBilling": true,
+      "triggerMode": "cloud-scheduler-http",
+      "globalSchedulerJob": {
+        "name": "toca-managed-instagram-tick",
+        "schedule": "* * * * *",
+        "timezone": "America/Bahia",
+        "endpoint": "/tick",
+        "oidcServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+        "maxRetryAttempts": 0
+      },
       "schedulerBackend": "postgresql",
       "scheduleTransport": "protected-mcp",
       "contentPayloadInInfrastructureTimer": false,
       "legacyHeartbeatSuperseded": true
+    },
+    "mcpProduction": {
+      "resourceType": "cloud-run-service",
+      "resourceName": "toca-mcp-production",
+      "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+      "private": true,
+      "minInstances": 0,
+      "maxInstances": 1,
+      "cpuThrottling": true,
+      "requestBasedBilling": true
     }
+  },
+  "costPrinciples": {
+    "preserveCorrectnessBeforeSavings": true,
+    "scaleToZeroWhenNoBackgroundCpuIsRequired": true,
+    "singleGlobalMinuteTriggerOnly": true,
+    "cloudSqlSharedCoreFloor": "db-g1-small",
+    "cloudSqlStorageSafetyBufferGb": 100,
+    "cloudSqlBackupRetentionDays": 7,
+    "cloudSqlTransactionLogRetentionDays": 7
   },
   "forbidden": {
     "projectOwner": true,
@@ -119,6 +148,8 @@
     "publicBucketIam": true,
     "perContentSchedulerJobs": true,
     "legacyHeartbeatRecreation": true,
+    "alwaysOnSchedulerPolling": true,
+    "unboundedCloudRunScaling": true,
     "deployAsSchedulingTransport": true
   }
 }
