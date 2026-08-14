@@ -5,16 +5,7 @@ import {
   type ControlledCreatePausedPlan,
   type MetaAdsWriteGuardrails,
 } from '../src/providers/meta-ads/meta-ads-controlled-write.js';
-import type {
-  MetaAdAccountRef,
-  MetaAdDraft,
-  MetaAdEntityStatus,
-  MetaAdSetDraft,
-  MetaAdsInsightsQuery,
-  MetaAdsProvider,
-  MetaCampaignDraft,
-  MetaCreativeDraft,
-} from '../src/providers/meta-ads/meta-ads-contracts.js';
+import type { MetaAdsProvider } from '../src/providers/meta-ads/meta-ads-contracts.js';
 
 const plan: ControlledCreatePausedPlan = {
   account: { adAccountId: '311793958882290', currency: 'BRL' },
@@ -75,7 +66,7 @@ function guardrails(overrides: Partial<MetaAdsWriteGuardrails> = {}): MetaAdsWri
 }
 
 function createProvider(existingCampaigns: readonly Readonly<Record<string, unknown>>[] = []) {
-  const provider: MetaAdsProvider = {
+  const provider = {
     listCampaigns: vi.fn().mockResolvedValue(existingCampaigns),
     getInsights: vi.fn().mockResolvedValue([]),
     createCampaign: vi.fn().mockResolvedValue({ id: 'campaign-1' }),
@@ -87,7 +78,7 @@ function createProvider(existingCampaigns: readonly Readonly<Record<string, unkn
     createAd: vi.fn().mockResolvedValueOnce({ id: 'ad-1' }).mockResolvedValueOnce({ id: 'ad-2' }),
     updateStatus: vi.fn().mockResolvedValue(undefined),
     updateBudget: vi.fn().mockResolvedValue(undefined),
-  };
+  } satisfies MetaAdsProvider;
   return provider;
 }
 
@@ -120,14 +111,6 @@ function withPixel(pixelId: string): ControlledCreatePausedPlan {
     },
   };
 }
-
-void ({} as MetaAdAccountRef);
-void ({} as MetaCampaignDraft);
-void ({} as MetaAdSetDraft);
-void ({} as MetaCreativeDraft);
-void ({} as MetaAdDraft);
-void ({} as MetaAdsInsightsQuery);
-void ('' as MetaAdEntityStatus);
 
 describe('Meta Ads controlled create-paused service', () => {
   it('generates a stable deterministic approval hash without provider writes', () => {
@@ -234,7 +217,7 @@ describe('Meta Ads controlled create-paused service', () => {
       }),
     );
     expect(provider.createAd).toHaveBeenCalledTimes(2);
-    for (const call of vi.mocked(provider.createAd).mock.calls) {
+    for (const call of provider.createAd.mock.calls) {
       expect(call[1].status).toBe('PAUSED');
     }
     expect(provider.updateStatus).not.toHaveBeenCalled();
