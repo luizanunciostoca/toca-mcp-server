@@ -20,12 +20,14 @@ env:
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_GRAPH_BASE_URL: https://graph.facebook.com
   META_GRAPH_API_VERSION: v24.0
-  META_CAMPAIGN_ID: '52617486396865'
+  META_CAMPAIGN_ID: '52617499494265'
+  EXPECTED_ADSET_ID: '52617499501065'
   EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
-  RECOVERED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE | FAILED-SHELL-31774472725
-  EXPECTED_MARKER: RECOVER_THE_PARTY_PAUSED_SHELL_52617486396865
+  EXPECTED_ADSET_NAME: THE PARTY | 2026-08-15 | Morro 15km | Broad 21-45 | Purchase
+  RECOVERED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE | FAILED-SHELL-31777075807
+  EXPECTED_MARKER: RECOVER_THE_PARTY_PAUSED_SHELL_52617499494265
   CAMPAIGN_START_UTC: '2026-08-15T03:00:00Z'
-  RECOVERY_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-81be90a0beb688dff0ad25999bdd3db081118e63
+  RECOVERY_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-57ecb96754d2ae36dfdaa2e2586cb1ad4b6c790c
 
 jobs:
   recover-paused-shell:
@@ -57,7 +59,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Recover exact PAUSED empty shell through runtime identity
+      - name: Recover exact PAUSED non-deliverable shell through runtime identity
         shell: bash
         run: |
           set -euo pipefail
@@ -75,9 +77,11 @@ jobs:
           const base = process.env.META_GRAPH_BASE_URL;
           const version = process.env.META_GRAPH_API_VERSION;
           const campaignId = process.env.META_CAMPAIGN_ID;
+          const expectedAdSetId = process.env.EXPECTED_ADSET_ID;
           const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
+          const expectedAdSetName = process.env.EXPECTED_ADSET_NAME;
           const recoveredName = process.env.RECOVERED_CAMPAIGN_NAME;
-          if (!token || !base || !version || !campaignId || !expectedName || !recoveredName) {
+          if (!token || !base || !version || !campaignId || !expectedAdSetId || !expectedName || !expectedAdSetName || !recoveredName) {
             throw new Error('SHELL_RECOVERY_CONFIG_MISSING');
           }
           async function graphGet(path, params = {}) {
@@ -106,7 +110,7 @@ jobs:
               fields: 'id,name,status,effective_status,objective,special_ad_categories',
             });
             const adSets = await graphGet(`${campaignId}/adsets`, {
-              fields: 'id,name,status,effective_status',
+              fields: 'id,name,status,effective_status,start_time,end_time,lifetime_budget,optimization_goal,billing_event,promoted_object,targeting',
               limit: '100',
             });
             const ads = await graphGet(`${campaignId}/ads`, {
@@ -119,19 +123,45 @@ jobs:
               ads: Array.isArray(ads.data) ? ads.data : [],
             };
           }
+          function assertExactPausedState(state) {
+            if (String(state.campaign.id) !== campaignId) throw new Error('SHELL_RECOVERY_ID_MISMATCH');
+            if (state.campaign.name !== expectedName) throw new Error('SHELL_RECOVERY_NAME_MISMATCH');
+            if (state.campaign.objective !== 'OUTCOME_SALES') throw new Error('SHELL_RECOVERY_OBJECTIVE_MISMATCH');
+            if (state.campaign.status !== 'PAUSED' || state.campaign.effective_status !== 'PAUSED') {
+              throw new Error('SHELL_RECOVERY_CAMPAIGN_NOT_PAUSED');
+            }
+            if (!Array.isArray(state.campaign.special_ad_categories) || state.campaign.special_ad_categories.length !== 0) {
+              throw new Error('SHELL_RECOVERY_SPECIAL_CATEGORY_MISMATCH');
+            }
+            if (state.adSets.length !== 1) throw new Error('SHELL_RECOVERY_ADSET_COUNT_MISMATCH');
+            if (state.ads.length !== 0) throw new Error('SHELL_RECOVERY_ADS_PRESENT');
+            const adSet = state.adSets[0];
+            if (String(adSet.id) !== expectedAdSetId) throw new Error('SHELL_RECOVERY_ADSET_ID_MISMATCH');
+            if (adSet.name !== expectedAdSetName) throw new Error('SHELL_RECOVERY_ADSET_NAME_MISMATCH');
+            if (adSet.status !== 'PAUSED' || adSet.effective_status !== 'PAUSED') {
+              throw new Error('SHELL_RECOVERY_ADSET_NOT_PAUSED');
+            }
+            if (String(adSet.lifetime_budget) !== '17000') throw new Error('SHELL_RECOVERY_BUDGET_MISMATCH');
+            if (adSet.optimization_goal !== 'OFFSITE_CONVERSIONS') throw new Error('SHELL_RECOVERY_OPTIMIZATION_MISMATCH');
+            if (adSet.billing_event !== 'IMPRESSIONS') throw new Error('SHELL_RECOVERY_BILLING_MISMATCH');
+            if (String(adSet.promoted_object?.pixel_id) !== '461233076843065') throw new Error('SHELL_RECOVERY_PIXEL_MISMATCH');
+            if (adSet.promoted_object?.custom_event_type !== 'PURCHASE') throw new Error('SHELL_RECOVERY_EVENT_MISMATCH');
+            if (Number(adSet.targeting?.age_min) !== 21 || Number(adSet.targeting?.age_max) !== 45) {
+              throw new Error('SHELL_RECOVERY_AGE_MISMATCH');
+            }
+            const locations = adSet.targeting?.geo_locations?.custom_locations;
+            if (!Array.isArray(locations) || locations.length !== 1) throw new Error('SHELL_RECOVERY_GEO_COUNT_MISMATCH');
+            const location = locations[0];
+            if (Number(location.latitude) !== -13.3833 || Number(location.longitude) !== -38.9167 || Number(location.radius) !== 15 || location.distance_unit !== 'kilometer') {
+              throw new Error('SHELL_RECOVERY_GEO_MISMATCH');
+            }
+            if (Number(adSet.targeting?.targeting_automation?.advantage_audience) !== 0) {
+              throw new Error('SHELL_RECOVERY_ADVANTAGE_AUDIENCE_MISMATCH');
+            }
+          }
+
           const before = await readState();
-          if (String(before.campaign.id) !== campaignId) throw new Error('SHELL_RECOVERY_ID_MISMATCH');
-          if (before.campaign.name !== expectedName) throw new Error('SHELL_RECOVERY_NAME_MISMATCH');
-          if (before.campaign.objective !== 'OUTCOME_SALES') throw new Error('SHELL_RECOVERY_OBJECTIVE_MISMATCH');
-          if (before.campaign.status !== 'PAUSED' || before.campaign.effective_status !== 'PAUSED') {
-            throw new Error('SHELL_RECOVERY_NOT_PAUSED');
-          }
-          if (!Array.isArray(before.campaign.special_ad_categories) || before.campaign.special_ad_categories.length !== 0) {
-            throw new Error('SHELL_RECOVERY_SPECIAL_CATEGORY_MISMATCH');
-          }
-          if (before.adSets.length !== 0 || before.ads.length !== 0) {
-            throw new Error('SHELL_RECOVERY_NOT_EMPTY');
-          }
+          assertExactPausedState(before);
 
           const mutation = await graphPostForm(campaignId, { name: recoveredName });
           if (mutation.success !== true) throw new Error('SHELL_RECOVERY_UPDATE_NOT_CONFIRMED');
@@ -139,17 +169,24 @@ jobs:
           const after = await readState();
           if (after.campaign.name !== recoveredName) throw new Error('SHELL_RECOVERY_RENAME_NOT_VISIBLE');
           if (after.campaign.status !== 'PAUSED' || after.campaign.effective_status !== 'PAUSED') {
-            throw new Error('SHELL_RECOVERY_STATUS_DRIFT');
+            throw new Error('SHELL_RECOVERY_CAMPAIGN_STATUS_DRIFT');
           }
-          if (after.adSets.length !== 0 || after.ads.length !== 0) {
+          if (after.adSets.length !== 1 || after.ads.length !== 0) {
             throw new Error('SHELL_RECOVERY_CHILDREN_DRIFT');
+          }
+          const afterAdSet = after.adSets[0];
+          if (String(afterAdSet.id) !== expectedAdSetId || afterAdSet.status !== 'PAUSED' || afterAdSet.effective_status !== 'PAUSED') {
+            throw new Error('SHELL_RECOVERY_ADSET_STATUS_DRIFT');
           }
           console.log(`META_ADS_THE_PARTY_SHELL_RECOVERY=${JSON.stringify({
             campaignId,
+            adSetId: expectedAdSetId,
             beforeName: expectedName,
             afterName: recoveredName,
             status: after.campaign.status,
             effectiveStatus: after.campaign.effective_status,
+            adSetStatus: afterAdSet.status,
+            adSetEffectiveStatus: afterAdSet.effective_status,
             adSetCount: after.adSets.length,
             adCount: after.ads.length,
           })}`);
@@ -164,7 +201,7 @@ jobs:
             --command node \
             --args "^~^-e~$JS_CODE" \
             --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
-            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_CAMPAIGN_ID=$META_CAMPAIGN_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME~RECOVERED_CAMPAIGN_NAME=$RECOVERED_CAMPAIGN_NAME" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_CAMPAIGN_ID=$META_CAMPAIGN_ID~EXPECTED_ADSET_ID=$EXPECTED_ADSET_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME~EXPECTED_ADSET_NAME=$EXPECTED_ADSET_NAME~RECOVERED_CAMPAIGN_NAME=$RECOVERED_CAMPAIGN_NAME" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 120s \
@@ -192,8 +229,9 @@ jobs:
           RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_SHELL_RECOVERY=}"
           printf '%s\n' "$RESULT_JSON" | jq -e \
             --arg id "$META_CAMPAIGN_ID" \
+            --arg adset "$EXPECTED_ADSET_ID" \
             --arg name "$RECOVERED_CAMPAIGN_NAME" \
-            '.campaignId == $id and .afterName == $name and .status == "PAUSED" and .effectiveStatus == "PAUSED" and .adSetCount == 0 and .adCount == 0' \
+            '.campaignId == $id and .adSetId == $adset and .afterName == $name and .status == "PAUSED" and .effectiveStatus == "PAUSED" and .adSetStatus == "PAUSED" and .adSetEffectiveStatus == "PAUSED" and .adSetCount == 1 and .adCount == 0' \
             >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-shell-recovery.json
           echo 'THE_PARTY_PAUSED_SHELL_RECOVERED=1'
