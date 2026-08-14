@@ -15,6 +15,7 @@ export interface PublicationReconciliationDescriptor {
 }
 
 const DEFAULT_TOLERANCE_MS = 30 * 60 * 1000;
+const MAX_AUTOMATIC_DRAFT_LATENESS_MS = 15 * 60 * 1000;
 
 export class InstagramPublicationReconciler {
   constructor(
@@ -27,7 +28,8 @@ export class InstagramPublicationReconciler {
     request: InstagramPublishRequest,
     descriptor: PublicationReconciliationDescriptor,
   ): Promise<PublicationExecutionResult | undefined> {
-    const record = await this.store.reserve(request, this.now());
+    const nowIso = this.now();
+    const record = await this.store.reserve(request, nowIso);
     if (record.state === 'PUBLISHED') return { publication: record, completed: true };
     if (record.state === 'CANCELED') return undefined;
     if (!this.transport.listRecentPublishedMedia) {
@@ -39,11 +41,19 @@ export class InstagramPublicationReconciler {
       25,
     );
     const matches = recent.filter((candidate) => matchesDescriptor(candidate, descriptor));
-    if (matches.length === 0) return undefined;
+    if (matches.length === 0) {
+      if (
+        record.state === 'DRAFT' &&
+        isPastAutomaticDraftWindow(descriptor.scheduledFor, nowIso)
+      ) {
+        throw new Error('INSTAGRAM_PUBLICATION_OVERDUE_RECONCILIATION_REQUIRED');
+      }
+      return undefined;
+    }
     if (matches.length > 1) throw new Error('INSTAGRAM_PUBLICATION_RECONCILIATION_AMBIGUOUS');
 
     const match = matches[0]!;
-    const reconciled = reconcilePublishedPublication(record, this.now(), {
+    const reconciled = reconcilePublishedPublication(record, nowIso, {
       externalMediaId: match.mediaId,
       ...(match.permalink ? { permalink: match.permalink } : {}),
       ...(match.timestamp ? { providerPublishedAt: match.timestamp } : {}),
@@ -74,11 +84,23 @@ function matchesDescriptor(
   return normalizeMediaType(candidate.mediaType) === descriptor.mediaType;
 }
 
+function isPastAutomaticDraftWindow(scheduledFor: string, nowIso: string): boolean {
+  const scheduledAt = Date.parse(scheduledFor);
+  const now = Date.parse(nowIso);
+  return (
+    Number.isFinite(scheduledAt) &&
+    Number.isFinite(now) &&
+    now - scheduledAt > MAX_AUTOMATIC_DRAFT_LATENESS_MS
+  );
+}
+
 function normalizeCaption(value: string | undefined): string {
   return (value ?? '').replace(/\r\n/g, '\n').trim();
 }
 
-function normalizeMediaType(value: string | undefined): InstagramPublishRequest['mediaType'] | undefined {
+function normalizeMediaType(
+  value: string | undefined,
+): InstagramPublishRequest['mediaType'] | undefined {
   if (value === 'IMAGE') return 'IMAGE';
   if (value === 'VIDEO' || value === 'REELS') return 'REEL';
   if (value === 'CAROUSEL_ALBUM') return 'CAROUSEL';
