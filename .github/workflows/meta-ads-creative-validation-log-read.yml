@@ -1,0 +1,34 @@
+name: Meta Ads Creative Validation Log Read
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-creative-validation-log-read.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Print persisted validation markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            'resource.type="cloud_run_job" AND resource.labels.job_name="toca-meta-ads-instagram-user-creative-validate" AND timestamp>="2026-08-14T03:27:00Z"' \
+            --project toca-mcp-production \
+            --order=asc \
+            --limit=200 \
+            --format='value(textPayload)' | \
+            grep -E 'META_ADS_(IG_PAGE_DISCOVERY|IG_CONFIGURED_ID_READ|CREATIVE_VALIDATE_ONLY|IG_PAGE_DISCOVERY_ERROR)=' || true
