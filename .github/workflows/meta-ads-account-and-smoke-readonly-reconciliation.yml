@@ -1,0 +1,159 @@
+name: Meta Ads Account and Smoke Read-Only Reconciliation
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-account-and-smoke-readonly-reconciliation.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-account-smoke-readonly-reconcile
+  CURRENT_ACCOUNT_ID: '311793958882290'
+  PIXEL_ACCOUNT_ID: '394512749760530'
+  PAGE_ID: '306103746115875'
+  SOURCE_CREATIVE_ID: '24628562856774168'
+  SMOKE_CAMPAIGN_ID: '52617455311665'
+  SMOKE_ADSET_ID: '52617455315265'
+  SMOKE_CREATIVE_ID: '2844574235935509'
+  SMOKE_AD_ID: '52617455330665'
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build immutable GET-only reconciliation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-ads-reconcile
+          cat > /tmp/meta-ads-reconcile/reconcile.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const currentAccountId = process.env.CURRENT_ACCOUNT_ID;
+          const pixelAccountId = process.env.PIXEL_ACCOUNT_ID;
+          const pageId = process.env.PAGE_ID;
+          const sourceCreativeId = process.env.SOURCE_CREATIVE_ID;
+          const smokeCampaignId = process.env.SMOKE_CAMPAIGN_ID;
+          const smokeAdSetId = process.env.SMOKE_ADSET_ID;
+          const smokeCreativeId = process.env.SMOKE_CREATIVE_ID;
+          const smokeAdId = process.env.SMOKE_AD_ID;
+          if (![token,currentAccountId,pixelAccountId,pageId,sourceCreativeId,smokeCampaignId,smokeAdSetId,smokeCreativeId,smokeAdId].every(Boolean)) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            return { response, body };
+          };
+          const rows = (body) => Array.isArray(body?.data) ? body.data : [];
+          const errorOf = (result) => {
+            const e = result.body?.error ?? {};
+            return { httpStatus: result.response.status, code: Number(e.code) || null, subcode: Number(e.error_subcode) || null, message: sanitize(e.message) };
+          };
+
+          const accessibleResult = await get('me/adaccounts?fields=id,account_id,name,account_status,currency,business,owner_business&limit=200');
+          const accessible = accessibleResult.response.ok ? rows(accessibleResult.body).map((item) => ({
+            id: String(item?.id ?? ''), accountId: String(item?.account_id ?? ''), name: item?.name ?? null,
+            accountStatus: item?.account_status ?? null, currency: item?.currency ?? null,
+            business: item?.business ?? null, ownerBusiness: item?.owner_business ?? null,
+          })) : [];
+
+          const accountResults = [];
+          for (const accountId of [currentAccountId, pixelAccountId]) {
+            const account = await get(`act_${accountId}?fields=id,account_id,name,account_status,currency,timezone_name,business,owner_business`);
+            const creatives = await get(`act_${accountId}/adcreatives?fields=id,name,object_story_spec&limit=100`);
+            const creativeRows = creatives.response.ok ? rows(creatives.body) : [];
+            accountResults.push({
+              accountId,
+              account: account.response.ok ? account.body : null,
+              accountError: account.response.ok ? null : errorOf(account),
+              creativeReadOk: creatives.response.ok,
+              creativeReadError: creatives.response.ok ? null : errorOf(creatives),
+              creativeCount: creativeRows.length,
+              sourceCreativePresent: creativeRows.some((item) => String(item?.id ?? '') === sourceCreativeId),
+              pageCreativeCount: creativeRows.filter((item) => String(item?.object_story_spec?.page_id ?? '') === pageId).length,
+              samplePageCreatives: creativeRows.filter((item) => String(item?.object_story_spec?.page_id ?? '') === pageId).slice(0, 5).map((item) => ({ id: String(item.id), name: item.name ?? null })),
+            });
+          }
+
+          const campaign = await get(`${smokeCampaignId}?fields=id,account_id,name,status,effective_status,configured_status,created_time,updated_time`);
+          const adSet = await get(`${smokeAdSetId}?fields=id,account_id,campaign_id,name,status,effective_status,configured_status,issues_info,promoted_object,bid_strategy,daily_budget,start_time,end_time,optimization_goal,updated_time`);
+          const creative = await get(`${smokeCreativeId}?fields=id,account_id,name,object_story_spec,status`);
+          const ad = await get(`${smokeAdId}?fields=id,account_id,campaign_id,adset_id,name,status,effective_status,configured_status,issues_info,failed_delivery_checks,ad_review_feedback,creative,created_time,updated_time`);
+
+          const smoke = {
+            campaign: campaign.response.ok ? campaign.body : { error: errorOf(campaign) },
+            adSet: adSet.response.ok ? adSet.body : { error: errorOf(adSet) },
+            creative: creative.response.ok ? creative.body : { error: errorOf(creative) },
+            ad: ad.response.ok ? ad.body : { error: errorOf(ad) },
+          };
+          const unsafeActive = [smoke.campaign, smoke.adSet, smoke.ad].some((entity) => entity?.status === 'ACTIVE' || entity?.effective_status === 'ACTIVE');
+          if (unsafeActive) throw new Error('UNEXPECTED_ACTIVE_SMOKE_ENTITY');
+
+          console.log(`META_ADS_ACCOUNT_RECONCILIATION=${JSON.stringify({
+            accessibleReadOk: accessibleResult.response.ok,
+            accessibleReadError: accessibleResult.response.ok ? null : errorOf(accessibleResult),
+            accessible,
+            accounts: accountResults,
+            smoke,
+          })}`);
+          NODE
+          cat > /tmp/meta-ads-reconcile/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY reconcile.mjs ./reconcile.mjs
+          USER node
+          CMD ["node", "reconcile.mjs"]
+          DOCKER
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-account-smoke-readonly-reconcile:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-ads-reconcile
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy GET-only reconciliation job
+        run: |
+          gcloud run jobs deploy "$JOB" --image "$IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "CURRENT_ACCOUNT_ID=$CURRENT_ACCOUNT_ID,PIXEL_ACCOUNT_ID=$PIXEL_ACCOUNT_ID,PAGE_ID=$PAGE_ID,SOURCE_CREATIVE_ID=$SOURCE_CREATIVE_ID,SMOKE_CAMPAIGN_ID=$SMOKE_CAMPAIGN_ID,SMOKE_ADSET_ID=$SMOKE_ADSET_ID,SMOKE_CREATIVE_ID=$SMOKE_CREATIVE_ID,SMOKE_AD_ID=$SMOKE_AD_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+      - name: Execute GET-only reconciliation
+        run: gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+      - name: Print persisted reconciliation result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=""
+          for attempt in $(seq 1 15); do
+            RESULT="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"META_ADS_ACCOUNT_RECONCILIATION=\"" \
+              --project "$PROJECT_ID" --freshness=15m --order=desc --limit=1 --format='value(textPayload)')"
+            [ -n "$RESULT" ] && break
+            sleep 3
+          done
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT"
+      - name: Remove GET-only reconciliation job
+        if: always()
+        run: gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
