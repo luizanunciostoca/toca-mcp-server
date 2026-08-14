@@ -1,0 +1,130 @@
+name: Meta Ads PREPARE Gate Isolation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/meta-ads-prepare-diagnostic-gates.ts'
+      - '.github/workflows/meta-ads-prepare-gates.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  META_ADS_ACCOUNT_ID: '311793958882290'
+  META_ADS_CURRENCY: BRL
+  META_ADS_PAGE_ID: '306103746115875'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable probe image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-gates-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  probe:
+    name: probe-${{ matrix.gate }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [PERMISSIONS, ACCOUNT, GEO, CREATIVE]
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve probe name
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          GATE_LOWER="$(printf '%s' '${{ matrix.gate }}' | tr '[:upper:]' '[:lower:]')"
+          echo "job=toca-meta-ads-probe-${GATE_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy read-only gate probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "${{ steps.probe.outputs.job }}" \
+            --image "${{ needs.build.outputs.image }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/meta-ads-prepare-diagnostic-gates.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_DIAGNOSTIC_GATE=${{ matrix.gate }}~META_ADS_SMOKE_ACCOUNT_ID=$META_ADS_ACCOUNT_ID~META_ADS_SMOKE_CURRENCY=$META_ADS_CURRENCY~META_ADS_SMOKE_PAGE_ID=$META_ADS_PAGE_ID" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+      - name: Execute ${{ matrix.gate }} read-only gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "${{ steps.probe.outputs.job }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Remove gate probe
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "${{ steps.probe.outputs.job }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --quiet || true
