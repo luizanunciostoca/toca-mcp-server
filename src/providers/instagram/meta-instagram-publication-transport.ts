@@ -5,9 +5,16 @@ import {
   buildInstagramPublishCall,
   type InstagramContainerCreate,
 } from './instagram-publish-builder.js';
-import type { InstagramPublicationTransport } from './instagram-publication-executor.js';
+import type {
+  InstagramPublicationTransport,
+  PublishedMediaEvidence,
+} from './instagram-publication-executor.js';
 
 type IdResponse = { readonly id: string };
+
+type MediaListResponse = {
+  readonly data?: readonly unknown[];
+};
 
 export class MetaInstagramPublicationTransport implements InstagramPublicationTransport {
   constructor(private readonly client: MetaApiClient) {}
@@ -42,6 +49,29 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
     return { mediaId: response.id };
   }
 
+  async getPublishedMedia(mediaId: string): Promise<PublishedMediaEvidence> {
+    return parseMediaEvidence(
+      await this.client.get(mediaId, {
+        fields: 'id,caption,media_type,permalink,timestamp',
+      }),
+    );
+  }
+
+  async listRecentPublishedMedia(
+    instagramAccountId: string,
+    limit = 25,
+  ): Promise<readonly PublishedMediaEvidence[]> {
+    const response = requireObject(
+      await this.client.get(`${instagramAccountId}/media`, {
+        fields: 'id,caption,media_type,permalink,timestamp',
+        limit: String(limit),
+      }),
+      'META_INSTAGRAM_MEDIA_LIST_INVALID',
+    ) as MediaListResponse & Record<string, unknown>;
+    if (!Array.isArray(response.data)) throw new Error('META_INSTAGRAM_MEDIA_LIST_INVALID');
+    return response.data.map(parseMediaEvidence);
+  }
+
   private async createPlannedContainer(plan: InstagramContainerCreate): Promise<string> {
     let body = plan.body;
     if (plan.children?.length) {
@@ -53,6 +83,20 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
     }
     return requireId(await this.client.post(plan.path, body)).id;
   }
+}
+
+function parseMediaEvidence(value: unknown): PublishedMediaEvidence {
+  const object = requireObject(value, 'META_INSTAGRAM_MEDIA_INVALID');
+  if (typeof object.id !== 'string' || object.id.length === 0) {
+    throw new Error('META_INSTAGRAM_MEDIA_INVALID');
+  }
+  return {
+    mediaId: object.id,
+    ...(typeof object.caption === 'string' ? { caption: object.caption } : {}),
+    ...(typeof object.media_type === 'string' ? { mediaType: object.media_type } : {}),
+    ...(typeof object.permalink === 'string' ? { permalink: object.permalink } : {}),
+    ...(typeof object.timestamp === 'string' ? { timestamp: object.timestamp } : {}),
+  };
 }
 
 function requireId(value: unknown): IdResponse {
