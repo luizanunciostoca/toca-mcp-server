@@ -104,8 +104,12 @@ export class InstagramPublicationExecutor {
             request.account.instagramAccountId,
             record.externalContainerId,
           );
+          const evidence = await getPublishedEvidence(this.transport, published.mediaId);
           record = transitionPublication(record, 'PUBLISHED', this.now(), {
             externalMediaId: published.mediaId,
+            ...(evidence.permalink ? { permalink: evidence.permalink } : {}),
+            ...(evidence.timestamp ? { providerPublishedAt: evidence.timestamp } : {}),
+            reconciliationSource: 'WRITE_RESPONSE',
           });
           await this.store.save(record);
         } catch (error) {
@@ -131,6 +135,18 @@ export class InstagramPublicationExecutor {
       }
       throw error;
     }
+  }
+}
+
+async function getPublishedEvidence(
+  transport: InstagramPublicationTransport,
+  mediaId: string,
+): Promise<PublishedMediaEvidence> {
+  if (!transport.getPublishedMedia) return { mediaId };
+  try {
+    return await transport.getPublishedMedia(mediaId);
+  } catch {
+    return { mediaId };
   }
 }
 
