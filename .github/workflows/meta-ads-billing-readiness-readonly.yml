@@ -53,13 +53,15 @@ jobs:
           const fundingDetails = body?.funding_source_details && typeof body.funding_source_details === 'object' ? body.funding_source_details : null;
           const expiredDetails = Array.isArray(body?.expired_funding_source_details) ? body.expired_funding_source_details : [];
           const failedChecks = Array.isArray(body?.failed_delivery_checks) ? body.failed_delivery_checks : [];
+          const fundingSourceValue = String(body?.funding_source ?? '');
+          const fundingDetailsId = String(fundingDetails?.id ?? '');
           console.log(`META_ADS_BILLING_READINESS=${JSON.stringify({
             httpStatus: response.status,
             ok: true,
             accountId: String(body?.account_id ?? ''),
             accountStatus: body?.account_status ?? null,
-            hasFundingSource: Boolean(body?.funding_source),
-            hasFundingSourceDetails: Boolean(fundingDetails),
+            fundingSourceNonZero: fundingSourceValue !== '' && fundingSourceValue !== '0',
+            fundingSourceDetailsIdNonZero: fundingDetailsId !== '' && fundingDetailsId !== '0',
             fundingSourceType: fundingDetails?.type ?? null,
             fundingSourceStatus: fundingDetails?.status ?? null,
             expiredFundingSourceCount: expiredDetails.length,
