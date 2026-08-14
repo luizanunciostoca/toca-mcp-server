@@ -1,0 +1,207 @@
+name: Meta Ads The Party Paused Shell Recovery
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - control/meta-ads-the-party-2026-08-15.recover-shell
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_GRAPH_BASE_URL: https://graph.facebook.com
+  META_GRAPH_API_VERSION: v24.0
+  META_CAMPAIGN_ID: '52617486396865'
+  EXPECTED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE
+  RECOVERED_CAMPAIGN_NAME: TOCA | THE PARTY | 2026-08-15 | PURCHASE | FAILED-SHELL-31774472725
+  EXPECTED_MARKER: RECOVER_THE_PARTY_PAUSED_SHELL_52617486396865
+  CAMPAIGN_START_UTC: '2026-08-15T03:00:00Z'
+  RECOVERY_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:the-party-20260815-81be90a0beb688dff0ad25999bdd3db081118e63
+
+jobs:
+  recover-paused-shell:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate exact recovery authorization and time lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -f control/meta-ads-the-party-2026-08-15.recover-shell
+          test "$(tr -d '\r\n' < control/meta-ads-the-party-2026-08-15.recover-shell)" = "$EXPECTED_MARKER"
+          CHANGED_FILES="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+          test "$CHANGED_FILES" = "control/meta-ads-the-party-2026-08-15.recover-shell"
+          now_epoch="$(date -u +%s)"
+          start_epoch="$(date -u -d "$CAMPAIGN_START_UTC" +%s)"
+          test "$now_epoch" -lt "$start_epoch"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Recover exact PAUSED empty shell through runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-meta-ads-shell-recovery-${GITHUB_RUN_ID}"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          JS_CODE="$(cat <<'NODE'
+          const token = process.env.META_TOKEN;
+          const base = process.env.META_GRAPH_BASE_URL;
+          const version = process.env.META_GRAPH_API_VERSION;
+          const campaignId = process.env.META_CAMPAIGN_ID;
+          const expectedName = process.env.EXPECTED_CAMPAIGN_NAME;
+          const recoveredName = process.env.RECOVERED_CAMPAIGN_NAME;
+          if (!token || !base || !version || !campaignId || !expectedName || !recoveredName) {
+            throw new Error('SHELL_RECOVERY_CONFIG_MISSING');
+          }
+          async function graphGet(path, params = {}) {
+            const url = new URL(`${base}/${version}/${path}`);
+            for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+            const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(`SHELL_RECOVERY_GET_HTTP_${response.status}`);
+            return payload;
+          }
+          async function graphPostForm(path, values) {
+            const response = await fetch(`${base}/${version}/${path}`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'content-type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams(values).toString(),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(`SHELL_RECOVERY_POST_HTTP_${response.status}`);
+            return payload;
+          }
+          async function readState() {
+            const campaign = await graphGet(campaignId, {
+              fields: 'id,name,status,effective_status,objective,special_ad_categories',
+            });
+            const adSets = await graphGet(`${campaignId}/adsets`, {
+              fields: 'id,name,status,effective_status',
+              limit: '100',
+            });
+            const ads = await graphGet(`${campaignId}/ads`, {
+              fields: 'id,name,status,effective_status',
+              limit: '100',
+            });
+            return {
+              campaign,
+              adSets: Array.isArray(adSets.data) ? adSets.data : [],
+              ads: Array.isArray(ads.data) ? ads.data : [],
+            };
+          }
+          const before = await readState();
+          if (String(before.campaign.id) !== campaignId) throw new Error('SHELL_RECOVERY_ID_MISMATCH');
+          if (before.campaign.name !== expectedName) throw new Error('SHELL_RECOVERY_NAME_MISMATCH');
+          if (before.campaign.objective !== 'OUTCOME_SALES') throw new Error('SHELL_RECOVERY_OBJECTIVE_MISMATCH');
+          if (before.campaign.status !== 'PAUSED' || before.campaign.effective_status !== 'PAUSED') {
+            throw new Error('SHELL_RECOVERY_NOT_PAUSED');
+          }
+          if (!Array.isArray(before.campaign.special_ad_categories) || before.campaign.special_ad_categories.length !== 0) {
+            throw new Error('SHELL_RECOVERY_SPECIAL_CATEGORY_MISMATCH');
+          }
+          if (before.adSets.length !== 0 || before.ads.length !== 0) {
+            throw new Error('SHELL_RECOVERY_NOT_EMPTY');
+          }
+
+          const mutation = await graphPostForm(campaignId, { name: recoveredName });
+          if (mutation.success !== true) throw new Error('SHELL_RECOVERY_UPDATE_NOT_CONFIRMED');
+
+          const after = await readState();
+          if (after.campaign.name !== recoveredName) throw new Error('SHELL_RECOVERY_RENAME_NOT_VISIBLE');
+          if (after.campaign.status !== 'PAUSED' || after.campaign.effective_status !== 'PAUSED') {
+            throw new Error('SHELL_RECOVERY_STATUS_DRIFT');
+          }
+          if (after.adSets.length !== 0 || after.ads.length !== 0) {
+            throw new Error('SHELL_RECOVERY_CHILDREN_DRIFT');
+          }
+          console.log(`META_ADS_THE_PARTY_SHELL_RECOVERY=${JSON.stringify({
+            campaignId,
+            beforeName: expectedName,
+            afterName: recoveredName,
+            status: after.campaign.status,
+            effectiveStatus: after.campaign.effective_status,
+            adSetCount: after.adSets.length,
+            adCount: after.ads.length,
+          })}`);
+          NODE
+          )"
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$RECOVERY_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args "^~^-e~$JS_CODE" \
+            --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION~META_CAMPAIGN_ID=$META_CAMPAIGN_ID~EXPECTED_CAMPAIGN_NAME=$EXPECTED_CAMPAIGN_NAME~RECOVERED_CAMPAIGN_NAME=$RECOVERED_CAMPAIGN_NAME" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_SHELL_RECOVERY=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=15m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_SHELL_RECOVERY=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_SHELL_RECOVERY=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg id "$META_CAMPAIGN_ID" \
+            --arg name "$RECOVERED_CAMPAIGN_NAME" \
+            '.campaignId == $id and .afterName == $name and .status == "PAUSED" and .effectiveStatus == "PAUSED" and .adSetCount == 0 and .adCount == 0' \
+            >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-shell-recovery.json
+          echo 'THE_PARTY_PAUSED_SHELL_RECOVERED=1'
+
+      - name: Upload recovery evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-ads-the-party-shell-recovery-${{ github.sha }}
+          path: meta-ads-the-party-shell-recovery.json
+          if-no-files-found: error
+          retention-days: 180
