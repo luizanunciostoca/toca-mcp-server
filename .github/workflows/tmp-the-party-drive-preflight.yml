@@ -1,0 +1,56 @@
+name: TEMP The Party Drive Creative Preflight
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/tmp-the-party-drive-preflight.yml'
+      - '.github/workflows/meta-ads-the-party-2026-08-15.yml'
+      - 'src/providers/meta-ads/meta-ads-the-party-2026-08-15-plan.ts'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  drive-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate as deployment service account
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - name: Download and verify approved creative 1
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            'https://www.googleapis.com/drive/v3/files/12hpbIpum6ju8_GFFK2bXTeTB-650Y5B7?alt=media' \
+            -o /tmp/creative-1.jpg
+          test "$(wc -c < /tmp/creative-1.jpg)" -gt 100000
+          test "$(xxd -p -l 2 /tmp/creative-1.jpg)" = 'ffd8'
+          printf '%s  %s\n' 'ea2784a3a95b946ee81e266b2b660e0b6a571c0d07025fbdcb5f8f27ab319e78' /tmp/creative-1.jpg | sha256sum --check --strict
+
+      - name: Download and verify approved creative 2
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            'https://www.googleapis.com/drive/v3/files/1rWmdzdxJqRhJsIeO8nQxdla7_LYqZDpE?alt=media' \
+            -o /tmp/creative-2.jpg
+          test "$(wc -c < /tmp/creative-2.jpg)" -gt 100000
+          test "$(xxd -p -l 2 /tmp/creative-2.jpg)" = 'ffd8'
+          printf '%s  %s\n' '6771739c8098e490e0f68682b8f7c7c6dcdab9ebc8aa9064d8a1568afec46fd6' /tmp/creative-2.jpg | sha256sum --check --strict
+
+      - name: Confirm preflight
+        run: echo 'THE_PARTY_DRIVE_PREFLIGHT_OK=1'
