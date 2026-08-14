@@ -15,6 +15,9 @@ export interface PublicationRecord {
   readonly state: PublicationState;
   readonly externalContainerId?: string;
   readonly externalMediaId?: string;
+  readonly permalink?: string;
+  readonly providerPublishedAt?: string;
+  readonly reconciliationSource?: 'WRITE_RESPONSE' | 'PROVIDER_LOOKUP';
   readonly lastError?: string;
   readonly updatedAt: string;
 }
@@ -30,18 +33,48 @@ const allowedTransitions: Readonly<Record<PublicationState, readonly Publication
   CANCELED: [],
 };
 
+type PublicationPatch = Partial<
+  Pick<
+    PublicationRecord,
+    | 'externalContainerId'
+    | 'externalMediaId'
+    | 'permalink'
+    | 'providerPublishedAt'
+    | 'reconciliationSource'
+    | 'lastError'
+  >
+>;
+
 export function transitionPublication(
   current: PublicationRecord,
   next: PublicationState,
   nowIso: string,
-  patch: Partial<
-    Pick<PublicationRecord, 'externalContainerId' | 'externalMediaId' | 'lastError'>
-  > = {},
+  patch: PublicationPatch = {},
 ): PublicationRecord {
   if (!allowedTransitions[current.state].includes(next)) {
     throw new Error(`Invalid publication transition: ${current.state} -> ${next}`);
   }
   return { ...current, ...patch, state: next, updatedAt: nowIso };
+}
+
+export function reconcilePublishedPublication(
+  current: PublicationRecord,
+  nowIso: string,
+  evidence: Pick<
+    PublicationRecord,
+    'externalMediaId' | 'permalink' | 'providerPublishedAt' | 'reconciliationSource'
+  >,
+): PublicationRecord {
+  if (current.state === 'CANCELED') {
+    throw new Error('INSTAGRAM_PUBLICATION_RECONCILIATION_CANCELED');
+  }
+  return {
+    ...current,
+    ...evidence,
+    state: 'PUBLISHED',
+    lastError: undefined,
+    updatedAt: nowIso,
+  };
 }
 
 export type PublicationReconciliation =
