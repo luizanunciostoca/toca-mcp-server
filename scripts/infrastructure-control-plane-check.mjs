@@ -4,6 +4,7 @@ const required = [
   '.github/workflows/infrastructure-control-plane.yml',
   '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
   '.github/workflows/provision-instagram-publication-assets-gcs.yml',
+  'src/toca-managed-instagram-daemon.ts',
   'infra/control-plane/policy.json',
   'infra/control-plane/storage-bucket-admin-role.yaml',
   'infra/control-plane/cloudsql-cost-optimizer-role.yaml',
@@ -19,6 +20,7 @@ for (const path of required) {
 
 const workflowPath = '.github/workflows/infrastructure-control-plane.yml';
 const daemonWorkflowPath = '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml';
+const daemonSourcePath = 'src/toca-managed-instagram-daemon.ts';
 const legacyProvisionPath = '.github/workflows/provision-instagram-publication-assets-gcs.yml';
 const policyPath = 'infra/control-plane/policy.json';
 const storageRolePath = 'infra/control-plane/storage-bucket-admin-role.yaml';
@@ -28,6 +30,7 @@ const runtime = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com';
 
 const workflow = readFileSync(workflowPath, 'utf8');
 const daemonWorkflow = readFileSync(daemonWorkflowPath, 'utf8');
+const daemonSource = readFileSync(daemonSourcePath, 'utf8');
 const legacyProvision = readFileSync(legacyProvisionPath, 'utf8');
 const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
 const storageRole = readFileSync(storageRolePath, 'utf8');
@@ -47,6 +50,7 @@ const workflowRequirements = [
   '.deliveryMode == "signed-url"',
   'roles/storage.objectCreator',
   'roles/storage.objectViewer',
+  'gcloud components install beta --quiet',
   'CLOUD_SQL_RESUME_STATE=VERIFIED',
   'gcloud beta sql instances patch',
   '--storage-auto-increase-limit=206',
@@ -109,7 +113,7 @@ if (workflow.includes('push:') || workflow.includes('pull_request:')) {
 }
 
 if (
-  policy.version !== 8 ||
+  policy.version !== 9 ||
   policy.projectId !== 'toca-mcp-production' ||
   policy.adminServiceAccount !== infraAdmin ||
   policy.runtimeServiceAccount !== runtime
@@ -209,40 +213,101 @@ if (policy.allowedOperations?.['reconcile-toca-managed-instagram-heartbeat']) {
 }
 
 const daemon = policy.activeRuntime?.tocaManagedInstagramScheduler;
+const globalScheduler = daemon?.globalSchedulerJob;
 if (
   daemon?.resourceType !== 'cloud-run-service' ||
   daemon?.resourceName !== 'toca-managed-instagram-daemon' ||
   daemon?.runtimeServiceAccount !== runtime ||
   daemon?.private !== true ||
-  daemon?.minInstances !== 1 ||
+  daemon?.minInstances !== 0 ||
   daemon?.maxInstances !== 1 ||
   daemon?.concurrency !== 1 ||
-  daemon?.pollIntervalMs !== 60000 ||
+  daemon?.cpuThrottling !== true ||
+  daemon?.requestBasedBilling !== true ||
+  daemon?.triggerMode !== 'cloud-scheduler-http' ||
+  globalScheduler?.name !== 'toca-managed-instagram-tick' ||
+  globalScheduler?.schedule !== '* * * * *' ||
+  globalScheduler?.timezone !== 'America/Bahia' ||
+  globalScheduler?.endpoint !== '/tick' ||
+  globalScheduler?.oidcServiceAccount !== runtime ||
+  globalScheduler?.maxRetryAttempts !== 0 ||
   daemon?.schedulerBackend !== 'postgresql' ||
   daemon?.scheduleTransport !== 'protected-mcp' ||
   daemon?.contentPayloadInInfrastructureTimer !== false ||
   daemon?.legacyHeartbeatSuperseded !== true
 ) {
-  console.error('TOCA-managed Instagram daemon topology is outside the approved envelope');
+  console.error('TOCA-managed Instagram scheduler topology is outside the minimum-cost envelope');
+  process.exit(1);
+}
+
+const mcpProduction = policy.activeRuntime?.mcpProduction;
+if (
+  mcpProduction?.resourceType !== 'cloud-run-service' ||
+  mcpProduction?.resourceName !== 'toca-mcp-production' ||
+  mcpProduction?.runtimeServiceAccount !== runtime ||
+  mcpProduction?.private !== true ||
+  mcpProduction?.minInstances !== 0 ||
+  mcpProduction?.maxInstances !== 1 ||
+  mcpProduction?.cpuThrottling !== true ||
+  mcpProduction?.requestBasedBilling !== true
+) {
+  console.error('MCP production topology is outside the minimum-cost envelope');
+  process.exit(1);
+}
+
+if (
+  policy.costPrinciples?.preserveCorrectnessBeforeSavings !== true ||
+  policy.costPrinciples?.scaleToZeroWhenNoBackgroundCpuIsRequired !== true ||
+  policy.costPrinciples?.singleGlobalMinuteTriggerOnly !== true ||
+  policy.costPrinciples?.cloudSqlSharedCoreFloor !== 'db-g1-small' ||
+  policy.costPrinciples?.cloudSqlStorageSafetyBufferGb !== 100 ||
+  policy.costPrinciples?.cloudSqlBackupRetentionDays !== 7 ||
+  policy.costPrinciples?.cloudSqlTransactionLogRetentionDays !== 7
+) {
+  console.error('Minimum-cost principles changed outside the approved envelope');
   process.exit(1);
 }
 
 const daemonRequirements = [
   'SERVICE_NAME: toca-managed-instagram-daemon',
-  '--min-instances 1',
+  'SCHEDULER_JOB_NAME: toca-managed-instagram-tick',
+  '--min-instances 0',
   '--max-instances 1',
   '--concurrency 1',
+  '--cpu-throttling',
   '--no-allow-unauthenticated',
-  'TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS=60000',
+  "--schedule='* * * * *'",
+  "--time-zone='America/Bahia'",
+  '--oidc-service-account-email="$GCP_RUNTIME_SERVICE_ACCOUNT"',
   'TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true',
   'TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=true',
+  'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_READY=1',
 ];
 
 for (const marker of daemonRequirements) {
   if (!daemonWorkflow.includes(marker)) {
-    console.error(`Daemon deploy workflow missing active topology marker: ${marker}`);
+    console.error(`Daemon deploy workflow missing minimum-cost topology marker: ${marker}`);
     process.exit(1);
   }
+}
+
+for (const forbidden of ['--min-instances 1', '--no-cpu-throttling', 'TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS']) {
+  if (daemonWorkflow.includes(forbidden)) {
+    console.error(`Daemon deploy workflow retains always-on cost marker: ${forbidden}`);
+    process.exit(1);
+  }
+}
+
+for (const marker of ["request.url === '/tick'", "request.method !== 'POST'", "triggerMode: 'cloud-scheduler-http'"]) {
+  if (!daemonSource.includes(marker)) {
+    console.error(`Daemon source missing request-driven marker: ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (daemonSource.includes('setInterval(') || daemonSource.includes('TOCA_MANAGED_INSTAGRAM_DAEMON_POLL_INTERVAL_MS')) {
+  console.error('Daemon source must not retain background polling when scale-to-zero is active');
+  process.exit(1);
 }
 
 const forbiddenPolicyFlags = [
@@ -255,6 +320,8 @@ const forbiddenPolicyFlags = [
   'publicBucketIam',
   'perContentSchedulerJobs',
   'legacyHeartbeatRecreation',
+  'alwaysOnSchedulerPolling',
+  'unboundedCloudRunScaling',
   'deployAsSchedulingTransport',
 ];
 
