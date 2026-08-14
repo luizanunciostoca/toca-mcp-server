@@ -5,6 +5,8 @@ import { EnvironmentSecretResolver } from './core/secrets.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
+import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
+import { MetaAdsControlledWriteService } from './providers/meta-ads/meta-ads-controlled-write.js';
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
@@ -13,6 +15,7 @@ import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagra
 import { registerInstagramHistoryTools } from './tools/register-instagram-history.js';
 import { registerInstagramManagedSchedulerTools } from './tools/register-instagram-managed-scheduler.js';
 import { registerMetaAdsReadTools } from './tools/register-meta-ads-read.js';
+import { registerMetaAdsWriteTools } from './tools/register-meta-ads-write.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.2.0';
@@ -51,6 +54,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
+    metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
   });
 
@@ -133,6 +137,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   );
 
   const secrets = new EnvironmentSecretResolver(env);
+  const pool = config.DATABASE_URL
+    ? createPostgresPool({ connectionString: config.DATABASE_URL })
+    : undefined;
   const createMetaClient = () => {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
@@ -147,8 +154,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     );
   };
 
-  if (config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && config.DATABASE_URL) {
-    const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
+  if (config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && pool) {
     const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
     registerInstagramManagedSchedulerTools(server, scheduler, {
       registry,
@@ -171,6 +177,51 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
 
   if (config.META_ADS_READ_ENABLED && config.META_ACCESS_TOKEN_ENV_KEY) {
     registerMetaAdsReadTools(server, new MetaAdsReadProvider(createMetaClient()));
+  }
+
+  if (config.META_ADS_WRITE_ENABLED && config.META_ACCESS_TOKEN_ENV_KEY && pool) {
+    const {
+      META_ADS_ALLOWED_ACCOUNT_ID: allowedAccountId,
+      META_ADS_ALLOWED_CURRENCY: allowedCurrency,
+      META_ADS_MAX_DAILY_BUDGET_MINOR: maxDailyBudgetMinor,
+      META_ADS_ALLOWED_GEO_KEYS: allowedGeoKeysRaw,
+      META_ADS_ALLOWED_PIXEL_ID: allowedPixelId,
+      META_ADS_ALLOWED_PAGE_ID: allowedPageId,
+      META_ADS_ALLOWED_INSTAGRAM_ACTOR_ID: allowedInstagramActorId,
+      META_ADS_APPROVED_REQUEST_SHA256: approvedRequestSha256,
+    } = config;
+    if (
+      !allowedAccountId ||
+      !allowedCurrency ||
+      !maxDailyBudgetMinor ||
+      !allowedGeoKeysRaw ||
+      !allowedPixelId ||
+      !allowedPageId ||
+      !allowedInstagramActorId ||
+      !approvedRequestSha256
+    ) {
+      throw new Error('META_ADS_WRITE_GUARDRAILS_REQUIRED');
+    }
+
+    const provider = new MetaAdsControlledGraphProvider(createMetaClient());
+    const service = new MetaAdsControlledWriteService(provider, {
+      allowedAccountId,
+      allowedCurrency,
+      maxDailyBudgetMinor,
+      allowedGeoKeys: allowedGeoKeysRaw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+      allowedPixelId,
+      allowedPageId,
+      allowedInstagramActorId,
+      approvedRequestSha256,
+    });
+    registerMetaAdsWriteTools(server, service, {
+      registry,
+      auditSink: new PostgresAuditSink(pool, registry),
+      requester: 'mcp-client',
+    });
   }
 
   return server;
