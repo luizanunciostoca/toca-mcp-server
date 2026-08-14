@@ -92,7 +92,12 @@ export class MetaAdsControlledWriteService {
     }
 
     const existing = await this.provider.listCampaigns(plan.account);
-    if (existing.some((campaign) => String(campaign.name ?? '') === plan.campaign.name)) {
+    if (
+      existing.some((campaign) => {
+        const name = campaign.name;
+        return typeof name === 'string' && name === plan.campaign.name;
+      })
+    ) {
       throw new Error('META_ADS_DUPLICATE_CAMPAIGN_NAME');
     }
 
@@ -213,15 +218,15 @@ export class MetaAdsControlledWriteService {
     if (cities.length === 0) throw new Error('META_ADS_CITY_TARGETING_REQUIRED');
     for (const cityValue of cities) {
       const city = asRecord(cityValue);
-      const key = String(city.key ?? '');
+      const key = scalarString(city.key);
       if (!allowedKeys.has(key)) throw new Error('META_ADS_GEO_KEY_NOT_ALLOWED');
     }
   }
 
   private assertPromotedObject(promotedObject: Readonly<Record<string, unknown>>): void {
-    if (String(promotedObject.pixel_id ?? '') !== this.guardrails.allowedPixelId)
+    if (scalarString(promotedObject.pixel_id) !== this.guardrails.allowedPixelId)
       throw new Error('META_ADS_PIXEL_NOT_ALLOWED');
-    if (String(promotedObject.custom_event_type ?? '') !== 'PURCHASE')
+    if (scalarString(promotedObject.custom_event_type) !== 'PURCHASE')
       throw new Error('META_ADS_PURCHASE_EVENT_REQUIRED');
   }
 }
@@ -245,4 +250,10 @@ function stableStringify(value: unknown): string {
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function scalarString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toString();
+  return '';
 }
