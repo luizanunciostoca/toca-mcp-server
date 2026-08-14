@@ -33,7 +33,36 @@ if (gate === 'PERMISSIONS') {
   }
   console.log(`META_ADS_DIAGNOSTIC_ACCOUNT_OK=${accountId}:${currency}`);
 } else if (gate === 'GEO') {
-  const queries = ['Morro de São Paulo', 'Morro de Sao Paulo'];
+  const match = await resolveUniqueCity(['Morro de São Paulo', 'Morro de Sao Paulo'], (name) =>
+    name.includes('morro de sao paulo'),
+  );
+  console.log(`META_ADS_DIAGNOSTIC_GEO_OK=${scalarString(match.key)}`);
+} else if (gate === 'GEO_CAIRU') {
+  const match = await resolveUniqueCity(['Cairu'], (name) => name === 'cairu');
+  console.log(`META_ADS_DIAGNOSTIC_GEO_CAIRU_OK=${scalarString(match.key)}`);
+} else if (gate === 'CREATIVE') {
+  const response = asRecord(
+    await api.get(`act_${accountId}/adcreatives`, {
+      fields: 'id,name,object_story_spec',
+      limit: '100',
+    }),
+  );
+  const data = Array.isArray(response.data) ? response.data : [];
+  const eligible = data.map(asRecord).filter((item) => {
+    const spec = asRecord(item.object_story_spec);
+    if (!scalarString(item.id) || scalarString(spec.page_id) !== pageId) return false;
+    return Boolean(spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
+  });
+  if (eligible.length === 0) throw new Error('META_ADS_DIAGNOSTIC_SOURCE_CREATIVE_NOT_FOUND');
+  console.log(`META_ADS_DIAGNOSTIC_CREATIVE_OK=${eligible.length}`);
+} else {
+  throw new Error('META_ADS_DIAGNOSTIC_GATE_UNSUPPORTED');
+}
+
+async function resolveUniqueCity(
+  queries: readonly string[],
+  matchesName: (normalizedName: string) => boolean,
+): Promise<Readonly<Record<string, unknown>>> {
   const matches = new Map<string, Readonly<Record<string, unknown>>>();
   for (const query of queries) {
     const response = asRecord(
@@ -52,7 +81,7 @@ if (gate === 'PERMISSIONS') {
       const countryCode = scalarString(item.country_code).toUpperCase();
       if (
         key &&
-        name.includes('morro de sao paulo') &&
+        matchesName(name) &&
         (countryCode === 'BR' || countryCode === 'BRA' || countryCode === '')
       ) {
         matches.set(key, item);
@@ -61,25 +90,7 @@ if (gate === 'PERMISSIONS') {
   }
   if (matches.size === 0) throw new Error('META_ADS_DIAGNOSTIC_GEO_NOT_FOUND');
   if (matches.size > 1) throw new Error('META_ADS_DIAGNOSTIC_GEO_AMBIGUOUS');
-  const [key] = matches.keys();
-  console.log(`META_ADS_DIAGNOSTIC_GEO_OK=${key}`);
-} else if (gate === 'CREATIVE') {
-  const response = asRecord(
-    await api.get(`act_${accountId}/adcreatives`, {
-      fields: 'id,name,object_story_spec',
-      limit: '100',
-    }),
-  );
-  const data = Array.isArray(response.data) ? response.data : [];
-  const eligible = data.map(asRecord).filter((item) => {
-    const spec = asRecord(item.object_story_spec);
-    if (!scalarString(item.id) || scalarString(spec.page_id) !== pageId) return false;
-    return Boolean(spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
-  });
-  if (eligible.length === 0) throw new Error('META_ADS_DIAGNOSTIC_SOURCE_CREATIVE_NOT_FOUND');
-  console.log(`META_ADS_DIAGNOSTIC_CREATIVE_OK=${eligible.length}`);
-} else {
-  throw new Error('META_ADS_DIAGNOSTIC_GATE_UNSUPPORTED');
+  return [...matches.values()][0]!;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
