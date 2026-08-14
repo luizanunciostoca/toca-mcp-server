@@ -20,6 +20,9 @@ const instagramActorId = requiredEnv('META_ADS_SMOKE_INSTAGRAM_ACTOR_ID');
 const smokeId = requiredEnv('META_ADS_SMOKE_ID');
 const dailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_DAILY_BUDGET_MINOR'));
 const maxDailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'));
+const geoLatitude = parseFiniteNumber(requiredEnv('META_ADS_SMOKE_GEO_LATITUDE'));
+const geoLongitude = parseFiniteNumber(requiredEnv('META_ADS_SMOKE_GEO_LONGITUDE'));
+const geoRadiusKm = parsePositiveNumber(requiredEnv('META_ADS_SMOKE_GEO_RADIUS_KM'));
 
 const api = createMetaPublicationApiClient(config);
 const provider = new MetaAdsControlledGraphProvider(api);
@@ -44,7 +47,7 @@ async function preparePlan(): Promise<{
 }> {
   const grantedScopes = await verifyPermissions();
   const account = await verifyAccount();
-  const geo = await resolveMorroGeo();
+  const geo = canonicalMorroCustomLocation();
   const sourceCreative = await resolveSourceCreative();
 
   const now = new Date();
@@ -58,12 +61,12 @@ async function preparePlan(): Promise<{
       specialAdCategories: [],
     },
     adSet: {
-      name: `P0 Smoke | Morro | Purchase | ${smokeId}`,
+      name: `P0 Smoke | Morro locality | Purchase | ${smokeId}`,
       dailyBudgetMinor,
       billingEvent: 'IMPRESSIONS',
       optimizationGoal: 'OFFSITE_CONVERSIONS',
       targeting: {
-        geo_locations: { cities: [{ key: scalarString(geo.key) }] },
+        geo_locations: { custom_locations: [geo] },
       },
       promotedObject: {
         pixel_id: pixelId,
@@ -84,8 +87,7 @@ async function preparePlan(): Promise<{
   };
 
   const sha = requestSha256(plan);
-  const guardrails = guardrailsFor([scalarString(geo.key)], sha);
-  const service = new MetaAdsControlledWriteService(provider, guardrails);
+  const service = new MetaAdsControlledWriteService(provider, guardrailsFor(sha));
   const validation = service.prepare(plan);
   if (validation.requestSha256 !== sha) throw new Error('META_ADS_SMOKE_PREPARE_HASH_MISMATCH');
 
@@ -126,11 +128,8 @@ async function executePlan(): Promise<{
 
   await verifyPermissions();
   await verifyAccount();
-  const geoKeys = extractGeoKeys(plan.adSet.targeting);
-  const service = new MetaAdsControlledWriteService(
-    provider,
-    guardrailsFor(geoKeys, approvedSha256),
-  );
+  const service = new MetaAdsControlledWriteService(provider, guardrailsFor(approvedSha256));
+  service.prepare(plan);
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
   const correlationId = `meta-ads:p0-smoke:${smokeId}:${approvedSha256}`;
 
@@ -237,37 +236,13 @@ async function verifyAccount(): Promise<Readonly<Record<string, unknown>>> {
   return account;
 }
 
-async function resolveMorroGeo(): Promise<Readonly<Record<string, unknown>>> {
-  const queries = ['Morro de São Paulo', 'Morro de Sao Paulo'];
-  const matches = new Map<string, Readonly<Record<string, unknown>>>();
-  for (const query of queries) {
-    const response = asRecord(
-      await api.get('search', {
-        type: 'adgeolocation',
-        location_types: JSON.stringify(['city']),
-        q: query,
-        country_code: 'BR',
-      }),
-    );
-    const data = Array.isArray(response.data) ? response.data : [];
-    for (const itemValue of data) {
-      const item = asRecord(itemValue);
-      const key = scalarString(item.key);
-      const name = normalizeText(scalarString(item.name));
-      const countryCode = scalarString(item.country_code).toUpperCase();
-      if (
-        key &&
-        name.includes('morro de sao paulo') &&
-        (countryCode === 'BR' || countryCode === 'BRA' || countryCode === '')
-      ) {
-        matches.set(key, item);
-      }
-    }
-  }
-  if (matches.size !== 1) {
-    throw new Error(`META_ADS_SMOKE_GEO_NOT_UNIQUE:${matches.size}`);
-  }
-  return [...matches.values()][0]!;
+function canonicalMorroCustomLocation(): Readonly<Record<string, unknown>> {
+  return {
+    latitude: geoLatitude,
+    longitude: geoLongitude,
+    radius: geoRadiusKm,
+    distance_unit: 'kilometer',
+  };
 }
 
 async function resolveSourceCreative(): Promise<{
@@ -299,28 +274,24 @@ async function resolveSourceCreative(): Promise<{
   return { id: selected.id, objectStorySpec: spec };
 }
 
-function guardrailsFor(
-  geoKeys: readonly string[],
-  approvedRequestSha256: string,
-): MetaAdsWriteGuardrails {
+function guardrailsFor(approvedRequestSha256: string): MetaAdsWriteGuardrails {
   return {
     allowedAccountId: accountId,
     allowedCurrency: currency,
     maxDailyBudgetMinor,
-    allowedGeoKeys: geoKeys,
+    allowedCustomLocations: [
+      {
+        latitude: geoLatitude,
+        longitude: geoLongitude,
+        maxRadius: geoRadiusKm,
+        distanceUnit: 'kilometer',
+      },
+    ],
     allowedPixelId: pixelId,
     allowedPageId: pageId,
     allowedInstagramActorId: instagramActorId,
     approvedRequestSha256,
   };
-}
-
-function extractGeoKeys(targeting: Readonly<Record<string, unknown>>): readonly string[] {
-  const geo = asRecord(targeting.geo_locations);
-  const cities = Array.isArray(geo.cities) ? geo.cities : [];
-  const keys = cities.map((city) => scalarString(asRecord(city).key)).filter(Boolean);
-  if (keys.length === 0) throw new Error('META_ADS_SMOKE_PLAN_GEO_REQUIRED');
-  return keys;
 }
 
 function assertProviderPaused(kind: string, entity: Readonly<Record<string, unknown>>): void {
@@ -342,13 +313,6 @@ function scalarString(value: unknown): string {
   return '';
 }
 
-function normalizeText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name}_REQUIRED`);
@@ -359,6 +323,18 @@ function parsePositiveInt(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed <= 0)
     throw new Error('META_ADS_SMOKE_INTEGER_INVALID');
+  return parsed;
+}
+
+function parseFiniteNumber(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error('META_ADS_SMOKE_NUMBER_INVALID');
+  return parsed;
+}
+
+function parsePositiveNumber(value: string): number {
+  const parsed = parseFiniteNumber(value);
+  if (parsed <= 0) throw new Error('META_ADS_SMOKE_POSITIVE_NUMBER_REQUIRED');
   return parsed;
 }
 
