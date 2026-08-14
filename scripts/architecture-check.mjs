@@ -41,7 +41,10 @@ const required = [
   'src/providers/meta-ads/meta-ads-contracts.ts',
   'src/providers/meta-ads/meta-ads-graph-provider.ts',
   'src/providers/meta-ads/meta-ads-read-provider.ts',
+  'src/providers/meta-ads/meta-ads-controlled-graph-provider.ts',
+  'src/providers/meta-ads/meta-ads-controlled-write.ts',
   'src/tools/register-meta-ads-read.ts',
+  'src/tools/register-meta-ads-write.ts',
   'src/scheduler/in-memory-scheduler.ts',
   'src/scheduler/postgres-scheduler.ts',
   'src/scheduler/scheduler-contracts.ts',
@@ -64,6 +67,7 @@ const required = [
   'test/meta.test.ts',
   'test/meta-assets.test.ts',
   'test/meta-graph.test.ts',
+  'test/meta-ads-controlled-write.test.ts',
   'test/preconnection-contracts.test.ts',
   'test/preconnection-runtime.test.ts',
   'test/secrets.test.ts',
@@ -189,24 +193,59 @@ const allowedMetaAdsReadNames = new Set([
   'meta_ads.ads.list',
   'meta_ads.insights.get',
 ]);
+const allowedMetaAdsControlledNames = new Set([
+  'meta_ads.campaign.prepare_paused',
+  'meta_ads.campaign.create_paused',
+]);
 const advertisedMetaAdsNames = [...registry.matchAll(/name: '(meta_ads\.[^']+)'/g)].map(
   (match) => match[1],
 );
 for (const name of advertisedMetaAdsNames) {
-  if (!allowedMetaAdsReadNames.has(name)) {
+  if (!allowedMetaAdsReadNames.has(name) && !allowedMetaAdsControlledNames.has(name)) {
     console.error(`Unpromoted Meta Ads capability must not be advertised: ${name}`);
     process.exit(1);
   }
+
   const marker = `name: '${name}'`;
   const start = registry.indexOf(marker);
   const end = registry.indexOf('\n  },', start);
   const definition = registry.slice(start, end === -1 ? registry.length : end);
+
+  if (allowedMetaAdsReadNames.has(name)) {
+    if (
+      !definition.includes("riskClass: 'READ'") ||
+      !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
+      !definition.includes('sideEffects: false') ||
+      !definition.includes("requiredScopes: ['ads_read']")
+    ) {
+      console.error(`Meta Ads read capability violates the read-only boundary: ${name}`);
+      process.exit(1);
+    }
+    continue;
+  }
+
+  if (name === 'meta_ads.campaign.prepare_paused') {
+    if (
+      !definition.includes("riskClass: 'READ'") ||
+      !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
+      !definition.includes('sideEffects: false') ||
+      !definition.includes('idempotent: true') ||
+      !definition.includes("requiredScopes: ['ads_management']")
+    ) {
+      console.error('Meta Ads prepare-paused capability violates the controlled-write boundary');
+      process.exit(1);
+    }
+    continue;
+  }
+
   if (
-    !definition.includes("riskClass: 'READ'") ||
+    !definition.includes("riskClass: 'WRITE_EXTERNAL'") ||
     !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
-    !definition.includes('sideEffects: false')
+    !definition.includes('sideEffects: true') ||
+    !definition.includes('idempotent: false') ||
+    !definition.includes("requiredScopes: ['ads_management']")
   ) {
-    console.error(`Meta Ads read capability violates the read-only boundary: ${name}`);
+    console.error('Meta Ads create-paused capability violates the controlled-write boundary');
     process.exit(1);
   }
 }
@@ -221,6 +260,21 @@ if (
   metaAdsReadProvider.includes('updateStatus')
 ) {
   console.error('Meta Ads read provider must remain GET-only and mutation-free');
+  process.exit(1);
+}
+const metaAdsControlledWrite = readFileSync(
+  'src/providers/meta-ads/meta-ads-controlled-write.ts',
+  'utf8',
+);
+if (
+  !metaAdsControlledWrite.includes("status: 'PAUSED'") ||
+  !metaAdsControlledWrite.includes('META_ADS_APPROVAL_SHA256_MISMATCH') ||
+  !metaAdsControlledWrite.includes('META_ADS_DUPLICATE_CAMPAIGN_NAME') ||
+  metaAdsControlledWrite.includes("status: 'ACTIVE'") ||
+  metaAdsControlledWrite.includes("updateStatus(") ||
+  metaAdsControlledWrite.includes("updateBudget(")
+) {
+  console.error('Meta Ads controlled write must remain create-paused-only and approval-bound');
   process.exit(1);
 }
 const plannedPublicationNames = [
@@ -267,6 +321,8 @@ for (const temporary of [
   '.github/workflows/preconnection-format.yml',
   '.github/workflows/gcp-foundation-normalize.yml',
   '.github/workflows/gcp-format.yml',
+  '.github/workflows/meta-ads-format-fix.yml',
+  '.github/workflows/meta-ads-format-probe.yml',
 ]) {
   if (existsSync(temporary)) {
     console.error(`Temporary workflow must be removed before validation: ${temporary}`);
