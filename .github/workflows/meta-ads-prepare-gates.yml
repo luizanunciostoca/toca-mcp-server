@@ -21,7 +21,7 @@ env:
   TOKEN_SECRET_ID: toca-meta-oauth-token
   META_APP_ID: '2281930145887404'
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
-  META_ADS_ACCOUNT_ID: '311793958882290'
+  META_ADS_ACCOUNT_ID: '394512749760530'
   META_ADS_CURRENCY: BRL
   META_ADS_PAGE_ID: '306103746115875'
 
