@@ -76,7 +76,9 @@ function guardrails(
   };
 }
 
-function createProvider(existingCampaigns: readonly Readonly<Record<string, unknown>>[] = []) {
+function createProvider(
+  existingCampaigns: readonly Readonly<Record<string, unknown>>[] = [],
+) {
   const provider: MetaAdsProvider = {
     listCampaigns: vi.fn().mockResolvedValue(existingCampaigns),
     getInsights: vi.fn().mockResolvedValue([]),
@@ -149,17 +151,25 @@ describe('Meta Ads controlled create-paused service', () => {
   });
 
   it('fails closed for an unauthorized account', () => {
-    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const service = new MetaAdsControlledWriteService(
+      createProvider(),
+      guardrails(),
+    );
     const invalid: ControlledCreatePausedPlan = {
       ...plan,
       account: { ...plan.account, adAccountId: 'other-account' },
     };
 
-    expect(() => service.prepare(invalid)).toThrow('META_ADS_ACCOUNT_NOT_ALLOWED');
+    expect(() => service.prepare(invalid)).toThrow(
+      'META_ADS_ACCOUNT_NOT_ALLOWED',
+    );
   });
 
   it('blocks daily budget above the hard account ceiling', () => {
-    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const service = new MetaAdsControlledWriteService(
+      createProvider(),
+      guardrails(),
+    );
 
     expect(() => service.prepare(withDailyBudget(100_001))).toThrow(
       'META_ADS_DAILY_BUDGET_EXCEEDS_GUARDRAIL',
@@ -167,7 +177,10 @@ describe('Meta Ads controlled create-paused service', () => {
   });
 
   it('blocks any city outside the approved Morro geo key', () => {
-    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const service = new MetaAdsControlledWriteService(
+      createProvider(),
+      guardrails(),
+    );
 
     expect(() => service.prepare(withGeoKey('SALVADOR_CITY_KEY'))).toThrow(
       'META_ADS_GEO_KEY_NOT_ALLOWED',
@@ -175,9 +188,14 @@ describe('Meta Ads controlled create-paused service', () => {
   });
 
   it('blocks a pixel other than the approved ticketing pixel', () => {
-    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const service = new MetaAdsControlledWriteService(
+      createProvider(),
+      guardrails(),
+    );
 
-    expect(() => service.prepare(withPixel('999'))).toThrow('META_ADS_PIXEL_NOT_ALLOWED');
+    expect(() => service.prepare(withPixel('999'))).toThrow(
+      'META_ADS_PIXEL_NOT_ALLOWED',
+    );
   });
 
   it('rejects creation when the explicit approval hash does not match', async () => {
