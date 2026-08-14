@@ -43,9 +43,8 @@ if (gate === 'PERMISSIONS') {
   const match = await resolveUniqueLocation(['Cairu'], (name) => name === 'cairu', ['city']);
   console.log(`META_ADS_DIAGNOSTIC_GEO_CAIRU_OK=${locationEvidence(match)}`);
 } else if (gate === 'GEO_ANY_MORRO') {
-  const match = await resolveUniqueLocation(
-    ['Morro de São Paulo', 'Morro de Sao Paulo'],
-    (name) => name.includes('morro de sao paulo'),
+  const match = await resolveUniqueLocation(['Morro de São Paulo', 'Morro de Sao Paulo'], (name) =>
+    name.includes('morro de sao paulo'),
   );
   console.log(`META_ADS_DIAGNOSTIC_GEO_ANY_MORRO_OK=${locationEvidence(match)}`);
 } else if (gate === 'GEO_ANY_CAIRU') {
