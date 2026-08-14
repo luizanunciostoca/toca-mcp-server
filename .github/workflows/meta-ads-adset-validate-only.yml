@@ -1,0 +1,177 @@
+name: Meta Ads AdSet Validate Only
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-post-fix-create-paused-smoke
+    paths:
+      - '.github/workflows/meta-ads-adset-validate-only.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-adset-validate-only
+  ACCOUNT_ID: '311793958882290'
+  CAMPAIGN_NAME: 'TOCA | P0 SMOKE CREATE_PAUSED | fix74v2-068a44052a6d'
+  PIXEL_ID: '461233076843065'
+
+jobs:
+  validate-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable diagnostic image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-adset-validate
+          cat > /tmp/meta-adset-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.META_ADS_ACCOUNT_ID;
+          const campaignName = process.env.META_ADS_CAMPAIGN_NAME;
+          const pixelId = process.env.META_ADS_PIXEL_ID;
+          if (!token || !accountId || !campaignName || !pixelId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (value) => String(value ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const getJson = async (url) => {
+            const response = await fetch(url, { headers });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(`GET_FAILED_${response.status}_${sanitize(body?.error?.message)}`);
+            return body;
+          };
+
+          const campaigns = await getJson(`${graph}/act_${accountId}/campaigns?fields=id,name,status,effective_status,created_time&limit=100`);
+          const matches = (Array.isArray(campaigns.data) ? campaigns.data : []).filter((c) => c?.name === campaignName);
+          if (matches.length !== 1) throw new Error(`CAMPAIGN_MATCH_COUNT_${matches.length}`);
+          const campaign = matches[0];
+          if (campaign.status !== 'PAUSED' || campaign.effective_status === 'ACTIVE') throw new Error('PARTIAL_CAMPAIGN_NOT_SAFELY_PAUSED');
+
+          const adsets = await getJson(`${graph}/${campaign.id}/adsets?fields=id,name,status,effective_status,created_time&limit=100`);
+          const existingAdSets = Array.isArray(adsets.data) ? adsets.data : [];
+          if (existingAdSets.length !== 0) throw new Error(`UNEXPECTED_PARTIAL_ADSET_COUNT_${existingAdSets.length}`);
+
+          console.log(`META_ADS_PARTIAL_DISCOVERY=${JSON.stringify({ campaign, adSetCount: existingAdSets.length })}`);
+
+          const now = Date.now();
+          const params = new URLSearchParams({
+            campaign_id: campaign.id,
+            name: 'P0 AdSet VALIDATE_ONLY | LOWEST_COST_WITHOUT_CAP',
+            daily_budget: '17000',
+            billing_event: 'IMPRESSIONS',
+            optimization_goal: 'OFFSITE_CONVERSIONS',
+            bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+            targeting: JSON.stringify({
+              geo_locations: {
+                custom_locations: [{
+                  latitude: -13.3833,
+                  longitude: -38.9167,
+                  radius: 15,
+                  distance_unit: 'kilometer',
+                }],
+              },
+            }),
+            promoted_object: JSON.stringify({ pixel_id: pixelId, custom_event_type: 'PURCHASE' }),
+            start_time: new Date(now + 30 * 60 * 1000).toISOString(),
+            end_time: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+            status: 'PAUSED',
+            execution_options: JSON.stringify(['validate_only']),
+          });
+          const response = await fetch(`${graph}/act_${accountId}/adsets`, {
+            method: 'POST',
+            headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const error = body?.error ?? {};
+            console.log(`META_ADS_ADSET_VALIDATE_ONLY=${JSON.stringify({
+              httpStatus: response.status,
+              type: sanitize(error.type),
+              code: Number.isFinite(Number(error.code)) ? Number(error.code) : null,
+              subcode: Number.isFinite(Number(error.error_subcode)) ? Number(error.error_subcode) : null,
+              userTitle: sanitize(error.error_user_title),
+              userMessage: sanitize(error.error_user_msg),
+              message: sanitize(error.message),
+            })}`);
+            process.exit(2);
+          }
+          const returnedId = body?.id ?? null;
+          console.log(`META_ADS_ADSET_VALIDATE_ONLY=${JSON.stringify({ httpStatus: response.status, ok: true, returnedId })}`);
+          if (returnedId) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+          NODE
+
+          cat > /tmp/meta-adset-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-adset-validate-only:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-adset-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_ADS_ACCOUNT_ID=$ACCOUNT_ID,META_ADS_CAMPAIGN_NAME=$CAMPAIGN_NAME,META_ADS_PIXEL_ID=$PIXEL_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+
+      - name: Execute discovery and validate-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for marker in META_ADS_PARTIAL_DISCOVERY= META_ADS_ADSET_VALIDATE_ONLY=; do
+            RESULT=""
+            for attempt in $(seq 1 12); do
+              RESULT="$(gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"$marker\"" \
+                --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)')"
+              [ -n "$RESULT" ] && break
+              sleep 5
+            done
+            printf '%s\n' "$RESULT"
+          done
+
+      - name: Remove validation job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
