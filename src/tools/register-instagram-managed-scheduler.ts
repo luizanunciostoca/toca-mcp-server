@@ -1,5 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
+import type { AuditSink } from '../core/audit.js';
+import { executeTool } from '../core/executor.js';
+import type { ToolDefinition, ToolRegistry } from '../core/tool-registry.js';
 import {
   hashTocaManagedInstagramApprovalDescriptor,
   tocaManagedInstagramApprovalDescriptorSchema,
@@ -21,10 +24,19 @@ const jobOutputSchema = z.object({
   payload: z.unknown(),
 });
 
+export interface InstagramManagedSchedulerExecutionOptions {
+  readonly registry: ToolRegistry;
+  readonly auditSink: AuditSink;
+  readonly requester?: string;
+}
+
 export function registerInstagramManagedSchedulerTools(
   server: McpServer,
   scheduler: TocaManagedInstagramScheduler,
+  execution: InstagramManagedSchedulerExecutionOptions,
 ): void {
+  const requester = execution.requester ?? 'mcp-client';
+
   server.registerTool(
     'instagram.toca_schedule.prepare',
     {
@@ -58,7 +70,16 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async (input) => response(await scheduler.schedule(input)),
+    async (input) =>
+      response(
+        await executeTool({
+          tool: requireTool(execution.registry, 'instagram.toca_schedule.create'),
+          policyContext: { requester },
+          auditSink: execution.auditSink,
+          correlationId: input.correlationId,
+          action: () => scheduler.schedule(input),
+        }),
+      ),
   );
 
   server.registerTool(
@@ -79,7 +100,16 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async ({ jobId, replacement }) => response(await scheduler.reschedule(jobId, replacement)),
+    async ({ jobId, replacement }) =>
+      response(
+        await executeTool({
+          tool: requireTool(execution.registry, 'instagram.toca_schedule.reschedule'),
+          policyContext: { requester },
+          auditSink: execution.auditSink,
+          correlationId: replacement.correlationId,
+          action: () => scheduler.reschedule(jobId, replacement),
+        }),
+      ),
   );
 
   server.registerTool(
@@ -96,7 +126,19 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async ({ jobId }) => response({ job: await scheduler.cancel(jobId) }),
+    async ({ jobId }) => {
+      const existing = await scheduler.status(jobId);
+      const correlationId = existing?.payload.correlationId ?? `schedule-cancel:${jobId}`;
+      return response({
+        job: await executeTool({
+          tool: requireTool(execution.registry, 'instagram.toca_schedule.cancel'),
+          policyContext: { requester },
+          auditSink: execution.auditSink,
+          correlationId,
+          action: () => scheduler.cancel(jobId),
+        }),
+      });
+    },
   );
 
   server.registerTool(
@@ -132,6 +174,12 @@ export function registerInstagramManagedSchedulerTools(
     },
     async () => response({ jobs: await scheduler.list() }),
   );
+}
+
+function requireTool(registry: ToolRegistry, name: string): ToolDefinition {
+  const tool = registry.get(name);
+  if (!tool) throw new Error(`MCP_TOOL_DEFINITION_NOT_FOUND:${name}`);
+  return tool;
 }
 
 function response(output: unknown) {
