@@ -81,11 +81,7 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
     account: MetaAdAccountRef,
     draft: MetaCreativeDraft,
   ): Promise<{ readonly id: string }> {
-    const objectStorySpec = {
-      ...draft.objectStorySpec,
-      page_id: draft.pageId,
-      ...(draft.instagramActorId ? { instagram_actor_id: draft.instagramActorId } : {}),
-    };
+    const objectStorySpec = normalizeObjectStorySpecForCreate(draft);
     const result = await this.api.post(`act_${account.adAccountId}/adcreatives`, {
       name: draft.name,
       object_story_spec: JSON.stringify(objectStorySpec),
@@ -126,4 +122,24 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
     void budgetType;
     return Promise.reject(new Error('META_ADS_BUDGET_MUTATION_NOT_ALLOWED'));
   }
+}
+
+function normalizeObjectStorySpecForCreate(draft: MetaCreativeDraft): Record<string, unknown> {
+  const objectStorySpec: Record<string, unknown> = { ...draft.objectStorySpec };
+  delete objectStorySpec.page_id;
+  delete objectStorySpec.instagram_actor_id;
+  delete objectStorySpec.instagram_user_id;
+
+  const sourceVideoData = draft.objectStorySpec.video_data;
+  if (sourceVideoData && typeof sourceVideoData === 'object' && !Array.isArray(sourceVideoData)) {
+    const videoData: Record<string, unknown> = {
+      ...(sourceVideoData as Readonly<Record<string, unknown>>),
+    };
+    if (videoData.image_hash && videoData.image_url) delete videoData.image_url;
+    objectStorySpec.video_data = videoData;
+  }
+
+  objectStorySpec.page_id = draft.pageId;
+  if (draft.instagramActorId) objectStorySpec.instagram_user_id = draft.instagramActorId;
+  return objectStorySpec;
 }
