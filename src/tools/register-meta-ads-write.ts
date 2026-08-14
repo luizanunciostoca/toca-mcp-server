@@ -67,7 +67,7 @@ export function registerMetaAdsWriteTools(
         openWorldHint: false,
       },
     },
-    async (input) => {
+    (input) => {
       const output = service.prepare(input as ControlledCreatePausedPlan);
       return {
         content: [{ type: 'text', text: JSON.stringify(output) }],
