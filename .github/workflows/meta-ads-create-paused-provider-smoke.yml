@@ -7,6 +7,7 @@ on:
       - 'src/meta-ads-create-paused-smoke.ts'
       - 'src/providers/meta-ads/meta-ads-controlled-graph-provider.ts'
       - 'src/providers/meta-ads/meta-ads-controlled-write.ts'
+      - 'src/providers/meta-ads/meta-ads-provider-preflight.ts'
       - 'src/providers/meta-ads/meta-ads-smoke-readiness.ts'
       - '.github/workflows/meta-ads-create-paused-provider-smoke.yml'
 
@@ -90,7 +91,7 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "SMOKE_ID=${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
 
-      - name: Deploy read-only prepare job
+      - name: Deploy no-side-effect prepare job
         shell: bash
         run: |
           set -euo pipefail
@@ -107,7 +108,7 @@ jobs:
             --task-timeout 180s \
             --quiet
 
-      - name: Execute read-only discovery and prepare
+      - name: Execute no-side-effect readiness and prepare
         shell: bash
         run: |
           set -euo pipefail
@@ -150,6 +151,9 @@ jobs:
               .pixelAccess.pixelId == "461233076843065" and
               .pixelAccess.accountId == $account and
               .pixelAccess.assigned == true and
+              .writeReadiness.validated == true and
+              (.writeReadiness.adSetId | length > 0) and
+              (.writeReadiness.creativeId | length > 0) and
               (.grantedScopes | index("ads_management") != null)
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-smoke-prepare.json
@@ -215,10 +219,19 @@ jobs:
             .providerVerification.campaign.status == "PAUSED" and
             .providerVerification.campaign.effective_status == "PAUSED" and
             .providerVerification.adSet.status == "PAUSED" and
-            (["PAUSED", "CAMPAIGN_PAUSED"] | index(.providerVerification.adSet.effective_status) != null) and
+            (
+              .providerVerification.adSet.effective_status == "PAUSED" or
+              .providerVerification.adSet.effective_status == "CAMPAIGN_PAUSED"
+            ) and
             ((.providerVerification.adSet.issues_info // []) | length == 0) and
             ([.providerVerification.ads[] | .status == "PAUSED"] | all) and
-            ([.providerVerification.ads[] | (["PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED"] | index(.effective_status) != null)] | all) and
+            ([.providerVerification.ads[] |
+              (
+                .effective_status == "PAUSED" or
+                .effective_status == "CAMPAIGN_PAUSED" or
+                .effective_status == "ADSET_PAUSED"
+              )
+            ] | all) and
             ([.providerVerification.ads[] | ((.issues_info // []) | length == 0)] | all) and
             ([.providerVerification.ads[] | ((.failed_delivery_checks // []) | length == 0)] | all)
           ' >/dev/null
