@@ -87,12 +87,19 @@ export class MetaAdsControlledWriteService {
   ): Promise<ControlledCreatePausedResult> {
     this.assertPlan(plan);
     const computed = requestSha256(plan);
-    if (approvalSha256 !== computed || this.guardrails.approvedRequestSha256 !== computed) {
+    if (
+      approvalSha256 !== computed ||
+      this.guardrails.approvedRequestSha256 !== computed
+    ) {
       throw new Error('META_ADS_APPROVAL_SHA256_MISMATCH');
     }
 
     const existing = await this.provider.listCampaigns(plan.account);
-    if (existing.some((campaign) => String(campaign.name ?? '') === plan.campaign.name)) {
+    if (
+      existing.some(
+        (campaign) => String(campaign.name ?? '') === plan.campaign.name,
+      )
+    ) {
       throw new Error('META_ADS_DUPLICATE_CAMPAIGN_NAME');
     }
 
@@ -102,7 +109,10 @@ export class MetaAdsControlledWriteService {
       specialAdCategories: plan.campaign.specialAdCategories,
       status: 'PAUSED',
     };
-    const campaign = await this.provider.createCampaign(plan.account, campaignDraft);
+    const campaign = await this.provider.createCampaign(
+      plan.account,
+      campaignDraft,
+    );
 
     const adSetDraft: MetaAdSetDraft = {
       campaignId: campaign.id,
@@ -121,7 +131,10 @@ export class MetaAdsControlledWriteService {
     const creativeIds: string[] = [];
     for (const creativePlan of plan.creatives) {
       const creativeDraft: MetaCreativeDraft = { ...creativePlan };
-      const creative = await this.provider.createCreative(plan.account, creativeDraft);
+      const creative = await this.provider.createCreative(
+        plan.account,
+        creativeDraft,
+      );
       creativeIds.push(creative.id);
     }
 
@@ -150,7 +163,9 @@ export class MetaAdsControlledWriteService {
   }
 
   private assertPlan(plan: ControlledCreatePausedPlan): void {
-    const allowedObjectives = this.guardrails.allowedObjectives ?? ['OUTCOME_SALES'];
+    const allowedObjectives = this.guardrails.allowedObjectives ?? [
+      'OUTCOME_SALES',
+    ];
     const allowedOptimizationGoals = this.guardrails.allowedOptimizationGoals ?? [
       'OFFSITE_CONVERSIONS',
     ];
@@ -161,7 +176,10 @@ export class MetaAdsControlledWriteService {
       throw new Error('META_ADS_CURRENCY_NOT_ALLOWED');
     if (!allowedObjectives.includes(plan.campaign.objective))
       throw new Error('META_ADS_OBJECTIVE_NOT_ALLOWED');
-    if (!Number.isInteger(plan.adSet.dailyBudgetMinor) || plan.adSet.dailyBudgetMinor <= 0)
+    if (
+      !Number.isInteger(plan.adSet.dailyBudgetMinor) ||
+      plan.adSet.dailyBudgetMinor <= 0
+    )
       throw new Error('META_ADS_DAILY_BUDGET_INVALID');
     if (plan.adSet.dailyBudgetMinor > this.guardrails.maxDailyBudgetMinor)
       throw new Error('META_ADS_DAILY_BUDGET_EXCEEDS_GUARDRAIL');
@@ -197,7 +215,8 @@ export class MetaAdsControlledWriteService {
   private assertGeo(targeting: Readonly<Record<string, unknown>>): void {
     const geo = asRecord(targeting.geo_locations);
     const allowedKeys = new Set(this.guardrails.allowedGeoKeys);
-    if (allowedKeys.size === 0) throw new Error('META_ADS_ALLOWED_GEO_KEYS_REQUIRED');
+    if (allowedKeys.size === 0)
+      throw new Error('META_ADS_ALLOWED_GEO_KEYS_REQUIRED');
 
     const disallowedGeoFields = [
       'countries',
@@ -219,7 +238,9 @@ export class MetaAdsControlledWriteService {
     }
   }
 
-  private assertPromotedObject(promotedObject: Readonly<Record<string, unknown>>): void {
+  private assertPromotedObject(
+    promotedObject: Readonly<Record<string, unknown>>,
+  ): void {
     if (String(promotedObject.pixel_id ?? '') !== this.guardrails.allowedPixelId)
       throw new Error('META_ADS_PIXEL_NOT_ALLOWED');
     if (String(promotedObject.custom_event_type ?? '') !== 'PURCHASE')
