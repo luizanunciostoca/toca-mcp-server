@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   assertExactTheParty20260815Descriptor,
@@ -78,23 +76,25 @@ describe('The Party 2026-08-15 approved Meta Ads descriptor', () => {
     );
   });
 
-  it('pins the exact two approved JPEG payloads and checksums', () => {
+  it('pins the exact two approved Drive-backed creative sources and checksums', () => {
     const descriptor = buildTheParty20260815Descriptor();
     expect(descriptor.assets.map((asset) => asset.fileName)).toEqual([
       'creative-1.jpg',
       'creative-2.jpg',
     ]);
-    expect(descriptor.assets.map((asset) => asset.sourceSha256)).toEqual([
-      'ee8128a08cf5143c581fba135384f2cf8d2f95c2d7258d4ff8c6740469351022',
-      '2adab63d6ecac535d4a5ac5b1adea45ee99b5be7edc3c867a712eb4ce2fa770d',
+    expect(descriptor.assets.map((asset) => asset.driveFileId)).toEqual([
+      '12hpbIpum6ju8_GFFK2bXTeTB-650Y5B7',
+      '1rWmdzdxJqRhJsIeO8nQxdla7_LYqZDpE',
     ]);
-
-    for (const asset of descriptor.assets) {
-      const bytes = readFileSync(`ops/meta-ads/the-party-2026-08-15/${asset.fileName}`);
-      expect(bytes.length).toBeGreaterThan(100_000);
-      expect(bytes[0]).toBe(0xff);
-      expect(bytes[1]).toBe(0xd8);
-      expect(createHash('sha256').update(bytes).digest('hex')).toBe(asset.sourceSha256);
-    }
+    expect(descriptor.assets.map((asset) => asset.sourceSha256)).toEqual([
+      'ea2784a3a95b946ee81e266b2b660e0b6a571c0d07025fbdcb5f8f27ab319e78',
+      '6771739c8098e490e0f68682b8f7c7c6dcdab9ebc8aa9064d8a1568afec46fd6',
+    ]);
+    expect(descriptor.assets.every((asset) => /^[A-Za-z0-9_-]{20,}$/.test(asset.driveFileId))).toBe(
+      true,
+    );
+    expect(descriptor.assets.every((asset) => /^[a-f0-9]{64}$/.test(asset.sourceSha256))).toBe(
+      true,
+    );
   });
 });
