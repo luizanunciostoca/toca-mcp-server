@@ -1,0 +1,212 @@
+name: Meta Ads Instagram User Creative Validate
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-instagram-user-creative-validate.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  JOB: toca-meta-ads-instagram-user-creative-validate
+  ACCOUNT_ID: '311793958882290'
+  PAGE_ID: '306103746115875'
+  CONFIGURED_IG_ID: '17841402033495654'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable read-only plus validate-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/meta-creative-validate
+          cat > /tmp/meta-creative-validate/validate.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.ACCOUNT_ID;
+          const pageId = process.env.PAGE_ID;
+          const configuredIgId = process.env.CONFIGURED_IG_ID;
+          if (!token || !accountId || !pageId || !configuredIgId) throw new Error('CONFIGURATION_MISSING');
+
+          const graph = 'https://graph.facebook.com/v24.0';
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+          const sanitize = (v) => String(v ?? '')
+            .replace(/(access[_-]?token|authorization|bearer|secret)\s*[:=]?\s*\S+/gi, '[REDACTED]')
+            .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+          const get = async (path) => {
+            const response = await fetch(`${graph}/${path}`, { headers });
+            const body = await response.json().catch(() => ({}));
+            return { response, body };
+          };
+
+          const pageFields = [
+            'id', 'name',
+            'instagram_business_account{id,username}',
+            'connected_instagram_account{id,username}',
+            'connected_page_backed_instagram_account{id,username}',
+          ].join(',');
+          const pageResult = await get(`${pageId}?fields=${encodeURIComponent(pageFields)}`);
+          if (!pageResult.response.ok) {
+            const error = pageResult.body?.error ?? {};
+            console.log(`META_ADS_IG_PAGE_DISCOVERY_ERROR=${JSON.stringify({
+              httpStatus: pageResult.response.status,
+              code: Number(error.code) || null,
+              subcode: Number(error.error_subcode) || null,
+              message: sanitize(error.message),
+            })}`);
+            process.exit(2);
+          }
+
+          const page = pageResult.body;
+          const candidates = [
+            ['instagram_business_account', page?.instagram_business_account],
+            ['connected_instagram_account', page?.connected_instagram_account],
+            ['connected_page_backed_instagram_account', page?.connected_page_backed_instagram_account],
+          ].filter(([, value]) => value?.id);
+          const unique = [];
+          for (const [source, value] of candidates) {
+            if (!unique.some((item) => item.id === String(value.id))) {
+              unique.push({ source, id: String(value.id), username: value.username ?? null });
+            }
+          }
+          console.log(`META_ADS_IG_PAGE_DISCOVERY=${JSON.stringify({
+            pageId: String(page.id ?? ''),
+            pageName: page.name ?? null,
+            configuredIgId,
+            candidates: unique,
+            configuredMatchesCandidate: unique.some((item) => item.id === configuredIgId),
+          })}`);
+          if (unique.length === 0) throw new Error('NO_PAGE_LINKED_INSTAGRAM_USER');
+
+          const selected = unique.find((item) => item.source === 'instagram_business_account') ?? unique[0];
+          const directConfigured = await get(`${configuredIgId}?fields=id,username`);
+          console.log(`META_ADS_IG_CONFIGURED_ID_READ=${JSON.stringify({
+            httpStatus: directConfigured.response.status,
+            ok: directConfigured.response.ok,
+            id: directConfigured.response.ok ? String(directConfigured.body?.id ?? '') : null,
+            username: directConfigured.response.ok ? directConfigured.body?.username ?? null : null,
+            errorCode: directConfigured.response.ok ? null : Number(directConfigured.body?.error?.code) || null,
+            errorMessage: directConfigured.response.ok ? null : sanitize(directConfigured.body?.error?.message),
+          })}`);
+
+          const creativeList = await get(`act_${accountId}/adcreatives?fields=id,name,object_story_spec&limit=100`);
+          if (!creativeList.response.ok) throw new Error(`SOURCE_CREATIVE_LIST_FAILED_${creativeList.response.status}`);
+          const eligible = (Array.isArray(creativeList.body?.data) ? creativeList.body.data : []).filter((item) => {
+            const spec = item?.object_story_spec;
+            return item?.id && spec?.page_id === pageId && (spec.link_data || spec.photo_data || spec.video_data || spec.template_data);
+          });
+          if (eligible.length === 0) throw new Error('SOURCE_CREATIVE_NOT_FOUND');
+          const source = eligible[0];
+          const objectStorySpec = { ...source.object_story_spec };
+          delete objectStorySpec.page_id;
+          delete objectStorySpec.instagram_actor_id;
+          delete objectStorySpec.instagram_user_id;
+          objectStorySpec.page_id = pageId;
+          objectStorySpec.instagram_user_id = selected.id;
+
+          const params = new URLSearchParams({
+            name: `P0 Creative VALIDATE_ONLY | instagram_user_id | ${selected.id}`,
+            object_story_spec: JSON.stringify(objectStorySpec),
+            execution_options: JSON.stringify(['validate_only']),
+          });
+          const response = await fetch(`${graph}/act_${accountId}/adcreatives`, {
+            method: 'POST',
+            headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          });
+          const body = await response.json().catch(() => ({}));
+          const error = body?.error ?? {};
+          const result = response.ok
+            ? { httpStatus: response.status, ok: true, returnedId: body?.id ?? null, selectedInstagramUser: selected, sourceCreativeId: String(source.id) }
+            : {
+                httpStatus: response.status,
+                ok: false,
+                selectedInstagramUser: selected,
+                sourceCreativeId: String(source.id),
+                type: sanitize(error.type),
+                code: Number(error.code) || null,
+                subcode: Number(error.error_subcode) || null,
+                userTitle: sanitize(error.error_user_title),
+                userMessage: sanitize(error.error_user_msg),
+                message: sanitize(error.message),
+              };
+          console.log(`META_ADS_CREATIVE_VALIDATE_ONLY=${JSON.stringify(result)}`);
+          if (!response.ok) process.exit(3);
+          if (body?.id) throw new Error('VALIDATE_ONLY_UNEXPECTEDLY_RETURNED_ID');
+          NODE
+
+          cat > /tmp/meta-creative-validate/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY validate.mjs ./validate.mjs
+          USER node
+          CMD ["node", "validate.mjs"]
+          DOCKER
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/meta-ads-creative-validate-only:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/meta-creative-validate
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy validation job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "ACCOUNT_ID=$ACCOUNT_ID,PAGE_ID=$PAGE_ID,CONFIGURED_IG_ID=$CONFIGURED_IG_ID" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+
+      - name: Execute discovery and creative validate-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Print persisted sanitized results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for marker in META_ADS_IG_PAGE_DISCOVERY= META_ADS_IG_CONFIGURED_ID_READ= META_ADS_CREATIVE_VALIDATE_ONLY= META_ADS_IG_PAGE_DISCOVERY_ERROR=; do
+            RESULT=""
+            for attempt in $(seq 1 12); do
+              RESULT="$(gcloud logging read \
+                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND textPayload:\"$marker\"" \
+                --project "$PROJECT_ID" --freshness=10m --order=desc --limit=1 --format='value(textPayload)')"
+              [ -n "$RESULT" ] && break
+              sleep 2
+            done
+            [ -n "$RESULT" ] && printf '%s\n' "$RESULT" || true
+          done
+
+      - name: Remove validation job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
