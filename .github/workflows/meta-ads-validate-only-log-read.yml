@@ -1,0 +1,37 @@
+name: Meta Ads Validate Only Log Read
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-campaign-validate-only
+    paths:
+      - '.github/workflows/meta-ads-validate-only-log-read.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  read-result:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Print persisted sanitized validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT="$(gcloud logging read \
+            'resource.type="cloud_run_job" AND resource.labels.job_name="toca-meta-ads-campaign-validate-only" AND textPayload:"META_ADS_VALIDATE_ONLY_RESULT=" AND timestamp>="2026-08-14T02:45:45Z" AND timestamp<="2026-08-14T02:46:10Z"' \
+            --project toca-mcp-production \
+            --order=desc \
+            --limit=1 \
+            --format='value(textPayload)')"
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT"
