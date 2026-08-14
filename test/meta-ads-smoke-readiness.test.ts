@@ -116,6 +116,8 @@ describe('Meta Ads provider smoke readiness', () => {
         { id: 'active-1', status: 'ACTIVE', effective_status: 'ACTIVE' },
       ]),
     ).toEqual({ id: 'paused-1', status: 'PAUSED', effective_status: 'CAMPAIGN_PAUSED' });
-    expect(selectMetaAdsValidationAdSet([{ id: 'archived-1', status: 'ARCHIVED' }])).toBeUndefined();
+    expect(
+      selectMetaAdsValidationAdSet([{ id: 'archived-1', status: 'ARCHIVED' }]),
+    ).toBeUndefined();
   });
 });
