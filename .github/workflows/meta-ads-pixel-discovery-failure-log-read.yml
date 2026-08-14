@@ -1,0 +1,34 @@
+name: Meta Ads Pixel Discovery Failure Log Read
+
+on:
+  push:
+    branches:
+      - diag/meta-ads-smoke-15442397-failure
+    paths:
+      - '.github/workflows/meta-ads-pixel-discovery-failure-log-read.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Print failed Cloud Run execution logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            'resource.type="cloud_run_job" AND resource.labels.job_name="toca-meta-ads-pixel-access-readonly-discovery" AND timestamp>="2026-08-14T03:42:25Z" AND timestamp<="2026-08-14T03:42:40Z"' \
+            --project toca-mcp-production \
+            --order=asc \
+            --limit=200 \
+            --format='value(textPayload)' | \
+            grep -E 'Error:|READ_FAILED|ACCOUNT_READ|META_|at file:|at async|Node.js' || true
