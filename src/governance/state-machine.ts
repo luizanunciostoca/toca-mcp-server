@@ -64,15 +64,13 @@ export function validateStateMachineDefinition<State extends string>(
   const states = new Set<string>(transitionStates);
   if (!states.has(definition.initialState)) throw new Error('STATE_MACHINE_INITIAL_STATE_MISSING');
   for (const terminal of definition.terminalStates) {
-    if (!states.has(terminal))
-      throw new Error(`STATE_MACHINE_TERMINAL_STATE_MISSING:${terminal}`);
+    if (!states.has(terminal)) throw new Error(`STATE_MACHINE_TERMINAL_STATE_MISSING:${terminal}`);
     if ((definition.transitions[terminal] ?? []).length > 0)
       throw new Error(`STATE_MACHINE_TERMINAL_HAS_TRANSITIONS:${terminal}`);
   }
   for (const state of transitionStates) {
     for (const target of definition.transitions[state] ?? []) {
-      if (!states.has(target))
-        throw new Error(`STATE_MACHINE_TARGET_STATE_MISSING:${target}`);
+      if (!states.has(target)) throw new Error(`STATE_MACHINE_TARGET_STATE_MISSING:${target}`);
     }
   }
 }
