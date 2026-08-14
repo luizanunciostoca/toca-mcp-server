@@ -133,8 +133,18 @@ describe('InstagramPublicationReconciler', () => {
     const store = new MemoryStore();
     const transport = new FakeTransport();
     transport.media = [
-      { mediaId: 'media-1', caption: 'Caption', mediaType: 'IMAGE', timestamp: '2026-08-14T00:30:00.000Z' },
-      { mediaId: 'media-2', caption: 'Caption', mediaType: 'IMAGE', timestamp: '2026-08-14T00:31:00.000Z' },
+      {
+        mediaId: 'media-1',
+        caption: 'Caption',
+        mediaType: 'IMAGE',
+        timestamp: '2026-08-14T00:30:00.000Z',
+      },
+      {
+        mediaId: 'media-2',
+        caption: 'Caption',
+        mediaType: 'IMAGE',
+        timestamp: '2026-08-14T00:31:00.000Z',
+      },
     ];
     const reconciler = new InstagramPublicationReconciler(
       store,
