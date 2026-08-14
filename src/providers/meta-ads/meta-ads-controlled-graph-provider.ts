@@ -110,6 +110,7 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
       adset_id: draft.adSetId,
       creative: JSON.stringify({ creative_id: draft.creativeId }),
       status: 'PAUSED',
+      fields: 'id',
     });
     return idResponseSchema.parse(result);
   }
