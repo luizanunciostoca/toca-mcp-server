@@ -1,5 +1,7 @@
 import type pg from 'pg';
 import type { RuntimeConfig } from '../config.js';
+import type { Telemetry } from '../core/observability.js';
+import type { StructuredLogger } from '../core/structured-logger.js';
 import { PostgresPublicationExecutionStore } from '../persistence/postgres-publication-store.js';
 import { GcsPublicationAssetDelivery } from '../providers/gcp/gcs-publication-asset-delivery.js';
 import { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
@@ -17,6 +19,8 @@ import type { JobHandler } from './worker.js';
 export interface TocaManagedInstagramWorkerRuntimeOptions {
   readonly config: RuntimeConfig;
   readonly pool: pg.Pool;
+  readonly telemetry?: Telemetry;
+  readonly logger?: StructuredLogger;
 }
 
 export function createTocaManagedInstagramRuntimeHandlers(
@@ -59,5 +63,7 @@ export async function runTocaManagedInstagramWorkerBatch(
     pool: options.pool,
     handlers,
     claimToolName: TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB,
+    ...(options.telemetry ? { telemetry: options.telemetry } : {}),
+    ...(options.logger ? { logger: options.logger } : {}),
   });
 }
