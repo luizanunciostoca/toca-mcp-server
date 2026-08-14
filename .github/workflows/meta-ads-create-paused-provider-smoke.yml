@@ -24,7 +24,6 @@ env:
   DATABASE_SECRET_ID: toca-database-url
   TOKEN_SECRET_ID: toca-meta-oauth-token
   MCP_SERVICE_NAME: toca-mcp-production
-  JOB_NAME: toca-meta-ads-create-paused-smoke
   META_APP_ID: '2281930145887404'
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_ADS_ACCOUNT_ID: '311793958882290'
@@ -84,10 +83,17 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-smoke-${GITHUB_SHA}"
+          SMOKE_ID="${GITHUB_SHA:0:12}"
+          JOB_NAME="toca-meta-ads-create-paused-smoke-${GITHUB_RUN_ID}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-          echo "SMOKE_ID=${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          echo "SMOKE_ID=$SMOKE_ID" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          echo "EXPECTED_CAMPAIGN_NAME=TOCA | P0 SMOKE CREATE_PAUSED | $SMOKE_ID" >> "$GITHUB_ENV"
+          echo "EXPECTED_ADSET_NAME=P0 Smoke | Morro locality | Purchase | $SMOKE_ID" >> "$GITHUB_ENV"
+          echo "EXPECTED_CREATIVE_NAME=P0 Smoke Creative | $SMOKE_ID" >> "$GITHUB_ENV"
+          echo "EXPECTED_AD_NAME=P0 Smoke Ad | $SMOKE_ID" >> "$GITHUB_ENV"
 
       - name: Deploy read-only prepare job
         shell: bash
@@ -116,27 +122,40 @@ jobs:
             --wait \
             --quiet
 
-      - name: Capture prepared plan and approval SHA
+      - name: Capture current-run prepared plan and approval SHA
         shell: bash
         run: |
           set -euo pipefail
-          RESULT_LINE=""
+          RESULT_JSON=""
           for attempt in $(seq 1 12); do
-            RESULT_LINE="$(gcloud logging read \
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              candidate="${line#META_ADS_SMOKE_PREPARE_RESULT=}"
+              if printf '%s' "$candidate" | jq -e \
+                --arg smoke "$SMOKE_ID" \
+                --arg campaign "$EXPECTED_CAMPAIGN_NAME" \
+                '.smokeId == $smoke and .campaignName == $campaign' >/dev/null 2>&1; then
+                RESULT_JSON="$candidate"
+                break
+              fi
+            done < <(gcloud logging read \
               "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_SMOKE_PREPARE_RESULT=\"" \
               --project "$GCP_PROJECT_ID" \
-              --freshness=30m \
+              --freshness=10m \
               --limit=50 \
               --order=desc \
-              --format='value(textPayload)' | grep 'META_ADS_SMOKE_PREPARE_RESULT=' | head -n1 || true)"
-            [ -n "$RESULT_LINE" ] && break
+              --format='value(textPayload)' | grep 'META_ADS_SMOKE_PREPARE_RESULT=' || true)
+            [ -n "$RESULT_JSON" ] && break
             sleep 5
           done
-          test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#META_ADS_SMOKE_PREPARE_RESULT=}"
+          test -n "$RESULT_JSON"
           printf '%s' "$RESULT_JSON" | jq -e \
+            --arg smoke "$SMOKE_ID" \
+            --arg campaign "$EXPECTED_CAMPAIGN_NAME" \
             --arg account "$META_ADS_ACCOUNT_ID" \
             --arg currency "$META_ADS_CURRENCY" '
+              .smokeId == $smoke and
+              .campaignName == $campaign and
               (.requestSha256 | test("^[a-f0-9]{64}$")) and
               (.planBase64 | length > 0) and
               (.geo.key | tostring | length > 0) and
@@ -148,7 +167,21 @@ jobs:
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-smoke-prepare.json
           printf '%s' "$RESULT_JSON" | jq -r .requestSha256 > /tmp/approved-sha.txt
           printf '%s' "$RESULT_JSON" | jq -r .planBase64 > /tmp/plan.b64
-          echo "META_ADS_SMOKE_PREPARED=1"
+          base64 --decode /tmp/plan.b64 > /tmp/plan.json
+          jq -e \
+            --arg account "$META_ADS_ACCOUNT_ID" \
+            --arg campaign "$EXPECTED_CAMPAIGN_NAME" \
+            --arg adset "$EXPECTED_ADSET_NAME" \
+            --arg creative "$EXPECTED_CREATIVE_NAME" \
+            --arg ad "$EXPECTED_AD_NAME" '
+              .account.adAccountId == $account and
+              .campaign.name == $campaign and
+              .adSet.name == $adset and
+              .adSet.targeting.targeting_automation.advantage_audience == 0 and
+              (.creatives | length == 1) and .creatives[0].name == $creative and
+              (.ads | length == 1) and .ads[0].name == $ad and .ads[0].creativeIndex == 0
+            ' /tmp/plan.json >/dev/null
+          echo 'META_ADS_SMOKE_CURRENT_RUN_PREPARED=1'
 
       - name: Deploy exact approved CREATE_PAUSED execution job
         shell: bash
@@ -181,30 +214,44 @@ jobs:
             --wait \
             --quiet
 
-      - name: Capture provider-backed PAUSED evidence
+      - name: Capture current-run provider-backed PAUSED evidence
         shell: bash
         run: |
           set -euo pipefail
-          RESULT_LINE=""
+          RESULT_JSON=""
           for attempt in $(seq 1 12); do
-            RESULT_LINE="$(gcloud logging read \
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              candidate="${line#META_ADS_SMOKE_EXECUTE_RESULT=}"
+              if printf '%s' "$candidate" | jq -e \
+                --arg smoke "$SMOKE_ID" \
+                --arg campaign "$EXPECTED_CAMPAIGN_NAME" \
+                '.smokeId == $smoke and .campaignName == $campaign' >/dev/null 2>&1; then
+                RESULT_JSON="$candidate"
+                break
+              fi
+            done < <(gcloud logging read \
               "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_SMOKE_EXECUTE_RESULT=\"" \
               --project "$GCP_PROJECT_ID" \
-              --freshness=30m \
+              --freshness=10m \
               --limit=50 \
               --order=desc \
-              --format='value(textPayload)' | grep 'META_ADS_SMOKE_EXECUTE_RESULT=' | head -n1 || true)"
-            [ -n "$RESULT_LINE" ] && break
+              --format='value(textPayload)' | grep 'META_ADS_SMOKE_EXECUTE_RESULT=' || true)
+            [ -n "$RESULT_JSON" ] && break
             sleep 5
           done
-          test -n "$RESULT_LINE"
-          RESULT_JSON="${RESULT_LINE#META_ADS_SMOKE_EXECUTE_RESULT=}"
-          printf '%s' "$RESULT_JSON" | jq -e '
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e \
+            --arg smoke "$SMOKE_ID" \
+            --arg campaign "$EXPECTED_CAMPAIGN_NAME" '
+            .smokeId == $smoke and
+            .campaignName == $campaign and
             .status == "PAUSED" and
             (.campaignId | length > 0) and
             (.adSetId | length > 0) and
             (.creativeIds | length == 1) and
             (.adIds | length == 1) and
+            .providerVerification.campaign.name == $campaign and
             .providerVerification.campaign.status == "PAUSED" and
             .providerVerification.adSet.status == "PAUSED" and
             ([.providerVerification.ads[].status] | all(. == "PAUSED")) and
@@ -245,7 +292,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          gcloud run jobs delete "$JOB_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --quiet || true
+          if [ -n "${JOB_NAME:-}" ]; then
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet || true
+          fi
