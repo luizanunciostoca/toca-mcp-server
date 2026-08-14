@@ -8,11 +8,19 @@ import type {
   MetaCreativeDraft,
 } from './meta-ads-contracts.js';
 
+export interface MetaAdsCustomLocationGuardrail {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly maxRadius: number;
+  readonly distanceUnit: 'kilometer' | 'mile';
+}
+
 export interface MetaAdsWriteGuardrails {
   readonly allowedAccountId: string;
   readonly allowedCurrency: string;
   readonly maxDailyBudgetMinor: number;
-  readonly allowedGeoKeys: readonly string[];
+  readonly allowedGeoKeys?: readonly string[];
+  readonly allowedCustomLocations?: readonly MetaAdsCustomLocationGuardrail[];
   readonly allowedPixelId: string;
   readonly allowedPageId: string;
   readonly allowedInstagramActorId?: string;
@@ -200,27 +208,66 @@ export class MetaAdsControlledWriteService {
 
   private assertGeo(targeting: Readonly<Record<string, unknown>>): void {
     const geo = asRecord(targeting.geo_locations);
-    const allowedKeys = new Set(this.guardrails.allowedGeoKeys);
-    if (allowedKeys.size === 0) throw new Error('META_ADS_ALLOWED_GEO_KEYS_REQUIRED');
+    const cities = Array.isArray(geo.cities) ? geo.cities : [];
+    const customLocations = Array.isArray(geo.custom_locations) ? geo.custom_locations : [];
 
-    const disallowedGeoFields = [
-      'countries',
-      'regions',
-      'zips',
-      'custom_locations',
-      'geo_markets',
-      'location_types',
-    ];
-    if (disallowedGeoFields.some((field) => geo[field] !== undefined))
+    const alwaysDisallowedGeoFields = ['countries', 'regions', 'zips', 'geo_markets', 'location_types'];
+    if (alwaysDisallowedGeoFields.some((field) => geo[field] !== undefined))
+      throw new Error('META_ADS_GEO_SCOPE_NOT_ALLOWED');
+    if (cities.length > 0 && customLocations.length > 0)
       throw new Error('META_ADS_GEO_SCOPE_NOT_ALLOWED');
 
-    const cities = Array.isArray(geo.cities) ? geo.cities : [];
-    if (cities.length === 0) throw new Error('META_ADS_CITY_TARGETING_REQUIRED');
-    for (const cityValue of cities) {
-      const city = asRecord(cityValue);
-      const key = scalarString(city.key);
-      if (!allowedKeys.has(key)) throw new Error('META_ADS_GEO_KEY_NOT_ALLOWED');
+    if (cities.length > 0) {
+      const allowedKeys = new Set(this.guardrails.allowedGeoKeys ?? []);
+      if (allowedKeys.size === 0) throw new Error('META_ADS_ALLOWED_GEO_KEYS_REQUIRED');
+      for (const cityValue of cities) {
+        const city = asRecord(cityValue);
+        if (Object.keys(city).some((key) => key !== 'key'))
+          throw new Error('META_ADS_GEO_SCOPE_NOT_ALLOWED');
+        const key = scalarString(city.key);
+        if (!allowedKeys.has(key)) throw new Error('META_ADS_GEO_KEY_NOT_ALLOWED');
+      }
+      return;
     }
+
+    if (customLocations.length > 0) {
+      const allowedLocations = this.guardrails.allowedCustomLocations ?? [];
+      if (allowedLocations.length === 0)
+        throw new Error('META_ADS_ALLOWED_CUSTOM_LOCATIONS_REQUIRED');
+
+      for (const customValue of customLocations) {
+        const custom = asRecord(customValue);
+        const allowedFields = new Set(['latitude', 'longitude', 'radius', 'distance_unit']);
+        if (Object.keys(custom).some((key) => !allowedFields.has(key)))
+          throw new Error('META_ADS_GEO_SCOPE_NOT_ALLOWED');
+
+        const latitude = finiteNumber(custom.latitude);
+        const longitude = finiteNumber(custom.longitude);
+        const radius = finiteNumber(custom.radius);
+        const distanceUnit = scalarString(custom.distance_unit);
+        if (
+          latitude === undefined ||
+          longitude === undefined ||
+          radius === undefined ||
+          radius <= 0 ||
+          (distanceUnit !== 'kilometer' && distanceUnit !== 'mile')
+        ) {
+          throw new Error('META_ADS_CUSTOM_LOCATION_INVALID');
+        }
+
+        const allowed = allowedLocations.find(
+          (candidate) =>
+            approximatelyEqual(candidate.latitude, latitude) &&
+            approximatelyEqual(candidate.longitude, longitude) &&
+            candidate.distanceUnit === distanceUnit &&
+            radius <= candidate.maxRadius,
+        );
+        if (!allowed) throw new Error('META_ADS_CUSTOM_LOCATION_NOT_ALLOWED');
+      }
+      return;
+    }
+
+    throw new Error('META_ADS_GEO_TARGETING_REQUIRED');
   }
 
   private assertPromotedObject(promotedObject: Readonly<Record<string, unknown>>): void {
@@ -256,4 +303,17 @@ function scalarString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value.toString();
   return '';
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function approximatelyEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 0.000001;
 }
