@@ -63,6 +63,7 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
       name: draft.name,
       targeting: JSON.stringify(draft.targeting),
       status: 'PAUSED',
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     };
     if (draft.dailyBudgetMinor !== undefined) values.daily_budget = String(draft.dailyBudgetMinor);
     if (draft.lifetimeBudgetMinor !== undefined)
