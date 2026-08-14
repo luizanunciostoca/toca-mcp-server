@@ -63,7 +63,15 @@ describe('TOCA OS route and capability catalogs', () => {
       const catalogDefinition = getCapabilityDefinition(tool.name);
       expect(catalogDefinition, tool.name).toBeDefined();
       expect(catalogDefinition?.lifecycle_status, tool.name).toBe(tool.capabilityStatus);
+      expect(catalogDefinition?.risk_class, tool.name).toBe(tool.riskClass);
+      expect(catalogDefinition?.side_effects, tool.name).toBe(tool.sideEffects);
+      expect(catalogDefinition?.idempotent, tool.name).toBe(tool.idempotent);
+      expect(catalogDefinition?.provider, tool.name).toBe(tool.provider);
+      expect(catalogDefinition?.required_scopes, tool.name).toEqual(tool.requiredScopes);
     }
     expect(runtime.get('meta_ads.campaign.activate')).toBeUndefined();
+    expect(
+      CAPABILITY_CATALOG.filter((definition) => definition.execution_surface === 'MCP_TOOL'),
+    ).toHaveLength(runtime.list().length);
   });
 });
