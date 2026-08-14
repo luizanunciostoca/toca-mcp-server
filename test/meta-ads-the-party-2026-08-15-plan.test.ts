@@ -83,8 +83,8 @@ describe('The Party 2026-08-15 approved Meta Ads descriptor', () => {
       'creative-2.jpg',
     ]);
     expect(descriptor.assets.map((asset) => asset.driveFileId)).toEqual([
-      '12hpbIpum6ju8_GFFK2bXTeTB-650Y5B7',
-      '1rWmdzdxJqRhJsIeO8nQxdla7_LYqZDpE',
+      '1zTpX6T-truHpBmjomvs2KU1QYeojRnXk',
+      '1PA3cfg8gDeWRyflhlcrVINuFw-FCJJLR',
     ]);
     expect(descriptor.assets.map((asset) => asset.sourceSha256)).toEqual([
       'ea2784a3a95b946ee81e266b2b660e0b6a571c0d07025fbdcb5f8f27ab319e78',
