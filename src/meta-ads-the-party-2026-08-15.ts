@@ -451,7 +451,8 @@ function assertAdSetEnvelope(
     throw new Error('META_ADS_THE_PARTY_PROVIDER_PIXEL_MISMATCH');
   }
   if (
-    scalarString(promotedObject.custom_event_type) !== descriptor.adSet.promotedObject.custom_event_type
+    scalarString(promotedObject.custom_event_type) !==
+    descriptor.adSet.promotedObject.custom_event_type
   ) {
     throw new Error('META_ADS_THE_PARTY_PROVIDER_EVENT_TYPE_MISMATCH');
   }
@@ -516,7 +517,9 @@ async function waitForConfiguredActive(
   throw new Error('META_ADS_THE_PARTY_ACTIVE_PROVIDER_CONFIRMATION_TIMEOUT');
 }
 
-async function rollbackToPaused(created: CreatedObjects): Promise<Readonly<Record<string, unknown>>> {
+async function rollbackToPaused(
+  created: CreatedObjects,
+): Promise<Readonly<Record<string, unknown>>> {
   const attempts: Record<string, string> = {};
   if (created.campaignId) attempts.campaign = await pauseBestEffort(created.campaignId);
   if (created.adSetId) attempts.adSet = await pauseBestEffort(created.adSetId);
@@ -575,5 +578,7 @@ function requiredEnv(name: string): string {
 }
 
 function normalizeError(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 500);
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/\s+/g, ' ')
+    .slice(0, 500);
 }
