@@ -92,9 +92,7 @@ export function canonicalAuditPayload(
 }
 
 export function hashAuditPayload(payload: Readonly<Record<string, unknown>>): string {
-  return createHash('sha256')
-    .update(JSON.stringify(canonicalize(payload)), 'utf8')
-    .digest('hex');
+  return createHash('sha256').update(canonicalJson(payload), 'utf8').digest('hex');
 }
 
 export function normalizeAuditEvidence(event: AuditEvent): readonly string[] {
@@ -140,6 +138,9 @@ export function verifyAuditLedger(
       record.sequence,
       record.previousHash,
     );
+    if (canonicalJson(record.canonicalPayload) !== canonicalJson(expectedPayload)) {
+      return invalid(executionId, records, previousHash, 'AUDIT_CANONICAL_PAYLOAD_MISMATCH');
+    }
     const expectedHash = hashAuditPayload(expectedPayload);
     if (record.eventHash !== expectedHash)
       return invalid(executionId, records, previousHash, 'AUDIT_EVENT_HASH_MISMATCH');
@@ -180,6 +181,10 @@ function invalid(
     headHash,
     reason,
   };
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
 }
 
 function canonicalize(value: unknown): unknown {
