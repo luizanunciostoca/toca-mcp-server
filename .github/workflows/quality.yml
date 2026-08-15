@@ -19,6 +19,15 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: M-FOUND-03 deterministic format preview
+        run: |
+          files=(
+            docs/checkpoints/m-found-03-capability-deduplication.md
+            src/governance/capability-aliases.ts
+            src/governance/types.ts
+          )
+          pnpm exec prettier --write "${files[@]}"
+          git diff -- "${files[@]}"
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
