@@ -16,6 +16,7 @@ env:
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   DATABASE_SECRET_ID: toca-database-url
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
 
 jobs:
   evidence:
@@ -31,7 +32,6 @@ jobs:
           workload_identity_provider: ${{ env.WIF }}
           service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
       - name: Read durable daily-control signal from production PostgreSQL
         shell: bash
         run: |
@@ -42,16 +42,15 @@ jobs:
             gcloud run jobs delete "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-
           QUERY_B64="$(printf '%s' "select json_build_object('name',name,'value',value,'attributes',attributes,'evidence',evidence,'occurredAt',occurred_at) from operational_signals where name='foundation.daily_control.completed' and attributes->>'dayKey'='2026-08-15' order by occurred_at desc limit 1;" | base64 -w0)"
           SCRIPT="const {Pool}=require('pg'); const q=Buffer.from(process.env.QUERY_B64,'base64').toString(); const p=new Pool({connectionString:process.env.DATABASE_URL,ssl:false}); p.query(q).then(r=>{if(r.rows.length!==1) throw new Error('FOUNDATION_DAILY_CONTROL_SIGNAL_NOT_FOUND'); console.log('FOUNDATION_DAILY_CONTROL_DB_RESULT='+JSON.stringify(r.rows[0].json_build_object));}).finally(()=>p.end());"
           SCRIPT_B64="$(printf '%s' "$SCRIPT" | base64 -w0)"
-
           gcloud run jobs deploy "$JOB_NAME" \
             --image "$IMAGE" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --command node \
             --args=-e,"eval(Buffer.from(process.env.SCRIPT_B64,'base64').toString())" \
             --set-env-vars "QUERY_B64=$QUERY_B64,SCRIPT_B64=$SCRIPT_B64" \
@@ -60,7 +59,6 @@ jobs:
             --max-retries 0 \
             --task-timeout 120s \
             --quiet
-
           gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
           RESULT_LINE="$(gcloud logging read \
             "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"FOUNDATION_DAILY_CONTROL_DB_RESULT=\"" \
@@ -75,7 +73,6 @@ jobs:
           ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > foundation-daily-control-evidence.json
           echo 'FOUNDATION_DAILY_CONTROL_2026_08_15=VERIFIED'
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: foundation-daily-control-evidence-${{ github.sha }}
