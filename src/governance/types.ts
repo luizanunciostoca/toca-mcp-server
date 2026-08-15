@@ -133,20 +133,11 @@ export interface RetryPolicyDefinition {
 
 export interface CapabilityDefinition {
   readonly capability_id: string;
-  /** @deprecated Use primary_route_id. Kept for compatibility through catalog v1.x. */
+  /** @deprecated Use primary_route_id. Kept for compatibility through catalog v1.1. */
   readonly route_id: RouteId | 'TRANSVERSAL';
   readonly primary_route_id: RouteId | 'TRANSVERSAL';
   readonly consumer_route_ids: readonly RouteId[];
-  /** Compatibility IDs that resolve to this canonical capability. */
   readonly aliases: readonly string[];
-  /** Canonical identity after compatibility alias resolution. */
-  readonly canonical_capability_id: string;
-  /** True when this catalog entry is retained only as a backwards-compatible alias. */
-  readonly is_compatibility_alias: boolean;
-  /** Canonical replacement for an alias entry, otherwise null. */
-  readonly replacement_capability_id: string | null;
-  /** Catalog contract version in which an alias became deprecated, otherwise null. */
-  readonly deprecated_since: string | null;
   readonly version: string;
   readonly description: string;
   readonly contract_quality: CapabilityContractQuality;
