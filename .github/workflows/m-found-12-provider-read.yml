@@ -1,0 +1,205 @@
+name: M-FOUND-12 Provider READ
+
+on:
+  push:
+    branches:
+      - feat/m-found-12-e2e-production-validation
+    paths:
+      - '.github/workflows/m-found-12-provider-read.yml'
+      - 'docs/checkpoints/m-found-12-e2e-production-validation.md'
+      - 'docs/operations/provider-write-validation-register.md'
+  pull_request:
+    paths:
+      - '.github/workflows/m-found-12-provider-read.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: m-found-12-provider-read-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_GRAPH_API_VERSION: v24.0
+  META_PAGE_ID: '306103746115875'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  provider-read:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact validation head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure immutable validation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          mkdir -p /tmp/m12-provider-read
+          cat > /tmp/m12-provider-read/read.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const apiVersion = process.env.META_GRAPH_API_VERSION;
+          const pageId = process.env.META_PAGE_ID;
+          const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const sourceSha = process.env.SOURCE_SHA;
+          if (!token || !apiVersion || !pageId || !instagramAccountId || !sourceSha) {
+            throw new Error('M_FOUND_12_PROVIDER_READ_CONFIG_MISSING');
+          }
+
+          async function graph(path) {
+            const response = await fetch(`https://graph.facebook.com/${apiVersion}/${path}`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              const code = Number.isInteger(body?.error?.code) ? body.error.code : 0;
+              const subcode = Number.isInteger(body?.error?.error_subcode) ? body.error.error_subcode : 0;
+              throw new Error(`M_FOUND_12_META_READ_HTTP_${response.status}_CODE_${code}_SUBCODE_${subcode}`);
+            }
+            return body;
+          }
+
+          const permissions = await graph('me/permissions');
+          const granted = new Set(
+            (Array.isArray(permissions.data) ? permissions.data : [])
+              .filter((item) => item?.status === 'granted' && typeof item.permission === 'string')
+              .map((item) => item.permission),
+          );
+          for (const required of ['instagram_basic', 'pages_show_list', 'pages_read_engagement']) {
+            if (!granted.has(required)) throw new Error(`M_FOUND_12_SCOPE_MISSING_${required}`);
+          }
+
+          const pages = await graph('me/accounts?fields=id,instagram_business_account&limit=100');
+          const page = (Array.isArray(pages.data) ? pages.data : []).find((item) => item?.id === pageId);
+          if (!page) throw new Error('M_FOUND_12_TARGET_PAGE_NOT_MANAGED');
+          if (page?.instagram_business_account?.id !== instagramAccountId) {
+            throw new Error('M_FOUND_12_INSTAGRAM_ACCOUNT_BINDING_MISMATCH');
+          }
+
+          const profile = await graph(`${instagramAccountId}?fields=id,username,name,media_count`);
+          if (profile.id !== instagramAccountId) throw new Error('M_FOUND_12_INSTAGRAM_ID_MISMATCH');
+          if (profile.username !== 'tocadomorcego') {
+            throw new Error(`M_FOUND_12_INSTAGRAM_USERNAME_MISMATCH_${String(profile.username ?? '')}`);
+          }
+          if (!Number.isInteger(profile.media_count)) throw new Error('M_FOUND_12_MEDIA_COUNT_MISSING');
+
+          const media = await graph(
+            `${instagramAccountId}/media?fields=id,media_type,timestamp,permalink&limit=5`,
+          );
+          if (!Array.isArray(media.data) || media.data.length === 0) {
+            throw new Error('M_FOUND_12_RECENT_MEDIA_READ_EMPTY');
+          }
+          for (const item of media.data) {
+            if (typeof item?.id !== 'string' || typeof item?.timestamp !== 'string') {
+              throw new Error('M_FOUND_12_RECENT_MEDIA_SHAPE_INVALID');
+            }
+          }
+
+          const evidence = {
+            schemaVersion: 1,
+            sourceSha,
+            provider: 'Meta Graph API',
+            apiVersion,
+            pageId,
+            instagramAccountId,
+            username: profile.username,
+            mediaCount: profile.media_count,
+            requiredScopes: ['instagram_basic', 'pages_show_list', 'pages_read_engagement'],
+            returnedMedia: media.data.map((item) => ({
+              id: item.id,
+              mediaType: item.media_type ?? null,
+              timestamp: item.timestamp,
+              permalink: item.permalink ?? null,
+            })),
+            verified: true,
+            verifiedAt: new Date().toISOString(),
+          };
+          console.log(`M_FOUND_12_PROVIDER_READ_RESULT=${JSON.stringify(evidence)}`);
+          NODE
+          cat > /tmp/m12-provider-read/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY read.mjs ./read.mjs
+          USER node
+          CMD ["node", "read.mjs"]
+          DOCKER
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/m12-provider-read:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/m12-provider-read
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-m12-provider-read-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Execute under production runtime identity with provider writes impossible
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,META_PAGE_ID=$META_PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,SOURCE_SHA=$GITHUB_SHA" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          RESULT_LINE="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"M_FOUND_12_PROVIDER_READ_RESULT=\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=20m \
+            --limit=20 \
+            --order=desc \
+            --format='value(textPayload)' | grep 'M_FOUND_12_PROVIDER_READ_RESULT=' | head -n1)"
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#M_FOUND_12_PROVIDER_READ_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --arg page "$META_PAGE_ID" \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" '
+              .schemaVersion == 1 and
+              .sourceSha == $sha and
+              .pageId == $page and
+              .instagramAccountId == $ig and
+              .username == "tocadomorcego" and
+              .verified == true and
+              (.returnedMedia | length > 0)
+            ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > m-found-12-provider-read.json
+          echo 'M_FOUND_12_PROVIDER_READ=VERIFIED'
+
+      - name: Upload sanitized provider-read evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: m-found-12-provider-read-${{ github.sha }}
+          path: m-found-12-provider-read.json
+          if-no-files-found: error
+          retention-days: 90
