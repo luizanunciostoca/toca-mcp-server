@@ -211,6 +211,14 @@ export interface WorkflowStepClaim {
   readonly claimedAt: string;
 }
 
+export interface WorkflowCompensationClaim {
+  readonly compensationId: string;
+  readonly workflowId: string;
+  readonly workerId: string;
+  readonly executionId: string;
+  readonly claimedAt: string;
+}
+
 export interface WorkflowStore {
   create(blueprint: WorkflowBlueprint, now?: string): Promise<WorkflowSnapshot>;
   get(workflowId: string): Promise<WorkflowSnapshot | undefined>;
@@ -255,6 +263,7 @@ export interface WorkflowStore {
   claimHumanTask(input: {
     readonly taskId: string;
     readonly principalId: string;
+    readonly principalRoles?: readonly string[];
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot>;
@@ -291,6 +300,25 @@ export interface WorkflowStore {
   }): Promise<WorkflowSnapshot>;
   activateCompensations(input: {
     readonly workflowId: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot>;
+  claimReadyCompensations(input: {
+    readonly workerId: string;
+    readonly now: string;
+    readonly limit: number;
+  }): Promise<readonly WorkflowCompensationClaim[]>;
+  completeCompensation(input: {
+    readonly compensationId: string;
+    readonly executionId: string;
+    readonly output?: unknown;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot>;
+  failCompensation(input: {
+    readonly compensationId: string;
+    readonly executionId: string;
+    readonly errorCode: string;
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot>;
@@ -335,14 +363,21 @@ export function validateWorkflowBlueprint(blueprint: WorkflowBlueprint): void {
   assertAcyclic(blueprint.steps);
 }
 
-export function assertWorkflowStepClaim(
-  step: WorkflowStep,
-  executionId: string,
-): void {
+export function assertWorkflowStepClaim(step: WorkflowStep, executionId: string): void {
   if (step.status !== 'RUNNING')
     throw new Error(`WORKFLOW_STEP_NOT_RUNNING:${step.workflowId}:${step.stepId}`);
   if (!executionId.trim() || step.claimExecutionId !== executionId)
     throw new Error(`WORKFLOW_STEP_CLAIM_MISMATCH:${step.workflowId}:${step.stepId}`);
+}
+
+export function assertWorkflowCompensationClaim(
+  compensation: WorkflowCompensation,
+  executionId: string,
+): void {
+  if (compensation.status !== 'RUNNING')
+    throw new Error(`WORKFLOW_COMPENSATION_NOT_RUNNING:${compensation.compensationId}`);
+  if (!executionId.trim() || compensation.claimExecutionId !== executionId)
+    throw new Error(`WORKFLOW_COMPENSATION_CLAIM_MISMATCH:${compensation.compensationId}`);
 }
 
 export function requireWorkflowEvidence(
