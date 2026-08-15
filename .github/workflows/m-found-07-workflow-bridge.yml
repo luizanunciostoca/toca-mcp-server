@@ -34,7 +34,6 @@ jobs:
             src/events/outbox-dispatcher.ts \
             src/events/transactional-consumer.ts \
             src/persistence/postgres-workflow-store.ts \
-            migrations/009_transactional_outbox.sql \
             test/transactional-outbox.test.ts \
             test/transactional-outbox-postgres-contract.test.ts
           pnpm quality
