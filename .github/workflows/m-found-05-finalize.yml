@@ -36,7 +36,6 @@ jobs:
                   raise SystemExit(f'PATCH_ANCHOR_NOT_FOUND:{path}:{old[:80]!r}')
               p.write_text(text.replace(old, new, 1))
 
-          # Canonical INVALIDATED lifecycle + invalidate-on-change helper.
           replace_once(
               'src/governance/approval-governance.ts',
               "  'FAILED_REVIEW_REQUIRED',\n  'REVOKED',",
@@ -67,7 +66,6 @@ jobs:
           """,
           )
 
-          # R27 surface from the approved manual. Four are implemented now; two remain planned.
           replace_once(
               'src/governance/capability-ids.ts',
               "    'approval.issue',\n    'approval.consume',",
@@ -102,8 +100,6 @@ jobs:
             'request',""",
           )
 
-          # The migration must accept historical CONSUMED rows and does not need unused
-          # invalidation timestamp columns: INVALIDATED is terminal and evidence-backed.
           migration = Path('migrations/006_approval_execution_atomicity.sql')
           text = migration.read_text()
           text = text.replace(
@@ -119,8 +115,6 @@ jobs:
               text = text[:start] + text[end+1:]
           migration.write_text(text)
 
-          # Catalog cardinality grows by the six new R27 capabilities; eight compatibility
-          # aliases remain, so the effective semantic catalog grows from 723 to 729.
           replace_once(
               'test/governance-catalog.test.ts',
               "it('materializes the 731-capability catalog using contract v1.1 without pretending inference is explicit', () => {\n    expect(() => validateCapabilityCatalog()).not.toThrow();\n    expect(CAPABILITY_CATALOG).toHaveLength(731);",
@@ -137,7 +131,6 @@ jobs:
               "      raw_count: 737,\n      compatibility_alias_count: 8,\n      effective_count: 729,",
           )
 
-          # Unit proof that payload drift invalidates approval rather than silently reusing it.
           replace_once(
               'test/approval-governance.test.ts',
               "  issueApproval,\n  requestApproval,",
@@ -145,7 +138,7 @@ jobs:
           )
           approval_test = Path('test/approval-governance.test.ts')
           text = approval_test.read_text()
-          anchor = "\n  it('prevents reusing an execution id even after a safe release', async () => {"
+          anchor = "\n  it('persists optimistic history and blocks stale direct writes', async () => {"
           if anchor not in text:
               raise SystemExit('PATCH_ANCHOR_NOT_FOUND:approval-governance-test')
           test = """
@@ -196,7 +189,6 @@ jobs:
             src/governance/approval-governance.ts \
             src/governance/capability-ids.ts \
             src/governance/capability-catalog.ts \
-            migrations/006_approval_execution_atomicity.sql \
             test/governance-catalog.test.ts \
             test/capability-resolution.test.ts \
             test/approval-governance.test.ts \
