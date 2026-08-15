@@ -28,14 +28,7 @@ export interface CapabilityValidationReport {
   readonly previousStatus: CapabilityStatus;
   readonly recommendedStatus: CapabilityStatus;
   readonly event:
-    | 'UNCHANGED'
-    | 'PROMOTE'
-    | 'DEMOTE'
-    | 'DEGRADE'
-    | 'BLOCK'
-    | 'DISABLE'
-    | 'SUSPEND'
-    | 'RETIRE';
+    'UNCHANGED' | 'PROMOTE' | 'DEMOTE' | 'DEGRADE' | 'BLOCK' | 'DISABLE' | 'SUSPEND' | 'RETIRE';
   readonly failedChecks: readonly (keyof CapabilityLifecycleEvidence)[];
   readonly unknownChecks: readonly (keyof CapabilityLifecycleEvidence)[];
   readonly evidence: readonly string[];
@@ -217,10 +210,7 @@ export function validateCapabilityLifecycle(
   if (eligibleStatus === 'CONNECTED' && checks.integrationTest.result === 'PASS') {
     eligibleStatus = 'INTEGRATION_VALIDATED';
   }
-  if (
-    eligibleStatus === 'INTEGRATION_VALIDATED' &&
-    allPassed(checks, ['smokeTest', 'readback'])
-  ) {
+  if (eligibleStatus === 'INTEGRATION_VALIDATED' && allPassed(checks, ['smokeTest', 'readback'])) {
     eligibleStatus = 'PRODUCTION_VALIDATED';
   }
 

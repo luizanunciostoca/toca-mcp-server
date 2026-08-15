@@ -1,20 +1,15 @@
-name: M-FOUND-02 Formatter
+name: Quality Gate
 
 on:
   pull_request:
-
-permissions:
-  contents: write
+  push:
+    branches: [main]
 
 jobs:
-  format:
+  quality:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
@@ -24,106 +19,15 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Apply approval precedence correction
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('src/governance/capability-catalog.ts')
-          text = path.read_text()
-          anchor = "  const providerPermissions = permissionRequirementsForCapability(capabilityId);\n"
-          insert = """  const providerPermissions = permissionRequirementsForCapability(capabilityId);
-          const defaultApprovalRequired =
-            risk === 'WRITE_EXTERNAL' || risk === 'FINANCIAL_IMPACT' || risk === 'DESTRUCTIVE';
-          """
-          if anchor not in text:
-              raise SystemExit('CAPABILITY_APPROVAL_ANCHOR_NOT_FOUND')
-          text = text.replace(anchor, insert, 1)
-          old = """    approval_required:
-                override?.approval_required ??
-                risk === 'WRITE_EXTERNAL' ||
-                risk === 'FINANCIAL_IMPACT' ||
-                risk === 'DESTRUCTIVE',
-          """
-          if old not in text:
-              raise SystemExit('CAPABILITY_APPROVAL_EXPRESSION_NOT_FOUND')
-          text = text.replace(
-              old,
-              "    approval_required: override?.approval_required ?? defaultApprovalRequired,\n",
-              1,
-          )
-          path.write_text(text)
-          PY
-      - name: Format contract files
-        run: |
-          pnpm exec prettier --write \
-            src/core/tool-registry.ts \
-            src/governance/capability-catalog.ts \
-            src/governance/capability-contract-overrides.ts \
-            src/governance/capability-lifecycle.ts \
-            src/governance/types.ts \
-            test/capability-lifecycle.test.ts \
-            test/governance-catalog.test.ts
-      - name: Restore canonical Quality Gate
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          Path('.github/workflows/quality.yml').write_text("""name: Quality Gate
-
-          on:
-            pull_request:
-            push:
-              branches: [main]
-
-          jobs:
-            quality:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - uses: pnpm/action-setup@v4
-                  with:
-                    version: 10.15.0
-                - uses: actions/setup-node@v4
-                  with:
-                    node-version: 24
-                    cache: pnpm
-                - name: Install dependencies
-                  run: pnpm install --frozen-lockfile
-                - name: Format check
-                  run: pnpm format:check
-                - name: Architecture check
-                  run: pnpm architecture:check
-                - name: Lint
-                  run: pnpm lint
-                - name: Typecheck
-                  run: pnpm typecheck
-                - name: Test
-                  run: pnpm test
-                - name: Build
-                  run: pnpm build
-          """)
-          PY
-          pnpm exec prettier --write .github/workflows/quality.yml
-      - name: Create deterministic formatting commit
-        run: |
-          git diff --check
-          git config user.name "toca-foundation-bot"
-          git config user.email "47362223+luizidebook@users.noreply.github.com"
-          git add \
-            .github/workflows/quality.yml \
-            src/core/tool-registry.ts \
-            src/governance/capability-catalog.ts \
-            src/governance/capability-contract-overrides.ts \
-            src/governance/capability-lifecycle.ts \
-            src/governance/types.ts \
-            test/capability-lifecycle.test.ts \
-            test/governance-catalog.test.ts
-          git diff --cached --check
-          git commit -m "style: finalize capability contract v1.1"
-      - name: Push deterministic formatting commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin "HEAD:${HEAD_REF}"
+      - name: Format check
+        run: pnpm format:check
+      - name: Architecture check
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build

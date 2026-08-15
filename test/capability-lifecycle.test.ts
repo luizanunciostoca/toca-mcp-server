@@ -31,10 +31,18 @@ describe('R22 capability lifecycle validation', () => {
     expect(specified.recommendedStatus).toBe('SPECIFIED');
     expect(promoteCapability('PLANNED', specified)).toBe('SPECIFIED');
 
-    const implemented = validateCapabilityLifecycle('example.resource.read', 'SPECIFIED', allPass());
+    const implemented = validateCapabilityLifecycle(
+      'example.resource.read',
+      'SPECIFIED',
+      allPass(),
+    );
     expect(implemented.recommendedStatus).toBe('IMPLEMENTED');
 
-    const connected = validateCapabilityLifecycle('example.resource.read', 'IMPLEMENTED', allPass());
+    const connected = validateCapabilityLifecycle(
+      'example.resource.read',
+      'IMPLEMENTED',
+      allPass(),
+    );
     expect(connected.recommendedStatus).toBe('CONNECTED');
 
     const integrationValidated = validateCapabilityLifecycle(

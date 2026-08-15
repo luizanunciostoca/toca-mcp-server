@@ -368,6 +368,8 @@ function createDefinition(
   );
   const operation = override?.operation ?? capabilityId;
   const providerPermissions = permissionRequirementsForCapability(capabilityId);
+  const defaultApprovalRequired =
+    risk === 'WRITE_EXTERNAL' || risk === 'FINANCIAL_IMPACT' || risk === 'DESTRUCTIVE';
 
   return {
     capability_id: capabilityId,
@@ -381,17 +383,15 @@ function createDefinition(
     lifecycle_status: status,
     risk_class: risk,
     side_effects: sideEffects,
-    approval_required:
-      override?.approval_required ??
-      risk === 'WRITE_EXTERNAL' ||
-      risk === 'FINANCIAL_IMPACT' ||
-      risk === 'DESTRUCTIVE',
+    approval_required: override?.approval_required ?? defaultApprovalRequired,
     idempotent,
     provider: override?.provider ?? runtimeDefinition?.provider ?? inferredProvider(capabilityId),
     operation,
     authentication_mode: override?.authentication_mode ?? authenticationMode(capabilityId),
     required_scopes:
-      override?.required_scopes ?? runtimeDefinition?.requiredScopes ?? inferredScopes(capabilityId, risk),
+      override?.required_scopes ??
+      runtimeDefinition?.requiredScopes ??
+      inferredScopes(capabilityId, risk),
     permission_requirements:
       override?.permission_requirements ??
       (providerPermissions.length > 0

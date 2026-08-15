@@ -1,9 +1,5 @@
 export type RiskClass =
-  | 'READ'
-  | 'WRITE_REVERSIBLE'
-  | 'WRITE_EXTERNAL'
-  | 'FINANCIAL_IMPACT'
-  | 'DESTRUCTIVE';
+  'READ' | 'WRITE_REVERSIBLE' | 'WRITE_EXTERNAL' | 'FINANCIAL_IMPACT' | 'DESTRUCTIVE';
 
 /**
  * Canonical TOCA OS capability lifecycle.

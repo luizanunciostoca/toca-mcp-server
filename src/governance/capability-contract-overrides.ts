@@ -150,9 +150,7 @@ const systemCapabilitiesOutput = closedObject(
  * RUNTIME_BOUND or LEGACY_INFERRED by the catalog builder instead of being
  * presented as fully specified contracts.
  */
-export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<
-  Record<string, CapabilityContractOverride>
-> = {
+export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<Record<string, CapabilityContractOverride>> = {
   'system.health': {
     description: 'Return the health and production-foundation identity of the TOCA MCP server.',
     contract_quality: 'EXPLICIT',
@@ -190,8 +188,7 @@ export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<
     rollback_method: 'DELETE_CREATED_COPY_OR_MANUAL_RECOVERY',
   },
   'operations.opening.checklist.execute': {
-    description:
-      'Execute and persist the opening checklist state for a TOCA operational context.',
+    description: 'Execute and persist the opening checklist state for a TOCA operational context.',
     contract_quality: 'EXPLICIT',
     risk_class: 'WRITE_REVERSIBLE',
     side_effects: true,
@@ -204,8 +201,7 @@ export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<
     rollback_method: 'COMPENSATING_STATE_TRANSITION',
   },
   'operations.closing.checklist.execute': {
-    description:
-      'Execute and persist the closing checklist state for a TOCA operational context.',
+    description: 'Execute and persist the closing checklist state for a TOCA operational context.',
     contract_quality: 'EXPLICIT',
     risk_class: 'WRITE_REVERSIBLE',
     side_effects: true,
@@ -236,11 +232,15 @@ export function permissionRequirementsForCapability(
   capabilityId: string,
 ): readonly ProviderPermissionRequirement[] {
   if (/^(instagram|social|engagement)\./.test(capabilityId)) {
-    if (/\.(publish|publication\.schedule)$/.test(capabilityId) || capabilityId.startsWith('instagram.publish.')) {
+    if (
+      /\.(publish|publication\.schedule)$/.test(capabilityId) ||
+      capabilityId.startsWith('instagram.publish.')
+    ) {
       return INSTAGRAM_PUBLISH_PERMISSION_REQUIREMENTS;
     }
     if (/comment|reply/.test(capabilityId)) return INSTAGRAM_COMMENT_PERMISSION_REQUIREMENTS;
-    if (/message|conversation|\.send$/.test(capabilityId)) return INSTAGRAM_MESSAGE_PERMISSION_REQUIREMENTS;
+    if (/message|conversation|\.send$/.test(capabilityId))
+      return INSTAGRAM_MESSAGE_PERMISSION_REQUIREMENTS;
   }
   return [];
 }
