@@ -1,0 +1,54 @@
+name: M-FOUND-07 Workflow Bridge
+
+on:
+  push:
+    branches:
+      - feat/m-found-07-transactional-outbox
+
+permissions:
+  contents: write
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: python scripts/m-found-07-workflow-bridge.py
+      - name: Validate complete repository
+        run: |
+          pnpm exec prettier --write \
+            src/events/domain-events.ts \
+            src/events/transactional-outbox.ts \
+            src/events/postgres-transactional-outbox.ts \
+            src/events/outbox-dispatcher.ts \
+            src/events/transactional-consumer.ts \
+            src/persistence/postgres-workflow-store.ts \
+            migrations/009_transactional_outbox.sql \
+            test/transactional-outbox.test.ts \
+            test/transactional-outbox-postgres-contract.test.ts
+          pnpm quality
+      - name: Commit validated bridge
+        run: |
+          rm .github/workflows/m-found-07-workflow-bridge.yml scripts/m-found-07-workflow-bridge.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: integrate workflow events with transactional outbox"
+      - name: Push validated result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-07-transactional-outbox"
