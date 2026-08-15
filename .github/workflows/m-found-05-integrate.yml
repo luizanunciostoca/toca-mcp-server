@@ -1,0 +1,156 @@
+name: M-FOUND-05 Integrator
+
+on:
+  push:
+    branches: [feat/m-found-05-approval-atomicity]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply final approval atomicity contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def once(path, old, new):
+              p = Path(path); text = p.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f'ANCHOR_NOT_FOUND:{path}:{old[:70]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          gov = 'src/governance/approval-governance.ts'
+          once(gov,
+            "  'FAILED_REVIEW_REQUIRED',\n  'REVOKED',",
+            "  'FAILED_REVIEW_REQUIRED',\n  'INVALIDATED',\n  'REVOKED',")
+          once(gov,
+            "const DIRECT_PUT_FORBIDDEN_STATUSES: ReadonlySet<ApprovalStatus> = new Set(\n  APPROVAL_EXECUTION_STATUSES,\n);",
+            "const DIRECT_PUT_FORBIDDEN_STATUSES: ReadonlySet<ApprovalStatus> = new Set([\n  ...APPROVAL_EXECUTION_STATUSES,\n  'INVALIDATED',\n]);")
+          once(gov,
+            "  | {\n      readonly type: 'FAIL_REVIEW_REQUIRED';\n      readonly executionId: string;\n      readonly evidence: readonly string[];\n      readonly reason: string;\n      readonly now?: string;\n    };",
+            "  | {\n      readonly type: 'FAIL_REVIEW_REQUIRED';\n      readonly executionId: string;\n      readonly evidence: readonly string[];\n      readonly reason: string;\n      readonly now?: string;\n    }\n  | {\n      readonly type: 'INVALIDATE';\n      readonly descriptorSha256: string;\n      readonly evidence: readonly string[];\n      readonly now?: string;\n    };")
+          once(gov,
+            "    case 'FAIL_REVIEW_REQUIRED': {\n      if (!['EXECUTING', 'PROVIDER_READBACK'].includes(record.status))\n        throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->FAILED_REVIEW_REQUIRED`);",
+            "    case 'INVALIDATE': {\n      if (!RESERVABLE_STATUSES.has(record.status))\n        throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->INVALIDATED`);\n      if (transition.descriptorSha256 === record.descriptorSha256) return record;\n      const evidence = requireEvidence(\n        transition.evidence,\n        'APPROVAL_INVALIDATION_EVIDENCE_REQUIRED',\n      );\n      return {\n        ...record,\n        status: 'INVALIDATED',\n        evidence: mergeEvidence(record.evidence, evidence),\n        version: record.version + 1,\n      };\n    }\n    case 'FAIL_REVIEW_REQUIRED': {\n      if (!['EXECUTING', 'PROVIDER_READBACK'].includes(record.status))\n        throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->FAILED_REVIEW_REQUIRED`);")
+          once(gov,
+            "  if (capability.primary_route_id) allowedRoutes.add(capability.primary_route_id);",
+            "  if (capability.primary_route_id !== 'TRANSVERSAL')\n    allowedRoutes.add(capability.primary_route_id);")
+
+          ids='src/governance/capability-ids.ts'
+          once(ids,
+            "    'approval.issue',\n    'approval.consume',",
+            "    'approval.issue',\n    'approval.reserve',\n    'approval.release',\n    'approval.invalidate_on_change',\n    'approval.delegate',\n    'approval.execution.bind',\n    'approval.sla.escalate',\n    'approval.consume',")
+
+          cat='src/governance/capability-catalog.ts'
+          once(cat,
+            "  'approval.issue',\n  'approval.consume',",
+            "  'approval.issue',\n  'approval.reserve',\n  'approval.release',\n  'approval.invalidate_on_change',\n  'approval.execution.bind',\n  'approval.consume',")
+          once(cat,
+            "  'replace',\n  'request',",
+            "  'replace',\n  'reserve',\n  'release',\n  'bind',\n  'delegate',\n  'invalidate_on_change',\n  'request',")
+
+          # Migration remains backward-compatible with legacy CONSUMED rows. INVALIDATED
+          # is represented by status + evidence/history; no extra timestamp columns are needed.
+          m=Path('migrations/006_approval_execution_atomicity.sql'); text=m.read_text()
+          text=text.replace(
+            "  add column if not exists failed_review_at timestamptz,\n  add column if not exists failure_reason text,\n  add column if not exists invalidated_at timestamptz,\n  add column if not exists invalidation_reason text;",
+            "  add column if not exists failed_review_at timestamptz,\n  add column if not exists failure_reason text;")
+          start=text.find("alter table approval_records\n  drop constraint if exists approval_records_invalidation_check;")
+          if start >= 0:
+            marker="\nalter table approval_records\n  drop constraint if exists approval_records_execution_issued_check;"
+            end=text.find(marker,start)
+            if end < 0: raise SystemExit('INVALIDATION_CONSTRAINT_END_NOT_FOUND')
+            text=text[:start]+text[end+1:]
+          m.write_text(text)
+
+          # Update cardinality: six new R27 IDs, eight aliases retained.
+          t='test/governance-catalog.test.ts'; p=Path(t); text=p.read_text()
+          text=text.replace('731-capability catalog','737-capability catalog').replace('toHaveLength(731)','toHaveLength(737)')
+          p.write_text(text)
+          t='test/capability-resolution.test.ts'; p=Path(t); text=p.read_text()
+          text=text.replace('preserves the 731 compatibility IDs','preserves the compatibility IDs')
+          text=text.replace('raw_count: 731','raw_count: 737').replace('effective_count: 723','effective_count: 729')
+          p.write_text(text)
+
+          # Extend approval tests with an atomic invalidation transition.
+          t='test/approval-governance.test.ts'; p=Path(t); text=p.read_text()
+          if "type: 'INVALIDATE'" not in text:
+            anchor="\n  it('persists optimistic history and blocks stale direct writes', async () => {"
+            if anchor not in text: raise SystemExit('APPROVAL_TEST_ANCHOR_NOT_FOUND')
+            test="""
+
+            it('invalidates an approved descriptor atomically when its material payload changes', async () => {
+              const store = new InMemoryApprovalStore();
+              const approved = approvedRecord();
+              await store.put(approved);
+              const changedSha = hashApprovalDescriptor({ ...descriptor, dailyBudgetMinor: 18_000 });
+              const invalidated = await store.transition(approved.approvalId, {
+                type: 'INVALIDATE',
+                descriptorSha256: changedSha,
+                evidence: ['descriptor-changed:budget'],
+                now: '2026-08-14T21:01:00Z',
+              });
+              expect(invalidated).toMatchObject({ status: 'INVALIDATED', version: approved.version + 1 });
+              expect(verifyApproval(invalidated, {
+                requester: 'luiz', routeId: 'R28', capabilityId: 'meta_ads.campaign.create_paused',
+                descriptorSha256: hashApprovalDescriptor(descriptor), targetAccount: 'act_394512749760530',
+                requiredScope: ['meta_ads.campaign.create_paused'],
+              })).toMatchObject({ valid: false });
+            });
+            """
+            p.write_text(text.replace(anchor,test+anchor,1))
+
+          t='test/approval-migration-contract.test.ts'; p=Path(t); text=p.read_text()
+          if "'INVALIDATED'" not in text:
+            text=text.replace("      'FAILED_REVIEW_REQUIRED',\n    ])", "      'FAILED_REVIEW_REQUIRED',\n      'INVALIDATED',\n    ])")
+            p.write_text(text)
+          PY
+      - name: Format and validate
+        run: |
+          pnpm exec prettier --write \
+            src/core/executor.ts \
+            src/governance/approval-governance.ts \
+            src/governance/capability-ids.ts \
+            src/governance/capability-catalog.ts \
+            test/governance-catalog.test.ts \
+            test/capability-resolution.test.ts \
+            test/approval-governance.test.ts \
+            test/approval-migration-contract.test.ts
+          pnpm format:check
+          pnpm architecture:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm build
+      - name: Commit validated result
+        run: |
+          rm .github/workflows/m-found-05-integrate.yml
+          git config user.name "toca-foundation-bot"
+          git config user.email "47362223+luizidebook@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: complete R27 atomic approval contract"
+      - name: Push validated result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-05-approval-atomicity"
