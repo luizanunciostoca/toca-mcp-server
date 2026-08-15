@@ -157,6 +157,34 @@ describe('R20/R29 video and content foundation', () => {
         },
       ]),
     ).toThrow('VIDEO_MARKETING_MASTER_REQUIRED');
+
+    expect(() =>
+      validateSelectedVideoAssets([
+        {
+          assetId: 'asset-original',
+          sourceAssetId: 'asset-original',
+          masterAssetId: 'asset-master',
+          masterAvailable: true,
+          rightsStatus: 'PASS',
+          fitnessScore: 95,
+          selectionRationale: 'Incorrectly selected original despite available master',
+        },
+      ]),
+    ).toThrow('VIDEO_MARKETING_MASTER_NOT_SELECTED');
+
+    expect(() =>
+      validateSelectedVideoAssets([
+        {
+          assetId: 'asset-master',
+          sourceAssetId: 'asset-original',
+          masterAssetId: 'asset-master',
+          masterAvailable: true,
+          rightsStatus: 'PASS',
+          fitnessScore: 95,
+          selectionRationale: 'Marketing master selected as required',
+        },
+      ]),
+    ).not.toThrow();
   });
 
   it('validates caller-supplied safe areas and versioned duration policy', () => {
