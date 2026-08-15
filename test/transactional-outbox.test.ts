@@ -73,7 +73,9 @@ class FakeOutboxStore implements EventOutboxStore {
   }
 
   get(eventId: string): Promise<OutboxRecord | undefined> {
-    return Promise.resolve(eventId === this.claimed.record.eventId ? this.claimed.record : undefined);
+    return Promise.resolve(
+      eventId === this.claimed.record.eventId ? this.claimed.record : undefined,
+    );
   }
 
   claimAvailable(): Promise<readonly ClaimedOutboxEvent[]> {
@@ -89,9 +91,7 @@ class FakeOutboxStore implements EventOutboxStore {
     });
   }
 
-  markFailed(input: {
-    readonly nextAttemptAt?: string;
-  }): Promise<OutboxRecord> {
+  markFailed(input: { readonly nextAttemptAt?: string }): Promise<OutboxRecord> {
     this.failed += 1;
     this.nextAttemptAt = input.nextAttemptAt;
     return Promise.resolve({

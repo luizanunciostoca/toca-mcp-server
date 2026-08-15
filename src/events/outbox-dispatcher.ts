@@ -36,7 +36,10 @@ export class OutboxDispatcher {
     if (!options.workerId.trim()) throw new Error('OUTBOX_WORKER_ID_REQUIRED');
     if (!Number.isInteger(options.retry.baseDelayMs) || options.retry.baseDelayMs < 0)
       throw new Error('OUTBOX_RETRY_BASE_DELAY_INVALID');
-    if (!Number.isInteger(options.retry.maxDelayMs) || options.retry.maxDelayMs < options.retry.baseDelayMs)
+    if (
+      !Number.isInteger(options.retry.maxDelayMs) ||
+      options.retry.maxDelayMs < options.retry.baseDelayMs
+    )
       throw new Error('OUTBOX_RETRY_MAX_DELAY_INVALID');
     this.#batchSize = options.batchSize ?? 10;
     if (!Number.isInteger(this.#batchSize) || this.#batchSize < 1 || this.#batchSize > 100)

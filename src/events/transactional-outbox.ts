@@ -166,8 +166,7 @@ export function requireEventEvidence(
 }
 
 export function assertOutboxLimit(limit: number): void {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-    throw new Error('OUTBOX_LIMIT_INVALID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('OUTBOX_LIMIT_INVALID');
 }
 
 export function assertTimestamp(value: string, errorCode: string): void {

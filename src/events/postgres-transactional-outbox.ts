@@ -11,7 +11,6 @@ import {
   type ConsumerReceiptStatus,
   type DomainEventEnvelope,
   type EventOutboxStore,
-  type OutboxDeliveryAttempt,
   type OutboxDeliveryAttemptStatus,
   type OutboxRecord,
   type OutboxStatus,
@@ -256,7 +255,11 @@ export class PostgresTransactionalOutbox implements EventOutboxStore {
            status = 'DELIVERED', completed_at = $2::timestamptz,
            error_code = null, evidence = $3::jsonb
          where execution_id = $1 and status = 'CLAIMED'`,
-        [input.executionId, input.now, json(mergeEventEvidence(asStringArray(attemptRow.evidence), evidence))],
+        [
+          input.executionId,
+          input.now,
+          json(mergeEventEvidence(asStringArray(attemptRow.evidence), evidence)),
+        ],
       );
       if (attemptUpdate.rowCount !== 1) throw new Error('OUTBOX_DELIVERY_ATTEMPT_STATE_CONFLICT');
 
@@ -398,8 +401,7 @@ export class PostgresTransactionalOutbox implements EventOutboxStore {
             json(mergeEventEvidence(asStringArray(attemptRow.evidence), evidence)),
           ],
         );
-        if (attemptUpdate.rowCount !== 1)
-          throw new Error('OUTBOX_STALE_ATTEMPT_STATE_CONFLICT');
+        if (attemptUpdate.rowCount !== 1) throw new Error('OUTBOX_STALE_ATTEMPT_STATE_CONFLICT');
 
         const availableAt = terminal ? row.available_at : (input.nextAttemptAt ?? input.now);
         const updated = await client.query(
