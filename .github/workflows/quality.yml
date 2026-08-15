@@ -30,12 +30,7 @@ jobs:
             test/capability-lifecycle.test.ts
           )
           pnpm exec prettier --write "${files[@]}"
-          for file in "${files[@]}"; do
-            echo "===== FORMATTED:${file} ====="
-            cat "${file}"
-            echo
-            echo "===== END:${file} ====="
-          done
+          git diff -- "${files[@]}"
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
