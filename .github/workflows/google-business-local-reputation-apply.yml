@@ -29,6 +29,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply architecture patch
         run: node scripts/apply-google-business-local-reputation.mjs
+      - name: Apply lint corrections
+        run: node scripts/fix-google-business-local-reputation-lint.mjs
       - name: Format implementation
         run: pnpm format
       - name: Full Quality Gate
