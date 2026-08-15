@@ -143,6 +143,9 @@ export class GoogleAdsPaidMediaProvider {
       validateOnly: false,
       responseContentType: 'RESOURCE_NAME_ONLY',
     });
+    const campaignResourceName = extractCreatedCampaignResourceName(response.body);
+    if (!campaignResourceName) throw new Error('GOOGLE_ADS_CREATED_RESOURCE_NAME_REQUIRED');
+    this.assertCampaignResourceName(campaignResourceName);
     return {
       status: 'PROVIDER_MUTATION_ACCEPTED',
       expectedCampaignStatus: 'PAUSED',
@@ -150,24 +153,39 @@ export class GoogleAdsPaidMediaProvider {
       requestId: response.requestId,
       response: response.body,
       campaignName: prepared.plan.campaignName,
-      campaignResourceName: extractCreatedCampaignResourceName(response.body),
+      campaignResourceName,
     };
   }
 
-  readbackCampaign(campaignIdOrName: string): Promise<Record<string, unknown>> {
-    const campaignId = campaignIdFromResourceName(campaignIdOrName);
-    const numeric = /^\d+$/.test(campaignId);
+  async readbackCampaign(campaignIdOrName: string): Promise<Record<string, unknown>> {
+    const trimmed = campaignIdOrName.trim();
+    if (!trimmed) throw new Error('GOOGLE_ADS_CAMPAIGN_REFERENCE_REQUIRED');
+    let campaignId = trimmed;
+    let numeric = /^\d+$/.test(trimmed);
+    if (trimmed.startsWith('customers/')) {
+      campaignId = this.assertCampaignResourceName(trimmed);
+      numeric = true;
+    }
     const predicate = numeric
       ? `campaign.id = ${campaignId}`
-      : `campaign.name = '${escapeGaqlLiteral(campaignIdOrName)}'`;
-    return this.api
-      .search(
-        `SELECT campaign.id, campaign.resource_name, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.campaign_budget, campaign_budget.amount_micros FROM campaign WHERE ${predicate} LIMIT 1`,
-      )
-      .then((response) => ({
-        requestId: response.requestId,
-        results: response.body.results ?? [],
-      }));
+      : `campaign.name = '${escapeGaqlLiteral(trimmed)}'`;
+    const response = await this.api.search(
+      `SELECT campaign.id, campaign.resource_name, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.campaign_budget, campaign_budget.amount_micros FROM campaign WHERE ${predicate} LIMIT 1`,
+    );
+    const results = response.body.results ?? [];
+    const first = results[0] as Record<string, unknown> | undefined;
+    const campaign = first?.campaign as Record<string, unknown> | undefined;
+    if (campaign) {
+      const resourceName = campaign.resourceName;
+      if (typeof resourceName !== 'string') {
+        throw new Error('GOOGLE_ADS_READBACK_RESOURCE_NAME_REQUIRED');
+      }
+      const readbackId = this.assertCampaignResourceName(resourceName);
+      if (numeric && readbackId !== campaignId) {
+        throw new Error('GOOGLE_ADS_READBACK_CAMPAIGN_MISMATCH');
+      }
+    }
+    return { requestId: response.requestId, results };
   }
 
   async verifyPaused(campaignIdOrName: string): Promise<GoogleAdsProviderReadback> {
@@ -176,21 +194,30 @@ export class GoogleAdsPaidMediaProvider {
     const campaign = rows[0]?.campaign as Record<string, unknown> | undefined;
     return {
       verified: campaign?.status === 'PAUSED',
-      evidence: { campaignIdOrName, status: campaign?.status, readback },
+      evidence: {
+        campaignIdOrName,
+        resourceName: campaign?.resourceName,
+        status: campaign?.status,
+        readback,
+      },
     };
   }
 
   async readBudgetMicros(campaignId: string): Promise<number> {
     assertNumericId(campaignId, 'GOOGLE_ADS_CAMPAIGN_ID_INVALID');
     const readback = await this.readbackCampaign(campaignId);
+    return this.readBudgetFromReadback(readback);
+  }
+
+  async readActivationBudgetMicros(campaignId: string): Promise<number> {
+    assertNumericId(campaignId, 'GOOGLE_ADS_CAMPAIGN_ID_INVALID');
+    const readback = await this.readbackCampaign(campaignId);
     const rows = readback.results as Array<Record<string, unknown>>;
-    const budget = rows[0]?.campaignBudget as Record<string, unknown> | undefined;
-    const amount = Number(budget?.amountMicros);
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      throw new Error('GOOGLE_ADS_CAMPAIGN_BUDGET_AMOUNT_INVALID');
+    const campaign = rows[0]?.campaign as Record<string, unknown> | undefined;
+    if (campaign?.status !== 'PAUSED') {
+      throw new Error('GOOGLE_ADS_ACTIVATION_REQUIRES_PAUSED_READBACK');
     }
-    this.assertBudget(amount);
-    return amount;
+    return this.readBudgetFromReadback(readback);
   }
 
   minorUnitsForMicros(amountMicros: number): number {
@@ -199,7 +226,7 @@ export class GoogleAdsPaidMediaProvider {
   }
 
   async activateCampaign(campaignId: string): Promise<Record<string, unknown>> {
-    await this.readBudgetMicros(campaignId);
+    await this.readActivationBudgetMicros(campaignId);
     return this.updateStatus(campaignId, 'ENABLED');
   }
 
@@ -236,6 +263,7 @@ export class GoogleAdsPaidMediaProvider {
     if (typeof budgetResource !== 'string') {
       throw new Error('GOOGLE_ADS_CAMPAIGN_BUDGET_NOT_FOUND');
     }
+    this.assertBudgetResourceName(budgetResource);
     const response = await this.api.mutate(`/customers/${this.#customerId}/campaignBudgets:mutate`, {
       operations: [
         {
@@ -266,6 +294,17 @@ export class GoogleAdsPaidMediaProvider {
       `SELECT campaign.id, campaign.name, segments.date, metrics.conversions, metrics.conversions_value, metrics.all_conversions, metrics.all_conversions_value FROM campaign WHERE segments.date BETWEEN '${startDate}' AND '${endDate}' ORDER BY segments.date DESC LIMIT 500`,
     );
     return { requestId: response.requestId, results: response.body.results ?? [] };
+  }
+
+  private readBudgetFromReadback(readback: Record<string, unknown>): number {
+    const rows = readback.results as Array<Record<string, unknown>>;
+    const budget = rows[0]?.campaignBudget as Record<string, unknown> | undefined;
+    const amount = Number(budget?.amountMicros);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      throw new Error('GOOGLE_ADS_CAMPAIGN_BUDGET_AMOUNT_INVALID');
+    }
+    this.assertBudget(amount);
+    return amount;
   }
 
   private validatePlan(plan: GoogleAdsCampaignPlan): GoogleAdsCampaignPlan {
@@ -305,6 +344,22 @@ export class GoogleAdsPaidMediaProvider {
       campaignName: plan.campaignName.trim(),
       budgetName: plan.budgetName.trim(),
     };
+  }
+
+  private assertCampaignResourceName(resourceName: string): string {
+    const match = /^customers\/(\d{10})\/campaigns\/(\d+)$/.exec(resourceName);
+    if (!match || match[1] !== this.#customerId) {
+      throw new Error('GOOGLE_ADS_CAMPAIGN_RESOURCE_BOUNDARY_VIOLATION');
+    }
+    return match[2] as string;
+  }
+
+  private assertBudgetResourceName(resourceName: string): string {
+    const match = /^customers\/(\d{10})\/campaignBudgets\/(\d+)$/.exec(resourceName);
+    if (!match || match[1] !== this.#customerId) {
+      throw new Error('GOOGLE_ADS_BUDGET_RESOURCE_BOUNDARY_VIOLATION');
+    }
+    return match[2] as string;
   }
 
   private assertBudget(amountMicros: number): void {
@@ -394,11 +449,6 @@ function extractCreatedCampaignResourceName(body: Record<string, unknown>): stri
     if (typeof resourceName === 'string') return resourceName;
   }
   return undefined;
-}
-
-function campaignIdFromResourceName(value: string): string {
-  const match = /\/campaigns\/(\d+)$/.exec(value);
-  return match?.[1] ?? value;
 }
 
 function assertCriterionAllowlist(
