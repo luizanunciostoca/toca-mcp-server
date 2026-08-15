@@ -1,12 +1,14 @@
 # M-FOUND-06 — Durable Workflow Persistence
 
-Status: **VALIDATED IN RUNNER — OFFICIAL QUALITY GATE PENDING**
+Status: **VALIDATED IN BRANCH — READY TO MERGE**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `166b4e98a636c0fd5b64c849fd3af986d0593b9e`
 
-Validated full repository run: `31862801088` — **SUCCESS** (`pnpm quality`)
+Validated full repository runner: `31862801088` — **SUCCESS** (`pnpm quality`)
+
+Validated official Quality Gate: `31862896583` / run `#1030` — **SUCCESS**
 
 ## Objective
 
