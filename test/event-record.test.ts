@@ -48,18 +48,10 @@ describe('M-FOUND-09 EventRecord contract', () => {
 
   it('rejects invalid schedules and invalid IANA timezones', () => {
     expect(() =>
-      validateSchedule(
-        '2026-08-15T20:00:00.000Z',
-        '2026-08-15T19:00:00.000Z',
-        'America/Bahia',
-      ),
+      validateSchedule('2026-08-15T20:00:00.000Z', '2026-08-15T19:00:00.000Z', 'America/Bahia'),
     ).toThrow('EVENT_RECORD_TIME_RANGE_INVALID');
     expect(() =>
-      validateSchedule(
-        '2026-08-15T19:00:00.000Z',
-        '2026-08-15T20:00:00.000Z',
-        'Mars/Olympus',
-      ),
+      validateSchedule('2026-08-15T19:00:00.000Z', '2026-08-15T20:00:00.000Z', 'Mars/Olympus'),
     ).toThrow('EVENT_RECORD_TIMEZONE_INVALID');
   });
 
@@ -68,8 +60,6 @@ describe('M-FOUND-09 EventRecord contract', () => {
       'source:a',
       'source:b',
     ]);
-    expect(() => requireEventRecordEvidence([' ', ''])).toThrow(
-      'EVENT_RECORD_EVIDENCE_REQUIRED',
-    );
+    expect(() => requireEventRecordEvidence([' ', ''])).toThrow('EVENT_RECORD_EVIDENCE_REQUIRED');
   });
 });

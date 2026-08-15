@@ -60,6 +60,8 @@ describe('M-FOUND-09 PostgreSQL EventRecord contract', () => {
     const store = repositoryFile('src/persistence/postgres-event-record-store.ts');
     expect(store).toContain('canonicalJson(left.attributes) === canonicalJson(right.attributes)');
     expect(store).toContain('EVENT_RECORD_ATTRIBUTES_INVALID');
-    expect(store).not.toContain('JSON.stringify(left.attributes) === JSON.stringify(right.attributes)');
+    expect(store).not.toContain(
+      'JSON.stringify(left.attributes) === JSON.stringify(right.attributes)',
+    );
   });
 });

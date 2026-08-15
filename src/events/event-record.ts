@@ -115,7 +115,11 @@ export interface EventRecordStore {
   updateDetails(input: UpdateEventRecordDetailsInput): Promise<EventRecord>;
   transitionStatus(input: TransitionEventRecordStatusInput): Promise<EventRecord>;
   attachExternalRef(input: AttachEventRecordExternalRefInput): Promise<EventRecordExternalRef>;
-  listBySeries(tenantId: string, seriesKey: string, limit?: number): Promise<readonly EventRecord[]>;
+  listBySeries(
+    tenantId: string,
+    seriesKey: string,
+    limit?: number,
+  ): Promise<readonly EventRecord[]>;
   listByTimeRange(input: {
     readonly tenantId: string;
     readonly from: string;
@@ -157,7 +161,8 @@ export function validateEventRecord(record: EventRecord): void {
   if (record.seriesKey !== null) requireText(record.seriesKey, 'EVENT_RECORD_SERIES_KEY_INVALID');
   requireText(record.name, 'EVENT_RECORD_NAME_REQUIRED');
   requireText(record.eventType, 'EVENT_RECORD_TYPE_REQUIRED');
-  if (!EVENT_RECORD_STATUSES.includes(record.status)) throw new Error('EVENT_RECORD_STATUS_INVALID');
+  if (!EVENT_RECORD_STATUSES.includes(record.status))
+    throw new Error('EVENT_RECORD_STATUS_INVALID');
   validateSchedule(record.startsAt, record.endsAt, record.timezone);
   if (record.venueName !== null) requireText(record.venueName, 'EVENT_RECORD_VENUE_INVALID');
   validateAttributes(record.attributes);

@@ -141,7 +141,8 @@ export class PostgresEventRecordStore implements EventRecordStore {
         const existingRow = existingResult.rows[0];
         if (!existingRow) throw new Error('EVENT_RECORD_IDEMPOTENCY_LOOKUP_FAILED');
         const existing = eventRecordFromRow(existingRow);
-        if (!sameCreateIntent(existing, record)) throw new Error('EVENT_RECORD_IDEMPOTENCY_CONFLICT');
+        if (!sameCreateIntent(existing, record))
+          throw new Error('EVENT_RECORD_IDEMPOTENCY_CONFLICT');
         await client.query('commit');
         return existing;
       }
@@ -185,8 +186,12 @@ export class PostgresEventRecordStore implements EventRecordStore {
       assertExpectedVersion(current, input.expectedVersion);
       const next: EventRecord = {
         ...current,
-        seriesKey: input.seriesKey === undefined ? current.seriesKey : nullableText(input.seriesKey),
-        name: input.name === undefined ? current.name : requireText(input.name, 'EVENT_RECORD_NAME_REQUIRED'),
+        seriesKey:
+          input.seriesKey === undefined ? current.seriesKey : nullableText(input.seriesKey),
+        name:
+          input.name === undefined
+            ? current.name
+            : requireText(input.name, 'EVENT_RECORD_NAME_REQUIRED'),
         eventType:
           input.eventType === undefined
             ? current.eventType
@@ -596,7 +601,7 @@ function sameCreateIntent(left: EventRecord, right: EventRecord): boolean {
     left.endsAt === right.endsAt &&
     left.timezone === right.timezone &&
     left.venueName === right.venueName &&
-    JSON.stringify(left.attributes) === JSON.stringify(right.attributes)
+    canonicalJson(left.attributes) === canonicalJson(right.attributes)
   );
 }
 
@@ -604,22 +609,32 @@ function asEventRecord(value: unknown): EventRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('EVENT_RECORD_REVISION_SNAPSHOT_INVALID');
   const candidate = value as EventRecord;
-  validateEventRecord(candidate);
+  try {
+    validateEventRecord(candidate);
+  } catch {
+    throw new Error('EVENT_RECORD_REVISION_SNAPSHOT_INVALID');
+  }
   return candidate;
 }
 
-function asAttributes(
-  value: unknown,
-): Readonly<Record<string, string | number | boolean | null>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+function asAttributes(value: unknown): Readonly<Record<string, string | number | boolean | null>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('EVENT_RECORD_ATTRIBUTES_INVALID');
   const entries = Object.entries(value as Record<string, unknown>);
   const normalized: Record<string, string | number | boolean | null> = {};
   for (const [key, item] of entries) {
-    if (item === null || ['string', 'number', 'boolean'].includes(typeof item)) {
-      normalized[key] = item as string | number | boolean | null;
-    }
+    if (item !== null && !['string', 'number', 'boolean'].includes(typeof item))
+      throw new Error('EVENT_RECORD_ATTRIBUTES_INVALID');
+    normalized[key] = item as string | number | boolean | null;
   }
+  validateAttributes(normalized);
   return normalized;
+}
+
+function canonicalJson(value: Readonly<Record<string, string | number | boolean | null>>): string {
+  return JSON.stringify(
+    Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))),
+  );
 }
 
 function asStringArray(value: unknown): readonly string[] {
