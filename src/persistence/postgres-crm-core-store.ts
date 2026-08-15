@@ -145,7 +145,7 @@ interface IdempotencyRow {
   readonly request_hash: string;
   readonly record_type: CrmRecordType;
   readonly record_id: string;
-  readonly response_snapshot: unknown | null;
+  readonly response_snapshot: Readonly<Record<string, unknown>> | null;
   readonly completed_at: Date | string | null;
 }
 
@@ -1009,7 +1009,7 @@ async function beginIdempotency(
   operation: string,
   recordType: CrmRecordType,
   recordId: string,
-): Promise<unknown | undefined> {
+): Promise<Readonly<Record<string, unknown>> | undefined> {
   validateCrmScope(input);
   const key = requireCrmText(input.idempotencyKey, 'CRM_IDEMPOTENCY_KEY_REQUIRED');
   const requestHash = hashIntent(input);
