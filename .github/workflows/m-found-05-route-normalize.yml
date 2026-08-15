@@ -1,0 +1,53 @@
+name: M-FOUND-05 Route Guard Normalizer
+
+on:
+  push:
+    branches: [feat/m-found-05-approval-atomicity]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Normalize route guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/governance/approval-governance.ts')
+          text=p.read_text()
+          old="  if (capability.primary_route_id !== 'TRANSVERSAL') allowedRoutes.add(capability.primary_route_id);"
+          new="  if (capability.primary_route_id !== 'TRANSVERSAL')\n    allowedRoutes.add(capability.primary_route_id);"
+          if old in text:
+            p.write_text(text.replace(old,new,1))
+          elif new not in text:
+            raise SystemExit('ROUTE_GUARD_NOT_FOUND')
+          PY
+          pnpm exec prettier --write src/governance/approval-governance.ts
+          rm .github/workflows/m-found-05-route-normalize.yml
+      - name: Commit and push
+        run: |
+          git config user.name "toca-foundation-bot"
+          git config user.email "47362223+luizidebook@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "style: normalize approval route guard"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-05-approval-atomicity"
