@@ -581,7 +581,7 @@ function assertApprovalRequest(input: ApprovalRequestInput, now: string): void {
   if (!capability) throw new Error('APPROVAL_CAPABILITY_UNKNOWN');
   const allowedRoutes = new Set<RouteId>();
   if (capability.route_id !== 'TRANSVERSAL') allowedRoutes.add(capability.route_id);
-  if (capability.primary_route_id) allowedRoutes.add(capability.primary_route_id);
+  if (capability.primary_route_id !== 'TRANSVERSAL') allowedRoutes.add(capability.primary_route_id);
   for (const routeId of capability.consumer_route_ids) allowedRoutes.add(routeId);
   if (!allowedRoutes.has(input.routeId)) throw new Error('APPROVAL_CAPABILITY_ROUTE_MISMATCH');
   if (!input.targetAccount.trim()) throw new Error('APPROVAL_TARGET_REQUIRED');

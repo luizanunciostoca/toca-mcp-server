@@ -8,10 +8,7 @@ import {
   type PolicyContext,
 } from './policy.js';
 import type { ToolDefinition } from './tool-registry.js';
-import type {
-  ApprovalAtomicTransition,
-  ApprovalStore,
-} from '../governance/approval-governance.js';
+import type { ApprovalAtomicTransition, ApprovalStore } from '../governance/approval-governance.js';
 
 export interface ProviderReadbackResult {
   readonly verified: boolean;
