@@ -1,22 +1,24 @@
 # M-FOUND-11 — TOCA Core MCP Surface
 
-Status: **IMPLEMENTED — MERGE BLOCKED UNTIL FULL QUALITY CAN RUN**
+Status: **IMPLEMENTED + HARDENED — MERGE BLOCKED UNTIL FIXED-HEAD QUALITY IS GREEN**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
-Initial branch base: `76aec57a707161f4ca8484059b8ec302b9be6910` (M-FOUND-09)
+Initial branch base: `76aec57a707161f4ca8484059b8ec302b9be6910` (M-FOUND-09).
 
-Reconciled `main` base: `88de675febdb1142f65c1354effef2ef2a9e0588` via mechanical sync PR #110. This base includes M-FOUND-10 CRM Core Records from PR #102 (`a33bfb18614b01b1f263edd1d8dee497c3a47495`) and Google Business foundation PR #106.
+Current reconciled `main` base: `b0d067e9cc6b469fdb1421ab7a25a25a3b0f1f47` (Measurement / Ticketing Read-Only / Attribution foundation, PR #111). The branch was rebuilt cleanly on this SHA while preserving only the six M-FOUND-11 files.
+
+This base also includes M-FOUND-10 CRM Core Records from PR #102 and Google Business foundation from PR #106.
 
 ## Objective
 
-Expose TOCA Core to ChatGPT through a deliberately small, governed and stable MCP facade without turning the internal capability catalog into hundreds of MCP tools and without creating a second MCP server, router, orchestrator or capability registry.
+Expose TOCA Core to ChatGPT through a deliberately small, governed and stable MCP facade without turning the internal capability catalog into hundreds of MCP tools and without creating another MCP server, router, orchestrator, workflow engine, scheduler, approval engine, audit ledger or capability registry.
 
-ChatGPT remains the reasoning/orchestration layer. `toca-mcp-server` remains the deterministic execution boundary. The canonical capability catalog, policy engine, approval lifecycle, durable workflows, audit ledger, provider adapters and EventRecord stores remain the underlying source contracts.
+ChatGPT remains the reasoning/orchestration layer. `toca-mcp-server` remains the deterministic execution boundary.
 
 ## Public MCP facade
 
-The public surface is exactly 12 tools:
+The public surface remains exactly 12 tools:
 
 1. `toca.system.health`
 2. `toca.capabilities.search`
@@ -31,145 +33,231 @@ The public surface is exactly 12 tools:
 11. `toca.audit.query`
 12. `toca.event.get`
 
-Existing provider services and adapters are no longer registered as independent ChatGPT-facing MCP tools by `createTocaServer`. They are resolved internally by `toca.execute` through explicit typed runtime bindings over the existing `ToolRegistry` and canonical capability catalog.
-
-The runtime resolver is a dispatch adapter, not another registry: catalog membership and lifecycle remain canonical in `src/governance/capability-catalog.ts`, while active runtime enablement remains canonical in `src/registry.ts`.
+Provider/domain capabilities remain internal. New CRM, Measurement, Privacy, Google Business or other capabilities are not promoted into dedicated MCP tools merely for convenience.
 
 ## Execution pipeline
 
-`toca.execute` resolves and enforces:
+`toca.execute` enforces:
 
-`authenticated identity → canonical capability/alias → active runtime binding → typed input schema → risk/authorization → policy → exact approval descriptor → idempotency binding → handler/provider → mandatory read-back for side effects → immutable audit`
+`authenticated identity → canonical capability/alias → active runtime binding → typed input schema → authorization → policy/risk → exact approval descriptor → idempotency → handler/provider → mandatory read-back → immutable audit`
 
-Important properties:
+Hardening after reconciliation adds these fail-closed requirements:
 
-- identity is mandatory for execution;
-- a catalogued capability without an active runtime binding fails with `CAPABILITY_NOT_EXECUTABLE`;
-- runtime risk and side-effect metadata must match the canonical capability contract;
-- executable payloads are parsed by concrete runtime schemas before policy/execution;
-- every side effect must resolve deterministic idempotency before the handler is invoked;
-- every side effect must define provider/read-store read-back before the handler is invoked;
+- runtime risk class must equal the canonical capability contract;
+- runtime side-effect metadata must equal the canonical contract;
+- runtime lifecycle status must equal the canonical lifecycle status;
+- runtime idempotency metadata must equal the canonical contract;
+- runtime formal-approval semantics must equal the canonical contract;
+- a local/runtime registry cannot promote a capability above the canonical lifecycle;
+- every side effect must expose deterministic idempotency before execution;
+- every side effect must define read-back before execution;
+- successful side-effect read-back must contain non-empty evidence and identify the exact external/internal resource read back;
 - formal-approval capabilities must resolve a target account;
-- writes still depend on existing lifecycle policy, so a side-effect capability that is not `PRODUCTION_VALIDATED` remains denied;
-- no test performs a real provider write or spends budget.
+- catalog-only capabilities remain non-executable without an explicit runtime binding.
 
-## Exact approval binding
+## Approval descriptor and requester binding
 
 The facade does not accept a free-form approval descriptor.
 
-`toca.approval.request` parses the exact capability payload through the same runtime schema used by execution and constructs a canonical descriptor containing:
+The descriptor is reconstructed from the typed runtime payload and now includes:
 
 - canonical capability ID;
+- authenticated principal ID;
+- tenant ID;
+- workspace ID;
+- organization ID;
 - parsed payload;
 - resolved target account;
 - deterministic idempotency key;
-- financial context when the runtime binding can derive one.
+- financial context when supplied by the binding.
 
-The existing approval engine hashes this descriptor with stable SHA-256 canonicalization. `toca.execute` reconstructs the same descriptor. Any material payload, target, idempotency or financial change therefore changes the descriptor hash and invalidates the ApprovalRecord.
+The descriptor uses canonical SHA-256 hashing through the existing Approval Engine. Payload drift, requester drift, tenant/workspace/organization drift, target drift, idempotency drift or financial drift therefore changes the descriptor hash.
 
 Formal approval remains atomic through the existing lifecycle:
 
 `APPROVED → RESERVED → EXECUTING → PROVIDER_READBACK → CONSUMED`
 
-No new approval subsystem was created.
+No new approval subsystem was introduced.
 
-## Mandatory provider read-back
+## Provider read-back and audit binding
 
-A side-effect runtime binding without `providerReadback` is rejected before its handler can execute.
+Every side effect must have a runtime `providerReadback` binding.
 
-For reversible internal scheduler writes, read-back is performed against the durable scheduler store. For provider writes, the binding must re-read the provider and prove the expected state. Current Meta Ads create-paused binding remains lifecycle-blocked from production execution; if its canonical lifecycle is later promoted, its binding reads the campaign back and requires PAUSED state.
+The core now binds successful execution audit records to:
 
-`toca.verify` independently verifies the immutable audit chain and performs a fresh read-back for side effects through the same runtime binding. It requires execution ID, correlation ID, canonical capability, typed payload and execution result, and checks that the audit execution was for that capability inside the authenticated tenant.
+- `core:descriptor-sha256:<exact execution descriptor hash>`;
+- normalized provider/read-store evidence;
+- the exact `externalResourceId` confirmed by read-back.
 
-## Capability discovery
+TOCA-managed Instagram scheduler create/reschedule read-back must prove the job is `SCHEDULED`; cancellation read-back must prove the job is `CANCELED`. Each path records the job ID as `externalResourceId`.
 
-`toca.capabilities.search` and `toca.capabilities.describe` read the effective canonical catalog rather than MCP tool registration count.
+Meta Ads create-paused remains canonically `IMPLEMENTED`, not `PRODUCTION_VALIDATED`, and therefore remains lifecycle-blocked. Its existing future binding reads the campaign back and requires paused state, but M-FOUND-11 does not promote it.
+
+## `toca.verify`
+
+`toca.verify` now rejects ambiguous replay/confusion paths by requiring all of the following:
+
+- immutable audit chain is valid;
+- execution ID and correlation locate the audited execution;
+- authenticated tenant matches every selected execution record;
+- authenticated requester matches the audited requester;
+- requested capability resolves to the same canonical capability recorded in audit;
+- typed payload reconstructs the exact descriptor hash stored in the successful audit record;
+- for side effects, fresh read-back returns non-empty evidence;
+- for side effects, fresh read-back identifies a resource;
+- the fresh read-back resource ID equals the resource ID captured in the successful audit record.
+
+A caller-supplied `result` can therefore no longer redirect verification to an unrelated provider resource while still reporting success.
+
+## Capability discovery and lifecycle maturity
+
+`toca.capabilities.search` and `toca.capabilities.describe` read the effective canonical catalog, not MCP registration count.
 
 A capability is reported executable only when:
 
-- the active runtime `ToolRegistry` contains it;
-- an internal typed runtime binding exists;
-- its lifecycle is operational;
-- side-effect capabilities are `PRODUCTION_VALIDATED`.
+- the active `ToolRegistry` contains the canonical capability;
+- a typed runtime binding exists;
+- the durable audit store required by `toca.execute` exists;
+- runtime risk, side effects, lifecycle, idempotency and approval semantics match the canonical contract;
+- lifecycle is operational;
+- side effects are `PRODUCTION_VALIDATED`;
+- side effects expose idempotency and read-back bindings;
+- formal approval persistence exists when formal approval is required.
 
-This prevents catalog-only capabilities from being treated as executable.
+This prevents runtime/local metadata from manufacturing lifecycle maturity or executable status.
 
-## Workflow facade
+## Durable workflow facade
 
-The facade reuses the M-FOUND-06 `WorkflowStore` and its transactional outbox behavior.
+The facade continues to reuse M-FOUND-06 `WorkflowStore` and its transactional outbox behavior.
 
-`toca.workflow.create` derives tenant/workspace/organization/requester from authenticated identity, derives a deterministic workflow ID from tenant + idempotency key, validates referenced capability IDs against the canonical catalog, and delegates persistence/dependency validation to the existing workflow engine.
+`toca.workflow.create`:
 
-`toca.workflow.get` and `toca.workflow.advance` enforce tenant isolation. `advance` exposes evidence-bearing transitions for completed/failed/retried steps, human tasks, timers and compensation activation without creating another scheduler or state engine.
+- derives tenant/workspace/organization/requester from authenticated identity;
+- derives a deterministic workflow ID from tenant + idempotency key;
+- resolves step capability aliases and persists canonical capability IDs;
+- delegates state/dependency/idempotency persistence to the existing workflow engine.
 
-Global worker operations such as claiming arbitrary ready steps or firing due timers are intentionally not exposed because the current store methods are worker-wide rather than tenant-scoped.
+`toca.workflow.advance` remains tenant-scoped. A static review identified a cross-workflow mutation hazard in `CLAIM_HUMAN_TASK` and `COMPLETE_HUMAN_TASK`: the store APIs mutate by `taskId`, while the facade separately accepted `workflowId`. The facade now verifies that the task belongs to the already-authorized workflow snapshot before invoking either mutation. The post-mutation tenant assertion remains as defense in depth.
 
-## Approval, audit and EventRecord reads
+Global worker-wide operations remain outside the public ChatGPT facade.
 
-- `toca.approval.request/get` reuse the existing approval store and requester/approver authority model.
-- `toca.audit.query` reuses the immutable Postgres audit ledger and filters results to the authenticated tenant.
-- `toca.event.get` reuses the M-FOUND-09 EventRecord store and enforces tenant isolation.
+## Approval reads
 
-## M-FOUND-10 CRM assessment
+`ApprovalRecord` currently does not carry tenant/workspace/organization scope. The previous `toca.approval.get` allowed a generic `APPROVER`/`ADMIN` role to read arbitrary approval IDs, which was not demonstrably safe for future multi-tenant operation.
 
-M-FOUND-10 was not merged when this branch was first cut, but it was subsequently merged via PR #102 and entered this branch during the main reconciliation.
+M-FOUND-11 now fails closed: `toca.approval.get` is requester-owned only. Broader approver visibility requires a future tenant-scoped Approval Engine contract rather than a facade-level role bypass.
 
-A controlled CRM read was evaluated and deliberately **not** added to the public facade. M-FOUND-10 itself states that CRM persistence does not create a new MCP tool merely because the store exists and does not mark CRM as `PRODUCTION_VALIDATED`. `CrmCoreStore` is an internal persistent domain contract with scoped query methods, but there is no canonical runtime capability binding that requires a dedicated ChatGPT-facing CRM tool in M-FOUND-11.
+## Reconciliation with current main
 
-Adding `toca.crm.*` would expand the facade without necessity and would bypass the intended capability lifecycle. Future CRM capabilities can be exposed through `toca.execute` by adding canonical runtime bindings when their contracts/lifecycle are ready, without changing the control-plane facade.
+### Measurement / Ticketing / Attribution — PR #111
 
-## Runtime wiring
+PR #111 added Measurement/Ticketing/Attribution files without modifying any of the six M-FOUND-11 files. Its domain-local `registerMeasurementAuditCapabilities` explicitly registers internal audit metadata and states that it does not expose MCP tools or imply provider connectivity/production validation.
 
-`createTocaServer` creates one MCP server and registers only the TOCA Core facade. Existing Instagram history, Meta Ads read/write and TOCA-managed scheduler services are instantiated under existing feature/config gates and supplied to an internal runtime resolver.
+No Measurement MCP tools or runtime bindings were added by M-FOUND-11. Future execution can use `toca.execute` only after canonical lifecycle + explicit typed runtime binding requirements are satisfied.
 
-No second MCP server, AI brain, router, workflow engine, scheduler, approval engine, audit ledger or capability registry is introduced.
+### Google Business
+
+Google Business contracts are present in main and remain internal/domain capabilities. Public writes are `IMPLEMENTED`, not `PRODUCTION_VALIDATED`, and no M-FOUND-11 runtime resolver binding promotes or exposes them.
+
+### CRM Core
+
+CRM Core is merged and tenant/workspace/organization scoped. No `toca.crm.*` facade was added. CRM capabilities can use `toca.execute` later when canonical executable contracts and bindings exist.
+
+### Privacy and other concurrent fronts
+
+Privacy, Google Ads, Video and Omnichannel work remain in separate open PRs at this checkpoint and are not part of the validated `main` base. M-FOUND-11 does not copy or anticipate their implementation.
+
+### EventRecord, Outbox, Audit Ledger, Workflow and Approval foundations
+
+- `toca.event.get` reuses `EventRecordStore` and enforces tenant equality before returning data;
+- `PostgresEventRecordStore` and `PostgresWorkflowStore` continue using the existing Transactional Outbox;
+- the immutable Audit Ledger remains the sole execution audit sink;
+- durable workflow concurrency/versioning remains owned by the existing workflow store;
+- formal approval reservation/consumption remains owned by the existing Approval Engine.
+
+No parallel infrastructure was created.
+
+## MCP schema/annotation review
+
+The surface remains Zod-typed and bounded for IDs, evidence arrays, search limits, workflow steps, dates and discriminated workflow transitions.
+
+MCP idempotency hints were corrected:
+
+- deterministic `toca.workflow.create` remains `idempotentHint: true`;
+- `toca.workflow.advance` is now `idempotentHint: false` because state transitions such as human-task claim are not generally replay-safe as an MCP operation;
+- `toca.approval.request` is now `idempotentHint: false` because it creates a new ApprovalRecord;
+- `toca.execute` remains conservative with `idempotentHint: false`.
 
 ## Acceptance tests
 
-`tests/m-found-11-core-surface.test.ts` explicitly verifies:
+`tests/m-found-11-core-surface.test.ts` now covers:
 
-1. the public facade is exactly the 12 expected `toca.*` tools;
-2. a catalogued capability without a runtime binding is not executable;
-3. a production-validated external write cannot execute without a formal approval;
-4. changing the typed payload invalidates an already-issued approval before the provider handler runs;
-5. a side effect without provider read-back is rejected before the handler runs.
+1. exact 12-tool public facade;
+2. catalogued capability without active runtime binding fails closed;
+3. runtime lifecycle promotion beyond canonical maturity fails before handler execution;
+4. descriptor hash changes on payload drift and requester/tenant drift;
+5. side effect without read-back fails before handler execution;
+6. read-back without exact resource identity fails;
+7. successful side effect records descriptor evidence + provider evidence + resource ID in audit;
+8. human-task ID outside the authorized workflow is rejected before mutation;
+9. a generic `ADMIN` cannot read another requester's ApprovalRecord.
 
-The tests use in-memory stores and simulated handlers only. They do not call providers or consume advertising budget.
+Tests use in-memory stores and simulated handlers only. No provider write or advertising spend is performed by the test design.
 
-## Quality evidence and current blocker
+## Quality evidence and blocker
 
-Quality history on PR #107:
+Historical PR #107 Quality evidence:
 
-- run `31866485005`: stopped at repository formatting; implementation was reformatted with the repository's own Prettier configuration;
-- run `31866564398`: format and architecture checks passed; lint identified localized typing issues in `src/mcp/runtime-capability-resolver.ts`;
-- those lint findings were fixed by replacing `any` result handling with typed generic runtime bindings and removing unnecessary async/unused imports;
-- subsequent full Quality could not start because GitHub Actions reported: `The job was not started because your account is locked due to a billing issue.` (run `31866620290`);
-- later heads continue to receive Actions `startup_failure`, so lint/typecheck/tests/build cannot currently be truthfully certified green by CI.
+- run `31866485005`: formatting failure; repository Prettier was applied;
+- run `31866564398`: format and architecture checks passed; lint exposed localized resolver typing issues, which were fixed;
+- run `31866620290` and later heads: GitHub Actions could not start because of the account/billing lock and returned startup failure.
 
-Additional static review after the Actions lock corrected strict TypeScript hazards in approval dependency narrowing, optional durable audit wiring and typed Vitest handler mocks.
+After the current reconciliation/hardening, run `31869397264` on head `b9ad6fd01ba5b78a85cc92b1388d7becd396d318` also completed as `startup_failure` with zero jobs created.
 
-This checkpoint must **not** be interpreted as a green Quality Gate. PR #107 remains draft and must not be merged until a full repository `pnpm quality` runs successfully on the exact final head.
+Local Quality could not be truthfully executed in the available assistant container because:
 
-## Non-goals
+- the repository is not mounted locally;
+- network cloning is unavailable in that container;
+- `pnpm`, Vitest, ESLint and Prettier are not installed there;
+- available runtime is Node `22.16.0` / TypeScript `5.8.3`, while `package.json` requires Node `>=24`, pnpm `10.15.0` and project TypeScript `6.x`.
+
+Static review and GitHub-side source/contract inspection are evidence only. They are **not** substitutes for repository `pnpm quality` or the official GitHub Actions Quality Gate.
+
+## Remaining risks
+
+1. **Official Quality is pending.** Lint, repository Prettier, TypeScript 6 typecheck, Vitest, architecture checks and build are not certified on the final head until Actions can run.
+2. **ApprovalRecord is not tenant-scoped in its persisted contract.** The MCP facade mitigates this by requester-only reads; broader tenant-safe approver queries require a foundation change outside M-FOUND-11.
+3. **EventRecordStore.get is ID-based rather than tenant-parameterized.** The facade performs a mandatory tenant check before returning the EventRecord, but storage-level tenant predicate hardening belongs to the EventRecord contract rather than this milestone.
+4. **No new provider capabilities are promoted.** Measurement, CRM, Google Business and concurrent fronts remain non-executable through `toca.execute` unless an explicit canonical runtime binding and required lifecycle evidence are added later.
+5. **No live provider smoke test was performed.** This milestone must not infer production validation from static/local behavior.
+
+## Non-goals preserved
 
 M-FOUND-11 does **not**:
 
 - create `R33`;
-- expose the full capability catalog as MCP tools;
-- create a dedicated CRM MCP surface;
-- promote provider writes to `PRODUCTION_VALIDATED`;
-- weaken provider/config/credential requirements;
-- create approval authority through ChatGPT;
-- perform external provider writes in tests;
-- create another orchestrator or registry.
+- create another MCP server;
+- create another orchestrator;
+- create another registry;
+- expose hundreds of capabilities as MCP tools;
+- add dedicated CRM/Measurement/Privacy/Google Business tools;
+- promote provider writes without evidence;
+- weaken credentials/scopes/config/financial guardrails;
+- perform real provider writes in tests;
+- merge while Quality is unavailable.
 
-## Merge contract
+## Fixed-head merge contract
 
 Before merge:
 
 1. GitHub Actions must be able to start normally;
-2. full repository `pnpm quality` must pass on the exact PR head;
-3. current `main` SHA must be revalidated and the branch reconciled if it moved;
-4. any reconciliation must be followed by another full Quality run;
-5. PR #107 must be merged with `expected_head_sha` equal to the exact green head;
-6. post-merge `main` Quality must be green.
+2. revalidate the current `main` SHA;
+3. if `main` moved, reconcile the branch again without scope expansion;
+4. run full repository `pnpm quality` on the exact reconciled head;
+5. require format, architecture, lint, typecheck, Vitest and build to be green;
+6. inspect the final diff and confirm the public facade is still exactly 12 tools;
+7. capture the exact green head SHA;
+8. merge PR #107 using `expected_head_sha` equal to that exact green SHA;
+9. run/observe post-merge `main` Quality and require it to be green.
+
+Until all items above are satisfied, PR #107 must remain draft and unmerged.
