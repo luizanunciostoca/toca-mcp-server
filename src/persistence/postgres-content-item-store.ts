@@ -273,7 +273,6 @@ export class PostgresContentItemStore implements ContentItemStore {
     assertPositiveInteger(input.expectedRecordVersion, 'CONTENT_ITEM_EXPECTED_VERSION_INVALID');
 
     return this.#withLockedItem(input.contentItemId, async (client, current) => {
-      assertExpectedVersion(current, input.expectedRecordVersion);
       const existingResult = await client.query<ContentItemVersionRow>(
         `select * from content_item_versions where content_item_id = $1 and idempotency_key = $2`,
         [current.contentItemId, idempotencyKey],
@@ -281,11 +280,12 @@ export class PostgresContentItemStore implements ContentItemStore {
       const existingRow = existingResult.rows[0];
       if (existingRow) {
         const existing = contentVersionFromRow(existingRow);
-        if (!sameVersionIntent(existing, input, current))
+        if (!sameVersionIntent(existing, input))
           throw new Error('CONTENT_VERSION_IDEMPOTENCY_CONFLICT');
         return existing;
       }
 
+      assertExpectedVersion(current, input.expectedRecordVersion);
       const source = await getVersionForUpdate(
         client,
         current.contentItemId,
@@ -795,20 +795,30 @@ function sameCreateIntent(
 function sameVersionIntent(
   existing: ContentItemVersion,
   input: CreateContentItemVersionInput,
-  current: ContentItem,
 ): boolean {
+  const requestedSourceAssets =
+    input.sourceAssetIds === undefined
+      ? undefined
+      : normalizeStringSet(input.sourceAssetIds, 'CONTENT_VERSION_SOURCE_ASSET_INVALID');
+  const requestedDerivedAssets = normalizeStringSet(
+    input.derivedAssetIds ?? [],
+    'CONTENT_VERSION_DERIVED_ASSET_INVALID',
+  );
   return (
     existing.versionId === input.versionId &&
     existing.derivationType === input.derivationType &&
     existing.sourceVersionId === input.sourceVersionId &&
-    existing.parentVersionId ===
-      (input.parentVersionId === undefined
-        ? current.currentVersionId
-        : nullableText(input.parentVersionId)) &&
+    (input.parentVersionId === undefined ||
+      existing.parentVersionId === nullableText(input.parentVersionId)) &&
     existing.variantKey === nullableText(input.variantKey) &&
-    existing.channel === (input.channel ?? current.channel) &&
-    existing.format === (input.format ?? current.format) &&
-    existing.language === (input.language ?? current.language) &&
+    (input.channel === undefined ||
+      existing.channel === requireText(input.channel, 'CONTENT_VERSION_CHANNEL_REQUIRED')) &&
+    (input.format === undefined || existing.format === input.format) &&
+    (input.language === undefined ||
+      existing.language === requireText(input.language, 'CONTENT_VERSION_LANGUAGE_REQUIRED')) &&
+    (requestedSourceAssets === undefined ||
+      canonical(existing.sourceAssetIds) === canonical(requestedSourceAssets)) &&
+    canonical(existing.derivedAssetIds) === canonical(requestedDerivedAssets) &&
     canonical(existing.payload) === canonical(input.payload) &&
     canonical(existing.sourceRefs) ===
       canonical(normalizeStringSet(input.sourceRefs, 'CONTENT_VERSION_SOURCE_REF_INVALID'))
