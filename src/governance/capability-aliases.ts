@@ -92,9 +92,7 @@ export const CAPABILITY_ALIAS_RULES: readonly CapabilityAliasRule[] = [
   },
 ] as const;
 
-const aliasMap = new Map(
-  CAPABILITY_ALIAS_RULES.map((rule) => [rule.alias_id, rule] as const),
-);
+const aliasMap = new Map(CAPABILITY_ALIAS_RULES.map((rule) => [rule.alias_id, rule] as const));
 
 const aliasesByCanonical = new Map<string, readonly CapabilityAliasRule[]>(
   [...new Set(CAPABILITY_ALIAS_RULES.map((rule) => rule.canonical_id))].map((canonicalId) => [
