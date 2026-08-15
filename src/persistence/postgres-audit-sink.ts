@@ -143,7 +143,14 @@ export class PostgresAuditSink implements AuditSink {
           `update audit_ledger_heads set
              last_sequence = $2, head_hash = $3, updated_at = $4::timestamptz
            where execution_id = $1 and last_sequence = $5 and head_hash = $6`,
-          [event.executionId, sequence, eventHash, event.createdAt, head.last_sequence, head.head_hash],
+          [
+            event.executionId,
+            sequence,
+            eventHash,
+            event.createdAt,
+            head.last_sequence,
+            head.head_hash,
+          ],
         );
         if (updated.rowCount !== 1) throw new Error('AUDIT_LEDGER_HEAD_CONCURRENT_UPDATE');
       } else {
@@ -311,7 +318,7 @@ function auditHeadFromRow(row: AuditLedgerHeadRow): AuditLedgerHead {
   };
 }
 
-function asRoles(value: unknown): AuditEvent['authorizationRoles'] {
+function asRoles(value: unknown): NonNullable<AuditEvent['authorizationRoles']> {
   if (!Array.isArray(value)) return [];
   return value.filter(
     (item): item is NonNullable<AuditEvent['authorizationRoles']>[number] =>

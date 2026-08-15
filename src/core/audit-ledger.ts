@@ -92,14 +92,20 @@ export function canonicalAuditPayload(
 }
 
 export function hashAuditPayload(payload: Readonly<Record<string, unknown>>): string {
-  return createHash('sha256').update(JSON.stringify(canonicalize(payload)), 'utf8').digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(payload)), 'utf8')
+    .digest('hex');
 }
 
 export function normalizeAuditEvidence(event: AuditEvent): readonly string[] {
-  const evidence = [...new Set((event.evidence ?? []).map((item) => item.trim()).filter(Boolean))].sort();
+  const evidence = [
+    ...new Set((event.evidence ?? []).map((item) => item.trim()).filter(Boolean)),
+  ].sort();
   return evidence.length > 0
     ? evidence
-    : [`audit:${event.status.toLowerCase()}:${requireText(event.executionId, 'AUDIT_EXECUTION_ID_REQUIRED')}`];
+    : [
+        `audit:${event.status.toLowerCase()}:${requireText(event.executionId, 'AUDIT_EXECUTION_ID_REQUIRED')}`,
+      ];
 }
 
 export function verifyAuditLedger(
@@ -142,8 +148,7 @@ export function verifyAuditLedger(
   }
 
   const lastSequence = records.length;
-  if (!head)
-    return invalid(executionId, records, previousHash, 'AUDIT_HEAD_MISSING');
+  if (!head) return invalid(executionId, records, previousHash, 'AUDIT_HEAD_MISSING');
   if (head.executionId !== executionId)
     return invalid(executionId, records, previousHash, 'AUDIT_HEAD_EXECUTION_MISMATCH');
   if (head.lastSequence !== lastSequence)

@@ -47,10 +47,7 @@ export class PostgresOperationalObservabilityStore implements OperationalSignalS
     );
   }
 
-  async listByExecution(
-    executionId: string,
-    limit = 200,
-  ): Promise<readonly OperationalSignal[]> {
+  async listByExecution(executionId: string, limit = 200): Promise<readonly OperationalSignal[]> {
     requireText(executionId, 'OBSERVABILITY_EXECUTION_ID_REQUIRED');
     assertOperationalLimit(limit);
     const result = await this.pool.query<OperationalSignalRow>(

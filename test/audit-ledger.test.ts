@@ -122,8 +122,15 @@ describe('M-FOUND-08 audit ledger integrity', () => {
   });
 
   it('provides deterministic fallback evidence for legacy audit callers', () => {
-    expect(normalizeAuditEvidence({ ...base, evidence: undefined })).toEqual([
-      'audit:started:exec-1',
-    ]);
+    expect(
+      normalizeAuditEvidence({
+        executionId: base.executionId,
+        correlationId: base.correlationId,
+        toolName: base.toolName,
+        requester: base.requester,
+        status: base.status,
+        createdAt: base.createdAt,
+      }),
+    ).toEqual(['audit:started:exec-1']);
   });
 });
