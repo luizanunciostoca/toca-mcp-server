@@ -10,6 +10,12 @@ def replace_once(path: str, old: str, new: str) -> None:
     file.write_text(text.replace(old, new, 1))
 
 
+replace_once(
+    "src/events/postgres-transactional-outbox.ts",
+    "  type OutboxDeliveryAttempt,\n",
+    "",
+)
+
 path = "src/persistence/postgres-workflow-store.ts"
 replace_once(
     path,
