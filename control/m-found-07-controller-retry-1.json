@@ -1,0 +1,6 @@
+{
+  "milestone": "M-FOUND-07",
+  "reason": "Re-run merge controller after hardening-required marker and post-hardening human Quality trigger.",
+  "pr": 99,
+  "target_branch": "feat/m-found-07-transactional-outbox"
+}
