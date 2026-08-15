@@ -121,7 +121,7 @@ jobs:
               raise SystemExit('deploy-runtime dependency marker missing')
           path.write_text(text.replace(old_needs, new_needs, 1))
           PY
-          pnpm exec prettier --write .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          pnpm exec prettier --write scripts/migrate-and-verify.ts .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
           pnpm quality
       - name: Commit tested permanent gate
         shell: bash
@@ -129,6 +129,6 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          git add scripts/migrate-and-verify.ts .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
           git commit -m 'fix(reliability): gate production deploy on schema migrations'
           git push origin HEAD:fix/foundation-daily-control-observability
