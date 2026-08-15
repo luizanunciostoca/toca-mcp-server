@@ -34,13 +34,17 @@ describe('measurement/ticketing postgres contract', () => {
   });
 
   it('keeps ticketing provider boundary read-only', () => {
-    expect(adapters).toContain('interface TicketingReadOnlyAdapter');
-    expect(adapters).toContain('resolveEvent(');
-    expect(adapters).toContain('readSalesSummary(');
-    expect(adapters).toContain('readInventory(');
-    expect(adapters).not.toMatch(
-      /refund|transfer|issueTicket|createPayment|updatePayment|updateInventory/,
+    const match = adapters.match(/export interface TicketingReadOnlyAdapter\s*{([\s\S]*?)\n}/);
+    const boundary = match?.[1] ?? '';
+
+    expect(boundary).not.toBe('');
+    expect(boundary).toContain('resolveEvent(');
+    expect(boundary).toContain('readSalesSummary(');
+    expect(boundary).toContain('readInventory(');
+    expect(boundary).not.toMatch(
+      /refund|transfer|issueTicket|createPayment|updatePayment|updateInventory/i,
     );
+    expect(boundary.match(/^\s+[A-Za-z]\w*\([^\n]+/gm)).toHaveLength(3);
     expect(capabilityContracts).toContain('providerWritesAllowed: false');
   });
 
