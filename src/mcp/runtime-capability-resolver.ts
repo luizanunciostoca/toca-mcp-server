@@ -202,7 +202,7 @@ function resolveBinding(
                   evidence: verified
                     ? [`meta:campaign:${result.campaignId}:paused`]
                     : [`meta:campaign:${result.campaignId}:readback-mismatch`],
-                  ...(verified ? { externalResourceId: result.campaignId } : {}),
+                  externalResourceId: result.campaignId,
                   ...(!verified ? { reason: 'META_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' } : {}),
                 };
               },
@@ -254,6 +254,7 @@ function resolveBinding(
                     ? `scheduler:job:${input.jobId}:canceled`
                     : `scheduler:job:${input.jobId}:cancel-readback-mismatch`,
                 ],
+                externalResourceId: input.jobId,
                 ...(!verified ? { reason: 'SCHEDULER_CANCEL_NOT_READ_BACK' } : {}),
               };
             },
@@ -328,13 +329,13 @@ function scheduleIdempotencyKey(input: TocaManagedInstagramSchedulePayload): str
 
 async function scheduleReadback(scheduler: TocaManagedInstagramScheduler, jobId: string) {
   const job = await scheduler.status(jobId);
-  const verified = Boolean(job);
+  const verified = job?.status === 'SCHEDULED';
   return {
     verified,
     evidence: [
-      verified ? `scheduler:job:${jobId}:readback` : `scheduler:job:${jobId}:readback-missing`,
+      verified ? `scheduler:job:${jobId}:scheduled` : `scheduler:job:${jobId}:readback-mismatch`,
     ],
-    ...(verified ? { externalResourceId: jobId } : {}),
-    ...(!verified ? { reason: 'SCHEDULER_JOB_NOT_READ_BACK' } : {}),
+    externalResourceId: jobId,
+    ...(!verified ? { reason: 'SCHEDULER_JOB_NOT_READ_BACK_AS_SCHEDULED' } : {}),
   };
 }
