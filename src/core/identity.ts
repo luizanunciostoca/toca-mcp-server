@@ -26,9 +26,12 @@ export interface ExecutionPrincipal {
   readonly principalId: string;
   readonly principalType: PrincipalType;
   readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly organizationId: string;
   readonly authenticationMethod: AuthenticationMethod;
   readonly authenticatedAt: string;
   readonly expiresAt: string | null;
+  readonly sessionId?: string;
   readonly evidence: readonly string[];
 }
 
@@ -67,6 +70,7 @@ export interface McpAuthInfoLike {
 }
 
 export interface McpToolContextLike {
+  readonly sessionId?: string;
   readonly http?: {
     readonly authInfo?: McpAuthInfoLike;
   };
@@ -74,6 +78,8 @@ export interface McpToolContextLike {
 
 export interface ResolveExecutionIdentityOptions {
   readonly tenantId: string;
+  readonly workspaceId?: string;
+  readonly organizationId?: string;
   readonly fallbackIdentity?: ExecutionIdentity;
   readonly now?: string;
 }
@@ -116,6 +122,8 @@ const REQUIRED_ROLES: Readonly<Record<RiskClass, readonly AuthorizationRole[]>> 
 export function createTrustedServiceExecutionIdentity(input: {
   readonly principalId: string;
   readonly tenantId: string;
+  readonly workspaceId?: string;
+  readonly organizationId?: string;
   readonly roles: readonly AuthorizationRole[];
   readonly allowedRouteIds?: readonly RouteId[] | null;
   readonly allowedCapabilityIds?: readonly string[] | null;
@@ -124,10 +132,16 @@ export function createTrustedServiceExecutionIdentity(input: {
   readonly now?: string;
 }): ExecutionIdentity {
   const now = input.now ?? new Date().toISOString();
+  const tenantId = requireNonEmpty(input.tenantId, 'IDENTITY_TENANT_REQUIRED');
   const principal: ExecutionPrincipal = {
     principalId: requireNonEmpty(input.principalId, 'IDENTITY_PRINCIPAL_REQUIRED'),
     principalType: 'SERVICE',
-    tenantId: requireNonEmpty(input.tenantId, 'IDENTITY_TENANT_REQUIRED'),
+    tenantId,
+    workspaceId: requireNonEmpty(input.workspaceId ?? tenantId, 'IDENTITY_WORKSPACE_REQUIRED'),
+    organizationId: requireNonEmpty(
+      input.organizationId ?? tenantId,
+      'IDENTITY_ORGANIZATION_REQUIRED',
+    ),
     authenticationMethod: 'INFRASTRUCTURE_IDENTITY',
     authenticatedAt: now,
     expiresAt: null,
@@ -138,9 +152,7 @@ export function createTrustedServiceExecutionIdentity(input: {
     tenantId: principal.tenantId,
     roles: unique(input.roles),
     allowedRouteIds: input.allowedRouteIds ? unique(input.allowedRouteIds) : null,
-    allowedCapabilityIds: input.allowedCapabilityIds
-      ? unique(input.allowedCapabilityIds)
-      : null,
+    allowedCapabilityIds: input.allowedCapabilityIds ? unique(input.allowedCapabilityIds) : null,
     allowedTargetAccounts: input.allowedTargetAccounts
       ? unique(input.allowedTargetAccounts)
       : null,
@@ -180,13 +192,20 @@ export function resolveExecutionIdentityFromMcpContext(
     .map((scope) => scope.slice('toca:account:'.length))
     .filter(Boolean);
 
+  const tenantId = requireNonEmpty(options.tenantId, 'IDENTITY_TENANT_REQUIRED');
   const principal: ExecutionPrincipal = {
     principalId: `mcp-client:${authInfo.clientId}`,
     principalType: 'SERVICE',
-    tenantId: requireNonEmpty(options.tenantId, 'IDENTITY_TENANT_REQUIRED'),
+    tenantId,
+    workspaceId: requireNonEmpty(options.workspaceId ?? tenantId, 'IDENTITY_WORKSPACE_REQUIRED'),
+    organizationId: requireNonEmpty(
+      options.organizationId ?? tenantId,
+      'IDENTITY_ORGANIZATION_REQUIRED',
+    ),
     authenticationMethod: 'MCP_OAUTH_BEARER',
     authenticatedAt: now,
     expiresAt: new Date(authInfo.expiresAt * 1000).toISOString(),
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     evidence: [`mcp-auth:${authInfo.clientId}`],
   };
   const authorization: AuthorizationGrant = {
@@ -200,8 +219,12 @@ export function resolveExecutionIdentityFromMcpContext(
     evidence: [`mcp-auth-scopes:${scopes.join(',')}`],
   };
   const identity = { principal, authorization } satisfies ExecutionIdentity;
-  assertExecutionIdentity(identity, now);
-  return identity;
+  try {
+    assertExecutionIdentity(identity, now);
+    return identity;
+  } catch {
+    return undefined;
+  }
 }
 
 export function authorizeExecution(
@@ -247,10 +270,15 @@ export function authorizeExecution(
   return { allowed: true, reason: 'IDENTITY_AND_AUTHORIZATION_VALID' };
 }
 
-export function assertExecutionIdentity(identity: ExecutionIdentity, now = new Date().toISOString()): void {
+export function assertExecutionIdentity(
+  identity: ExecutionIdentity,
+  now = new Date().toISOString(),
+): void {
   const { principal, authorization } = identity;
   requireNonEmpty(principal.principalId, 'IDENTITY_PRINCIPAL_REQUIRED');
   requireNonEmpty(principal.tenantId, 'IDENTITY_TENANT_REQUIRED');
+  requireNonEmpty(principal.workspaceId, 'IDENTITY_WORKSPACE_REQUIRED');
+  requireNonEmpty(principal.organizationId, 'IDENTITY_ORGANIZATION_REQUIRED');
   requireEvidence(principal.evidence, 'IDENTITY_EVIDENCE_REQUIRED');
   requireEvidence(authorization.evidence, 'AUTHORIZATION_EVIDENCE_REQUIRED');
   if (!Number.isFinite(Date.parse(principal.authenticatedAt)))
