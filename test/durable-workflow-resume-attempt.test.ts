@@ -42,9 +42,18 @@ describe('M-FOUND-06 durable wait attempt semantics', () => {
       evidence: ['test://human/open'],
       now: '2026-08-14T20:02:00Z',
     });
+    await expect(
+      store.claimHumanTask({
+        taskId: 'human-task-1',
+        principalId: 'luiz',
+        evidence: ['test://human/no-role'],
+        now: '2026-08-14T20:02:30Z',
+      }),
+    ).rejects.toThrow('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');
     await store.claimHumanTask({
       taskId: 'human-task-1',
       principalId: 'luiz',
+      principalRoles: ['APPROVER'],
       evidence: ['test://human/claim'],
       now: '2026-08-14T20:03:00Z',
     });
