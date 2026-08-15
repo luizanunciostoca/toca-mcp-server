@@ -89,13 +89,7 @@ export type GoogleBusinessReviewSentiment = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
 export type GoogleBusinessReviewSensitivity = 'STANDARD' | 'HUMAN_REVIEW_REQUIRED';
 
 export type GoogleBusinessWeekday =
-  | 'MONDAY'
-  | 'TUESDAY'
-  | 'WEDNESDAY'
-  | 'THURSDAY'
-  | 'FRIDAY'
-  | 'SATURDAY'
-  | 'SUNDAY';
+  'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
 
 export interface GoogleBusinessHoursPeriod {
   readonly openDay: GoogleBusinessWeekday;
@@ -285,10 +279,7 @@ export interface GoogleBusinessProvider {
     readonly post: GoogleBusinessLocalPostDraft;
   }): Promise<GoogleBusinessLocalPostSnapshot>;
   getLocalPost(name: string): Promise<GoogleBusinessLocalPostSnapshot>;
-  listReviews(input: {
-    readonly parent: string;
-    readonly pageToken: string | null;
-  }): Promise<{
+  listReviews(input: { readonly parent: string; readonly pageToken: string | null }): Promise<{
     readonly reviews: readonly GoogleBusinessReviewSnapshot[];
     readonly nextPageToken: string | null;
   }>;
@@ -347,7 +338,10 @@ export function validateGoogleBusinessLocation(
   compareExpected('primaryPhone', expected.primaryPhone, location.primaryPhone, issues);
   compareExpected('primaryCategory', expected.primaryCategory, location.primaryCategory, issues);
   if (expected.regularHours !== undefined) {
-    const reconciliation = reconcileGoogleBusinessHours(expected.regularHours, location.regularHours);
+    const reconciliation = reconcileGoogleBusinessHours(
+      expected.regularHours,
+      location.regularHours,
+    );
     if (!reconciliation.inSync) issues.push('LOCATION_REGULAR_HOURS_MISMATCH');
   }
 
@@ -362,8 +356,12 @@ export function reconcileGoogleBusinessHours(
   const actualPeriods = normalizePeriods(actual?.periods ?? []);
   const actualKeys = new Set(actualPeriods.map(periodKey));
   const expectedKeys = new Set(expectedPeriods.map(periodKey));
-  const missingFromProvider = expectedPeriods.filter((period) => !actualKeys.has(periodKey(period)));
-  const unexpectedAtProvider = actualPeriods.filter((period) => !expectedKeys.has(periodKey(period)));
+  const missingFromProvider = expectedPeriods.filter(
+    (period) => !actualKeys.has(periodKey(period)),
+  );
+  const unexpectedAtProvider = actualPeriods.filter(
+    (period) => !expectedKeys.has(periodKey(period)),
+  );
   return {
     inSync: missingFromProvider.length === 0 && unexpectedAtProvider.length === 0,
     missingFromProvider,
@@ -842,20 +840,26 @@ function compareExpected(
 ): void {
   if (expected === undefined) return;
   if (stableValue(expected) !== stableValue(actual)) {
-    issues.push(`LOCATION_${field.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}_MISMATCH`);
+    issues.push(
+      `LOCATION_${field.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}_MISMATCH`,
+    );
   }
 }
 
 function stableValue(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return JSON.stringify(value.map((item) => JSON.parse(stableValue(item))));
+  return JSON.stringify(normalizeStableValue(value));
+}
+
+function normalizeStableValue(value: unknown): unknown {
+  if (value === undefined) return '__undefined__';
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => normalizeStableValue(item));
   const record = value as Readonly<Record<string, unknown>>;
-  const normalized = Object.fromEntries(
-    Object.keys(record)
-      .sort()
-      .map((key) => [key, JSON.parse(stableValue(record[key]))]),
-  );
-  return JSON.stringify(normalized);
+  const normalized: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) {
+    normalized[key] = normalizeStableValue(record[key]);
+  }
+  return normalized;
 }
 
 function normalizeSearchText(value: string): string {

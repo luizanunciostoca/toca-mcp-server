@@ -38,7 +38,9 @@ const EVENT: EventRecord = {
   updatedAt: '2026-08-15T01:00:00.000Z',
 };
 
-function review(overrides: Partial<GoogleBusinessReviewSnapshot> = {}): GoogleBusinessReviewSnapshot {
+function review(
+  overrides: Partial<GoogleBusinessReviewSnapshot> = {},
+): GoogleBusinessReviewSnapshot {
   return {
     name: 'accounts/1/locations/2/reviews/3',
     locationName: 'locations/2',
@@ -52,7 +54,9 @@ function review(overrides: Partial<GoogleBusinessReviewSnapshot> = {}): GoogleBu
   };
 }
 
-function location(overrides: Partial<GoogleBusinessLocationSnapshot> = {}): GoogleBusinessLocationSnapshot {
+function location(
+  overrides: Partial<GoogleBusinessLocationSnapshot> = {},
+): GoogleBusinessLocationSnapshot {
   return {
     name: 'locations/2',
     title: 'Toca do Morcego',
@@ -73,7 +77,7 @@ function location(overrides: Partial<GoogleBusinessLocationSnapshot> = {}): Goog
 describe('Google Business Profile / Local Discovery / Reputation', () => {
   it('prepares event posts from the canonical EventRecord instead of duplicating event truth', async () => {
     const store = {
-      get: async (eventId: string) => (eventId === EVENT.eventId ? EVENT : undefined),
+      get: (eventId: string) => Promise.resolve(eventId === EVENT.eventId ? EVENT : undefined),
     } as unknown as EventRecordStore;
 
     const draft = await prepareGoogleBusinessPost(
@@ -102,14 +106,10 @@ describe('Google Business Profile / Local Discovery / Reputation', () => {
   it('reconciles hours read-only and reports both missing and unexpected provider periods', () => {
     const result = reconcileGoogleBusinessHours(
       {
-        periods: [
-          { openDay: 'MONDAY', openTime: '16:30', closeDay: 'MONDAY', closeTime: '22:00' },
-        ],
+        periods: [{ openDay: 'MONDAY', openTime: '16:30', closeDay: 'MONDAY', closeTime: '22:00' }],
       },
       {
-        periods: [
-          { openDay: 'MONDAY', openTime: '17:00', closeDay: 'MONDAY', closeTime: '22:00' },
-        ],
+        periods: [{ openDay: 'MONDAY', openTime: '17:00', closeDay: 'MONDAY', closeTime: '22:00' }],
       },
     );
 
@@ -119,16 +119,22 @@ describe('Google Business Profile / Local Discovery / Reputation', () => {
   });
 
   it('requires human review for complaints, legal content and crisis content', () => {
-    expect(classifyGoogleBusinessReview(review({ starRating: 1, comment: 'Pessimo atendimento' }))).toMatchObject({
+    expect(
+      classifyGoogleBusinessReview(review({ starRating: 1, comment: 'Pessimo atendimento' })),
+    ).toMatchObject({
       category: 'RECLAMACAO',
       requiresHumanReview: true,
       sensitivity: 'HUMAN_REVIEW_REQUIRED',
     });
-    expect(classifyGoogleBusinessReview(review({ comment: 'Meu advogado vai abrir processo' }))).toMatchObject({
+    expect(
+      classifyGoogleBusinessReview(review({ comment: 'Meu advogado vai abrir processo' })),
+    ).toMatchObject({
       category: 'JURIDICO',
       requiresHumanReview: true,
     });
-    expect(classifyGoogleBusinessReview(review({ comment: 'Houve agressao e problema de seguranca' }))).toMatchObject({
+    expect(
+      classifyGoogleBusinessReview(review({ comment: 'Houve agressao e problema de seguranca' })),
+    ).toMatchObject({
       category: 'CRISE',
       requiresHumanReview: true,
     });
@@ -175,7 +181,7 @@ describe('Google Business Profile / Local Discovery / Reputation', () => {
   });
 
   it('verifies provider readback against the exact prepared local post', async () => {
-    const store = { get: async () => EVENT } as unknown as EventRecordStore;
+    const store = { get: () => Promise.resolve(EVENT) } as unknown as EventRecordStore;
     const draft = await prepareGoogleBusinessPost(
       { locationName: 'locations/2', summary: 'Evento confirmado.', eventId: EVENT.eventId },
       store,

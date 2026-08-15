@@ -61,6 +61,20 @@ const implementedInternal = new Set([
   'release.change.prepare',
   'release.evidence.record',
   'release.close',
+  'google_business.location.read',
+  'google_business.location.validate',
+  'google_business.hours.reconcile',
+  'google_business.post.prepare',
+  'google_business.post.create',
+  'google_business.post.readback',
+  'google_business.review.ingest',
+  'google_business.review.classify',
+  'google_business.review.reply_draft',
+  'google_business.review.reply',
+  'google_business.review.verify',
+  'google_business.notification.ingest',
+  'google_business.performance.read',
+  'google_business.profile.drift.detect',
   'approval.request',
   'approval.descriptor.generate',
   'approval.descriptor.hash',
@@ -195,6 +209,12 @@ function isMutationAction(capabilityId: string): boolean {
 
 function isProviderWrite(capabilityId: string): boolean {
   if (/^meta_ads\./.test(capabilityId)) return isMutationAction(capabilityId);
+  if (/^google_business\./.test(capabilityId)) {
+    return (
+      capabilityId === 'google_business.post.create' ||
+      capabilityId === 'google_business.review.reply'
+    );
+  }
   if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     return /\.(publish|send|reply|activate|pause|resume|create_paused|update_budget|update_status|replace_creative|replace|archive|cancel)$/.test(
       capabilityId,
@@ -232,6 +252,7 @@ function inferredRiskClass(capabilityId: string): RiskClass {
 
 function inferredProvider(capabilityId: string): string {
   if (/^meta_ads\./.test(capabilityId)) return 'Meta Marketing API';
+  if (/^google_business\./.test(capabilityId)) return 'Google Business Profile';
   if (/^(instagram|social|engagement)\./.test(capabilityId)) return 'Meta/Instagram';
   if (/^drive\./.test(capabilityId)) return 'Google Drive';
   if (/^(release|security)\./.test(capabilityId)) return 'GitHub+GCP';
@@ -284,6 +305,9 @@ function humanDescription(capabilityId: string): string {
 function evidence(capabilityId: string, status: CapabilityStatus): readonly string[] {
   if (status === 'PLANNED' || status === 'SPECIFIED') return [];
   if (knownRuntimeTools.has(capabilityId)) return ['src/registry.ts'];
+  if (capabilityId.startsWith('google_business.')) {
+    return ['src/local-discovery/google-business.ts'];
+  }
   if (capabilityId.startsWith('approval.')) return ['src/governance/approval-governance.ts'];
   if (capabilityId.startsWith('capability.')) return ['src/governance/capability-lifecycle.ts'];
   if (capabilityId.startsWith('governance.')) return ['src/governance/governance-drift.ts'];
@@ -304,6 +328,7 @@ function authenticationMode(capabilityId: string): AuthenticationMode {
   if (capabilityId.startsWith('system.')) return 'NONE';
   if (implementedInternal.has(capabilityId)) return 'INTERNAL';
   if (capabilityId.startsWith('drive.')) return 'OAUTH2';
+  if (capabilityId.startsWith('google_business.')) return 'OAUTH2';
   if (/^(instagram|social|engagement|meta_ads)\./.test(capabilityId)) return 'UNKNOWN';
   return 'INTERNAL';
 }
@@ -363,9 +388,10 @@ function createDefinition(
     override?.idempotent ??
     runtimeDefinition?.idempotent ??
     (!sideEffects || !isProviderWrite(capabilityId));
-  const external = /^(instagram|meta_ads|social|engagement|drive|release|security)\./.test(
-    capabilityId,
-  );
+  const external =
+    /^(instagram|meta_ads|social|engagement|google_business|drive|release|security)\./.test(
+      capabilityId,
+    );
   const operation = override?.operation ?? capabilityId;
   const providerPermissions = permissionRequirementsForCapability(capabilityId);
   const defaultApprovalRequired =
