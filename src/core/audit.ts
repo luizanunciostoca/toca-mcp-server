@@ -9,6 +9,9 @@ export interface AuditEvent {
   readonly requester: string;
   readonly principalType?: PrincipalType;
   readonly tenantId?: string;
+  readonly workspaceId?: string;
+  readonly organizationId?: string;
+  readonly sessionId?: string;
   readonly authenticationMethod?: AuthenticationMethod;
   readonly authorizationRoles?: readonly AuthorizationRole[];
   readonly status: AuditStatus;
