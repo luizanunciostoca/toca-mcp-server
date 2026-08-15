@@ -30,7 +30,6 @@ jobs:
           src/persistence/postgres-measurement-store.ts
           test/measurement-foundation.test.ts
           test/measurement-postgres-contract.test.ts
-          migrations/013_measurement_ticketing_attribution.sql
           docs/checkpoints/measurement-ticketing-attribution-foundation.md
           .github/workflows/measurement-branch-format.yml
       - name: Commit formatting if needed
@@ -41,6 +40,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/measurement src/persistence/postgres-measurement-store.ts test/measurement-foundation.test.ts test/measurement-postgres-contract.test.ts migrations/013_measurement_ticketing_attribution.sql docs/checkpoints/measurement-ticketing-attribution-foundation.md .github/workflows/measurement-branch-format.yml
+          git add src/measurement src/persistence/postgres-measurement-store.ts test/measurement-foundation.test.ts test/measurement-postgres-contract.test.ts docs/checkpoints/measurement-ticketing-attribution-foundation.md .github/workflows/measurement-branch-format.yml
           git commit -m "style: format measurement foundation"
           git push origin HEAD:feat/measurement-ticketing-attribution-foundation
