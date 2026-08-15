@@ -26,6 +26,10 @@ export class PostgresAuditSink implements AuditSink {
           executionId: event.executionId,
           approvalId: event.approvalId ?? null,
           connectedAccount: event.connectedAccount ?? null,
+          principalType: event.principalType ?? null,
+          tenantId: event.tenantId ?? null,
+          authenticationMethod: event.authenticationMethod ?? null,
+          authorizationRoles: event.authorizationRoles ?? [],
           createdAt: event.createdAt,
         }),
         JSON.stringify({
