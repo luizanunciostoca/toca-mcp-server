@@ -1,12 +1,14 @@
 # M-FOUND-07 — Event Bus / Transactional Outbox
 
-Status: **VALIDATED IN RUNNER — OFFICIAL PR QUALITY GATE PENDING**
+Status: **READY TO MERGE — OFFICIAL PR QUALITY GATE GREEN**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `c5373bfde8017ff76fa2a9bce882ddb331f7cabe`
 
-Validated full repository run: `31863810927` — **SUCCESS** (`pnpm quality`)
+Validated bridge run: `31863810927` — **SUCCESS** (`pnpm quality`)
+
+Official PR Quality Gate: run `31863943331` / Quality Gate `#1033` — **SUCCESS**
 
 ## Objective
 
@@ -152,7 +154,9 @@ M-FOUND-07 is complete when:
 
 The implementation plus workflow bridge passed full repository `pnpm quality` in GitHub Actions run `31863810927`, including format, architecture, lint, typecheck, all tests and build. The temporary bridge workflow/script removed themselves before the validated commit was pushed.
 
-A normal pull-request Quality Gate is still required on the final documentation/cleanup head before merge.
+The final cleanup/documentation head then passed the normal pull-request Quality Gate `#1033` (run `31863943331`) with Format, Architecture, Lint, Typecheck, all tests and Build green.
+
+The next required proof is a final Quality Gate on this status-only documentation commit, followed by a fixed-head merge and post-merge `main` Quality Gate.
 
 ## Exit
 
