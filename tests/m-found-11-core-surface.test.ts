@@ -39,6 +39,18 @@ function externalIdentity(principalId = 'test:external-writer', tenantId = 'toca
   });
 }
 
+function readerIdentity(principalId = 'test:reader', tenantId = 'toca-do-morcego') {
+  return createTrustedServiceExecutionIdentity({
+    principalId,
+    tenantId,
+    roles: ['READER'],
+    allowedCapabilityIds: ['meta_ads.campaigns.list'],
+    allowedTargetAccounts: ['act_allowed'],
+    evidence: ['test:identity'],
+    now: NOW,
+  });
+}
+
 function operatorIdentity(principalId = 'test:operator', tenantId = 'toca-do-morcego') {
   return createTrustedServiceExecutionIdentity({
     principalId,
@@ -80,6 +92,7 @@ function schedulerBinding(
   options: {
     readonly readback?: CoreCapabilityRuntimeBinding['providerReadback'];
     readonly execute?: (input: unknown) => Promise<unknown>;
+    readonly validated?: boolean;
   } = {},
 ): CoreCapabilityRuntimeBinding {
   const schema = z.object({ idempotencyKey: z.string().min(1) });
@@ -87,6 +100,7 @@ function schedulerBinding(
     inputSchema: schema,
     execute: options.execute ?? (async () => ({ id: 'job_1' })),
     idempotencyKey: (input) => `job:${schema.parse(input).idempotencyKey}`,
+    sideEffectValidated: options.validated ?? true,
     ...(options.readback ? { providerReadback: options.readback } : {}),
   };
 }
@@ -172,6 +186,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
         evidence: ['provider:test:campaign_1'],
         externalResourceId: 'campaign_1',
       }),
+      sideEffectValidated: true,
     };
 
     await expect(
@@ -191,6 +206,73 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
     ).rejects.toMatchObject({
       code: 'CAPABILITY_UNAVAILABLE',
       message: expect.stringContaining('lifecycle_status'),
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('refuses a side-effect runtime binding that is not explicitly validated', async () => {
+    const execute = vi.fn(async (_input: unknown) => ({ id: 'job_1' }));
+    const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
+
+    await expect(
+      executeCoreCapability(
+        {
+          capabilityId: 'instagram.toca_schedule.create',
+          payload: { idempotencyKey: 'job-key' },
+          correlationId: 'test:binding-maturity',
+        },
+        operatorIdentity(),
+        {
+          registry,
+          runtimeResolver: () =>
+            schedulerBinding({
+              execute,
+              validated: false,
+              readback: async () => ({
+                verified: true,
+                evidence: ['scheduler:job:job_1:scheduled'],
+                externalResourceId: 'job_1',
+              }),
+            }),
+          auditSink: new InMemoryAuditSink(),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'CAPABILITY_UNAVAILABLE',
+      message: expect.stringContaining('CAPABILITY_RUNTIME_BINDING_UNVALIDATED'),
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('enforces target-account authorization for account-scoped reads', async () => {
+    const execute = vi.fn(async (_input: unknown) => []);
+    const schema = z.object({
+      adAccountId: z.string().min(1),
+      currency: z.string().min(3),
+    });
+    const binding: CoreCapabilityRuntimeBinding = {
+      inputSchema: schema,
+      execute,
+      targetAccount: (input) => schema.parse(input).adAccountId,
+    };
+
+    await expect(
+      executeCoreCapability(
+        {
+          capabilityId: 'meta_ads.campaigns.list',
+          payload: { adAccountId: 'act_other', currency: 'BRL' },
+          correlationId: 'test:account-read-auth',
+        },
+        readerIdentity(),
+        {
+          registry: createToolRegistry({ metaAdsReadsEnabled: true }),
+          runtimeResolver: () => binding,
+          auditSink: new InMemoryAuditSink(),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'POLICY_DENIED',
+      message: 'AUTHORIZATION_TARGET_ACCOUNT_NOT_ALLOWED',
     });
     expect(execute).not.toHaveBeenCalled();
   });
