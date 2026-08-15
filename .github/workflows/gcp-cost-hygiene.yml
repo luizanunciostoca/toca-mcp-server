@@ -12,6 +12,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: gcp-cost-hygiene-production
+  cancel-in-progress: false
+
 env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
@@ -23,8 +27,11 @@ jobs:
   artifact-registry-cleanup:
     runs-on: ubuntu-latest
     environment: infrastructure-admin
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Verify bounded cleanup policy before privileged auth
         shell: bash
@@ -38,12 +45,12 @@ jobs:
           echo 'ARTIFACT_REGISTRY_CLEANUP_POLICY_BOUNDARY=PASS'
 
       - name: Authenticate as infrastructure administrator
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Apply bounded Artifact Registry cleanup policy
         shell: bash

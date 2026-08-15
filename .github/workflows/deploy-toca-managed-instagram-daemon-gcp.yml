@@ -17,6 +17,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-toca-managed-instagram-daemon-production
+  cancel-in-progress: false
+
 env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
@@ -38,16 +42,19 @@ jobs:
   quality-build-image:
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 30
     outputs:
       image: ${{ steps.image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.15.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -56,12 +63,12 @@ jobs:
       - run: pnpm quality
 
       - name: Authenticate deployer to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Configure Docker authentication
         run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
@@ -79,10 +86,13 @@ jobs:
     needs: quality-build-image
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
     outputs:
       service_url: ${{ steps.scheduler.outputs.service_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Verify bounded scheduler target before deployer auth
         shell: bash
@@ -96,12 +106,12 @@ jobs:
           echo 'TOCA_MANAGED_INSTAGRAM_SCHEDULER_BOUNDARY=PASS'
 
       - name: Authenticate deployer to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Provision authenticated minute trigger before scale-to-zero
         id: scheduler
@@ -157,18 +167,21 @@ jobs:
     needs: [quality-build-image, provision-minute-trigger]
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 20
     env:
       IMAGE: ${{ needs.quality-build-image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Authenticate deployer to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Deploy scale-to-zero scheduler executor
         run: |
@@ -257,14 +270,15 @@ jobs:
     needs: [provision-minute-trigger, deploy-runtime]
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
     steps:
       - name: Authenticate deployer to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Verify authenticated minute trigger and execute smoke tick
         shell: bash
