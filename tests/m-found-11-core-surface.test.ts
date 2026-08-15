@@ -451,6 +451,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
         scope: ['meta_ads.campaign.create_paused'],
         expiresAt: '2099-01-01T00:00:00.000Z',
         correlationId: 'test:approval-read',
+        evidence: ['test:approval-request'],
       },
       { now: NOW, createId: () => 'approval_other' },
     );
