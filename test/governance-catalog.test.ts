@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CAPABILITY_CATALOG,
+  CAPABILITY_CATALOG_VERSION,
   getCapabilityDefinition,
   validateCapabilityCatalog,
 } from '../src/governance/capability-catalog.js';
@@ -24,13 +25,18 @@ describe('TOCA OS route and capability catalogs', () => {
     expect(getRouteDefinition('R32').capabilityIds).toContain('registry.reconcile');
   });
 
-  it('materializes every requested and technical capability with complete metadata', () => {
+  it('materializes the 731-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
     expect(CAPABILITY_CATALOG).toHaveLength(731);
+    expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
+    expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
+
     expect(getCapabilityDefinition('approval.consume')).toMatchObject({
       route_id: 'R27',
+      primary_route_id: 'R27',
       lifecycle_status: 'IMPLEMENTED',
       execution_surface: 'INTERNAL_ENGINE',
+      contract_quality: 'RUNTIME_BOUND',
     });
     expect(getCapabilityDefinition('meta_ads.campaign.activate')).toMatchObject({
       route_id: 'R28',
@@ -51,7 +57,66 @@ describe('TOCA OS route and capability catalogs', () => {
     });
   });
 
-  it('keeps the runtime registry narrower than the canonical catalog', () => {
+  it('corrects known risk-classification errors with explicit contracts', () => {
+    expect(getCapabilityDefinition('drive.file.copy')).toMatchObject({
+      contract_quality: 'EXPLICIT',
+      risk_class: 'WRITE_EXTERNAL',
+      side_effects: true,
+      approval_required: true,
+    });
+    expect(getCapabilityDefinition('operations.opening.checklist.execute')).toMatchObject({
+      contract_quality: 'EXPLICIT',
+      risk_class: 'WRITE_REVERSIBLE',
+      side_effects: true,
+    });
+    expect(getCapabilityDefinition('operations.closing.checklist.execute')).toMatchObject({
+      contract_quality: 'EXPLICIT',
+      risk_class: 'WRITE_REVERSIBLE',
+      side_effects: true,
+    });
+    expect(getCapabilityDefinition('story.export')).toMatchObject({
+      contract_quality: 'EXPLICIT',
+      risk_class: 'WRITE_REVERSIBLE',
+      side_effects: true,
+    });
+  });
+
+  it('uses the real bootstrap output contracts instead of requiring status/correlation_id universally', () => {
+    const health = getCapabilityDefinition('system.health');
+    expect(health).toMatchObject({ contract_quality: 'EXPLICIT' });
+    expect(health?.output_schema).toMatchObject({
+      additionalProperties: false,
+      required: ['status', 'service', 'version', 'phase'],
+    });
+    expect(health?.output_schema.required).not.toContain('correlation_id');
+
+    const capabilities = getCapabilityDefinition('system.capabilities');
+    expect(capabilities?.output_schema).toMatchObject({
+      additionalProperties: false,
+      required: ['tools'],
+    });
+    expect(capabilities?.output_schema.required).not.toContain('status');
+    expect(capabilities?.output_schema.required).not.toContain('correlation_id');
+  });
+
+  it('models Instagram provider permissions by authentication mode instead of one guessed scope', () => {
+    const publication = getCapabilityDefinition('instagram.publish.image');
+    const facebookLogin = publication?.permission_requirements.find(
+      (requirement) => requirement.authentication_mode === 'META_FACEBOOK_LOGIN',
+    );
+    const instagramLogin = publication?.permission_requirements.find(
+      (requirement) => requirement.authentication_mode === 'META_INSTAGRAM_LOGIN',
+    );
+
+    expect(facebookLogin).toBeDefined();
+    expect(facebookLogin?.scopes).toContain('instagram_basic');
+    expect(facebookLogin?.scopes).toContain('instagram_content_publish');
+    expect(instagramLogin).toBeDefined();
+    expect(instagramLogin?.scopes).toContain('instagram_business_basic');
+    expect(instagramLogin?.scopes).toContain('instagram_business_content_publish');
+  });
+
+  it('keeps the runtime registry narrower than the canonical catalog and labels runtime contracts honestly', () => {
     const runtime = createToolRegistry({
       instagramReadsEnabled: true,
       metaAdsReadsEnabled: true,
@@ -68,6 +133,7 @@ describe('TOCA OS route and capability catalogs', () => {
       expect(catalogDefinition?.idempotent, tool.name).toBe(tool.idempotent);
       expect(catalogDefinition?.provider, tool.name).toBe(tool.provider);
       expect(catalogDefinition?.required_scopes, tool.name).toEqual(tool.requiredScopes);
+      expect(catalogDefinition?.contract_quality, tool.name).not.toBe('LEGACY_INFERRED');
     }
     expect(runtime.get('meta_ads.campaign.activate')).toBeUndefined();
     expect(

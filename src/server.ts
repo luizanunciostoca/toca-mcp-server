@@ -22,11 +22,17 @@ export const SERVER_VERSION = '0.2.0';
 
 const capabilityStatusSchema = z.enum([
   'PLANNED',
+  'SPECIFIED',
   'IMPLEMENTED',
   'CONNECTED',
+  'INTEGRATION_VALIDATED',
   'PRODUCTION_VALIDATED',
+  'DEGRADED',
+  'DISABLED',
+  'BLOCKED',
   'SUSPENDED',
   'DEPRECATED',
+  'RETIRED',
   'REMOVED',
 ]);
 

@@ -54,11 +54,59 @@ export interface RouteDefinition {
 export type ExecutionSurface =
   'COGNITIVE' | 'CONNECTOR' | 'MCP_TOOL' | 'INTERNAL_ENGINE' | 'CATALOG_ONLY';
 
-export interface JsonSchemaReference {
+export type CapabilityContractQuality = 'EXPLICIT' | 'RUNTIME_BOUND' | 'LEGACY_INFERRED';
+
+export type AuthenticationMode =
+  | 'NONE'
+  | 'INTERNAL'
+  | 'META_FACEBOOK_LOGIN'
+  | 'META_INSTAGRAM_LOGIN'
+  | 'META_SYSTEM_USER'
+  | 'OAUTH2'
+  | 'SERVICE_ACCOUNT'
+  | 'WORKLOAD_IDENTITY'
+  | 'UNKNOWN';
+
+export type ProviderAccessLevel = 'READ' | 'MANAGE' | 'PUBLISH' | 'MESSAGE' | 'COMMENT' | 'ADMIN';
+
+export interface ProviderPermissionRequirement {
+  readonly provider: string;
+  readonly authentication_mode: AuthenticationMode;
+  readonly operation: string;
+  readonly scopes: readonly string[];
+  readonly access_level: ProviderAccessLevel;
+  readonly validated_at: string | null;
+  readonly evidence: readonly string[];
+}
+
+export type JsonSchemaPrimitiveType =
+  'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
+
+export interface JsonSchemaNode {
+  readonly type?: JsonSchemaPrimitiveType | readonly JsonSchemaPrimitiveType[];
+  readonly description?: string;
+  readonly enum?: readonly (string | number | boolean | null)[];
+  readonly const?: string | number | boolean | null;
+  readonly format?: string;
+  readonly pattern?: string;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly properties?: Readonly<Record<string, JsonSchemaNode>>;
+  readonly required?: readonly string[];
+  readonly items?: JsonSchemaNode;
+  readonly additionalProperties?: boolean | JsonSchemaNode;
+  readonly anyOf?: readonly JsonSchemaNode[];
+  readonly oneOf?: readonly JsonSchemaNode[];
+}
+
+export interface JsonSchemaReference extends JsonSchemaNode {
   readonly $id: string;
   readonly type: 'object';
-  readonly additionalProperties: boolean;
-  readonly required?: readonly string[];
+  readonly additionalProperties: boolean | JsonSchemaNode;
 }
 
 export interface RetryPolicyDefinition {
@@ -69,16 +117,26 @@ export interface RetryPolicyDefinition {
 
 export interface CapabilityDefinition {
   readonly capability_id: string;
+  /** @deprecated Use primary_route_id. Kept for compatibility through catalog v1.1. */
   readonly route_id: RouteId | 'TRANSVERSAL';
+  readonly primary_route_id: RouteId | 'TRANSVERSAL';
+  readonly consumer_route_ids: readonly RouteId[];
+  readonly aliases: readonly string[];
   readonly version: string;
   readonly description: string;
+  readonly contract_quality: CapabilityContractQuality;
   readonly lifecycle_status: CapabilityStatus;
   readonly risk_class: RiskClass;
   readonly side_effects: boolean;
   readonly approval_required: boolean;
   readonly idempotent: boolean;
   readonly provider: string;
+  readonly operation: string;
+  readonly authentication_mode: AuthenticationMode;
+  /** Current runtime scopes when a concrete runtime mode is known. */
   readonly required_scopes: readonly string[];
+  /** Provider/auth-mode alternatives for the operation. */
+  readonly permission_requirements: readonly ProviderPermissionRequirement[];
   readonly required_config: readonly string[];
   readonly input_schema: JsonSchemaReference;
   readonly output_schema: JsonSchemaReference;
@@ -87,6 +145,8 @@ export interface CapabilityDefinition {
   readonly verification_method: string;
   readonly rollback_method: string;
   readonly owner: string;
+  readonly reviewer_role: string;
+  readonly approver_role: string;
   readonly last_validated_at: string | null;
   readonly evidence: readonly string[];
   readonly execution_surface: ExecutionSurface;

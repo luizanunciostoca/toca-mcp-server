@@ -11,12 +11,14 @@ export interface CapabilityCheck {
 }
 
 export interface CapabilityLifecycleEvidence {
+  readonly contractDefinition: CapabilityCheck;
   readonly codePresence: CapabilityCheck;
   readonly runtimePresence: CapabilityCheck;
   readonly featureFlag: CapabilityCheck;
   readonly credentials: CapabilityCheck;
   readonly permissions: CapabilityCheck;
   readonly providerSupport: CapabilityCheck;
+  readonly integrationTest: CapabilityCheck;
   readonly smokeTest: CapabilityCheck;
   readonly readback: CapabilityCheck;
 }
@@ -25,7 +27,8 @@ export interface CapabilityValidationReport {
   readonly capabilityId: string;
   readonly previousStatus: CapabilityStatus;
   readonly recommendedStatus: CapabilityStatus;
-  readonly event: 'UNCHANGED' | 'PROMOTE' | 'DEMOTE' | 'SUSPEND';
+  readonly event:
+    'UNCHANGED' | 'PROMOTE' | 'DEMOTE' | 'DEGRADE' | 'BLOCK' | 'DISABLE' | 'SUSPEND' | 'RETIRE';
   readonly failedChecks: readonly (keyof CapabilityLifecycleEvidence)[];
   readonly unknownChecks: readonly (keyof CapabilityLifecycleEvidence)[];
   readonly evidence: readonly string[];
@@ -34,25 +37,111 @@ export interface CapabilityValidationReport {
 
 const orderedStatuses: readonly CapabilityStatus[] = [
   'PLANNED',
+  'SPECIFIED',
   'IMPLEMENTED',
   'CONNECTED',
+  'INTEGRATION_VALIDATED',
   'PRODUCTION_VALIDATED',
 ];
 
 const transitionMap: Readonly<Record<CapabilityStatus, readonly CapabilityStatus[]>> = {
-  PLANNED: ['IMPLEMENTED', 'DEPRECATED', 'REMOVED'],
-  IMPLEMENTED: ['PLANNED', 'CONNECTED', 'SUSPENDED', 'DEPRECATED', 'REMOVED'],
-  CONNECTED: ['IMPLEMENTED', 'PRODUCTION_VALIDATED', 'SUSPENDED', 'DEPRECATED', 'REMOVED'],
-  PRODUCTION_VALIDATED: ['SUSPENDED', 'DEPRECATED', 'REMOVED'],
-  SUSPENDED: [
-    'PLANNED',
-    'IMPLEMENTED',
+  PLANNED: ['SPECIFIED', 'DEPRECATED', 'RETIRED', 'REMOVED'],
+  SPECIFIED: ['PLANNED', 'IMPLEMENTED', 'BLOCKED', 'DEPRECATED', 'RETIRED', 'REMOVED'],
+  IMPLEMENTED: [
+    'SPECIFIED',
     'CONNECTED',
-    'PRODUCTION_VALIDATED',
+    'BLOCKED',
+    'DISABLED',
+    'SUSPENDED',
     'DEPRECATED',
+    'RETIRED',
     'REMOVED',
   ],
-  DEPRECATED: ['SUSPENDED', 'REMOVED'],
+  CONNECTED: [
+    'IMPLEMENTED',
+    'INTEGRATION_VALIDATED',
+    'DEGRADED',
+    'BLOCKED',
+    'DISABLED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  INTEGRATION_VALIDATED: [
+    'CONNECTED',
+    'PRODUCTION_VALIDATED',
+    'DEGRADED',
+    'BLOCKED',
+    'DISABLED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  PRODUCTION_VALIDATED: [
+    'INTEGRATION_VALIDATED',
+    'DEGRADED',
+    'BLOCKED',
+    'DISABLED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  DEGRADED: [
+    'SPECIFIED',
+    'IMPLEMENTED',
+    'CONNECTED',
+    'INTEGRATION_VALIDATED',
+    'PRODUCTION_VALIDATED',
+    'BLOCKED',
+    'DISABLED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  DISABLED: [
+    'SPECIFIED',
+    'IMPLEMENTED',
+    'CONNECTED',
+    'INTEGRATION_VALIDATED',
+    'PRODUCTION_VALIDATED',
+    'BLOCKED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  BLOCKED: [
+    'PLANNED',
+    'SPECIFIED',
+    'IMPLEMENTED',
+    'CONNECTED',
+    'INTEGRATION_VALIDATED',
+    'PRODUCTION_VALIDATED',
+    'DISABLED',
+    'SUSPENDED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  SUSPENDED: [
+    'PLANNED',
+    'SPECIFIED',
+    'IMPLEMENTED',
+    'CONNECTED',
+    'INTEGRATION_VALIDATED',
+    'PRODUCTION_VALIDATED',
+    'BLOCKED',
+    'DISABLED',
+    'DEPRECATED',
+    'RETIRED',
+    'REMOVED',
+  ],
+  DEPRECATED: ['SUSPENDED', 'RETIRED', 'REMOVED'],
+  RETIRED: ['REMOVED'],
   REMOVED: [],
 };
 
@@ -61,8 +150,17 @@ export function validateCapabilityLifecycle(
   previousStatus: CapabilityStatus,
   checks: CapabilityLifecycleEvidence,
 ): CapabilityValidationReport {
-  if (previousStatus === 'REMOVED' || previousStatus === 'DEPRECATED') {
+  if (
+    previousStatus === 'REMOVED' ||
+    previousStatus === 'RETIRED' ||
+    previousStatus === 'DEPRECATED' ||
+    previousStatus === 'DISABLED'
+  ) {
     return report(capabilityId, previousStatus, previousStatus, checks);
+  }
+
+  if (checks.contractDefinition.result === 'FAIL') {
+    return report(capabilityId, previousStatus, 'BLOCKED', checks);
   }
 
   const operationalChecks: readonly (keyof CapabilityLifecycleEvidence)[] = [
@@ -72,33 +170,51 @@ export function validateCapabilityLifecycle(
     'permissions',
     'providerSupport',
   ];
-  const productionChecks: readonly (keyof CapabilityLifecycleEvidence)[] = [
-    'smokeTest',
-    'readback',
-  ];
   const failedOperational = operationalChecks.some((name) => checks[name].result === 'FAIL');
-  const failedProduction = productionChecks.some((name) => checks[name].result === 'FAIL');
+  const failedValidation = ['integrationTest', 'smokeTest', 'readback'].some(
+    (name) => checks[name as keyof CapabilityLifecycleEvidence].result === 'FAIL',
+  );
 
   if (
-    previousStatus === 'PRODUCTION_VALIDATED' &&
-    (checks.codePresence.result === 'FAIL' || failedOperational || failedProduction)
+    ['CONNECTED', 'INTEGRATION_VALIDATED', 'PRODUCTION_VALIDATED', 'DEGRADED'].includes(
+      previousStatus,
+    ) &&
+    checks.permissions.result === 'FAIL'
   ) {
+    return report(capabilityId, previousStatus, 'BLOCKED', checks);
+  }
+
+  if (
+    ['INTEGRATION_VALIDATED', 'PRODUCTION_VALIDATED', 'DEGRADED'].includes(previousStatus) &&
+    (failedOperational || failedValidation)
+  ) {
+    return report(capabilityId, previousStatus, 'DEGRADED', checks);
+  }
+
+  if (previousStatus === 'PRODUCTION_VALIDATED' && checks.codePresence.result === 'FAIL') {
     return report(capabilityId, previousStatus, 'SUSPENDED', checks);
   }
 
   let eligibleStatus: CapabilityStatus = 'PLANNED';
-  if (checks.codePresence.result === 'PASS') eligibleStatus = 'IMPLEMENTED';
+  if (checks.contractDefinition.result === 'PASS') eligibleStatus = 'SPECIFIED';
+  if (eligibleStatus === 'SPECIFIED' && checks.codePresence.result === 'PASS') {
+    eligibleStatus = 'IMPLEMENTED';
+  }
   if (
     eligibleStatus === 'IMPLEMENTED' &&
     checks.runtimePresence.result === 'PASS' &&
     allSatisfied(checks, operationalChecks)
-  )
+  ) {
     eligibleStatus = 'CONNECTED';
-  if (eligibleStatus === 'CONNECTED' && allPassed(checks, productionChecks))
+  }
+  if (eligibleStatus === 'CONNECTED' && checks.integrationTest.result === 'PASS') {
+    eligibleStatus = 'INTEGRATION_VALIDATED';
+  }
+  if (eligibleStatus === 'INTEGRATION_VALIDATED' && allPassed(checks, ['smokeTest', 'readback'])) {
     eligibleStatus = 'PRODUCTION_VALIDATED';
+  }
 
   const recommendedStatus = nextValidatedStatus(previousStatus, eligibleStatus);
-
   return report(capabilityId, previousStatus, recommendedStatus, checks);
 }
 
@@ -107,17 +223,20 @@ export function assertCapabilityLifecycleTransition(
   to: CapabilityStatus,
 ): void {
   if (from === to) return;
-  if (!transitionMap[from].includes(to))
+  if (!transitionMap[from].includes(to)) {
     throw new Error(`CAPABILITY_TRANSITION_NOT_ALLOWED:${from}->${to}`);
+  }
 }
 
 export function promoteCapability(
   current: CapabilityStatus,
-  report: CapabilityValidationReport,
+  reportValue: CapabilityValidationReport,
 ): CapabilityStatus {
-  if (report.previousStatus !== current) throw new Error('CAPABILITY_REPORT_STATUS_MISMATCH');
-  assertCapabilityLifecycleTransition(current, report.recommendedStatus);
-  return report.recommendedStatus;
+  if (reportValue.previousStatus !== current) {
+    throw new Error('CAPABILITY_REPORT_STATUS_MISMATCH');
+  }
+  assertCapabilityLifecycleTransition(current, reportValue.recommendedStatus);
+  return reportValue.recommendedStatus;
 }
 
 function report(
@@ -170,7 +289,11 @@ function lifecycleEvent(
   next: CapabilityStatus,
 ): CapabilityValidationReport['event'] {
   if (previous === next) return 'UNCHANGED';
+  if (next === 'DEGRADED') return 'DEGRADE';
+  if (next === 'BLOCKED') return 'BLOCK';
+  if (next === 'DISABLED') return 'DISABLE';
   if (next === 'SUSPENDED') return 'SUSPEND';
+  if (next === 'RETIRED' || next === 'REMOVED') return 'RETIRE';
   const previousIndex = orderedStatuses.indexOf(previous);
   const nextIndex = orderedStatuses.indexOf(next);
   return nextIndex > previousIndex ? 'PROMOTE' : 'DEMOTE';
@@ -180,7 +303,7 @@ function nextValidatedStatus(
   previous: CapabilityStatus,
   eligible: CapabilityStatus,
 ): CapabilityStatus {
-  if (previous === 'SUSPENDED') return eligible;
+  if (['SUSPENDED', 'BLOCKED', 'DEGRADED'].includes(previous)) return eligible;
   const previousIndex = orderedStatuses.indexOf(previous);
   const eligibleIndex = orderedStatuses.indexOf(eligible);
   if (previousIndex < 0 || eligibleIndex < 0) return eligible;

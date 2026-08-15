@@ -1,6 +1,10 @@
 import type { CapabilityStatus, RiskClass, ToolDefinition } from '../core/tool-registry.js';
 import { createToolRegistry } from '../registry.js';
 import {
+  CAPABILITY_CONTRACT_OVERRIDES,
+  permissionRequirementsForCapability,
+} from './capability-contract-overrides.js';
+import {
   ROUTE_CAPABILITY_IDS,
   TECHNICAL_EXTENSION_CAPABILITY_IDS,
   TRANSVERSAL_CAPABILITY_IDS,
@@ -8,13 +12,19 @@ import {
 import {
   ROUTE_IDS,
   assertCapabilityNamespace,
+  type AuthenticationMode,
+  type CapabilityContractQuality,
   type CapabilityDefinition,
   type ExecutionSurface,
+  type ProviderAccessLevel,
+  type ProviderPermissionRequirement,
   type RouteId,
 } from './types.js';
 
 const OWNER = 'LUIZ + CHATGPT (COPILOTO DE GOVERNANCA)';
-const CATALOG_VERSION = '1.0.0';
+const REVIEWER_ROLE = 'TOCA_OS_GOVERNANCE_REVIEWER';
+const APPROVER_ROLE = 'TOCA_OS_ACCOUNTABLE_OWNER';
+export const CAPABILITY_CATALOG_VERSION = '1.1.0';
 
 const implementedInternal = new Set([
   'governance.scan',
@@ -138,7 +148,9 @@ const mutationActions = new Set([
   'edit',
   'enable',
   'escalate',
+  'execute',
   'expire',
+  'export',
   'import',
   'increase',
   'inject',
@@ -183,12 +195,14 @@ function isMutationAction(capabilityId: string): boolean {
 
 function isProviderWrite(capabilityId: string): boolean {
   if (/^meta_ads\./.test(capabilityId)) return isMutationAction(capabilityId);
-  if (/^(instagram|social|engagement)\./.test(capabilityId))
+  if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     return /\.(publish|send|reply|activate|pause|resume|create_paused|update_budget|update_status|replace_creative|replace|archive|cancel)$/.test(
       capabilityId,
     );
-  if (/^(drive|release|security|restore|dr)\./.test(capabilityId))
+  }
+  if (/^(drive|release|security|restore|dr)\./.test(capabilityId)) {
     return isMutationAction(capabilityId);
+  }
   return false;
 }
 
@@ -203,19 +217,20 @@ function isMutation(capabilityId: string): boolean {
   return isMutationAction(capabilityId) || isProviderWrite(capabilityId);
 }
 
-function riskClass(capabilityId: string): RiskClass {
+function inferredRiskClass(capabilityId: string): RiskClass {
   if (isFinancial(capabilityId)) return 'FINANCIAL_IMPACT';
   if (
     /\.(delete|remove)$/.test(capabilityId) &&
     /^(drive|registry|capability)\./.test(capabilityId)
-  )
+  ) {
     return 'DESTRUCTIVE';
+  }
   if (isProviderWrite(capabilityId)) return 'WRITE_EXTERNAL';
   if (isMutation(capabilityId)) return 'WRITE_REVERSIBLE';
   return 'READ';
 }
 
-function provider(capabilityId: string): string {
+function inferredProvider(capabilityId: string): string {
   if (/^meta_ads\./.test(capabilityId)) return 'Meta Marketing API';
   if (/^(instagram|social|engagement)\./.test(capabilityId)) return 'Meta/Instagram';
   if (/^drive\./.test(capabilityId)) return 'Google Drive';
@@ -226,20 +241,23 @@ function provider(capabilityId: string): string {
   return 'TOCA_OS+toca-mcp';
 }
 
-function scopes(capabilityId: string, risk: RiskClass): readonly string[] {
+/**
+ * Legacy flat scopes are retained for runtime compatibility. Planned social
+ * capabilities intentionally do not receive guessed scopes; their provider/login
+ * alternatives live in permission_requirements instead.
+ */
+function inferredScopes(capabilityId: string, risk: RiskClass): readonly string[] {
   if (/^meta_ads\./.test(capabilityId)) return risk === 'READ' ? ['ads_read'] : ['ads_management'];
-  if (/^(instagram|social|engagement)\./.test(capabilityId)) {
-    if (/\.(publish|send|reply)$/.test(capabilityId)) return ['instagram_content_publish'];
-    return ['instagram_basic'];
-  }
+  if (/^(instagram|social|engagement)\./.test(capabilityId)) return [];
   if (/^drive\./.test(capabilityId)) return ['drive.file'];
   return [];
 }
 
 function config(capabilityId: string): readonly string[] {
   if (/^meta_ads\./.test(capabilityId)) return ['META_GRAPH_API_VERSION', 'META_ACCESS_TOKEN_REF'];
-  if (/^(instagram|social|engagement)\./.test(capabilityId))
+  if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     return ['INSTAGRAM_BUSINESS_ACCOUNT_ID', 'META_ACCESS_TOKEN_REF'];
+  }
   if (/^(backup|restore|dr)\./.test(capabilityId)) return ['DATABASE_URL', 'GCP_PROJECT_ID'];
   return [];
 }
@@ -252,8 +270,9 @@ function executionSurface(capabilityId: string, status: CapabilityStatus): Execu
     /^(copy|editorial|campaign|analytics|performance|context|quality_gate|people|legal)\./.test(
       capabilityId,
     )
-  )
+  ) {
     return 'COGNITIVE';
+  }
   return status === 'PLANNED' ? 'CATALOG_ONLY' : 'INTERNAL_ENGINE';
 }
 
@@ -263,7 +282,7 @@ function humanDescription(capabilityId: string): string {
 }
 
 function evidence(capabilityId: string, status: CapabilityStatus): readonly string[] {
-  if (status === 'PLANNED') return [];
+  if (status === 'PLANNED' || status === 'SPECIFIED') return [];
   if (knownRuntimeTools.has(capabilityId)) return ['src/registry.ts'];
   if (capabilityId.startsWith('approval.')) return ['src/governance/approval-governance.ts'];
   if (capabilityId.startsWith('capability.')) return ['src/governance/capability-lifecycle.ts'];
@@ -272,45 +291,115 @@ function evidence(capabilityId: string, status: CapabilityStatus): readonly stri
   return ['src/governance/state-machine.ts'];
 }
 
+function contractQuality(capabilityId: string): CapabilityContractQuality {
+  const explicit = CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality;
+  if (explicit) return explicit;
+  if (knownRuntimeTools.has(capabilityId) || implementedInternal.has(capabilityId)) {
+    return 'RUNTIME_BOUND';
+  }
+  return 'LEGACY_INFERRED';
+}
+
+function authenticationMode(capabilityId: string): AuthenticationMode {
+  if (capabilityId.startsWith('system.')) return 'NONE';
+  if (implementedInternal.has(capabilityId)) return 'INTERNAL';
+  if (capabilityId.startsWith('drive.')) return 'OAUTH2';
+  if (/^(instagram|social|engagement|meta_ads)\./.test(capabilityId)) return 'UNKNOWN';
+  return 'INTERNAL';
+}
+
+function accessLevel(risk: RiskClass): ProviderAccessLevel {
+  if (risk === 'READ') return 'READ';
+  return 'MANAGE';
+}
+
+function runtimePermissionRequirements(
+  capabilityId: string,
+  runtime: ToolDefinition | undefined,
+  operation: string,
+): readonly ProviderPermissionRequirement[] {
+  if (!runtime || runtime.requiredScopes.length === 0) return [];
+  return [
+    {
+      provider: runtime.provider,
+      authentication_mode: 'UNKNOWN',
+      operation,
+      scopes: runtime.requiredScopes,
+      access_level: accessLevel(runtime.riskClass),
+      validated_at: null,
+      evidence: ['src/registry.ts'],
+    },
+  ];
+}
+
+function genericInputSchema(capabilityId: string) {
+  return {
+    $id: `toca://capabilities/${capabilityId}/input/v1.1`,
+    type: 'object' as const,
+    additionalProperties: true,
+  };
+}
+
+function genericOutputSchema(capabilityId: string) {
+  return {
+    $id: `toca://capabilities/${capabilityId}/output/v1.1`,
+    type: 'object' as const,
+    additionalProperties: true,
+  };
+}
+
 function createDefinition(
   capabilityId: string,
   routeId: RouteId | 'TRANSVERSAL',
 ): CapabilityDefinition {
   assertCapabilityNamespace(capabilityId);
   const runtimeDefinition = runtimeDefinitions.get(capabilityId);
-  const risk = runtimeDefinition?.riskClass ?? riskClass(capabilityId);
+  const override = CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
+  const inferredRisk = runtimeDefinition?.riskClass ?? inferredRiskClass(capabilityId);
+  const risk = override?.risk_class ?? inferredRisk;
   const status = lifecycleStatus(capabilityId);
-  const sideEffects = runtimeDefinition?.sideEffects ?? risk !== 'READ';
+  const sideEffects = override?.side_effects ?? runtimeDefinition?.sideEffects ?? risk !== 'READ';
   const idempotent =
-    runtimeDefinition?.idempotent ?? (!sideEffects || !isProviderWrite(capabilityId));
+    override?.idempotent ??
+    runtimeDefinition?.idempotent ??
+    (!sideEffects || !isProviderWrite(capabilityId));
   const external = /^(instagram|meta_ads|social|engagement|drive|release|security)\./.test(
     capabilityId,
   );
+  const operation = override?.operation ?? capabilityId;
+  const providerPermissions = permissionRequirementsForCapability(capabilityId);
+  const defaultApprovalRequired =
+    risk === 'WRITE_EXTERNAL' || risk === 'FINANCIAL_IMPACT' || risk === 'DESTRUCTIVE';
+
   return {
     capability_id: capabilityId,
     route_id: routeId,
-    version: CATALOG_VERSION,
-    description: humanDescription(capabilityId),
+    primary_route_id: routeId,
+    consumer_route_ids: [],
+    aliases: [],
+    version: CAPABILITY_CATALOG_VERSION,
+    description: override?.description ?? humanDescription(capabilityId),
+    contract_quality: contractQuality(capabilityId),
     lifecycle_status: status,
     risk_class: risk,
     side_effects: sideEffects,
-    approval_required:
-      risk === 'WRITE_EXTERNAL' || risk === 'FINANCIAL_IMPACT' || risk === 'DESTRUCTIVE',
+    approval_required: override?.approval_required ?? defaultApprovalRequired,
     idempotent,
-    provider: runtimeDefinition?.provider ?? provider(capabilityId),
-    required_scopes: runtimeDefinition?.requiredScopes ?? scopes(capabilityId, risk),
+    provider: override?.provider ?? runtimeDefinition?.provider ?? inferredProvider(capabilityId),
+    operation,
+    authentication_mode: override?.authentication_mode ?? authenticationMode(capabilityId),
+    required_scopes:
+      override?.required_scopes ??
+      runtimeDefinition?.requiredScopes ??
+      inferredScopes(capabilityId, risk),
+    permission_requirements:
+      override?.permission_requirements ??
+      (providerPermissions.length > 0
+        ? providerPermissions
+        : runtimePermissionRequirements(capabilityId, runtimeDefinition, operation)),
     required_config: config(capabilityId),
-    input_schema: {
-      $id: `toca://capabilities/${capabilityId}/input/v1`,
-      type: 'object',
-      additionalProperties: true,
-    },
-    output_schema: {
-      $id: `toca://capabilities/${capabilityId}/output/v1`,
-      type: 'object',
-      additionalProperties: true,
-      required: ['status', 'correlation_id'],
-    },
+    input_schema: override?.input_schema ?? genericInputSchema(capabilityId),
+    output_schema: override?.output_schema ?? genericOutputSchema(capabilityId),
     timeout_ms: external ? 60_000 : 30_000,
     retry_policy: {
       max_attempts: idempotent ? 3 : 1,
@@ -319,16 +408,21 @@ function createDefinition(
         ? ['PROVIDER_RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'TIMEOUT']
         : [],
     },
-    verification_method: external
-      ? 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON'
-      : 'SCHEMA_VALIDATION_AND_AUDIT_EVIDENCE',
+    verification_method:
+      override?.verification_method ??
+      (external
+        ? 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON'
+        : 'SCHEMA_VALIDATION_AND_AUDIT_EVIDENCE'),
     rollback_method:
-      risk === 'READ'
+      override?.rollback_method ??
+      (risk === 'READ'
         ? 'NOT_APPLICABLE'
         : risk === 'WRITE_REVERSIBLE'
           ? 'COMPENSATING_STATE_TRANSITION'
-          : 'EXPLICIT_PROVIDER_COMPENSATION_OR_MANUAL_RECOVERY',
+          : 'EXPLICIT_PROVIDER_COMPENSATION_OR_MANUAL_RECOVERY'),
     owner: OWNER,
+    reviewer_role: REVIEWER_ROLE,
+    approver_role: APPROVER_ROLE,
     last_validated_at: status === 'PRODUCTION_VALIDATED' ? '2026-08-14T00:00:00Z' : null,
     evidence: evidence(capabilityId, status),
     execution_surface: executionSurface(capabilityId, status),
@@ -357,17 +451,39 @@ export function getCapabilityDefinition(capabilityId: string): CapabilityDefinit
 }
 
 export function validateCapabilityCatalog(): void {
-  if (capabilityMap.size !== CAPABILITY_CATALOG.length)
+  if (capabilityMap.size !== CAPABILITY_CATALOG.length) {
     throw new Error('CAPABILITY_CATALOG_DUPLICATE_ID');
+  }
+
   for (const definition of CAPABILITY_CATALOG) {
     assertCapabilityNamespace(definition.capability_id);
-    if (definition.side_effects !== (definition.risk_class !== 'READ'))
-      throw new Error(`CAPABILITY_RISK_SIDE_EFFECT_MISMATCH:${definition.capability_id}`);
-    if (definition.lifecycle_status === 'PRODUCTION_VALIDATED') {
-      if (!definition.last_validated_at || definition.evidence.length === 0)
-        throw new Error(`CAPABILITY_PRODUCTION_EVIDENCE_REQUIRED:${definition.capability_id}`);
+
+    if (definition.route_id !== definition.primary_route_id) {
+      throw new Error(`CAPABILITY_PRIMARY_ROUTE_MISMATCH:${definition.capability_id}`);
     }
-    if (definition.approval_required && definition.risk_class === 'READ')
+    if (definition.side_effects !== (definition.risk_class !== 'READ')) {
+      throw new Error(`CAPABILITY_RISK_SIDE_EFFECT_MISMATCH:${definition.capability_id}`);
+    }
+    if (definition.lifecycle_status === 'PRODUCTION_VALIDATED') {
+      if (!definition.last_validated_at || definition.evidence.length === 0) {
+        throw new Error(`CAPABILITY_PRODUCTION_EVIDENCE_REQUIRED:${definition.capability_id}`);
+      }
+    }
+    if (definition.approval_required && definition.risk_class === 'READ') {
       throw new Error(`CAPABILITY_READ_APPROVAL_INVALID:${definition.capability_id}`);
+    }
+    if (
+      definition.execution_surface === 'MCP_TOOL' &&
+      definition.lifecycle_status !== 'PLANNED' &&
+      definition.contract_quality === 'LEGACY_INFERRED'
+    ) {
+      throw new Error(`CAPABILITY_RUNTIME_CONTRACT_SOURCE_REQUIRED:${definition.capability_id}`);
+    }
+    if (
+      definition.contract_quality === 'EXPLICIT' &&
+      definition.output_schema.$id.endsWith('/output/v1')
+    ) {
+      throw new Error(`CAPABILITY_EXPLICIT_SCHEMA_VERSION_INVALID:${definition.capability_id}`);
+    }
   }
 }
