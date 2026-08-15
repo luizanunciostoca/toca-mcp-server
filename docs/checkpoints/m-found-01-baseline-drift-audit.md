@@ -1,8 +1,11 @@
 # M-FOUND-01 — Baseline & Drift Audit
 
-Status: **EXECUTED — BASELINE CAPTURED**  
-Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`  
-Date: 2026-08-14 (America/Bahia)  
+Status: **EXECUTED — BASELINE CAPTURED**
+
+Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
+
+Date: 2026-08-14 (America/Bahia)
+
 Repository: `luizidebook/toca-mcp-server`
 
 ## 1. Purpose
@@ -23,12 +26,10 @@ This checkpoint records observed truth. It does not promote any capability and i
 
 ### Open pull requests observed
 
-| PR | State | Purpose | Foundation handling |
-|---|---|---|---|
-| #78 | draft | Meta Ads account/pixel readiness and settled-delivery hardening | Preserve; do not merge implicitly into foundation work |
-| #53 | draft | Instagram native scheduling capability probe | Preserve as independent provider research/evidence |
-| #47 | draft | Meta Ads read expansion | Reconcile against current `main` before any reuse |
-| #46 | draft | Marketing Autopilot E2E / Story hardening | Reconcile against current `main` before any reuse |
+- PR #78 — draft — Meta Ads account/pixel readiness and settled-delivery hardening. Preserve; do not merge implicitly into foundation work.
+- PR #53 — draft — Instagram native scheduling capability probe. Preserve as independent provider research/evidence.
+- PR #47 — draft — Meta Ads read expansion. Reconcile against current `main` before any reuse.
+- PR #46 — draft — Marketing Autopilot E2E / Story hardening. Reconcile against current `main` before any reuse.
 
 No foundation milestone may assume code from an open PR is present in `main`.
 
@@ -36,13 +37,13 @@ No foundation milestone may assume code from an open PR is present in `main`.
 
 The TOCA_OS Google Drive remains the canonical business/operational source of truth, while GitHub/runtime/provider evidence remain the source of truth for executable implementation state.
 
-| Resource | Canonical ID | Observed state |
-|---|---|---|
-| `TOCA_OS — MANUAL_TECNICO_MESTRE_DO_SISTEMA_COMPLETO_v1.1` | `10IIezg-NTT64k2bSsWfn8grcm6wUri2bGhKa3yM14v8` | OFFICIAL / current master manual |
-| `TOCA_OS — 04_GUIA_PARA_IA` | `1dtbfsMVfjCqm00ZAAl-6EkYxlgfiy9gL_IfqMsoHliY` | canonical AI operating guide |
-| `TOCA_OS — REGISTRO_CANONICO_DE_RECURSOS_E_IDS_v1.0` | `1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY` | canonical resource/ID registry |
-| `TOCA_OS — REGISTRO_MACHINE_ACTIONABLE_DE_ROTEAMENTO_v1.0` | `1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU` | active routing registry |
-| `TOCA_OS — RELATORIO_DE_MATURIDADE_COMPLETUDE_E_RISCOS_v3.0 — 2026-08-14` | `169QXKZAL9azyFe5nq8hYVgqhoxmK_-dxM_k0G66_pJQ` | current report document, but its audited GitHub snapshot is stale |
+Canonical resources observed:
+
+- Master manual: `TOCA_OS — MANUAL_TECNICO_MESTRE_DO_SISTEMA_COMPLETO_v1.1`; ID `10IIezg-NTT64k2bSsWfn8grcm6wUri2bGhKa3yM14v8`; status `OFFICIAL`.
+- AI guide: `TOCA_OS — 04_GUIA_PARA_IA`; ID `1dtbfsMVfjCqm00ZAAl-6EkYxlgfiy9gL_IfqMsoHliY`.
+- Canonical resource registry: `TOCA_OS — REGISTRO_CANONICO_DE_RECURSOS_E_IDS_v1.0`; ID `1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY`.
+- Machine routing registry: `TOCA_OS — REGISTRO_MACHINE_ACTIONABLE_DE_ROTEAMENTO_v1.0`; ID `1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU`.
+- Maturity report: `TOCA_OS — RELATORIO_DE_MATURIDADE_COMPLETUDE_E_RISCOS_v3.0 — 2026-08-14`; ID `169QXKZAL9azyFe5nq8hYVgqhoxmK_-dxM_k0G66_pJQ`.
 
 The v1.0 master manual is explicitly superseded. The v1.1 manual is the canonical manual.
 
