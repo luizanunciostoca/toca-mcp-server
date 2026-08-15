@@ -1,11 +1,14 @@
 import type { RiskClass, ToolDefinition } from './tool-registry.js';
+import { authorizeExecution, type ExecutionIdentity } from './identity.js';
 import { verifyApproval, type ApprovalRecord } from '../governance/approval-governance.js';
 import { getCapabilityDefinition } from '../governance/capability-catalog.js';
 
 export type PolicyDecision = 'ALLOW' | 'REQUIRE_APPROVAL' | 'DENY';
 
 export interface PolicyContext {
-  readonly requester: string;
+  readonly identity?: ExecutionIdentity;
+  /** @deprecated Use identity.principal.principalId. Kept only for non-mutating compatibility paths. */
+  readonly requester?: string;
   readonly connectedAccount?: string;
   readonly approval?: ApprovalRecord;
   readonly descriptorSha256?: string;
@@ -29,7 +32,13 @@ const approvalRiskClasses: ReadonlySet<RiskClass> = new Set([
 ]);
 
 export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
-  if (tool.capabilityStatus === 'SUSPENDED' || tool.capabilityStatus === 'REMOVED') {
+  if (
+    tool.capabilityStatus === 'SUSPENDED' ||
+    tool.capabilityStatus === 'REMOVED' ||
+    tool.capabilityStatus === 'DISABLED' ||
+    tool.capabilityStatus === 'RETIRED' ||
+    tool.capabilityStatus === 'BLOCKED'
+  ) {
     return {
       decision: 'DENY',
       reason: `Capability is ${tool.capabilityStatus}.`,
@@ -43,9 +52,29 @@ export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): Po
     };
   }
 
+  const capability = getCapabilityDefinition(tool.name);
+  if (tool.sideEffects) {
+    const routeId = capability?.primary_route_id ?? capability?.route_id;
+    const authorization = authorizeExecution(context.identity, {
+      capabilityId: tool.name,
+      riskClass: tool.riskClass,
+      ...(routeId && routeId !== 'TRANSVERSAL' ? { routeId } : {}),
+      ...(context.connectedAccount ? { targetAccount: context.connectedAccount } : {}),
+      ...(context.now ? { now: context.now } : {}),
+    });
+    if (!authorization.allowed) {
+      return {
+        decision: 'DENY',
+        reason: authorization.reason,
+      };
+    }
+  }
+
   if (approvalRiskClasses.has(tool.riskClass)) {
-    const routeId = getCapabilityDefinition(tool.name)?.route_id;
+    const routeId = capability?.primary_route_id ?? capability?.route_id;
+    const requester = context.identity?.principal.principalId;
     if (
+      !requester ||
       !context.approval ||
       !context.descriptorSha256 ||
       !context.connectedAccount ||
@@ -54,14 +83,14 @@ export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): Po
     ) {
       return {
         decision: 'REQUIRE_APPROVAL',
-        reason: `Risk class ${tool.riskClass} requires a formal ApprovalRecord.`,
+        reason: `Risk class ${tool.riskClass} requires a formal ApprovalRecord bound to the authenticated principal.`,
       };
     }
 
     const verification = verifyApproval(
       context.approval,
       {
-        requester: context.requester,
+        requester,
         routeId,
         capabilityId: tool.name,
         descriptorSha256: context.descriptorSha256,
