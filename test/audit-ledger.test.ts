@@ -95,6 +95,29 @@ describe('M-FOUND-08 audit ledger integrity', () => {
     );
   });
 
+  it('detects tampering with the persisted canonical payload', () => {
+    const started = record(base, 1, AUDIT_GENESIS_HASH, 'audit-1');
+    const tampered: AuditLedgerRecord = {
+      ...started,
+      canonicalPayload: {
+        ...started.canonicalPayload,
+        requester: 'attacker',
+      },
+    };
+    const head: AuditLedgerHead = {
+      executionId: base.executionId,
+      correlationId: base.correlationId,
+      tenantId: base.tenantId ?? null,
+      lastSequence: 1,
+      headHash: started.eventHash,
+      updatedAt: started.createdAt,
+    };
+
+    expect(verifyAuditLedger(base.executionId, [tampered], head).reason).toBe(
+      'AUDIT_CANONICAL_PAYLOAD_MISMATCH',
+    );
+  });
+
   it('detects sequence gaps and inconsistent heads', () => {
     const started = record(base, 1, AUDIT_GENESIS_HASH, 'audit-1');
     const invalidSequence: AuditLedgerRecord = { ...started, sequence: 2 };
