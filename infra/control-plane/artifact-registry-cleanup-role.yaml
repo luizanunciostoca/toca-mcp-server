@@ -1,0 +1,10 @@
+title: TOCA MCP Artifact Registry Cleanup Manager
+description: Least-privilege permissions to read the allowlisted TOCA MCP Artifact Registry repository, apply bounded cleanup policies and allow those policies to delete matching old versions. Cannot create/delete repositories, mutate repository IAM, upload artifacts or administer unrelated resources.
+stage: GA
+includedPermissions:
+  - artifactregistry.repositories.get
+  - artifactregistry.repositories.update
+  - artifactregistry.versions.delete
+  - resourcemanager.projects.get
+  - serviceusage.services.get
+  - serviceusage.services.use
