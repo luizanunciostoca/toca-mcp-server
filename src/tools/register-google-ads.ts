@@ -137,6 +137,7 @@ export function registerGoogleAdsTools(
         },
         auditSink: execution.auditSink,
         correlationId,
+        createExecutionId: () => correlationId,
         action: () => provider.createPaused(typedPlan),
         approvalExecution: {
           approvalId,
