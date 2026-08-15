@@ -196,9 +196,19 @@ describe('M-FOUND-06 durable workflow lifecycle', () => {
     expect(waiting.instance.status).toBe('WAITING');
     expect(waiting.steps[0]?.status).toBe('WAITING_HUMAN');
 
+    await expect(
+      store.claimHumanTask({
+        taskId: 'task-1',
+        principalId: 'luiz',
+        evidence: ['identity://luiz/no-role'],
+        now: '2026-08-14T22:02:30Z',
+      }),
+    ).rejects.toThrow('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');
+
     await store.claimHumanTask({
       taskId: 'task-1',
       principalId: 'luiz',
+      principalRoles: ['APPROVER'],
       evidence: ['identity://luiz'],
       now: '2026-08-14T22:03:00Z',
     });

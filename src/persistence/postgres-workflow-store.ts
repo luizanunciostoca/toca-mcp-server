@@ -184,7 +184,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
         if (existingWorkflowId !== blueprint.workflowId)
           throw new Error('WORKFLOW_IDEMPOTENCY_CONFLICT');
         await client.query('commit');
-        return this.#readSnapshot(blueprint.workflowId);
+        return this.#requireSnapshot(blueprint.workflowId);
       }
 
       const dependencies: WorkflowDependency[] = blueprint.steps.flatMap((step) =>
@@ -255,7 +255,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
       }
 
       await client.query('commit');
-      return this.#readSnapshot(blueprint.workflowId);
+      return this.#requireSnapshot(blueprint.workflowId);
     } catch (error) {
       await client.query('rollback');
       if (isUniqueViolation(error)) throw new Error('WORKFLOW_ALREADY_EXISTS');
@@ -285,6 +285,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
          from workflow_steps s
          join workflow_instances w on w.workflow_id = s.workflow_id
          where s.status = 'READY'
+           and s.attempts < s.max_attempts
            and w.status in ('RUNNING', 'WAITING')
          order by w.updated_at asc, s.workflow_id asc, s.step_id asc
          for update of s skip locked
@@ -304,7 +305,9 @@ export class PostgresWorkflowStore implements WorkflowStore {
         });
         await client.query(
           `update workflow_steps set
-             status = 'RUNNING', attempts = attempts + 1, claimed_by = $3,
+             status = 'RUNNING',
+             attempts = attempts + case when started_at is null then 1 else 0 end,
+             claimed_by = $3,
              claim_execution_id = $4, claimed_at = $5::timestamptz,
              started_at = coalesce(started_at, $5::timestamptz),
              completed_at = null, error_code = null, version = version + 1
@@ -320,7 +323,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
           {
             workerId: input.workerId,
             executionId,
-            attempt: row.attempts + 1,
+            attempt: row.started_at === null ? row.attempts + 1 : row.attempts,
           },
           [],
           input.now,
@@ -385,7 +388,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
       await this.#unlockDependents(client, input.workflowId, instance.correlation_id, input.now);
       await this.#recomputeInstanceStatus(client, input.workflowId, input.now);
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async failStep(input: {
@@ -434,7 +437,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
         input.errorCode,
       );
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async retryStep(input: {
@@ -451,7 +454,8 @@ export class PostgresWorkflowStore implements WorkflowStore {
       if (step.attempts >= step.max_attempts) throw new Error('WORKFLOW_STEP_RETRY_EXHAUSTED');
       await client.query(
         `update workflow_steps set
-           status = 'READY', output = null, completed_at = null, error_code = null,
+           status = 'READY', output = null, started_at = null,
+           completed_at = null, error_code = null,
            evidence = $4::jsonb, version = version + 1
          where workflow_id = $1 and step_id = $2 and version = $3`,
         [
@@ -472,7 +476,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
       });
       await this.#setInstanceStatus(client, input.workflowId, 'RUNNING', input.now, null);
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async openHumanTask(input: {
@@ -531,12 +535,13 @@ export class PostgresWorkflowStore implements WorkflowStore {
       });
       await this.#recomputeInstanceStatus(client, input.workflowId, input.now);
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async claimHumanTask(input: {
     readonly taskId: string;
     readonly principalId: string;
+    readonly principalRoles?: readonly string[];
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
@@ -555,6 +560,8 @@ export class PostgresWorkflowStore implements WorkflowStore {
       if (!task) throw new Error('WORKFLOW_HUMAN_TASK_NOT_FOUND');
       workflowId = task.workflow_id;
       if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');
+      if (task.required_role && !new Set(input.principalRoles ?? []).has(task.required_role))
+        throw new Error('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');
       const instance = await this.#lockInstance(client, workflowId);
       await client.query(
         `update workflow_human_tasks set
@@ -585,7 +592,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
     } finally {
       client.release();
     }
-    return this.#readSnapshot(workflowId);
+    return this.#requireSnapshot(workflowId);
   }
 
   async completeHumanTask(input: {
@@ -651,7 +658,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
     } finally {
       client.release();
     }
-    return this.#readSnapshot(workflowId);
+    return this.#requireSnapshot(workflowId);
   }
 
   async scheduleTimer(input: {
@@ -697,7 +704,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
       });
       await this.#recomputeInstanceStatus(client, input.workflowId, input.now);
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async fireDueTimers(input: {
@@ -803,7 +810,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
         occurredAt: input.now,
       });
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
   }
 
   async activateCompensations(input: {
@@ -843,7 +850,13 @@ export class PostgresWorkflowStore implements WorkflowStore {
         });
       }
     });
-    return this.#readSnapshot(input.workflowId);
+    return this.#requireSnapshot(input.workflowId);
+  }
+
+  async #requireSnapshot(workflowId: string): Promise<WorkflowSnapshot> {
+    const snapshot = await this.#readSnapshot(workflowId, true);
+    if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');
+    return snapshot;
   }
 
   async #readSnapshot(
