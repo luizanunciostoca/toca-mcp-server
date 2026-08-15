@@ -28,6 +28,28 @@ const META_PERMISSION_VALIDATED_AT = '2026-08-14';
 const META_OFFICIAL_POSTMAN_EVIDENCE = [
   'Meta official Instagram API Postman workspace — Instagram Login and Facebook Login permission model, validated 2026-08-14',
 ];
+const GOOGLE_BUSINESS_PERMISSION_VALIDATED_AT = '2026-08-15';
+const GOOGLE_BUSINESS_SCOPE = 'https://www.googleapis.com/auth/business.manage';
+const GOOGLE_BUSINESS_OFFICIAL_EVIDENCE = [
+  'Google Business Profile official API documentation — OAuth, Business Information, Local Posts, Reviews, Notifications and Performance, validated 2026-08-15',
+];
+
+function googleBusinessPermissionRequirements(
+  operation: string,
+  accessLevel: ProviderPermissionRequirement['access_level'],
+): readonly ProviderPermissionRequirement[] {
+  return [
+    {
+      provider: 'Google Business Profile',
+      authentication_mode: 'OAUTH2',
+      operation,
+      scopes: [GOOGLE_BUSINESS_SCOPE],
+      access_level: accessLevel,
+      validated_at: GOOGLE_BUSINESS_PERMISSION_VALIDATED_AT,
+      evidence: GOOGLE_BUSINESS_OFFICIAL_EVIDENCE,
+    },
+  ];
+}
 
 function closedObject(
   id: string,
@@ -212,6 +234,229 @@ export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<Record<string, CapabilityCo
     authentication_mode: 'INTERNAL',
     verification_method: 'PERSISTED_STATE_READBACK',
     rollback_method: 'COMPENSATING_STATE_TRANSITION',
+  },
+  'google_business.location.read': {
+    description:
+      'Read the current Google Business Profile location snapshot using an explicit read mask.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile',
+    operation: 'businessinformation.locations.get',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'businessinformation.locations.get',
+      'READ',
+    ),
+    verification_method: 'PROVIDER_RESPONSE_SCHEMA_VALIDATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.location.validate': {
+    description:
+      'Validate a normalized Google Business location snapshot against canonical local-discovery expectations.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.location.validate',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'DETERMINISTIC_PROFILE_VALIDATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.hours.reconcile': {
+    description:
+      'Compare canonical and provider hours and return a read-only reconciliation plan without mutating Google.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.hours.reconcile',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'DETERMINISTIC_HOURS_DIFF',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.post.prepare': {
+    description:
+      'Prepare a local post draft and bind event posts to the canonical EventRecord when applicable.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.post.prepare',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'DRAFT_AND_EVENT_RECORD_VALIDATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.post.create': {
+    description:
+      'Create a Google Business Profile Local Post only through R27 approval and mandatory provider read-back.',
+    risk_class: 'WRITE_EXTERNAL',
+    side_effects: true,
+    approval_required: true,
+    idempotent: false,
+    provider: 'Google Business Profile',
+    operation: 'accounts.locations.localPosts.create',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'accounts.locations.localPosts.create',
+      'PUBLISH',
+    ),
+    verification_method: 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON',
+    rollback_method: 'EXPLICIT_PROVIDER_COMPENSATION_OR_MANUAL_RECOVERY',
+  },
+  'google_business.post.readback': {
+    description:
+      'Read a Google Business Local Post and compare it with the prepared expected state.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile',
+    operation: 'accounts.locations.localPosts.get',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'accounts.locations.localPosts.get',
+      'READ',
+    ),
+    verification_method: 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.review.ingest': {
+    description:
+      'Normalize an incoming Google Business review into an idempotent ingestion envelope.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.review.ingest',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'NORMALIZED_REVIEW_SCHEMA_AND_DEDUPLICATION_KEY',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.review.classify': {
+    description:
+      'Classify Google Business reviews conservatively for intent, sentiment and human-review risk.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.review.classify',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'DETERMINISTIC_REVIEW_POLICY_CLASSIFICATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.review.reply_draft': {
+    description: 'Create a review reply draft that is never eligible for unrestricted auto-reply.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'TOCA_OS+toca-mcp',
+    operation: 'google_business.review.reply_draft',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'REPLY_DRAFT_POLICY_VALIDATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.review.reply': {
+    description:
+      'Publish a review reply only through R27 approval, with extra human review for complaints, legal and crisis cases, and provider read-back.',
+    risk_class: 'WRITE_EXTERNAL',
+    side_effects: true,
+    approval_required: true,
+    idempotent: false,
+    provider: 'Google Business Profile',
+    operation: 'accounts.locations.reviews.updateReply',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'accounts.locations.reviews.updateReply',
+      'COMMENT',
+    ),
+    verification_method: 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON',
+    rollback_method: 'EXPLICIT_PROVIDER_COMPENSATION_OR_MANUAL_RECOVERY',
+  },
+  'google_business.review.verify': {
+    description:
+      'Read a Google Business review after reply and verify the exact provider-side reply text.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile',
+    operation: 'accounts.locations.reviews.get',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'accounts.locations.reviews.get',
+      'READ',
+    ),
+    verification_method: 'PROVIDER_READBACK_AND_EXPECTED_STATE_COMPARISON',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.notification.ingest': {
+    description:
+      'Normalize a verified Google Business Profile notification delivery into a stable deduplication envelope.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile Notifications / Cloud PubSub',
+    operation: 'google_business.notification.ingest',
+    authentication_mode: 'INTERNAL',
+    required_scopes: [],
+    verification_method: 'NORMALIZED_NOTIFICATION_SCHEMA_AND_DEDUPLICATION_KEY',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.performance.read': {
+    description:
+      'Read Google Business Profile Performance daily metrics for a bounded location/date range.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile Performance API',
+    operation: 'locations.fetchMultiDailyMetricsTimeSeries',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'locations.fetchMultiDailyMetricsTimeSeries',
+      'READ',
+    ),
+    verification_method: 'PROVIDER_RESPONSE_SCHEMA_VALIDATION',
+    rollback_method: 'NOT_APPLICABLE',
+  },
+  'google_business.profile.drift.detect': {
+    description:
+      'Detect canonical-vs-provider and Google-updated profile drift without mutating the location.',
+    risk_class: 'READ',
+    side_effects: false,
+    approval_required: false,
+    idempotent: true,
+    provider: 'Google Business Profile',
+    operation: 'businessinformation.locations.get+getGoogleUpdated',
+    authentication_mode: 'OAUTH2',
+    required_scopes: [GOOGLE_BUSINESS_SCOPE],
+    permission_requirements: googleBusinessPermissionRequirements(
+      'businessinformation.locations.get+getGoogleUpdated',
+      'READ',
+    ),
+    verification_method: 'CANONICAL_PROVIDER_AND_GOOGLE_UPDATED_DIFF',
+    rollback_method: 'NOT_APPLICABLE',
   },
   'story.export': {
     description: 'Export a Story artifact from an approved content definition.',
