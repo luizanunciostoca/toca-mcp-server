@@ -32,7 +32,7 @@ export interface MeasurementReadRequest {
   readonly externalPropertyId: string;
   readonly from: string;
   readonly to: string;
-  readonly eventNames?: readonly string[];
+  readonly eventNames?: readonly string[] | undefined;
 }
 
 /**

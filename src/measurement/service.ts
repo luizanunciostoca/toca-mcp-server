@@ -64,7 +64,7 @@ export class MeasurementFoundationService {
     private readonly eventRecords: EventRecordStore,
     options: MeasurementFoundationServiceOptions = {},
   ) {
-    this.#audit = options.audit;
+    if (options.audit) this.#audit = options.audit;
     this.#createId = options.createId ?? randomUUID;
   }
 
@@ -96,7 +96,7 @@ export class MeasurementFoundationService {
     ].sort();
     if (conversionEventNames.length === 0) throw new Error('MEASUREMENT_CONVERSION_EVENT_REQUIRED');
     const requiredDimensions = [
-      ...new Set(input.requiredDimensions ?? ['source', 'medium', 'campaign']),
+      ...new Set(input.requiredDimensions ?? (['source', 'medium', 'campaign'] as const)),
     ].sort();
     const plan: MeasurementPlan = {
       planId: input.planId
@@ -506,7 +506,9 @@ export class MeasurementFoundationService {
       await this.#audit.write({
         ...base,
         status: 'FAILED',
-        errorCode: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN_ERROR',
+        errorCode:
+          (error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN_ERROR') ??
+          'UNKNOWN_ERROR',
         evidence: [...context.evidence, `risk-class:${riskClass}`],
         createdAt: nowIso(),
       });

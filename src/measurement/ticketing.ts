@@ -27,7 +27,7 @@ export function normalizeTicketingSalesSummary(input: {
   readonly result: TicketingSalesReadResult;
   readonly requesterPrincipalId: string;
   readonly correlationId: string;
-  readonly workflowInstanceId?: string | null;
+  readonly workflowInstanceId?: string | null | undefined;
 }): TicketingSalesSummary {
   const grossRevenueMinor = nonNegativeInteger(
     input.result.grossRevenueMinor,
@@ -72,7 +72,7 @@ export function normalizeTicketingInventory(input: {
   readonly result: TicketingInventoryReadResult;
   readonly requesterPrincipalId: string;
   readonly correlationId: string;
-  readonly workflowInstanceId?: string | null;
+  readonly workflowInstanceId?: string | null | undefined;
 }): TicketingInventorySnapshot {
   const capacity = nullableNonNegativeInteger(input.result.capacity, 'TICKETING_CAPACITY_INVALID');
   const sold = nonNegativeInteger(input.result.sold, 'TICKETING_SOLD_INVALID');
@@ -121,7 +121,7 @@ export function normalizeTicketingWebhook(input: {
   readonly normalizedPayload: Readonly<Record<string, string | number | boolean | null>>;
   readonly requesterPrincipalId: string;
   readonly correlationId: string;
-  readonly workflowInstanceId?: string | null;
+  readonly workflowInstanceId?: string | null | undefined;
   readonly evidence: readonly string[];
 }): TicketingWebhookReceipt {
   const receivedAt = timestamp(

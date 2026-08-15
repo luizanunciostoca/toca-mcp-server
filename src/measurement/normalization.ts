@@ -19,38 +19,38 @@ export interface NormalizeMeasurementEventInput {
   readonly tenantId: string;
   readonly workspaceId: string;
   readonly organizationId: string;
-  readonly eventId?: string | null;
+  readonly eventId?: string | null | undefined;
   readonly sourceSystem: MeasurementSourceSystem;
   readonly sourceEventId: string;
   readonly eventName: string;
   readonly occurredAt: string;
-  readonly ingestedAt?: string;
-  readonly sessionId?: string | null;
-  readonly anonymousId?: string | null;
-  readonly subjectId?: string | null;
-  readonly source?: string | null;
-  readonly medium?: string | null;
-  readonly campaign?: string | null;
-  readonly content?: string | null;
-  readonly term?: string | null;
-  readonly campaignId?: string | null;
-  readonly contentId?: string | null;
-  readonly isConversion?: boolean;
-  readonly valueMinor?: number | null;
-  readonly currency?: string | null;
-  readonly properties?: MeasurementProperties;
+  readonly ingestedAt?: string | undefined;
+  readonly sessionId?: string | null | undefined;
+  readonly anonymousId?: string | null | undefined;
+  readonly subjectId?: string | null | undefined;
+  readonly source?: string | null | undefined;
+  readonly medium?: string | null | undefined;
+  readonly campaign?: string | null | undefined;
+  readonly content?: string | null | undefined;
+  readonly term?: string | null | undefined;
+  readonly campaignId?: string | null | undefined;
+  readonly contentId?: string | null | undefined;
+  readonly isConversion?: boolean | undefined;
+  readonly valueMinor?: number | null | undefined;
+  readonly currency?: string | null | undefined;
+  readonly properties?: MeasurementProperties | undefined;
   readonly requesterPrincipalId: string;
   readonly correlationId: string;
-  readonly workflowInstanceId?: string | null;
+  readonly workflowInstanceId?: string | null | undefined;
   readonly evidence: readonly string[];
 }
 
 export function normalizeUtm(input: {
-  readonly source?: string | null;
-  readonly medium?: string | null;
-  readonly campaign?: string | null;
-  readonly content?: string | null;
-  readonly term?: string | null;
+  readonly source?: string | null | undefined;
+  readonly medium?: string | null | undefined;
+  readonly campaign?: string | null | undefined;
+  readonly content?: string | null | undefined;
+  readonly term?: string | null | undefined;
 }): UtmDimensions {
   return {
     source: dimension(input.source, true),
