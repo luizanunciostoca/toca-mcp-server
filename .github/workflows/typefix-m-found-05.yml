@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply remaining exact TypeScript fix
+      - name: Apply remaining exact route narrowing
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -38,17 +38,17 @@ jobs:
           PY
       - name: Validate exact result
         run: |
-          pnpm exec prettier --write src/governance/approval-governance.ts
+          pnpm exec prettier --write src/core/executor.ts src/governance/approval-governance.ts
           pnpm format:check
           pnpm typecheck
-      - name: Commit validated fix and remove temporary workflow
+      - name: Commit validated fixes and remove temporary workflow
         run: |
           rm .github/workflows/typefix-m-found-05.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix: narrow approval primary route before reservation"
+          git commit -m "fix: finalize M-FOUND-05 atomicity type contracts"
       - name: Push validated result
         env:
           GH_TOKEN: ${{ github.token }}
