@@ -55,29 +55,23 @@ jobs:
           fi
           exit 0
 
-      - name: Inventory Cloud Monitoring alert transport without mutation
+      - name: Inventory Monitoring with infrastructure administrator
         shell: bash
         run: |
           set -euo pipefail
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
-          CHANNEL_HTTP="$(curl --silent --output /tmp/channels.json --write-out '%{http_code}' \
+          CHANNEL_HTTP="$(curl --silent --output /tmp/infra-channels.json --write-out '%{http_code}' \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H 'Accept: application/json' \
             "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/notificationChannels?pageSize=100")"
-          POLICY_HTTP="$(curl --silent --output /tmp/policies.json --write-out '%{http_code}' \
+          POLICY_HTTP="$(curl --silent --output /tmp/infra-policies.json --write-out '%{http_code}' \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H 'Accept: application/json' \
             "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alertPolicies?pageSize=100")"
-
           CHANNEL_COUNT=0
           POLICY_COUNT=0
-          if [ "$CHANNEL_HTTP" = "200" ]; then
-            CHANNEL_COUNT="$(jq '(.notificationChannels // []) | length' /tmp/channels.json)"
-          fi
-          if [ "$POLICY_HTTP" = "200" ]; then
-            POLICY_COUNT="$(jq '(.alertPolicies // []) | length' /tmp/policies.json)"
-          fi
-
+          if [ "$CHANNEL_HTTP" = "200" ]; then CHANNEL_COUNT="$(jq '(.notificationChannels // []) | length' /tmp/infra-channels.json)"; fi
+          if [ "$POLICY_HTTP" = "200" ]; then POLICY_COUNT="$(jq '(.alertPolicies // []) | length' /tmp/infra-policies.json)"; fi
           jq -n \
             --arg sourceSha "$GITHUB_SHA" \
             --argjson channelHttp "$CHANNEL_HTTP" \
@@ -86,10 +80,10 @@ jobs:
             --argjson policyCount "$POLICY_COUNT" \
             --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{schemaVersion:1,sourceSha:$sourceSha,identity:"infrastructure-admin",notificationChannels:{httpStatus:$channelHttp,count:$channelCount},alertPolicies:{httpStatus:$policyHttp,count:$policyCount},verifiedAt:$verifiedAt}' \
-            > reliability-monitoring-readback.json
-          echo "FOUNDATION_MONITORING_READBACK channel_http=$CHANNEL_HTTP channels=$CHANNEL_COUNT policy_http=$POLICY_HTTP policies=$POLICY_COUNT"
+            > reliability-monitoring-infra-readback.json
+          echo "FOUNDATION_MONITORING_INFRA_READBACK channel_http=$CHANNEL_HTTP channels=$CHANNEL_COUNT policy_http=$POLICY_HTTP policies=$POLICY_COUNT"
 
-      - name: Reauthenticate as deployer for independent Cloud SQL read
+      - name: Reauthenticate as deployer
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -142,6 +136,34 @@ jobs:
             > reliability-cloudsql-readback.json
           echo 'FOUNDATION_CLOUD_SQL_RECOVERY_READBACK=VERIFIED'
 
+      - name: Inventory Monitoring with deployer
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          CHANNEL_HTTP="$(curl --silent --output /tmp/deployer-channels.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Accept: application/json' \
+            "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/notificationChannels?pageSize=100")"
+          POLICY_HTTP="$(curl --silent --output /tmp/deployer-policies.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Accept: application/json' \
+            "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alertPolicies?pageSize=100")"
+          CHANNEL_COUNT=0
+          POLICY_COUNT=0
+          if [ "$CHANNEL_HTTP" = "200" ]; then CHANNEL_COUNT="$(jq '(.notificationChannels // []) | length' /tmp/deployer-channels.json)"; fi
+          if [ "$POLICY_HTTP" = "200" ]; then POLICY_COUNT="$(jq '(.alertPolicies // []) | length' /tmp/deployer-policies.json)"; fi
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --argjson channelHttp "$CHANNEL_HTTP" \
+            --argjson policyHttp "$POLICY_HTTP" \
+            --argjson channelCount "$CHANNEL_COUNT" \
+            --argjson policyCount "$POLICY_COUNT" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,sourceSha:$sourceSha,identity:"deployer",notificationChannels:{httpStatus:$channelHttp,count:$channelCount},alertPolicies:{httpStatus:$policyHttp,count:$policyCount},verifiedAt:$verifiedAt}' \
+            > reliability-monitoring-deployer-readback.json
+          echo "FOUNDATION_MONITORING_DEPLOYER_READBACK channel_http=$CHANNEL_HTTP channels=$CHANNEL_COUNT policy_http=$POLICY_HTTP policies=$POLICY_COUNT"
+
       - name: Upload sanitized reliability readback
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -149,6 +171,7 @@ jobs:
           name: foundation-reliability-gcp-readback-${{ github.sha }}
           path: |
             reliability-cloudsql-readback.json
-            reliability-monitoring-readback.json
+            reliability-monitoring-infra-readback.json
+            reliability-monitoring-deployer-readback.json
           if-no-files-found: error
           retention-days: 90
