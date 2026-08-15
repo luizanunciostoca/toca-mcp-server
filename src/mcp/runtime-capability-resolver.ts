@@ -231,7 +231,7 @@ function resolveBinding(
       return services.instagramScheduler
         ? binding(
             rescheduleSchema,
-            (input) => services.instagramScheduler!.reschedule(input.jobId, input.replacement),
+            (input) => executeIdempotentReschedule(services.instagramScheduler!, input),
             {
               idempotencyKey: (input) =>
                 `instagram:reschedule:${input.jobId}:${scheduleIdempotencyKey(input.replacement)}`,
@@ -325,6 +325,32 @@ function metaAccountRead<T extends z.infer<typeof adAccountSchema>, TResult>(
 
 function scheduleIdempotencyKey(input: TocaManagedInstagramSchedulePayload): string {
   return `internal:instagram:toca-managed:${input.contentItemId}:${hashTocaManagedInstagramApprovalDescriptor(input)}`;
+}
+
+async function executeIdempotentReschedule(
+  scheduler: TocaManagedInstagramScheduler,
+  input: z.infer<typeof rescheduleSchema>,
+) {
+  const replacementKey = scheduleIdempotencyKey(input.replacement);
+  const recoverReplacement = async () =>
+    (await scheduler.list()).find((job) => job.idempotencyKey === replacementKey);
+
+  const source = await scheduler.status(input.jobId);
+  if (source?.status === 'CANCELED') {
+    const recovered = await recoverReplacement();
+    if (recovered) return recovered;
+  }
+
+  try {
+    return await scheduler.reschedule(input.jobId, input.replacement);
+  } catch (error) {
+    const sourceAfterFailure = await scheduler.status(input.jobId);
+    if (sourceAfterFailure?.status === 'CANCELED') {
+      const recovered = await recoverReplacement();
+      if (recovered) return recovered;
+    }
+    throw error;
+  }
 }
 
 async function scheduleReadback(scheduler: TocaManagedInstagramScheduler, jobId: string) {
