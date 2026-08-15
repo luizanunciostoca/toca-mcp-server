@@ -92,6 +92,8 @@ const policyContext = () => ({
   now: '2026-08-14T21:00:00Z',
 });
 
+const fixedNow = () => '2026-08-14T21:00:00Z';
+
 describe('M-FOUND-05 atomic approval executor', () => {
   it('consumes only after a verified provider readback', async () => {
     const store = await seededStore();
@@ -111,7 +113,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
       approvalExecution: {
         approvalId: 'approval-atomic-1',
         store,
-        now: () => '2026-08-14T21:00:00Z',
+        now: fixedNow,
         providerReadback: (output) =>
           Promise.resolve({
             verified: output.campaignId === 'campaign-123' && output.status === 'PAUSED',
@@ -174,6 +176,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
         approvalExecution: {
           approvalId: 'approval-atomic-1',
           store,
+          now: fixedNow,
           providerReadback: () => Promise.resolve({ verified: true, evidence: ['unreachable'] }),
         },
       }),
@@ -199,6 +202,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
         approvalExecution: {
           approvalId: 'approval-atomic-1',
           store,
+          now: fixedNow,
           providerReadback: () => Promise.resolve({ verified: true, evidence: ['unreachable'] }),
         },
       }),
@@ -221,6 +225,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
         approvalExecution: {
           approvalId: 'approval-atomic-1',
           store,
+          now: fixedNow,
           providerReadback: () =>
             Promise.resolve({
               verified: false,
@@ -258,6 +263,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
         approvalExecution: {
           approvalId: 'approval-atomic-1',
           store,
+          now: fixedNow,
           providerReadback: () => Promise.resolve({ verified: true, evidence: ['unreachable'] }),
         },
       }),
