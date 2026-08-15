@@ -8,15 +8,15 @@ import {
 } from '../src/governance/capability-resolution.js';
 
 describe('M-FOUND-03 capability canonicalization', () => {
-  it('preserves the 731 compatibility IDs while collapsing exact semantic aliases', () => {
+  it('preserves the 731 compatibility IDs plus technical extensions while collapsing exact semantic aliases', () => {
     expect(() => validateCapabilityResolution()).not.toThrow();
 
     const effective = getEffectiveCapabilityCatalog();
     expect(CAPABILITY_ALIAS_RULES).toHaveLength(8);
     expect(effective).toMatchObject({
-      raw_count: 731,
+      raw_count: 756,
       compatibility_alias_count: 8,
-      effective_count: 723,
+      effective_count: 748,
     });
   });
 
