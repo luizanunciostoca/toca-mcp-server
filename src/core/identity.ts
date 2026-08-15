@@ -153,9 +153,7 @@ export function createTrustedServiceExecutionIdentity(input: {
     roles: unique(input.roles),
     allowedRouteIds: input.allowedRouteIds ? unique(input.allowedRouteIds) : null,
     allowedCapabilityIds: input.allowedCapabilityIds ? unique(input.allowedCapabilityIds) : null,
-    allowedTargetAccounts: input.allowedTargetAccounts
-      ? unique(input.allowedTargetAccounts)
-      : null,
+    allowedTargetAccounts: input.allowedTargetAccounts ? unique(input.allowedTargetAccounts) : null,
     evidence: requireEvidence(input.evidence, 'AUTHORIZATION_EVIDENCE_REQUIRED'),
   };
   assertExecutionIdentity({ principal, authorization }, now);
