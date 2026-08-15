@@ -52,7 +52,11 @@ export interface RouteDefinition {
 }
 
 export type ExecutionSurface =
-  'COGNITIVE' | 'CONNECTOR' | 'MCP_TOOL' | 'INTERNAL_ENGINE' | 'CATALOG_ONLY';
+  | 'COGNITIVE'
+  | 'CONNECTOR'
+  | 'MCP_TOOL'
+  | 'INTERNAL_ENGINE'
+  | 'CATALOG_ONLY';
 
 export type CapabilityContractQuality = 'EXPLICIT' | 'RUNTIME_BOUND' | 'LEGACY_INFERRED';
 
@@ -67,7 +71,13 @@ export type AuthenticationMode =
   | 'WORKLOAD_IDENTITY'
   | 'UNKNOWN';
 
-export type ProviderAccessLevel = 'READ' | 'MANAGE' | 'PUBLISH' | 'MESSAGE' | 'COMMENT' | 'ADMIN';
+export type ProviderAccessLevel =
+  | 'READ'
+  | 'MANAGE'
+  | 'PUBLISH'
+  | 'MESSAGE'
+  | 'COMMENT'
+  | 'ADMIN';
 
 export interface ProviderPermissionRequirement {
   readonly provider: string;
@@ -80,7 +90,13 @@ export interface ProviderPermissionRequirement {
 }
 
 export type JsonSchemaPrimitiveType =
-  'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
+  | 'object'
+  | 'array'
+  | 'string'
+  | 'number'
+  | 'integer'
+  | 'boolean'
+  | 'null';
 
 export interface JsonSchemaNode {
   readonly type?: JsonSchemaPrimitiveType | readonly JsonSchemaPrimitiveType[];
@@ -117,11 +133,20 @@ export interface RetryPolicyDefinition {
 
 export interface CapabilityDefinition {
   readonly capability_id: string;
-  /** @deprecated Use primary_route_id. Kept for compatibility through catalog v1.1. */
+  /** @deprecated Use primary_route_id. Kept for compatibility through catalog v1.x. */
   readonly route_id: RouteId | 'TRANSVERSAL';
   readonly primary_route_id: RouteId | 'TRANSVERSAL';
   readonly consumer_route_ids: readonly RouteId[];
+  /** Compatibility IDs that resolve to this canonical capability. */
   readonly aliases: readonly string[];
+  /** Canonical identity after compatibility alias resolution. */
+  readonly canonical_capability_id: string;
+  /** True when this catalog entry is retained only as a backwards-compatible alias. */
+  readonly is_compatibility_alias: boolean;
+  /** Canonical replacement for an alias entry, otherwise null. */
+  readonly replacement_capability_id: string | null;
+  /** Catalog contract version in which an alias became deprecated, otherwise null. */
+  readonly deprecated_since: string | null;
   readonly version: string;
   readonly description: string;
   readonly contract_quality: CapabilityContractQuality;
