@@ -21,7 +21,8 @@ describe('M-FOUND-07 PostgreSQL transactional outbox contract', () => {
     expect(store).toContain('OUTBOX_STALE_ATTEMPT_STATE_CONFLICT');
     expect(store).toContain('attemptUpdate.rowCount !== 1');
     expect(store).toContain('OUTBOX_DELIVERY_ATTEMPT_STATE_CONFLICT');
-    expect(store).toContain("status = 'DEAD_LETTER'");
+    expect(store).toContain("terminal ? 'DEAD_LETTER' : 'FAILED_RETRYABLE'");
+    expect(store).toContain("? 'DEAD_LETTER'");
   });
 
   it('keeps consumer receipts inside caller-owned PostgreSQL transactions', () => {
