@@ -6,9 +6,9 @@ Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `8c4b0cbd6ac4d4e111dd2086c5c08d5c04167bb5`
 
-Validated implementation head: `6db192fda95f2205a7f437a81021b3617a28ba05`
+Validated implementation head: `d6d9a9f63d6957a343bcf915cce9f9d368be6cff`
 
-Official PR Quality Gate: `31864758165` / run `#1044` — **SUCCESS**
+Official PR Quality Gate: `31864905068` / run `#1048` — **SUCCESS**
 
 ## Objective
 
@@ -51,11 +51,12 @@ The verifier reads a repeatable-read snapshot and checks:
 1. contiguous sequence numbers;
 2. exact previous-hash linkage;
 3. deterministic canonical payload reconstruction;
-4. SHA-256 event hashes;
-5. final sequence against the persisted head;
-6. final hash against the persisted head.
+4. equality between the persisted `canonical_payload` and the reconstructed canonical payload;
+5. SHA-256 event hashes;
+6. final sequence against the persisted head;
+7. final hash against the persisted head.
 
-Any mismatch is surfaced as a specific integrity reason rather than silently accepted.
+The test suite independently proves detection of persisted event-hash tampering, persisted canonical-payload tampering, sequence gaps and inconsistent heads. Any mismatch is surfaced as a specific integrity reason rather than silently accepted.
 
 ## Durable observability
 
@@ -103,7 +104,7 @@ M-FOUND-08 is complete when:
 3. a durable head records the last sequence/hash;
 4. concurrent writers are serialized per execution;
 5. audit event mutation/deletion is rejected at the database layer;
-6. ledger verification detects sequence/hash/head corruption;
+6. ledger verification detects sequence, persisted canonical payload, event-hash and head corruption;
 7. existing `audit_events` compatibility is preserved;
 8. each audit transition creates durable correlated observability in the same transaction;
 9. operational signals are append-only and queryable by execution/correlation;
@@ -115,9 +116,9 @@ M-FOUND-08 is complete when:
 
 ## Current evidence
 
-The cleaned implementation head `6db192fda95f2205a7f437a81021b3617a28ba05` passed the official pull-request Quality Gate in GitHub Actions run `31864758165` (`#1044`). Format, architecture, lint, typecheck, the full test suite and build all completed successfully. Temporary M-FOUND-08 validation workflow artifacts were removed before this checkpoint was promoted.
+The hardened implementation head `d6d9a9f63d6957a343bcf915cce9f9d368be6cff` passed the official pull-request Quality Gate in GitHub Actions run `31864905068` (`#1048`). Format, Architecture, Lint, Typecheck, all 310 tests and Build completed successfully. Temporary M-FOUND-08 validation workflow artifacts are absent from the branch.
 
-Because this checkpoint update creates a new documentation head, that exact final head must pass the normal PR Quality Gate before merge. Merge remains fixed-head only, followed by post-merge `main` validation.
+Because this checkpoint update creates a documentation-only head, that exact final head must pass the normal PR Quality Gate before merge. Merge remains fixed-head only, followed by post-merge `main` validation.
 
 ## Exit
 
