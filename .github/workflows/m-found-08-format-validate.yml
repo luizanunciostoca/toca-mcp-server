@@ -24,22 +24,47 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Apply exact optional type fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"PATCH_ANCHOR_COUNT_INVALID:{path}:{count}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'src/persistence/postgres-audit-sink.ts',
+              "function asRoles(value: unknown): AuditEvent['authorizationRoles'] {",
+              "function asRoles(value: unknown): NonNullable<AuditEvent['authorizationRoles']> {",
+          )
+          replace_once(
+              'test/audit-ledger.test.ts',
+              "    expect(normalizeAuditEvidence({ ...base, evidence: undefined })).toEqual([\n      'audit:started:exec-1',\n    ]);",
+              "    expect(\n      normalizeAuditEvidence({\n        executionId: base.executionId,\n        correlationId: base.correlationId,\n        toolName: base.toolName,\n        requester: base.requester,\n        status: base.status,\n        createdAt: base.createdAt,\n      }),\n    ).toEqual(['audit:started:exec-1']);",
+          )
+          PY
       - name: Format M-FOUND-08 files
         run: |
           pnpm exec prettier --write \
             src/core/audit-ledger.ts \
             src/persistence/postgres-audit-sink.ts \
-            src/persistence/postgres-operational-observability.ts
+            src/persistence/postgres-operational-observability.ts \
+            test/audit-ledger.test.ts
       - name: Validate complete repository
         run: pnpm quality
-      - name: Commit validated formatting
+      - name: Commit validated result
         run: |
           rm .github/workflows/m-found-08-format-validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "style: validate M-FOUND-08 audit observability"
+          git commit -m "fix: validate M-FOUND-08 audit observability"
       - name: Push validated result
         env:
           GH_TOKEN: ${{ github.token }}
