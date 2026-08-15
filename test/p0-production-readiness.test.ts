@@ -1,14 +1,25 @@
 import type pg from 'pg';
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent } from '../src/core/audit.js';
+import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import { RuntimeTelemetry } from '../src/core/observability.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import type { StructuredLogger } from '../src/core/structured-logger.js';
 import { PostgresAuditSink } from '../src/persistence/postgres-audit-sink.js';
 import { createToolRegistry } from '../src/registry.js';
 
+const schedulerIdentity = createTrustedServiceExecutionIdentity({
+  principalId: 'test-mcp-client',
+  tenantId: 'toca-do-morcego',
+  roles: ['OPERATOR'],
+  allowedCapabilityIds: ['instagram.toca_schedule.create'],
+  allowedTargetAccounts: [],
+  evidence: ['test://p0-production-readiness'],
+  now: '2026-08-14T00:59:00.000Z',
+});
+
 describe('P0 production scheduler policy', () => {
-  it('marks validated scheduler mutations executable through generic policy', () => {
+  it('requires a bounded identity for validated scheduler mutations', () => {
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
     const tool = registry.get('instagram.toca_schedule.create');
     expect(tool).toMatchObject({
@@ -16,10 +27,11 @@ describe('P0 production scheduler policy', () => {
       riskClass: 'WRITE_REVERSIBLE',
       sideEffects: true,
     });
-    expect(tool && evaluatePolicy(tool, { requester: 'test-mcp-client' }).decision).toBe('ALLOW');
+    expect(tool && evaluatePolicy(tool, { requester: 'test-mcp-client' }).decision).toBe('DENY');
+    expect(tool && evaluatePolicy(tool, { identity: schedulerIdentity }).decision).toBe('ALLOW');
   });
 
-  it('persists generic execution audit using the registered risk class', async () => {
+  it('persists identity-aware execution audit using the registered risk class', async () => {
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
     const calls: unknown[][] = [];
     const pool = {
@@ -34,6 +46,12 @@ describe('P0 production scheduler policy', () => {
       correlationId: 'corr-1',
       toolName: 'instagram.toca_schedule.create',
       requester: 'test-mcp-client',
+      principalType: 'SERVICE',
+      tenantId: 'toca-do-morcego',
+      workspaceId: 'toca-do-morcego',
+      organizationId: 'toca-do-morcego',
+      authenticationMethod: 'INFRASTRUCTURE_IDENTITY',
+      authorizationRoles: ['OPERATOR'],
       status: 'SUCCEEDED',
       createdAt: '2026-08-14T01:00:00.000Z',
     };
@@ -51,6 +69,13 @@ describe('P0 production scheduler policy', () => {
         executionId: 'exec-1',
         approvalId: null,
         connectedAccount: null,
+        principalType: 'SERVICE',
+        tenantId: 'toca-do-morcego',
+        workspaceId: 'toca-do-morcego',
+        organizationId: 'toca-do-morcego',
+        sessionId: null,
+        authenticationMethod: 'INFRASTRUCTURE_IDENTITY',
+        authorizationRoles: ['OPERATOR'],
         createdAt: '2026-08-14T01:00:00.000Z',
       }),
       JSON.stringify({ externalResourceId: null, errorCode: null }),
