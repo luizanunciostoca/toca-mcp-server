@@ -318,10 +318,21 @@ export function registerTocaCoreSurface(
       requireMutationRole(identity);
       const store = requireStore(dependencies.workflowStore, 'WORKFLOW_STORE_REQUIRED');
       const steps = input.steps.map((step) => {
-        if (!step.capabilityId) return step;
-        const resolved = resolveCapabilityDefinition(step.capabilityId);
-        if (!resolved) throw new Error(`WORKFLOW_CAPABILITY_UNKNOWN:${step.capabilityId}`);
-        return { ...step, capabilityId: resolved.canonical_id };
+        const capabilityId = step.capabilityId
+          ? (() => {
+              const resolved = resolveCapabilityDefinition(step.capabilityId);
+              if (!resolved) throw new Error(`WORKFLOW_CAPABILITY_UNKNOWN:${step.capabilityId}`);
+              return resolved.canonical_id;
+            })()
+          : step.capabilityId;
+        return {
+          stepId: step.stepId,
+          name: step.name,
+          ...(capabilityId !== undefined ? { capabilityId } : {}),
+          ...(step.input !== undefined ? { input: step.input } : {}),
+          ...(step.maxAttempts !== undefined ? { maxAttempts: step.maxAttempts } : {}),
+          ...(step.dependsOn !== undefined ? { dependsOn: step.dependsOn } : {}),
+        };
       });
       const workflowId = deterministicWorkflowId(identity.principal.tenantId, input.idempotencyKey);
       const snapshot = await store.create({
@@ -524,8 +535,14 @@ export function registerTocaCoreSurface(
     async (input, context) => {
       const identity = requireIdentity(dependencies, context);
       const auditStore = requireStore(dependencies.auditStore, 'AUDIT_STORE_REQUIRED');
+      const executionInput = {
+        capabilityId: input.capabilityId,
+        payload: input.payload,
+        correlationId: input.correlationId,
+        ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
+      };
       return response(
-        await executeCoreCapability(input, identity, {
+        await executeCoreCapability(executionInput, identity, {
           registry: dependencies.registry,
           runtimeResolver: dependencies.runtimeResolver,
           auditSink: auditStore,

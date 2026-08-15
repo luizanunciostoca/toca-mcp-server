@@ -3,6 +3,7 @@ import type { InstagramHistoryProvider } from '../providers/instagram/instagram-
 import type { MetaAdsControlledGraphProvider } from '../providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import {
   requestSha256,
+  type ControlledCreatePausedPlan,
   type MetaAdsControlledWriteService,
 } from '../providers/meta-ads/meta-ads-controlled-write.js';
 import type { MetaAdsReadProvider } from '../providers/meta-ads/meta-ads-read-provider.js';
@@ -87,6 +88,34 @@ const planSchema = z.object({
     .min(1)
     .max(10),
 });
+function toControlledCreatePausedPlan(
+  input: z.infer<typeof planSchema>,
+): ControlledCreatePausedPlan {
+  return {
+    account: input.account,
+    campaign: input.campaign,
+    adSet: {
+      name: input.adSet.name,
+      dailyBudgetMinor: input.adSet.dailyBudgetMinor,
+      billingEvent: input.adSet.billingEvent,
+      optimizationGoal: input.adSet.optimizationGoal,
+      targeting: input.adSet.targeting,
+      promotedObject: input.adSet.promotedObject,
+      ...(input.adSet.startTime !== undefined ? { startTime: input.adSet.startTime } : {}),
+      ...(input.adSet.endTime !== undefined ? { endTime: input.adSet.endTime } : {}),
+    },
+    creatives: input.creatives.map((creative) => ({
+      name: creative.name,
+      pageId: creative.pageId,
+      objectStorySpec: creative.objectStorySpec,
+      ...(creative.instagramActorId !== undefined
+        ? { instagramActorId: creative.instagramActorId }
+        : {}),
+    })),
+    ads: input.ads,
+  };
+}
+
 const rescheduleSchema = z.object({
   jobId: z.string().min(1),
   replacement: tocaManagedInstagramSchedulePayloadSchema,
@@ -171,18 +200,27 @@ function resolveBinding(
         : undefined;
     case 'meta_ads.campaign.prepare_paused':
       return services.metaAdsWrite
-        ? binding(planSchema, (input) => Promise.resolve(services.metaAdsWrite!.prepare(input)), {
-            targetAccount: (input) => input.account.adAccountId,
-          })
+        ? binding(
+            planSchema,
+            (input) =>
+              Promise.resolve(services.metaAdsWrite!.prepare(toControlledCreatePausedPlan(input))),
+            {
+              targetAccount: (input) => input.account.adAccountId,
+            },
+          )
         : undefined;
     case 'meta_ads.campaign.create_paused':
       return services.metaAdsWrite && services.metaAdsWriteProvider
         ? binding(
             planSchema,
-            (input) => services.metaAdsWrite!.createPaused(input, requestSha256(input)),
+            (input) => {
+              const plan = toControlledCreatePausedPlan(input);
+              return services.metaAdsWrite!.createPaused(plan, requestSha256(plan));
+            },
             {
               targetAccount: (input) => input.account.adAccountId,
-              idempotencyKey: (input) => `meta-ads:create-paused:${requestSha256(input)}`,
+              idempotencyKey: (input) =>
+                `meta-ads:create-paused:${requestSha256(toControlledCreatePausedPlan(input))}`,
               financialContext: (input) => ({
                 amountMinor: input.adSet.dailyBudgetMinor,
                 currency: input.account.currency.toUpperCase(),
