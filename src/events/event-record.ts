@@ -1,5 +1,3 @@
-import type pg from 'pg';
-
 export const EVENT_RECORD_STATUSES = [
   'DRAFT',
   'PLANNED',
@@ -126,13 +124,6 @@ export interface EventRecordStore {
   }): Promise<readonly EventRecord[]>;
   listRevisions(eventId: string): Promise<readonly EventRecordRevision[]>;
   listExternalRefs(eventId: string): Promise<readonly EventRecordExternalRef[]>;
-}
-
-export interface TransactionalEventRecordWriter {
-  writeRevision(
-    client: pg.PoolClient,
-    revision: EventRecordRevision,
-  ): Promise<void>;
 }
 
 const STATUS_TRANSITIONS: Readonly<Record<EventRecordStatus, readonly EventRecordStatus[]>> = {
