@@ -1,0 +1,6 @@
+{
+  "milestone": "M-FOUND-06",
+  "reason": "Re-run merge controller after final human concurrency-contract tests were added.",
+  "required_pr": 98,
+  "expected_base_sha": "166b4e98a636c0fd5b64c849fd3af986d0593b9e"
+}
