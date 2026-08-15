@@ -1,0 +1,136 @@
+name: M-FOUND-06 Invariant Fix
+
+on:
+  push:
+    branches:
+      - feat/m-found-06-durable-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply exact invariant fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:{path}:{count}:{old[:60]}')
+              p.write_text(text.replace(old, new, 1))
+
+          p = Path('src/workflow/in-memory-workflow-store.ts')
+          text = p.read_text()
+          old = """        const executionId = this.#nextUniqueExecutionId();
+        const claimed: WorkflowStep = {
+"""
+          new = """        const executionId = this.#nextUniqueExecutionId();
+        const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;
+        const claimed: WorkflowStep = {
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:in-memory-claim:{text.count(old)}')
+          text = text.replace(old, new, 1)
+          old = """          attempts: step.attempts + 1,
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:in-memory-attempts:{text.count(old)}')
+          text = text.replace(old, """          attempts: nextAttempts,
+""", 1)
+          old = """      output: null,
+      completedAt: null,
+      errorCode: null,
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:in-memory-retry:{text.count(old)}')
+          text = text.replace(old, """      output: null,
+      startedAt: null,
+      completedAt: null,
+      errorCode: null,
+""", 1)
+          p.write_text(text)
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+          old = """             status = 'RUNNING', attempts = attempts + 1, claimed_by = $3,
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:postgres-attempts:{text.count(old)}')
+          text = text.replace(old, """             status = 'RUNNING',
+             attempts = attempts + case when started_at is null then 1 else 0 end,
+             claimed_by = $3,
+""", 1)
+          old = """          attempt: row.attempts + 1,
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:postgres-event-attempt:{text.count(old)}')
+          text = text.replace(old, """          attempt: row.started_at === null ? row.attempts + 1 : row.attempts,
+""", 1)
+          old = """           status = 'READY', output = null, completed_at = null, error_code = null,
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:postgres-retry:{text.count(old)}')
+          text = text.replace(old, """           status = 'READY', output = null, started_at = null,
+           completed_at = null, error_code = null,
+""", 1)
+
+          # Methods whose public contract requires an existing workflow must never return undefined.
+          text = text.replace('return this.#readSnapshot(blueprint.workflowId);', 'return this.#requireSnapshot(blueprint.workflowId);')
+          text = text.replace('return this.#readSnapshot(input.workflowId);', 'return this.#requireSnapshot(input.workflowId);')
+          text = text.replace('return this.#readSnapshot(workflowId);', 'return this.#requireSnapshot(workflowId);')
+          anchor = """  async #readSnapshot(
+    workflowId: string,
+    allowMissing = false,
+  ): Promise<WorkflowSnapshot | undefined> {
+"""
+          if text.count(anchor) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:require-snapshot:{text.count(anchor)}')
+          helper = """  async #requireSnapshot(workflowId: string): Promise<WorkflowSnapshot> {
+    const snapshot = await this.#readSnapshot(workflowId, true);
+    if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');
+    return snapshot;
+  }
+
+"""
+          text = text.replace(anchor, helper + anchor, 1)
+          p.write_text(text)
+          PY
+      - name: Validate exact result
+        run: |
+          pnpm exec prettier --write \
+            src/workflow/in-memory-workflow-store.ts \
+            src/persistence/postgres-workflow-store.ts
+          pnpm format:check
+          pnpm typecheck
+      - name: Commit validated fixes and remove temporary workflow
+        run: |
+          rm .github/workflows/m-found-06-invariant-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: preserve workflow attempt and snapshot invariants"
+      - name: Push validated result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
