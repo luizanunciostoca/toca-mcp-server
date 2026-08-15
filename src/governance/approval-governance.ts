@@ -234,10 +234,7 @@ export class InMemoryApprovalStore implements ApprovalStore {
 
   #persist(record: ApprovalRecord): void {
     this.#current.set(record.approvalId, record);
-    this.#history.set(record.approvalId, [
-      ...(this.#history.get(record.approvalId) ?? []),
-      record,
-    ]);
+    this.#history.set(record.approvalId, [...(this.#history.get(record.approvalId) ?? []), record]);
   }
 }
 
@@ -424,7 +421,10 @@ export function applyApprovalAtomicTransition(
     }
     case 'CONSUME': {
       assertExecutionTransition(record, 'PROVIDER_READBACK', transition.executionId);
-      const evidence = requireEvidence(transition.evidence, 'APPROVAL_CONSUMPTION_EVIDENCE_REQUIRED');
+      const evidence = requireEvidence(
+        transition.evidence,
+        'APPROVAL_CONSUMPTION_EVIDENCE_REQUIRED',
+      );
       if (!record.providerReadbackAt || record.providerReadbackEvidence.length === 0)
         throw new Error('APPROVAL_PROVIDER_READBACK_REQUIRED');
       return {
@@ -546,7 +546,9 @@ export function toApprovalRecordWire(record: ApprovalRecord): ApprovalRecordWire
   };
 }
 
-export function normalizeApprovalRecord(record: Partial<ApprovalRecord> & ApprovalRecord): ApprovalRecord {
+export function normalizeApprovalRecord(
+  record: Partial<ApprovalRecord> & ApprovalRecord,
+): ApprovalRecord {
   return {
     ...record,
     reservationExecutionId: record.reservationExecutionId ?? null,

@@ -8,10 +8,7 @@ import {
   type PolicyContext,
 } from './policy.js';
 import type { ToolDefinition } from './tool-registry.js';
-import type {
-  ApprovalAtomicTransition,
-  ApprovalStore,
-} from '../governance/approval-governance.js';
+import type { ApprovalAtomicTransition, ApprovalStore } from '../governance/approval-governance.js';
 
 export interface ProviderReadbackResult {
   readonly verified: boolean;
@@ -65,9 +62,7 @@ function createAuditEvent(
     status,
     createdAt: new Date().toISOString(),
     ...(policyContext.approval ? { approvalId: policyContext.approval.approvalId } : {}),
-    ...(policyContext.connectedAccount
-      ? { connectedAccount: policyContext.connectedAccount }
-      : {}),
+    ...(policyContext.connectedAccount ? { connectedAccount: policyContext.connectedAccount } : {}),
     ...extra,
   };
 }
@@ -183,9 +178,7 @@ async function executeWithAtomicApproval<T>(
   }
 
   try {
-    await options.auditSink.write(
-      createAuditEvent(options, policyContext, executionId, 'STARTED'),
-    );
+    await options.auditSink.write(createAuditEvent(options, policyContext, executionId, 'STARTED'));
   } catch (error) {
     await bestEffortTransition(approvalExecution.store, approvalExecution.approvalId, {
       type: 'RELEASE',
@@ -217,7 +210,10 @@ async function executeWithAtomicApproval<T>(
         errorCode: 'STATE_CONFLICT',
       }),
     );
-    throw new ExecutionError('STATE_CONFLICT', `Approval execution could not start: ${errorMessage(error)}`);
+    throw new ExecutionError(
+      'STATE_CONFLICT',
+      `Approval execution could not start: ${errorMessage(error)}`,
+    );
   }
 
   let result: T;
@@ -281,9 +277,7 @@ async function executeWithAtomicApproval<T>(
     await options.auditSink.write(
       createAuditEvent(options, policyContext, executionId, 'FAILED', {
         errorCode: 'PROVIDER_READBACK_FAILED',
-        ...(readback.externalResourceId
-          ? { externalResourceId: readback.externalResourceId }
-          : {}),
+        ...(readback.externalResourceId ? { externalResourceId: readback.externalResourceId } : {}),
       }),
     );
     throw new ExecutionError(
@@ -310,9 +304,7 @@ async function executeWithAtomicApproval<T>(
     await options.auditSink.write(
       createAuditEvent(options, policyContext, executionId, 'FAILED', {
         errorCode: 'APPROVAL_REVIEW_REQUIRED',
-        ...(readback.externalResourceId
-          ? { externalResourceId: readback.externalResourceId }
-          : {}),
+        ...(readback.externalResourceId ? { externalResourceId: readback.externalResourceId } : {}),
       }),
     );
     throw new ExecutionError(
@@ -332,9 +324,7 @@ async function executeWithAtomicApproval<T>(
     await options.auditSink.write(
       createAuditEvent(options, policyContext, executionId, 'FAILED', {
         errorCode: 'APPROVAL_REVIEW_REQUIRED',
-        ...(readback.externalResourceId
-          ? { externalResourceId: readback.externalResourceId }
-          : {}),
+        ...(readback.externalResourceId ? { externalResourceId: readback.externalResourceId } : {}),
       }),
     );
     throw new ExecutionError(
