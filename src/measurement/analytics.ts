@@ -20,8 +20,8 @@ export function calculateFunnel(stages: readonly FunnelStage[]): FunnelResult {
   }));
   const issues: DataQualityIssue[] = [];
   for (let index = 1; index < normalized.length; index += 1) {
-    const previous = normalized[index - 1];
-    const current = normalized[index];
+    const previous = normalized[index - 1]!;
+    const current = normalized[index]!;
     if (current.count > previous.count) {
       issues.push({
         code: 'FUNNEL_STAGE_INCREASE',
@@ -31,10 +31,10 @@ export function calculateFunnel(stages: readonly FunnelStage[]): FunnelResult {
       });
     }
   }
-  const first = normalized[0].count;
+  const first = normalized[0]!.count;
   const last = normalized.at(-1)?.count ?? 0;
   const dropOffs = normalized.slice(1).map((stage, offset) => {
-    const previous = normalized[offset];
+    const previous = normalized[offset]!;
     const dropped = Math.max(0, previous.count - stage.count);
     return {
       from: previous.name,
