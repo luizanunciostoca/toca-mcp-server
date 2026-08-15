@@ -41,10 +41,14 @@ The durable workflow builder uses the existing workflow engine. The production g
 
 ## Concurrency reconciliation
 
-Implementation began from main `76aec57a707161f4ca8484059b8ec302b9be6910`. During development, CRM Core and Google Business were merged by other isolated workstreams. The final branch was rebuilt on current main `88de675febdb1142f65c1354effef2ef2a9e0588` instead of resolving catalog conflicts by choosing one side blindly.
+Implementation began from main `76aec57a707161f4ca8484059b8ec302b9be6910`. During development, CRM Core and Google Business were merged by other isolated workstreams. The implementation was then rebuilt cleanly on `88de675febdb1142f65c1354effef2ef2a9e0588` instead of resolving catalog conflicts by choosing one side blindly.
+
+Measurement/Ticketing later advanced main to `b0d067e9cc6b469fdb1421ab7a25a25a3b0f1f47` through a file-disjoint change set. The final PR branch is based against that main state and retains only the R20/R29 delta.
 
 The R20/R29 capability identifiers are intentionally isolated in `src/content/capability-ids.ts`, then folded into the global capability catalog. This preserves the central Google Business technical-extension map while keeping one unified canonical catalog.
 
 ## Quality evidence
 
 A preliminary full `pnpm quality` run `31866404716` passed on the original R20/R29 implementation before concurrent main changes. The final release authority is the official pull-request Quality Gate executed against the reconciled branch head and current main; its fixed-head SHA and merge evidence must be recorded at closure.
+
+PR #114 is the clean final Quality candidate. It uses a fresh branch to avoid stale Actions state from the earlier closed PR #108 branch reuse.
