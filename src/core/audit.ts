@@ -19,6 +19,7 @@ export interface AuditEvent {
   readonly connectedAccount?: string;
   readonly externalResourceId?: string;
   readonly errorCode?: string;
+  readonly evidence?: readonly string[];
   readonly createdAt: string;
 }
 
