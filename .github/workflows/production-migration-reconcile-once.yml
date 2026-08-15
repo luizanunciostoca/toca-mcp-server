@@ -1,0 +1,114 @@
+name: Production Migration Reconcile One-Shot
+
+on:
+  push:
+    branches: [chore/foundation-daily-control-evidence]
+    paths: ['.github/workflows/production-migration-reconcile-once.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  ARTIFACT_REPOSITORY: toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  MIGRATION_SOURCE_SHA: aaca384bf6d72f29ecb88681dcab02b280bde478
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact validated main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.MIGRATION_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build immutable migration image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > Dockerfile.migrate <<'EOF'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+          COPY package.json pnpm-lock.yaml ./
+          RUN pnpm install --frozen-lockfile
+          COPY tsconfig.json ./
+          COPY scripts ./scripts
+          COPY migrations ./migrations
+          USER node
+          CMD ["pnpm", "migrate"]
+          EOF
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPOSITORY/server:production-migrate-$MIGRATION_SOURCE_SHA"
+          docker build -f Dockerfile.migrate -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Assert exact precondition and apply official migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-production-migrate-${GITHUB_RUN_ID}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          PRECHECK="const {Pool}=require('pg'); const expected=['001_production_foundation.sql','002_worker_dead_letter.sql','003_meta_webhook_idempotency.sql','004_meta_webhook_reply_routing.sql']; const p=new Pool({connectionString:process.env.DATABASE_URL}); p.query('select version from schema_migrations order by version').then(r=>{const got=r.rows.map(x=>x.version); if(JSON.stringify(got)!==JSON.stringify(expected)) throw new Error('PRODUCTION_MIGRATION_PRECONDITION_MISMATCH:'+JSON.stringify(got)); console.log('PRODUCTION_MIGRATION_PRECONDITION=VERIFIED');}).finally(()=>p.end());"
+          POSTCHECK="const {Pool}=require('pg'); const expected=['001_production_foundation.sql','002_worker_dead_letter.sql','003_meta_webhook_idempotency.sql','004_meta_webhook_reply_routing.sql','005_approval_governance.sql','006_approval_execution_atomicity.sql','007_durable_workflow_persistence.sql','008_workflow_execution_claims.sql','009_transactional_outbox.sql','010_audit_ledger_observability.sql','011_event_record.sql','012_crm_core_records.sql','013_measurement_ticketing_attribution.sql']; const required=['approval_records','workflow_instances','workflow_execution_claims','event_outbox','audit_ledger_events','audit_ledger_heads','operational_signals','event_records','crm_contacts','measurement_events']; const p=new Pool({connectionString:process.env.DATABASE_URL}); Promise.all([p.query('select version from schema_migrations order by version'),p.query(\"select table_name from information_schema.tables where table_schema='public'\")]).then(([m,t])=>{const got=m.rows.map(x=>x.version); const tables=new Set(t.rows.map(x=>x.table_name)); if(JSON.stringify(got)!==JSON.stringify(expected)) throw new Error('PRODUCTION_MIGRATION_POSTCONDITION_MISMATCH:'+JSON.stringify(got)); const missing=required.filter(x=>!tables.has(x)); if(missing.length) throw new Error('PRODUCTION_MIGRATION_REQUIRED_TABLES_MISSING:'+missing.join(',')); console.log('PRODUCTION_MIGRATION_POSTCONDITION=VERIFIED');}).finally(()=>p.end());"
+          PRE_B64="$(printf '%s' "$PRECHECK" | base64 -w0)"
+          POST_B64="$(printf '%s' "$POSTCHECK" | base64 -w0)"
+          SCRIPT="node -e \"eval(Buffer.from(process.env.PRE_B64,'base64').toString())\" && pnpm migrate && node -e \"eval(Buffer.from(process.env.POST_B64,'base64').toString())\""
+          SCRIPT_B64="$(printf '%s' "$SCRIPT" | base64 -w0)"
+
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SA" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "PRE_B64=$PRE_B64,POST_B64=$POST_B64,SCRIPT_B64=$SCRIPT_B64" \
+            --command sh \
+            --args=-c,"eval \"\$(printf '%s' \"\$SCRIPT_B64\" | base64 -d)\"" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+          gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+            --project "$PROJECT_ID" --freshness=20m --limit=200 --order=asc --format='value(textPayload)' || true)"
+          printf '%s\n' "$LOGS" | tee production-migration-reconcile.log
+          printf '%s' "$LOGS" | grep -F 'PRODUCTION_MIGRATION_PRECONDITION=VERIFIED'
+          printf '%s' "$LOGS" | grep -F 'Applied 005_approval_governance.sql'
+          printf '%s' "$LOGS" | grep -F 'Applied 013_measurement_ticketing_attribution.sql'
+          printf '%s' "$LOGS" | grep -F 'PRODUCTION_MIGRATION_POSTCONDITION=VERIFIED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-migration-reconcile-${{ env.MIGRATION_SOURCE_SHA }}
+          path: production-migration-reconcile.log
+          if-no-files-found: error
+          retention-days: 90
