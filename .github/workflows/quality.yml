@@ -19,6 +19,23 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: M-FOUND-02 deterministic format preview
+        run: |
+          files=(
+            src/core/tool-registry.ts
+            src/governance/capability-catalog.ts
+            src/governance/capability-contract-overrides.ts
+            src/governance/capability-lifecycle.ts
+            src/governance/types.ts
+            test/capability-lifecycle.test.ts
+          )
+          pnpm exec prettier --write "${files[@]}"
+          for file in "${files[@]}"; do
+            echo "===== FORMATTED:${file} ====="
+            cat "${file}"
+            echo
+            echo "===== END:${file} ====="
+          done
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
