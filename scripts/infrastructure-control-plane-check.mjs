@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'node:fs';
 const required = [
   '.github/workflows/infrastructure-control-plane.yml',
   '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
-  '.github/workflows/provision-instagram-publication-assets-gcs.yml',
   'src/toca-managed-instagram-daemon.ts',
   'infra/control-plane/policy.json',
   'infra/control-plane/storage-bucket-admin-role.yaml',
@@ -21,7 +20,6 @@ for (const path of required) {
 const workflowPath = '.github/workflows/infrastructure-control-plane.yml';
 const daemonWorkflowPath = '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml';
 const daemonSourcePath = 'src/toca-managed-instagram-daemon.ts';
-const legacyProvisionPath = '.github/workflows/provision-instagram-publication-assets-gcs.yml';
 const policyPath = 'infra/control-plane/policy.json';
 const storageRolePath = 'infra/control-plane/storage-bucket-admin-role.yaml';
 const cloudSqlRolePath = 'infra/control-plane/cloudsql-cost-optimizer-role.yaml';
@@ -31,7 +29,6 @@ const runtime = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com';
 const workflow = readFileSync(workflowPath, 'utf8');
 const daemonWorkflow = readFileSync(daemonWorkflowPath, 'utf8');
 const daemonSource = readFileSync(daemonSourcePath, 'utf8');
-const legacyProvision = readFileSync(legacyProvisionPath, 'utf8');
 const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
 const storageRole = readFileSync(storageRolePath, 'utf8');
 const cloudSqlRole = readFileSync(cloudSqlRolePath, 'utf8');
@@ -96,13 +93,6 @@ const forbiddenWorkflowMarkers = [
 for (const forbidden of forbiddenWorkflowMarkers) {
   if (workflow.includes(forbidden)) {
     console.error(`Infrastructure workflow contains forbidden/superseded capability: ${forbidden}`);
-    process.exit(1);
-  }
-}
-
-for (const forbidden of ['--member="allUsers"', '--member="allAuthenticatedUsers"']) {
-  if (legacyProvision.includes(forbidden)) {
-    console.error(`Legacy publication provisioning contains forbidden public IAM: ${forbidden}`);
     process.exit(1);
   }
 }
