@@ -42,6 +42,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     blueprint: WorkflowBlueprint,
     now = new Date().toISOString(),
   ): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     validateWorkflowBlueprint(blueprint);
     assertTimestamp(now, 'WORKFLOW_NOW_INVALID');
 
@@ -151,7 +152,8 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       );
       for (const step of steps) {
         if (claims.length >= input.limit) return Promise.resolve(claims);
-        if (step.status !== 'READY' || step.attempts >= step.maxAttempts) continue;
+        if (step.status !== 'READY') continue;
+        if (step.startedAt === null && step.attempts >= step.maxAttempts) continue;
         const executionId = this.#nextUniqueExecutionId();
         const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;
         const claimed: WorkflowStep = {
@@ -196,6 +198,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     const evidence = requireWorkflowEvidence(input.evidence);
     assertJsonSerializable(input.output ?? null);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
@@ -235,6 +238,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     const evidence = requireWorkflowEvidence(input.evidence);
     requireText(input.errorCode, 'WORKFLOW_STEP_ERROR_CODE_REQUIRED');
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
@@ -271,6 +275,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     const evidence = requireWorkflowEvidence(input.evidence);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     const step = this.#requireStep(input.workflowId, input.stepId);
@@ -314,6 +319,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     requireText(input.taskId, 'WORKFLOW_HUMAN_TASK_ID_REQUIRED');
     if (this.#humanTasks.has(input.taskId)) throw new Error('WORKFLOW_HUMAN_TASK_ALREADY_EXISTS');
     const evidence = requireWorkflowEvidence(input.evidence);
@@ -365,6 +371,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     requireText(input.principalId, 'WORKFLOW_HUMAN_TASK_PRINCIPAL_REQUIRED');
     const evidence = requireWorkflowEvidence(input.evidence);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
@@ -399,6 +406,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     requireText(input.principalId, 'WORKFLOW_HUMAN_TASK_PRINCIPAL_REQUIRED');
     const evidence = requireWorkflowEvidence(input.evidence);
     assertJsonSerializable(input.completion ?? null);
@@ -453,6 +461,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     requireText(input.timerId, 'WORKFLOW_TIMER_ID_REQUIRED');
     if (this.#timers.has(input.timerId)) throw new Error('WORKFLOW_TIMER_ALREADY_EXISTS');
     const evidence = requireWorkflowEvidence(input.evidence);
@@ -553,6 +562,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     requireText(input.compensationId, 'WORKFLOW_COMPENSATION_ID_REQUIRED');
     if (this.#compensations.has(input.compensationId))
       throw new Error('WORKFLOW_COMPENSATION_ALREADY_EXISTS');
@@ -603,6 +613,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
     const evidence = requireWorkflowEvidence(input.evidence);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     const instance = this.#requireInstance(input.workflowId);

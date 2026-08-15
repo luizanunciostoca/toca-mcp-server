@@ -32,7 +32,7 @@ interface WorkflowInstanceRow {
   readonly requester_principal_id: string;
   readonly status: WorkflowInstance['status'];
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly error_code: string | null;
   readonly created_at: Date | string;
   readonly updated_at: Date | string;
@@ -47,7 +47,7 @@ interface WorkflowStepRow {
   readonly capability_id: string | null;
   readonly status: WorkflowStep['status'];
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly attempts: number;
   readonly max_attempts: number;
   readonly claimed_by: string | null;
@@ -88,7 +88,7 @@ interface WorkflowHumanTaskRow {
   readonly due_at: Date | string | null;
   readonly claimed_at: Date | string | null;
   readonly completed_at: Date | string | null;
-  readonly completion: unknown | null;
+  readonly completion: unknown;
   readonly evidence: unknown;
   readonly version: number;
 }
@@ -112,7 +112,7 @@ interface WorkflowCompensationRow {
   readonly capability_id: string | null;
   readonly status: WorkflowCompensation['status'];
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly claimed_by: string | null;
   readonly claim_execution_id: string | null;
   readonly claimed_at: Date | string | null;
@@ -280,20 +280,37 @@ export class PostgresWorkflowStore implements WorkflowStore {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      const selected = await client.query<WorkflowStepRow>(
-        `select s.*
+      const candidates = await client.query<Pick<WorkflowStepRow, 'workflow_id' | 'step_id'>>(
+        `select s.workflow_id, s.step_id
          from workflow_steps s
          join workflow_instances w on w.workflow_id = s.workflow_id
          where s.status = 'READY'
-           and s.attempts < s.max_attempts
+           and (s.started_at is not null or s.attempts < s.max_attempts)
            and w.status in ('RUNNING', 'WAITING')
          order by w.updated_at asc, s.workflow_id asc, s.step_id asc
-         for update of s skip locked
          limit $1`,
         [input.limit],
       );
       const claims: WorkflowStepClaim[] = [];
-      for (const row of selected.rows) {
+      for (const candidate of candidates.rows) {
+        const instanceLock = await client.query<WorkflowInstanceRow>(
+          `select * from workflow_instances
+           where workflow_id = $1 and status in ('RUNNING', 'WAITING')
+           for update skip locked`,
+          [candidate.workflow_id],
+        );
+        if (!instanceLock.rows[0]) continue;
+
+        const stepLock = await client.query<WorkflowStepRow>(
+          `select * from workflow_steps
+           where workflow_id = $1 and step_id = $2 and status = 'READY'
+             and (started_at is not null or attempts < max_attempts)
+           for update skip locked`,
+          [candidate.workflow_id, candidate.step_id],
+        );
+        const row = stepLock.rows[0];
+        if (!row) continue;
+
         const executionId = this.#createId();
         await this.#claimExecution(client, {
           executionId,
@@ -311,8 +328,8 @@ export class PostgresWorkflowStore implements WorkflowStore {
              claim_execution_id = $4, claimed_at = $5::timestamptz,
              started_at = coalesce(started_at, $5::timestamptz),
              completed_at = null, error_code = null, version = version + 1
-           where workflow_id = $1 and step_id = $2`,
-          [row.workflow_id, row.step_id, input.workerId, executionId, input.now],
+           where workflow_id = $1 and step_id = $2 and version = $6`,
+          [row.workflow_id, row.step_id, input.workerId, executionId, input.now, row.version],
         );
         await this.#setInstanceStatus(client, row.workflow_id, 'RUNNING', input.now, null);
         await this.#appendWorkflowEvent(

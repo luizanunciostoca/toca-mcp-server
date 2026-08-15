@@ -230,6 +230,7 @@ create table if not exists workflow_compensations (
   evidence jsonb not null default '[]'::jsonb,
   version integer not null default 1,
   unique (workflow_id, order_index),
+  unique (workflow_id, compensation_id),
   foreign key (workflow_id, step_id)
     references workflow_steps (workflow_id, step_id) on delete restrict,
   check (order_index >= 0),

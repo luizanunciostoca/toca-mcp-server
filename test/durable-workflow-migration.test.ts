@@ -35,7 +35,7 @@ describe('M-FOUND-06 durable workflow persistence schema', () => {
 
   it('uses row locking, SKIP LOCKED and repeatable-read snapshots in the PostgreSQL store', () => {
     const store = repositoryFile('src/persistence/postgres-workflow-store.ts');
-    expect(store).toContain('for update of s skip locked');
+    expect(store).not.toContain('for update of s skip locked');
     expect(store).toContain('for update skip locked');
     expect(store).toContain('select * from workflow_instances where workflow_id = $1 for update');
     expect(store).toContain('select * from workflow_steps');

@@ -74,7 +74,7 @@ export interface WorkflowInstance {
   readonly requesterPrincipalId: string;
   readonly status: WorkflowInstanceStatus;
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly errorCode: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -89,7 +89,7 @@ export interface WorkflowStep {
   readonly capabilityId: string | null;
   readonly status: WorkflowStepStatus;
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly attempts: number;
   readonly maxAttempts: number;
   readonly claimedBy: string | null;
@@ -130,7 +130,7 @@ export interface WorkflowHumanTask {
   readonly dueAt: string | null;
   readonly claimedAt: string | null;
   readonly completedAt: string | null;
-  readonly completion: unknown | null;
+  readonly completion: unknown;
   readonly evidence: readonly string[];
   readonly version: number;
 }
@@ -154,7 +154,7 @@ export interface WorkflowCompensation {
   readonly capabilityId: string | null;
   readonly status: WorkflowCompensationStatus;
   readonly input: unknown;
-  readonly output: unknown | null;
+  readonly output: unknown;
   readonly claimedBy: string | null;
   readonly claimExecutionId: string | null;
   readonly claimedAt: string | null;

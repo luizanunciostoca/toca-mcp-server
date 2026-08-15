@@ -42,6 +42,8 @@ describe('M-FOUND-06 durable workflow concurrency invariants', () => {
     expect(postgres).toContain(
       'attempts = attempts + case when started_at is null then 1 else 0 end',
     );
-    expect(postgres).toContain('attempt: row.started_at === null ? row.attempts + 1 : row.attempts');
+    expect(postgres).toContain(
+      'attempt: row.started_at === null ? row.attempts + 1 : row.attempts',
+    );
   });
 });
