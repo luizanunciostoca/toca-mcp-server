@@ -28,18 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
-          cat >/tmp/request.json <<'JSON'
-          {
-            "permissions": [
-              "cloudsql.instances.get",
-              "cloudsql.backupRuns.get",
-              "cloudsql.backupRuns.list",
-              "cloudsql.instances.create",
-              "cloudsql.instances.delete",
-              "cloudsql.instances.clone",
-              "cloudsql.instances.restoreBackup"
-            ]
-          }
+          printf '%s\n' '{"permissions":["cloudsql.instances.get","cloudsql.backupRuns.get","cloudsql.backupRuns.list","cloudsql.instances.create","cloudsql.instances.delete","cloudsql.instances.clone","cloudsql.instances.restoreBackup"]}' > /tmp/request.json
           HTTP="$(curl --silent --output /tmp/permissions.json --write-out '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
