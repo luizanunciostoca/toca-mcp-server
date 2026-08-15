@@ -4,6 +4,7 @@ import * as z from 'zod/v4';
 import type { AuditSink } from '../core/audit.js';
 import type { AuditLedgerRecord, AuditLedgerVerification } from '../core/audit-ledger.js';
 import type { ExecutionIdentity, ExecutionIdentityResolver } from '../core/identity.js';
+import { requiresFormalApproval } from '../core/policy.js';
 import type { ToolRegistry } from '../core/tool-registry.js';
 import type { EventRecordStore } from '../events/event-record.js';
 import { toApprovalRecordWire, type ApprovalStore } from '../governance/approval-governance.js';
@@ -16,6 +17,7 @@ import type { WorkflowSnapshot, WorkflowStore } from '../workflow/workflow-contr
 import {
   executeCoreCapability,
   requestCoreApproval,
+  resolveCoreRuntimeExecution,
   type CoreCapabilityRuntimeResolver,
 } from './core-execution.js';
 
@@ -58,10 +60,16 @@ const readAnnotations = {
   idempotentHint: true,
   openWorldHint: false,
 } as const;
-const internalWriteAnnotations = {
+const idempotentWriteAnnotations = {
   readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
+  openWorldHint: false,
+} as const;
+const mutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
   openWorldHint: false,
 } as const;
 const executeAnnotations = {
@@ -303,17 +311,18 @@ export function registerTocaCoreSurface(
         input: z.unknown().optional(),
         steps: z.array(workflowStepSchema).min(1).max(200),
       }),
-      annotations: internalWriteAnnotations,
+      annotations: idempotentWriteAnnotations,
     },
     async (input, context) => {
       const identity = requireIdentity(dependencies, context);
       requireMutationRole(identity);
       const store = requireStore(dependencies.workflowStore, 'WORKFLOW_STORE_REQUIRED');
-      for (const step of input.steps) {
-        if (step.capabilityId && !resolveCapabilityDefinition(step.capabilityId)) {
-          throw new Error(`WORKFLOW_CAPABILITY_UNKNOWN:${step.capabilityId}`);
-        }
-      }
+      const steps = input.steps.map((step) => {
+        if (!step.capabilityId) return step;
+        const resolved = resolveCapabilityDefinition(step.capabilityId);
+        if (!resolved) throw new Error(`WORKFLOW_CAPABILITY_UNKNOWN:${step.capabilityId}`);
+        return { ...step, capabilityId: resolved.canonical_id };
+      });
       const workflowId = deterministicWorkflowId(identity.principal.tenantId, input.idempotencyKey);
       const snapshot = await store.create({
         workflowId,
@@ -327,7 +336,7 @@ export function registerTocaCoreSurface(
         organizationId: identity.principal.organizationId,
         requesterPrincipalId: identity.principal.principalId,
         ...(input.input !== undefined ? { input: input.input } : {}),
-        steps: input.steps,
+        steps,
       });
       return response({ workflow: snapshot });
     },
@@ -356,13 +365,13 @@ export function registerTocaCoreSurface(
       description:
         'Apply one explicit, evidence-bearing transition through the existing durable workflow engine.',
       inputSchema: workflowAdvanceSchema,
-      annotations: internalWriteAnnotations,
+      annotations: mutationAnnotations,
     },
     async (input, context) => {
       const identity = requireIdentity(dependencies, context);
       requireMutationRole(identity);
       const store = requireStore(dependencies.workflowStore, 'WORKFLOW_STORE_REQUIRED');
-      await requireTenantWorkflow(store, input.workflowId, identity);
+      const authorizedWorkflow = await requireTenantWorkflow(store, input.workflowId, identity);
       const now = new Date().toISOString();
       let snapshot: WorkflowSnapshot;
       switch (input.action) {
@@ -408,6 +417,7 @@ export function registerTocaCoreSurface(
           });
           break;
         case 'CLAIM_HUMAN_TASK':
+          assertWorkflowHumanTask(authorizedWorkflow, input.taskId);
           snapshot = await store.claimHumanTask({
             taskId: input.taskId,
             principalId: identity.principal.principalId,
@@ -417,6 +427,7 @@ export function registerTocaCoreSurface(
           });
           break;
         case 'COMPLETE_HUMAN_TASK':
+          assertWorkflowHumanTask(authorizedWorkflow, input.taskId);
           snapshot = await store.completeHumanTask({
             taskId: input.taskId,
             principalId: identity.principal.principalId,
@@ -463,7 +474,7 @@ export function registerTocaCoreSurface(
         expiresAt: z.string().datetime({ offset: true }),
         evidence: evidenceSchema,
       }),
-      annotations: internalWriteAnnotations,
+      annotations: mutationAnnotations,
     },
     async (input, context) => {
       const identity = requireIdentity(dependencies, context);
@@ -480,8 +491,7 @@ export function registerTocaCoreSurface(
     'toca.approval.get',
     {
       title: 'Get TOCA Approval',
-      description:
-        'Read one ApprovalRecord when the authenticated principal owns it or has approval authority.',
+      description: 'Read one ApprovalRecord owned by the authenticated requester.',
       inputSchema: z.object({ approvalId: z.string().min(1) }),
       annotations: readAnnotations,
     },
@@ -490,10 +500,7 @@ export function registerTocaCoreSurface(
       const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');
       const approval = await store.get(approvalId);
       if (!approval) throw new Error('APPROVAL_NOT_FOUND');
-      if (
-        approval.requester !== identity.principal.principalId &&
-        !identity.authorization.roles.some((role) => role === 'APPROVER' || role === 'ADMIN')
-      ) {
+      if (approval.requester !== identity.principal.principalId) {
         throw new Error('APPROVAL_ACCESS_DENIED');
       }
       return response({ approval: toApprovalRecordWire(approval) });
@@ -533,7 +540,7 @@ export function registerTocaCoreSurface(
     {
       title: 'Verify TOCA Execution',
       description:
-        'Verify the immutable audit chain and, for side effects, perform a fresh provider read-back through the same runtime binding.',
+        'Verify the immutable audit chain, exact execution descriptor and fresh provider state for side effects.',
       inputSchema: z.object({
         executionId: z.string().min(1),
         correlationId: correlationIdSchema,
@@ -550,39 +557,59 @@ export function registerTocaCoreSurface(
         (record) => record.executionId === input.executionId,
       );
       if (records.length === 0) throw new Error('AUDIT_EXECUTION_NOT_FOUND');
-      for (const record of records) assertTenant(record.tenantId ?? '', identity);
+      for (const record of records) {
+        assertTenant(record.tenantId ?? '', identity);
+        if (record.requester !== identity.principal.principalId) {
+          throw new Error('VERIFY_REQUESTER_EXECUTION_MISMATCH');
+        }
+      }
       const audit = await auditStore.verifyExecution(input.executionId);
-      const resolved = resolveCapabilityDefinition(input.capabilityId);
-      if (!resolved) throw new Error(`CAPABILITY_UNKNOWN:${input.capabilityId}`);
-      const capabilityId = resolved.canonical_id;
-      if (records.some((record) => record.toolName !== capabilityId)) {
+      const resolved = resolveCoreRuntimeExecution(input.capabilityId, input.payload, identity, {
+        registry: dependencies.registry,
+        runtimeResolver: dependencies.runtimeResolver,
+      });
+      if (records.some((record) => record.toolName !== resolved.capabilityId)) {
         throw new Error('VERIFY_CAPABILITY_EXECUTION_MISMATCH');
       }
-      const tool = dependencies.registry.get(capabilityId);
-      const binding = dependencies.runtimeResolver(capabilityId);
-      if (!tool || !binding) throw new Error('CAPABILITY_NOT_EXECUTABLE');
-      const payload = binding.inputSchema.parse(input.payload);
+      const succeeded = records.find((record) => record.status === 'SUCCEEDED');
+      if (!succeeded) throw new Error('VERIFY_EXECUTION_NOT_SUCCEEDED');
+      const descriptorEvidence = `core:descriptor-sha256:${resolved.descriptorSha256}`;
+      if (!succeeded.evidence.includes(descriptorEvidence)) {
+        throw new Error('VERIFY_DESCRIPTOR_EXECUTION_MISMATCH');
+      }
+
       let provider = {
         required: false,
         verified: true,
         evidence: [] as readonly string[],
+        auditedResourceId: undefined as string | undefined,
+        readbackResourceId: undefined as string | undefined,
       };
-      if (tool.sideEffects) {
-        if (!binding.providerReadback) throw new Error('PROVIDER_READBACK_REQUIRED');
-        const readback = await binding.providerReadback(input.result, payload);
-        const evidence = readback.evidence.map((item) => item.trim()).filter(Boolean);
+      if (resolved.tool.sideEffects) {
+        if (!resolved.binding.providerReadback) throw new Error('PROVIDER_READBACK_REQUIRED');
+        const readback = await resolved.binding.providerReadback(input.result, resolved.payload);
+        const evidence = normalizeEvidence(readback.evidence);
+        const readbackResourceId = normalizeOptional(readback.externalResourceId);
+        const auditedResourceId = normalizeOptional(succeeded.externalResourceId);
         provider = {
           required: true,
-          verified: readback.verified && evidence.length > 0,
+          verified:
+            readback.verified &&
+            evidence.length > 0 &&
+            readbackResourceId !== undefined &&
+            auditedResourceId !== undefined &&
+            readbackResourceId === auditedResourceId,
           evidence,
+          auditedResourceId,
+          readbackResourceId,
         };
       }
-      const succeeded = records.some((record) => record.status === 'SUCCEEDED');
       return response({
         executionId: input.executionId,
         correlationId: input.correlationId,
-        capabilityId,
-        verified: audit.valid && succeeded && provider.verified,
+        capabilityId: resolved.capabilityId,
+        descriptorBound: true,
+        verified: audit.valid && provider.verified,
         audit,
         provider,
       });
@@ -633,17 +660,37 @@ export function registerTocaCoreSurface(
 
 function isRuntimeExecutable(
   capabilityId: string,
-  dependencies: Pick<TocaCoreSurfaceDependencies, 'registry' | 'runtimeResolver'>,
+  dependencies: Pick<
+    TocaCoreSurfaceDependencies,
+    'registry' | 'runtimeResolver' | 'auditStore' | 'approvalStore'
+  >,
 ): boolean {
+  const resolved = resolveCapabilityDefinition(capabilityId);
   const tool = dependencies.registry.get(capabilityId);
-  if (!tool || !dependencies.runtimeResolver(capabilityId)) return false;
+  const binding = dependencies.runtimeResolver(capabilityId);
+  if (!resolved || !tool || !binding || !dependencies.auditStore) return false;
+  const canonical = resolved.canonical_definition;
+  if (
+    tool.riskClass !== canonical.risk_class ||
+    tool.sideEffects !== canonical.side_effects ||
+    tool.capabilityStatus !== canonical.lifecycle_status ||
+    tool.idempotent !== canonical.idempotent ||
+    requiresFormalApproval(tool) !== canonical.approval_required
+  ) {
+    return false;
+  }
   if (
     ['PLANNED', 'SPECIFIED', 'DISABLED', 'BLOCKED', 'SUSPENDED', 'RETIRED', 'REMOVED'].includes(
       tool.capabilityStatus,
     )
-  )
+  ) {
     return false;
-  if (tool.sideEffects && tool.capabilityStatus !== 'PRODUCTION_VALIDATED') return false;
+  }
+  if (tool.sideEffects) {
+    if (tool.capabilityStatus !== 'PRODUCTION_VALIDATED') return false;
+    if (!binding.idempotencyKey || !binding.providerReadback) return false;
+  }
+  if (requiresFormalApproval(tool) && !dependencies.approvalStore) return false;
   return true;
 }
 
@@ -666,6 +713,12 @@ function assertTenant(tenantId: string, identity: ExecutionIdentity): void {
   if (tenantId !== identity.principal.tenantId) throw new Error('CORE_TENANT_ACCESS_DENIED');
 }
 
+function assertWorkflowHumanTask(snapshot: WorkflowSnapshot, taskId: string): void {
+  if (!snapshot.humanTasks.some((task) => task.taskId === taskId)) {
+    throw new Error('WORKFLOW_HUMAN_TASK_WORKFLOW_MISMATCH');
+  }
+}
+
 async function requireTenantWorkflow(
   store: WorkflowStore,
   workflowId: string,
@@ -683,6 +736,15 @@ function deterministicWorkflowId(tenantId: string, idempotencyKey: string): stri
     .digest('hex')
     .slice(0, 32);
   return `wf_${digest}`;
+}
+
+function normalizeEvidence(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function normalizeOptional(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized || undefined;
 }
 
 function requireStore<T>(value: T | undefined, errorCode: string): T {
