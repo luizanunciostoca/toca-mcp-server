@@ -38,14 +38,12 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     this.#createId = options.createId ?? randomUUID;
   }
 
-  async create(
-    blueprint: WorkflowBlueprint,
-    now = new Date().toISOString(),
-  ): Promise<WorkflowSnapshot> {
+  async create(blueprint: WorkflowBlueprint, now = new Date().toISOString()): Promise<WorkflowSnapshot> {
     validateWorkflowBlueprint(blueprint);
     assertTimestamp(now, 'WORKFLOW_NOW_INVALID');
 
-    const existingWorkflowId = this.#idempotency.get(blueprint.idempotencyKey);
+    const idempotencyScope = scopedIdempotencyKey(blueprint);
+    const existingWorkflowId = this.#idempotency.get(idempotencyScope);
     if (existingWorkflowId) {
       if (existingWorkflowId !== blueprint.workflowId)
         throw new Error('WORKFLOW_IDEMPOTENCY_CONFLICT');
@@ -109,7 +107,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     this.#steps.set(blueprint.workflowId, stepMap);
     this.#dependencies.set(blueprint.workflowId, dependencies);
     this.#events.set(blueprint.workflowId, []);
-    this.#idempotency.set(blueprint.idempotencyKey, blueprint.workflowId);
+    this.#idempotency.set(idempotencyScope, blueprint.workflowId);
     this.#appendEvent(
       blueprint.workflowId,
       null,
@@ -126,9 +124,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   }
 
   get(workflowId: string): Promise<WorkflowSnapshot | undefined> {
-    return Promise.resolve(
-      this.#instances.has(workflowId) ? this.#snapshot(workflowId) : undefined,
-    );
+    return Promise.resolve(this.#instances.has(workflowId) ? this.#snapshot(workflowId) : undefined);
   }
 
   claimReadySteps(input: {
@@ -150,7 +146,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       );
       for (const step of steps) {
         if (claims.length >= input.limit) return Promise.resolve(claims);
-        if (step.status !== 'READY') continue;
+        if (step.status !== 'READY' || step.attempts >= step.maxAttempts) continue;
         const executionId = this.#nextUniqueExecutionId();
         const claimed: WorkflowStep = {
           ...step,
@@ -159,7 +155,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
           claimedBy: input.workerId,
           claimExecutionId: executionId,
           claimedAt: input.now,
-          startedAt: step.startedAt ?? input.now,
+          startedAt: input.now,
           completedAt: null,
           errorCode: null,
           version: step.version + 1,
@@ -258,7 +254,20 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       evidence,
       input.now,
     );
-    this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);
+
+    if (step.attempts >= step.maxAttempts) {
+      for (const candidate of this.#requireSteps(input.workflowId).values()) {
+        if (!['PENDING', 'READY'].includes(candidate.status)) continue;
+        this.#requireSteps(input.workflowId).set(candidate.stepId, {
+          ...candidate,
+          status: 'BLOCKED',
+          version: candidate.version + 1,
+        });
+      }
+      this.#updateInstanceStatus(input.workflowId, 'FAILED', input.now, input.errorCode);
+    } else {
+      this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);
+    }
     return this.#snapshot(input.workflowId);
   }
 
@@ -278,6 +287,10 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       ...step,
       status: 'READY',
       output: null,
+      claimedBy: null,
+      claimExecutionId: null,
+      claimedAt: null,
+      startedAt: null,
       completedAt: null,
       errorCode: null,
       evidence: mergeEvidence(step.evidence, evidence),
@@ -291,6 +304,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       evidence,
       input.now,
     );
+    this.#appendEvent(input.workflowId, input.stepId, 'STEP_READY', {}, evidence, input.now);
     this.#updateInstanceStatus(input.workflowId, 'RUNNING', input.now);
     return this.#snapshot(input.workflowId);
   }
@@ -353,6 +367,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   async claimHumanTask(input: {
     readonly taskId: string;
     readonly principalId: string;
+    readonly principalRoles?: readonly string[];
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot> {
@@ -361,6 +376,8 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     const task = this.#requireHumanTask(input.taskId);
     if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');
+    if (task.requiredRole && !new Set(input.principalRoles ?? []).has(task.requiredRole))
+      throw new Error('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');
 
     this.#humanTasks.set(input.taskId, {
       ...task,
@@ -420,6 +437,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       evidence,
       input.now,
     );
+    this.#appendEvent(task.workflowId, task.stepId, 'STEP_READY', { resumedBy: 'HUMAN_TASK' }, evidence, input.now);
     this.#updateInstanceStatus(task.workflowId, 'RUNNING', input.now);
     return this.#snapshot(task.workflowId);
   }
@@ -440,7 +458,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     assertJsonSerializable(input.payload ?? null);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertTimestamp(input.fireAt, 'WORKFLOW_TIMER_FIRE_AT_INVALID');
-    if (Date.parse(input.fireAt) < Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_IN_PAST');
+    if (Date.parse(input.fireAt) <= Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_NOT_FUTURE');
     const step = this.#requireStep(input.workflowId, input.stepId);
     assertWorkflowStepClaim(step, input.executionId);
 
@@ -481,10 +499,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertLimit(input.limit);
     const due = [...this.#timers.values()]
-      .filter(
-        (timer) =>
-          timer.status === 'SCHEDULED' && Date.parse(timer.fireAt) <= Date.parse(input.now),
-      )
+      .filter((timer) => timer.status === 'SCHEDULED' && Date.parse(timer.fireAt) <= Date.parse(input.now))
       .sort((a, b) => a.fireAt.localeCompare(b.fireAt) || a.timerId.localeCompare(b.timerId))
       .slice(0, input.limit);
     const fired: string[] = [];
@@ -510,6 +525,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
         [`timer:fired:${timer.timerId}`],
         input.now,
       );
+      this.#appendEvent(timer.workflowId, timer.stepId, 'STEP_READY', { resumedBy: 'TIMER' }, [], input.now);
       this.#updateInstanceStatus(timer.workflowId, 'RUNNING', input.now);
       fired.push(timer.timerId);
     }
@@ -536,6 +552,12 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     const step = this.#requireStep(input.workflowId, input.stepId);
     if (step.status !== 'SUCCEEDED') throw new Error('WORKFLOW_COMPENSATION_STEP_NOT_SUCCEEDED');
+    if (
+      this.#workflowCompensations(input.workflowId).some(
+        (compensation) => compensation.orderIndex === input.orderIndex,
+      )
+    )
+      throw new Error('WORKFLOW_COMPENSATION_ORDER_CONFLICT');
 
     this.#compensations.set(input.compensationId, {
       compensationId: input.compensationId,
@@ -573,29 +595,28 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     const evidence = requireWorkflowEvidence(input.evidence);
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     const instance = this.#requireInstance(input.workflowId);
-    if (!['BLOCKED', 'FAILED'].includes(instance.status))
+    if (!['BLOCKED', 'FAILED', 'CANCELED'].includes(instance.status))
       throw new Error('WORKFLOW_COMPENSATION_ACTIVATION_INVALID');
     const compensations = this.#workflowCompensations(input.workflowId).filter(
       (compensation) => compensation.status === 'PENDING',
     );
     if (compensations.length === 0) throw new Error('WORKFLOW_COMPENSATION_NONE_PENDING');
 
-    for (const compensation of compensations) {
-      this.#compensations.set(compensation.compensationId, {
-        ...compensation,
-        status: 'READY',
-        evidence: mergeEvidence(compensation.evidence, evidence),
-        version: compensation.version + 1,
-      });
-      this.#appendEvent(
-        input.workflowId,
-        compensation.stepId,
-        'COMPENSATION_READY',
-        { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },
-        evidence,
-        input.now,
-      );
-    }
+    const compensation = compensations[0];
+    this.#compensations.set(compensation.compensationId, {
+      ...compensation,
+      status: 'READY',
+      evidence: mergeEvidence(compensation.evidence, evidence),
+      version: compensation.version + 1,
+    });
+    this.#appendEvent(
+      input.workflowId,
+      compensation.stepId,
+      'COMPENSATION_READY',
+      { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },
+      evidence,
+      input.now,
+    );
     return this.#snapshot(input.workflowId);
   }
 
@@ -626,9 +647,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   #workflowCompensations(workflowId: string): WorkflowCompensation[] {
     return [...this.#compensations.values()]
       .filter((compensation) => compensation.workflowId === workflowId)
-      .sort(
-        (a, b) => b.orderIndex - a.orderIndex || a.compensationId.localeCompare(b.compensationId),
-      );
+      .sort((a, b) => b.orderIndex - a.orderIndex || a.compensationId.localeCompare(b.compensationId));
   }
 
   #unlockDependents(workflowId: string, completedStepId: string, now: string): void {
@@ -645,8 +664,8 @@ export class InMemoryWorkflowStore implements WorkflowStore {
         .filter((dependency) => dependency.stepId === stepId)
         .map((dependency) => dependency.dependsOnStepId);
       if (
-        required.every(
-          (dependencyId) => this.#requireStep(workflowId, dependencyId).status === 'SUCCEEDED',
+        required.every((dependencyId) =>
+          ['SUCCEEDED', 'SKIPPED'].includes(this.#requireStep(workflowId, dependencyId).status),
         )
       ) {
         this.#requireSteps(workflowId).set(stepId, {
@@ -663,6 +682,11 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     const steps = [...this.#requireSteps(workflowId).values()];
     if (steps.every((step) => ['SUCCEEDED', 'SKIPPED'].includes(step.status))) {
       this.#updateInstanceStatus(workflowId, 'SUCCEEDED', now);
+      return;
+    }
+    if (steps.some((step) => step.status === 'FAILED' && step.attempts >= step.maxAttempts)) {
+      const errorCode = steps.find((step) => step.status === 'FAILED')?.errorCode ?? 'WORKFLOW_STEP_FAILED';
+      this.#updateInstanceStatus(workflowId, 'FAILED', now, errorCode);
       return;
     }
     if (steps.some((step) => ['FAILED', 'BLOCKED'].includes(step.status))) {
@@ -686,11 +710,7 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   ): void {
     const current = this.#requireInstance(workflowId);
     const completedAt = ['SUCCEEDED', 'FAILED', 'CANCELED'].includes(status) ? now : null;
-    if (
-      current.status === status &&
-      current.errorCode === errorCode &&
-      current.completedAt === completedAt
-    )
+    if (current.status === status && current.errorCode === errorCode && current.completedAt === completedAt)
       return;
     this.#instances.set(workflowId, {
       ...current,
@@ -736,26 +756,26 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   #snapshot(workflowId: string): WorkflowSnapshot {
     const instance = this.#requireInstance(workflowId);
     return {
-      instance: structuredClone(instance),
+      instance: cloneRecord(instance),
       steps: [...this.#requireSteps(workflowId).values()]
         .sort((a, b) => a.stepId.localeCompare(b.stepId))
-        .map((item) => structuredClone(item)),
+        .map(cloneRecord),
       dependencies: [...(this.#dependencies.get(workflowId) ?? [])]
         .sort(
           (a, b) =>
             a.stepId.localeCompare(b.stepId) || a.dependsOnStepId.localeCompare(b.dependsOnStepId),
         )
-        .map((item) => structuredClone(item)),
-      events: [...(this.#events.get(workflowId) ?? [])].map((item) => structuredClone(item)),
+        .map(cloneRecord),
+      events: [...(this.#events.get(workflowId) ?? [])].map(cloneRecord),
       humanTasks: [...this.#humanTasks.values()]
         .filter((task) => task.workflowId === workflowId)
         .sort((a, b) => a.taskId.localeCompare(b.taskId))
-        .map((item) => structuredClone(item)),
+        .map(cloneRecord),
       timers: [...this.#timers.values()]
         .filter((timer) => timer.workflowId === workflowId)
         .sort((a, b) => a.timerId.localeCompare(b.timerId))
-        .map((item) => structuredClone(item)),
-      compensations: this.#workflowCompensations(workflowId).map((item) => structuredClone(item)),
+        .map(cloneRecord),
+      compensations: this.#workflowCompensations(workflowId).map(cloneRecord),
     };
   }
 
@@ -771,12 +791,20 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   }
 }
 
+function scopedIdempotencyKey(blueprint: WorkflowBlueprint): string {
+  return [blueprint.tenantId, blueprint.workspaceId, blueprint.definitionId, blueprint.idempotencyKey].join(':');
+}
+
 function mergeEvidence(current: readonly string[], next: readonly string[]): readonly string[] {
-  return [...new Set([...current, ...next])].sort();
+  return [...new Set([...current, ...next].map((item) => item.trim()).filter(Boolean))].sort();
 }
 
 function cloneJson<T>(value: T): T {
-  return structuredClone(value);
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function cloneRecord<T extends object>(value: T): T {
+  return cloneJson(value);
 }
 
 function requireText(value: string, errorCode: string): void {
@@ -788,6 +816,5 @@ function assertTimestamp(value: string, errorCode: string): void {
 }
 
 function assertLimit(limit: number): void {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-    throw new Error('WORKFLOW_LIMIT_INVALID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('WORKFLOW_LIMIT_INVALID');
 }
