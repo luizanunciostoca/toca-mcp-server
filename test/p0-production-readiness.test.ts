@@ -33,14 +33,27 @@ describe('P0 production scheduler policy', () => {
 
   it('persists identity-aware execution audit using the registered risk class', async () => {
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const calls: unknown[][] = [];
-    const pool = {
-      query: (_sql: string, values: unknown[]) => {
-        calls.push(values);
-        return Promise.resolve({});
+    const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
+    let released = false;
+    const client = {
+      query: (sql: string, values: readonly unknown[] = []) => {
+        calls.push({ sql, values: [...values] });
+        if (sql.includes('select * from audit_ledger_heads')) {
+          return Promise.resolve({ rows: [], rowCount: 0 });
+        }
+        return Promise.resolve({ rows: [], rowCount: 1 });
       },
+      release: () => {
+        released = true;
+      },
+    } as unknown as pg.PoolClient;
+    const pool = {
+      connect: () => Promise.resolve(client),
     } as unknown as pg.Pool;
-    const sink = new PostgresAuditSink(pool, registry);
+    const ids = ['audit-event-1', 'signal-1'];
+    const sink = new PostgresAuditSink(pool, registry, {
+      createId: () => ids.shift() ?? 'unexpected-id',
+    });
     const event: AuditEvent = {
       executionId: 'exec-1',
       correlationId: 'corr-1',
@@ -58,28 +71,27 @@ describe('P0 production scheduler policy', () => {
 
     await sink.write(event);
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual([
+    const ledger = calls.find(({ sql }) => sql.includes('insert into audit_ledger_events'));
+    expect(ledger?.values[15]).toBe('WRITE_REVERSIBLE');
+    const legacy = calls.find(({ sql }) => sql.includes('insert into audit_events'));
+    expect(legacy?.values.slice(0, 5)).toEqual([
       'corr-1',
       'test-mcp-client',
       'instagram.toca_schedule.create',
       'WRITE_REVERSIBLE',
       'SUCCEEDED',
-      JSON.stringify({
-        executionId: 'exec-1',
-        approvalId: null,
-        connectedAccount: null,
-        principalType: 'SERVICE',
-        tenantId: 'toca-do-morcego',
-        workspaceId: 'toca-do-morcego',
-        organizationId: 'toca-do-morcego',
-        sessionId: null,
-        authenticationMethod: 'INFRASTRUCTURE_IDENTITY',
-        authorizationRoles: ['OPERATOR'],
-        createdAt: '2026-08-14T01:00:00.000Z',
-      }),
-      JSON.stringify({ externalResourceId: null, errorCode: null }),
     ]);
+    const normalized = JSON.parse(String(legacy?.values[5])) as Record<string, unknown>;
+    expect(normalized).toMatchObject({
+      executionId: 'exec-1',
+      ledgerEventId: 'audit-event-1',
+      principalType: 'SERVICE',
+      tenantId: 'toca-do-morcego',
+      authorizationRoles: ['OPERATOR'],
+      evidence: ['audit:succeeded:exec-1'],
+    });
+    expect(calls.some(({ sql }) => sql.includes('insert into operational_signals'))).toBe(true);
+    expect(released).toBe(true);
   });
 });
 
