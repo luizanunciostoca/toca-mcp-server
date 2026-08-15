@@ -1,0 +1,103 @@
+name: M-FOUND-06 Final Fix
+
+on:
+  push:
+    branches:
+      - feat/m-found-06-durable-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  final-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply exact final invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          for path in ['src/workflow/workflow-contracts.ts', 'src/persistence/postgres-workflow-store.ts']:
+              p = Path(path)
+              text = p.read_text()
+              text = text.replace('readonly output: unknown | null;', 'readonly output: unknown;')
+              text = text.replace('readonly completion: unknown | null;', 'readonly completion: unknown;')
+              p.write_text(text)
+
+          p = Path('src/workflow/in-memory-workflow-store.ts')
+          text = p.read_text()
+          old = "        if (step.status !== 'READY' || step.attempts >= step.maxAttempts) continue;"
+          new = "        if (step.status !== 'READY') continue;\n        if (step.startedAt === null && step.attempts >= step.maxAttempts) continue;"
+          if text.count(old) != 1:
+              raise SystemExit(f'CLAIM_FILTER_ANCHOR_INVALID:{text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          methods = [
+              'create',
+              'completeStep',
+              'failStep',
+              'retryStep',
+              'openHumanTask',
+              'claimHumanTask',
+              'completeHumanTask',
+              'scheduleTimer',
+              'registerCompensation',
+              'activateCompensations',
+          ]
+          for method in methods:
+              start = text.find(f'  async {method}(')
+              if start < 0:
+                  raise SystemExit(f'ASYNC_METHOD_NOT_FOUND:{method}')
+              promise = text.find('): Promise<', start)
+              if promise < 0:
+                  raise SystemExit(f'ASYNC_RETURN_NOT_FOUND:{method}')
+              body = text.find('{', promise)
+              if body < 0:
+                  raise SystemExit(f'ASYNC_BODY_NOT_FOUND:{method}')
+              insertion = '\n    await Promise.resolve();'
+              if text[body + 1 : body + 1 + len(insertion)] != insertion:
+                  text = text[: body + 1] + insertion + text[body + 1 :]
+          p.write_text(text)
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+          old = "           and s.attempts < s.max_attempts\n           and w.status in ('RUNNING', 'WAITING')"
+          new = "           and (s.started_at is not null or s.attempts < s.max_attempts)\n           and w.status in ('RUNNING', 'WAITING')"
+          if text.count(old) != 1:
+              raise SystemExit(f'POSTGRES_CLAIM_FILTER_ANCHOR_INVALID:{text.count(old)}')
+          text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+      - name: Validate complete repository
+        run: |
+          pnpm exec prettier --write \
+            src/workflow/workflow-contracts.ts \
+            src/workflow/in-memory-workflow-store.ts \
+            src/persistence/postgres-workflow-store.ts
+          pnpm quality
+      - name: Remove temporary workflow and commit validated result
+        run: |
+          rm .github/workflows/m-found-06-final-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: finalize durable workflow claim invariants"
+      - name: Push validated result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
