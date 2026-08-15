@@ -245,6 +245,7 @@ export interface WorkflowStore {
     readonly taskId: string;
     readonly workflowId: string;
     readonly stepId: string;
+    readonly executionId: string;
     readonly requiredRole?: string | null;
     readonly payload?: unknown;
     readonly dueAt?: string | null;
@@ -268,6 +269,7 @@ export interface WorkflowStore {
     readonly timerId: string;
     readonly workflowId: string;
     readonly stepId: string;
+    readonly executionId: string;
     readonly fireAt: string;
     readonly payload?: unknown;
     readonly evidence: readonly string[];
