@@ -14,6 +14,8 @@ M-FOUND-04 intentionally precedes approval atomicity. Approval records can only 
 
 ## Canonical execution identity
 
+`src/core/identity.ts` is the single canonical identity source. `src/core/auth.ts` is retained only as a compatibility facade for callers that historically imported authentication types from that module.
+
 The new `ExecutionIdentity` separates authentication from authorization.
 
 ### Principal
@@ -23,10 +25,15 @@ Every authenticated principal carries:
 - `principalId`;
 - `principalType` (`HUMAN`, `SERVICE`, `AGENT`);
 - `tenantId`;
+- `workspaceId`;
+- `organizationId`;
 - authentication method;
 - authentication timestamp;
 - optional expiry;
+- optional MCP session ID;
 - evidence.
+
+Workspace and organization default to the verified tenant only when a narrower verified context is unavailable. They remain explicit fields in the canonical principal and audit model so future multi-workspace and multi-organization boundaries do not require redefining identity.
 
 ### Authorization grant
 
@@ -71,7 +78,9 @@ Supported TOCA scopes include:
 
 Access tokens are not persisted into the identity or audit model.
 
-A presented but expired MCP identity is rejected. It never falls back to a broader service identity.
+A presented but expired MCP identity is rejected. It never falls back to a broader service identity. A presented identity with no recognized TOCA authorization role is also rejected rather than becoming a partially authenticated executable principal.
+
+Account-bound side effects remain fail-closed unless the token carries an explicit matching `toca:account:<target_account>` scope.
 
 ## Current Cloud Run production compatibility path
 
@@ -90,6 +99,8 @@ That fallback identity is deliberately restricted to the three already productio
 - `instagram.toca_schedule.cancel`.
 
 It receives `OPERATOR` only and no target-account grant. It cannot authorize Meta Ads external writes, financial actions or destructive actions.
+
+This fallback identifies the real **execution service**. It does not impersonate Luiz, ChatGPT or another human/agent principal. A richer authenticated MCP principal, when present and valid, takes precedence.
 
 Tests couple this fallback to the deployment workflow's authenticated Cloud Run boundary so removal of `--no-allow-unauthenticated` becomes a Quality Gate failure.
 
@@ -110,6 +121,8 @@ Approval verification binds `ApprovalRecord.requester` to `identity.principal.pr
 
 A plain requester string or the deprecated boolean `approved=true` cannot authorize a side effect.
 
+When an identity resolver returns no identity, mutable registrations omit the optional identity field rather than constructing `{ identity: undefined }`. Policy therefore sees a genuinely absent identity and denies the side effect fail-closed.
+
 ## Audit integration
 
 Audit events now record, when available:
@@ -117,13 +130,16 @@ Audit events now record, when available:
 - principal ID through the existing actor/requester column;
 - principal type;
 - tenant ID;
+- workspace ID;
+- organization ID;
+- MCP session ID;
 - authentication method;
 - authorization roles;
 - approval ID;
 - connected account;
 - correlation ID and execution ID.
 
-The additional identity metadata is stored inside the existing JSON audit payload, so M-FOUND-04 does not require a destructive audit-table migration.
+The additional identity metadata is stored inside the existing JSON audit payload, so M-FOUND-04 does not require a destructive audit-table migration. Secrets and bearer tokens are never stored in the identity audit payload.
 
 ## Mutable MCP registration changes
 
@@ -141,14 +157,15 @@ M-FOUND-04 establishes the following invariants:
 
 1. a side effect is never authorized by a free-form requester string;
 2. authentication and authorization are separate records;
-3. an expired presented identity never downgrades into a fallback identity;
-4. target-account operations require an account grant when an account is supplied;
-5. execution roles are risk-class aware;
-6. approval requester identity must equal the authenticated execution principal;
-7. audit events preserve principal and authorization metadata;
-8. the infrastructure fallback has an exact capability allowlist;
-9. Meta Ads external writes are not enabled by the fallback;
-10. no capability lifecycle status is promoted by this milestone.
+3. principal identity contains tenant, workspace and organization context;
+4. an expired or role-less presented identity never downgrades into a fallback identity;
+5. target-account operations require an account grant when an account is supplied;
+6. execution roles are risk-class aware;
+7. approval requester identity must equal the authenticated execution principal;
+8. audit events preserve principal and authorization metadata without tokens;
+9. the infrastructure fallback has an exact capability allowlist;
+10. Meta Ads external writes are not enabled by the fallback;
+11. no capability lifecycle status is promoted by this milestone.
 
 ## Deferred to later checkpoints
 
@@ -163,14 +180,15 @@ M-FOUND-04 is complete when:
 1. no mutable MCP registration uses the generic `mcp-client` requester;
 2. side effects require a valid execution identity;
 3. identity expiry is enforced;
-4. capability, route, account and risk-role authorization restrictions are test-covered;
-5. approval verification is requester-bound to principal identity;
-6. audit records principal metadata;
-7. Cloud Run fallback remains exact-capability and authenticated-boundary constrained;
-8. existing 32-route and capability-resolution architecture remains unchanged;
-9. Quality Gate passes fully;
-10. merge uses a fixed head SHA;
-11. post-merge `main` Quality Gate passes.
+4. authenticated tokens without a TOCA authorization role are rejected;
+5. capability, route, account and risk-role authorization restrictions are test-covered;
+6. approval verification is requester-bound to principal identity;
+7. audit records principal, tenant, workspace, organization and authorization metadata;
+8. Cloud Run fallback remains exact-capability and authenticated-boundary constrained;
+9. existing 32-route and capability-resolution architecture remains unchanged;
+10. Quality Gate passes fully;
+11. merge uses a fixed head SHA;
+12. post-merge `main` Quality Gate and production deployment validation pass.
 
 ## Exit
 
