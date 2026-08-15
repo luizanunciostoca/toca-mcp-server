@@ -16,12 +16,29 @@ const completeMetaEnv = {
   META_GRAPH_API_VERSION: 'v1.0',
 } satisfies NodeJS.ProcessEnv;
 
+const completeGoogleAdsEnv = {
+  NODE_ENV: 'test',
+  GOOGLE_ADS_PHASE: 'READ_ONLY',
+  GOOGLE_ADS_CUSTOMER_ID: '123-456-7890',
+  GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY: 'GOOGLE_ADS_ACCESS_TOKEN',
+  GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: 'GOOGLE_ADS_DEVELOPER_TOKEN',
+  GOOGLE_ADS_ACCESS_TOKEN: 'test-access-token',
+  GOOGLE_ADS_DEVELOPER_TOKEN: 'test-developer-token',
+  GOOGLE_ADS_ALLOWED_CUSTOMER_ID: '1234567890',
+  GOOGLE_ADS_ALLOWED_CURRENCY: 'BRL',
+  GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: '100000000',
+  GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: '10000',
+  GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: '2076',
+} satisfies NodeJS.ProcessEnv;
+
 describe('runtime configuration', () => {
-  it('starts with Meta and TOCA-managed scheduling disabled without requiring provider settings', () => {
+  it('starts with Meta, Google Ads and TOCA-managed scheduling disabled without provider settings', () => {
     expect(loadConfig({ NODE_ENV: 'test', META_ENABLED: 'false' })).toMatchObject({
       NODE_ENV: 'test',
       META_ENABLED: false,
       META_WEBHOOK_ENABLED: false,
+      GOOGLE_ADS_PHASE: 'OFF',
+      GOOGLE_ADS_API_VERSION: 'v25',
       TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: false,
     });
   });
@@ -134,5 +151,54 @@ describe('runtime configuration', () => {
       GCP_PROJECT_ID: 'toca-mcp-production',
       META_TOKEN_SECRET_ID: 'toca-meta-oauth-token',
     });
+  });
+
+  it('requires complete Google Ads credential references and guardrails whenever the phased runtime is enabled', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        GOOGLE_ADS_PHASE: 'READ_ONLY',
+        GOOGLE_ADS_CUSTOMER_ID: '1234567890',
+      }),
+    ).toThrow();
+
+    expect(loadConfig(completeGoogleAdsEnv)).toMatchObject({
+      GOOGLE_ADS_PHASE: 'READ_ONLY',
+      GOOGLE_ADS_API_VERSION: 'v25',
+      GOOGLE_ADS_CUSTOMER_ID: '123-456-7890',
+      GOOGLE_ADS_ALLOWED_CUSTOMER_ID: '1234567890',
+      GOOGLE_ADS_ALLOWED_CURRENCY: 'BRL',
+      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: 100_000_000,
+      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: 10_000,
+    });
+  });
+
+  it('requires persistent audit and approval storage from CREATE_PAUSED onward', () => {
+    expect(() =>
+      loadConfig({
+        ...completeGoogleAdsEnv,
+        GOOGLE_ADS_PHASE: 'CREATE_PAUSED',
+      }),
+    ).toThrow('DATABASE_URL is required from GOOGLE_ADS_PHASE=CREATE_PAUSED onward');
+
+    expect(
+      loadConfig({
+        ...completeGoogleAdsEnv,
+        GOOGLE_ADS_PHASE: 'MANAGE',
+        DATABASE_URL: 'postgres://localhost/toca-test',
+      }),
+    ).toMatchObject({
+      GOOGLE_ADS_PHASE: 'MANAGE',
+      DATABASE_URL: 'postgres://localhost/toca-test',
+    });
+  });
+
+  it('rejects a Google Ads target account that differs from the configured allowlist', () => {
+    expect(() =>
+      loadConfig({
+        ...completeGoogleAdsEnv,
+        GOOGLE_ADS_ALLOWED_CUSTOMER_ID: '9999999999',
+      }),
+    ).toThrow('GOOGLE_ADS_ALLOWED_CUSTOMER_ID must match GOOGLE_ADS_CUSTOMER_ID');
   });
 });

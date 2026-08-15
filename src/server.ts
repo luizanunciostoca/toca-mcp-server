@@ -8,8 +8,11 @@ import {
   type ExecutionIdentityResolver,
 } from './core/identity.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { createPostgresPool } from './persistence/postgres.js';
+import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
+import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { MetaAdsControlledWriteService } from './providers/meta-ads/meta-ads-controlled-write.js';
@@ -18,6 +21,7 @@ import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagram-scheduler.js';
+import { registerGoogleAdsTools } from './tools/register-google-ads.js';
 import { registerInstagramHistoryTools } from './tools/register-instagram-history.js';
 import { registerInstagramManagedSchedulerTools } from './tools/register-instagram-managed-scheduler.js';
 import { registerMetaAdsReadTools } from './tools/register-meta-ads-read.js';
@@ -75,6 +79,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
+    googleAdsPhase: config.GOOGLE_ADS_PHASE,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
   });
 
@@ -244,7 +249,74 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     });
   }
 
+  if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+    const {
+      GOOGLE_ADS_CUSTOMER_ID: customerId,
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: loginCustomerId,
+      GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY: accessTokenEnvKey,
+      GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: developerTokenEnvKey,
+      GOOGLE_ADS_ALLOWED_CUSTOMER_ID: allowedCustomerId,
+      GOOGLE_ADS_ALLOWED_CURRENCY: allowedCurrency,
+      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: maxDailyBudgetMicros,
+      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: currencyMinorUnitMicros,
+      GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: allowedLocationIdsRaw,
+      GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: allowedLanguageIdsRaw,
+    } = config;
+    if (
+      !customerId ||
+      !accessTokenEnvKey ||
+      !developerTokenEnvKey ||
+      !allowedCustomerId ||
+      !allowedCurrency ||
+      !maxDailyBudgetMicros ||
+      !currencyMinorUnitMicros ||
+      !allowedLocationIdsRaw
+    ) {
+      throw new Error('GOOGLE_ADS_RUNTIME_GUARDRAILS_REQUIRED');
+    }
+
+    const api = new GoogleAdsRestApiClient(
+      {
+        apiVersion: config.GOOGLE_ADS_API_VERSION,
+        customerId,
+        ...(loginCustomerId ? { loginCustomerId } : {}),
+        accessTokenRef: { provider: 'env', key: accessTokenEnvKey },
+        developerTokenRef: { provider: 'env', key: developerTokenEnvKey },
+      },
+      secrets,
+    );
+    const provider = new GoogleAdsPaidMediaProvider(api, {
+      allowedCustomerId,
+      allowedCurrency,
+      maxDailyBudgetMicros,
+      currencyMinorUnitMicros,
+      allowedLocationCriterionIds: csvValues(allowedLocationIdsRaw),
+      ...(allowedLanguageIdsRaw
+        ? { allowedLanguageCriterionIds: csvValues(allowedLanguageIdsRaw) }
+        : {}),
+      allowedAdvertisingChannelTypes: ['SEARCH'],
+    });
+    const execution = pool
+      ? {
+          registry,
+          auditSink: new PostgresAuditSink(pool, registry),
+          approvalStore: new PostgresApprovalStore(pool),
+          resolveIdentity,
+          customerId: allowedCustomerId,
+          currencyCode: allowedCurrency.toUpperCase(),
+        }
+      : undefined;
+    registerGoogleAdsTools(server, provider, config.GOOGLE_ADS_PHASE, execution);
+  }
+
   return server;
+}
+
+function csvValues(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function runtimeServiceIdentity(
