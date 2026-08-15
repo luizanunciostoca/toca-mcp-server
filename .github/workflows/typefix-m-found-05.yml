@@ -24,57 +24,31 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply exact TypeScript fixes
+      - name: Apply remaining exact TypeScript fix
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if text.count(old) != 1:
-                  raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:{path}:{text.count(old)}')
-              p.write_text(text.replace(old, new, 1))
-
-          replace_once(
-              'src/core/executor.ts',
-              "function createAuditEvent(\n  options: ExecuteToolOptions<unknown>,",
-              "function createAuditEvent<T>(\n  options: ExecuteToolOptions<T>,",
-          )
-
-          replace_once(
-              'src/core/executor.ts',
-              """    return executeWithAtomicApproval(effectiveOptions, policyContext, executionId);
-""",
-              """    const atomicOptions: ExecuteToolOptions<T> & {
-      readonly approvalExecution: ApprovalExecutionOptions<T>;
-    } = {
-      ...effectiveOptions,
-      approvalExecution: options.approvalExecution,
-    };
-    return executeWithAtomicApproval(atomicOptions, policyContext, executionId);
-""",
-          )
-
-          replace_once(
-              'src/governance/approval-governance.ts',
-              "  if (capability.primary_route_id) allowedRoutes.add(capability.primary_route_id);",
-              "  if (capability.primary_route_id !== 'TRANSVERSAL')\n    allowedRoutes.add(capability.primary_route_id);",
-          )
+          p = Path('src/governance/approval-governance.ts')
+          text = p.read_text()
+          old = "  if (capability.primary_route_id) allowedRoutes.add(capability.primary_route_id);"
+          new = "  if (capability.primary_route_id !== 'TRANSVERSAL')\n    allowedRoutes.add(capability.primary_route_id);"
+          if text.count(old) != 1:
+              raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:{text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
           PY
       - name: Validate exact result
         run: |
-          pnpm exec prettier --write src/core/executor.ts src/governance/approval-governance.ts
+          pnpm exec prettier --write src/governance/approval-governance.ts
           pnpm format:check
           pnpm typecheck
-      - name: Commit validated fixes and remove temporary workflow
+      - name: Commit validated fix and remove temporary workflow
         run: |
           rm .github/workflows/typefix-m-found-05.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix: resolve M-FOUND-05 atomicity type contracts"
+          git commit -m "fix: narrow approval primary route before reservation"
       - name: Push validated result
         env:
           GH_TOKEN: ${{ github.token }}
