@@ -1,0 +1,252 @@
+name: M-FOUND-07 Merge Controller
+
+on:
+  push:
+    branches:
+      - controller/m-found-07-merge
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: "99"
+      TARGET_BRANCH: "feat/m-found-07-transactional-outbox"
+    steps:
+      - name: Wait for complete transactional integration and freeze PR head
+        id: freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            pr_json="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
+            head_sha="$(jq -r '.head.sha' <<<"${pr_json}")"
+            base_sha="$(jq -r '.base.sha' <<<"${pr_json}")"
+            base_ref="$(jq -r '.base.ref' <<<"${pr_json}")"
+            head_ref="$(jq -r '.head.ref' <<<"${pr_json}")"
+            main_sha="$(gh api "repos/${REPO}/commits/main" --jq '.sha')"
+
+            if [[ "${base_ref}" != "main" || "${head_ref}" != "${TARGET_BRANCH}" ]]; then
+              echo "Unexpected PR refs: base=${base_ref} head=${head_ref}" >&2
+              exit 1
+            fi
+            if [[ "${main_sha}" != "${base_sha}" ]]; then
+              echo "Main advanced from PR base: main=${main_sha} base=${base_sha}" >&2
+              exit 1
+            fi
+
+            approval="$(gh api "repos/${REPO}/contents/src/persistence/postgres-approval-store.ts?ref=${head_sha}" --jq '.content' | tr -d '\n' | base64 -d)"
+            workflow="$(gh api "repos/${REPO}/contents/src/persistence/postgres-workflow-store.ts?ref=${head_sha}" --jq '.content' | tr -d '\n' | base64 -d)"
+            contracts="$(gh api "repos/${REPO}/contents/src/events/transactional-outbox.ts?ref=${head_sha}" --jq '.content' | tr -d '\n' | base64 -d)"
+
+            if grep -q 'APPROVAL_OUTBOX_CONTEXT_REQUIRED' <<<"${approval}" \
+              && grep -q 'await this.#enqueueDomainEvent(client, record);' <<<"${approval}" \
+              && grep -q 'await this.#enqueueDomainEvent(client, next);' <<<"${approval}" \
+              && grep -q 'await this.#outbox.enqueue(' <<<"${workflow}" \
+              && grep -q "'IN_PROGRESS'" <<<"${contracts}"; then
+              echo "head_sha=${head_sha}" >> "${GITHUB_OUTPUT}"
+              echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+              echo "Transactional integration present at ${head_sha}."
+              exit 0
+            fi
+            echo "Waiting for transactional Approval/Workflow integration on ${head_sha}..."
+            sleep 10
+          done
+          echo "Transactional integration did not become complete." >&2
+          exit 1
+
+      - name: Verify required M-FOUND-07 files and architecture invariants
+        env:
+          HEAD_SHA: ${{ steps.freeze.outputs.head_sha }}
+          BASE_SHA: ${{ steps.freeze.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          for path in \
+            src/events/transactional-outbox.ts \
+            src/events/domain-events.ts \
+            src/events/in-memory-event-outbox.ts \
+            src/events/postgres-event-consumer.ts \
+            src/persistence/postgres-event-outbox.ts \
+            migrations/009_transactional_outbox.sql \
+            test/transactional-outbox.test.ts \
+            test/transactional-outbox-migration.test.ts \
+            test/transactional-outbox-integration.test.ts \
+            docs/checkpoints/m-found-07-event-bus-transactional-outbox.md; do
+            gh api "repos/${REPO}/contents/${path}?ref=${HEAD_SHA}" >/dev/null
+          done
+
+          compare="$(gh api "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}")"
+          changed="$(jq -r '.files[].filename' <<<"${compare}")"
+          if grep -Eq '^src/governance/(capability-ids|route-catalog)\.ts$' <<<"${changed}"; then
+            echo "M-FOUND-07 unexpectedly changed route/capability compatibility files." >&2
+            exit 1
+          fi
+
+          approval="$(gh api "repos/${REPO}/contents/src/persistence/postgres-approval-store.ts?ref=${HEAD_SHA}" --jq '.content' | tr -d '\n' | base64 -d)"
+          workflow="$(gh api "repos/${REPO}/contents/src/persistence/postgres-workflow-store.ts?ref=${HEAD_SHA}" --jq '.content' | tr -d '\n' | base64 -d)"
+          outbox="$(gh api "repos/${REPO}/contents/src/persistence/postgres-event-outbox.ts?ref=${HEAD_SHA}" --jq '.content' | tr -d '\n' | base64 -d)"
+
+          python - "${approval}" "${workflow}" "${outbox}" <<'PY'
+          import sys
+          approval, workflow, outbox = sys.argv[1:]
+
+          for marker in [
+              'await this.#enqueueDomainEvent(client, record);',
+              'await this.#enqueueDomainEvent(client, next);',
+          ]:
+              pos = approval.find(marker)
+              if pos < 0 or approval.find("await client.query('commit');", pos) < pos:
+                  raise SystemExit(f'APPROVAL_OUTBOX_NOT_BEFORE_COMMIT:{marker}')
+
+          append_start = workflow.find('async #appendEvent(')
+          append_end = workflow.find('async #claimExecution(', append_start)
+          append_body = workflow[append_start:append_end]
+          if 'await this.#outbox.enqueue(' not in append_body:
+              raise SystemExit('WORKFLOW_OUTBOX_MIRROR_MISSING')
+
+          enqueue_start = outbox.find('async enqueue(')
+          enqueue_end = outbox.find('async get(', enqueue_start)
+          enqueue_body = outbox[enqueue_start:enqueue_end]
+          if "query('begin')" in enqueue_body or "query('commit')" in enqueue_body:
+              raise SystemExit('OUTBOX_ENQUEUE_OWNS_HIDDEN_TRANSACTION')
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.freeze.outputs.head_sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Re-run complete repository quality on frozen head
+        run: pnpm quality
+
+      - name: Require official Quality Gate success for exact frozen head
+        env:
+          HEAD_SHA: ${{ steps.freeze.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            runs="$(gh api "repos/${REPO}/actions/workflows/quality.yml/runs?event=pull_request&per_page=40")"
+            run_id="$(jq -r --arg sha "${HEAD_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty' <<<"${runs}")"
+            status="$(jq -r --arg sha "${HEAD_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .status // empty' <<<"${runs}")"
+            conclusion="$(jq -r --arg sha "${HEAD_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .conclusion // empty' <<<"${runs}")"
+            if [[ -n "${run_id}" && "${status}" == "completed" ]]; then
+              if [[ "${conclusion}" != "success" ]]; then
+                echo "Official Quality Gate ${run_id} concluded ${conclusion}." >&2
+                exit 1
+              fi
+              echo "Official Quality Gate ${run_id} green for ${HEAD_SHA}."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "No completed official Quality Gate for frozen head." >&2
+          exit 1
+
+      - name: Reconfirm exact head and base immediately before merge
+        env:
+          HEAD_SHA: ${{ steps.freeze.outputs.head_sha }}
+          BASE_SHA: ${{ steps.freeze.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          current_head="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          current_main="$(gh api "repos/${REPO}/commits/main" --jq '.sha')"
+          if [[ "${current_head}" != "${HEAD_SHA}" ]]; then
+            echo "PR head moved after validation: ${current_head}" >&2
+            exit 1
+          fi
+          if [[ "${current_main}" != "${BASE_SHA}" ]]; then
+            echo "Main moved after validation: ${current_main}" >&2
+            exit 1
+          fi
+
+      - name: Mark PR ready and merge exact validated head
+        id: merge
+        env:
+          HEAD_SHA: ${{ steps.freeze.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          gh pr ready "${PR_NUMBER}" --repo "${REPO}" || true
+          response="$(gh api --method PUT "repos/${REPO}/pulls/${PR_NUMBER}/merge" \
+            -f sha="${HEAD_SHA}" \
+            -f merge_method=merge \
+            -f commit_title='feat: implement M-FOUND-07 transactional outbox (#99)' \
+            -f commit_message='Add same-transaction domain event persistence, at-least-once delivery, bounded retry/dead-letter handling and idempotent internal consumer receipts after an exact-head green Quality Gate.')"
+          merged="$(jq -r '.merged' <<<"${response}")"
+          merge_sha="$(jq -r '.sha' <<<"${response}")"
+          if [[ "${merged}" != "true" || -z "${merge_sha}" || "${merge_sha}" == "null" ]]; then
+            echo "Merge failed: ${response}" >&2
+            exit 1
+          fi
+          echo "merge_sha=${merge_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Require post-merge main Quality Gate success
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            runs="$(gh api "repos/${REPO}/actions/workflows/quality.yml/runs?event=push&branch=main&per_page=40")"
+            run_id="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty' <<<"${runs}")"
+            status="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .status // empty' <<<"${runs}")"
+            conclusion="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .conclusion // empty' <<<"${runs}")"
+            if [[ -n "${run_id}" && "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] && exit 0
+              echo "Post-merge Quality Gate ${run_id} concluded ${conclusion}." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Post-merge Quality Gate did not complete." >&2
+          exit 1
+
+      - name: Require post-merge production deploy success
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            runs="$(gh api "repos/${REPO}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/runs?event=push&branch=main&per_page=40")"
+            run_id="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty' <<<"${runs}")"
+            status="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .status // empty' <<<"${runs}")"
+            conclusion="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .conclusion // empty' <<<"${runs}")"
+            if [[ -n "${run_id}" && "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] && exit 0
+              echo "Post-merge deploy ${run_id} concluded ${conclusion}." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Post-merge deploy did not complete." >&2
+          exit 1
+
+      - name: Bootstrap M-FOUND-08 from exact validated merge SHA
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          target='feat/m-found-08-audit-observability'
+          if existing="$(gh api "repos/${REPO}/git/ref/heads/${target}" --jq '.object.sha' 2>/dev/null)"; then
+            if [[ "${existing}" != "${MERGE_SHA}" ]]; then
+              echo "M-FOUND-08 branch exists at unexpected SHA ${existing}." >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          gh api --method POST "repos/${REPO}/git/refs" -f ref="refs/heads/${target}" -f sha="${MERGE_SHA}" >/dev/null
