@@ -3,6 +3,8 @@ name: Google Business Local Reputation Apply
 on:
   push:
     branches: [feat/google-business-local-reputation]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
