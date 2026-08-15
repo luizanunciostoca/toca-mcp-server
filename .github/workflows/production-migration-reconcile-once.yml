@@ -59,6 +59,7 @@ jobs:
           RUN pnpm install --frozen-lockfile
           COPY tsconfig.json ./
           COPY scripts ./scripts
+          COPY src ./src
           COPY migrations ./migrations
           USER node
           CMD ["pnpm", "migrate"]
