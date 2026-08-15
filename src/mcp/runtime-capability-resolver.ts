@@ -206,6 +206,7 @@ function resolveBinding(
                   ...(!verified ? { reason: 'META_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' } : {}),
                 };
               },
+              sideEffectValidated: false,
             },
           )
         : undefined;
@@ -224,6 +225,7 @@ function resolveBinding(
               idempotencyKey: scheduleIdempotencyKey,
               providerReadback: (result) =>
                 scheduleReadback(services.instagramScheduler!, result.id),
+              sideEffectValidated: true,
             },
           )
         : undefined;
@@ -237,6 +239,7 @@ function resolveBinding(
                 `instagram:reschedule:${input.jobId}:${scheduleIdempotencyKey(input.replacement)}`,
               providerReadback: (result) =>
                 scheduleReadback(services.instagramScheduler!, result.id),
+              sideEffectValidated: false,
             },
           )
         : undefined;
@@ -258,6 +261,7 @@ function resolveBinding(
                 ...(!verified ? { reason: 'SCHEDULER_CANCEL_NOT_READ_BACK' } : {}),
               };
             },
+            sideEffectValidated: true,
           })
         : undefined;
     case 'instagram.toca_schedule.status':
@@ -293,6 +297,7 @@ function binding<T, TResult>(
       readonly reason?: string;
       readonly externalResourceId?: string;
     }>;
+    readonly sideEffectValidated?: boolean;
   } = {},
 ): CoreCapabilityRuntimeBinding {
   return {
@@ -312,6 +317,9 @@ function binding<T, TResult>(
           providerReadback: (result: unknown, input: unknown) =>
             options.providerReadback!(result as TResult, input as T),
         }
+      : {}),
+    ...(options.sideEffectValidated !== undefined
+      ? { sideEffectValidated: options.sideEffectValidated }
       : {}),
   };
 }
