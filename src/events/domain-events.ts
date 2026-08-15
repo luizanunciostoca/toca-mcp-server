@@ -12,6 +12,7 @@ export interface DomainEventContext {
 }
 
 export interface CreateDomainEventInput extends DomainEventContext {
+  readonly eventKey: string;
   readonly eventType: string;
   readonly schemaVersion?: string;
   readonly aggregateType: string;
@@ -27,12 +28,13 @@ export interface CreateDomainEventInput extends DomainEventContext {
 export function createDomainEvent(input: CreateDomainEventInput): DomainEventEnvelope {
   const event: DomainEventEnvelope = {
     eventId: deterministicDomainEventId({
+      tenantId: input.tenantId,
+      eventKey: input.eventKey,
       eventType: input.eventType,
       aggregateType: input.aggregateType,
       aggregateId: input.aggregateId,
-      aggregateVersion: input.aggregateVersion,
-      correlationId: input.correlationId,
     }),
+    eventKey: input.eventKey,
     eventType: input.eventType,
     schemaVersion: input.schemaVersion ?? '1.0.0',
     aggregateType: input.aggregateType,
@@ -52,18 +54,18 @@ export function createDomainEvent(input: CreateDomainEventInput): DomainEventEnv
 }
 
 export function deterministicDomainEventId(input: {
+  readonly tenantId: string;
+  readonly eventKey: string;
   readonly eventType: string;
   readonly aggregateType: string;
   readonly aggregateId: string;
-  readonly aggregateVersion: number;
-  readonly correlationId: string;
 }): string {
   const canonical = [
-    input.eventType.trim(),
+    input.tenantId.trim(),
     input.aggregateType.trim(),
     input.aggregateId.trim(),
-    String(input.aggregateVersion),
-    input.correlationId.trim(),
+    input.eventType.trim(),
+    input.eventKey.trim(),
   ].join('|');
   return `evt_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
 }
