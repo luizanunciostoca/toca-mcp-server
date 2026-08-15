@@ -6,6 +6,7 @@ const permanentWorkflows = [
   '.github/workflows/deploy-instagram-publication-worker-gcp.yml',
   '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
   '.github/workflows/gcp-cost-hygiene.yml',
+  '.github/workflows/gcp-meta-oauth-boundary-smoke.yml',
   '.github/workflows/infrastructure-control-plane.yml',
   '.github/workflows/marketing-autopilot-publication.yml',
   '.github/workflows/m-found-12-postgres-e2e.yml',
