@@ -250,6 +250,8 @@ export function validateSelectedVideoAssets(assets: readonly SelectedVideoAsset[
       throw new Error('VIDEO_MARKETING_MASTER_REQUIRED');
     if (asset.masterAssetId !== null)
       requireText(asset.masterAssetId, 'VIDEO_MASTER_ASSET_ID_INVALID');
+    if (asset.masterAvailable && asset.masterAssetId !== asset.assetId)
+      throw new Error('VIDEO_MARKETING_MASTER_NOT_SELECTED');
     if (!Number.isFinite(asset.fitnessScore) || asset.fitnessScore < 0 || asset.fitnessScore > 100)
       throw new Error('VIDEO_ASSET_FITNESS_SCORE_INVALID');
     if (asset.rightsStatus !== 'PASS') throw new Error('VIDEO_ASSET_RIGHTS_NOT_CLEARED');
