@@ -22,18 +22,174 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Reconcile latest main
+      - name: Reconcile latest main and resolve additive catalog conflicts
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin main
-          git merge --no-edit origin/main
+          if ! git merge --no-edit origin/main; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            allowed="docs/architecture/routes-capabilities-v1.md
+          src/governance/capability-catalog.ts
+          src/governance/capability-ids.ts
+          test/capability-resolution.test.ts
+          test/governance-catalog.test.ts"
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              if ! printf '%s\n' "$allowed" | grep -Fxq "$file"; then
+                echo "Unexpected merge conflict: $file"
+                exit 1
+              fi
+              git checkout --theirs -- "$file"
+            done <<< "$conflicts"
+
+            python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if old not in text:
+                  raise RuntimeError(f'anchor not found in {path}: {old[:100]!r}')
+              file.write_text(text.replace(old, new, 1))
+
+          ids = Path('src/governance/capability-ids.ts')
+          text = ids.read_text()
+          if "'video.brief.create'" not in text:
+              addition = """  R20: [
+            'video.brief.create',
+            'video.storyboard.generate',
+            'video.script.generate',
+            'video.asset.select',
+            'video.timeline.compose',
+            'video.subtitle.generate',
+            'video.caption.embed',
+            'video.audio.normalize',
+            'video.music_rights.validate',
+            'video.safe_area.validate',
+            'video.duration.validate',
+            'video.thumbnail.generate',
+            'video.export.reel',
+            'video.export.story',
+            'video.quality.validate',
+          ],
+          R29: [
+            'content_item.version.create',
+            'content_item.variant.create',
+            'content_item.channel.adapt',
+            'content_item.language.localize',
+            'content_item.fact.validate',
+            'content_item.rights.validate',
+            'content_item.accessibility.validate',
+            'content_item.event.link',
+            'content_item.experiment.link',
+            'content.repurpose.plan',
+          ],
+          """
+              if '  R30: [' not in text:
+                  raise RuntimeError('R30 anchor missing while reconciling capability IDs')
+              text = text.replace('  R30: [', addition + '  R30: [', 1)
+              ids.write_text(text)
+
+          catalog = Path('src/governance/capability-catalog.ts')
+          text = catalog.read_text()
+          if "'video.brief.create'" not in text:
+              internal = """  'video.brief.create',
+            'video.storyboard.generate',
+            'video.script.generate',
+            'video.asset.select',
+            'video.timeline.compose',
+            'video.subtitle.generate',
+            'video.caption.embed',
+            'video.audio.normalize',
+            'video.music_rights.validate',
+            'video.safe_area.validate',
+            'video.duration.validate',
+            'video.thumbnail.generate',
+            'video.export.reel',
+            'video.export.story',
+            'video.quality.validate',
+            'content_item.version.create',
+            'content_item.variant.create',
+            'content_item.channel.adapt',
+            'content_item.language.localize',
+            'content_item.fact.validate',
+            'content_item.rights.validate',
+            'content_item.accessibility.validate',
+            'content_item.event.link',
+            'content_item.experiment.link',
+            'content.repurpose.plan',
+          """
+              text = text.replace(
+                  'const implementedInternal = new Set([\n',
+                  'const implementedInternal = new Set([\n' + internal,
+                  1,
+              )
+              text = text.replace(
+                  "  if (/^(design|image|copy|presentation|story)\\./.test(capabilityId)) return 'ChatGPT+TOCA_OS';",
+                  "  if (/^(design|image|copy|presentation|story|video)\\./.test(capabilityId)) return 'ChatGPT+TOCA_OS';",
+                  1,
+              )
+              approval_anchor = "  if (capabilityId.startsWith('approval.')) return ['src/governance/approval-governance.ts'];"
+              video_evidence = """  if (capabilityId.startsWith('video.')) {
+            return ['src/content/video.ts', 'src/content/capability-contracts.ts'];
+          }
+          if (capabilityId.startsWith('content_item.') || capabilityId === 'content.repurpose.plan') {
+            return ['src/content/content-item.ts', 'src/content/capability-contracts.ts'];
+          }
+          """
+              if approval_anchor not in text:
+                  raise RuntimeError('approval evidence anchor missing')
+              text = text.replace(approval_anchor, video_evidence + approval_anchor, 1)
+              catalog.write_text(text)
+
+          resolution = Path('test/capability-resolution.test.ts')
+          text = resolution.read_text()
+          text = re.sub(r'raw_count: \d+,', 'raw_count: 770,', text, count=1)
+          text = re.sub(r'effective_count: \d+,', 'effective_count: 762,', text, count=1)
+          resolution.write_text(text)
+
+          governance = Path('test/governance-catalog.test.ts')
+          text = governance.read_text()
+          text = re.sub(r"materializes the \d+-capability catalog", "materializes the 770-capability catalog", text, count=1)
+          text = re.sub(r'expect\(CAPABILITY_CATALOG\)\.toHaveLength\(\d+\);', 'expect(CAPABILITY_CATALOG).toHaveLength(770);', text, count=1)
+          governance.write_text(text)
+
+          docs = Path('docs/architecture/routes-capabilities-v1.md')
+          text = docs.read_text()
+          text = re.sub(
+              r'`src/governance/capability-catalog\.ts`: normalized metadata for all \d+ catalog entries;',
+              '`src/governance/capability-catalog.ts`: normalized metadata for 770 catalog entries (the prior 745 entries plus 25 R20/R29 extensions);',
+              text,
+              count=1,
+          )
+          docs.write_text(text)
+          PY
+
+            git add docs/architecture/routes-capabilities-v1.md \
+              src/governance/capability-catalog.ts \
+              src/governance/capability-ids.ts \
+              test/capability-resolution.test.ts \
+              test/governance-catalog.test.ts
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo 'Unresolved merge conflicts remain'
+              git diff --name-only --diff-filter=U
+              exit 1
+            fi
+            git commit --no-edit
+          fi
           rm .github/workflows/r20-r29-reconcile-main.yml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format final follow-up files
+      - name: Format reconciled files
         run: >-
           pnpm exec prettier --write
+          src/governance/capability-ids.ts
+          src/governance/capability-catalog.ts
+          test/capability-resolution.test.ts
+          test/governance-catalog.test.ts
+          docs/architecture/routes-capabilities-v1.md
           test/r20-r29-capability-contracts.test.ts
           docs/checkpoints/r20-r29-video-content-repurposing.md
       - name: Full Quality Gate on reconciled tree
