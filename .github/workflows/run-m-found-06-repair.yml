@@ -1,0 +1,115 @@
+name: Run M-FOUND-06 Repair
+
+on:
+  push:
+    branches:
+      - repair/m-found-06-durable-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  repair-target-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m-found-06-durable-workflows
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply idempotent durable-workflow repairs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/workflow/in-memory-workflow-store.ts')
+          text = p.read_text()
+          if 'const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;' not in text:
+              anchor = "        const executionId = this.#nextUniqueExecutionId();\n        const claimed: WorkflowStep = {\n"
+              if anchor not in text:
+                  raise SystemExit('IN_MEMORY_CLAIM_ANCHOR_MISSING')
+              text = text.replace(
+                  anchor,
+                  "        const executionId = this.#nextUniqueExecutionId();\n        const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;\n        const claimed: WorkflowStep = {\n",
+                  1,
+              )
+          if '          attempts: step.attempts + 1,\n' in text:
+              text = text.replace('          attempts: step.attempts + 1,\n', '          attempts: nextAttempts,\n', 1)
+          retry_anchor = "      output: null,\n      completedAt: null,\n      errorCode: null,\n"
+          fixed_retry = "      output: null,\n      startedAt: null,\n      completedAt: null,\n      errorCode: null,\n"
+          if fixed_retry not in text:
+              if retry_anchor not in text:
+                  raise SystemExit('IN_MEMORY_RETRY_ANCHOR_MISSING')
+              text = text.replace(retry_anchor, fixed_retry, 1)
+          p.write_text(text)
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+          old = "             status = 'RUNNING', attempts = attempts + 1, claimed_by = $3,\n"
+          new = "             status = 'RUNNING',\n             attempts = attempts + case when started_at is null then 1 else 0 end,\n             claimed_by = $3,\n"
+          if old in text:
+              text = text.replace(old, new, 1)
+          if '          attempt: row.attempts + 1,\n' in text:
+              text = text.replace(
+                  '          attempt: row.attempts + 1,\n',
+                  '          attempt: row.started_at === null ? row.attempts + 1 : row.attempts,\n',
+                  1,
+              )
+          retry_sql = "           status = 'READY', output = null, completed_at = null, error_code = null,\n"
+          fixed_retry_sql = "           status = 'READY', output = null, started_at = null,\n           completed_at = null, error_code = null,\n"
+          if fixed_retry_sql not in text:
+              if retry_sql not in text:
+                  raise SystemExit('POSTGRES_RETRY_ANCHOR_MISSING')
+              text = text.replace(retry_sql, fixed_retry_sql, 1)
+
+          text = text.replace('return this.#readSnapshot(blueprint.workflowId);', 'return this.#requireSnapshot(blueprint.workflowId);')
+          text = text.replace('return this.#readSnapshot(input.workflowId);', 'return this.#requireSnapshot(input.workflowId);')
+          text = text.replace('return this.#readSnapshot(workflowId);', 'return this.#requireSnapshot(workflowId);')
+          helper = """  async #requireSnapshot(workflowId: string): Promise<WorkflowSnapshot> {
+    const snapshot = await this.#readSnapshot(workflowId, true);
+    if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');
+    return snapshot;
+  }
+
+"""
+          anchor = """  async #readSnapshot(
+    workflowId: string,
+    allowMissing = false,
+  ): Promise<WorkflowSnapshot | undefined> {
+"""
+          if '#requireSnapshot(workflowId: string)' not in text:
+              if anchor not in text:
+                  raise SystemExit('REQUIRE_SNAPSHOT_ANCHOR_MISSING')
+              text = text.replace(anchor, helper + anchor, 1)
+          p.write_text(text)
+          PY
+      - name: Remove target-branch temporary workflows
+        run: |
+          rm -f .github/workflows/format-m-found-06.yml
+          rm -f .github/workflows/m-found-06-invariant-fix.yml
+          rm -f .github/workflows/m-found-06-repair.yml
+      - name: Validate repaired target branch
+        run: |
+          pnpm exec prettier --write \
+            src/workflow/in-memory-workflow-store.ts \
+            src/persistence/postgres-workflow-store.ts
+          pnpm format:check
+          pnpm typecheck
+      - name: Commit and push one clean target-branch result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: preserve durable workflow execution invariants"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
