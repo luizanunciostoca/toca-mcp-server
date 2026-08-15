@@ -1,6 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { loadConfig } from './config.js';
+import { loadConfig, type RuntimeConfig } from './config.js';
+import {
+  createTrustedServiceExecutionIdentity,
+  resolveExecutionIdentityFromMcpContext,
+  type ExecutionIdentity,
+  type ExecutionIdentityResolver,
+} from './core/identity.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { createPostgresPool } from './persistence/postgres.js';
@@ -19,6 +25,7 @@ import { registerMetaAdsWriteTools } from './tools/register-meta-ads-write.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.2.0';
+const TOCA_TENANT_ID = 'toca-do-morcego';
 
 const capabilityStatusSchema = z.enum([
   'PLANNED',
@@ -46,11 +53,18 @@ const riskClassSchema = z.enum([
 
 export interface TocaServerOptions {
   readonly env?: NodeJS.ProcessEnv;
+  readonly executionIdentity?: ExecutionIdentity;
 }
 
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const env = options.env ?? process.env;
   const config = loadConfig(env);
+  const fallbackIdentity = options.executionIdentity ?? runtimeServiceIdentity(env, config);
+  const resolveIdentity: ExecutionIdentityResolver = (context) =>
+    resolveExecutionIdentityFromMcpContext(context, {
+      tenantId: TOCA_TENANT_ID,
+      ...(fallbackIdentity ? { fallbackIdentity } : {}),
+    });
 
   const server = new McpServer({
     name: SERVER_NAME,
@@ -165,7 +179,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     registerInstagramManagedSchedulerTools(server, scheduler, {
       registry,
       auditSink: new PostgresAuditSink(pool, registry),
-      requester: 'mcp-client',
+      resolveIdentity,
     });
   }
 
@@ -226,9 +240,33 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     registerMetaAdsWriteTools(server, service, {
       registry,
       auditSink: new PostgresAuditSink(pool, registry),
-      requester: 'mcp-client',
+      resolveIdentity,
     });
   }
 
   return server;
+}
+
+function runtimeServiceIdentity(
+  env: NodeJS.ProcessEnv,
+  config: RuntimeConfig,
+): ExecutionIdentity | undefined {
+  const cloudRunService = env.K_SERVICE?.trim();
+  if (config.NODE_ENV !== 'production' || !config.MCP_ENABLED || !cloudRunService) return undefined;
+
+  return createTrustedServiceExecutionIdentity({
+    principalId: `cloud-run-service:${cloudRunService}`,
+    tenantId: TOCA_TENANT_ID,
+    roles: ['OPERATOR'],
+    allowedCapabilityIds: [
+      'instagram.toca_schedule.create',
+      'instagram.toca_schedule.reschedule',
+      'instagram.toca_schedule.cancel',
+    ],
+    allowedTargetAccounts: [],
+    evidence: [
+      `runtime:cloud-run:${cloudRunService}`,
+      'deployment-contract:cloud-run-authenticated-boundary',
+    ],
+  });
 }
