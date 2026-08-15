@@ -1,0 +1,17 @@
+# TOCA OS repository ownership
+# Keep the default owner explicit so protected-branch review rules can require
+# code-owner approval without creating route/domain-specific ACL drift.
+* @luizidebook
+
+# Governance / execution boundaries
+/.github/ @luizidebook
+/src/core/ @luizidebook
+/src/governance/ @luizidebook
+/src/mcp/ @luizidebook
+/migrations/ @luizidebook
+/scripts/ @luizidebook
+/control/ @luizidebook
+
+# Supply-chain manifests
+/package.json @luizidebook
+/pnpm-lock.yaml @luizidebook
