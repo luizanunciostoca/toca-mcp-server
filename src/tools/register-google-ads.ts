@@ -118,7 +118,7 @@ export function registerGoogleAdsTools(
       description:
         'Creates budget, PAUSED campaign and targeting atomically. Requires R27 approval, authenticated requester and provider read-back; policy remains fail-closed until PRODUCTION_VALIDATED.',
       inputSchema: z.object({ plan: planSchema, approvalId: z.string().min(1) }),
-      annotations: writeAnnotations(),
+      annotations: writeAnnotations(false),
     },
     async ({ plan, approvalId }, context) => {
       const typedPlan = plan as GoogleAdsCampaignPlan;
@@ -132,6 +132,8 @@ export function registerGoogleAdsTools(
           connectedAccount: execution.customerId,
           descriptorSha256: prepared.requestSha256,
           requiredApprovalScope: ['google_ads.campaign.create_paused'],
+          financialAmountMinor: provider.minorUnitsForMicros(prepared.plan.dailyBudgetMicros),
+          currency: prepared.plan.currencyCode,
         },
         auditSink: execution.auditSink,
         correlationId,
@@ -187,7 +189,7 @@ export function registerGoogleAdsTools(
         amountMicros: z.number().int().positive(),
         approvalId: z.string().min(1),
       }),
-      annotations: writeAnnotations(),
+      annotations: writeAnnotations(true),
     },
     async ({ campaignId, amountMicros, approvalId }, context) => {
       const descriptorSha256 = descriptorHash({ campaignId, amountMicros });
@@ -208,8 +210,7 @@ export function registerGoogleAdsTools(
         approvalExecution: {
           approvalId,
           store: execution.approvalStore,
-          providerReadback: async () =>
-            verifyBudgetReadback(provider, campaignId, amountMicros),
+          providerReadback: async () => verifyBudgetReadback(provider, campaignId, amountMicros),
         },
       });
       return response(output);
@@ -234,11 +235,11 @@ function registerStatusWrite(
         campaignId: z.string().regex(/^\d+$/),
         approvalId: z.string().min(1),
       }),
-      annotations: writeAnnotations(),
+      annotations: writeAnnotations(true),
     },
     async ({ campaignId, approvalId }, context) => {
       const budgetMicros =
-        status === 'ENABLED' ? await provider.readBudgetMicros(campaignId) : undefined;
+        status === 'ENABLED' ? await provider.readActivationBudgetMicros(campaignId) : undefined;
       const descriptorSha256 = descriptorHash({ campaignId, status, budgetMicros });
       const identity = execution.resolveIdentity(context);
       const output = await executeTool({
@@ -338,11 +339,11 @@ function requireTool(registry: ToolRegistry, name: string): ToolDefinition {
   return tool;
 }
 
-function writeAnnotations() {
+function writeAnnotations(idempotent: boolean) {
   return {
     readOnlyHint: false,
     destructiveHint: false,
-    idempotentHint: false,
+    idempotentHint: idempotent,
     openWorldHint: true,
   };
 }
