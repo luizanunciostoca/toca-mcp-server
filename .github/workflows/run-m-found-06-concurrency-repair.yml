@@ -1,0 +1,155 @@
+name: Run M-FOUND-06 Concurrency Repair
+
+on:
+  push:
+    branches:
+      - repair4/m-found-06-concurrency
+
+permissions:
+  contents: write
+
+jobs:
+  repair-target:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m-found-06-durable-workflows
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Repair PostgreSQL workflow invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+
+          # Ensure JSON serialization is explicitly narrowed to string for TypeScript.
+          old_json = """function json(value: unknown): string {
+  assertJsonSerializable(value);
+  return JSON.stringify(value);
+}
+"""
+          new_json = """function json(value: unknown): string {
+  assertJsonSerializable(value);
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('WORKFLOW_PAYLOAD_NOT_JSON_SERIALIZABLE');
+  return serialized;
+}
+"""
+          if old_json in text:
+              text = text.replace(old_json, new_json, 1)
+
+          # Standardize claim lock order to workflow instance -> step.
+          pattern = re.compile(
+              r"      const selected = await client\.query<WorkflowStepRow>\(.*?      const claims: WorkflowStepClaim\[\] = \[\];\n      for \(const row of selected\.rows\) \{",
+              re.S,
+          )
+          if pattern.search(text):
+              replacement = """      const candidates = await client.query<Pick<WorkflowStepRow, 'workflow_id' | 'step_id'>>(
+        `select s.workflow_id, s.step_id
+         from workflow_steps s
+         join workflow_instances w on w.workflow_id = s.workflow_id
+         where s.status = 'READY'
+           and w.status in ('RUNNING', 'WAITING')
+         order by w.updated_at asc, s.workflow_id asc, s.step_id asc
+         limit $1`,
+        [Math.min(input.limit * 8, 800)],
+      );
+      const claims: WorkflowStepClaim[] = [];
+      for (const candidate of candidates.rows) {
+        if (claims.length >= input.limit) break;
+        const instanceLock = await client.query<WorkflowInstanceRow>(
+          `select * from workflow_instances
+           where workflow_id = $1 and status in ('RUNNING', 'WAITING')
+           for update skip locked`,
+          [candidate.workflow_id],
+        );
+        if (!instanceLock.rows[0]) continue;
+        const stepLock = await client.query<WorkflowStepRow>(
+          `select * from workflow_steps
+           where workflow_id = $1 and step_id = $2 and status = 'READY'
+           for update skip locked`,
+          [candidate.workflow_id, candidate.step_id],
+        );
+        const row = stepLock.rows[0];
+        if (!row) continue;"""
+              text, count = pattern.subn(replacement, text, count=1)
+              if count != 1:
+                  raise SystemExit('CLAIM_LOCK_ORDER_PATCH_FAILED')
+          elif 'const candidates = await client.query<Pick<WorkflowStepRow' not in text:
+              raise SystemExit('CLAIM_LOCK_ORDER_ANCHOR_MISSING')
+
+          p.write_text(text)
+
+          p = Path('migrations/007_durable_workflow_persistence.sql')
+          text = p.read_text()
+          if 'unique (workflow_id, compensation_id),' not in text:
+              anchor = '  unique (workflow_id, order_index),\n'
+              if anchor not in text:
+                  raise SystemExit('COMPENSATION_UNIQUE_ANCHOR_MISSING')
+              text = text.replace(anchor, anchor + '  unique (workflow_id, compensation_id),\n', 1)
+          p.write_text(text)
+
+          p = Path('migrations/008_workflow_execution_claims.sql')
+          text = p.read_text()
+          text = text.replace(
+              '  compensation_id text references workflow_compensations (compensation_id) on delete restrict,\n',
+              '  compensation_id text,\n',
+              1,
+          )
+          composite = """  foreign key (workflow_id, compensation_id)
+    references workflow_compensations (workflow_id, compensation_id) on delete restrict,
+"""
+          if composite not in text:
+              anchor = """  foreign key (workflow_id, step_id)
+    references workflow_steps (workflow_id, step_id) on delete restrict
+"""
+              if anchor not in text:
+                  raise SystemExit('EXECUTION_CLAIM_FK_ANCHOR_MISSING')
+              replacement = anchor.rstrip('\n') + ',\n' + composite.rstrip('\n') + '\n'
+              text = text.replace(anchor, replacement, 1)
+          p.write_text(text)
+          PY
+      - name: Remove any M-FOUND-06 target temporary workflows
+        run: |
+          rm -f .github/workflows/format-m-found-06.yml
+          rm -f .github/workflows/m-found-06-invariant-fix.yml
+          rm -f .github/workflows/m-found-06-repair.yml
+      - name: Format and run complete quality
+        run: |
+          pnpm exec prettier --write src/persistence/postgres-workflow-store.ts
+          pnpm quality
+      - name: Record concurrency repair sentinel
+        run: |
+          mkdir -p control
+          cat > control/m-found-06-concurrency-repair.json <<'JSON'
+          {
+            "milestone": "M-FOUND-06",
+            "status": "CONCURRENCY_REPAIR_LOCAL_QUALITY_GREEN",
+            "lock_order": "workflow_instance_then_step",
+            "compensation_claim_binding": "same_workflow_composite_fk",
+            "event_outbox_introduced": false
+          }
+          JSON
+          pnpm exec prettier --write control/m-found-06-concurrency-repair.json
+      - name: Commit and push validated target branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: harden durable workflow concurrency contracts"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
