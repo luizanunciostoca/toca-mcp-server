@@ -5,11 +5,31 @@ import { isRouteId, type RouteId } from './types.js';
 export const APPROVAL_STATUSES = [
   'REQUESTED',
   'APPROVED',
+  'RESERVED',
+  'EXECUTING',
+  'PROVIDER_READBACK',
   'CONSUMED',
+  'RELEASED',
+  'FAILED_REVIEW_REQUIRED',
   'REVOKED',
   'EXPIRED',
 ] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export const APPROVAL_EXECUTION_STATUSES = [
+  'RESERVED',
+  'EXECUTING',
+  'PROVIDER_READBACK',
+  'CONSUMED',
+  'RELEASED',
+  'FAILED_REVIEW_REQUIRED',
+] as const;
+export type ApprovalExecutionStatus = (typeof APPROVAL_EXECUTION_STATUSES)[number];
+
+const RESERVABLE_STATUSES: ReadonlySet<ApprovalStatus> = new Set(['APPROVED', 'RELEASED']);
+const DIRECT_PUT_FORBIDDEN_STATUSES: ReadonlySet<ApprovalStatus> = new Set(
+  APPROVAL_EXECUTION_STATUSES,
+);
 
 export interface ApprovalFinancialCeiling {
   readonly amountMinor: number;
@@ -31,6 +51,17 @@ export interface ApprovalRecord {
   readonly expiresAt: string;
   readonly consumedAt: string | null;
   readonly revokedAt: string | null;
+  readonly reservationExecutionId: string | null;
+  readonly reservationPrincipalId: string | null;
+  readonly reservationCorrelationId: string | null;
+  readonly reservedAt: string | null;
+  readonly executingAt: string | null;
+  readonly providerReadbackAt: string | null;
+  readonly providerReadbackEvidence: readonly string[];
+  readonly releasedAt: string | null;
+  readonly releaseReason: string | null;
+  readonly failedReviewAt: string | null;
+  readonly failureReason: string | null;
   readonly status: ApprovalStatus;
   readonly evidence: readonly string[];
   readonly correlationId: string;
@@ -49,9 +80,22 @@ export interface ApprovalRecordWire {
   readonly financial_ceiling: ApprovalFinancialCeiling | null;
   readonly issued_at: string | null;
   readonly expires_at: string;
+  readonly consumed_at: string | null;
+  readonly reservation_execution_id: string | null;
+  readonly reservation_principal_id: string | null;
+  readonly reservation_correlation_id: string | null;
+  readonly reserved_at: string | null;
+  readonly executing_at: string | null;
+  readonly provider_readback_at: string | null;
+  readonly provider_readback_evidence: readonly string[];
+  readonly released_at: string | null;
+  readonly release_reason: string | null;
+  readonly failed_review_at: string | null;
+  readonly failure_reason: string | null;
   readonly status: ApprovalStatus;
   readonly evidence: readonly string[];
   readonly correlation_id: string;
+  readonly version: number;
 }
 
 export interface ApprovalRequestInput {
@@ -93,29 +137,75 @@ export interface ApprovalVerification {
   readonly reasons: readonly string[];
 }
 
+export interface ApprovalExecutionBinding {
+  readonly executionId: string;
+  readonly principalId: string;
+  readonly correlationId: string;
+}
+
+export type ApprovalAtomicTransition =
+  | {
+      readonly type: 'RESERVE';
+      readonly expectation: ApprovalExpectation;
+      readonly binding: ApprovalExecutionBinding;
+      readonly now?: string;
+    }
+  | {
+      readonly type: 'BEGIN_EXECUTION';
+      readonly executionId: string;
+      readonly evidence?: readonly string[];
+      readonly now?: string;
+    }
+  | {
+      readonly type: 'PROVIDER_READBACK';
+      readonly executionId: string;
+      readonly evidence: readonly string[];
+      readonly now?: string;
+    }
+  | {
+      readonly type: 'CONSUME';
+      readonly executionId: string;
+      readonly evidence: readonly string[];
+      readonly now?: string;
+    }
+  | {
+      readonly type: 'RELEASE';
+      readonly executionId: string;
+      readonly evidence: readonly string[];
+      readonly reason: string;
+      readonly now?: string;
+    }
+  | {
+      readonly type: 'FAIL_REVIEW_REQUIRED';
+      readonly executionId: string;
+      readonly evidence: readonly string[];
+      readonly reason: string;
+      readonly now?: string;
+    };
+
 export interface ApprovalStore {
   put(record: ApprovalRecord, expectedVersion?: number): Promise<void>;
   get(approvalId: string): Promise<ApprovalRecord | undefined>;
   history(approvalId: string): Promise<readonly ApprovalRecord[]>;
+  transition(approvalId: string, transition: ApprovalAtomicTransition): Promise<ApprovalRecord>;
 }
 
 export class InMemoryApprovalStore implements ApprovalStore {
   readonly #current = new Map<string, ApprovalRecord>();
   readonly #history = new Map<string, ApprovalRecord[]>();
+  readonly #claimedExecutionIds = new Set<string>();
 
   put(record: ApprovalRecord, expectedVersion?: number): Promise<void> {
     return Promise.resolve().then(() => {
+      if (DIRECT_PUT_FORBIDDEN_STATUSES.has(record.status))
+        throw new Error('APPROVAL_EXECUTION_TRANSITION_REQUIRED');
       const current = this.#current.get(record.approvalId);
       if (expectedVersion !== undefined && current?.version !== expectedVersion)
         throw new Error('APPROVAL_VERSION_CONFLICT');
       if (current && record.version !== current.version + 1)
         throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
       if (!current && record.version !== 1) throw new Error('APPROVAL_INITIAL_VERSION_INVALID');
-      this.#current.set(record.approvalId, record);
-      this.#history.set(record.approvalId, [
-        ...(this.#history.get(record.approvalId) ?? []),
-        record,
-      ]);
+      this.#persist(record);
     });
   }
 
@@ -125,6 +215,26 @@ export class InMemoryApprovalStore implements ApprovalStore {
 
   history(approvalId: string): Promise<readonly ApprovalRecord[]> {
     return Promise.resolve(this.#history.get(approvalId) ?? []);
+  }
+
+  transition(approvalId: string, transition: ApprovalAtomicTransition): Promise<ApprovalRecord> {
+    return Promise.resolve().then(() => {
+      const current = this.#current.get(approvalId);
+      if (!current) throw new Error('APPROVAL_NOT_FOUND');
+      if (transition.type === 'RESERVE') {
+        if (this.#claimedExecutionIds.has(transition.binding.executionId))
+          throw new Error('APPROVAL_EXECUTION_ID_ALREADY_CLAIMED');
+        this.#claimedExecutionIds.add(transition.binding.executionId);
+      }
+      const next = applyApprovalAtomicTransition(current, transition);
+      this.#persist(next);
+      return next;
+    });
+  }
+
+  #persist(record: ApprovalRecord): void {
+    this.#current.set(record.approvalId, record);
+    this.#history.set(record.approvalId, [...(this.#history.get(record.approvalId) ?? []), record]);
   }
 }
 
@@ -142,15 +252,26 @@ export function requestApproval(
     capabilityId: input.capabilityId,
     descriptorSha256: hashApprovalDescriptor(input.descriptor),
     targetAccount: input.targetAccount,
-    scope: [...new Set(input.scope)].sort(),
+    scope: unique(input.scope).sort(),
     financialCeiling: input.financialCeiling ?? null,
     requestedAt: now,
     issuedAt: null,
     expiresAt: input.expiresAt,
     consumedAt: null,
     revokedAt: null,
+    reservationExecutionId: null,
+    reservationPrincipalId: null,
+    reservationCorrelationId: null,
+    reservedAt: null,
+    executingAt: null,
+    providerReadbackAt: null,
+    providerReadbackEvidence: [],
+    releasedAt: null,
+    releaseReason: null,
+    failedReviewAt: null,
+    failureReason: null,
     status: 'REQUESTED',
-    evidence: [...new Set(input.evidence ?? [])].sort(),
+    evidence: unique(input.evidence ?? []).sort(),
     correlationId: input.correlationId,
     version: 1,
   };
@@ -167,16 +288,14 @@ export function issueApproval(
   if (record.status !== 'REQUESTED') throw new Error('APPROVAL_NOT_REQUESTED');
   const now = input.now ?? new Date().toISOString();
   validateApproverAuthority(record, input.authority, now);
-  if (input.evidence.length === 0) throw new Error('APPROVAL_EVIDENCE_REQUIRED');
+  requireEvidence(input.evidence, 'APPROVAL_EVIDENCE_REQUIRED');
   if (Date.parse(record.expiresAt) <= Date.parse(now)) throw new Error('APPROVAL_EXPIRED');
   return {
     ...record,
     approver: input.authority.approver,
     issuedAt: now,
     status: 'APPROVED',
-    evidence: [
-      ...new Set([...record.evidence, ...input.authority.evidence, ...input.evidence]),
-    ].sort(),
+    evidence: unique([...record.evidence, ...input.authority.evidence, ...input.evidence]).sort(),
     version: record.version + 1,
   };
 }
@@ -191,7 +310,7 @@ export function validateApproverAuthority(
     throw new Error('APPROVAL_AUTHORITY_TIMESTAMP_INVALID');
   if (Date.parse(authority.validatedAt) > Date.parse(now))
     throw new Error('APPROVAL_AUTHORITY_FROM_FUTURE');
-  if (authority.evidence.length === 0) throw new Error('APPROVAL_AUTHORITY_EVIDENCE_REQUIRED');
+  requireEvidence(authority.evidence, 'APPROVAL_AUTHORITY_EVIDENCE_REQUIRED');
   if (!authority.allowedRouteIds.includes(record.routeId))
     throw new Error('APPROVAL_APPROVER_ROUTE_NOT_ALLOWED');
   if (!authority.allowedCapabilityIds.includes(record.capabilityId))
@@ -214,7 +333,7 @@ export function verifyApproval(
   now = new Date().toISOString(),
 ): ApprovalVerification {
   const reasons: string[] = [];
-  if (record.status !== 'APPROVED') reasons.push(`STATUS_${record.status}`);
+  if (!RESERVABLE_STATUSES.has(record.status)) reasons.push(`STATUS_${record.status}`);
   if (!record.approver || !record.issuedAt) reasons.push('NOT_ISSUED');
   if (Date.parse(record.expiresAt) <= Date.parse(now)) reasons.push('EXPIRED');
   if (expectation.requester && record.requester !== expectation.requester)
@@ -240,15 +359,128 @@ export function verifyApproval(
   return { valid: reasons.length === 0, reasons };
 }
 
+export function applyApprovalAtomicTransition(
+  record: ApprovalRecord,
+  transition: ApprovalAtomicTransition,
+): ApprovalRecord {
+  const now = transition.now ?? new Date().toISOString();
+
+  switch (transition.type) {
+    case 'RESERVE': {
+      const verification = verifyApproval(record, transition.expectation, now);
+      if (!verification.valid)
+        throw new Error(`APPROVAL_VERIFICATION_FAILED:${verification.reasons.join(',')}`);
+      const { executionId, principalId, correlationId } = transition.binding;
+      requireNonEmpty(executionId, 'APPROVAL_EXECUTION_ID_REQUIRED');
+      requireNonEmpty(principalId, 'APPROVAL_EXECUTION_PRINCIPAL_REQUIRED');
+      requireNonEmpty(correlationId, 'APPROVAL_EXECUTION_CORRELATION_REQUIRED');
+      if (transition.expectation.requester && transition.expectation.requester !== principalId)
+        throw new Error('APPROVAL_EXECUTION_PRINCIPAL_MISMATCH');
+      if (record.status === 'RELEASED' && record.reservationExecutionId === executionId)
+        throw new Error('APPROVAL_EXECUTION_ID_ALREADY_CLAIMED');
+      return {
+        ...record,
+        reservationExecutionId: executionId,
+        reservationPrincipalId: principalId,
+        reservationCorrelationId: correlationId,
+        reservedAt: now,
+        executingAt: null,
+        providerReadbackAt: null,
+        providerReadbackEvidence: [],
+        consumedAt: null,
+        releasedAt: null,
+        releaseReason: null,
+        failedReviewAt: null,
+        failureReason: null,
+        status: 'RESERVED',
+        version: record.version + 1,
+      };
+    }
+    case 'BEGIN_EXECUTION': {
+      assertExecutionTransition(record, 'RESERVED', transition.executionId);
+      if (Date.parse(record.expiresAt) <= Date.parse(now)) throw new Error('APPROVAL_EXPIRED');
+      return {
+        ...record,
+        executingAt: now,
+        status: 'EXECUTING',
+        evidence: mergeEvidence(record.evidence, transition.evidence ?? []),
+        version: record.version + 1,
+      };
+    }
+    case 'PROVIDER_READBACK': {
+      assertExecutionTransition(record, 'EXECUTING', transition.executionId);
+      const evidence = requireEvidence(transition.evidence, 'APPROVAL_READBACK_EVIDENCE_REQUIRED');
+      return {
+        ...record,
+        providerReadbackAt: now,
+        providerReadbackEvidence: evidence,
+        status: 'PROVIDER_READBACK',
+        evidence: mergeEvidence(record.evidence, evidence),
+        version: record.version + 1,
+      };
+    }
+    case 'CONSUME': {
+      assertExecutionTransition(record, 'PROVIDER_READBACK', transition.executionId);
+      const evidence = requireEvidence(
+        transition.evidence,
+        'APPROVAL_CONSUMPTION_EVIDENCE_REQUIRED',
+      );
+      if (!record.providerReadbackAt || record.providerReadbackEvidence.length === 0)
+        throw new Error('APPROVAL_PROVIDER_READBACK_REQUIRED');
+      return {
+        ...record,
+        consumedAt: now,
+        status: 'CONSUMED',
+        evidence: mergeEvidence(record.evidence, evidence),
+        version: record.version + 1,
+      };
+    }
+    case 'RELEASE': {
+      assertExecutionTransition(record, 'RESERVED', transition.executionId);
+      const evidence = requireEvidence(transition.evidence, 'APPROVAL_RELEASE_EVIDENCE_REQUIRED');
+      const reason = requireNonEmpty(transition.reason, 'APPROVAL_RELEASE_REASON_REQUIRED');
+      return {
+        ...record,
+        releasedAt: now,
+        releaseReason: reason,
+        status: 'RELEASED',
+        evidence: mergeEvidence(record.evidence, evidence),
+        version: record.version + 1,
+      };
+    }
+    case 'FAIL_REVIEW_REQUIRED': {
+      if (!['EXECUTING', 'PROVIDER_READBACK'].includes(record.status))
+        throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->FAILED_REVIEW_REQUIRED`);
+      assertExecutionId(record, transition.executionId);
+      const evidence = requireEvidence(transition.evidence, 'APPROVAL_FAILURE_EVIDENCE_REQUIRED');
+      const reason = requireNonEmpty(transition.reason, 'APPROVAL_FAILURE_REASON_REQUIRED');
+      return {
+        ...record,
+        failedReviewAt: now,
+        failureReason: reason,
+        status: 'FAILED_REVIEW_REQUIRED',
+        evidence: mergeEvidence(record.evidence, evidence),
+        version: record.version + 1,
+      };
+    }
+  }
+}
+
+/**
+ * Compatibility helper for internal callers. Consumption is only valid after provider readback.
+ */
 export function consumeApproval(
   record: ApprovalRecord,
-  expectation: ApprovalExpectation,
+  executionId: string,
+  evidence: readonly string[],
   now = new Date().toISOString(),
 ): ApprovalRecord {
-  const verification = verifyApproval(record, expectation, now);
-  if (!verification.valid)
-    throw new Error(`APPROVAL_VERIFICATION_FAILED:${verification.reasons.join(',')}`);
-  return { ...record, status: 'CONSUMED', consumedAt: now, version: record.version + 1 };
+  return applyApprovalAtomicTransition(record, {
+    type: 'CONSUME',
+    executionId,
+    evidence,
+    now,
+  });
 }
 
 export function revokeApproval(
@@ -256,13 +488,14 @@ export function revokeApproval(
   evidence: readonly string[],
   now = new Date().toISOString(),
 ): ApprovalRecord {
-  if (!['REQUESTED', 'APPROVED'].includes(record.status)) throw new Error('APPROVAL_NOT_REVOCABLE');
-  if (evidence.length === 0) throw new Error('APPROVAL_REVOCATION_EVIDENCE_REQUIRED');
+  if (!['REQUESTED', 'APPROVED', 'RELEASED'].includes(record.status))
+    throw new Error('APPROVAL_NOT_REVOCABLE');
+  requireEvidence(evidence, 'APPROVAL_REVOCATION_EVIDENCE_REQUIRED');
   return {
     ...record,
     status: 'REVOKED',
     revokedAt: now,
-    evidence: [...new Set([...record.evidence, ...evidence])].sort(),
+    evidence: mergeEvidence(record.evidence, evidence),
     version: record.version + 1,
   };
 }
@@ -271,7 +504,8 @@ export function expireApproval(
   record: ApprovalRecord,
   now = new Date().toISOString(),
 ): ApprovalRecord {
-  if (!['REQUESTED', 'APPROVED'].includes(record.status)) throw new Error('APPROVAL_NOT_EXPIRABLE');
+  if (!['REQUESTED', 'APPROVED', 'RELEASED'].includes(record.status))
+    throw new Error('APPROVAL_NOT_EXPIRABLE');
   if (Date.parse(record.expiresAt) > Date.parse(now)) throw new Error('APPROVAL_NOT_EXPIRED');
   return { ...record, status: 'EXPIRED', version: record.version + 1 };
 }
@@ -293,10 +527,50 @@ export function toApprovalRecordWire(record: ApprovalRecord): ApprovalRecordWire
     financial_ceiling: record.financialCeiling,
     issued_at: record.issuedAt,
     expires_at: record.expiresAt,
+    consumed_at: record.consumedAt,
+    reservation_execution_id: record.reservationExecutionId,
+    reservation_principal_id: record.reservationPrincipalId,
+    reservation_correlation_id: record.reservationCorrelationId,
+    reserved_at: record.reservedAt,
+    executing_at: record.executingAt,
+    provider_readback_at: record.providerReadbackAt,
+    provider_readback_evidence: record.providerReadbackEvidence,
+    released_at: record.releasedAt,
+    release_reason: record.releaseReason,
+    failed_review_at: record.failedReviewAt,
+    failure_reason: record.failureReason,
     status: record.status,
     evidence: record.evidence,
     correlation_id: record.correlationId,
+    version: record.version,
   };
+}
+
+export function normalizeApprovalRecord(
+  record: Partial<ApprovalRecord> & ApprovalRecord,
+): ApprovalRecord {
+  return {
+    ...record,
+    reservationExecutionId: record.reservationExecutionId ?? null,
+    reservationPrincipalId: record.reservationPrincipalId ?? null,
+    reservationCorrelationId: record.reservationCorrelationId ?? null,
+    reservedAt: record.reservedAt ?? null,
+    executingAt: record.executingAt ?? null,
+    providerReadbackAt: record.providerReadbackAt ?? null,
+    providerReadbackEvidence: record.providerReadbackEvidence ?? [],
+    releasedAt: record.releasedAt ?? null,
+    releaseReason: record.releaseReason ?? null,
+    failedReviewAt: record.failedReviewAt ?? null,
+    failureReason: record.failureReason ?? null,
+  };
+}
+
+export function isApprovalStatus(value: string): value is ApprovalStatus {
+  return (APPROVAL_STATUSES as readonly string[]).includes(value);
+}
+
+export function isDirectApprovalPutAllowed(status: ApprovalStatus): boolean {
+  return !DIRECT_PUT_FORBIDDEN_STATUSES.has(status);
 }
 
 function assertApprovalRequest(input: ApprovalRequestInput, now: string): void {
@@ -305,13 +579,16 @@ function assertApprovalRequest(input: ApprovalRequestInput, now: string): void {
   if (!input.capabilityId.trim()) throw new Error('APPROVAL_CAPABILITY_REQUIRED');
   const capability = getCapabilityDefinition(input.capabilityId);
   if (!capability) throw new Error('APPROVAL_CAPABILITY_UNKNOWN');
-  if (capability.route_id !== input.routeId) throw new Error('APPROVAL_CAPABILITY_ROUTE_MISMATCH');
+  const allowedRoutes = new Set<RouteId>();
+  if (capability.route_id !== 'TRANSVERSAL') allowedRoutes.add(capability.route_id);
+  if (capability.primary_route_id !== 'TRANSVERSAL') allowedRoutes.add(capability.primary_route_id);
+  for (const routeId of capability.consumer_route_ids) allowedRoutes.add(routeId);
+  if (!allowedRoutes.has(input.routeId)) throw new Error('APPROVAL_CAPABILITY_ROUTE_MISMATCH');
   if (!input.targetAccount.trim()) throw new Error('APPROVAL_TARGET_REQUIRED');
   if (input.scope.length === 0 || input.scope.some((scope) => !scope.trim()))
     throw new Error('APPROVAL_SCOPE_REQUIRED');
   if (!input.correlationId.trim()) throw new Error('APPROVAL_CORRELATION_REQUIRED');
-  if (!input.evidence || input.evidence.length === 0)
-    throw new Error('APPROVAL_REQUEST_EVIDENCE_REQUIRED');
+  requireEvidence(input.evidence ?? [], 'APPROVAL_REQUEST_EVIDENCE_REQUIRED');
   if (
     !Number.isFinite(Date.parse(input.expiresAt)) ||
     Date.parse(input.expiresAt) <= Date.parse(now)
@@ -325,6 +602,42 @@ function assertApprovalRequest(input: ApprovalRequestInput, now: string): void {
     )
       throw new Error('APPROVAL_FINANCIAL_CEILING_INVALID');
   }
+}
+
+function assertExecutionTransition(
+  record: ApprovalRecord,
+  requiredStatus: ApprovalStatus,
+  executionId: string,
+): void {
+  if (record.status !== requiredStatus)
+    throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->${requiredStatus}`);
+  assertExecutionId(record, executionId);
+}
+
+function assertExecutionId(record: ApprovalRecord, executionId: string): void {
+  if (!executionId.trim()) throw new Error('APPROVAL_EXECUTION_ID_REQUIRED');
+  if (record.reservationExecutionId !== executionId)
+    throw new Error('APPROVAL_EXECUTION_BINDING_MISMATCH');
+}
+
+function mergeEvidence(current: readonly string[], next: readonly string[]): readonly string[] {
+  return unique([...current, ...next]).sort();
+}
+
+function requireEvidence(values: readonly string[], errorCode: string): readonly string[] {
+  const evidence = unique(values.map((value) => value.trim()).filter(Boolean));
+  if (evidence.length === 0) throw new Error(errorCode);
+  return evidence;
+}
+
+function requireNonEmpty(value: string, errorCode: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(errorCode);
+  return normalized;
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
 }
 
 function stableJson(value: unknown): string {
