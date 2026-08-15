@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryWorkflowStore } from '../src/workflow/in-memory-workflow-store.js';
-import { validateWorkflowBlueprint, type WorkflowBlueprint } from '../src/workflow/workflow-contracts.js';
+import {
+  validateWorkflowBlueprint,
+  type WorkflowBlueprint,
+} from '../src/workflow/workflow-contracts.js';
 
 const baseBlueprint = (overrides: Partial<WorkflowBlueprint> = {}): WorkflowBlueprint => ({
   workflowId: 'workflow-1',
@@ -62,10 +65,7 @@ describe('M-FOUND-06 durable workflow lifecycle', () => {
     const duplicate = await store.create(baseBlueprint(), '2026-08-14T20:00:01Z');
     expect(duplicate.instance.workflowId).toBe('workflow-1');
     await expect(
-      store.create(
-        baseBlueprint({ workflowId: 'workflow-conflict' }),
-        '2026-08-14T20:00:02Z',
-      ),
+      store.create(baseBlueprint({ workflowId: 'workflow-conflict' }), '2026-08-14T20:00:02Z'),
     ).rejects.toThrow('WORKFLOW_IDEMPOTENCY_CONFLICT');
 
     const firstClaim = await store.claimReadySteps({
@@ -100,7 +100,10 @@ describe('M-FOUND-06 durable workflow lifecycle', () => {
       evidence: ['provider://instagram/media-1'],
       now: '2026-08-14T20:04:00Z',
     });
-    expect(completed.instance).toMatchObject({ status: 'SUCCEEDED', completedAt: '2026-08-14T20:04:00Z' });
+    expect(completed.instance).toMatchObject({
+      status: 'SUCCEEDED',
+      completedAt: '2026-08-14T20:04:00Z',
+    });
     expect(completed.events.map((event) => event.eventType)).toContain('STEP_SUCCEEDED');
   });
 
@@ -217,7 +220,10 @@ describe('M-FOUND-06 durable workflow lifecycle', () => {
     });
     expect(resumed.instance.status).toBe('RUNNING');
     expect(resumed.steps[0]?.status).toBe('READY');
-    expect(resumed.humanTasks[0]).toMatchObject({ status: 'COMPLETED', assignedPrincipalId: 'luiz' });
+    expect(resumed.humanTasks[0]).toMatchObject({
+      status: 'COMPLETED',
+      assignedPrincipalId: 'luiz',
+    });
   });
 
   it('persists timers and wakes the exact waiting step when due', async () => {
@@ -242,7 +248,9 @@ describe('M-FOUND-06 durable workflow lifecycle', () => {
     });
     expect(waiting.instance.status).toBe('WAITING');
     expect(await store.fireDueTimers({ now: '2026-08-14T23:09:59Z', limit: 10 })).toEqual([]);
-    expect(await store.fireDueTimers({ now: '2026-08-14T23:10:00Z', limit: 10 })).toEqual(['timer-1']);
+    expect(await store.fireDueTimers({ now: '2026-08-14T23:10:00Z', limit: 10 })).toEqual([
+      'timer-1',
+    ]);
     const resumed = await store.get('workflow-1');
     expect(resumed?.instance.status).toBe('RUNNING');
     expect(resumed?.steps[0]?.status).toBe('READY');

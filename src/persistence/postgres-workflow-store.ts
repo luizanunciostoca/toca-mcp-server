@@ -312,11 +312,19 @@ export class PostgresWorkflowStore implements WorkflowStore {
           [row.workflow_id, row.step_id, input.workerId, executionId, input.now],
         );
         await this.#setInstanceStatus(client, row.workflow_id, 'RUNNING', input.now, null);
-        await this.#appendWorkflowEvent(client, row.workflow_id, row.step_id, 'STEP_CLAIMED', {
-          workerId: input.workerId,
-          executionId,
-          attempt: row.attempts + 1,
-        }, [], input.now);
+        await this.#appendWorkflowEvent(
+          client,
+          row.workflow_id,
+          row.step_id,
+          'STEP_CLAIMED',
+          {
+            workerId: input.workerId,
+            executionId,
+            attempt: row.attempts + 1,
+          },
+          [],
+          input.now,
+        );
         claims.push({
           workflowId: row.workflow_id,
           stepId: row.step_id,
@@ -1070,10 +1078,7 @@ export class PostgresWorkflowStore implements WorkflowStore {
     });
   }
 
-  async #appendEvent(
-    client: pg.PoolClient,
-    input: Omit<WorkflowEvent, 'eventId'>,
-  ): Promise<void> {
+  async #appendEvent(client: pg.PoolClient, input: Omit<WorkflowEvent, 'eventId'>): Promise<void> {
     assertJsonSerializable(input.payload);
     await client.query(
       `insert into workflow_events (
@@ -1273,7 +1278,8 @@ function assertTimestamp(value: string, errorCode: string): void {
 }
 
 function assertLimit(limit: number): void {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('WORKFLOW_LIMIT_INVALID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error('WORKFLOW_LIMIT_INVALID');
 }
 
 function isUniqueViolation(error: unknown): boolean {

@@ -19,7 +19,9 @@ describe('M-FOUND-06 durable workflow persistence schema', () => {
       expect(migration).toContain(`create table if not exists ${table}`);
     }
     expect(migration).not.toContain('event_outbox');
-    expect(migration).toContain("status in ('RUNNING', 'WAITING', 'BLOCKED', 'SUCCEEDED', 'FAILED', 'CANCELED')");
+    expect(migration).toContain(
+      "status in ('RUNNING', 'WAITING', 'BLOCKED', 'SUCCEEDED', 'FAILED', 'CANCELED')",
+    );
     expect(migration).toContain('workflow_timers_due_idx');
     expect(migration).toContain('workflow_compensations_ready_idx');
   });
@@ -28,7 +30,7 @@ describe('M-FOUND-06 durable workflow persistence schema', () => {
     const claims = repositoryFile('migrations/008_workflow_execution_claims.sql');
     expect(claims).toContain('create table if not exists workflow_execution_claims');
     expect(claims).toContain('execution_id text primary key');
-    expect(claims).toContain("check ((step_id is not null) <> (compensation_id is not null))");
+    expect(claims).toContain('check ((step_id is not null) <> (compensation_id is not null))');
   });
 
   it('uses row locking, SKIP LOCKED and repeatable-read snapshots in the PostgreSQL store', () => {

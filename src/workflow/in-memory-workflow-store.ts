@@ -38,7 +38,10 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     this.#createId = options.createId ?? randomUUID;
   }
 
-  async create(blueprint: WorkflowBlueprint, now = new Date().toISOString()): Promise<WorkflowSnapshot> {
+  async create(
+    blueprint: WorkflowBlueprint,
+    now = new Date().toISOString(),
+  ): Promise<WorkflowSnapshot> {
     validateWorkflowBlueprint(blueprint);
     assertTimestamp(now, 'WORKFLOW_NOW_INVALID');
 
@@ -123,7 +126,9 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   }
 
   get(workflowId: string): Promise<WorkflowSnapshot | undefined> {
-    return Promise.resolve(this.#instances.has(workflowId) ? this.#snapshot(workflowId) : undefined);
+    return Promise.resolve(
+      this.#instances.has(workflowId) ? this.#snapshot(workflowId) : undefined,
+    );
   }
 
   claimReadySteps(input: {
@@ -476,7 +481,10 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertLimit(input.limit);
     const due = [...this.#timers.values()]
-      .filter((timer) => timer.status === 'SCHEDULED' && Date.parse(timer.fireAt) <= Date.parse(input.now))
+      .filter(
+        (timer) =>
+          timer.status === 'SCHEDULED' && Date.parse(timer.fireAt) <= Date.parse(input.now),
+      )
       .sort((a, b) => a.fireAt.localeCompare(b.fireAt) || a.timerId.localeCompare(b.timerId))
       .slice(0, input.limit);
     const fired: string[] = [];
@@ -618,7 +626,9 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   #workflowCompensations(workflowId: string): WorkflowCompensation[] {
     return [...this.#compensations.values()]
       .filter((compensation) => compensation.workflowId === workflowId)
-      .sort((a, b) => b.orderIndex - a.orderIndex || a.compensationId.localeCompare(b.compensationId));
+      .sort(
+        (a, b) => b.orderIndex - a.orderIndex || a.compensationId.localeCompare(b.compensationId),
+      );
   }
 
   #unlockDependents(workflowId: string, completedStepId: string, now: string): void {
@@ -634,7 +644,11 @@ export class InMemoryWorkflowStore implements WorkflowStore {
       const required = dependencies
         .filter((dependency) => dependency.stepId === stepId)
         .map((dependency) => dependency.dependsOnStepId);
-      if (required.every((dependencyId) => this.#requireStep(workflowId, dependencyId).status === 'SUCCEEDED')) {
+      if (
+        required.every(
+          (dependencyId) => this.#requireStep(workflowId, dependencyId).status === 'SUCCEEDED',
+        )
+      ) {
         this.#requireSteps(workflowId).set(stepId, {
           ...step,
           status: 'READY',
@@ -672,7 +686,11 @@ export class InMemoryWorkflowStore implements WorkflowStore {
   ): void {
     const current = this.#requireInstance(workflowId);
     const completedAt = ['SUCCEEDED', 'FAILED', 'CANCELED'].includes(status) ? now : null;
-    if (current.status === status && current.errorCode === errorCode && current.completedAt === completedAt)
+    if (
+      current.status === status &&
+      current.errorCode === errorCode &&
+      current.completedAt === completedAt
+    )
       return;
     this.#instances.set(workflowId, {
       ...current,
@@ -770,5 +788,6 @@ function assertTimestamp(value: string, errorCode: string): void {
 }
 
 function assertLimit(limit: number): void {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('WORKFLOW_LIMIT_INVALID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error('WORKFLOW_LIMIT_INVALID');
 }

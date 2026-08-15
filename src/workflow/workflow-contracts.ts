@@ -24,12 +24,7 @@ export const WORKFLOW_STEP_STATUSES = [
 ] as const;
 export type WorkflowStepStatus = (typeof WORKFLOW_STEP_STATUSES)[number];
 
-export const WORKFLOW_HUMAN_TASK_STATUSES = [
-  'OPEN',
-  'CLAIMED',
-  'COMPLETED',
-  'CANCELED',
-] as const;
+export const WORKFLOW_HUMAN_TASK_STATUSES = ['OPEN', 'CLAIMED', 'COMPLETED', 'CANCELED'] as const;
 export type WorkflowHumanTaskStatus = (typeof WORKFLOW_HUMAN_TASK_STATUSES)[number];
 
 export const WORKFLOW_TIMER_STATUSES = ['SCHEDULED', 'FIRED', 'CANCELED'] as const;
