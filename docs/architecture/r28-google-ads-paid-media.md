@@ -94,6 +94,9 @@ No write may be promoted to production solely because code, unit tests or CI are
 requires credentials, correct provider permissions/scopes, the real intended account, successful
 provider validation, R27 approval behavior and provider read-back evidence.
 
+Release merge additionally requires a green Quality Gate on the exact final head SHA after the last
+main-branch reconciliation; stale or pre-reconciliation CI evidence is not sufficient.
+
 ## Zero-spend test policy
 
 Automated tests use fake adapters and in-memory secrets. They do not call the Google Ads network,
