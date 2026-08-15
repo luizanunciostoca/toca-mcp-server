@@ -1,0 +1,57 @@
+name: Cloud Run Helper Diagnostics
+
+on:
+  push:
+    branches: [chore/foundation-daily-control-evidence]
+    paths: ['.github/workflows/cloud-run-helper-diagnostics.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read failed helper logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for JOB in \
+            toca-foundation-daily-evidence-31914909118 \
+            toca-meta-ads-prepare-31914813896
+          do
+            echo "===== ${JOB} ====="
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=2h \
+              --limit=200 \
+              --order=asc \
+              --format=json \
+              | jq '[.[] | {timestamp,severity,textPayload,jsonPayload,labels}]' \
+              | tee "${JOB}.json"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloud-run-helper-diagnostics-${{ github.sha }}
+          path: |
+            toca-foundation-daily-evidence-31914909118.json
+            toca-meta-ads-prepare-31914813896.json
+          if-no-files-found: error
+          retention-days: 30
