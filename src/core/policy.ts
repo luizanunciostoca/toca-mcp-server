@@ -6,7 +6,7 @@ import { getCapabilityDefinition } from '../governance/capability-catalog.js';
 export type PolicyDecision = 'ALLOW' | 'REQUIRE_APPROVAL' | 'DENY';
 
 export interface PolicyContext {
-  readonly identity?: ExecutionIdentity;
+  readonly identity?: ExecutionIdentity | undefined;
   /** @deprecated Use identity.principal.principalId. Kept only for non-mutating compatibility paths. */
   readonly requester?: string;
   readonly connectedAccount?: string;
