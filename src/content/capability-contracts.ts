@@ -175,6 +175,7 @@ export const VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES: Readonly<
     'Export an approved Reel artifact after rights, accessibility, safe-area, duration and quality gates pass; no publication occurs.',
     {
       write: true,
+      approvalRequired: true,
       extra: approvalRef,
       extraRequired: ['approval_ref'],
       verification: 'ARTIFACT_EXISTS_LINEAGE_VALID_AND_ALL_HARD_GATES_PASS',
@@ -185,6 +186,7 @@ export const VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES: Readonly<
     'Export an approved vertical Story video artifact after all hard gates pass; no publication occurs.',
     {
       write: true,
+      approvalRequired: true,
       extra: approvalRef,
       extraRequired: ['approval_ref'],
       verification: 'ARTIFACT_EXISTS_LINEAGE_VALID_AND_ALL_HARD_GATES_PASS',
