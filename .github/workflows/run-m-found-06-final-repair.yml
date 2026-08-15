@@ -1,0 +1,124 @@
+name: Run Final M-FOUND-06 Repair
+
+on:
+  push:
+    branches:
+      - repair3/m-found-06-final
+
+permissions:
+  contents: write
+
+jobs:
+  repair-target:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m-found-06-durable-workflows
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Normalize known invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/workflow/in-memory-workflow-store.ts')
+          text = p.read_text()
+          if 'const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;' not in text:
+              text, count = re.subn(
+                  r"(\s+const executionId = this\.#nextUniqueExecutionId\(\);\n)(\s+const claimed: WorkflowStep = \{)",
+                  r"\1        const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;\n\2",
+                  text,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit('IN_MEMORY_CLAIM_PATCH_FAILED')
+          text = text.replace('attempts: step.attempts + 1,', 'attempts: nextAttempts,', 1)
+          if 'startedAt: null,' not in text.split("async retryStep", 1)[1].split("async openHumanTask", 1)[0]:
+              text, count = re.subn(
+                  r"(status: 'READY',\n\s+output: null,\n)(\s+completedAt: null,)",
+                  r"\1      startedAt: null,\n\2",
+                  text,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit('IN_MEMORY_RETRY_PATCH_FAILED')
+          p.write_text(text)
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+          text = text.replace(
+              "status = 'RUNNING', attempts = attempts + 1, claimed_by = $3,",
+              "status = 'RUNNING',\n             attempts = attempts + case when started_at is null then 1 else 0 end,\n             claimed_by = $3,",
+              1,
+          )
+          text = text.replace(
+              'attempt: row.attempts + 1,',
+              'attempt: row.started_at === null ? row.attempts + 1 : row.attempts,',
+              1,
+          )
+          retry_block = text.split('async retryStep', 1)[1].split('async openHumanTask', 1)[0]
+          if "started_at = null" not in retry_block:
+              text = text.replace(
+                  "status = 'READY', output = null, completed_at = null, error_code = null,",
+                  "status = 'READY', output = null, started_at = null,\n           completed_at = null, error_code = null,",
+                  1,
+              )
+          text = text.replace('return this.#readSnapshot(blueprint.workflowId);', 'return this.#requireSnapshot(blueprint.workflowId);')
+          text = text.replace('return this.#readSnapshot(input.workflowId);', 'return this.#requireSnapshot(input.workflowId);')
+          text = text.replace('return this.#readSnapshot(workflowId);', 'return this.#requireSnapshot(workflowId);')
+          if '#requireSnapshot(workflowId: string)' not in text:
+              anchor = "  async #readSnapshot(\n    workflowId: string,\n    allowMissing = false,\n  ): Promise<WorkflowSnapshot | undefined> {\n"
+              helper = "  async #requireSnapshot(workflowId: string): Promise<WorkflowSnapshot> {\n    const snapshot = await this.#readSnapshot(workflowId, true);\n    if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');\n    return snapshot;\n  }\n\n"
+              if anchor not in text:
+                  raise SystemExit('REQUIRE_SNAPSHOT_ANCHOR_MISSING')
+              text = text.replace(anchor, helper + anchor, 1)
+          p.write_text(text)
+          PY
+      - name: Remove target temporary workflows
+        run: |
+          rm -f .github/workflows/format-m-found-06.yml
+          rm -f .github/workflows/m-found-06-invariant-fix.yml
+          rm -f .github/workflows/m-found-06-repair.yml
+      - name: Format and run complete quality gate locally
+        run: |
+          pnpm exec prettier --write \
+            src/workflow/workflow-contracts.ts \
+            src/workflow/in-memory-workflow-store.ts \
+            src/persistence/postgres-workflow-store.ts \
+            test/durable-workflow.test.ts \
+            test/durable-workflow-migration.test.ts \
+            docs/checkpoints/m-found-06-durable-workflow-persistence.md
+          pnpm quality
+      - name: Record repair success sentinel
+        run: |
+          mkdir -p control
+          cat > control/m-found-06-repair-complete.json <<'JSON'
+          {
+            "milestone": "M-FOUND-06",
+            "status": "REPAIRED_AND_LOCAL_QUALITY_GREEN",
+            "catalog_compatibility_ids_expected": 731,
+            "event_outbox_introduced": false,
+            "note": "Generated only after pnpm quality succeeds on the repaired target branch. Official PR Quality Gate remains required before merge."
+          }
+          JSON
+          pnpm exec prettier --write control/m-found-06-repair-complete.json
+      - name: Commit and push validated target branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: finalize durable workflow persistence invariants"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
