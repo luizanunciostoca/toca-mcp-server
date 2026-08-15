@@ -105,10 +105,11 @@ export function registerMetaAdsWriteTools(
     async ({ plan, approvalSha256 }, context) => {
       const typedPlan = plan as ControlledCreatePausedPlan;
       const correlationId = `meta-ads:create-paused:${requestSha256(typedPlan)}`;
+      const identity = execution.resolveIdentity(context);
       const output = await executeTool({
         tool: requireTool(execution.registry, 'meta_ads.campaign.create_paused'),
         policyContext: {
-          identity: execution.resolveIdentity(context),
+          ...(identity ? { identity } : {}),
           connectedAccount: typedPlan.account.adAccountId,
         },
         auditSink: execution.auditSink,
