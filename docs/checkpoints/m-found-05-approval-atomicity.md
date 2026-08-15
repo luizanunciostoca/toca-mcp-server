@@ -1,10 +1,12 @@
 # M-FOUND-05 — Approval Engine Atomicity
 
-Status: **IMPLEMENTED IN BRANCH — FULL QUALITY VALIDATION PENDING**
+Status: **VALIDATED IN BRANCH — READY TO MERGE**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `a25f60b11a75c73145ec24525c0b79f72b67b53a`
+
+Validated Quality Gate: `31861261004` / run `#999` — **SUCCESS**
 
 ## Objective
 
