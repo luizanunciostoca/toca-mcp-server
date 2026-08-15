@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
 import { RuntimeTelemetry } from './core/observability.js';
 import { JsonConsoleLogger } from './core/structured-logger.js';
+import { runFoundationDailyControl } from './operations/foundation-daily-control.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import {
@@ -38,6 +39,7 @@ let lastRunStartedAt: string | null = null;
 let lastRunFinishedAt: string | null = null;
 let lastClaimed = 0;
 let lastError: string | null = null;
+let lastDailyControlDay: string | null = null;
 
 async function verifySchedulerPersistence(): Promise<void> {
   const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
@@ -124,6 +126,19 @@ type TickResult = {
   skipped: boolean;
 };
 
+async function runDailyControlWithoutBlockingWorker(): Promise<void> {
+  try {
+    const result = await runFoundationDailyControl({ pool, telemetry, logger });
+    if (result.ran || result.reason === 'ALREADY_COMPLETED') {
+      lastDailyControlDay = result.dayKey;
+    }
+  } catch {
+    // The daily sweep already emits a structured failure and telemetry. A control-plane
+    // read failure must not rewrite the already-completed worker result into an ambiguous
+    // provider mutation outcome. Alerts/operators decide any subsequent write shutdown.
+  }
+}
+
 async function tick(): Promise<TickResult> {
   if (running || stopping) {
     telemetry.increment('daemon.tick.skipped');
@@ -136,6 +151,7 @@ async function tick(): Promise<TickResult> {
   telemetry.increment('daemon.tick.started');
   try {
     lastClaimed = await runTocaManagedInstagramWorkerBatch({ config, pool, telemetry, logger });
+    await runDailyControlWithoutBlockingWorker();
     lastError = null;
     telemetry.increment('daemon.tick.succeeded');
     telemetry.record('daemon.tick.claimed_jobs', lastClaimed);
@@ -177,6 +193,7 @@ const server = createServer((request, response) => {
         lastRunFinishedAt,
         lastClaimed,
         lastError,
+        lastDailyControlDay,
         telemetry: telemetry.snapshot(),
       }),
     );
