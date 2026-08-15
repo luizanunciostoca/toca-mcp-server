@@ -31,7 +31,6 @@ export function calculateFunnel(stages: readonly FunnelStage[]): FunnelResult {
       });
     }
   }
-
   const first = normalized[0].count;
   const last = normalized.at(-1)?.count ?? 0;
   const dropOffs = normalized.slice(1).map((stage, offset) => {
@@ -44,10 +43,9 @@ export function calculateFunnel(stages: readonly FunnelStage[]): FunnelResult {
       rate: previous.count === 0 ? null : dropped / previous.count,
     };
   });
-  const score = Math.max(0, Math.min(1, 1 - issues.length * 0.15));
   const dataQuality: DataQualityReport = {
     valid: true,
-    score,
+    score: Math.max(0, Math.min(1, 1 - issues.length * 0.15)),
     issues,
   };
   return {
@@ -67,7 +65,9 @@ export function calculateAttribution(input: {
   readonly reconciliationScore: number;
 }): AttributionResult {
   if (input.touchpoints.length === 0) throw new Error('ATTRIBUTION_TOUCHPOINT_REQUIRED');
-  const conversionTime = Date.parse(timestamp(input.conversionOccurredAt, 'ATTRIBUTION_CONVERSION_TIME_INVALID'));
+  const conversionTime = Date.parse(
+    timestamp(input.conversionOccurredAt, 'ATTRIBUTION_CONVERSION_TIME_INVALID'),
+  );
   const touchpoints = [...input.touchpoints]
     .map((touchpoint) => ({
       ...touchpoint,
@@ -78,7 +78,7 @@ export function calculateAttribution(input: {
     .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   if (touchpoints.length === 0) throw new Error('ATTRIBUTION_TOUCHPOINT_BEFORE_CONVERSION_REQUIRED');
 
-  const credit = 1 / touchpoints.length;
+  const linearCredit = 1 / touchpoints.length;
   const credits = touchpoints.map((touchpoint, index) => ({
     ...touchpoint,
     credit:
@@ -90,19 +90,26 @@ export function calculateAttribution(input: {
           ? index === touchpoints.length - 1
             ? 1
             : 0
-          : credit,
+          : linearCredit,
   }));
   const hasCampaignIdentity = touchpoints.some(
-    (touchpoint) => touchpoint.campaignId || touchpoint.campaign || touchpoint.contentId || touchpoint.content,
+    (touchpoint) =>
+      touchpoint.campaignId ||
+      touchpoint.campaign ||
+      touchpoint.contentId ||
+      touchpoint.content,
   );
-  const confidence = calculateAttributionConfidence({
-    sourceQualityScore: input.sourceQualityScore,
-    identityContinuityScore: input.identityContinuityScore,
-    reconciliationScore: input.reconciliationScore,
-    hasCampaignIdentity,
-    touchpointCount: touchpoints.length,
-  });
-  return { model: input.model, credits, confidence };
+  return {
+    model: input.model,
+    credits,
+    confidence: calculateAttributionConfidence({
+      sourceQualityScore: input.sourceQualityScore,
+      identityContinuityScore: input.identityContinuityScore,
+      reconciliationScore: input.reconciliationScore,
+      hasCampaignIdentity,
+      touchpointCount: touchpoints.length,
+    }),
+  };
 }
 
 export function calculateAttributionConfidence(input: {
@@ -117,11 +124,13 @@ export function calculateAttributionConfidence(input: {
     input.identityContinuityScore,
     'ATTRIBUTION_IDENTITY_CONTINUITY_INVALID',
   );
-  const reconciliation = score(input.reconciliationScore, 'ATTRIBUTION_RECONCILIATION_SCORE_INVALID');
+  const reconciliation = score(
+    input.reconciliationScore,
+    'ATTRIBUTION_RECONCILIATION_SCORE_INVALID',
+  );
   if (!Number.isInteger(input.touchpointCount) || input.touchpointCount < 1) {
     throw new Error('ATTRIBUTION_TOUCHPOINT_COUNT_INVALID');
   }
-
   const campaignIdentity = input.hasCampaignIdentity ? 1 : 0.5;
   const sample = Math.min(1, input.touchpointCount / 3);
   const result =
@@ -137,7 +146,6 @@ export function calculateAttributionConfidence(input: {
   if (reconciliation < 0.7) reasons.push('CONVERSION_RECONCILIATION_WEAK');
   if (!input.hasCampaignIdentity) reasons.push('CAMPAIGN_IDENTITY_MISSING');
   if (input.touchpointCount < 2) reasons.push('TOUCHPOINT_SAMPLE_SMALL');
-
   return {
     score: normalized,
     level:
@@ -166,10 +174,14 @@ export function calculateSalesPacing(input: {
   readonly capacity: number | null;
   readonly dataQualityScore: number;
 }): EventSalesPacing {
-  const salesStartedAt = Date.parse(timestamp(input.salesStartedAt, 'SALES_PACING_START_INVALID'));
+  const salesStartedAt = Date.parse(
+    timestamp(input.salesStartedAt, 'SALES_PACING_START_INVALID'),
+  );
   const asOfIso = timestamp(input.asOf, 'SALES_PACING_AS_OF_INVALID');
   const asOf = Date.parse(asOfIso);
-  const eventStartsAt = Date.parse(timestamp(input.event.startsAt, 'SALES_PACING_EVENT_START_INVALID'));
+  const eventStartsAt = Date.parse(
+    timestamp(input.event.startsAt, 'SALES_PACING_EVENT_START_INVALID'),
+  );
   if (asOf < salesStartedAt) throw new Error('SALES_PACING_AS_OF_BEFORE_SALES_START');
   if (eventStartsAt <= salesStartedAt) throw new Error('SALES_PACING_EVENT_WINDOW_INVALID');
 
@@ -198,16 +210,20 @@ export function calculateSalesPacing(input: {
         : null
       : new Date(asOf + (remaining / ticketsPerDay) * 86_400_000).toISOString();
   const quality = score(input.dataQualityScore, 'SALES_PACING_DATA_QUALITY_INVALID');
-  const confidence = calculateAttributionConfidence({
+  const baseConfidence = calculateAttributionConfidence({
     sourceQualityScore: quality,
     identityContinuityScore: 1,
     reconciliationScore: quality,
     hasCampaignIdentity: true,
     touchpointCount: capacity === null ? 1 : 3,
   });
-  if (capacity === null) {
-    confidence.reasons.push('EVENT_CAPACITY_UNKNOWN');
-  }
+  const confidence: AttributionConfidence =
+    capacity === null
+      ? {
+          ...baseConfidence,
+          reasons: [...baseConfidence.reasons, 'EVENT_CAPACITY_UNKNOWN'],
+        }
+      : baseConfidence;
 
   return {
     eventId: input.event.eventId,
@@ -229,10 +245,21 @@ export function reconciliationConfidence(input: {
   readonly matchedConversions: number;
   readonly sourceQualityScore: number;
 }): AttributionConfidence {
-  const measured = nonNegativeInteger(input.measuredConversions, 'RECONCILIATION_MEASURED_INVALID');
-  const ticket = nonNegativeInteger(input.ticketConversions, 'RECONCILIATION_TICKET_INVALID');
-  const matched = nonNegativeInteger(input.matchedConversions, 'RECONCILIATION_MATCHED_INVALID');
-  if (matched > measured || matched > ticket) throw new Error('RECONCILIATION_MATCHED_EXCEEDS_TOTAL');
+  const measured = nonNegativeInteger(
+    input.measuredConversions,
+    'RECONCILIATION_MEASURED_INVALID',
+  );
+  const ticket = nonNegativeInteger(
+    input.ticketConversions,
+    'RECONCILIATION_TICKET_INVALID',
+  );
+  const matched = nonNegativeInteger(
+    input.matchedConversions,
+    'RECONCILIATION_MATCHED_INVALID',
+  );
+  if (matched > measured || matched > ticket) {
+    throw new Error('RECONCILIATION_MATCHED_EXCEEDS_TOTAL');
+  }
   const denominator = Math.max(measured, ticket, 1);
   const reconciliationScore = matched / denominator;
   return calculateAttributionConfidence({
