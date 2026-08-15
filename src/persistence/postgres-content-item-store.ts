@@ -286,7 +286,11 @@ export class PostgresContentItemStore implements ContentItemStore {
         return existing;
       }
 
-      const source = await getVersionForUpdate(client, current.contentItemId, input.sourceVersionId);
+      const source = await getVersionForUpdate(
+        client,
+        current.contentItemId,
+        input.sourceVersionId,
+      );
       const parentVersionId =
         input.parentVersionId === undefined
           ? current.currentVersionId
@@ -538,7 +542,8 @@ export class PostgresContentItemStore implements ContentItemStore {
       await this.#appendHistoryAndOutbox(client, {
         item: updated,
         changeType: kind === 'EVENT' ? 'EVENT_LINKED' : 'EXPERIMENT_LINKED',
-        eventType: kind === 'EVENT' ? 'content_item.event_linked' : 'content_item.experiment_linked',
+        eventType:
+          kind === 'EVENT' ? 'content_item.event_linked' : 'content_item.experiment_linked',
         eventKey: `${updated.contentKey}:${kind.toLowerCase()}:${targetId}`,
         payload: { targetId },
         correlationId,
@@ -578,7 +583,8 @@ export class PostgresContentItemStore implements ContentItemStore {
     client: pg.PoolClient,
     input: {
       readonly item: ContentItem;
-      readonly changeType: 'CREATED' | 'VERSION_CREATED' | 'STATE_CHANGED' | 'EVENT_LINKED' | 'EXPERIMENT_LINKED';
+      readonly changeType:
+        'CREATED' | 'VERSION_CREATED' | 'STATE_CHANGED' | 'EVENT_LINKED' | 'EXPERIMENT_LINKED';
       readonly eventType: string;
       readonly eventKey: string;
       readonly payload: JsonValue | { readonly [key: string]: unknown };
@@ -734,7 +740,10 @@ function contentVersionFromRow(row: ContentItemVersionRow): ContentItemVersion {
     format: row.format,
     language: row.language,
     sourceAssetIds: decodeStringArray(row.source_asset_ids, 'CONTENT_VERSION_SOURCE_ASSET_INVALID'),
-    derivedAssetIds: decodeStringArray(row.derived_asset_ids, 'CONTENT_VERSION_DERIVED_ASSET_INVALID'),
+    derivedAssetIds: decodeStringArray(
+      row.derived_asset_ids,
+      'CONTENT_VERSION_DERIVED_ASSET_INVALID',
+    ),
     payload: decodeJsonValue(row.payload, 'CONTENT_VERSION_PAYLOAD_INVALID'),
     sourceRefs: decodeStringArray(row.source_refs, 'CONTENT_VERSION_SOURCE_REF_INVALID'),
     evidence: requireEvidence(decodeStringArray(row.evidence, 'CONTENT_EVIDENCE_INVALID')),
@@ -793,7 +802,9 @@ function sameVersionIntent(
     existing.derivationType === input.derivationType &&
     existing.sourceVersionId === input.sourceVersionId &&
     existing.parentVersionId ===
-      (input.parentVersionId === undefined ? current.currentVersionId : nullableText(input.parentVersionId)) &&
+      (input.parentVersionId === undefined
+        ? current.currentVersionId
+        : nullableText(input.parentVersionId)) &&
     existing.variantKey === nullableText(input.variantKey) &&
     existing.channel === (input.channel ?? current.channel) &&
     existing.format === (input.format ?? current.format) &&
@@ -820,7 +831,8 @@ function nullableText(value: string | null | undefined): string | null {
 }
 
 function decodeStringArray(value: unknown, errorCode: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error(errorCode);
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+    throw new Error(errorCode);
   return normalizeStringSet(value as string[], errorCode);
 }
 

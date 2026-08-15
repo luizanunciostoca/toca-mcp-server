@@ -63,7 +63,8 @@ export const CONTENT_RIGHTS_STATUSES = [
 export type ContentRightsStatus = (typeof CONTENT_RIGHTS_STATUSES)[number];
 
 export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+export type JsonValue =
+  JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
 export interface ContentItem {
   readonly contentItemId: string;
@@ -286,7 +287,11 @@ export function validateContentItemVersion(version: ContentItemVersion): void {
   assertTimestamp(version.createdAt, 'CONTENT_VERSION_CREATED_AT_INVALID');
 
   if (version.derivationType === 'ORIGINAL') {
-    if (version.versionNumber !== 1 || version.parentVersionId !== null || version.sourceVersionId !== null) {
+    if (
+      version.versionNumber !== 1 ||
+      version.parentVersionId !== null ||
+      version.sourceVersionId !== null
+    ) {
       throw new Error('CONTENT_VERSION_ORIGINAL_LINEAGE_INVALID');
     }
     if (version.lineageRootVersionId !== version.versionId) {
@@ -330,7 +335,10 @@ export interface RightsCheck {
   readonly validUntil?: string | null;
 }
 
-export function validateRights(checks: readonly RightsCheck[], now = new Date().toISOString()): ContentValidationStatus {
+export function validateRights(
+  checks: readonly RightsCheck[],
+  now = new Date().toISOString(),
+): ContentValidationStatus {
   if (checks.length === 0) return 'REVIEW_REQUIRED';
   const current = Date.parse(now);
   if (!Number.isFinite(current)) throw new Error('CONTENT_RIGHTS_NOW_INVALID');
@@ -384,7 +392,10 @@ export function planContentRepurpose(
   validateContentItemVersion(source);
   const seen = new Set<string>();
   return destinations.map((destination) => {
-    const variantKey = requireText(destination.variantKey, 'CONTENT_REPURPOSE_VARIANT_KEY_REQUIRED');
+    const variantKey = requireText(
+      destination.variantKey,
+      'CONTENT_REPURPOSE_VARIANT_KEY_REQUIRED',
+    );
     const channel = requireText(destination.channel, 'CONTENT_REPURPOSE_CHANNEL_REQUIRED');
     const language = requireText(destination.language, 'CONTENT_REPURPOSE_LANGUAGE_REQUIRED');
     const uniqueness = [variantKey, channel, destination.format, language].join('|');
@@ -403,7 +414,10 @@ export function planContentRepurpose(
   });
 }
 
-export function normalizeStringSet(values: readonly string[], errorCode: string): readonly string[] {
+export function normalizeStringSet(
+  values: readonly string[],
+  errorCode: string,
+): readonly string[] {
   const normalized = [...new Set(values.map((value) => requireText(value, errorCode)))].sort();
   return normalized;
 }

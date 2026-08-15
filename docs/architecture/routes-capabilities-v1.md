@@ -12,7 +12,7 @@ The machine-readable sources are:
 - `src/governance/route-catalog.ts`: R01-R32, owners, priorities, subflows and terminal states;
 - `src/governance/capability-ids.ts`: requested capability identifiers by route plus transversal
   and existing technical identifiers;
-- `src/governance/capability-catalog.ts`: normalized metadata for all 731 catalog entries;
+- `src/governance/capability-catalog.ts`: normalized metadata for the 731 compatibility entries plus 25 R20/R29 technical extensions (756 total);
 - `src/registry.ts`: the intentionally smaller set exposed by the running MCP server.
 
 Catalog presence does not imply execution. `execution_surface: CATALOG_ONLY` and

@@ -126,9 +126,7 @@ describe('R20/R29 video and content foundation', () => {
 
   it('treats unknown rights as review-required and expired rights as a hard failure', () => {
     expect(
-      validateRights([
-        { assetId: 'asset-1', status: 'UNKNOWN', evidence: ['rights:lookup'] },
-      ]),
+      validateRights([{ assetId: 'asset-1', status: 'UNKNOWN', evidence: ['rights:lookup'] }]),
     ).toBe('REVIEW_REQUIRED');
     expect(
       validateRights(
@@ -162,13 +160,15 @@ describe('R20/R29 video and content foundation', () => {
   });
 
   it('validates caller-supplied safe areas and versioned duration policy', () => {
-    expect(validateSafeArea(timeline, { topPx: 100, rightPx: 80, bottomPx: 180, leftPx: 80 })).toEqual({
+    expect(
+      validateSafeArea(timeline, { topPx: 100, rightPx: 80, bottomPx: 180, leftPx: 80 }),
+    ).toEqual({
       status: 'PASS',
       violations: [],
     });
-    expect(validateSafeArea(timeline, { topPx: 300, rightPx: 80, bottomPx: 180, leftPx: 80 }).status).toBe(
-      'FAIL',
-    );
+    expect(
+      validateSafeArea(timeline, { topPx: 300, rightPx: 80, bottomPx: 180, leftPx: 80 }).status,
+    ).toBe('FAIL');
     expect(validateDuration(15_000, { minimumMs: 1_000, maximumMs: 90_000 })).toBe('PASS');
     expect(validateDuration(100_000, { minimumMs: 1_000, maximumMs: 90_000 })).toBe('FAIL');
   });

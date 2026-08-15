@@ -91,16 +91,15 @@ function internalContract(
     provider: 'TOCA_OS+toca-mcp',
     operation: capabilityId,
     authentication_mode: 'INTERNAL',
-    input_schema: inputSchema(
-      capabilityId,
-      options.extra,
-      options.extraRequired,
-    ),
+    input_schema: inputSchema(capabilityId, options.extra, options.extraRequired),
     output_schema: outputSchema(capabilityId),
     verification_method:
       options.verification ??
-      (write ? 'PERSISTED_ARTIFACT_OR_STATE_READBACK_AND_AUDIT_EVIDENCE' : 'SCHEMA_AND_GATE_VALIDATION'),
-    rollback_method: options.rollback ?? (write ? 'SUPERSEDE_DERIVED_ARTIFACT_OR_STATE' : 'NOT_APPLICABLE'),
+      (write
+        ? 'PERSISTED_ARTIFACT_OR_STATE_READBACK_AND_AUDIT_EVIDENCE'
+        : 'SCHEMA_AND_GATE_VALIDATION'),
+    rollback_method:
+      options.rollback ?? (write ? 'SUPERSEDE_DERIVED_ARTIFACT_OR_STATE' : 'NOT_APPLICABLE'),
   };
 }
 

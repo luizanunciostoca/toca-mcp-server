@@ -27,6 +27,31 @@ const APPROVER_ROLE = 'TOCA_OS_ACCOUNTABLE_OWNER';
 export const CAPABILITY_CATALOG_VERSION = '1.1.0';
 
 const implementedInternal = new Set([
+  'video.brief.create',
+  'video.storyboard.generate',
+  'video.script.generate',
+  'video.asset.select',
+  'video.timeline.compose',
+  'video.subtitle.generate',
+  'video.caption.embed',
+  'video.audio.normalize',
+  'video.music_rights.validate',
+  'video.safe_area.validate',
+  'video.duration.validate',
+  'video.thumbnail.generate',
+  'video.export.reel',
+  'video.export.story',
+  'video.quality.validate',
+  'content_item.version.create',
+  'content_item.variant.create',
+  'content_item.channel.adapt',
+  'content_item.language.localize',
+  'content_item.fact.validate',
+  'content_item.rights.validate',
+  'content_item.accessibility.validate',
+  'content_item.event.link',
+  'content_item.experiment.link',
+  'content.repurpose.plan',
   'governance.scan',
   'governance.drive_vs_registry.diff',
   'governance.registry_vs_runtime.diff',
@@ -237,7 +262,8 @@ function inferredProvider(capabilityId: string): string {
   if (/^(release|security)\./.test(capabilityId)) return 'GitHub+GCP';
   if (/^(backup|restore|dr)\./.test(capabilityId)) return 'GCP+PostgreSQL';
   if (/^(observability|incident)\./.test(capabilityId)) return 'TOCA MCP+GCP';
-  if (/^(design|image|copy|presentation|story)\./.test(capabilityId)) return 'ChatGPT+TOCA_OS';
+  if (/^(design|image|copy|presentation|story|video)\./.test(capabilityId))
+    return 'ChatGPT+TOCA_OS';
   return 'TOCA_OS+toca-mcp';
 }
 
@@ -284,6 +310,10 @@ function humanDescription(capabilityId: string): string {
 function evidence(capabilityId: string, status: CapabilityStatus): readonly string[] {
   if (status === 'PLANNED' || status === 'SPECIFIED') return [];
   if (knownRuntimeTools.has(capabilityId)) return ['src/registry.ts'];
+  if (capabilityId.startsWith('video.'))
+    return ['src/content/video.ts', 'src/content/capability-contracts.ts'];
+  if (capabilityId.startsWith('content_item.') || capabilityId === 'content.repurpose.plan')
+    return ['src/content/content-item.ts', 'src/content/capability-contracts.ts'];
   if (capabilityId.startsWith('approval.')) return ['src/governance/approval-governance.ts'];
   if (capabilityId.startsWith('capability.')) return ['src/governance/capability-lifecycle.ts'];
   if (capabilityId.startsWith('governance.')) return ['src/governance/governance-drift.ts'];

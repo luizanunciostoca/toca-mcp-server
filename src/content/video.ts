@@ -183,7 +183,12 @@ export function validateVideoBrief(brief: VideoBrief): void {
   if (!VIDEO_OUTPUT_TYPES.includes(brief.outputType)) throw new Error('VIDEO_OUTPUT_TYPE_INVALID');
   if (!Number.isInteger(brief.durationMs) || brief.durationMs <= 0)
     throw new Error('VIDEO_DURATION_INVALID');
-  if (!Number.isInteger(brief.width) || !Number.isInteger(brief.height) || brief.width <= 0 || brief.height <= 0)
+  if (
+    !Number.isInteger(brief.width) ||
+    !Number.isInteger(brief.height) ||
+    brief.width <= 0 ||
+    brief.height <= 0
+  )
     throw new Error('VIDEO_DIMENSIONS_INVALID');
   if (brief.width >= brief.height) throw new Error('VIDEO_VERTICAL_FORMAT_REQUIRED');
   if (brief.sourceAssetIds.length === 0) throw new Error('VIDEO_SOURCE_ASSET_REQUIRED');
@@ -194,7 +199,10 @@ export function validateVideoBrief(brief: VideoBrief): void {
   for (const ref of brief.rightsRefs) requireText(ref, 'VIDEO_RIGHTS_REF_INVALID');
 }
 
-export function validateStoryboard(scenes: readonly StoryboardScene[], targetDurationMs: number): void {
+export function validateStoryboard(
+  scenes: readonly StoryboardScene[],
+  targetDurationMs: number,
+): void {
   if (scenes.length === 0) throw new Error('VIDEO_STORYBOARD_EMPTY');
   const orders = new Set<number>();
   let total = 0;
@@ -255,7 +263,12 @@ export function validateTimeline(timeline: VideoTimeline): void {
   requireEvidence(timeline.evidence);
   if (!Number.isInteger(timeline.durationMs) || timeline.durationMs <= 0)
     throw new Error('VIDEO_TIMELINE_DURATION_INVALID');
-  if (!Number.isInteger(timeline.width) || !Number.isInteger(timeline.height) || timeline.width <= 0 || timeline.height <= 0)
+  if (
+    !Number.isInteger(timeline.width) ||
+    !Number.isInteger(timeline.height) ||
+    timeline.width <= 0 ||
+    timeline.height <= 0
+  )
     throw new Error('VIDEO_TIMELINE_DIMENSIONS_INVALID');
   if (timeline.clips.length === 0) throw new Error('VIDEO_TIMELINE_CLIP_REQUIRED');
   for (const clip of timeline.clips) {
@@ -271,9 +284,14 @@ export function validateTimeline(timeline: VideoTimeline): void {
   for (const overlay of timeline.overlays) {
     requireText(overlay.overlayId, 'VIDEO_OVERLAY_ID_REQUIRED');
     requireText(overlay.text, 'VIDEO_OVERLAY_TEXT_REQUIRED');
-    if (overlay.startMs < 0 || overlay.endMs <= overlay.startMs || overlay.endMs > timeline.durationMs)
+    if (
+      overlay.startMs < 0 ||
+      overlay.endMs <= overlay.startMs ||
+      overlay.endMs > timeline.durationMs
+    )
       throw new Error('VIDEO_OVERLAY_RANGE_INVALID');
-    if (overlay.width <= 0 || overlay.height <= 0) throw new Error('VIDEO_OVERLAY_DIMENSIONS_INVALID');
+    if (overlay.width <= 0 || overlay.height <= 0)
+      throw new Error('VIDEO_OVERLAY_DIMENSIONS_INVALID');
   }
 }
 
@@ -291,7 +309,9 @@ export function validateSubtitleTrack(track: SubtitleTrack, durationMs: number):
   }
 }
 
-export function validateAudioNormalization(result: AudioNormalizationResult): ContentValidationStatus {
+export function validateAudioNormalization(
+  result: AudioNormalizationResult,
+): ContentValidationStatus {
   requireText(result.normalizedArtifactRef, 'VIDEO_AUDIO_ARTIFACT_REF_REQUIRED');
   requireEvidence(result.evidence);
   if (![result.targetLufs, result.measuredLufs, result.truePeakDbtp].every(Number.isFinite))
@@ -300,11 +320,15 @@ export function validateAudioNormalization(result: AudioNormalizationResult): Co
   return Math.abs(result.measuredLufs - result.targetLufs) <= 1 ? 'PASS' : 'REVIEW_REQUIRED';
 }
 
-export function validateMusicRights(input: MusicRightsInput, now?: string): ContentValidationStatus {
+export function validateMusicRights(
+  input: MusicRightsInput,
+  now?: string,
+): ContentValidationStatus {
   requireText(input.musicAssetId, 'VIDEO_MUSIC_ASSET_ID_REQUIRED');
   requireText(input.territory, 'VIDEO_MUSIC_TERRITORY_REQUIRED');
   requireText(input.intendedUse, 'VIDEO_MUSIC_INTENDED_USE_REQUIRED');
-  if (input.rights.assetId !== input.musicAssetId) throw new Error('VIDEO_MUSIC_RIGHTS_ASSET_MISMATCH');
+  if (input.rights.assetId !== input.musicAssetId)
+    throw new Error('VIDEO_MUSIC_RIGHTS_ASSET_MISMATCH');
   return validateRights([input.rights], now);
 }
 
@@ -335,7 +359,10 @@ export function validateSafeArea(
   return { status: violations.length === 0 ? 'PASS' : 'FAIL', violations };
 }
 
-export function validateDuration(durationMs: number, policy: DurationPolicy): ContentValidationStatus {
+export function validateDuration(
+  durationMs: number,
+  policy: DurationPolicy,
+): ContentValidationStatus {
   if (!Number.isInteger(durationMs) || durationMs <= 0) throw new Error('VIDEO_DURATION_INVALID');
   if (
     !Number.isInteger(policy.minimumMs) ||
@@ -400,7 +427,9 @@ export interface VideoWorkflowInput {
   readonly sourceFormat: ContentItemFormat;
 }
 
-export function buildVideoProductionWorkflowBlueprint(input: VideoWorkflowInput): WorkflowBlueprint {
+export function buildVideoProductionWorkflowBlueprint(
+  input: VideoWorkflowInput,
+): WorkflowBlueprint {
   requireText(input.contentItemId, 'VIDEO_WORKFLOW_CONTENT_ITEM_REQUIRED');
   requireText(input.versionId, 'VIDEO_WORKFLOW_VERSION_REQUIRED');
   const steps: WorkflowStepBlueprint[] = [
@@ -422,12 +451,15 @@ export function buildVideoProductionWorkflowBlueprint(input: VideoWorkflowInput)
       'audio',
     ]),
     step('thumbnail', 'Generate thumbnail manifest', 'video.thumbnail.generate', ['timeline']),
-    step(
-      'quality',
-      'Validate final video quality',
-      'video.quality.validate',
-      ['music-rights', 'safe-area', 'duration', 'facts', 'rights', 'accessibility', 'thumbnail'],
-    ),
+    step('quality', 'Validate final video quality', 'video.quality.validate', [
+      'music-rights',
+      'safe-area',
+      'duration',
+      'facts',
+      'rights',
+      'accessibility',
+      'thumbnail',
+    ]),
     step('approval', 'Verify existing approval', 'approval.verify', ['quality']),
     step(
       'export',

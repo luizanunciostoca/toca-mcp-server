@@ -1,3 +1,4 @@
+import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from '../content/capability-contracts.js';
 import type { RiskClass } from '../core/tool-registry.js';
 import type {
   AuthenticationMode,
@@ -151,6 +152,7 @@ const systemCapabilitiesOutput = closedObject(
  * presented as fully specified contracts.
  */
 export const CAPABILITY_CONTRACT_OVERRIDES: Readonly<Record<string, CapabilityContractOverride>> = {
+  ...VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES,
   'system.health': {
     description: 'Return the health and production-foundation identity of the TOCA MCP server.',
     contract_quality: 'EXPLICIT',
