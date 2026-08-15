@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AuditSink } from '../core/audit.js';
+import type { AuditEvent, AuditSink } from '../core/audit.js';
 import { executeTool, type ProviderReadbackResult } from '../core/executor.js';
 import { ExecutionError } from '../core/errors.js';
 import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
@@ -67,7 +67,7 @@ export interface CoreApprovalRequestInput {
   readonly evidence: readonly string[];
 }
 
-interface ResolvedRuntimeExecution {
+export interface ResolvedRuntimeExecution {
   readonly capabilityId: string;
   readonly tool: ToolDefinition;
   readonly binding: CoreCapabilityRuntimeBinding;
@@ -84,9 +84,13 @@ export async function executeCoreCapability(
   identity: ExecutionIdentity,
   dependencies: CoreExecutionDependencies,
 ): Promise<CoreExecuteResult> {
-  const resolved = resolveRuntimeExecution(input.capabilityId, input.payload, dependencies);
+  const resolved = resolveCoreRuntimeExecution(
+    input.capabilityId,
+    input.payload,
+    identity,
+    dependencies,
+  );
   const correlationId = requireText(input.correlationId, 'CORE_CORRELATION_ID_REQUIRED');
-  assertAuthorized(identity, resolved);
 
   if (resolved.tool.sideEffects && !resolved.idempotencyKey) {
     throw unavailable(
@@ -109,26 +113,35 @@ export async function executeCoreCapability(
 
   const executionId = dependencies.createExecutionId?.() ?? randomUUID();
   let providerReadbackVerified = !resolved.tool.sideEffects;
+  let providerReadbackEvidence: readonly string[] = [];
+  let providerExternalResourceId: string | undefined;
+  const descriptorEvidence = `core:descriptor-sha256:${resolved.descriptorSha256}`;
   const providerReadback = resolved.binding.providerReadback
     ? async (result: unknown): Promise<ProviderReadbackResult> => {
-        const readback = await resolved.binding.providerReadback?.(result, resolved.payload);
-        if (!readback) {
-          return {
-            verified: false,
-            evidence: [`provider:readback:${resolved.capabilityId}`],
-            reason: 'PROVIDER_READBACK_MISSING',
-          };
-        }
+        const readback = await resolved.binding.providerReadback!(result, resolved.payload);
         const providerEvidence = normalizeEvidence(readback.evidence);
-        const verified = readback.verified && providerEvidence.length > 0;
+        const externalResourceId = normalizeOptional(readback.externalResourceId);
+        const verified =
+          readback.verified && providerEvidence.length > 0 && externalResourceId !== undefined;
         providerReadbackVerified = verified;
+        providerReadbackEvidence = [
+          `provider:readback:${resolved.capabilityId}`,
+          ...providerEvidence,
+        ];
+        providerExternalResourceId = externalResourceId;
+        const reason =
+          readback.reason ??
+          (providerEvidence.length === 0
+            ? 'PROVIDER_READBACK_EVIDENCE_REQUIRED'
+            : !externalResourceId
+              ? 'PROVIDER_READBACK_RESOURCE_ID_REQUIRED'
+              : undefined);
         return {
           ...readback,
           verified,
-          evidence: [`provider:readback:${resolved.capabilityId}`, ...providerEvidence],
-          ...(!verified && !readback.reason
-            ? { reason: 'PROVIDER_READBACK_EVIDENCE_REQUIRED' }
-            : {}),
+          evidence: providerReadbackEvidence,
+          ...(externalResourceId ? { externalResourceId } : {}),
+          ...(!verified && reason ? { reason } : {}),
         };
       }
     : undefined;
@@ -176,10 +189,15 @@ export async function executeCoreCapability(
     return result;
   };
 
+  const auditSink = createBoundAuditSink(dependencies.auditSink, () => ({
+    descriptorEvidence,
+    providerReadbackEvidence,
+    providerExternalResourceId,
+  }));
   const result = await executeTool({
     tool: resolved.tool,
     policyContext,
-    auditSink: dependencies.auditSink,
+    auditSink,
     correlationId,
     action,
     ...(approvalExecution ? { approvalExecution } : {}),
@@ -202,7 +220,7 @@ export async function requestCoreApproval(
 ): Promise<ApprovalRecord> {
   if (!dependencies.approvalStore)
     throw unavailable('APPROVAL_STORE_REQUIRED', 'Approval persistence is unavailable.');
-  const resolved = resolveRuntimeExecution(input.capabilityId, input.payload, {
+  const resolved = resolveCoreRuntimeExecution(input.capabilityId, input.payload, identity, {
     registry: dependencies.registry,
     runtimeResolver: dependencies.runtimeResolver,
   });
@@ -227,7 +245,6 @@ export async function requestCoreApproval(
       'Approval cannot bind an execution without idempotency.',
     );
   }
-  assertAuthorized(identity, resolved);
 
   const capability = resolveCapabilityDefinition(resolved.capabilityId)?.canonical_definition;
   const routeId = capability?.primary_route_id ?? capability?.route_id;
@@ -260,13 +277,20 @@ export async function requestCoreApproval(
 export function createExecutionApprovalDescriptor(input: {
   readonly capabilityId: string;
   readonly payload: unknown;
+  readonly identity: ExecutionIdentity;
   readonly targetAccount?: string;
   readonly idempotencyKey?: string;
   readonly financialContext?: CoreCapabilityFinancialContext;
 }): Readonly<Record<string, unknown>> {
   return {
-    schema_version: 1,
+    schema_version: 2,
     capability_id: requireText(input.capabilityId, 'CAPABILITY_ID_REQUIRED'),
+    requester_binding: {
+      principal_id: input.identity.principal.principalId,
+      tenant_id: input.identity.principal.tenantId,
+      workspace_id: input.identity.principal.workspaceId,
+      organization_id: input.identity.principal.organizationId,
+    },
     payload: input.payload,
     target_account: input.targetAccount ?? null,
     idempotency_key: input.idempotencyKey ?? null,
@@ -279,9 +303,10 @@ export function createExecutionApprovalDescriptor(input: {
   };
 }
 
-function resolveRuntimeExecution(
+export function resolveCoreRuntimeExecution(
   requestedCapabilityId: string,
   payload: unknown,
+  identity: ExecutionIdentity,
   dependencies: Pick<CoreExecutionDependencies, 'registry' | 'runtimeResolver'>,
 ): ResolvedRuntimeExecution {
   const requestedId = requireText(requestedCapabilityId, 'CAPABILITY_ID_REQUIRED');
@@ -298,13 +323,7 @@ function resolveRuntimeExecution(
       `Capability ${capabilityId} is catalogued but has no active runtime binding.`,
     );
   }
-  const canonical = resolvedDefinition.canonical_definition;
-  if (tool.riskClass !== canonical.risk_class || tool.sideEffects !== canonical.side_effects) {
-    throw unavailable(
-      'CAPABILITY_RUNTIME_CONTRACT_MISMATCH',
-      `Runtime contract for ${capabilityId} does not match the canonical capability catalog.`,
-    );
-  }
+  assertRuntimeContract(tool, resolvedDefinition.canonical_definition);
 
   let parsed: unknown;
   try {
@@ -323,12 +342,12 @@ function resolveRuntimeExecution(
   const descriptor = createExecutionApprovalDescriptor({
     capabilityId,
     payload: parsed,
+    identity,
     ...(targetAccount ? { targetAccount } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(financialContext ? { financialContext } : {}),
   });
-
-  return {
+  const resolved: ResolvedRuntimeExecution = {
     capabilityId,
     tool,
     binding,
@@ -339,6 +358,27 @@ function resolveRuntimeExecution(
     descriptor,
     descriptorSha256: hashApprovalDescriptor(descriptor),
   };
+  assertAuthorized(identity, resolved);
+  return resolved;
+}
+
+function assertRuntimeContract(
+  tool: ToolDefinition,
+  canonical: NonNullable<ReturnType<typeof resolveCapabilityDefinition>>['canonical_definition'],
+): void {
+  const formalApproval = requiresFormalApproval(tool);
+  const mismatches: string[] = [];
+  if (tool.riskClass !== canonical.risk_class) mismatches.push('risk_class');
+  if (tool.sideEffects !== canonical.side_effects) mismatches.push('side_effects');
+  if (tool.capabilityStatus !== canonical.lifecycle_status) mismatches.push('lifecycle_status');
+  if (tool.idempotent !== canonical.idempotent) mismatches.push('idempotent');
+  if (formalApproval !== canonical.approval_required) mismatches.push('approval_required');
+  if (mismatches.length > 0) {
+    throw unavailable(
+      'CAPABILITY_RUNTIME_CONTRACT_MISMATCH',
+      `Runtime contract for ${tool.name} diverges from canonical fields: ${mismatches.join(',')}.`,
+    );
+  }
 }
 
 function assertAuthorized(identity: ExecutionIdentity, resolved: ResolvedRuntimeExecution): void {
@@ -355,6 +395,33 @@ function assertAuthorized(identity: ExecutionIdentity, resolved: ResolvedRuntime
   if (!authorization.allowed) {
     throw new ExecutionError('POLICY_DENIED', authorization.reason);
   }
+}
+
+function createBoundAuditSink(
+  sink: AuditSink,
+  state: () => {
+    readonly descriptorEvidence: string;
+    readonly providerReadbackEvidence: readonly string[];
+    readonly providerExternalResourceId: string | undefined;
+  },
+): AuditSink {
+  return {
+    async write(event: AuditEvent): Promise<void> {
+      const current = state();
+      const evidence = normalizeEvidence([
+        ...(event.evidence ?? []),
+        current.descriptorEvidence,
+        ...current.providerReadbackEvidence,
+      ]);
+      await sink.write({
+        ...event,
+        evidence,
+        ...(!event.externalResourceId && current.providerExternalResourceId
+          ? { externalResourceId: current.providerExternalResourceId }
+          : {}),
+      });
+    },
+  };
 }
 
 function validateFinancialContext(value: CoreCapabilityFinancialContext): void {
