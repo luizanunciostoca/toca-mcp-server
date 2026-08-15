@@ -23,11 +23,16 @@ describe('TOCA OS route and capability catalogs', () => {
       terminalStates: ['RECONCILED', 'BLOCKED_PENDING_HUMAN_DECISION'],
     });
     expect(getRouteDefinition('R32').capabilityIds).toContain('registry.reconcile');
+    expect(getRouteDefinition('R07').subflows).toEqual(
+      expect.arrayContaining(['LOCAL_DISCOVERY', 'GOOGLE_EVENT_POST', 'PROFILE_FRESHNESS']),
+    );
+    expect(getRouteDefinition('R30').subflows).toContain('REVIEW_RESPONSE');
+    expect(getRouteDefinition('R31').subflows).toContain('LOCAL_PERFORMANCE');
   });
 
-  it('materializes the 731-capability catalog using contract v1.1 without pretending inference is explicit', () => {
+  it('materializes the 745-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(731);
+    expect(CAPABILITY_CATALOG).toHaveLength(745);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
@@ -54,6 +59,26 @@ describe('TOCA OS route and capability catalogs', () => {
     expect(getCapabilityDefinition('release.deploy')).toMatchObject({
       risk_class: 'WRITE_EXTERNAL',
       approval_required: true,
+    });
+    expect(getCapabilityDefinition('google_business.post.create')).toMatchObject({
+      route_id: 'R07',
+      lifecycle_status: 'IMPLEMENTED',
+      risk_class: 'WRITE_EXTERNAL',
+      side_effects: true,
+      approval_required: true,
+      execution_surface: 'INTERNAL_ENGINE',
+    });
+    expect(getCapabilityDefinition('google_business.review.reply')).toMatchObject({
+      route_id: 'R30',
+      lifecycle_status: 'IMPLEMENTED',
+      risk_class: 'WRITE_EXTERNAL',
+      approval_required: true,
+    });
+    expect(getCapabilityDefinition('google_business.performance.read')).toMatchObject({
+      route_id: 'R31',
+      lifecycle_status: 'IMPLEMENTED',
+      risk_class: 'READ',
+      side_effects: false,
     });
   });
 
@@ -136,6 +161,8 @@ describe('TOCA OS route and capability catalogs', () => {
       expect(catalogDefinition?.contract_quality, tool.name).not.toBe('LEGACY_INFERRED');
     }
     expect(runtime.get('meta_ads.campaign.activate')).toBeUndefined();
+    expect(runtime.get('google_business.post.create')).toBeUndefined();
+    expect(runtime.get('google_business.review.reply')).toBeUndefined();
     expect(
       CAPABILITY_CATALOG.filter((definition) => definition.execution_surface === 'MCP_TOOL'),
     ).toHaveLength(runtime.list().length);

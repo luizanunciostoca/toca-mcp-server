@@ -119,6 +119,16 @@ Not implemented in this checkpoint:
 - invented GA4/Search Console/Meta/ticketing credentials or connectivity;
 - a new route.
 
+## Main reconciliation evidence
+
+The implementation branch was created from `76aec57a707161f4ca8484059b8ec302b9be6910`. While this checkpoint was in progress, parallel milestones advanced `main`, including CRM Core Records and Google Business Local Discovery / Reputation.
+
+Before final Quality validation, the branch was explicitly reconciled with `main` at `88de675febdb1142f65c1354effef2ef2a9e0588`. The reconciliation commit `4e7bb9f1fe901dd2ae2dcab89196c62f6a8abbe5` has both that `main` commit and the measurement head `21d5ae09dda34e536029d668f7edd6f88056b197` as parents.
+
+Migration ordering was revalidated after the concurrent merges: `main` contains `012_crm_core_records.sql`, while the Google Business PR adds no migration, so `013_measurement_ticketing_attribution.sql` remains the next non-conflicting migration.
+
+The final merge remains conditional on another fixed-head Quality Gate and a last `main` revalidation.
+
 ## Quality expectations
 
 The branch must pass the repository Quality Gate at a fixed head before merge. Immediately before merge, `main` must be revalidated; if it moved, the branch must be reconciled and rerun. A post-merge Quality Gate on the resulting `main` commit is required.
