@@ -1,0 +1,43 @@
+name: Governance Pin Meta OAuth One-Shot
+
+on:
+  push:
+    branches: [chore/foundation-v1-repo-governance]
+    paths: ['.github/workflows/governance-pin-meta-oauth.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: chore/foundation-v1-repo-governance
+          fetch-depth: 0
+      - name: Pin remaining Meta OAuth boundary actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/gcp-meta-oauth-boundary-smoke.yml')
+          source = path.read_text()
+          replacements = {
+              'actions/checkout@v4': 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
+              'google-github-actions/auth@v2': 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed',
+              'google-github-actions/setup-gcloud@v2': 'google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f',
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f'missing expected action ref: {old}')
+              source = source.replace(old, new)
+          path.write_text(source)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/gcp-meta-oauth-boundary-smoke.yml
+          git commit -m 'chore(governance): pin Meta OAuth boundary actions'
+          git push origin HEAD:chore/foundation-v1-repo-governance
