@@ -9,57 +9,76 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DATABASE_SECRET_ID: toca-database-url
+
 jobs:
   evidence:
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
-          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Inspect production daemon logs and verify daily-control completion
+
+      - name: Read durable daily-control signal from production PostgreSQL
         shell: bash
         run: |
           set -euo pipefail
-          FILTER_BASE='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-managed-instagram-daemon"'
-          gcloud logging read "$FILTER_BASE" \
-            --project toca-mcp-production \
-            --freshness=12h \
-            --limit=1000 \
-            --order=desc \
-            --format=json > /tmp/daemon-logs.json
+          JOB_NAME="toca-foundation-daily-evidence-${GITHUB_RUN_ID}"
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/toca-mcp/server:toca-managed-daemon-aaca384bf6d72f29ecb88681dcab02b280bde478"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
 
-          jq '[.[] | select(
-            ((.jsonPayload.event // "") | tostring | contains("foundation.daily_control")) or
-            ((.textPayload // "") | tostring | contains("foundation.daily_control")) or
-            ((.jsonPayload.event // "") | tostring | contains("toca.managed.instagram.daemon.tick")) or
-            ((.textPayload // "") | tostring | contains("toca.managed.instagram.daemon.tick"))
-          ) | {timestamp, severity, jsonPayload, textPayload}]' \
-            /tmp/daemon-logs.json > foundation-daily-control-diagnostic.json
+          QUERY_B64="$(printf '%s' "select json_build_object('name',name,'value',value,'attributes',attributes,'evidence',evidence,'occurredAt',occurred_at) from operational_signals where name='foundation.daily_control.completed' and attributes->>'dayKey'='2026-08-15' order by occurred_at desc limit 1;" | base64 -w0)"
+          SCRIPT="const {Pool}=require('pg'); const q=Buffer.from(process.env.QUERY_B64,'base64').toString(); const p=new Pool({connectionString:process.env.DATABASE_URL,ssl:false}); p.query(q).then(r=>{if(r.rows.length!==1) throw new Error('FOUNDATION_DAILY_CONTROL_SIGNAL_NOT_FOUND'); console.log('FOUNDATION_DAILY_CONTROL_DB_RESULT='+JSON.stringify(r.rows[0].json_build_object));}).finally(()=>p.end());"
+          SCRIPT_B64="$(printf '%s' "$SCRIPT" | base64 -w0)"
 
-          echo "FOUNDATION_DAEMON_RELEVANT_LOG_COUNT=$(jq 'length' foundation-daily-control-diagnostic.json)"
-          jq -c '.[]' foundation-daily-control-diagnostic.json | head -n 20 || true
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args=-e,"eval(Buffer.from(process.env.SCRIPT_B64,'base64').toString())" \
+            --set-env-vars "QUERY_B64=$QUERY_B64,SCRIPT_B64=$SCRIPT_B64" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
 
-          jq -e 'any(.[];
-            ((.jsonPayload.event // "") == "foundation.daily_control.completed" and (.jsonPayload.dayKey // "") == "2026-08-15") or
-            (((.textPayload // "") | tostring | contains("foundation.daily_control.completed")) and
-             ((.textPayload // "") | tostring | contains("2026-08-15")))
-          )' foundation-daily-control-diagnostic.json >/dev/null
-
-          cp foundation-daily-control-diagnostic.json foundation-daily-control-evidence.json
+          gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+          RESULT_LINE="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"FOUNDATION_DAILY_CONTROL_DB_RESULT=\"" \
+            --project "$PROJECT_ID" --freshness=20m --limit=20 --order=desc --format='value(textPayload)' \
+            | grep 'FOUNDATION_DAILY_CONTROL_DB_RESULT=' | head -n1)"
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#FOUNDATION_DAILY_CONTROL_DB_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .name == "foundation.daily_control.completed" and
+            .attributes.dayKey == "2026-08-15" and
+            (.value == 0 or .value == 1)
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > foundation-daily-control-evidence.json
           echo 'FOUNDATION_DAILY_CONTROL_2026_08_15=VERIFIED'
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
         with:
           name: foundation-daily-control-evidence-${{ github.sha }}
-          path: |
-            foundation-daily-control-evidence.json
-            foundation-daily-control-diagnostic.json
-          if-no-files-found: warn
+          path: foundation-daily-control-evidence.json
+          if-no-files-found: error
           retention-days: 90
