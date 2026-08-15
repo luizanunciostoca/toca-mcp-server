@@ -28,30 +28,24 @@ jobs:
           workload_identity_provider: ${{ env.WIF }}
           service_account: ${{ env.DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Read failed helper logs
+      - name: Read failed migration logs
         shell: bash
         run: |
           set -euo pipefail
-          for JOB in \
-            toca-foundation-daily-evidence-31914909118 \
-            toca-meta-ads-prepare-31914813896
-          do
-            echo "===== ${JOB} ====="
-            gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
-              --project "$PROJECT_ID" \
-              --freshness=2h \
-              --limit=200 \
-              --order=asc \
-              --format=json \
-              | jq '[.[] | {timestamp,severity,textPayload,jsonPayload,labels}]' \
-              | tee "${JOB}.json"
-          done
+          JOB=toca-production-migrate-31915535478
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+            --project "$PROJECT_ID" \
+            --freshness=2h \
+            --limit=300 \
+            --order=asc \
+            --format=json \
+            | jq '[.[] | {timestamp,severity,textPayload,jsonPayload,labels}]' \
+            | tee "${JOB}.json"
+          jq -r '.[] | select(.textPayload != null) | .textPayload' "${JOB}.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cloud-run-helper-diagnostics-${{ github.sha }}
-          path: |
-            toca-foundation-daily-evidence-31914909118.json
-            toca-meta-ads-prepare-31914813896.json
+          name: cloud-run-migration-diagnostics-${{ github.sha }}
+          path: toca-production-migrate-31915535478.json
           if-no-files-found: error
           retention-days: 30
