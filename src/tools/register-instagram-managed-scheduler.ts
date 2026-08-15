@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { AuditSink } from '../core/audit.js';
 import { executeTool } from '../core/executor.js';
+import type { ExecutionIdentityResolver } from '../core/identity.js';
 import type { ToolDefinition, ToolRegistry } from '../core/tool-registry.js';
 import {
   hashTocaManagedInstagramApprovalDescriptor,
@@ -27,7 +28,7 @@ const jobOutputSchema = z.object({
 export interface InstagramManagedSchedulerExecutionOptions {
   readonly registry: ToolRegistry;
   readonly auditSink: AuditSink;
-  readonly requester?: string;
+  readonly resolveIdentity: ExecutionIdentityResolver;
 }
 
 export function registerInstagramManagedSchedulerTools(
@@ -35,8 +36,6 @@ export function registerInstagramManagedSchedulerTools(
   scheduler: TocaManagedInstagramScheduler,
   execution: InstagramManagedSchedulerExecutionOptions,
 ): void {
-  const requester = execution.requester ?? 'mcp-client';
-
   server.registerTool(
     'instagram.toca_schedule.prepare',
     {
@@ -70,11 +69,11 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async (input) =>
+    async (input, context) =>
       response(
         await executeTool({
           tool: requireTool(execution.registry, 'instagram.toca_schedule.create'),
-          policyContext: { requester },
+          policyContext: { identity: execution.resolveIdentity(context) },
           auditSink: execution.auditSink,
           correlationId: input.correlationId,
           action: () => scheduler.schedule(input),
@@ -100,11 +99,11 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async ({ jobId, replacement }) =>
+    async ({ jobId, replacement }, context) =>
       response(
         await executeTool({
           tool: requireTool(execution.registry, 'instagram.toca_schedule.reschedule'),
-          policyContext: { requester },
+          policyContext: { identity: execution.resolveIdentity(context) },
           auditSink: execution.auditSink,
           correlationId: replacement.correlationId,
           action: () => scheduler.reschedule(jobId, replacement),
@@ -126,13 +125,13 @@ export function registerInstagramManagedSchedulerTools(
         openWorldHint: false,
       },
     },
-    async ({ jobId }) => {
+    async ({ jobId }, context) => {
       const existing = await scheduler.status(jobId);
       const correlationId = existing?.payload.correlationId ?? `schedule-cancel:${jobId}`;
       return response({
         job: await executeTool({
           tool: requireTool(execution.registry, 'instagram.toca_schedule.cancel'),
-          policyContext: { requester },
+          policyContext: { identity: execution.resolveIdentity(context) },
           auditSink: execution.auditSink,
           correlationId,
           action: () => scheduler.cancel(jobId),
