@@ -18,7 +18,7 @@ env:
   RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  AUDIT_REASON: post-migration-attempt-31915535478
+  AUDIT_REASON: post-successful-migration-reconcile-31915833053
 
 jobs:
   audit:
@@ -86,6 +86,7 @@ jobs:
           test -n "$RESULT"
           JSON="${RESULT#PRODUCTION_SCHEMA_AUDIT=}"
           printf '%s\n' "$JSON" | jq . | tee production-schema-audit.json
+          printf '%s' "$JSON" | jq -e '.required.operational_signals == true and (.migrations | length) == 13' >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-schema-audit-${{ github.sha }}
