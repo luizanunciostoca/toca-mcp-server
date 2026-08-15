@@ -22,6 +22,7 @@ export type ConsumerReceiptStatus = (typeof CONSUMER_RECEIPT_STATUSES)[number];
 
 export interface DomainEventEnvelope {
   readonly eventId: string;
+  readonly eventKey: string;
   readonly eventType: string;
   readonly schemaVersion: string;
   readonly aggregateType: string;
@@ -138,6 +139,7 @@ export interface EventOutboxStore extends TransactionalOutboxWriter {
 
 export function validateDomainEvent(event: DomainEventEnvelope): void {
   requireText(event.eventId, 'OUTBOX_EVENT_ID_REQUIRED');
+  requireText(event.eventKey, 'OUTBOX_EVENT_KEY_REQUIRED');
   requireText(event.eventType, 'OUTBOX_EVENT_TYPE_REQUIRED');
   requireText(event.schemaVersion, 'OUTBOX_SCHEMA_VERSION_REQUIRED');
   requireText(event.aggregateType, 'OUTBOX_AGGREGATE_TYPE_REQUIRED');
