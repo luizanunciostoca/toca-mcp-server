@@ -1,0 +1,50 @@
+name: R20 R29 One Shot Integration
+
+on:
+  push:
+    branches: [feat/r20-r29-video-content-repurposing]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/r20-r29-video-content-repurposing
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Apply integration patch
+        run: python scripts/apply-r20-r29-video-content.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format changed code
+        run: >-
+          pnpm exec prettier --write
+          src/content/content-item.ts
+          src/content/video.ts
+          src/content/capability-contracts.ts
+          src/persistence/postgres-content-item-store.ts
+          src/governance/capability-ids.ts
+          src/governance/route-catalog.ts
+          src/governance/capability-contract-overrides.ts
+          src/governance/capability-catalog.ts
+          test/content-video-foundation.test.ts
+          test/governance-catalog.test.ts
+          docs/architecture/routes-capabilities-v1.md
+      - name: Full Quality Gate
+        run: pnpm quality
+      - name: Commit validated implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: integrate R20 R29 video content lifecycle"
+          git push origin HEAD:feat/r20-r29-video-content-repurposing
