@@ -52,11 +52,7 @@ export interface RouteDefinition {
 }
 
 export type ExecutionSurface =
-  | 'COGNITIVE'
-  | 'CONNECTOR'
-  | 'MCP_TOOL'
-  | 'INTERNAL_ENGINE'
-  | 'CATALOG_ONLY';
+  'COGNITIVE' | 'CONNECTOR' | 'MCP_TOOL' | 'INTERNAL_ENGINE' | 'CATALOG_ONLY';
 
 export type CapabilityContractQuality = 'EXPLICIT' | 'RUNTIME_BOUND' | 'LEGACY_INFERRED';
 
@@ -71,13 +67,7 @@ export type AuthenticationMode =
   | 'WORKLOAD_IDENTITY'
   | 'UNKNOWN';
 
-export type ProviderAccessLevel =
-  | 'READ'
-  | 'MANAGE'
-  | 'PUBLISH'
-  | 'MESSAGE'
-  | 'COMMENT'
-  | 'ADMIN';
+export type ProviderAccessLevel = 'READ' | 'MANAGE' | 'PUBLISH' | 'MESSAGE' | 'COMMENT' | 'ADMIN';
 
 export interface ProviderPermissionRequirement {
   readonly provider: string;
@@ -90,13 +80,7 @@ export interface ProviderPermissionRequirement {
 }
 
 export type JsonSchemaPrimitiveType =
-  | 'object'
-  | 'array'
-  | 'string'
-  | 'number'
-  | 'integer'
-  | 'boolean'
-  | 'null';
+  'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
 
 export interface JsonSchemaNode {
   readonly type?: JsonSchemaPrimitiveType | readonly JsonSchemaPrimitiveType[];
