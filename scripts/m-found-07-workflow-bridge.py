@@ -14,7 +14,7 @@ path = "src/persistence/postgres-workflow-store.ts"
 replace_once(
     path,
     "import type pg from 'pg';\nimport {",
-    "import type pg from 'pg';\nimport { createDomainEvent } from '../events/domain-events.js';\nimport type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';\nimport {",
+    "import type pg from 'pg';\nimport { createDomainEvent } from '../events/domain-events.js';\nimport { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';\nimport type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';\nimport {",
 )
 replace_once(
     path,
@@ -24,12 +24,12 @@ replace_once(
 replace_once(
     path,
     "export class PostgresWorkflowStore implements WorkflowStore {\n  readonly #createId: () => string;",
-    "export class PostgresWorkflowStore implements WorkflowStore {\n  readonly #createId: () => string;\n  readonly #outbox: TransactionalOutboxWriter | undefined;",
+    "export class PostgresWorkflowStore implements WorkflowStore {\n  readonly #createId: () => string;\n  readonly #outbox: TransactionalOutboxWriter;",
 )
 replace_once(
     path,
     "  ) {\n    this.#createId = options.createId ?? randomUUID;\n  }",
-    "  ) {\n    this.#createId = options.createId ?? randomUUID;\n    this.#outbox = options.outbox;\n  }",
+    "  ) {\n    this.#createId = options.createId ?? randomUUID;\n    this.#outbox = options.outbox ?? new PostgresTransactionalOutbox(pool);\n  }",
 )
 
 file = Path(path)
@@ -58,7 +58,6 @@ replacement = r'''  async #appendEvent(client: pg.PoolClient, input: Omit<Workfl
       ],
     );
 
-    if (!this.#outbox) return;
     const context = await client.query<
       Pick<
         WorkflowInstanceRow,
