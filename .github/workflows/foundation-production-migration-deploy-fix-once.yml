@@ -1,0 +1,143 @@
+name: Foundation Production Migration Deploy Fix One-Shot
+
+on:
+  push:
+    branches: [fix/foundation-daily-control-observability]
+    paths: ['.github/workflows/foundation-production-migration-deploy-fix-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/foundation-daily-control-observability
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Gate runtime deploy on official production migrations
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml')
+          text = path.read_text()
+          marker = '  provision-minute-trigger:\n'
+          if marker not in text:
+              raise SystemExit('provision-minute-trigger marker missing')
+          if '  migrate-production:\n' in text:
+              raise SystemExit('migrate-production already exists')
+
+          job = r'''  migrate-production:
+    needs: quality-build-image
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable migration image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > Dockerfile.migrate <<'EOF'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+          COPY package.json pnpm-lock.yaml ./
+          RUN pnpm install --frozen-lockfile
+          COPY tsconfig.json ./
+          COPY scripts ./scripts
+          COPY migrations ./migrations
+          USER node
+          EOF
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:production-migrate-${GITHUB_SHA}"
+          docker build -f Dockerfile.migrate -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "MIGRATION_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Apply and verify official production migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$MIGRATION_IMAGE"
+          JOB_NAME="toca-production-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          VERIFY_SCRIPT="const fs=require('fs'); const {Pool}=require('pg'); const expected=fs.readdirSync('/app/migrations').filter(x=>x.endsWith('.sql')).sort(); const p=new Pool({connectionString:process.env.DATABASE_URL}); p.query('select version from schema_migrations order by version').then(r=>{const got=r.rows.map(x=>x.version); if(JSON.stringify(got)!==JSON.stringify(expected)) throw new Error('PRODUCTION_SCHEMA_MIGRATION_DRIFT:'+JSON.stringify({expected,got})); console.log('PRODUCTION_SCHEMA_MIGRATIONS_CURRENT='+expected.length);}).finally(()=>p.end());"
+          VERIFY_B64="$(printf '%s' "$VERIFY_SCRIPT" | base64 -w0)"
+          COMMAND="pnpm migrate && node -e \"eval(Buffer.from(process.env.VERIFY_B64,'base64').toString())\""
+          COMMAND_B64="$(printf '%s' "$COMMAND" | base64 -w0)"
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$MIGRATION_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "VERIFY_B64=$VERIFY_B64,COMMAND_B64=$COMMAND_B64" \
+            --command sh \
+            --args=-c,"eval \"\$(printf '%s' \"\$COMMAND_B64\" | base64 -d)\"" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+          echo 'TOCA_PRODUCTION_SCHEMA_MIGRATION_GATE=PASS'
+
+'''
+          text = text.replace(marker, job + marker, 1)
+          old_needs = '    needs: [quality-build-image, provision-minute-trigger]\n'
+          new_needs = '    needs: [quality-build-image, migrate-production, provision-minute-trigger]\n'
+          if old_needs not in text:
+              raise SystemExit('deploy-runtime needs marker missing')
+          text = text.replace(old_needs, new_needs, 1)
+          path.write_text(text)
+          PY
+          pnpm exec prettier --write .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          pnpm quality
+      - name: Commit tested deployment hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          git commit -m 'fix(reliability): gate production deploy on schema migrations'
+          git push origin HEAD:fix/foundation-daily-control-observability
