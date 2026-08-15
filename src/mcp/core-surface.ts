@@ -688,6 +688,7 @@ function isRuntimeExecutable(
   }
   if (tool.sideEffects) {
     if (tool.capabilityStatus !== 'PRODUCTION_VALIDATED') return false;
+    if (binding.sideEffectValidated !== true) return false;
     if (!binding.idempotencyKey || !binding.providerReadback) return false;
   }
   if (requiresFormalApproval(tool) && !dependencies.approvalStore) return false;
