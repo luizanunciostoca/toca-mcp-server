@@ -76,7 +76,8 @@ export function calculateAttribution(input: {
     }))
     .filter((touchpoint) => Date.parse(touchpoint.occurredAt) <= conversionTime)
     .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  if (touchpoints.length === 0) throw new Error('ATTRIBUTION_TOUCHPOINT_BEFORE_CONVERSION_REQUIRED');
+  if (touchpoints.length === 0)
+    throw new Error('ATTRIBUTION_TOUCHPOINT_BEFORE_CONVERSION_REQUIRED');
 
   const linearCredit = 1 / touchpoints.length;
   const credits = touchpoints.map((touchpoint, index) => ({
@@ -94,10 +95,7 @@ export function calculateAttribution(input: {
   }));
   const hasCampaignIdentity = touchpoints.some(
     (touchpoint) =>
-      touchpoint.campaignId ||
-      touchpoint.campaign ||
-      touchpoint.contentId ||
-      touchpoint.content,
+      touchpoint.campaignId || touchpoint.campaign || touchpoint.contentId || touchpoint.content,
   );
   return {
     model: input.model,
@@ -174,9 +172,7 @@ export function calculateSalesPacing(input: {
   readonly capacity: number | null;
   readonly dataQualityScore: number;
 }): EventSalesPacing {
-  const salesStartedAt = Date.parse(
-    timestamp(input.salesStartedAt, 'SALES_PACING_START_INVALID'),
-  );
+  const salesStartedAt = Date.parse(timestamp(input.salesStartedAt, 'SALES_PACING_START_INVALID'));
   const asOfIso = timestamp(input.asOf, 'SALES_PACING_AS_OF_INVALID');
   const asOf = Date.parse(asOfIso);
   const eventStartsAt = Date.parse(
@@ -245,18 +241,9 @@ export function reconciliationConfidence(input: {
   readonly matchedConversions: number;
   readonly sourceQualityScore: number;
 }): AttributionConfidence {
-  const measured = nonNegativeInteger(
-    input.measuredConversions,
-    'RECONCILIATION_MEASURED_INVALID',
-  );
-  const ticket = nonNegativeInteger(
-    input.ticketConversions,
-    'RECONCILIATION_TICKET_INVALID',
-  );
-  const matched = nonNegativeInteger(
-    input.matchedConversions,
-    'RECONCILIATION_MATCHED_INVALID',
-  );
+  const measured = nonNegativeInteger(input.measuredConversions, 'RECONCILIATION_MEASURED_INVALID');
+  const ticket = nonNegativeInteger(input.ticketConversions, 'RECONCILIATION_TICKET_INVALID');
+  const matched = nonNegativeInteger(input.matchedConversions, 'RECONCILIATION_MATCHED_INVALID');
   if (matched > measured || matched > ticket) {
     throw new Error('RECONCILIATION_MATCHED_EXCEEDS_TOTAL');
   }

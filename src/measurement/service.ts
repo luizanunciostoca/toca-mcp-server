@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditSink } from '../core/audit.js';
-import {
-  authorizeExecution,
-  type ExecutionIdentity,
-} from '../core/identity.js';
+import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
 import type { RiskClass } from '../core/tool-registry.js';
 import type { EventRecordStore } from '../events/event-record.js';
 import type { MeasurementReadAdapter, TicketingReadOnlyAdapter } from './adapters.js';
@@ -80,7 +77,9 @@ export class MeasurementFoundationService {
       readonly objective: string;
       readonly attributionModel: AttributionModel;
       readonly conversionEventNames: readonly string[];
-      readonly requiredDimensions?: readonly ('source' | 'medium' | 'campaign' | 'content' | 'term')[];
+      readonly requiredDimensions?: readonly (
+        'source' | 'medium' | 'campaign' | 'content' | 'term'
+      )[];
     },
   ): Promise<MeasurementPlan> {
     assertAuthorized(context.identity, 'R18', 'measurement.plan.create', 'WRITE_REVERSIBLE');
@@ -88,11 +87,21 @@ export class MeasurementFoundationService {
     const principal = context.identity.principal;
     const eventId = nullableText(input.eventId);
     if (eventId) await this.#assertEventRecord(eventId, context.identity);
-    const conversionEventNames = [...new Set(input.conversionEventNames.map((name) => requireText(name, 'MEASUREMENT_CONVERSION_EVENT_REQUIRED')))].sort();
+    const conversionEventNames = [
+      ...new Set(
+        input.conversionEventNames.map((name) =>
+          requireText(name, 'MEASUREMENT_CONVERSION_EVENT_REQUIRED'),
+        ),
+      ),
+    ].sort();
     if (conversionEventNames.length === 0) throw new Error('MEASUREMENT_CONVERSION_EVENT_REQUIRED');
-    const requiredDimensions = [...new Set(input.requiredDimensions ?? ['source', 'medium', 'campaign'])].sort();
+    const requiredDimensions = [
+      ...new Set(input.requiredDimensions ?? ['source', 'medium', 'campaign']),
+    ].sort();
     const plan: MeasurementPlan = {
-      planId: input.planId ? requireText(input.planId, 'MEASUREMENT_PLAN_ID_REQUIRED') : this.#createId(),
+      planId: input.planId
+        ? requireText(input.planId, 'MEASUREMENT_PLAN_ID_REQUIRED')
+        : this.#createId(),
       planKey: requireText(input.planKey, 'MEASUREMENT_PLAN_KEY_REQUIRED'),
       tenantId: principal.tenantId,
       workspaceId: principal.workspaceId,
@@ -106,7 +115,10 @@ export class MeasurementFoundationService {
       correlationId: context.correlationId,
       workflowInstanceId: nullableText(context.workflowInstanceId),
       evidence: normalizeEvidence(context.evidence),
-      createdAt: timestamp(context.now ?? new Date().toISOString(), 'MEASUREMENT_PLAN_CREATED_AT_INVALID'),
+      createdAt: timestamp(
+        context.now ?? new Date().toISOString(),
+        'MEASUREMENT_PLAN_CREATED_AT_INVALID',
+      ),
     };
     return this.#audited(context, 'measurement.plan.create', 'WRITE_REVERSIBLE', plan.planId, () =>
       this.store.createPlan(plan),
@@ -171,8 +183,12 @@ export class MeasurementFoundationService {
       });
       assertDataQuality(normalized.dataQuality);
       results.push(
-        await this.#audited(context, 'measurement.event.record', 'WRITE_REVERSIBLE', normalized.measurementEventId, () =>
-          this.store.recordEvent(normalized),
+        await this.#audited(
+          context,
+          'measurement.event.record',
+          'WRITE_REVERSIBLE',
+          normalized.measurementEventId,
+          () => this.store.recordEvent(normalized),
         ),
       );
     }
@@ -182,16 +198,29 @@ export class MeasurementFoundationService {
   async bindTicketingEvent(
     context: MeasurementOperationContext,
     adapter: TicketingReadOnlyAdapter,
-    input: { readonly eventId: string; readonly externalEventId: string; readonly bindingId?: string },
+    input: {
+      readonly eventId: string;
+      readonly externalEventId: string;
+      readonly bindingId?: string;
+    },
   ): Promise<TicketingEventBinding> {
     assertAuthorized(context.identity, 'R18', 'ticketing.event.identity.read', 'READ');
     assertAuthorized(context.identity, 'R18', 'measurement.event.record', 'WRITE_REVERSIBLE');
     const event = await this.#assertEventRecord(input.eventId, context.identity);
-    const identity = await this.#audited(context, 'ticketing.event.identity.read', 'READ', input.externalEventId, () =>
-      adapter.resolveEvent(requireText(input.externalEventId, 'TICKETING_EXTERNAL_EVENT_ID_REQUIRED')),
+    const identity = await this.#audited(
+      context,
+      'ticketing.event.identity.read',
+      'READ',
+      input.externalEventId,
+      () =>
+        adapter.resolveEvent(
+          requireText(input.externalEventId, 'TICKETING_EXTERNAL_EVENT_ID_REQUIRED'),
+        ),
     );
-    if (identity.provider !== adapter.provider) throw new Error('TICKETING_PROVIDER_IDENTITY_MISMATCH');
-    if (identity.externalEventId !== input.externalEventId) throw new Error('TICKETING_EXTERNAL_EVENT_ID_MISMATCH');
+    if (identity.provider !== adapter.provider)
+      throw new Error('TICKETING_PROVIDER_IDENTITY_MISMATCH');
+    if (identity.externalEventId !== input.externalEventId)
+      throw new Error('TICKETING_EXTERNAL_EVENT_ID_MISMATCH');
     const binding: TicketingEventBinding = {
       bindingId: input.bindingId ?? this.#createId(),
       tenantId: event.tenantId,
@@ -205,23 +234,38 @@ export class MeasurementFoundationService {
       correlationId: context.correlationId,
       workflowInstanceId: nullableText(context.workflowInstanceId),
       evidence: normalizeEvidence([...context.evidence, ...identity.evidence]),
-      createdAt: timestamp(context.now ?? new Date().toISOString(), 'TICKETING_BINDING_CREATED_AT_INVALID'),
+      createdAt: timestamp(
+        context.now ?? new Date().toISOString(),
+        'TICKETING_BINDING_CREATED_AT_INVALID',
+      ),
     };
-    return this.#audited(context, 'measurement.event.record', 'WRITE_REVERSIBLE', binding.bindingId, () =>
-      this.store.bindTicketingEvent(binding),
+    return this.#audited(
+      context,
+      'measurement.event.record',
+      'WRITE_REVERSIBLE',
+      binding.bindingId,
+      () => this.store.bindTicketingEvent(binding),
     );
   }
 
   async readAndRecordTicketingSales(
     context: MeasurementOperationContext,
     adapter: TicketingReadOnlyAdapter,
-    input: { readonly eventId: string; readonly externalEventId: string; readonly snapshotId?: string },
+    input: {
+      readonly eventId: string;
+      readonly externalEventId: string;
+      readonly snapshotId?: string;
+    },
   ): Promise<TicketingSalesSummary> {
     assertAuthorized(context.identity, 'R18', 'ticketing.sales.summary.read', 'READ');
     assertAuthorized(context.identity, 'R18', 'measurement.event.record', 'WRITE_REVERSIBLE');
     await this.#assertTicketingBinding(adapter, input.eventId, input.externalEventId);
-    const result = await this.#audited(context, 'ticketing.sales.summary.read', 'READ', input.externalEventId, () =>
-      adapter.readSalesSummary(input.externalEventId),
+    const result = await this.#audited(
+      context,
+      'ticketing.sales.summary.read',
+      'READ',
+      input.externalEventId,
+      () => adapter.readSalesSummary(input.externalEventId),
     );
     const summary = normalizeTicketingSalesSummary({
       snapshotId: input.snapshotId ?? this.#createId(),
@@ -236,21 +280,33 @@ export class MeasurementFoundationService {
       correlationId: context.correlationId,
       workflowInstanceId: context.workflowInstanceId,
     });
-    return this.#audited(context, 'measurement.event.record', 'WRITE_REVERSIBLE', summary.snapshotId, () =>
-      this.store.recordSalesSummary(summary),
+    return this.#audited(
+      context,
+      'measurement.event.record',
+      'WRITE_REVERSIBLE',
+      summary.snapshotId,
+      () => this.store.recordSalesSummary(summary),
     );
   }
 
   async readAndRecordTicketingInventory(
     context: MeasurementOperationContext,
     adapter: TicketingReadOnlyAdapter,
-    input: { readonly eventId: string; readonly externalEventId: string; readonly snapshotId?: string },
+    input: {
+      readonly eventId: string;
+      readonly externalEventId: string;
+      readonly snapshotId?: string;
+    },
   ): Promise<TicketingInventorySnapshot> {
     assertAuthorized(context.identity, 'R18', 'ticketing.inventory.read', 'READ');
     assertAuthorized(context.identity, 'R18', 'measurement.event.record', 'WRITE_REVERSIBLE');
     await this.#assertTicketingBinding(adapter, input.eventId, input.externalEventId);
-    const result = await this.#audited(context, 'ticketing.inventory.read', 'READ', input.externalEventId, () =>
-      adapter.readInventory(input.externalEventId),
+    const result = await this.#audited(
+      context,
+      'ticketing.inventory.read',
+      'READ',
+      input.externalEventId,
+      () => adapter.readInventory(input.externalEventId),
     );
     const snapshot = normalizeTicketingInventory({
       snapshotId: input.snapshotId ?? this.#createId(),
@@ -265,8 +321,12 @@ export class MeasurementFoundationService {
       correlationId: context.correlationId,
       workflowInstanceId: context.workflowInstanceId,
     });
-    return this.#audited(context, 'measurement.event.record', 'WRITE_REVERSIBLE', snapshot.snapshotId, () =>
-      this.store.recordInventory(snapshot),
+    return this.#audited(
+      context,
+      'measurement.event.record',
+      'WRITE_REVERSIBLE',
+      snapshot.snapshotId,
+      () => this.store.recordInventory(snapshot),
     );
   }
 
@@ -287,8 +347,12 @@ export class MeasurementFoundationService {
       evidence: [...context.evidence, ...input.evidence],
     });
     assertDataQuality(receipt.dataQuality);
-    return this.#audited(context, 'ticketing.webhook.record', 'WRITE_REVERSIBLE', receipt.receiptId, () =>
-      this.store.recordWebhook(receipt),
+    return this.#audited(
+      context,
+      'ticketing.webhook.record',
+      'WRITE_REVERSIBLE',
+      receipt.receiptId,
+      () => this.store.recordWebhook(receipt),
     );
   }
 
@@ -332,11 +396,19 @@ export class MeasurementFoundationService {
       correlationId: context.correlationId,
       workflowInstanceId: nullableText(context.workflowInstanceId),
       evidence: normalizeEvidence(context.evidence),
-      createdAt: timestamp(context.now ?? new Date().toISOString(), 'RECONCILIATION_CREATED_AT_INVALID'),
+      createdAt: timestamp(
+        context.now ?? new Date().toISOString(),
+        'RECONCILIATION_CREATED_AT_INVALID',
+      ),
     };
-    if (Date.parse(value.windowEndsAt) <= Date.parse(value.windowStartsAt)) throw new Error('RECONCILIATION_WINDOW_INVALID');
-    return this.#audited(context, 'ticketing.conversion.reconcile', 'WRITE_REVERSIBLE', value.reconciliationId, () =>
-      this.store.recordReconciliation(value),
+    if (Date.parse(value.windowEndsAt) <= Date.parse(value.windowStartsAt))
+      throw new Error('RECONCILIATION_WINDOW_INVALID');
+    return this.#audited(
+      context,
+      'ticketing.conversion.reconcile',
+      'WRITE_REVERSIBLE',
+      value.reconciliationId,
+      () => this.store.recordReconciliation(value),
     );
   }
 
@@ -368,7 +440,12 @@ export class MeasurementFoundationService {
 
   async calculateEventSalesPacing(
     identity: ExecutionIdentity,
-    input: { readonly eventId: string; readonly salesStartedAt: string; readonly asOf: string; readonly dataQualityScore: number },
+    input: {
+      readonly eventId: string;
+      readonly salesStartedAt: string;
+      readonly asOf: string;
+      readonly dataQualityScore: number;
+    },
   ): Promise<EventSalesPacing> {
     assertAuthorized(identity, 'R31', 'performance.event.sales_pacing.calculate', 'READ');
     const event = await this.#assertEventRecord(input.eventId, identity);
@@ -401,7 +478,11 @@ export class MeasurementFoundationService {
     return event;
   }
 
-  async #assertTicketingBinding(adapter: TicketingReadOnlyAdapter, eventId: string, externalEventId: string): Promise<void> {
+  async #assertTicketingBinding(
+    adapter: TicketingReadOnlyAdapter,
+    eventId: string,
+    externalEventId: string,
+  ): Promise<void> {
     const binding = await this.store.getTicketingBinding(adapter.provider, externalEventId);
     if (!binding) throw new Error('TICKETING_EVENT_BINDING_REQUIRED');
     if (binding.eventId !== eventId) throw new Error('TICKETING_EVENT_BINDING_MISMATCH');

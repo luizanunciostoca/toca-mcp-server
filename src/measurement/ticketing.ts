@@ -76,7 +76,10 @@ export function normalizeTicketingInventory(input: {
 }): TicketingInventorySnapshot {
   const capacity = nullableNonNegativeInteger(input.result.capacity, 'TICKETING_CAPACITY_INVALID');
   const sold = nonNegativeInteger(input.result.sold, 'TICKETING_SOLD_INVALID');
-  const available = nullableNonNegativeInteger(input.result.available, 'TICKETING_AVAILABLE_INVALID');
+  const available = nullableNonNegativeInteger(
+    input.result.available,
+    'TICKETING_AVAILABLE_INVALID',
+  );
   const held = nullableNonNegativeInteger(input.result.held, 'TICKETING_HELD_INVALID');
   if (capacity !== null && sold > capacity) throw new Error('TICKETING_SOLD_EXCEEDS_CAPACITY');
   if (capacity !== null && available !== null && sold + available > capacity) {
@@ -121,7 +124,10 @@ export function normalizeTicketingWebhook(input: {
   readonly workflowInstanceId?: string | null;
   readonly evidence: readonly string[];
 }): TicketingWebhookReceipt {
-  const receivedAt = timestamp(input.receivedAt ?? new Date().toISOString(), 'TICKETING_WEBHOOK_RECEIVED_AT_INVALID');
+  const receivedAt = timestamp(
+    input.receivedAt ?? new Date().toISOString(),
+    'TICKETING_WEBHOOK_RECEIVED_AT_INVALID',
+  );
   const occurredAt = timestamp(input.occurredAt, 'TICKETING_WEBHOOK_OCCURRED_AT_INVALID');
   const evidence = normalizeEvidence(input.evidence);
   const dataQuality = validateMeasurementDataQuality({

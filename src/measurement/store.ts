@@ -23,7 +23,10 @@ export interface MeasurementStore {
   recordEvent(event: NormalizedMeasurementEvent): Promise<NormalizedMeasurementEvent>;
   listEvents(query: MeasurementEventQuery): Promise<readonly NormalizedMeasurementEvent[]>;
   bindTicketingEvent(binding: TicketingEventBinding): Promise<TicketingEventBinding>;
-  getTicketingBinding(provider: string, externalEventId: string): Promise<TicketingEventBinding | undefined>;
+  getTicketingBinding(
+    provider: string,
+    externalEventId: string,
+  ): Promise<TicketingEventBinding | undefined>;
   recordSalesSummary(summary: TicketingSalesSummary): Promise<TicketingSalesSummary>;
   recordInventory(snapshot: TicketingInventorySnapshot): Promise<TicketingInventorySnapshot>;
   recordWebhook(receipt: TicketingWebhookReceipt): Promise<TicketingWebhookReceipt>;

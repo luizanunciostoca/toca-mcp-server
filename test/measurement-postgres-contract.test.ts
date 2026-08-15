@@ -38,7 +38,9 @@ describe('measurement/ticketing postgres contract', () => {
     expect(adapters).toContain('resolveEvent(');
     expect(adapters).toContain('readSalesSummary(');
     expect(adapters).toContain('readInventory(');
-    expect(adapters).not.toMatch(/refund|transfer|issueTicket|createPayment|updatePayment|updateInventory/);
+    expect(adapters).not.toMatch(
+      /refund|transfer|issueTicket|createPayment|updatePayment|updateInventory/,
+    );
     expect(capabilityContracts).toContain('providerWritesAllowed: false');
   });
 

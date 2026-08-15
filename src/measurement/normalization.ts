@@ -77,7 +77,10 @@ export function normalizeMeasurementEvent(
   }
 
   const occurredAt = timestamp(input.occurredAt, 'MEASUREMENT_OCCURRED_AT_INVALID');
-  const ingestedAt = timestamp(input.ingestedAt ?? new Date().toISOString(), 'MEASUREMENT_INGESTED_AT_INVALID');
+  const ingestedAt = timestamp(
+    input.ingestedAt ?? new Date().toISOString(),
+    'MEASUREMENT_INGESTED_AT_INVALID',
+  );
   const evidence = normalizeEvidence(input.evidence);
   const eventId = nullableText(input.eventId);
   const valueMinor = nullableMinor(input.valueMinor);
@@ -140,28 +143,74 @@ export function validateMeasurementDataQuality(input: {
 }): DataQualityReport {
   const issues: DataQualityIssue[] = [];
   if (!input.sourceEventId.trim()) {
-    issues.push(issue('SOURCE_EVENT_ID_MISSING', 'ERROR', 'sourceEventId', 'Provider/source event identity is required.'));
+    issues.push(
+      issue(
+        'SOURCE_EVENT_ID_MISSING',
+        'ERROR',
+        'sourceEventId',
+        'Provider/source event identity is required.',
+      ),
+    );
   }
   if (Date.parse(input.occurredAt) > Date.parse(input.ingestedAt) + 5 * 60_000) {
-    issues.push(issue('EVENT_TIMESTAMP_AFTER_INGESTION', 'ERROR', 'occurredAt', 'Event occurrence cannot materially postdate ingestion.'));
+    issues.push(
+      issue(
+        'EVENT_TIMESTAMP_AFTER_INGESTION',
+        'ERROR',
+        'occurredAt',
+        'Event occurrence cannot materially postdate ingestion.',
+      ),
+    );
   }
   if (input.sourceSystem === 'TICKETING' && !input.eventId) {
-    issues.push(issue('EVENT_RECORD_LINK_REQUIRED', 'ERROR', 'eventId', 'Ticketing data must link to EventRecord.'));
+    issues.push(
+      issue(
+        'EVENT_RECORD_LINK_REQUIRED',
+        'ERROR',
+        'eventId',
+        'Ticketing data must link to EventRecord.',
+      ),
+    );
   }
   if (input.isConversion && input.sourceSystem === 'TICKETING' && !input.eventId) {
-    issues.push(issue('CONVERSION_EVENT_RECORD_LINK_REQUIRED', 'ERROR', 'eventId', 'Ticket conversion must link to EventRecord.'));
+    issues.push(
+      issue(
+        'CONVERSION_EVENT_RECORD_LINK_REQUIRED',
+        'ERROR',
+        'eventId',
+        'Ticket conversion must link to EventRecord.',
+      ),
+    );
   }
   if (input.valueMinor !== null && !input.currency) {
-    issues.push(issue('CURRENCY_REQUIRED_FOR_VALUE', 'ERROR', 'currency', 'Currency is required when a monetary value exists.'));
+    issues.push(
+      issue(
+        'CURRENCY_REQUIRED_FOR_VALUE',
+        'ERROR',
+        'currency',
+        'Currency is required when a monetary value exists.',
+      ),
+    );
   }
   if (!input.utm.source) {
-    issues.push(issue('ATTRIBUTION_SOURCE_MISSING', 'WARNING', 'source', 'Attribution source is missing.'));
+    issues.push(
+      issue('ATTRIBUTION_SOURCE_MISSING', 'WARNING', 'source', 'Attribution source is missing.'),
+    );
   }
   if (!input.utm.medium) {
-    issues.push(issue('ATTRIBUTION_MEDIUM_MISSING', 'WARNING', 'medium', 'Attribution medium is missing.'));
+    issues.push(
+      issue('ATTRIBUTION_MEDIUM_MISSING', 'WARNING', 'medium', 'Attribution medium is missing.'),
+    );
   }
   if (input.evidence.length === 0) {
-    issues.push(issue('MEASUREMENT_EVIDENCE_MISSING', 'ERROR', 'evidence', 'At least one lineage/evidence reference is required.'));
+    issues.push(
+      issue(
+        'MEASUREMENT_EVIDENCE_MISSING',
+        'ERROR',
+        'evidence',
+        'At least one lineage/evidence reference is required.',
+      ),
+    );
   }
 
   const errorCount = issues.filter((candidate) => candidate.severity === 'ERROR').length;
@@ -172,7 +221,9 @@ export function validateMeasurementDataQuality(input: {
 
 export function assertDataQuality(report: DataQualityReport): void {
   if (!report.valid) {
-    const codes = report.issues.filter((item) => item.severity === 'ERROR').map((item) => item.code);
+    const codes = report.issues
+      .filter((item) => item.severity === 'ERROR')
+      .map((item) => item.code);
     throw new Error(`MEASUREMENT_DATA_QUALITY_FAILED:${codes.join(',')}`);
   }
 }
@@ -194,7 +245,10 @@ export function normalizeEvidence(evidence: readonly string[]): readonly string[
   return normalized;
 }
 
-export function normalizeCurrency(value: string | null | undefined, required: boolean): string | null {
+export function normalizeCurrency(
+  value: string | null | undefined,
+  required: boolean,
+): string | null {
   const normalized = value?.trim().toUpperCase() ?? '';
   if (!normalized) {
     if (required) throw new Error('MEASUREMENT_CURRENCY_REQUIRED');

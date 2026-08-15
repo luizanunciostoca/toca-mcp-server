@@ -148,7 +148,11 @@ describe('ticketing read-only normalization', () => {
     });
     expect(sales.currency).toBe('BRL');
     expect(inventory.available).toBe(120);
-    expect(MEASUREMENT_CAPABILITY_CONTRACTS.filter((item) => item.capabilityId.startsWith('ticketing.')).every((item) => item.providerWritesAllowed === false)).toBe(true);
+    expect(
+      MEASUREMENT_CAPABILITY_CONTRACTS.filter((item) =>
+        item.capabilityId.startsWith('ticketing.'),
+      ).every((item) => item.providerWritesAllowed === false),
+    ).toBe(true);
   });
 
   it('hashes webhook payloads and keeps EventRecord mandatory', () => {
