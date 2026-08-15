@@ -1,0 +1,83 @@
+name: M-FOUND-05 Final Validation
+
+on:
+  push:
+    branches: [feat/m-found-05-approval-atomicity]
+
+permissions:
+  contents: write
+
+jobs:
+  final:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.15.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Complete R27 contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          def patch(path, old, new):
+            p=Path(path); t=p.read_text()
+            if new in t: return
+            if old not in t: raise SystemExit(f'ANCHOR:{path}:{old[:60]}')
+            p.write_text(t.replace(old,new,1))
+
+          g='src/governance/approval-governance.ts'
+          patch(g,"  'FAILED_REVIEW_REQUIRED',\n  'REVOKED',","  'FAILED_REVIEW_REQUIRED',\n  'INVALIDATED',\n  'REVOKED',")
+          patch(g,"const DIRECT_PUT_FORBIDDEN_STATUSES: ReadonlySet<ApprovalStatus> = new Set(\n  APPROVAL_EXECUTION_STATUSES,\n);","const DIRECT_PUT_FORBIDDEN_STATUSES: ReadonlySet<ApprovalStatus> = new Set([\n  ...APPROVAL_EXECUTION_STATUSES,\n  'INVALIDATED',\n]);")
+          patch(g,"  | {\n      readonly type: 'FAIL_REVIEW_REQUIRED';\n      readonly executionId: string;\n      readonly evidence: readonly string[];\n      readonly reason: string;\n      readonly now?: string;\n    };","  | {\n      readonly type: 'FAIL_REVIEW_REQUIRED';\n      readonly executionId: string;\n      readonly evidence: readonly string[];\n      readonly reason: string;\n      readonly now?: string;\n    }\n  | {\n      readonly type: 'INVALIDATE';\n      readonly descriptorSha256: string;\n      readonly evidence: readonly string[];\n      readonly now?: string;\n    };")
+          patch(g,"    case 'FAIL_REVIEW_REQUIRED': {\n      if (!['EXECUTING', 'PROVIDER_READBACK'].includes(record.status))","    case 'INVALIDATE': {\n      if (!RESERVABLE_STATUSES.has(record.status))\n        throw new Error(`APPROVAL_TRANSITION_INVALID:${record.status}->INVALIDATED`);\n      if (transition.descriptorSha256 === record.descriptorSha256) return record;\n      const evidence = requireEvidence(transition.evidence, 'APPROVAL_INVALIDATION_EVIDENCE_REQUIRED');\n      return { ...record, status: 'INVALIDATED', evidence: mergeEvidence(record.evidence, evidence), version: record.version + 1 };\n    }\n    case 'FAIL_REVIEW_REQUIRED': {\n      if (!['EXECUTING', 'PROVIDER_READBACK'].includes(record.status))")
+
+          i='src/governance/capability-ids.ts'
+          patch(i,"    'approval.issue',\n    'approval.consume',","    'approval.issue',\n    'approval.reserve',\n    'approval.release',\n    'approval.invalidate_on_change',\n    'approval.delegate',\n    'approval.execution.bind',\n    'approval.sla.escalate',\n    'approval.consume',")
+          c='src/governance/capability-catalog.ts'
+          patch(c,"  'approval.issue',\n  'approval.consume',","  'approval.issue',\n  'approval.reserve',\n  'approval.release',\n  'approval.invalidate_on_change',\n  'approval.execution.bind',\n  'approval.consume',")
+          patch(c,"  'replace',\n  'request',","  'replace',\n  'reserve',\n  'release',\n  'bind',\n  'delegate',\n  'invalidate_on_change',\n  'request',")
+
+          m=Path('migrations/006_approval_execution_atomicity.sql'); t=m.read_text()
+          t=t.replace("  add column if not exists failed_review_at timestamptz,\n  add column if not exists failure_reason text,\n  add column if not exists invalidated_at timestamptz,\n  add column if not exists invalidation_reason text;","  add column if not exists failed_review_at timestamptz,\n  add column if not exists failure_reason text;")
+          a=t.find("alter table approval_records\n  drop constraint if exists approval_records_invalidation_check;")
+          if a>=0:
+            marker="\nalter table approval_records\n  drop constraint if exists approval_records_execution_issued_check;"; b=t.find(marker,a)
+            if b<0: raise SystemExit('INVALIDATION_SQL_END')
+            t=t[:a]+t[b+1:]
+          m.write_text(t)
+
+          p=Path('test/governance-catalog.test.ts'); t=p.read_text().replace('731-capability catalog','737-capability catalog').replace('toHaveLength(731)','toHaveLength(737)'); p.write_text(t)
+          p=Path('test/capability-resolution.test.ts'); t=p.read_text().replace('preserves the 731 compatibility IDs','preserves the compatibility IDs').replace('raw_count: 731','raw_count: 737').replace('effective_count: 723','effective_count: 729'); p.write_text(t)
+          p=Path('test/approval-migration-contract.test.ts'); t=p.read_text()
+          if "'INVALIDATED'" not in t: t=t.replace("      'FAILED_REVIEW_REQUIRED',\n    ])","      'FAILED_REVIEW_REQUIRED',\n      'INVALIDATED',\n    ])")
+          p.write_text(t)
+          PY
+      - name: Quality
+        run: |
+          pnpm exec prettier --write src/core/executor.ts src/governance/approval-governance.ts src/governance/capability-ids.ts src/governance/capability-catalog.ts test/governance-catalog.test.ts test/capability-resolution.test.ts test/approval-migration-contract.test.ts
+          pnpm format:check
+          pnpm architecture:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm build
+      - name: Commit validated result
+        run: |
+          rm .github/workflows/m-found-05-final.yml
+          git config user.name toca-foundation-bot
+          git config user.email 47362223+luizidebook@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: complete R27 atomic approval contract"
+      - name: Push
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-05-approval-atomicity"
