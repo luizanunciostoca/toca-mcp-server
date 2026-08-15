@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "milestone": "TOCA_OS_MARKETING_SALES_FOUNDATION_v1",
+  "checkpoint": "M-FOUND-01",
+  "captured_date": "2026-08-14",
+  "timezone": "America/Bahia",
+  "repository": "luizidebook/toca-mcp-server",
+  "github": {
+    "default_branch": "main",
+    "main_sha": "285187cf58933f15bc2319955dd19feeae1d2e2a",
+    "tree_sha": "2d1004f59e9c5ae64b04124faf64c6df96f54da8",
+    "quality_run_id": 31853270406,
+    "quality_conclusion": "success",
+    "branch_protection_enabled": false,
+    "open_pull_requests": [78, 53, 47, 46]
+  },
+  "drive": {
+    "master_manual": {
+      "title": "TOCA_OS — MANUAL_TECNICO_MESTRE_DO_SISTEMA_COMPLETO_v1.1",
+      "id": "10IIezg-NTT64k2bSsWfn8grcm6wUri2bGhKa3yM14v8",
+      "status": "OFFICIAL"
+    },
+    "ai_guide": {
+      "title": "TOCA_OS — 04_GUIA_PARA_IA",
+      "id": "1dtbfsMVfjCqm00ZAAl-6EkYxlgfiy9gL_IfqMsoHliY"
+    },
+    "canonical_resource_registry": {
+      "title": "TOCA_OS — REGISTRO_CANONICO_DE_RECURSOS_E_IDS_v1.0",
+      "id": "1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY"
+    },
+    "machine_routing_registry": {
+      "title": "TOCA_OS — REGISTRO_MACHINE_ACTIONABLE_DE_ROTEAMENTO_v1.0",
+      "id": "1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU"
+    },
+    "maturity_report": {
+      "title": "TOCA_OS — RELATORIO_DE_MATURIDADE_COMPLETUDE_E_RISCOS_v3.0 — 2026-08-14",
+      "id": "169QXKZAL9azyFe5nq8hYVgqhoxmK_-dxM_k0G66_pJQ",
+      "audited_github_snapshot_sha": "c97002ae294f2e5604f3802513c814acbf3753ab",
+      "snapshot_is_current": false
+    }
+  },
+  "architecture": {
+    "route_count": 32,
+    "allow_new_macro_route": false,
+    "capability_catalog_version": "1.0.0",
+    "registry_definition_count_when_all_families_counted": 27,
+    "production_validated_registry_capabilities": 6,
+    "general_durable_workflow_engine_present": false,
+    "atomic_approval_execution_lifecycle_present": false
+  },
+  "confirmed_gaps": [
+    "CAPABILITY_METADATA_HEURISTIC",
+    "CAPABILITY_SCHEMAS_GENERIC",
+    "CATALOG_RUNTIME_CONTRACT_SPLIT",
+    "CAPABILITY_MULTI_ROUTE_CONSUMPTION_MISSING",
+    "REQUESTER_IDENTITY_NOT_BOUND_TO_EXECUTION_BOUNDARY",
+    "APPROVAL_RESERVATION_MISSING",
+    "APPROVAL_EXECUTION_BINDING_MISSING",
+    "APPROVAL_PROVIDER_READBACK_CONSUMPTION_MISSING",
+    "GENERAL_DURABLE_WORKFLOW_ENGINE_MISSING",
+    "MAIN_BRANCH_PROTECTION_DISABLED",
+    "DRIVE_MATURITY_REPORT_GITHUB_SNAPSHOT_STALE",
+    "ONE_SHOT_WORKFLOW_HYGIENE_DEBT"
+  ],
+  "next_checkpoint": "M-FOUND-02"
+}
