@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryAuditSink } from '../src/core/audit.js';
 import { executeTool } from '../src/core/executor.js';
 import { parseExecutionContext } from '../src/core/execution-context.js';
+import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import { evaluatePolicy } from '../src/core/policy.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import {
@@ -37,6 +38,16 @@ const writeTool: ToolDefinition = {
   sideEffects: true,
   idempotent: true,
 };
+
+const externalWriterIdentity = createTrustedServiceExecutionIdentity({
+  principalId: 'test',
+  tenantId: 'toca-do-morcego',
+  roles: ['EXTERNAL_WRITER'],
+  allowedCapabilityIds: ['instagram.publish.image'],
+  allowedTargetAccounts: ['instagram-account-1'],
+  evidence: ['test://identity/external-writer'],
+  now: '2026-08-14T19:59:00Z',
+});
 
 describe('ToolRegistry', () => {
   it('registers and lists definitions deterministically', () => {
@@ -89,15 +100,24 @@ describe('evaluatePolicy', () => {
       ...writeTool,
       capabilityStatus: 'PRODUCTION_VALIDATED' as const,
     };
-    expect(evaluatePolicy(validated, { requester: 'test' }).decision).toBe('REQUIRE_APPROVAL');
-    expect(evaluatePolicy(validated, { requester: 'test', approved: true }).decision).toBe(
-      'REQUIRE_APPROVAL',
-    );
+    expect(
+      evaluatePolicy(validated, {
+        identity: externalWriterIdentity,
+        connectedAccount: 'instagram-account-1',
+      }).decision,
+    ).toBe('REQUIRE_APPROVAL');
+    expect(
+      evaluatePolicy(validated, {
+        identity: externalWriterIdentity,
+        connectedAccount: 'instagram-account-1',
+        approved: true,
+      }).decision,
+    ).toBe('REQUIRE_APPROVAL');
 
     const descriptor = { mediaId: 'media-1', caption: 'TOCA' };
     const requested = requestApproval(
       {
-        requester: 'test',
+        requester: externalWriterIdentity.principal.principalId,
         routeId: 'R02',
         capabilityId: validated.name,
         descriptor,
@@ -124,7 +144,7 @@ describe('evaluatePolicy', () => {
     });
     expect(
       evaluatePolicy(validated, {
-        requester: 'test',
+        identity: externalWriterIdentity,
         connectedAccount: 'instagram-account-1',
         approval,
         descriptorSha256: hashApprovalDescriptor(descriptor),
