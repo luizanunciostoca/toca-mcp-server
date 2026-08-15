@@ -101,21 +101,19 @@ describe('TOCA OS route and capability catalogs', () => {
 
   it('models Instagram provider permissions by authentication mode instead of one guessed scope', () => {
     const publication = getCapabilityDefinition('instagram.publish.image');
-    expect(publication?.permission_requirements).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          authentication_mode: 'META_FACEBOOK_LOGIN',
-          scopes: expect.arrayContaining(['instagram_basic', 'instagram_content_publish']),
-        }),
-        expect.objectContaining({
-          authentication_mode: 'META_INSTAGRAM_LOGIN',
-          scopes: expect.arrayContaining([
-            'instagram_business_basic',
-            'instagram_business_content_publish',
-          ]),
-        }),
-      ]),
+    const facebookLogin = publication?.permission_requirements.find(
+      (requirement) => requirement.authentication_mode === 'META_FACEBOOK_LOGIN',
     );
+    const instagramLogin = publication?.permission_requirements.find(
+      (requirement) => requirement.authentication_mode === 'META_INSTAGRAM_LOGIN',
+    );
+
+    expect(facebookLogin).toBeDefined();
+    expect(facebookLogin?.scopes).toContain('instagram_basic');
+    expect(facebookLogin?.scopes).toContain('instagram_content_publish');
+    expect(instagramLogin).toBeDefined();
+    expect(instagramLogin?.scopes).toContain('instagram_business_basic');
+    expect(instagramLogin?.scopes).toContain('instagram_business_content_publish');
   });
 
   it('keeps the runtime registry narrower than the canonical catalog and labels runtime contracts honestly', () => {
