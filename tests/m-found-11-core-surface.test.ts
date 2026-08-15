@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Vitest asymmetric matcher helpers expose any-typed matcher values in assertions. */
 import type { McpServer } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
 import * as z from 'zod/v4';
@@ -98,7 +99,7 @@ function schedulerBinding(
   const schema = z.object({ idempotencyKey: z.string().min(1) });
   return {
     inputSchema: schema,
-    execute: options.execute ?? (async () => ({ id: 'job_1' })),
+    execute: options.execute ?? (() => Promise.resolve({ id: 'job_1' })),
     idempotencyKey: (input) => `job:${schema.parse(input).idempotencyKey}`,
     sideEffectValidated: options.validated ?? true,
     ...(options.readback ? { providerReadback: options.readback } : {}),
@@ -175,17 +176,18 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
   });
 
   it('fails closed when runtime lifecycle is promoted beyond the canonical catalog', async () => {
-    const execute = vi.fn(async (_input: unknown) => ({ campaignId: 'campaign_1' }));
+    const execute = vi.fn(() => Promise.resolve({ campaignId: 'campaign_1' }));
     const binding: CoreCapabilityRuntimeBinding = {
       inputSchema: z.object({ accountId: z.string().min(1), name: z.string().min(1) }),
       execute,
       targetAccount: (input) => z.object({ accountId: z.string() }).parse(input).accountId,
       idempotencyKey: () => 'meta:test',
-      providerReadback: async () => ({
-        verified: true,
-        evidence: ['provider:test:campaign_1'],
-        externalResourceId: 'campaign_1',
-      }),
+      providerReadback: () =>
+        Promise.resolve({
+          verified: true,
+          evidence: ['provider:test:campaign_1'],
+          externalResourceId: 'campaign_1',
+        }),
       sideEffectValidated: true,
     };
 
@@ -211,7 +213,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
   });
 
   it('refuses a side-effect runtime binding that is not explicitly validated', async () => {
-    const execute = vi.fn(async (_input: unknown) => ({ id: 'job_1' }));
+    const execute = vi.fn(() => Promise.resolve({ id: 'job_1' }));
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
 
     await expect(
@@ -228,11 +230,12 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
             schedulerBinding({
               execute,
               validated: false,
-              readback: async () => ({
-                verified: true,
-                evidence: ['scheduler:job:job_1:scheduled'],
-                externalResourceId: 'job_1',
-              }),
+              readback: () =>
+                Promise.resolve({
+                  verified: true,
+                  evidence: ['scheduler:job:job_1:scheduled'],
+                  externalResourceId: 'job_1',
+                }),
             }),
           auditSink: new InMemoryAuditSink(),
         },
@@ -245,7 +248,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
   });
 
   it('enforces target-account authorization for account-scoped reads', async () => {
-    const execute = vi.fn(async (_input: unknown) => []);
+    const execute = vi.fn(() => Promise.resolve([]));
     const schema = z.object({
       adAccountId: z.string().min(1),
       currency: z.string().min(3),
@@ -305,7 +308,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
   });
 
   it('refuses every side effect that lacks provider read-back before invoking the handler', async () => {
-    const execute = vi.fn(async (_input: unknown) => ({ id: 'job_1' }));
+    const execute = vi.fn(() => Promise.resolve({ id: 'job_1' }));
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
 
     await expect(
@@ -345,10 +348,11 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
           registry,
           runtimeResolver: () =>
             schedulerBinding({
-              readback: async () => ({
-                verified: true,
-                evidence: ['scheduler:job:job_1:scheduled'],
-              }),
+              readback: () =>
+                Promise.resolve({
+                  verified: true,
+                  evidence: ['scheduler:job:job_1:scheduled'],
+                }),
             }),
           auditSink,
         },
@@ -375,11 +379,12 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
         registry,
         runtimeResolver: () =>
           schedulerBinding({
-            readback: async () => ({
-              verified: true,
-              evidence: ['scheduler:job:job_1:scheduled'],
-              externalResourceId: 'job_1',
-            }),
+            readback: () =>
+              Promise.resolve({
+                verified: true,
+                evidence: ['scheduler:job:job_1:scheduled'],
+                externalResourceId: 'job_1',
+              }),
           }),
         auditSink,
         createExecutionId: () => 'execution_1',
@@ -403,9 +408,9 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
 
   it('rejects a human-task id that is not part of the already-authorized workflow before mutation', async () => {
     const local = partialWorkflowSnapshot('wf_local', 'toca-do-morcego', []);
-    const claimHumanTask = vi.fn(async (_input: unknown) => local);
+    const claimHumanTask = vi.fn(() => Promise.resolve(local));
     const workflowStore = {
-      get: vi.fn(async (_workflowId: string) => local),
+      get: vi.fn(() => Promise.resolve(local)),
       claimHumanTask,
     } as unknown as WorkflowStore;
     const identity = operatorIdentity();
