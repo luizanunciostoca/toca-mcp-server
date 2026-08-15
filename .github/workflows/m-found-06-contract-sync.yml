@@ -1,0 +1,309 @@
+name: M-FOUND-06 Contract Sync
+
+on:
+  push:
+    branches:
+      - feat/m-found-06-durable-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Synchronize reference store with final contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/workflow/in-memory-workflow-store.ts')
+          text = p.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:{count}:{old[:80]}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "  assertJsonSerializable,\n  assertWorkflowStepClaim,",
+              "  assertJsonSerializable,\n  assertWorkflowCompensationClaim,\n  assertWorkflowStepClaim,",
+          )
+          replace_once(
+              "  type WorkflowCompensation,\n  type WorkflowDependency,",
+              "  type WorkflowCompensation,\n  type WorkflowCompensationClaim,\n  type WorkflowDependency,",
+          )
+          replace_once(
+              "    const existingWorkflowId = this.#idempotency.get(blueprint.idempotencyKey);",
+              "    const idempotencyScope = [\n      blueprint.tenantId,\n      blueprint.workspaceId,\n      blueprint.definitionId,\n      blueprint.idempotencyKey,\n    ].join(':');\n    const existingWorkflowId = this.#idempotency.get(idempotencyScope);",
+          )
+          replace_once(
+              "    this.#idempotency.set(blueprint.idempotencyKey, blueprint.workflowId);",
+              "    this.#idempotency.set(idempotencyScope, blueprint.workflowId);",
+          )
+          replace_once(
+              """    this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);
+    return this.#snapshot(input.workflowId);
+  }
+
+  async retryStep""",
+              """    if (step.attempts >= step.maxAttempts) {
+      for (const candidate of this.#requireSteps(input.workflowId).values()) {
+        if (!['PENDING', 'READY'].includes(candidate.status)) continue;
+        this.#requireSteps(input.workflowId).set(candidate.stepId, {
+          ...candidate,
+          status: 'BLOCKED',
+          version: candidate.version + 1,
+        });
+      }
+      this.#updateInstanceStatus(input.workflowId, 'FAILED', input.now, input.errorCode);
+    } else {
+      this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);
+    }
+    return this.#snapshot(input.workflowId);
+  }
+
+  async retryStep""",
+          )
+          replace_once(
+              """  async claimHumanTask(input: {
+    readonly taskId: string;
+    readonly principalId: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {""",
+              """  async claimHumanTask(input: {
+    readonly taskId: string;
+    readonly principalId: string;
+    readonly principalRoles?: readonly string[];
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {""",
+          )
+          replace_once(
+              """    const task = this.#requireHumanTask(input.taskId);
+    if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');
+
+    this.#humanTasks.set(input.taskId, {""",
+              """    const task = this.#requireHumanTask(input.taskId);
+    if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');
+    if (task.requiredRole && !new Set(input.principalRoles ?? []).has(task.requiredRole))
+      throw new Error('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');
+
+    this.#humanTasks.set(input.taskId, {""",
+          )
+          old_activate = """    for (const compensation of compensations) {
+      this.#compensations.set(compensation.compensationId, {
+        ...compensation,
+        status: 'READY',
+        evidence: mergeEvidence(compensation.evidence, evidence),
+        version: compensation.version + 1,
+      });
+      this.#appendEvent(
+        input.workflowId,
+        compensation.stepId,
+        'COMPENSATION_READY',
+        { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },
+        evidence,
+        input.now,
+      );
+    }
+    return this.#snapshot(input.workflowId);
+  }
+
+  #requireInstance"""
+          new_activate = """    const compensation = compensations.sort(
+      (a, b) => b.orderIndex - a.orderIndex || a.compensationId.localeCompare(b.compensationId),
+    )[0];
+    this.#compensations.set(compensation.compensationId, {
+      ...compensation,
+      status: 'READY',
+      evidence: mergeEvidence(compensation.evidence, evidence),
+      version: compensation.version + 1,
+    });
+    this.#appendEvent(
+      input.workflowId,
+      compensation.stepId,
+      'COMPENSATION_READY',
+      { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },
+      evidence,
+      input.now,
+    );
+    return this.#snapshot(input.workflowId);
+  }
+
+  claimReadyCompensations(input: {
+    readonly workerId: string;
+    readonly now: string;
+    readonly limit: number;
+  }): Promise<readonly WorkflowCompensationClaim[]> {
+    requireText(input.workerId, 'WORKFLOW_WORKER_ID_REQUIRED');
+    assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
+    assertLimit(input.limit);
+    const ready = [...this.#compensations.values()]
+      .filter((item) => item.status === 'READY')
+      .sort(
+        (a, b) =>
+          a.workflowId.localeCompare(b.workflowId) ||
+          b.orderIndex - a.orderIndex ||
+          a.compensationId.localeCompare(b.compensationId),
+      )
+      .slice(0, input.limit);
+    const claims: WorkflowCompensationClaim[] = [];
+    for (const compensation of ready) {
+      const executionId = this.#nextUniqueExecutionId();
+      this.#compensations.set(compensation.compensationId, {
+        ...compensation,
+        status: 'RUNNING',
+        claimedBy: input.workerId,
+        claimExecutionId: executionId,
+        claimedAt: input.now,
+        version: compensation.version + 1,
+      });
+      this.#appendEvent(
+        compensation.workflowId,
+        compensation.stepId,
+        'COMPENSATION_CLAIMED',
+        { compensationId: compensation.compensationId, workerId: input.workerId, executionId },
+        [],
+        input.now,
+      );
+      claims.push({
+        compensationId: compensation.compensationId,
+        workflowId: compensation.workflowId,
+        workerId: input.workerId,
+        executionId,
+        claimedAt: input.now,
+      });
+    }
+    return Promise.resolve(claims);
+  }
+
+  async completeCompensation(input: {
+    readonly compensationId: string;
+    readonly executionId: string;
+    readonly output?: unknown;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {
+    const evidence = requireWorkflowEvidence(input.evidence);
+    assertJsonSerializable(input.output ?? null);
+    assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
+    const compensation = this.#requireCompensation(input.compensationId);
+    assertWorkflowCompensationClaim(compensation, input.executionId);
+    this.#compensations.set(compensation.compensationId, {
+      ...compensation,
+      status: 'SUCCEEDED',
+      output: cloneJson(input.output ?? null),
+      completedAt: input.now,
+      errorCode: null,
+      evidence: mergeEvidence(compensation.evidence, evidence),
+      version: compensation.version + 1,
+    });
+    this.#appendEvent(
+      compensation.workflowId,
+      compensation.stepId,
+      'COMPENSATION_SUCCEEDED',
+      { compensationId: compensation.compensationId, executionId: input.executionId },
+      evidence,
+      input.now,
+    );
+    const next = this.#workflowCompensations(compensation.workflowId).find(
+      (item) => item.status === 'PENDING',
+    );
+    if (next) {
+      this.#compensations.set(next.compensationId, {
+        ...next,
+        status: 'READY',
+        evidence: mergeEvidence(next.evidence, evidence),
+        version: next.version + 1,
+      });
+      this.#appendEvent(
+        next.workflowId,
+        next.stepId,
+        'COMPENSATION_READY',
+        { compensationId: next.compensationId, orderIndex: next.orderIndex },
+        evidence,
+        input.now,
+      );
+    }
+    return this.#snapshot(compensation.workflowId);
+  }
+
+  async failCompensation(input: {
+    readonly compensationId: string;
+    readonly executionId: string;
+    readonly errorCode: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {
+    const evidence = requireWorkflowEvidence(input.evidence);
+    requireText(input.errorCode, 'WORKFLOW_COMPENSATION_ERROR_CODE_REQUIRED');
+    assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
+    const compensation = this.#requireCompensation(input.compensationId);
+    assertWorkflowCompensationClaim(compensation, input.executionId);
+    this.#compensations.set(compensation.compensationId, {
+      ...compensation,
+      status: 'FAILED',
+      completedAt: input.now,
+      errorCode: input.errorCode,
+      evidence: mergeEvidence(compensation.evidence, evidence),
+      version: compensation.version + 1,
+    });
+    this.#appendEvent(
+      compensation.workflowId,
+      compensation.stepId,
+      'COMPENSATION_FAILED',
+      {
+        compensationId: compensation.compensationId,
+        executionId: input.executionId,
+        errorCode: input.errorCode,
+      },
+      evidence,
+      input.now,
+    );
+    return this.#snapshot(compensation.workflowId);
+  }
+
+  #requireCompensation(compensationId: string): WorkflowCompensation {
+    const compensation = this.#compensations.get(compensationId);
+    if (!compensation) throw new Error('WORKFLOW_COMPENSATION_NOT_FOUND');
+    return compensation;
+  }
+
+  #requireInstance"""
+          replace_once(old_activate, new_activate)
+          p.write_text(text)
+          PY
+      - name: Format and validate reference contract
+        run: |
+          pnpm exec prettier --write src/workflow/workflow-contracts.ts src/workflow/in-memory-workflow-store.ts
+          pnpm format:check
+          pnpm typecheck
+      - name: Commit synchronized store and remove temporary workflow
+        run: |
+          rm .github/workflows/m-found-06-contract-sync.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: align durable workflow reference store"
+      - name: Push validated result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
