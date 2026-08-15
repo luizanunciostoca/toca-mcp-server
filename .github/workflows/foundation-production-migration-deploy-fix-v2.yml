@@ -1,0 +1,65 @@
+name: Foundation Production Migration Deploy Fix V2
+
+on:
+  push:
+    branches: [fix/foundation-daily-control-observability]
+    paths: ['.github/workflows/foundation-production-migration-deploy-fix-v2.yml']
+
+permissions:
+  contents: write
+
+env:
+  MIGRATION_JOB_B64: ICBtaWdyYXRlLXByb2R1Y3Rpb246CiAgICBuZWVkczogcXVhbGl0eS1idWlsZC1pbWFnZQogICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAogICAgZW52aXJvbm1lbnQ6IHByb2R1Y3Rpb24KICAgIHRpbWVvdXQtbWludXRlczogMjAKICAgIHN0ZXBzOgogICAgICAtIG5hbWU6IEF1dGhlbnRpY2F0ZSBkZXBsb3llciB0byBHb29nbGUgQ2xvdWQKICAgICAgICB1c2VzOiBnb29nbGUtZ2l0aHViLWFjdGlvbnMvYXV0aEBjMjAwZjM2OTFkODNiNDFiZjliYmQ4NjM4OTk3YTQ2MjU5MjkzN2VkICMgdjIKICAgICAgICB3aXRoOgogICAgICAgICAgd29ya2xvYWRfaWRlbnRpdHlfcHJvdmlkZXI6ICR7eyBlbnYuR0NQX1dPUktMT0FEX0lERU5USVRZX1BST1ZJREVSIH19CiAgICAgICAgICBzZXJ2aWNlX2FjY291bnQ6ICR7eyBlbnYuR0NQX0RFUExPWV9TRVJWSUNFX0FDQ09VTlQgfX0KCiAgICAgIC0gdXNlczogZ29vZ2xlLWdpdGh1Yi1hY3Rpb25zL3NldHVwLWdjbG91ZEBlNDI3YWQ4YTM0Zjg2NzZlZGY0N2NmN2Q3OTI1NDk5YWRmM2ViNzRmICMgdjIKCiAgICAgIC0gbmFtZTogQXBwbHkgYW5kIHZlcmlmeSBvZmZpY2lhbCBwcm9kdWN0aW9uIG1pZ3JhdGlvbnMKICAgICAgICBzaGVsbDogYmFzaAogICAgICAgIHJ1bjogfAogICAgICAgICAgc2V0IC1ldW8gcGlwZWZhaWwKICAgICAgICAgIElNQUdFPSIkR0NQX1JFR0lPTi1kb2NrZXIucGtnLmRldi8kR0NQX1BST0pFQ1RfSUQvJEdDUF9BUlRJRkFDVF9SRVBPU0lUT1JZL3NlcnZlcjp0b2NhLW1hbmFnZWQtZGFlbW9uLSR7R0lUSFVCX1NIQX0iCiAgICAgICAgICBKT0JfTkFNRT0idG9jYS1wcm9kdWN0aW9uLW1pZ3JhdGUtJHtHSVRIVUJfUlVOX0lEfS0ke0dJVEhVQl9SVU5fQVRURU1QVH0iCiAgICAgICAgICBjbGVhbnVwKCkgewogICAgICAgICAgICBnY2xvdWQgcnVuIGpvYnMgZGVsZXRlICIkSk9CX05BTUUiIFwKICAgICAgICAgICAgICAtLXByb2plY3QgIiRHQ1BfUFJPSkVDVF9JRCIgXAogICAgICAgICAgICAgIC0tcmVnaW9uICIkR0NQX1JFR0lPTiIgXAogICAgICAgICAgICAgIC0tcXVpZXQgPi9kZXYvbnVsbCAyPiYxIHx8IHRydWUKICAgICAgICAgIH0KICAgICAgICAgIHRyYXAgY2xlYW51cCBFWElUCgogICAgICAgICAgVkVSSUZZX1NDUklQVD0iY29uc3QgZnM9cmVxdWlyZSgnZnMnKTsgY29uc3Qge1Bvb2x9PXJlcXVpcmUoJ3BnJyk7IGNvbnN0IGV4cGVjdGVkPWZzLnJlYWRkaXJTeW5jKCcvYXBwL21pZ3JhdGlvbnMnKS5maWx0ZXIoeD0+eC5lbmRzV2l0aCgnLnNxbCcpKS5zb3J0KCk7IGNvbnN0IHA9bmV3IFBvb2woe2Nvbm5lY3Rpb25TdHJpbmc6cHJvY2Vzcy5lbnYuREFUQUJBU0VfVVJMfSk7IHAucXVlcnkoJ3NlbGVjdCB2ZXJzaW9uIGZyb20gc2NoZW1hX21pZ3JhdGlvbnMgb3JkZXIgYnkgdmVyc2lvbicpLnRoZW4ocj0+e2NvbnN0IGdvdD1yLnJvd3MubWFwKHg9PngudmVyc2lvbik7IGlmKEpTT04uc3RyaW5naWZ5KGdvdCkhPT1KU09OLnN0cmluZ2lmeShleHBlY3RlZCkpIHRocm93IG5ldyBFcnJvcignUFJPRFVDVElPTl9TQ0hFTUFfTUlHUkFUSU9OX0RSSUZUOicrSlNPTi5zdHJpbmdpZnkoe2V4cGVjdGVkLGdvdH0pKTsgY29uc29sZS5sb2coJ1BST0RVQ1RJT05fU0NIRU1BX01JR1JBVElPTlNfQ1VSUkVOVD0nK2V4cGVjdGVkLmxlbmd0aCk7fSkuZmluYWxseSgoKT0+cC5lbmQoKSk7IgogICAgICAgICAgVkVSSUZZX0I2ND0iJChwcmludGYgJyVzJyAiJFZFUklGWV9TQ1JJUFQiIHwgYmFzZTY0IC13MCkiCiAgICAgICAgICBDT01NQU5EPSJub2RlIGRpc3Qvc2NyaXB0cy9taWdyYXRlLmpzICYmIG5vZGUgLWUgXCJldmFsKEJ1ZmZlci5mcm9tKHByb2Nlc3MuZW52LlZFUklGWV9CNjQsJ2Jhc2U2NCcpLnRvU3RyaW5nKCkpXCIiCiAgICAgICAgICBDT01NQU5EX0I2ND0iJChwcmludGYgJyVzJyAiJENPTU1BTkQiIHwgYmFzZTY0IC13MCkiCgogICAgICAgICAgZ2Nsb3VkIHJ1biBqb2JzIGRlcGxveSAiJEpPQl9OQU1FIiBcCiAgICAgICAgICAgIC0taW1hZ2UgIiRJTUFHRSIgXAogICAgICAgICAgICAtLXByb2plY3QgIiRHQ1BfUFJPSkVDVF9JRCIgXAogICAgICAgICAgICAtLXJlZ2lvbiAiJEdDUF9SRUdJT04iIFwKICAgICAgICAgICAgLS1zZXJ2aWNlLWFjY291bnQgIiRHQ1BfUlVOVElNRV9TRVJWSUNFX0FDQ09VTlQiIFwKICAgICAgICAgICAgLS1zZXQtY2xvdWRzcWwtaW5zdGFuY2VzICIkQ0xPVURfU1FMX0lOU1RBTkNFIiIFwKICAgICAgICAgICAgLS1zZXQtc2VjcmV0cyAiREFUQUJBU0VfVVJMP SREQVRBQkFTRV9TRUNSRVRfSUQ6bGF0ZXN0IiBcCiAgICAgICAgICAgIC0tc2V0LWVudi12YXJzICJWRVJJRllfQjY0PSRWRVJJRllfQjY0LENPTU1BTkRfQjY0PSRDT01NQU5EX0I2NCIgXAogICAgICAgICAgICAtLWNvbW1hbmQgc2ggXAogICAgICAgICAgICAtLWFyZ3M9LWMsImV2YWwgXCJcJChwcmludGYgJyVzJyBcIlwkQ09NTUFORF9CNjRcIiB8IGJhc2U2NCAtZClcIiIgXAogICAgICAgICAgICAtLXRhc2tzIDEgXAogICAgICAgICAgICAtLW1heC1yZXRyaWVzIDAgXAogICAgICAgICAgICAtLXRhc2stdGltZW91dCAzMDBzIFwKICAgICAgICAgICAgLS1xdWlldAoKICAgICAgICAgIGdjbG91ZCBydW4gam9icyBleGVjdXRlICIkSk9CX05BTUUiIFwKICAgICAgICAgICAgLS1wcm9qZWN0ICIkR0NQX1BST0pFQ1RfSUQiIFwKICAgICAgICAgICAgLS1yZWdpb24gIiRHQ1BfUkVHSU9OIiBcCiAgICAgICAgICAgIC0td2FpdCBcCiAgICAgICAgICAgIC0tcXVpZXQKICAgICAgICAgIGVjaG8gJ1RPQ0FfUFJPRFVDVElPTl9TQ0hFTUFfTUlHUkFUSU9OX0dBVEU9UEFTUycKCg==
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/foundation-daily-control-observability
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Patch permanent deploy gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          path = Path('.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml')
+          text = path.read_text()
+          if '  migrate-production:\n' in text:
+              raise SystemExit('migrate-production already exists')
+          marker = '  provision-minute-trigger:\n'
+          if marker not in text:
+              raise SystemExit('provision marker missing')
+          job = base64.b64decode(os.environ['MIGRATION_JOB_B64']).decode()
+          text = text.replace(marker, job + marker, 1)
+          old = '    needs: [quality-build-image, provision-minute-trigger]\n'
+          new = '    needs: [quality-build-image, migrate-production, provision-minute-trigger]\n'
+          if old not in text:
+              raise SystemExit('deploy needs marker missing')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          pnpm quality
+      - name: Commit deployment gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml
+          git commit -m 'fix(reliability): gate production deploy on schema migrations'
+          git push origin HEAD:fix/foundation-daily-control-observability
