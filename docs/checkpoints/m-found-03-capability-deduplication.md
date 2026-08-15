@@ -22,16 +22,16 @@ This avoids a destructive renumbering/rewrite and makes later TOCA Core capabili
 
 The following R09 capabilities are exact semantic aliases of the R30 engagement lifecycle and now resolve to the R30 canonical identity:
 
-| Compatibility ID (R09) | Canonical ID (R30) |
-|---|---|
-| `social.intent.classify` | `engagement.classify_intent` |
+| Compatibility ID (R09)      | Canonical ID (R30)              |
+| --------------------------- | ------------------------------- |
+| `social.intent.classify`    | `engagement.classify_intent`    |
 | `social.sentiment.classify` | `engagement.classify_sentiment` |
-| `social.lead.detect` | `engagement.identify_lead` |
-| `social.response.draft` | `engagement.response.generate` |
-| `social.response.send` | `engagement.reply.send` |
-| `social.escalate` | `engagement.escalate` |
-| `social.assign` | `engagement.assign_human` |
-| `social.close` | `engagement.close` |
+| `social.lead.detect`        | `engagement.identify_lead`      |
+| `social.response.draft`     | `engagement.response.generate`  |
+| `social.response.send`      | `engagement.reply.send`         |
+| `social.escalate`           | `engagement.escalate`           |
+| `social.assign`             | `engagement.assign_human`       |
+| `social.close`              | `engagement.close`              |
 
 All eight mappings are marked `EXACT` and deprecated as compatibility identities since semantic resolution contract `1.2.0`.
 
