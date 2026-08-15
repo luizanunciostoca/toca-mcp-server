@@ -78,9 +78,9 @@ describe('M-FOUND-08 audit ledger integrity', () => {
     });
   });
 
-  it('detects tampering with a hashed audit field', () => {
+  it('detects tampering with the persisted event hash', () => {
     const started = record(base, 1, AUDIT_GENESIS_HASH, 'audit-1');
-    const tampered: AuditLedgerRecord = { ...started, status: 'FAILED' };
+    const tampered: AuditLedgerRecord = { ...started, eventHash: 'f'.repeat(64) };
     const head: AuditLedgerHead = {
       executionId: base.executionId,
       correlationId: base.correlationId,
