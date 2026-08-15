@@ -91,6 +91,7 @@ export async function proveOutboundPrivacyEligibility(
   if (subject.contactRecordId !== contactRecordId) {
     throw new Error('OMNICHANNEL_PRIVACY_SUBJECT_CONTACT_MISMATCH');
   }
+  const resolvedSubjectRef = subject.subjectRef;
 
   const privacyChannel = toPrivacyChannel(input.channel);
   const privacyContext: PrivacyExecutionContext = {
@@ -110,7 +111,7 @@ export async function proveOutboundPrivacyEligibility(
 
   const purpose = await deps.privacy.resolvePurpose({
     context: privacyContext,
-    subjectRef: subject.subjectRef,
+    subjectRef: resolvedSubjectRef,
     purposeId,
   });
   if (purpose.blocked || purpose.state !== 'KNOWN') {
@@ -119,7 +120,7 @@ export async function proveOutboundPrivacyEligibility(
 
   const decision = await deps.privacy.checkSuppression({
     context: privacyContext,
-    subjectRef: subject.subjectRef,
+    subjectRef: resolvedSubjectRef,
     purposeId,
     channel: privacyChannel,
     preferenceRequired: input.preferenceRequired,
@@ -128,7 +129,7 @@ export async function proveOutboundPrivacyEligibility(
     throw new Error(`OMNICHANNEL_PRIVACY_BLOCKED:${decision.state}:${decision.reasons.join(',')}`);
   }
 
-  const events = await deps.privacyStore.listForSubject(scope.tenantId, subject.subjectRef);
+  const events = await deps.privacyStore.listForSubject(scope.tenantId, resolvedSubjectRef);
   const purposeDecision = findExecutionEvent(events, {
     eventType: 'PURPOSE_RESOLVED',
     executionId,
@@ -187,7 +188,7 @@ export async function proveOutboundPrivacyEligibility(
     ...scope,
     requesterPrincipalId: input.identity.principal.principalId,
     contactRecordId,
-    subjectRef: subject.subjectRef,
+    subjectRef: resolvedSubjectRef,
     purposeId,
     channel: input.channel,
     privacyChannel,
@@ -293,6 +294,6 @@ function requireEvidence(values: readonly string[], errorCode: string): readonly
   return evidence;
 }
 
-function mergeEvidence(...sources: readonly (readonly string[])[]): readonly string[] {
+function mergeEvidence(...sources: (readonly string[])[]): readonly string[] {
   return [...new Set(sources.flat().map((value) => value.trim()).filter(Boolean))].sort();
 }
