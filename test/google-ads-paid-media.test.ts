@@ -89,7 +89,7 @@ class FakeGoogleAdsApi implements GoogleAdsApiClient {
   }
 }
 
-function createProvider(api = new FakeGoogleAdsApi()) {
+function createProvider(api: GoogleAdsApiClient & { mutations: Array<{ path: string; body: Record<string, unknown> }> } = new FakeGoogleAdsApi()) {
   return {
     api,
     provider: new GoogleAdsPaidMediaProvider(api, {
@@ -132,7 +132,7 @@ describe('Google Ads R28 paid media provider', () => {
     expect(campaignOperation.create).toMatchObject({ status: 'PAUSED' });
   });
 
-  it('creates only a PAUSED campaign and exposes the real resource name for read-back', async () => {
+  it('creates only a PAUSED campaign and exposes the exact target-account resource name for read-back', async () => {
     const { api, provider } = createProvider();
 
     const output = await provider.createPaused(plan);
@@ -143,6 +143,61 @@ describe('Google Ads R28 paid media provider', () => {
       expectedCampaignStatus: 'PAUSED',
       campaignResourceName: 'customers/1234567890/campaigns/456',
     });
+  });
+
+  it('rejects a create response whose campaign resource belongs to another customer', async () => {
+    class CrossAccountCreateApi extends FakeGoogleAdsApi {
+      override async mutate(path: string, body: Record<string, unknown>) {
+        this.mutations.push({ path, body });
+        return {
+          body: {
+            mutateOperationResponses: [
+              {
+                campaignResult: {
+                  resourceName: 'customers/9999999999/campaigns/456',
+                },
+              },
+            ],
+          },
+          requestId: 'req-cross-account',
+        };
+      }
+    }
+    const { provider } = createProvider(new CrossAccountCreateApi());
+
+    await expect(provider.createPaused(plan)).rejects.toThrow(
+      'GOOGLE_ADS_CAMPAIGN_RESOURCE_BOUNDARY_VIOLATION',
+    );
+  });
+
+  it('rejects provider read-back when the returned campaign is outside the target account', async () => {
+    class CrossAccountReadbackApi extends FakeGoogleAdsApi {
+      override async search(query: string) {
+        if (query.includes('customer.id')) return super.search(query);
+        return {
+          body: {
+            results: [
+              {
+                campaign: {
+                  id: '456',
+                  resourceName: 'customers/9999999999/campaigns/456',
+                  status: 'PAUSED',
+                },
+              },
+            ],
+          },
+          requestId: 'req-cross-readback',
+        };
+      }
+    }
+    const { provider } = createProvider(new CrossAccountReadbackApi());
+
+    await expect(provider.readbackCampaign('456')).rejects.toThrow(
+      'GOOGLE_ADS_CAMPAIGN_RESOURCE_BOUNDARY_VIOLATION',
+    );
+    await expect(
+      provider.readbackCampaign('customers/9999999999/campaigns/456'),
+    ).rejects.toThrow('GOOGLE_ADS_CAMPAIGN_RESOURCE_BOUNDARY_VIOLATION');
   });
 
   it('enforces account, currency, location and financial ceilings before any write', () => {
@@ -166,7 +221,7 @@ describe('Google Ads R28 paid media provider', () => {
     expect(api.mutations).toHaveLength(0);
   });
 
-  it('converts provider micros to approval minor units and validates budget before activation', async () => {
+  it('converts provider micros to approval minor units and requires a PAUSED readback before activation', async () => {
     const { api, provider } = createProvider();
 
     expect(provider.minorUnitsForMicros(50_000_000)).toBe(5_000);
@@ -176,6 +231,44 @@ describe('Google Ads R28 paid media provider', () => {
     expect(api.mutations[0]?.path).toBe('/customers/1234567890/campaigns:mutate');
     const operations = api.mutations[0]?.body.operations as Array<Record<string, unknown>>;
     expect(operations[0]?.update).toMatchObject({ status: 'ENABLED' });
+  });
+
+  it('fails closed before activation when readback does not prove the campaign is PAUSED', async () => {
+    class EnabledReadbackApi extends FakeGoogleAdsApi {
+      override async search(query: string) {
+        const result = await super.search(query);
+        const first = result.body.results?.[0] as Record<string, unknown> | undefined;
+        const campaign = first?.campaign as Record<string, unknown> | undefined;
+        if (campaign) campaign.status = 'ENABLED';
+        return result;
+      }
+    }
+    const api = new EnabledReadbackApi();
+    const { provider } = createProvider(api);
+
+    await expect(provider.activateCampaign('456')).rejects.toThrow(
+      'GOOGLE_ADS_ACTIVATION_REQUIRES_PAUSED_READBACK',
+    );
+    expect(api.mutations).toHaveLength(0);
+  });
+
+  it('rejects a budget resource returned from another customer before mutating it', async () => {
+    class CrossAccountBudgetApi extends FakeGoogleAdsApi {
+      override async search(query: string) {
+        const result = await super.search(query);
+        const first = result.body.results?.[0] as Record<string, unknown> | undefined;
+        const campaign = first?.campaign as Record<string, unknown> | undefined;
+        if (campaign) campaign.campaignBudget = 'customers/9999999999/campaignBudgets/789';
+        return result;
+      }
+    }
+    const api = new CrossAccountBudgetApi();
+    const { provider } = createProvider(api);
+
+    await expect(provider.updateBudget('456', 50_000_000)).rejects.toThrow(
+      'GOOGLE_ADS_BUDGET_RESOURCE_BOUNDARY_VIOLATION',
+    );
+    expect(api.mutations).toHaveLength(0);
   });
 });
 
