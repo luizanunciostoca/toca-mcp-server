@@ -8,7 +8,10 @@ import {
   type PolicyContext,
 } from './policy.js';
 import type { ToolDefinition } from './tool-registry.js';
-import type { ApprovalAtomicTransition, ApprovalStore } from '../governance/approval-governance.js';
+import type {
+  ApprovalAtomicTransition,
+  ApprovalStore,
+} from '../governance/approval-governance.js';
 
 export interface ProviderReadbackResult {
   readonly verified: boolean;
@@ -34,8 +37,8 @@ export interface ExecuteToolOptions<T> {
   readonly createExecutionId?: () => string;
 }
 
-function createAuditEvent(
-  options: ExecuteToolOptions<unknown>,
+function createAuditEvent<T>(
+  options: ExecuteToolOptions<T>,
   policyContext: PolicyContext,
   executionId: string,
   status: AuditEvent['status'],
@@ -101,7 +104,8 @@ export async function executeTool<T>(options: ExecuteToolOptions<T>): Promise<T>
   }
 
   if (formalApproval) {
-    if (!options.approvalExecution) {
+    const approvalExecution = options.approvalExecution;
+    if (!approvalExecution) {
       await options.auditSink.write(
         createAuditEvent(effectiveOptions, policyContext, executionId, 'DENIED', {
           errorCode: 'APPROVAL_ATOMICITY_REQUIRED',
@@ -112,7 +116,11 @@ export async function executeTool<T>(options: ExecuteToolOptions<T>): Promise<T>
         'Formal approval writes require an ApprovalStore reservation and provider readback contract.',
       );
     }
-    return executeWithAtomicApproval(effectiveOptions, policyContext, executionId);
+    return executeWithAtomicApproval(
+      { ...effectiveOptions, approvalExecution },
+      policyContext,
+      executionId,
+    );
   }
 
   await options.auditSink.write(
