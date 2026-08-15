@@ -1,0 +1,99 @@
+name: M-FOUND-06 Reconcile
+
+on:
+  push:
+    branches:
+      - feat/m-found-06-durable-workflows
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply bounded workflow persistence fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'PATCH_ANCHOR_COUNT_INVALID:{path}:{count}')
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once('src/workflow/in-memory-workflow-store.ts', "    const idempotencyScope = [\n      blueprint.tenantId,\n      blueprint.workspaceId,\n      blueprint.definitionId,\n      blueprint.idempotencyKey,\n    ].join(':');", "    const idempotencyScope = [blueprint.tenantId, blueprint.idempotencyKey].join(':');")
+          replace_once('src/workflow/in-memory-workflow-store.ts', "        const executionId = this.#nextUniqueExecutionId();\n        const claimed: WorkflowStep = {", "        const executionId = this.#nextUniqueExecutionId();\n        const nextAttempts = step.startedAt === null ? step.attempts + 1 : step.attempts;\n        const claimed: WorkflowStep = {")
+          replace_once('src/workflow/in-memory-workflow-store.ts', "          attempts: step.attempts + 1,", "          attempts: nextAttempts,")
+          replace_once('src/workflow/in-memory-workflow-store.ts', "    if (step.attempts >= step.maxAttempts) {\n      for (const candidate of this.#requireSteps(input.workflowId).values()) {\n        if (!['PENDING', 'READY'].includes(candidate.status)) continue;\n        this.#requireSteps(input.workflowId).set(candidate.stepId, {\n          ...candidate,\n          status: 'BLOCKED',\n          version: candidate.version + 1,\n        });\n      }\n      this.#updateInstanceStatus(input.workflowId, 'FAILED', input.now, input.errorCode);\n    } else {\n      this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);\n    }", "    this.#updateInstanceStatus(input.workflowId, 'BLOCKED', input.now, input.errorCode);")
+          replace_once('src/workflow/in-memory-workflow-store.ts', "    if (Date.parse(input.fireAt) <= Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_NOT_FUTURE');", "    if (Date.parse(input.fireAt) < Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_IN_PAST');")
+          replace_once('src/workflow/in-memory-workflow-store.ts', "    const compensation = compensations[0];\n    this.#compensations.set(compensation.compensationId, {\n      ...compensation,\n      status: 'READY',\n      evidence: mergeEvidence(compensation.evidence, evidence),\n      version: compensation.version + 1,\n    });\n    this.#appendEvent(\n      input.workflowId,\n      compensation.stepId,\n      'COMPENSATION_READY',\n      { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },\n      evidence,\n      input.now,\n    );", "    for (const compensation of compensations) {\n      this.#compensations.set(compensation.compensationId, {\n        ...compensation,\n        status: 'READY',\n        evidence: mergeEvidence(compensation.evidence, evidence),\n        version: compensation.version + 1,\n      });\n      this.#appendEvent(\n        input.workflowId,\n        compensation.stepId,\n        'COMPENSATION_READY',\n        { compensationId: compensation.compensationId, orderIndex: compensation.orderIndex },\n        evidence,\n        input.now,\n      );\n    }")
+
+          replace_once('src/persistence/postgres-workflow-store.ts', "         where s.status = 'READY'\n           and w.status in ('RUNNING', 'WAITING')", "         where s.status = 'READY'\n           and s.attempts < s.max_attempts\n           and w.status in ('RUNNING', 'WAITING')")
+          replace_once('src/persistence/postgres-workflow-store.ts', "             status = 'RUNNING', attempts = attempts + 1, claimed_by = $3,", "             status = 'RUNNING',\n             attempts = attempts + case when started_at is null then 1 else 0 end,\n             claimed_by = $3,")
+          replace_once('src/persistence/postgres-workflow-store.ts', "            attempt: row.attempts + 1,", "            attempt: row.started_at === null ? row.attempts + 1 : row.attempts,")
+          replace_once('src/persistence/postgres-workflow-store.ts', "           status = 'READY', output = null, completed_at = null, error_code = null,", "           status = 'READY', output = null, started_at = null,\n           completed_at = null, error_code = null,")
+          replace_once('src/persistence/postgres-workflow-store.ts', "  async claimHumanTask(input: {\n    readonly taskId: string;\n    readonly principalId: string;\n    readonly evidence: readonly string[];", "  async claimHumanTask(input: {\n    readonly taskId: string;\n    readonly principalId: string;\n    readonly principalRoles?: readonly string[];\n    readonly evidence: readonly string[];")
+          replace_once('src/persistence/postgres-workflow-store.ts', "      if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');\n      const instance = await this.#lockInstance(client, workflowId);", "      if (task.status !== 'OPEN') throw new Error('WORKFLOW_HUMAN_TASK_NOT_OPEN');\n      if (task.required_role && !new Set(input.principalRoles ?? []).has(task.required_role))\n        throw new Error('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');\n      const instance = await this.#lockInstance(client, workflowId);")
+
+          p = Path('src/persistence/postgres-workflow-store.ts')
+          text = p.read_text()
+          text = text.replace('return this.#readSnapshot(blueprint.workflowId);', 'return this.#requireSnapshot(blueprint.workflowId);')
+          text = text.replace('return this.#readSnapshot(input.workflowId);', 'return this.#requireSnapshot(input.workflowId);')
+          text = text.replace('return this.#readSnapshot(workflowId);', 'return this.#requireSnapshot(workflowId);')
+          anchor = "  async #readSnapshot(\n    workflowId: string,\n    allowMissing = false,\n  ): Promise<WorkflowSnapshot | undefined> {"
+          if '#requireSnapshot(workflowId: string)' not in text:
+              if text.count(anchor) != 1:
+                  raise SystemExit('PATCH_ANCHOR_COUNT_INVALID:require-snapshot')
+              helper = "  async #requireSnapshot(workflowId: string): Promise<WorkflowSnapshot> {\n    const snapshot = await this.#readSnapshot(workflowId, true);\n    if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');\n    return snapshot;\n  }\n\n"
+              text = text.replace(anchor, helper + anchor, 1)
+          p.write_text(text)
+
+          p = Path('test/durable-workflow.test.ts')
+          text = p.read_text()
+          old = "    await store.claimHumanTask({\n      taskId: 'task-1',\n      principalId: 'luiz',\n      evidence: ['identity://luiz'],"
+          if text.count(old) != 1:
+              raise SystemExit('PATCH_ANCHOR_COUNT_INVALID:test-human-role')
+          new = "    await expect(\n      store.claimHumanTask({\n        taskId: 'task-1',\n        principalId: 'luiz',\n        evidence: ['identity://luiz/no-role'],\n        now: '2026-08-14T22:02:30Z',\n      }),\n    ).rejects.toThrow('WORKFLOW_HUMAN_TASK_ROLE_REQUIRED');\n\n    await store.claimHumanTask({\n      taskId: 'task-1',\n      principalId: 'luiz',\n      principalRoles: ['APPROVER'],\n      evidence: ['identity://luiz'],"
+          text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+      - name: Validate reconciliation
+        run: |
+          pnpm exec prettier --write \
+            src/workflow/workflow-contracts.ts \
+            src/workflow/in-memory-workflow-store.ts \
+            src/persistence/postgres-workflow-store.ts \
+            test/durable-workflow.test.ts
+          pnpm format:check
+          pnpm typecheck
+          pnpm test -- durable-workflow
+      - name: Remove temporary workflow and commit validated changes
+        run: |
+          rm .github/workflows/m-found-06-reconcile.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: reconcile durable workflow execution invariants"
+      - name: Push validated reconciliation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:feat/m-found-06-durable-workflows"
