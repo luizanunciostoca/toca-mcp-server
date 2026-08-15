@@ -30,6 +30,7 @@ export interface CoreCapabilityRuntimeBinding {
   readonly idempotencyKey?: (input: unknown) => string | undefined;
   readonly financialContext?: (input: unknown) => CoreCapabilityFinancialContext | undefined;
   readonly providerReadback?: (result: unknown, input: unknown) => Promise<ProviderReadbackResult>;
+  readonly sideEffectValidated?: boolean;
 }
 
 export type CoreCapabilityRuntimeResolver = (
@@ -324,6 +325,12 @@ export function resolveCoreRuntimeExecution(
     );
   }
   assertRuntimeContract(tool, resolvedDefinition.canonical_definition);
+  if (tool.sideEffects && binding.sideEffectValidated !== true) {
+    throw unavailable(
+      'CAPABILITY_RUNTIME_BINDING_UNVALIDATED',
+      `Side-effect runtime binding for ${capabilityId} has not been explicitly validated for execution.`,
+    );
+  }
 
   let parsed: unknown;
   try {
@@ -388,9 +395,7 @@ function assertAuthorized(identity: ExecutionIdentity, resolved: ResolvedRuntime
     capabilityId: resolved.capabilityId,
     riskClass: resolved.tool.riskClass,
     ...(routeId && routeId !== 'TRANSVERSAL' ? { routeId } : {}),
-    ...(resolved.tool.sideEffects && resolved.targetAccount
-      ? { targetAccount: resolved.targetAccount }
-      : {}),
+    ...(resolved.targetAccount ? { targetAccount: resolved.targetAccount } : {}),
   });
   if (!authorization.allowed) {
     throw new ExecutionError('POLICY_DENIED', authorization.reason);
