@@ -1,12 +1,14 @@
 # M-FOUND-09 — EventRecord
 
-Status: **VALIDATED IN RUNNER — OFFICIAL PR QUALITY GATE PENDING**
+Status: **READY TO MERGE — OFFICIAL PR QUALITY GREEN**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `1a3333c0e31eeddb46af421ef5ced2ffca572d5d`
 
-Validated full repository run: `31865371900` — **SUCCESS** (`pnpm quality`)
+Validated implementation run: `31865371900` — **SUCCESS** (`pnpm quality`)
+
+Official PR Quality Gate: `31865472569` / run `#1051` — **SUCCESS**
 
 ## Objective
 
@@ -156,7 +158,9 @@ M-FOUND-09 is complete when:
 
 The clean implementation head passed full repository `pnpm quality` in GitHub Actions run `31865371900`. The validation workflow and patch script removed themselves before the validated commit was pushed.
 
-A normal pull-request Quality Gate is still required on the final checkpoint head before merge.
+The final checkpoint head then passed the normal pull-request Quality Gate `#1051` (run `31865472569`) with Format, Architecture, Lint, Typecheck, all tests and Build green.
+
+Because this checkpoint update creates a documentation-only head, that exact final head must pass the normal PR Quality Gate before merge. Merge remains fixed-head only, followed by post-merge `main` validation.
 
 ## Exit
 
