@@ -31,6 +31,34 @@ try {
     )
   ).rows.map((row) => row.table_name);
 
+  const dailyControl = tables.includes('operational_signals')
+    ? (
+        await pool.query<{
+          name: string;
+          value: number;
+          attributes: Record<string, unknown>;
+          evidence: string[];
+          occurred_at: Date | string;
+        }>(
+          `select name, value, attributes, evidence, occurred_at
+           from operational_signals
+           where name = 'foundation.daily_control.completed'
+             and attributes->>'dayKey' = '2026-08-15'
+           order by occurred_at desc
+           limit 1`,
+        )
+      ).rows.map((row) => ({
+        name: row.name,
+        value: row.value,
+        attributes: row.attributes,
+        evidence: row.evidence,
+        occurredAt:
+          row.occurred_at instanceof Date
+            ? row.occurred_at.toISOString()
+            : new Date(row.occurred_at).toISOString(),
+      }))
+    : [];
+
   console.log(
     `PRODUCTION_SCHEMA_AUDIT=${JSON.stringify({
       registryExists,
@@ -44,6 +72,7 @@ try {
         operational_signals: tables.includes('operational_signals'),
         event_records: tables.includes('event_records'),
       },
+      dailyControl,
     })}`,
   );
 } finally {
