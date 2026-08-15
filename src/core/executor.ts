@@ -29,6 +29,9 @@ function createAuditEvent(
       ? {
           principalType: principal.principalType,
           tenantId: principal.tenantId,
+          workspaceId: principal.workspaceId,
+          organizationId: principal.organizationId,
+          ...(principal.sessionId ? { sessionId: principal.sessionId } : {}),
           authenticationMethod: principal.authenticationMethod,
         }
       : {}),
