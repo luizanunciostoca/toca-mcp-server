@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
+import { createDomainEvent } from '../events/domain-events.js';
+import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
+import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
 import {
   assertJsonSerializable,
   requireWorkflowEvidence,
@@ -124,16 +127,19 @@ interface WorkflowCompensationRow {
 
 export interface PostgresWorkflowStoreOptions {
   readonly createId?: () => string;
+  readonly outbox?: TransactionalOutboxWriter;
 }
 
 export class PostgresWorkflowStore implements WorkflowStore {
   readonly #createId: () => string;
+  readonly #outbox: TransactionalOutboxWriter;
 
   constructor(
     private readonly pool: pg.Pool,
     options: PostgresWorkflowStoreOptions = {},
   ) {
     this.#createId = options.createId ?? randomUUID;
+    this.#outbox = options.outbox ?? new PostgresTransactionalOutbox(pool);
   }
 
   async create(
@@ -1110,13 +1116,14 @@ export class PostgresWorkflowStore implements WorkflowStore {
 
   async #appendEvent(client: pg.PoolClient, input: Omit<WorkflowEvent, 'eventId'>): Promise<void> {
     assertJsonSerializable(input.payload);
+    const eventId = this.#createId();
     await client.query(
       `insert into workflow_events (
          event_id, workflow_id, step_id, event_type, correlation_id,
          payload, evidence, occurred_at
        ) values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::timestamptz)`,
       [
-        this.#createId(),
+        eventId,
         input.workflowId,
         input.stepId,
         input.eventType,
@@ -1126,6 +1133,37 @@ export class PostgresWorkflowStore implements WorkflowStore {
         input.occurredAt,
       ],
     );
+
+    const context = await client.query<
+      Pick<WorkflowInstanceRow, 'tenant_id' | 'workspace_id' | 'organization_id' | 'version'>
+    >(
+      `select tenant_id, workspace_id, organization_id, version
+       from workflow_instances where workflow_id = $1`,
+      [input.workflowId],
+    );
+    const instance = context.rows[0];
+    if (!instance) throw new Error('WORKFLOW_NOT_FOUND');
+    const domainEvent = createDomainEvent({
+      eventKey: eventId,
+      eventType: `workflow.${input.eventType.toLowerCase()}`,
+      aggregateType: 'workflow',
+      aggregateId: input.workflowId,
+      aggregateVersion: instance.version,
+      tenantId: instance.tenant_id,
+      workspaceId: instance.workspace_id,
+      organizationId: instance.organization_id,
+      correlationId: input.correlationId,
+      causationId: null,
+      occurredAt: input.occurredAt,
+      payload: {
+        workflowEventId: eventId,
+        workflowEventType: input.eventType,
+        stepId: input.stepId,
+        payload: input.payload,
+      },
+      evidence: [...input.evidence, `workflow-event:${eventId}`],
+    });
+    await this.#outbox.enqueue(client, domainEvent);
   }
 
   async #claimExecution(
