@@ -30,9 +30,9 @@ describe('TOCA OS route and capability catalogs', () => {
     expect(getRouteDefinition('R31').subflows).toContain('LOCAL_PERFORMANCE');
   });
 
-  it('materializes the 745-capability catalog using contract v1.1 without pretending inference is explicit', () => {
+  it('materializes the 770-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(745);
+    expect(CAPABILITY_CATALOG).toHaveLength(770);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
