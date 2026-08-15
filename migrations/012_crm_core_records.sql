@@ -87,7 +87,7 @@ create table if not exists crm_leads (
   check (qualification in ('UNQUALIFIED', 'MARKETING_QUALIFIED', 'SALES_QUALIFIED', 'DISQUALIFIED')),
   check (score is null or (score >= 0 and score <= 100)),
   check (status <> 'DISQUALIFIED' or (qualification = 'DISQUALIFIED' and disqualified_reason is not null)),
-  check (status = 'DISQUALIFIED' or disqualified_reason is null),
+  check (status in ('DISQUALIFIED', 'ARCHIVED') or disqualified_reason is null),
   check (status <> 'CONVERTED' or qualification = 'SALES_QUALIFIED'),
   check (jsonb_typeof(attributes) = 'object'),
   check (version >= 1)
@@ -133,9 +133,9 @@ create table if not exists crm_opportunities (
          (value_minor is not null and value_minor >= 0 and currency ~ '^[A-Z]{3}$')),
   check (next_action_at is null or next_action is not null),
   check (status <> 'OPEN' or closed_at is null),
-  check (status not in ('WON', 'LOST', 'CANCELED') or closed_at is not null),
+  check (status = 'OPEN' or closed_at is not null),
   check (status <> 'LOST' or loss_reason is not null),
-  check (status = 'LOST' or loss_reason is null),
+  check (status in ('LOST', 'ARCHIVED') or loss_reason is null),
   check (jsonb_typeof(attributes) = 'object'),
   check (version >= 1)
 );

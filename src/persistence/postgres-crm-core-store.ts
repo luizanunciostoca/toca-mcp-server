@@ -188,12 +188,21 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
       value: requireCrmText(channel.value, 'CRM_CONTACT_CHANNEL_VALUE_REQUIRED'),
       normalizedValue: normalizeCrmChannelValue(channel.channelType, channel.value),
       primary: channel.primary ?? false,
-      verifiedAt: normalizeNullableTimestamp(channel.verifiedAt, 'CRM_CONTACT_CHANNEL_VERIFIED_AT_INVALID'),
+      verifiedAt: normalizeNullableTimestamp(
+        channel.verifiedAt,
+        'CRM_CONTACT_CHANNEL_VERIFIED_AT_INVALID',
+      ),
     }));
     assertDistinctChannels(channels);
 
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'contact.create', 'CONTACT', record.contactId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'contact.create',
+        'CONTACT',
+        record.contactId,
+      );
       if (replay) return contactFromSnapshot(replay);
 
       const inserted = await client.query<ContactRow>(
@@ -202,22 +211,41 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
            display_name, status, attributes, version, created_at, updated_at
          ) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,1,$9::timestamptz,$9::timestamptz)
          returning *`,
-        [record.contactId, record.tenantId, record.workspaceId, record.organizationId,
-          record.contactType, record.displayName, record.status, json(record.attributes), now],
+        [
+          record.contactId,
+          record.tenantId,
+          record.workspaceId,
+          record.organizationId,
+          record.contactType,
+          record.displayName,
+          record.status,
+          json(record.attributes),
+          now,
+        ],
       );
       const created = contactFromRow(requiredRow(inserted.rows[0], 'CRM_CONTACT_INSERT_FAILED'));
       for (const channel of channels) {
         await insertChannel(client, created, channel, metadata.evidence, now);
       }
-      await this.#recordMutation(client, 'CONTACT', created, 'CREATED', {
-        channelIds: channels.map((channel) => channel.channelId).sort(),
-      }, metadata, 'contact.created');
+      await this.#recordMutation(
+        client,
+        'CONTACT',
+        created,
+        'CREATED',
+        {
+          channelIds: channels.map((channel) => channel.channelId).sort(),
+        },
+        metadata,
+        'contact.created',
+      );
       await completeIdempotency(client, input, 'contact.create', created.contactId, created, now);
       return created;
     });
   }
 
-  async getContact(input: CrmScope & { readonly contactId: string }): Promise<ContactRecord | undefined> {
+  async getContact(
+    input: CrmScope & { readonly contactId: string },
+  ): Promise<ContactRecord | undefined> {
     validateCrmScope(input);
     const result = await this.pool.query<ContactRow>(
       `select * from crm_contacts where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4`,
@@ -231,13 +259,22 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     const metadata = normalizeMetadata(input);
     assertCrmVersion(input.expectedVersion);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'contact.update', 'CONTACT', input.contactId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'contact.update',
+        'CONTACT',
+        input.contactId,
+      );
       if (replay) return contactFromSnapshot(replay);
       const current = await lockContact(client, input);
       assertExpectedVersion(current.version, input.expectedVersion);
       const next: ContactRecord = {
         ...current,
-        displayName: input.displayName === undefined ? current.displayName : requireCrmText(input.displayName, 'CRM_CONTACT_DISPLAY_NAME_REQUIRED'),
+        displayName:
+          input.displayName === undefined
+            ? current.displayName
+            : requireCrmText(input.displayName, 'CRM_CONTACT_DISPLAY_NAME_REQUIRED'),
         status: input.status ?? current.status,
         attributes: input.attributes ?? current.attributes,
         version: current.version + 1,
@@ -247,11 +284,29 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
       const updated = await client.query<ContactRow>(
         `update crm_contacts set display_name=$5,status=$6,attributes=$7::jsonb,version=$8,updated_at=$9::timestamptz
          where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4 and version=$10 returning *`,
-        [input.tenantId,input.workspaceId,input.organizationId,input.contactId,next.displayName,next.status,
-          json(next.attributes),next.version,now,current.version],
+        [
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          input.contactId,
+          next.displayName,
+          next.status,
+          json(next.attributes),
+          next.version,
+          now,
+          current.version,
+        ],
       );
       const record = contactFromRow(requiredRow(updated.rows[0], 'CRM_CONTACT_CONCURRENT_UPDATE'));
-      await this.#recordMutation(client, 'CONTACT', record, 'UPDATED', {}, metadata, 'contact.updated');
+      await this.#recordMutation(
+        client,
+        'CONTACT',
+        record,
+        'UPDATED',
+        {},
+        metadata,
+        'contact.updated',
+      );
       await completeIdempotency(client, input, 'contact.update', record.contactId, record, now);
       return record;
     });
@@ -264,41 +319,82 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     const provider = normalizeCrmChannelProvider(input.channelType, input.provider);
     const normalizedValue = normalizeCrmChannelValue(input.channelType, input.value);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'contact.channel.attach', 'CONTACT', input.contactId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'contact.channel.attach',
+        'CONTACT',
+        input.contactId,
+      );
       if (replay) return channelFromSnapshot(replay);
       const current = await lockContact(client, input);
       assertExpectedVersion(current.version, input.expectedVersion);
-      const channel = await insertChannel(client, current, {
-        channelId: requireCrmText(input.channelId, 'CRM_CONTACT_CHANNEL_ID_REQUIRED'),
-        channelType: input.channelType,
-        provider,
-        value: requireCrmText(input.value, 'CRM_CONTACT_CHANNEL_VALUE_REQUIRED'),
-        normalizedValue,
-        primary: input.primary ?? false,
-        verifiedAt: normalizeNullableTimestamp(input.verifiedAt, 'CRM_CONTACT_CHANNEL_VERIFIED_AT_INVALID'),
-      }, metadata.evidence, now);
+      const channel = await insertChannel(
+        client,
+        current,
+        {
+          channelId: requireCrmText(input.channelId, 'CRM_CONTACT_CHANNEL_ID_REQUIRED'),
+          channelType: input.channelType,
+          provider,
+          value: requireCrmText(input.value, 'CRM_CONTACT_CHANNEL_VALUE_REQUIRED'),
+          normalizedValue,
+          primary: input.primary ?? false,
+          verifiedAt: normalizeNullableTimestamp(
+            input.verifiedAt,
+            'CRM_CONTACT_CHANNEL_VERIFIED_AT_INVALID',
+          ),
+        },
+        metadata.evidence,
+        now,
+      );
       const updated = await client.query<ContactRow>(
         `update crm_contacts set version=version+1,updated_at=$5::timestamptz
          where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4 and version=$6 returning *`,
-        [input.tenantId,input.workspaceId,input.organizationId,input.contactId,now,current.version],
+        [
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          input.contactId,
+          now,
+          current.version,
+        ],
       );
-      const aggregate = contactFromRow(requiredRow(updated.rows[0], 'CRM_CONTACT_CONCURRENT_UPDATE'));
-      await this.#recordMutation(client, 'CONTACT', aggregate, 'CHANNEL_ATTACHED', {
-        channelId: channel.channelId,
-        channelType: channel.channelType,
-        provider: channel.provider,
-        normalizedValue: channel.normalizedValue,
-      }, metadata, 'contact.channel_attached');
-      await completeIdempotency(client, input, 'contact.channel.attach', aggregate.contactId, channel, now);
+      const aggregate = contactFromRow(
+        requiredRow(updated.rows[0], 'CRM_CONTACT_CONCURRENT_UPDATE'),
+      );
+      await this.#recordMutation(
+        client,
+        'CONTACT',
+        aggregate,
+        'CHANNEL_ATTACHED',
+        {
+          channelId: channel.channelId,
+          channelType: channel.channelType,
+          provider: channel.provider,
+          normalizedValue: channel.normalizedValue,
+        },
+        metadata,
+        'contact.channel_attached',
+      );
+      await completeIdempotency(
+        client,
+        input,
+        'contact.channel.attach',
+        aggregate.contactId,
+        channel,
+        now,
+      );
       return channel;
     });
   }
 
-  async findContactByChannel(input: CrmScope & {
-    readonly channelType: ContactChannelRecord['channelType'];
-    readonly provider?: string | null;
-    readonly value: string;
-  }): Promise<ContactRecord | undefined> {
+  async findContactByChannel(
+    input: CrmScope & {
+      readonly channelType: ContactChannelRecord['channelType'];
+      readonly provider?: string | null;
+      readonly value: string;
+    },
+  ): Promise<ContactRecord | undefined> {
     validateCrmScope(input);
     const provider = normalizeCrmChannelProvider(input.channelType, input.provider);
     const normalized = normalizeCrmChannelValue(input.channelType, input.value);
@@ -309,17 +405,26 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
        where ch.tenant_id=$1 and ch.workspace_id=$2 and ch.organization_id=$3
          and ch.channel_type=$4 and ch.provider_key=$5 and ch.normalized_value=$6
        order by c.contact_id asc limit 1`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.channelType,provider ?? '',normalized],
+      [
+        input.tenantId,
+        input.workspaceId,
+        input.organizationId,
+        input.channelType,
+        provider ?? '',
+        normalized,
+      ],
     );
     return result.rows[0] ? contactFromRow(result.rows[0]) : undefined;
   }
 
-  async listContactChannels(input: CrmScope & { readonly contactId: string }): Promise<readonly ContactChannelRecord[]> {
+  async listContactChannels(
+    input: CrmScope & { readonly contactId: string },
+  ): Promise<readonly ContactChannelRecord[]> {
     validateCrmScope(input);
     const result = await this.pool.query<ChannelRow>(
       `select * from crm_contact_channels where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4
        order by channel_type asc, provider_key asc, normalized_value asc, channel_id asc`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.contactId],
+      [input.tenantId, input.workspaceId, input.organizationId, input.contactId],
     );
     return result.rows.map(channelFromRow);
   }
@@ -343,8 +448,12 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
       score: input.score ?? null,
       ownerPrincipalId: nullableCrmText(input.ownerPrincipalId),
       slaDueAt: normalizeNullableTimestamp(input.slaDueAt, 'CRM_LEAD_SLA_DUE_AT_INVALID'),
-      capturedAt: input.capturedAt === undefined ? now : normalizeCrmTimestamp(input.capturedAt, 'CRM_LEAD_CAPTURED_AT_INVALID'),
-      qualifiedAt: qualification === 'MARKETING_QUALIFIED' || qualification === 'SALES_QUALIFIED' ? now : null,
+      capturedAt:
+        input.capturedAt === undefined
+          ? now
+          : normalizeCrmTimestamp(input.capturedAt, 'CRM_LEAD_CAPTURED_AT_INVALID'),
+      qualifiedAt:
+        qualification === 'MARKETING_QUALIFIED' || qualification === 'SALES_QUALIFIED' ? now : null,
       convertedAt: status === 'CONVERTED' ? now : null,
       disqualifiedReason: null,
       attributes: input.attributes ?? {},
@@ -365,10 +474,27 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
           disqualified_reason,attributes,version,created_at,updated_at
         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14::timestamptz,
           $15::timestamptz,$16::timestamptz,$17,$18::jsonb,1,$19::timestamptz,$19::timestamptz) returning *`,
-        [record.leadId,record.tenantId,record.workspaceId,record.organizationId,record.contactId,record.eventId,
-          record.sourceType,record.sourceRef,record.status,record.qualification,record.score,record.ownerPrincipalId,
-          record.slaDueAt,record.capturedAt,record.qualifiedAt,record.convertedAt,record.disqualifiedReason,
-          json(record.attributes),now],
+        [
+          record.leadId,
+          record.tenantId,
+          record.workspaceId,
+          record.organizationId,
+          record.contactId,
+          record.eventId,
+          record.sourceType,
+          record.sourceRef,
+          record.status,
+          record.qualification,
+          record.score,
+          record.ownerPrincipalId,
+          record.slaDueAt,
+          record.capturedAt,
+          record.qualifiedAt,
+          record.convertedAt,
+          record.disqualifiedReason,
+          json(record.attributes),
+          now,
+        ],
       );
       const created = leadFromRow(requiredRow(inserted.rows[0], 'CRM_LEAD_INSERT_FAILED'));
       await this.#recordMutation(client, 'LEAD', created, 'CREATED', {}, metadata, 'lead.created');
@@ -381,7 +507,7 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     validateCrmScope(input);
     const result = await this.pool.query<LeadRow>(
       `select * from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.leadId],
+      [input.tenantId, input.workspaceId, input.organizationId, input.leadId],
     );
     return result.rows[0] ? leadFromRow(result.rows[0]) : undefined;
   }
@@ -404,13 +530,26 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
         status,
         qualification,
         score: input.score === undefined ? current.score : input.score,
-        ownerPrincipalId: input.ownerPrincipalId === undefined ? current.ownerPrincipalId : nullableCrmText(input.ownerPrincipalId),
-        slaDueAt: input.slaDueAt === undefined ? current.slaDueAt : normalizeNullableTimestamp(input.slaDueAt, 'CRM_LEAD_SLA_DUE_AT_INVALID'),
-        qualifiedAt: current.qualifiedAt ?? ((qualification === 'MARKETING_QUALIFIED' || qualification === 'SALES_QUALIFIED') ? now : null),
+        ownerPrincipalId:
+          input.ownerPrincipalId === undefined
+            ? current.ownerPrincipalId
+            : nullableCrmText(input.ownerPrincipalId),
+        slaDueAt:
+          input.slaDueAt === undefined
+            ? current.slaDueAt
+            : normalizeNullableTimestamp(input.slaDueAt, 'CRM_LEAD_SLA_DUE_AT_INVALID'),
+        qualifiedAt:
+          current.qualifiedAt ??
+          (qualification === 'MARKETING_QUALIFIED' || qualification === 'SALES_QUALIFIED'
+            ? now
+            : null),
         convertedAt: status === 'CONVERTED' ? (current.convertedAt ?? now) : current.convertedAt,
-        disqualifiedReason: status === 'DISQUALIFIED'
-          ? nullableCrmText(input.disqualifiedReason)
-          : (status === 'ARCHIVED' ? current.disqualifiedReason : null),
+        disqualifiedReason:
+          status === 'DISQUALIFIED'
+            ? nullableCrmText(input.disqualifiedReason)
+            : status === 'ARCHIVED'
+              ? current.disqualifiedReason
+              : null,
         attributes: input.attributes ?? current.attributes,
         version: current.version + 1,
         updatedAt: now,
@@ -421,25 +560,50 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
            qualified_at=$10::timestamptz,converted_at=$11::timestamptz,disqualified_reason=$12,attributes=$13::jsonb,
            version=$14,updated_at=$15::timestamptz
          where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4 and version=$16 returning *`,
-        [input.tenantId,input.workspaceId,input.organizationId,input.leadId,next.status,next.qualification,next.score,
-          next.ownerPrincipalId,next.slaDueAt,next.qualifiedAt,next.convertedAt,next.disqualifiedReason,json(next.attributes),
-          next.version,now,current.version],
+        [
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          input.leadId,
+          next.status,
+          next.qualification,
+          next.score,
+          next.ownerPrincipalId,
+          next.slaDueAt,
+          next.qualifiedAt,
+          next.convertedAt,
+          next.disqualifiedReason,
+          json(next.attributes),
+          next.version,
+          now,
+          current.version,
+        ],
       );
       const record = leadFromRow(requiredRow(updated.rows[0], 'CRM_LEAD_CONCURRENT_UPDATE'));
-      await this.#recordMutation(client, 'LEAD', record, status === current.status ? 'UPDATED' : 'STATUS_CHANGED', {}, metadata, 'lead.updated');
+      await this.#recordMutation(
+        client,
+        'LEAD',
+        record,
+        status === current.status ? 'UPDATED' : 'STATUS_CHANGED',
+        {},
+        metadata,
+        'lead.updated',
+      );
       await completeIdempotency(client, input, 'lead.update', record.leadId, record, now);
       return record;
     });
   }
 
-  async listLeadsForContact(input: CrmScope & { readonly contactId: string; readonly limit?: number }): Promise<readonly LeadRecord[]> {
+  async listLeadsForContact(
+    input: CrmScope & { readonly contactId: string; readonly limit?: number },
+  ): Promise<readonly LeadRecord[]> {
     validateCrmScope(input);
     const limit = input.limit ?? 200;
     assertCrmLimit(limit);
     const result = await this.pool.query<LeadRow>(
       `select * from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4
        order by captured_at desc, lead_id asc limit $5`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.contactId,limit],
+      [input.tenantId, input.workspaceId, input.organizationId, input.contactId, limit],
     );
     return result.rows.map(leadFromRow);
   }
@@ -465,9 +629,15 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
       currency,
       valueMinor,
       nextAction: nullableCrmText(input.nextAction),
-      nextActionAt: normalizeNullableTimestamp(input.nextActionAt, 'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID'),
+      nextActionAt: normalizeNullableTimestamp(
+        input.nextActionAt,
+        'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID',
+      ),
       ownerPrincipalId: nullableCrmText(input.ownerPrincipalId),
-      expectedCloseAt: normalizeNullableTimestamp(input.expectedCloseAt, 'CRM_OPPORTUNITY_EXPECTED_CLOSE_AT_INVALID'),
+      expectedCloseAt: normalizeNullableTimestamp(
+        input.expectedCloseAt,
+        'CRM_OPPORTUNITY_EXPECTED_CLOSE_AT_INVALID',
+      ),
       closedAt: null,
       lossReason: null,
       attributes: input.attributes ?? {},
@@ -477,13 +647,21 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     };
     validateOpportunityRecord(record);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'opportunity.create', 'OPPORTUNITY', record.opportunityId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'opportunity.create',
+        'OPPORTUNITY',
+        record.opportunityId,
+      );
       if (replay) return opportunityFromSnapshot(replay);
       await assertContactExists(client, input, record.contactId);
       if (record.leadId) {
         const lead = await getLeadForLink(client, input, record.leadId);
-        if (lead.contactId !== record.contactId) throw new Error('CRM_OPPORTUNITY_LEAD_CONTACT_CONFLICT');
-        if (record.eventId && lead.eventId && record.eventId !== lead.eventId) throw new Error('CRM_OPPORTUNITY_EVENT_LINK_CONFLICT');
+        if (lead.contactId !== record.contactId)
+          throw new Error('CRM_OPPORTUNITY_LEAD_CONTACT_CONFLICT');
+        if (record.eventId && lead.eventId && record.eventId !== lead.eventId)
+          throw new Error('CRM_OPPORTUNITY_EVENT_LINK_CONFLICT');
       }
       if (record.eventId) await assertEventScope(client, input, record.eventId);
       const inserted = await client.query<OpportunityRow>(
@@ -493,22 +671,59 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
           attributes,version,created_at,updated_at
         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::timestamptz,$16,$17::timestamptz,
           null,null,$18::jsonb,1,$19::timestamptz,$19::timestamptz) returning *`,
-        [record.opportunityId,record.tenantId,record.workspaceId,record.organizationId,record.contactId,record.leadId,
-          record.eventId,record.name,record.pipelineKey,record.stageKey,record.status,record.currency,record.valueMinor,
-          record.nextAction,record.nextActionAt,record.ownerPrincipalId,record.expectedCloseAt,json(record.attributes),now],
+        [
+          record.opportunityId,
+          record.tenantId,
+          record.workspaceId,
+          record.organizationId,
+          record.contactId,
+          record.leadId,
+          record.eventId,
+          record.name,
+          record.pipelineKey,
+          record.stageKey,
+          record.status,
+          record.currency,
+          record.valueMinor,
+          record.nextAction,
+          record.nextActionAt,
+          record.ownerPrincipalId,
+          record.expectedCloseAt,
+          json(record.attributes),
+          now,
+        ],
       );
-      const created = opportunityFromRow(requiredRow(inserted.rows[0], 'CRM_OPPORTUNITY_INSERT_FAILED'));
-      await this.#recordMutation(client, 'OPPORTUNITY', created, 'CREATED', {}, metadata, 'opportunity.created');
-      await completeIdempotency(client, input, 'opportunity.create', created.opportunityId, created, now);
+      const created = opportunityFromRow(
+        requiredRow(inserted.rows[0], 'CRM_OPPORTUNITY_INSERT_FAILED'),
+      );
+      await this.#recordMutation(
+        client,
+        'OPPORTUNITY',
+        created,
+        'CREATED',
+        {},
+        metadata,
+        'opportunity.created',
+      );
+      await completeIdempotency(
+        client,
+        input,
+        'opportunity.create',
+        created.opportunityId,
+        created,
+        now,
+      );
       return created;
     });
   }
 
-  async getOpportunity(input: CrmScope & { readonly opportunityId: string }): Promise<OpportunityRecord | undefined> {
+  async getOpportunity(
+    input: CrmScope & { readonly opportunityId: string },
+  ): Promise<OpportunityRecord | undefined> {
     validateCrmScope(input);
     const result = await this.pool.query<OpportunityRow>(
       `select * from crm_opportunities where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and opportunity_id=$4`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.opportunityId],
+      [input.tenantId, input.workspaceId, input.organizationId, input.opportunityId],
     );
     return result.rows[0] ? opportunityFromRow(result.rows[0]) : undefined;
   }
@@ -518,33 +733,80 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     const metadata = normalizeMetadata(input);
     assertCrmVersion(input.expectedVersion);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'opportunity.update', 'OPPORTUNITY', input.opportunityId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'opportunity.update',
+        'OPPORTUNITY',
+        input.opportunityId,
+      );
       if (replay) return opportunityFromSnapshot(replay);
       const current = await lockOpportunity(client, input);
       assertExpectedVersion(current.version, input.expectedVersion);
       if (current.status !== 'OPEN') throw new Error('CRM_OPPORTUNITY_CLOSED_UPDATE_FORBIDDEN');
-      const currency = input.currency === undefined ? current.currency : normalizeCrmCurrency(input.currency);
+      const currency =
+        input.currency === undefined ? current.currency : normalizeCrmCurrency(input.currency);
       const valueMinor = input.valueMinor === undefined ? current.valueMinor : input.valueMinor;
       validateCrmMoney(currency, valueMinor);
       const next: OpportunityRecord = {
         ...current,
-        name: input.name === undefined ? current.name : requireCrmText(input.name, 'CRM_OPPORTUNITY_NAME_REQUIRED'),
-        pipelineKey: input.pipelineKey === undefined ? current.pipelineKey : requireCrmText(input.pipelineKey, 'CRM_OPPORTUNITY_PIPELINE_REQUIRED'),
-        stageKey: input.stageKey === undefined ? current.stageKey : requireCrmText(input.stageKey, 'CRM_OPPORTUNITY_STAGE_REQUIRED'),
+        name:
+          input.name === undefined
+            ? current.name
+            : requireCrmText(input.name, 'CRM_OPPORTUNITY_NAME_REQUIRED'),
+        pipelineKey:
+          input.pipelineKey === undefined
+            ? current.pipelineKey
+            : requireCrmText(input.pipelineKey, 'CRM_OPPORTUNITY_PIPELINE_REQUIRED'),
+        stageKey:
+          input.stageKey === undefined
+            ? current.stageKey
+            : requireCrmText(input.stageKey, 'CRM_OPPORTUNITY_STAGE_REQUIRED'),
         currency,
         valueMinor,
-        nextAction: input.nextAction === undefined ? current.nextAction : nullableCrmText(input.nextAction),
-        nextActionAt: input.nextActionAt === undefined ? current.nextActionAt : normalizeNullableTimestamp(input.nextActionAt, 'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID'),
-        ownerPrincipalId: input.ownerPrincipalId === undefined ? current.ownerPrincipalId : nullableCrmText(input.ownerPrincipalId),
-        expectedCloseAt: input.expectedCloseAt === undefined ? current.expectedCloseAt : normalizeNullableTimestamp(input.expectedCloseAt, 'CRM_OPPORTUNITY_EXPECTED_CLOSE_AT_INVALID'),
+        nextAction:
+          input.nextAction === undefined ? current.nextAction : nullableCrmText(input.nextAction),
+        nextActionAt:
+          input.nextActionAt === undefined
+            ? current.nextActionAt
+            : normalizeNullableTimestamp(
+                input.nextActionAt,
+                'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID',
+              ),
+        ownerPrincipalId:
+          input.ownerPrincipalId === undefined
+            ? current.ownerPrincipalId
+            : nullableCrmText(input.ownerPrincipalId),
+        expectedCloseAt:
+          input.expectedCloseAt === undefined
+            ? current.expectedCloseAt
+            : normalizeNullableTimestamp(
+                input.expectedCloseAt,
+                'CRM_OPPORTUNITY_EXPECTED_CLOSE_AT_INVALID',
+              ),
         attributes: input.attributes ?? current.attributes,
         version: current.version + 1,
         updatedAt: now,
       };
       validateOpportunityRecord(next);
       const record = await updateOpportunityRow(client, current, next);
-      await this.#recordMutation(client, 'OPPORTUNITY', record, 'UPDATED', {}, metadata, 'opportunity.updated');
-      await completeIdempotency(client, input, 'opportunity.update', record.opportunityId, record, now);
+      await this.#recordMutation(
+        client,
+        'OPPORTUNITY',
+        record,
+        'UPDATED',
+        {},
+        metadata,
+        'opportunity.updated',
+      );
+      await completeIdempotency(
+        client,
+        input,
+        'opportunity.update',
+        record.opportunityId,
+        record,
+        now,
+      );
       return record;
     });
   }
@@ -554,13 +816,26 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
     const metadata = normalizeMetadata(input);
     assertCrmVersion(input.expectedVersion);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'opportunity.transition', 'OPPORTUNITY', input.opportunityId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'opportunity.transition',
+        'OPPORTUNITY',
+        input.opportunityId,
+      );
       if (replay) return opportunityFromSnapshot(replay);
       const current = await lockOpportunity(client, input);
       assertExpectedVersion(current.version, input.expectedVersion);
       assertCrmOpportunityStatusTransition(current.status, input.status);
       if (current.status === input.status) {
-        await completeIdempotency(client, input, 'opportunity.transition', current.opportunityId, current, now);
+        await completeIdempotency(
+          client,
+          input,
+          'opportunity.transition',
+          current.opportunityId,
+          current,
+          now,
+        );
         return current;
       }
       const closing = ['WON', 'LOST', 'CANCELED'].includes(input.status);
@@ -568,36 +843,60 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
         ...current,
         status: input.status,
         closedAt: closing ? now : current.closedAt,
-        lossReason: input.status === 'LOST' ? nullableCrmText(input.lossReason) : (input.status === 'ARCHIVED' ? current.lossReason : null),
+        lossReason:
+          input.status === 'LOST'
+            ? nullableCrmText(input.lossReason)
+            : input.status === 'ARCHIVED'
+              ? current.lossReason
+              : null,
         version: current.version + 1,
         updatedAt: now,
       };
       validateOpportunityRecord(next);
       const record = await updateOpportunityRow(client, current, next);
-      await this.#recordMutation(client, 'OPPORTUNITY', record, 'STATUS_CHANGED', { from: current.status, to: record.status }, metadata, 'opportunity.status_changed');
-      await completeIdempotency(client, input, 'opportunity.transition', record.opportunityId, record, now);
+      await this.#recordMutation(
+        client,
+        'OPPORTUNITY',
+        record,
+        'STATUS_CHANGED',
+        { from: current.status, to: record.status },
+        metadata,
+        'opportunity.status_changed',
+      );
+      await completeIdempotency(
+        client,
+        input,
+        'opportunity.transition',
+        record.opportunityId,
+        record,
+        now,
+      );
       return record;
     });
   }
 
-  async listOpportunitiesForContact(input: CrmScope & { readonly contactId: string; readonly limit?: number }): Promise<readonly OpportunityRecord[]> {
+  async listOpportunitiesForContact(
+    input: CrmScope & { readonly contactId: string; readonly limit?: number },
+  ): Promise<readonly OpportunityRecord[]> {
     validateCrmScope(input);
     const limit = input.limit ?? 200;
     assertCrmLimit(limit);
     const result = await this.pool.query<OpportunityRow>(
       `select * from crm_opportunities where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4
        order by created_at desc, opportunity_id asc limit $5`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.contactId,limit],
+      [input.tenantId, input.workspaceId, input.organizationId, input.contactId, limit],
     );
     return result.rows.map(opportunityFromRow);
   }
 
-  async listRevisions(input: CrmScope & { readonly recordType: CrmRecordType; readonly recordId: string }): Promise<readonly CrmRecordRevision[]> {
+  async listRevisions(
+    input: CrmScope & { readonly recordType: CrmRecordType; readonly recordId: string },
+  ): Promise<readonly CrmRecordRevision[]> {
     validateCrmScope(input);
     const result = await this.pool.query<RevisionRow>(
       `select * from crm_record_revisions where tenant_id=$1 and workspace_id=$2 and organization_id=$3
          and record_type=$4 and record_id=$5 order by revision asc`,
-      [input.tenantId,input.workspaceId,input.organizationId,input.recordType,input.recordId],
+      [input.tenantId, input.workspaceId, input.organizationId, input.recordType, input.recordId],
     );
     return result.rows.map(revisionFromRow);
   }
@@ -617,24 +916,41 @@ export class PostgresCrmCoreStore implements CrmCoreStore {
          tenant_id,workspace_id,organization_id,record_type,record_id,revision,change_type,snapshot,details,
          evidence,execution_id,correlation_id,actor_principal_id,idempotency_key,created_at
        ) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15::timestamptz)`,
-      [record.tenantId,record.workspaceId,record.organizationId,recordType,recordId,record.version,changeType,
-        json(record),json(details),json(metadata.evidence),metadata.executionId,metadata.correlationId,
-        metadata.actorPrincipalId,metadata.idempotencyKey,metadata.now],
+      [
+        record.tenantId,
+        record.workspaceId,
+        record.organizationId,
+        recordType,
+        recordId,
+        record.version,
+        changeType,
+        json(record),
+        json(details),
+        json(metadata.evidence),
+        metadata.executionId,
+        metadata.correlationId,
+        metadata.actorPrincipalId,
+        metadata.idempotencyKey,
+        metadata.now,
+      ],
     );
-    await this.#outbox.enqueue(client, createDomainEvent({
-      eventKey: `${metadata.idempotencyKey}:${changeType.toLowerCase()}`,
-      eventType: `crm.${eventTypeSuffix}`,
-      aggregateType: `crm_${recordType.toLowerCase()}`,
-      aggregateId: recordId,
-      aggregateVersion: record.version,
-      tenantId: record.tenantId,
-      workspaceId: record.workspaceId,
-      organizationId: record.organizationId,
-      correlationId: metadata.correlationId,
-      occurredAt: metadata.now,
-      payload: { recordType, recordId, revision: record.version, snapshot: record, details },
-      evidence: metadata.evidence,
-    }));
+    await this.#outbox.enqueue(
+      client,
+      createDomainEvent({
+        eventKey: `${metadata.idempotencyKey}:${changeType.toLowerCase()}`,
+        eventType: `crm.${eventTypeSuffix}`,
+        aggregateType: `crm_${recordType.toLowerCase()}`,
+        aggregateId: recordId,
+        aggregateVersion: record.version,
+        tenantId: record.tenantId,
+        workspaceId: record.workspaceId,
+        organizationId: record.organizationId,
+        correlationId: metadata.correlationId,
+        occurredAt: metadata.now,
+        payload: { recordType, recordId, revision: record.version, snapshot: record, details },
+        evidence: metadata.evidence,
+      }),
+    );
     await appendInternalAuditLedgerEvent(client, {
       operation: eventTypeSuffix,
       recordType,
@@ -703,17 +1019,29 @@ async function beginIdempotency(
        tenant_id,workspace_id,organization_id,operation,idempotency_key,request_hash,record_type,record_id,created_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz)
      on conflict (tenant_id,workspace_id,organization_id,operation,idempotency_key) do nothing returning idempotency_key`,
-    [input.tenantId,input.workspaceId,input.organizationId,operation,key,requestHash,recordType,recordId,now],
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      operation,
+      key,
+      requestHash,
+      recordType,
+      recordId,
+      now,
+    ],
   );
   if (inserted.rowCount === 1) return undefined;
   const existing = await client.query<IdempotencyRow>(
     `select request_hash,record_type,record_id,response_snapshot,completed_at from crm_idempotency_keys
      where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and operation=$4 and idempotency_key=$5 for update`,
-    [input.tenantId,input.workspaceId,input.organizationId,operation,key],
+    [input.tenantId, input.workspaceId, input.organizationId, operation, key],
   );
   const row = requiredRow(existing.rows[0], 'CRM_IDEMPOTENCY_LOOKUP_FAILED');
-  if (row.request_hash !== requestHash || row.record_type !== recordType) throw new Error('CRM_IDEMPOTENCY_CONFLICT');
-  if (row.completed_at === null || row.response_snapshot === null) throw new Error('CRM_IDEMPOTENCY_INCOMPLETE');
+  if (row.request_hash !== requestHash || row.record_type !== recordType)
+    throw new Error('CRM_IDEMPOTENCY_CONFLICT');
+  if (row.completed_at === null || row.response_snapshot === null)
+    throw new Error('CRM_IDEMPOTENCY_INCOMPLETE');
   return row.response_snapshot;
 }
 
@@ -728,7 +1056,16 @@ async function completeIdempotency(
   const updated = await client.query(
     `update crm_idempotency_keys set record_id=$6,response_snapshot=$7::jsonb,completed_at=$8::timestamptz
      where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and operation=$4 and idempotency_key=$5 and completed_at is null`,
-    [input.tenantId,input.workspaceId,input.organizationId,operation,input.idempotencyKey,recordId,json(response),now],
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      operation,
+      input.idempotencyKey,
+      recordId,
+      json(response),
+      now,
+    ],
   );
   if (updated.rowCount !== 1) throw new Error('CRM_IDEMPOTENCY_COMPLETE_FAILED');
 }
@@ -753,81 +1090,153 @@ async function insertChannel(
        channel_id,contact_id,tenant_id,workspace_id,organization_id,channel_type,provider,value,normalized_value,
        is_primary,verified_at,evidence,created_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,$12::jsonb,$13::timestamptz) returning *`,
-    [channel.channelId,contact.contactId,contact.tenantId,contact.workspaceId,contact.organizationId,channel.channelType,
-      channel.provider,channel.value,channel.normalizedValue,channel.primary,channel.verifiedAt,json(evidence),now],
+    [
+      channel.channelId,
+      contact.contactId,
+      contact.tenantId,
+      contact.workspaceId,
+      contact.organizationId,
+      channel.channelType,
+      channel.provider,
+      channel.value,
+      channel.normalizedValue,
+      channel.primary,
+      channel.verifiedAt,
+      json(evidence),
+      now,
+    ],
   );
   return channelFromRow(requiredRow(result.rows[0], 'CRM_CONTACT_CHANNEL_INSERT_FAILED'));
 }
 
-async function lockContact(client: pg.PoolClient, input: CrmScope & { readonly contactId: string }): Promise<ContactRecord> {
+async function lockContact(
+  client: pg.PoolClient,
+  input: CrmScope & { readonly contactId: string },
+): Promise<ContactRecord> {
   const result = await client.query<ContactRow>(
     `select * from crm_contacts where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4 for update`,
-    [input.tenantId,input.workspaceId,input.organizationId,input.contactId],
+    [input.tenantId, input.workspaceId, input.organizationId, input.contactId],
   );
   return contactFromRow(requiredRow(result.rows[0], 'CRM_CONTACT_NOT_FOUND'));
 }
 
-async function lockLead(client: pg.PoolClient, input: CrmScope & { readonly leadId: string }): Promise<LeadRecord> {
+async function lockLead(
+  client: pg.PoolClient,
+  input: CrmScope & { readonly leadId: string },
+): Promise<LeadRecord> {
   const result = await client.query<LeadRow>(
     `select * from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4 for update`,
-    [input.tenantId,input.workspaceId,input.organizationId,input.leadId],
+    [input.tenantId, input.workspaceId, input.organizationId, input.leadId],
   );
   return leadFromRow(requiredRow(result.rows[0], 'CRM_LEAD_NOT_FOUND'));
 }
 
-async function lockOpportunity(client: pg.PoolClient, input: CrmScope & { readonly opportunityId: string }): Promise<OpportunityRecord> {
+async function lockOpportunity(
+  client: pg.PoolClient,
+  input: CrmScope & { readonly opportunityId: string },
+): Promise<OpportunityRecord> {
   const result = await client.query<OpportunityRow>(
     `select * from crm_opportunities where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and opportunity_id=$4 for update`,
-    [input.tenantId,input.workspaceId,input.organizationId,input.opportunityId],
+    [input.tenantId, input.workspaceId, input.organizationId, input.opportunityId],
   );
   return opportunityFromRow(requiredRow(result.rows[0], 'CRM_OPPORTUNITY_NOT_FOUND'));
 }
 
-async function assertContactExists(client: pg.PoolClient, scope: CrmScope, contactId: string): Promise<void> {
+async function assertContactExists(
+  client: pg.PoolClient,
+  scope: CrmScope,
+  contactId: string,
+): Promise<void> {
   const result = await client.query(
     `select contact_id from crm_contacts where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4`,
-    [scope.tenantId,scope.workspaceId,scope.organizationId,contactId],
+    [scope.tenantId, scope.workspaceId, scope.organizationId, contactId],
   );
   if (result.rowCount !== 1) throw new Error('CRM_CONTACT_NOT_FOUND');
 }
 
-async function getLeadForLink(client: pg.PoolClient, scope: CrmScope, leadId: string): Promise<LeadRecord> {
+async function getLeadForLink(
+  client: pg.PoolClient,
+  scope: CrmScope,
+  leadId: string,
+): Promise<LeadRecord> {
   const result = await client.query<LeadRow>(
     `select * from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4`,
-    [scope.tenantId,scope.workspaceId,scope.organizationId,leadId],
+    [scope.tenantId, scope.workspaceId, scope.organizationId, leadId],
   );
   return leadFromRow(requiredRow(result.rows[0], 'CRM_LEAD_NOT_FOUND'));
 }
 
-async function assertEventScope(client: pg.PoolClient, scope: CrmScope, eventId: string): Promise<void> {
-  const result = await client.query<{ tenant_id: string; workspace_id: string; organization_id: string }>(
-    'select tenant_id,workspace_id,organization_id from event_records where event_id=$1',
-    [eventId],
-  );
+async function assertEventScope(
+  client: pg.PoolClient,
+  scope: CrmScope,
+  eventId: string,
+): Promise<void> {
+  const result = await client.query<{
+    tenant_id: string;
+    workspace_id: string;
+    organization_id: string;
+  }>('select tenant_id,workspace_id,organization_id from event_records where event_id=$1', [
+    eventId,
+  ]);
   const row = requiredRow(result.rows[0], 'CRM_EVENT_RECORD_NOT_FOUND');
-  if (row.tenant_id !== scope.tenantId || row.workspace_id !== scope.workspaceId || row.organization_id !== scope.organizationId) {
+  if (
+    row.tenant_id !== scope.tenantId ||
+    row.workspace_id !== scope.workspaceId ||
+    row.organization_id !== scope.organizationId
+  ) {
     throw new Error('CRM_EVENT_RECORD_SCOPE_CONFLICT');
   }
 }
 
-async function updateOpportunityRow(client: pg.PoolClient, current: OpportunityRecord, next: OpportunityRecord): Promise<OpportunityRecord> {
+async function updateOpportunityRow(
+  client: pg.PoolClient,
+  current: OpportunityRecord,
+  next: OpportunityRecord,
+): Promise<OpportunityRecord> {
   const result = await client.query<OpportunityRow>(
     `update crm_opportunities set name=$5,pipeline_key=$6,stage_key=$7,status=$8,currency=$9,value_minor=$10,
        next_action=$11,next_action_at=$12::timestamptz,owner_principal_id=$13,expected_close_at=$14::timestamptz,
        closed_at=$15::timestamptz,loss_reason=$16,attributes=$17::jsonb,version=$18,updated_at=$19::timestamptz
      where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and opportunity_id=$4 and version=$20 returning *`,
-    [current.tenantId,current.workspaceId,current.organizationId,current.opportunityId,next.name,next.pipelineKey,next.stageKey,
-      next.status,next.currency,next.valueMinor,next.nextAction,next.nextActionAt,next.ownerPrincipalId,next.expectedCloseAt,
-      next.closedAt,next.lossReason,json(next.attributes),next.version,next.updatedAt,current.version],
+    [
+      current.tenantId,
+      current.workspaceId,
+      current.organizationId,
+      current.opportunityId,
+      next.name,
+      next.pipelineKey,
+      next.stageKey,
+      next.status,
+      next.currency,
+      next.valueMinor,
+      next.nextAction,
+      next.nextActionAt,
+      next.ownerPrincipalId,
+      next.expectedCloseAt,
+      next.closedAt,
+      next.lossReason,
+      json(next.attributes),
+      next.version,
+      next.updatedAt,
+      current.version,
+    ],
   );
   return opportunityFromRow(requiredRow(result.rows[0], 'CRM_OPPORTUNITY_CONCURRENT_UPDATE'));
 }
 
 function contactFromRow(row: ContactRow): ContactRecord {
   const record: ContactRecord = {
-    contactId: row.contact_id,tenantId: row.tenant_id,workspaceId: row.workspace_id,organizationId: row.organization_id,
-    contactType: row.contact_type,displayName: row.display_name,status: row.status,attributes: asAttributes(row.attributes),
-    version: row.version,createdAt: iso(row.created_at),updatedAt: iso(row.updated_at),
+    contactId: row.contact_id,
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    contactType: row.contact_type,
+    displayName: row.display_name,
+    status: row.status,
+    attributes: asAttributes(row.attributes),
+    version: row.version,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
   };
   validateContactRecord(record);
   return record;
@@ -835,22 +1244,46 @@ function contactFromRow(row: ContactRow): ContactRecord {
 
 function channelFromRow(row: ChannelRow): ContactChannelRecord {
   return {
-    channelId: row.channel_id,contactId: row.contact_id,tenantId: row.tenant_id,workspaceId: row.workspace_id,
-    organizationId: row.organization_id,channelType: row.channel_type,provider: row.provider,value: row.value,
-    normalizedValue: row.normalized_value,primary: row.is_primary,verifiedAt: isoNullable(row.verified_at),
-    evidence: asEvidence(row.evidence),createdAt: iso(row.created_at),
+    channelId: row.channel_id,
+    contactId: row.contact_id,
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    channelType: row.channel_type,
+    provider: row.provider,
+    value: row.value,
+    normalizedValue: row.normalized_value,
+    primary: row.is_primary,
+    verifiedAt: isoNullable(row.verified_at),
+    evidence: asEvidence(row.evidence),
+    createdAt: iso(row.created_at),
   };
 }
 
 function leadFromRow(row: LeadRow): LeadRecord {
   const score = row.score === null ? null : Number(row.score);
   const record: LeadRecord = {
-    leadId: row.lead_id,tenantId: row.tenant_id,workspaceId: row.workspace_id,organizationId: row.organization_id,
-    contactId: row.contact_id,eventId: row.event_id,sourceType: row.source_type,sourceRef: row.source_ref,status: row.status,
-    qualification: row.qualification,score,ownerPrincipalId: row.owner_principal_id,slaDueAt: isoNullable(row.sla_due_at),
-    capturedAt: iso(row.captured_at),qualifiedAt: isoNullable(row.qualified_at),convertedAt: isoNullable(row.converted_at),
-    disqualifiedReason: row.disqualified_reason,attributes: asAttributes(row.attributes),version: row.version,
-    createdAt: iso(row.created_at),updatedAt: iso(row.updated_at),
+    leadId: row.lead_id,
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    contactId: row.contact_id,
+    eventId: row.event_id,
+    sourceType: row.source_type,
+    sourceRef: row.source_ref,
+    status: row.status,
+    qualification: row.qualification,
+    score,
+    ownerPrincipalId: row.owner_principal_id,
+    slaDueAt: isoNullable(row.sla_due_at),
+    capturedAt: iso(row.captured_at),
+    qualifiedAt: isoNullable(row.qualified_at),
+    convertedAt: isoNullable(row.converted_at),
+    disqualifiedReason: row.disqualified_reason,
+    attributes: asAttributes(row.attributes),
+    version: row.version,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
   };
   validateLeadRecord(record);
   return record;
@@ -858,14 +1291,32 @@ function leadFromRow(row: LeadRow): LeadRecord {
 
 function opportunityFromRow(row: OpportunityRow): OpportunityRecord {
   const valueMinor = row.value_minor === null ? null : Number(row.value_minor);
-  if (valueMinor !== null && !Number.isSafeInteger(valueMinor)) throw new Error('CRM_VALUE_MINOR_UNSAFE');
+  if (valueMinor !== null && !Number.isSafeInteger(valueMinor))
+    throw new Error('CRM_VALUE_MINOR_UNSAFE');
   const record: OpportunityRecord = {
-    opportunityId: row.opportunity_id,tenantId: row.tenant_id,workspaceId: row.workspace_id,organizationId: row.organization_id,
-    contactId: row.contact_id,leadId: row.lead_id,eventId: row.event_id,name: row.name,pipelineKey: row.pipeline_key,
-    stageKey: row.stage_key,status: row.status,currency: row.currency,valueMinor,nextAction: row.next_action,
-    nextActionAt: isoNullable(row.next_action_at),ownerPrincipalId: row.owner_principal_id,
-    expectedCloseAt: isoNullable(row.expected_close_at),closedAt: isoNullable(row.closed_at),lossReason: row.loss_reason,
-    attributes: asAttributes(row.attributes),version: row.version,createdAt: iso(row.created_at),updatedAt: iso(row.updated_at),
+    opportunityId: row.opportunity_id,
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    contactId: row.contact_id,
+    leadId: row.lead_id,
+    eventId: row.event_id,
+    name: row.name,
+    pipelineKey: row.pipeline_key,
+    stageKey: row.stage_key,
+    status: row.status,
+    currency: row.currency,
+    valueMinor,
+    nextAction: row.next_action,
+    nextActionAt: isoNullable(row.next_action_at),
+    ownerPrincipalId: row.owner_principal_id,
+    expectedCloseAt: isoNullable(row.expected_close_at),
+    closedAt: isoNullable(row.closed_at),
+    lossReason: row.loss_reason,
+    attributes: asAttributes(row.attributes),
+    version: row.version,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
   };
   validateOpportunityRecord(record);
   return record;
@@ -873,11 +1324,21 @@ function opportunityFromRow(row: OpportunityRow): OpportunityRecord {
 
 function revisionFromRow(row: RevisionRow): CrmRecordRevision {
   return {
-    tenantId: row.tenant_id,workspaceId: row.workspace_id,organizationId: row.organization_id,
-    recordType: row.record_type,recordId: row.record_id,revision: row.revision,changeType: row.change_type,
-    snapshot: snapshotForType(row.record_type,row.snapshot),details: asObject(row.details),evidence: asEvidence(row.evidence),
-    executionId: row.execution_id,correlationId: row.correlation_id,actorPrincipalId: row.actor_principal_id,
-    idempotencyKey: row.idempotency_key,createdAt: iso(row.created_at),
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    organizationId: row.organization_id,
+    recordType: row.record_type,
+    recordId: row.record_id,
+    revision: row.revision,
+    changeType: row.change_type,
+    snapshot: snapshotForType(row.record_type, row.snapshot),
+    details: asObject(row.details),
+    evidence: asEvidence(row.evidence),
+    executionId: row.execution_id,
+    correlationId: row.correlation_id,
+    actorPrincipalId: row.actor_principal_id,
+    idempotencyKey: row.idempotency_key,
+    createdAt: iso(row.created_at),
   };
 }
 
@@ -901,19 +1362,27 @@ function opportunityFromSnapshot(value: unknown): OpportunityRecord {
   validateOpportunityRecord(record);
   return record;
 }
-function snapshotForType(type: CrmRecordType, value: unknown): ContactRecord | LeadRecord | OpportunityRecord {
+function snapshotForType(
+  type: CrmRecordType,
+  value: unknown,
+): ContactRecord | LeadRecord | OpportunityRecord {
   if (type === 'CONTACT') return contactFromSnapshot(value);
   if (type === 'LEAD') return leadFromSnapshot(value);
   return opportunityFromSnapshot(value);
 }
 
-function getRecordId(type: CrmRecordType, record: ContactRecord | LeadRecord | OpportunityRecord): string {
+function getRecordId(
+  type: CrmRecordType,
+  record: ContactRecord | LeadRecord | OpportunityRecord,
+): string {
   if (type === 'CONTACT') return (record as ContactRecord).contactId;
   if (type === 'LEAD') return (record as LeadRecord).leadId;
   return (record as OpportunityRecord).opportunityId;
 }
 
-function assertDistinctChannels(channels: readonly { channelType: string; provider: string | null; normalizedValue: string }[]): void {
+function assertDistinctChannels(
+  channels: readonly { channelType: string; provider: string | null; normalizedValue: string }[],
+): void {
   const keys = new Set<string>();
   for (const channel of channels) {
     const key = `${channel.channelType}|${channel.provider ?? ''}|${channel.normalizedValue}`;
@@ -931,7 +1400,11 @@ function stableStringify(value: unknown): string {
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortValue);
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a],[b]) => a.localeCompare(b)).map(([key,item]) => [key,sortValue(item)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, sortValue(item)]),
+    );
   }
   return value;
 }
@@ -939,22 +1412,32 @@ function assertExpectedVersion(actual: number, expected: number): void {
   if (actual !== expected) throw new Error(`CRM_VERSION_CONFLICT:${expected}:${actual}`);
 }
 function normalizeNow(value: string | undefined): string {
-  return value === undefined ? new Date().toISOString() : normalizeCrmTimestamp(value, 'CRM_NOW_INVALID');
+  return value === undefined
+    ? new Date().toISOString()
+    : normalizeCrmTimestamp(value, 'CRM_NOW_INVALID');
 }
-function json(value: unknown): string { return JSON.stringify(value); }
-function iso(value: Date | string): string { return new Date(value).toISOString(); }
-function isoNullable(value: Date | string | null): string | null { return value === null ? null : iso(value); }
+function json(value: unknown): string {
+  return JSON.stringify(value);
+}
+function iso(value: Date | string): string {
+  return new Date(value).toISOString();
+}
+function isoNullable(value: Date | string | null): string | null {
+  return value === null ? null : iso(value);
+}
 function asAttributes(value: unknown): ContactRecord['attributes'] {
   const object = asObject(value) as Record<string, string | number | boolean | null>;
   validateCrmAttributes(object);
   return object;
 }
 function asObject(value: unknown): Readonly<Record<string, unknown>> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('CRM_JSON_OBJECT_INVALID');
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('CRM_JSON_OBJECT_INVALID');
   return value as Readonly<Record<string, unknown>>;
 }
 function asEvidence(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new Error('CRM_EVIDENCE_INVALID');
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string'))
+    throw new Error('CRM_EVIDENCE_INVALID');
   return requireCrmEvidence(value);
 }
 function requiredRow<T>(row: T | undefined, errorCode: string): T {
@@ -962,11 +1445,17 @@ function requiredRow<T>(row: T | undefined, errorCode: string): T {
   return row;
 }
 function isUniqueViolation(error: unknown): error is { code: string; constraint?: string } {
-  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === '23505';
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === '23505'
+  );
 }
 function mapUniqueViolation(error: { code: string; constraint?: string }): Error {
   const constraint = error.constraint ?? '';
-  if (constraint.includes('crm_contact_channels') && constraint.includes('normalized')) return new Error('CRM_CONTACT_DUPLICATE_CHANNEL');
+  if (constraint.includes('crm_contact_channels') && constraint.includes('normalized'))
+    return new Error('CRM_CONTACT_DUPLICATE_CHANNEL');
   if (constraint.includes('primary')) return new Error('CRM_CONTACT_PRIMARY_CHANNEL_CONFLICT');
   return new Error('CRM_RECORD_ID_CONFLICT');
 }

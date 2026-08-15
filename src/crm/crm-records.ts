@@ -239,22 +239,34 @@ export interface CrmCoreStore {
   getContact(input: CrmScope & { readonly contactId: string }): Promise<ContactRecord | undefined>;
   updateContact(input: UpdateContactRecordInput): Promise<ContactRecord>;
   attachContactChannel(input: AttachContactChannelInput): Promise<ContactChannelRecord>;
-  findContactByChannel(input: CrmScope & {
-    readonly channelType: CrmContactChannelType;
-    readonly provider?: string | null;
-    readonly value: string;
-  }): Promise<ContactRecord | undefined>;
-  listContactChannels(input: CrmScope & { readonly contactId: string }): Promise<readonly ContactChannelRecord[]>;
+  findContactByChannel(
+    input: CrmScope & {
+      readonly channelType: CrmContactChannelType;
+      readonly provider?: string | null;
+      readonly value: string;
+    },
+  ): Promise<ContactRecord | undefined>;
+  listContactChannels(
+    input: CrmScope & { readonly contactId: string },
+  ): Promise<readonly ContactChannelRecord[]>;
   createLead(input: CreateLeadRecordInput): Promise<LeadRecord>;
   getLead(input: CrmScope & { readonly leadId: string }): Promise<LeadRecord | undefined>;
   updateLead(input: UpdateLeadRecordInput): Promise<LeadRecord>;
-  listLeadsForContact(input: CrmScope & { readonly contactId: string; readonly limit?: number }): Promise<readonly LeadRecord[]>;
+  listLeadsForContact(
+    input: CrmScope & { readonly contactId: string; readonly limit?: number },
+  ): Promise<readonly LeadRecord[]>;
   createOpportunity(input: CreateOpportunityRecordInput): Promise<OpportunityRecord>;
-  getOpportunity(input: CrmScope & { readonly opportunityId: string }): Promise<OpportunityRecord | undefined>;
+  getOpportunity(
+    input: CrmScope & { readonly opportunityId: string },
+  ): Promise<OpportunityRecord | undefined>;
   updateOpportunity(input: UpdateOpportunityRecordInput): Promise<OpportunityRecord>;
   transitionOpportunity(input: TransitionOpportunityRecordInput): Promise<OpportunityRecord>;
-  listOpportunitiesForContact(input: CrmScope & { readonly contactId: string; readonly limit?: number }): Promise<readonly OpportunityRecord[]>;
-  listRevisions(input: CrmScope & { readonly recordType: CrmRecordType; readonly recordId: string }): Promise<readonly CrmRecordRevision[]>;
+  listOpportunitiesForContact(
+    input: CrmScope & { readonly contactId: string; readonly limit?: number },
+  ): Promise<readonly OpportunityRecord[]>;
+  listRevisions(
+    input: CrmScope & { readonly recordType: CrmRecordType; readonly recordId: string },
+  ): Promise<readonly CrmRecordRevision[]>;
 }
 
 const LEAD_TRANSITIONS: Readonly<Record<CrmLeadStatus, readonly CrmLeadStatus[]>> = {
@@ -267,7 +279,9 @@ const LEAD_TRANSITIONS: Readonly<Record<CrmLeadStatus, readonly CrmLeadStatus[]>
   ARCHIVED: [],
 };
 
-const OPPORTUNITY_TRANSITIONS: Readonly<Record<CrmOpportunityStatus, readonly CrmOpportunityStatus[]>> = {
+const OPPORTUNITY_TRANSITIONS: Readonly<
+  Record<CrmOpportunityStatus, readonly CrmOpportunityStatus[]>
+> = {
   OPEN: ['WON', 'LOST', 'CANCELED'],
   WON: ['ARCHIVED'],
   LOST: ['ARCHIVED'],
@@ -282,7 +296,10 @@ export function assertCrmLeadStatusTransition(current: CrmLeadStatus, next: CrmL
   }
 }
 
-export function assertCrmOpportunityStatusTransition(current: CrmOpportunityStatus, next: CrmOpportunityStatus): void {
+export function assertCrmOpportunityStatusTransition(
+  current: CrmOpportunityStatus,
+  next: CrmOpportunityStatus,
+): void {
   if (current === next) return;
   if (!OPPORTUNITY_TRANSITIONS[current].includes(next)) {
     throw new Error(`CRM_OPPORTUNITY_STATUS_TRANSITION_INVALID:${current}:${next}`);
@@ -313,7 +330,8 @@ export function validateLeadRecord(record: LeadRecord): void {
   requireCrmText(record.contactId, 'CRM_CONTACT_ID_REQUIRED');
   requireCrmText(record.sourceType, 'CRM_LEAD_SOURCE_TYPE_REQUIRED');
   if (!CRM_LEAD_STATUSES.includes(record.status)) throw new Error('CRM_LEAD_STATUS_INVALID');
-  if (!CRM_LEAD_QUALIFICATIONS.includes(record.qualification)) throw new Error('CRM_LEAD_QUALIFICATION_INVALID');
+  if (!CRM_LEAD_QUALIFICATIONS.includes(record.qualification))
+    throw new Error('CRM_LEAD_QUALIFICATION_INVALID');
   validateCrmScore(record.score);
   normalizeNullableTimestamp(record.slaDueAt, 'CRM_LEAD_SLA_DUE_AT_INVALID');
   normalizeCrmTimestamp(record.capturedAt, 'CRM_LEAD_CAPTURED_AT_INVALID');
@@ -326,9 +344,11 @@ export function validateLeadRecord(record: LeadRecord): void {
     throw new Error('CRM_LEAD_CONVERTED_REQUIRES_SALES_QUALIFICATION');
   }
   if (record.status === 'DISQUALIFIED') {
-    if (record.qualification !== 'DISQUALIFIED') throw new Error('CRM_LEAD_DISQUALIFIED_QUALIFICATION_REQUIRED');
-    if (record.disqualifiedReason === null) throw new Error('CRM_LEAD_DISQUALIFIED_REASON_REQUIRED');
-  } else if (record.disqualifiedReason !== null) {
+    if (record.qualification !== 'DISQUALIFIED')
+      throw new Error('CRM_LEAD_DISQUALIFIED_QUALIFICATION_REQUIRED');
+    if (record.disqualifiedReason === null)
+      throw new Error('CRM_LEAD_DISQUALIFIED_REASON_REQUIRED');
+  } else if (record.status !== 'ARCHIVED' && record.disqualifiedReason !== null) {
     throw new Error('CRM_LEAD_DISQUALIFIED_REASON_NOT_ALLOWED');
   }
   validateCrmAttributes(record.attributes);
@@ -344,29 +364,38 @@ export function validateOpportunityRecord(record: OpportunityRecord): void {
   requireCrmText(record.name, 'CRM_OPPORTUNITY_NAME_REQUIRED');
   requireCrmText(record.pipelineKey, 'CRM_OPPORTUNITY_PIPELINE_REQUIRED');
   requireCrmText(record.stageKey, 'CRM_OPPORTUNITY_STAGE_REQUIRED');
-  if (!CRM_OPPORTUNITY_STATUSES.includes(record.status)) throw new Error('CRM_OPPORTUNITY_STATUS_INVALID');
+  if (!CRM_OPPORTUNITY_STATUSES.includes(record.status))
+    throw new Error('CRM_OPPORTUNITY_STATUS_INVALID');
   validateCrmMoney(record.currency, record.valueMinor);
-  if (record.nextActionAt !== null && record.nextAction === null) throw new Error('CRM_OPPORTUNITY_NEXT_ACTION_REQUIRED');
+  if (record.nextActionAt !== null && record.nextAction === null)
+    throw new Error('CRM_OPPORTUNITY_NEXT_ACTION_REQUIRED');
   normalizeNullableTimestamp(record.nextActionAt, 'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID');
   normalizeNullableTimestamp(record.expectedCloseAt, 'CRM_OPPORTUNITY_EXPECTED_CLOSE_AT_INVALID');
   normalizeNullableTimestamp(record.closedAt, 'CRM_OPPORTUNITY_CLOSED_AT_INVALID');
-  if (record.status === 'OPEN' && record.closedAt !== null) throw new Error('CRM_OPPORTUNITY_OPEN_CLOSED_AT_NOT_ALLOWED');
-  if (['WON', 'LOST', 'CANCELED'].includes(record.status) && record.closedAt === null) {
+  if (record.status === 'OPEN' && record.closedAt !== null)
+    throw new Error('CRM_OPPORTUNITY_OPEN_CLOSED_AT_NOT_ALLOWED');
+  if (record.status !== 'OPEN' && record.closedAt === null) {
     throw new Error('CRM_OPPORTUNITY_CLOSED_AT_REQUIRED');
   }
-  if (record.status === 'LOST' && record.lossReason === null) throw new Error('CRM_OPPORTUNITY_LOSS_REASON_REQUIRED');
-  if (record.status !== 'LOST' && record.lossReason !== null) throw new Error('CRM_OPPORTUNITY_LOSS_REASON_NOT_ALLOWED');
+  if (record.status === 'LOST' && record.lossReason === null)
+    throw new Error('CRM_OPPORTUNITY_LOSS_REASON_REQUIRED');
+  if (!['LOST', 'ARCHIVED'].includes(record.status) && record.lossReason !== null)
+    throw new Error('CRM_OPPORTUNITY_LOSS_REASON_NOT_ALLOWED');
   validateCrmAttributes(record.attributes);
   assertCrmVersion(record.version);
   normalizeCrmTimestamp(record.createdAt, 'CRM_OPPORTUNITY_CREATED_AT_INVALID');
   normalizeCrmTimestamp(record.updatedAt, 'CRM_OPPORTUNITY_UPDATED_AT_INVALID');
 }
 
-export function normalizeCrmChannelValue(channelType: CrmContactChannelType, value: string): string {
+export function normalizeCrmChannelValue(
+  channelType: CrmContactChannelType,
+  value: string,
+): string {
   const trimmed = requireCrmText(value, 'CRM_CONTACT_CHANNEL_VALUE_REQUIRED');
   if (channelType === 'EMAIL') {
     const normalized = trimmed.toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('CRM_CONTACT_CHANNEL_EMAIL_INVALID');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized))
+      throw new Error('CRM_CONTACT_CHANNEL_EMAIL_INVALID');
     return normalized;
   }
   if (channelType === 'PHONE') {
@@ -377,28 +406,36 @@ export function normalizeCrmChannelValue(channelType: CrmContactChannelType, val
   return trimmed.toLowerCase();
 }
 
-export function normalizeCrmChannelProvider(channelType: CrmContactChannelType, provider: string | null | undefined): string | null {
+export function normalizeCrmChannelProvider(
+  channelType: CrmContactChannelType,
+  provider: string | null | undefined,
+): string | null {
   const normalized = nullableCrmText(provider)?.toLowerCase() ?? null;
-  if (['SOCIAL', 'OTHER'].includes(channelType) && normalized === null) throw new Error('CRM_CONTACT_CHANNEL_PROVIDER_REQUIRED');
-  if (['EMAIL', 'PHONE'].includes(channelType) && normalized !== null) throw new Error('CRM_CONTACT_CHANNEL_PROVIDER_NOT_ALLOWED');
+  if (['SOCIAL', 'OTHER'].includes(channelType) && normalized === null)
+    throw new Error('CRM_CONTACT_CHANNEL_PROVIDER_REQUIRED');
+  if (['EMAIL', 'PHONE'].includes(channelType) && normalized !== null)
+    throw new Error('CRM_CONTACT_CHANNEL_PROVIDER_NOT_ALLOWED');
   return normalized;
 }
 
 export function normalizeCrmCurrency(currency: string | null | undefined): string | null {
   const normalized = nullableCrmText(currency)?.toUpperCase() ?? null;
-  if (normalized !== null && !/^[A-Z]{3}$/.test(normalized)) throw new Error('CRM_CURRENCY_INVALID');
+  if (normalized !== null && !/^[A-Z]{3}$/.test(normalized))
+    throw new Error('CRM_CURRENCY_INVALID');
   return normalized;
 }
 
 export function validateCrmMoney(currency: string | null, valueMinor: number | null): void {
-  if (valueMinor !== null && (!Number.isSafeInteger(valueMinor) || valueMinor < 0)) throw new Error('CRM_VALUE_MINOR_INVALID');
+  if (valueMinor !== null && (!Number.isSafeInteger(valueMinor) || valueMinor < 0))
+    throw new Error('CRM_VALUE_MINOR_INVALID');
   if (valueMinor !== null && currency === null) throw new Error('CRM_CURRENCY_REQUIRED');
   if (valueMinor === null && currency !== null) throw new Error('CRM_VALUE_REQUIRED_FOR_CURRENCY');
   if (currency !== null && !/^[A-Z]{3}$/.test(currency)) throw new Error('CRM_CURRENCY_INVALID');
 }
 
 export function validateCrmScore(score: number | null): void {
-  if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) throw new Error('CRM_LEAD_SCORE_INVALID');
+  if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100))
+    throw new Error('CRM_LEAD_SCORE_INVALID');
 }
 
 export function requireCrmEvidence(evidence: readonly string[]): readonly string[] {
@@ -410,7 +447,8 @@ export function requireCrmEvidence(evidence: readonly string[]): readonly string
 export function validateCrmAttributes(attributes: CrmAttributes): void {
   for (const [key, value] of Object.entries(attributes)) {
     requireCrmText(key, 'CRM_ATTRIBUTE_KEY_REQUIRED');
-    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('CRM_ATTRIBUTE_VALUE_INVALID');
+    if (typeof value === 'number' && !Number.isFinite(value))
+      throw new Error('CRM_ATTRIBUTE_VALUE_INVALID');
   }
 }
 
@@ -428,7 +466,10 @@ export function normalizeCrmTimestamp(value: string, errorCode: string): string 
   return new Date(parsed).toISOString();
 }
 
-export function normalizeNullableTimestamp(value: string | null | undefined, errorCode: string): string | null {
+export function normalizeNullableTimestamp(
+  value: string | null | undefined,
+  errorCode: string,
+): string | null {
   return value === null || value === undefined ? null : normalizeCrmTimestamp(value, errorCode);
 }
 

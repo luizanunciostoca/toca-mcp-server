@@ -134,7 +134,14 @@ export async function appendInternalAuditLedgerEvent(
       `insert into audit_ledger_heads (
          execution_id, correlation_id, tenant_id, last_sequence, head_hash, updated_at
        ) values ($1, $2, $3, $4, $5, $6::timestamptz)`,
-      [event.executionId, event.correlationId, event.tenantId, sequence, eventHash, event.createdAt],
+      [
+        event.executionId,
+        event.correlationId,
+        event.tenantId,
+        sequence,
+        eventHash,
+        event.createdAt,
+      ],
     );
   }
 
