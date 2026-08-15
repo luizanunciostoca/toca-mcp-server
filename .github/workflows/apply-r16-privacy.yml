@@ -35,3 +35,4 @@ jobs:
           git add src/governance/capability-ids.ts src/governance/capability-catalog.ts src/governance/capability-contract-overrides.ts test/governance-catalog.test.ts test/capability-resolution.test.ts
           git commit -m "feat(privacy): register R16 capability contracts"
           git push origin HEAD:feat/r16-privacy-consent-preferences
+# reconciliation-trigger
