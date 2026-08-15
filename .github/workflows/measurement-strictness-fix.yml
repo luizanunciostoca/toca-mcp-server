@@ -1,0 +1,93 @@
+name: Measurement Strictness Fix
+
+on:
+  push:
+    branches:
+      - feat/measurement-ticketing-attribution-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/measurement-ticketing-attribution-foundation
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply strict TypeScript fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service = Path('src/measurement/service.ts')
+          text = service.read_text()
+          text = text.replace(
+              '    this.#audit = options.audit;\n',
+              '    if (options.audit) this.#audit = options.audit;\n',
+          )
+          text = text.replace(
+              "input.requiredDimensions ?? ['source', 'medium', 'campaign']",
+              "input.requiredDimensions ?? (['source', 'medium', 'campaign'] as const)",
+          )
+          text = text.replace(
+              "errorCode: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN_ERROR',",
+              "errorCode:\n          (error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN_ERROR') ??\n          'UNKNOWN_ERROR',",
+          )
+          service.write_text(text)
+
+          normalization = Path('src/measurement/normalization.ts')
+          text = normalization.read_text()
+          text = text.replace('?: string | null;', '?: string | null | undefined;')
+          text = text.replace('readonly ingestedAt?: string;', 'readonly ingestedAt?: string | undefined;')
+          text = text.replace('readonly isConversion?: boolean;', 'readonly isConversion?: boolean | undefined;')
+          text = text.replace('?: number | null;', '?: number | null | undefined;')
+          text = text.replace(
+              'readonly properties?: MeasurementProperties;',
+              'readonly properties?: MeasurementProperties | undefined;',
+          )
+          normalization.write_text(text)
+
+          adapters = Path('src/measurement/adapters.ts')
+          text = adapters.read_text().replace(
+              'readonly eventNames?: readonly string[];',
+              'readonly eventNames?: readonly string[] | undefined;',
+          )
+          adapters.write_text(text)
+
+          ticketing = Path('src/measurement/ticketing.ts')
+          text = ticketing.read_text().replace(
+              'readonly workflowInstanceId?: string | null;',
+              'readonly workflowInstanceId?: string | null | undefined;',
+          )
+          ticketing.write_text(text)
+          PY
+      - name: Format touched TypeScript files
+        run: >-
+          pnpm exec prettier --write
+          src/measurement/analytics.ts
+          src/measurement/service.ts
+          src/measurement/normalization.ts
+          src/measurement/adapters.ts
+          src/measurement/ticketing.ts
+          .github/workflows/measurement-strictness-fix.yml
+      - name: Commit fixes if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/measurement/analytics.ts src/measurement/service.ts src/measurement/normalization.ts src/measurement/adapters.ts src/measurement/ticketing.ts .github/workflows/measurement-strictness-fix.yml
+          git commit -m "fix: satisfy strict measurement contracts"
+          git push origin HEAD:feat/measurement-ticketing-attribution-foundation
