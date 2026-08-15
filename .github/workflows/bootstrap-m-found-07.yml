@@ -1,0 +1,105 @@
+name: Bootstrap M-FOUND-07
+
+on:
+  push:
+    branches:
+      - controller/m-found-07-bootstrap
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SOURCE_PR: "98"
+      TARGET_BRANCH: "feat/m-found-07-transactional-outbox"
+    steps:
+      - name: Wait for M-FOUND-06 merge
+        id: merged
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            pr="$(gh api "repos/${REPO}/pulls/${SOURCE_PR}")"
+            merged="$(jq -r '.merged' <<<"${pr}")"
+            merge_sha="$(jq -r '.merge_commit_sha // empty' <<<"${pr}")"
+            if [[ "${merged}" == "true" && -n "${merge_sha}" ]]; then
+              echo "merge_sha=${merge_sha}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "M-FOUND-06 was not merged in time." >&2
+          exit 1
+
+      - name: Require main at M-FOUND-06 merge SHA
+        env:
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${REPO}/commits/main" --jq '.sha')"
+          if [[ "${current_main}" != "${MERGE_SHA}" ]]; then
+            echo "Main moved after M-FOUND-06 merge: ${current_main}" >&2
+            exit 1
+          fi
+
+      - name: Require green post-merge Quality Gate
+        env:
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            runs="$(gh api "repos/${REPO}/actions/workflows/quality.yml/runs?event=push&branch=main&per_page=30")"
+            status="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .status // empty' <<<"${runs}")"
+            conclusion="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .conclusion // empty' <<<"${runs}")"
+            if [[ "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] && exit 0
+              echo "M-FOUND-06 post-merge Quality Gate is ${conclusion}." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "M-FOUND-06 post-merge Quality Gate did not complete." >&2
+          exit 1
+
+      - name: Require green post-merge deploy
+        env:
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            runs="$(gh api "repos/${REPO}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/runs?event=push&branch=main&per_page=30")"
+            status="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .status // empty' <<<"${runs}")"
+            conclusion="$(jq -r --arg sha "${MERGE_SHA}" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .conclusion // empty' <<<"${runs}")"
+            if [[ "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] && exit 0
+              echo "M-FOUND-06 post-merge deploy is ${conclusion}." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "M-FOUND-06 post-merge deploy did not complete." >&2
+          exit 1
+
+      - name: Create exact M-FOUND-07 branch
+        env:
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          if existing="$(gh api "repos/${REPO}/git/ref/heads/${TARGET_BRANCH}" --jq '.object.sha' 2>/dev/null)"; then
+            if [[ "${existing}" != "${MERGE_SHA}" ]]; then
+              echo "M-FOUND-07 branch already exists at unexpected SHA ${existing}." >&2
+              exit 1
+            fi
+            echo "M-FOUND-07 branch already exists at validated merge SHA."
+            exit 0
+          fi
+          gh api --method POST "repos/${REPO}/git/refs" \
+            -f ref="refs/heads/${TARGET_BRANCH}" \
+            -f sha="${MERGE_SHA}" >/dev/null
+          echo "Created ${TARGET_BRANCH} at ${MERGE_SHA}."
