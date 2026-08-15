@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryAuditSink, type AuditEvent, type AuditSink } from '../src/core/audit.js';
+import { InMemoryAuditSink, type AuditSink } from '../src/core/audit.js';
 import { executeTool } from '../src/core/executor.js';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import type { ToolDefinition } from '../src/core/tool-registry.js';
@@ -246,7 +246,7 @@ describe('M-FOUND-05 atomic approval executor', () => {
     const store = await seededStore();
     let called = false;
     const failingAudit: AuditSink = {
-      write: (_event: AuditEvent) => Promise.reject(new Error('audit unavailable')),
+      write: () => Promise.reject(new Error('audit unavailable')),
     };
 
     await expect(
