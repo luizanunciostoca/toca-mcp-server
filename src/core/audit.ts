@@ -1,3 +1,5 @@
+import type { AuthenticationMethod, AuthorizationRole, PrincipalType } from './identity.js';
+
 export type AuditStatus = 'STARTED' | 'SUCCEEDED' | 'FAILED' | 'DENIED';
 
 export interface AuditEvent {
@@ -5,6 +7,13 @@ export interface AuditEvent {
   readonly correlationId: string;
   readonly toolName: string;
   readonly requester: string;
+  readonly principalType?: PrincipalType;
+  readonly tenantId?: string;
+  readonly workspaceId?: string;
+  readonly organizationId?: string;
+  readonly sessionId?: string;
+  readonly authenticationMethod?: AuthenticationMethod;
+  readonly authorizationRoles?: readonly AuthorizationRole[];
   readonly status: AuditStatus;
   readonly approvalId?: string;
   readonly connectedAccount?: string;

@@ -18,11 +18,24 @@ function createAuditEvent(
   status: AuditEvent['status'],
   extra: Partial<Pick<AuditEvent, 'errorCode' | 'externalResourceId'>> = {},
 ): AuditEvent {
+  const principal = options.policyContext.identity?.principal;
+  const authorization = options.policyContext.identity?.authorization;
   return {
     executionId,
     correlationId: options.correlationId,
     toolName: options.tool.name,
-    requester: options.policyContext.requester,
+    requester: principal?.principalId ?? options.policyContext.requester ?? 'anonymous',
+    ...(principal
+      ? {
+          principalType: principal.principalType,
+          tenantId: principal.tenantId,
+          workspaceId: principal.workspaceId,
+          organizationId: principal.organizationId,
+          ...(principal.sessionId ? { sessionId: principal.sessionId } : {}),
+          authenticationMethod: principal.authenticationMethod,
+        }
+      : {}),
+    ...(authorization ? { authorizationRoles: authorization.roles } : {}),
     status,
     createdAt: new Date().toISOString(),
     ...(options.policyContext.approval

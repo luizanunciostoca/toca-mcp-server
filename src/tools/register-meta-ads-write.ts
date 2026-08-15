@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { AuditSink } from '../core/audit.js';
 import { executeTool } from '../core/executor.js';
+import type { ExecutionIdentityResolver } from '../core/identity.js';
 import type { ToolDefinition, ToolRegistry } from '../core/tool-registry.js';
 import {
   requestSha256,
@@ -56,7 +57,7 @@ const planSchema = z.object({
 export interface MetaAdsWriteExecutionOptions {
   readonly registry: ToolRegistry;
   readonly auditSink: AuditSink;
-  readonly requester?: string;
+  readonly resolveIdentity: ExecutionIdentityResolver;
 }
 
 export function registerMetaAdsWriteTools(
@@ -64,8 +65,6 @@ export function registerMetaAdsWriteTools(
   service: MetaAdsControlledWriteService,
   execution: MetaAdsWriteExecutionOptions,
 ): void {
-  const requester = execution.requester ?? 'mcp-client';
-
   server.registerTool(
     'meta_ads.campaign.prepare_paused',
     {
@@ -103,12 +102,16 @@ export function registerMetaAdsWriteTools(
         openWorldHint: true,
       },
     },
-    async ({ plan, approvalSha256 }) => {
+    async ({ plan, approvalSha256 }, context) => {
       const typedPlan = plan as ControlledCreatePausedPlan;
       const correlationId = `meta-ads:create-paused:${requestSha256(typedPlan)}`;
+      const identity = execution.resolveIdentity(context);
       const output = await executeTool({
         tool: requireTool(execution.registry, 'meta_ads.campaign.create_paused'),
-        policyContext: { requester },
+        policyContext: {
+          ...(identity ? { identity } : {}),
+          connectedAccount: typedPlan.account.adAccountId,
+        },
         auditSink: execution.auditSink,
         correlationId,
         action: () => service.createPaused(typedPlan, approvalSha256),
