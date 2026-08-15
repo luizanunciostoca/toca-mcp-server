@@ -1,4 +1,9 @@
 import type { CapabilityStatus, RiskClass, ToolDefinition } from '../core/tool-registry.js';
+import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from '../content/capability-contracts.js';
+import {
+  VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_IDS,
+  VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET,
+} from '../content/capability-ids.js';
 import { createToolRegistry } from '../registry.js';
 import {
   CAPABILITY_CONTRACT_OVERRIDES,
@@ -125,10 +130,16 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
 
 const knownRuntimeTools = new Set(runtimeDefinitions.keys());
 
+function isVideoContentTechnicalExtension(capabilityId: string): boolean {
+  return VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET.has(capabilityId);
+}
+
 function lifecycleStatus(capabilityId: string): CapabilityStatus {
   return (
     runtimeDefinitions.get(capabilityId)?.capabilityStatus ??
-    (implementedInternal.has(capabilityId) ? 'IMPLEMENTED' : 'PLANNED')
+    (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId)
+      ? 'IMPLEMENTED'
+      : 'PLANNED')
   );
 }
 
@@ -258,7 +269,9 @@ function inferredProvider(capabilityId: string): string {
   if (/^(release|security)\./.test(capabilityId)) return 'GitHub+GCP';
   if (/^(backup|restore|dr)\./.test(capabilityId)) return 'GCP+PostgreSQL';
   if (/^(observability|incident)\./.test(capabilityId)) return 'TOCA MCP+GCP';
-  if (/^(design|image|copy|presentation|story)\./.test(capabilityId)) return 'ChatGPT+TOCA_OS';
+  if (/^(design|image|copy|presentation|story|video)\./.test(capabilityId)) {
+    return 'ChatGPT+TOCA_OS';
+  }
   return 'TOCA_OS+toca-mcp';
 }
 
@@ -285,7 +298,9 @@ function config(capabilityId: string): readonly string[] {
 
 function executionSurface(capabilityId: string, status: CapabilityStatus): ExecutionSurface {
   if (knownRuntimeTools.has(capabilityId)) return 'MCP_TOOL';
-  if (implementedInternal.has(capabilityId)) return 'INTERNAL_ENGINE';
+  if (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId)) {
+    return 'INTERNAL_ENGINE';
+  }
   if (/^(drive|design|presentation)\./.test(capabilityId)) return 'CONNECTOR';
   if (
     /^(copy|editorial|campaign|analytics|performance|context|quality_gate|people|legal)\./.test(
@@ -308,6 +323,12 @@ function evidence(capabilityId: string, status: CapabilityStatus): readonly stri
   if (capabilityId.startsWith('google_business.')) {
     return ['src/local-discovery/google-business.ts'];
   }
+  if (capabilityId.startsWith('video.')) {
+    return ['src/content/video.ts', 'src/content/capability-contracts.ts'];
+  }
+  if (capabilityId.startsWith('content_item.') || capabilityId === 'content.repurpose.plan') {
+    return ['src/content/content-item.ts', 'src/content/capability-contracts.ts'];
+  }
   if (capabilityId.startsWith('approval.')) return ['src/governance/approval-governance.ts'];
   if (capabilityId.startsWith('capability.')) return ['src/governance/capability-lifecycle.ts'];
   if (capabilityId.startsWith('governance.')) return ['src/governance/governance-drift.ts'];
@@ -315,10 +336,21 @@ function evidence(capabilityId: string, status: CapabilityStatus): readonly stri
   return ['src/governance/state-machine.ts'];
 }
 
+function capabilityContractOverride(capabilityId: string) {
+  return (
+    VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES[capabilityId] ??
+    CAPABILITY_CONTRACT_OVERRIDES[capabilityId]
+  );
+}
+
 function contractQuality(capabilityId: string): CapabilityContractQuality {
-  const explicit = CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality;
+  const explicit = capabilityContractOverride(capabilityId)?.contract_quality;
   if (explicit) return explicit;
-  if (knownRuntimeTools.has(capabilityId) || implementedInternal.has(capabilityId)) {
+  if (
+    knownRuntimeTools.has(capabilityId) ||
+    implementedInternal.has(capabilityId) ||
+    isVideoContentTechnicalExtension(capabilityId)
+  ) {
     return 'RUNTIME_BOUND';
   }
   return 'LEGACY_INFERRED';
@@ -326,7 +358,9 @@ function contractQuality(capabilityId: string): CapabilityContractQuality {
 
 function authenticationMode(capabilityId: string): AuthenticationMode {
   if (capabilityId.startsWith('system.')) return 'NONE';
-  if (implementedInternal.has(capabilityId)) return 'INTERNAL';
+  if (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId)) {
+    return 'INTERNAL';
+  }
   if (capabilityId.startsWith('drive.')) return 'OAUTH2';
   if (capabilityId.startsWith('google_business.')) return 'OAUTH2';
   if (/^(instagram|social|engagement|meta_ads)\./.test(capabilityId)) return 'UNKNOWN';
@@ -379,7 +413,7 @@ function createDefinition(
 ): CapabilityDefinition {
   assertCapabilityNamespace(capabilityId);
   const runtimeDefinition = runtimeDefinitions.get(capabilityId);
-  const override = CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
+  const override = capabilityContractOverride(capabilityId);
   const inferredRisk = runtimeDefinition?.riskClass ?? inferredRiskClass(capabilityId);
   const risk = override?.risk_class ?? inferredRisk;
   const status = lifecycleStatus(capabilityId);
@@ -456,7 +490,11 @@ function createDefinition(
 }
 
 function allRouteCapabilityIds(routeId: RouteId): readonly string[] {
-  return [...ROUTE_CAPABILITY_IDS[routeId], ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? [])];
+  return [
+    ...ROUTE_CAPABILITY_IDS[routeId],
+    ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? []),
+    ...(VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? []),
+  ];
 }
 
 export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
