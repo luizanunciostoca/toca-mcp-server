@@ -43,6 +43,7 @@ jobs:
           source = source
             .replace("execute: options.execute ?? (async () => ({ id: 'job_1' })),", "execute: options.execute ?? (() => Promise.resolve({ id: 'job_1' })),")
             .replaceAll('vi.fn(async (_input: unknown) => (', 'vi.fn(() => Promise.resolve(')
+            .replace('vi.fn(async (_input: unknown) => [])', 'vi.fn(() => Promise.resolve([]))')
             .replace('vi.fn(async (_input: unknown) => local)', 'vi.fn(() => Promise.resolve(local))')
             .replace('vi.fn(async (_workflowId: string) => local)', 'vi.fn(() => Promise.resolve(local))')
             .replaceAll('providerReadback: async () => ({', 'providerReadback: () => Promise.resolve({')
