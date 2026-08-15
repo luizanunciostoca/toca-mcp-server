@@ -1,10 +1,14 @@
 # M-FOUND-08 — Audit Ledger / Observability
 
-Status: **IMPLEMENTED IN BRANCH — VALIDATION REQUIRED**
+Status: **READY TO MERGE — OFFICIAL PR QUALITY GREEN**
 
 Milestone: `TOCA_OS_MARKETING_SALES_FOUNDATION_v1`
 
 Base main SHA: `8c4b0cbd6ac4d4e111dd2086c5c08d5c04167bb5`
+
+Validated implementation head: `6db192fda95f2205a7f437a81021b3617a28ba05`
+
+Official PR Quality Gate: `31864758165` / run `#1044` — **SUCCESS**
 
 ## Objective
 
@@ -109,6 +113,12 @@ M-FOUND-08 is complete when:
 13. merge uses a fixed green head SHA;
 14. post-merge `main` Quality Gate passes.
 
+## Current evidence
+
+The cleaned implementation head `6db192fda95f2205a7f437a81021b3617a28ba05` passed the official pull-request Quality Gate in GitHub Actions run `31864758165` (`#1044`). Format, architecture, lint, typecheck, the full test suite and build all completed successfully. Temporary M-FOUND-08 validation workflow artifacts were removed before this checkpoint was promoted.
+
+Because this checkpoint update creates a new documentation head, that exact final head must pass the normal PR Quality Gate before merge. Merge remains fixed-head only, followed by post-merge `main` validation.
+
 ## Exit
 
-After validation, proceed to `M-FOUND-09 — EventRecord`.
+After a fixed-head green merge and post-merge `main` Quality Gate, proceed to `M-FOUND-09 — EventRecord`.
