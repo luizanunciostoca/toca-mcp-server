@@ -1,5 +1,6 @@
 create table if not exists event_outbox (
   event_id text primary key,
+  event_key text not null,
   event_type text not null,
   schema_version text not null,
   aggregate_type text not null,
@@ -24,6 +25,7 @@ create table if not exists event_outbox (
   last_error_code text,
   version integer not null default 1,
   check (length(trim(event_id)) > 0),
+  check (length(trim(event_key)) > 0),
   check (length(trim(event_type)) > 0),
   check (length(trim(schema_version)) > 0),
   check (length(trim(aggregate_type)) > 0),
@@ -42,7 +44,8 @@ create table if not exists event_outbox (
     or (claimed_by is not null and claim_execution_id is not null and claimed_at is not null)
   ),
   check (status <> 'DELIVERED' or delivered_at is not null),
-  check (status <> 'DEAD_LETTER' or last_error_code is not null)
+  check (status <> 'DEAD_LETTER' or last_error_code is not null),
+  unique (tenant_id, aggregate_type, aggregate_id, event_key)
 );
 
 create index if not exists event_outbox_available_idx
