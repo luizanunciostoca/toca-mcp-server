@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import * as z from 'zod/v4';
-import type { InstagramMediaType, InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
+import type {
+  InstagramMediaType,
+  InstagramPublishRequest,
+} from '../providers/instagram/instagram-contracts.js';
 import type {
   InstagramPublicationExecutor,
   InstagramPublicationTransport,
@@ -22,18 +25,28 @@ const accountSchema = z.object({
   pageId: z.string().min(1),
   instagramAccountId: z.string().min(1),
 });
+const mediaUrlSchema = z.string().url();
+const imageUrlSchema = mediaUrlSchema.refine(isImageMediaUrl, {
+  message: 'Instagram image publication requires a JPEG, PNG, or WebP URL.',
+});
 const basePublicationSchema = z.object({
   account: accountSchema,
-  mediaUrls: z.array(z.string().url()).min(1).max(10),
+  mediaUrls: z.array(mediaUrlSchema).min(1).max(10),
   caption: z.string().max(2200).optional(),
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
 });
-const singleMediaPublicationSchema = basePublicationSchema.extend({
-  mediaUrls: z.array(z.string().url()).length(1),
+const imagePublicationSchema = basePublicationSchema.extend({
+  mediaUrls: z.array(imageUrlSchema).length(1),
 });
 const carouselPublicationSchema = basePublicationSchema.extend({
-  mediaUrls: z.array(z.string().url()).min(2).max(10),
+  mediaUrls: z.array(imageUrlSchema).min(2).max(10),
+});
+const singleVideoPublicationSchema = basePublicationSchema.extend({
+  mediaUrls: z.array(mediaUrlSchema).length(1),
+});
+const storyPublicationSchema = basePublicationSchema.omit({ caption: true }).extend({
+  mediaUrls: z.array(mediaUrlSchema).length(1),
 });
 
 type DirectPublicationInput = z.infer<typeof basePublicationSchema>;
@@ -52,7 +65,7 @@ export function resolveInstagramPublicationRuntimeBinding(
 ): CoreCapabilityRuntimeBinding | undefined {
   if (!runtime || !isDirectPublicationCapabilityId(capabilityId)) return undefined;
   const mediaType = DIRECT_PUBLICATION_CAPABILITIES[capabilityId];
-  const schema = mediaType === 'CAROUSEL' ? carouselPublicationSchema : singleMediaPublicationSchema;
+  const schema = publicationSchemaFor(mediaType);
 
   return {
     inputSchema: schema,
@@ -63,11 +76,17 @@ export function resolveInstagramPublicationRuntimeBinding(
       return executeUntilPublished(runtime, request);
     },
     targetAccount: (value) => schema.parse(value).account.instagramAccountId,
-    idempotencyKey: (value) => directPublicationIdempotencyKey(capabilityId, schema.parse(value)),
+    idempotencyKey: (value) =>
+      directPublicationIdempotencyKey(capabilityId, schema.parse(value)),
     providerReadback: async (result, value) => {
       const input = schema.parse(value);
       assertAllowedAccount(input, runtime.allowedInstagramAccountId);
-      return readbackPublishedMedia(mediaType, result as PublicationExecutionResult, input, runtime);
+      return readbackPublishedMedia(
+        mediaType,
+        result as PublicationExecutionResult,
+        input,
+        runtime,
+      );
     },
     sideEffectValidated: true,
   };
@@ -151,6 +170,19 @@ function publicationRequest(
   };
 }
 
+function publicationSchemaFor(mediaType: InstagramMediaType) {
+  switch (mediaType) {
+    case 'IMAGE':
+      return imagePublicationSchema;
+    case 'CAROUSEL':
+      return carouselPublicationSchema;
+    case 'REEL':
+      return singleVideoPublicationSchema;
+    case 'STORY':
+      return storyPublicationSchema;
+  }
+}
+
 function directPublicationIdempotencyKey(
   capabilityId: DirectPublicationCapabilityId,
   input: DirectPublicationInput,
@@ -183,6 +215,15 @@ function providerMediaTypeMatches(expected: InstagramMediaType, observed: string
       return observed === 'VIDEO' || observed === 'REELS';
     case 'STORY':
       return observed === 'IMAGE' || observed === 'VIDEO' || observed === 'REELS';
+  }
+}
+
+function isImageMediaUrl(value: string): boolean {
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    return /\.(?:jpe?g|png|webp)$/.test(pathname);
+  } catch {
+    return false;
   }
 }
 
