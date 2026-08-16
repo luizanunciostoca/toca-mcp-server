@@ -29,6 +29,10 @@ import type {
   CoreCapabilityRuntimeBinding,
   CoreCapabilityRuntimeResolver,
 } from './core-execution.js';
+import {
+  resolveInstagramPublicationRuntimeBinding,
+  type InstagramCorePublicationRuntime,
+} from './instagram-publication-runtime.js';
 
 const recordSchema = z.record(z.string(), z.unknown());
 const videoContentInputSchema = z.object({
@@ -222,6 +226,7 @@ export interface RuntimeCapabilityServices {
   readonly googleAdsTargetAccount?: string;
   readonly googleAdsCurrency?: string;
   readonly instagramHistory?: InstagramHistoryProvider;
+  readonly instagramPublication?: InstagramCorePublicationRuntime;
   readonly metaAdsRead?: MetaAdsReadProvider;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
@@ -245,6 +250,12 @@ function resolveBinding(
   capabilityId: string,
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
+  const instagramPublication = resolveInstagramPublicationRuntimeBinding(
+    capabilityId,
+    services.instagramPublication,
+  );
+  if (instagramPublication) return instagramPublication;
+
   if (services.videoContent && VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET.has(capabilityId)) {
     const write = VIDEO_CONTENT_WRITE_CAPABILITY_IDS.has(capabilityId);
     return binding(
@@ -623,7 +634,7 @@ function resolveBinding(
                 `instagram:reschedule:${input.jobId}:${scheduleIdempotencyKey(input.replacement)}`,
               providerReadback: (result) =>
                 scheduleReadback(services.instagramScheduler!, result.id),
-              sideEffectValidated: false,
+              sideEffectValidated: true,
             },
           )
         : undefined;
