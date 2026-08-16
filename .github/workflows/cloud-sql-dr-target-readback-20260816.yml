@@ -1,0 +1,42 @@
+name: Cloud SQL DR Target Readback 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-validation-final-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-target-readback-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  SOURCE_INSTANCE: toca-mcp-db
+  TARGET_INSTANCE: toca-mcp-dr-final-31932660953
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read-only target/source and permission probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          SOURCE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          TARGET="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          jq -n --slurpfile p /tmp/perms.json --argjson s "$SOURCE" --argjson t "$TARGET" '{permissions:($p[0].permissions//[]),source:{name:$s.name,state:$s.state,databaseVersion:$s.databaseVersion,region:$s.region,deletionProtection:$s.settings.deletionProtectionEnabled,backupEnabled:$s.settings.backupConfiguration.enabled,pitrEnabled:$s.settings.backupConfiguration.pointInTimeRecoveryEnabled},target:{name:$t.name,state:$t.state,databaseVersion:$t.databaseVersion,region:$t.region,deletionProtection:$t.settings.deletionProtectionEnabled,tier:$t.settings.tier,edition:$t.settings.edition}}'
+          test "$(jq -r '.name' <<<"$SOURCE")" = "$SOURCE_INSTANCE"
+          test "$(jq -r '.settings.deletionProtectionEnabled' <<<"$SOURCE")" = true
+          test "$(jq -r '.name' <<<"$TARGET")" = "$TARGET_INSTANCE"
