@@ -1,8 +1,10 @@
 # Foundation v1 — Telemetry, Alerting, SLO and Disaster Recovery
 
-Status: **CURRENT RELEASE TELEMETRY/ALERTING + BACKUP/PITR DR OPERATIONALLY VALIDATED**
+Status: **PRODUCTION_VERIFIED**
 
-Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Production runtime source: `3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732`.
+
+Canonical Foundation/SLO closeout: `docs/operations/foundation-production-verification-2026-08-16.md`.
 
 Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md`, `docs/operations/foundation-reliability-provider-evidence.md` and `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`.
 
@@ -21,7 +23,7 @@ Foundation v1 includes:
 
 ## Foundation objectives
 
-Operational objectives remain:
+Operational objectives:
 
 - Core governed request availability >=99.9%;
 - managed scheduler tick success >=99.5%;
@@ -32,11 +34,11 @@ Operational objectives remain:
 - Cloud SQL PITR enabled;
 - restore-drill evidence <=90d old;
 - PostgreSQL recovery RTO <=60m;
-- PostgreSQL PITR RPO objective <=15m.
+- PostgreSQL PITR RPO <=15m.
 
 No ambiguous provider write may be converted into an unverified success.
 
-## Managed alerting — operationally configured
+## Managed alerting — PASS
 
 The previous Monitoring/Logging IAM blockers are closed.
 
@@ -63,63 +65,43 @@ Evidence:
 - artifact `9260213391`;
 - SHA-256 `af9803d8c9bbb43a8338bbd47ba64a6f61eedbe03922db2bb0479e388ee50575`.
 
-Independent mailbox-level receipt was not visible through the connected Gmail during the immediate observation window, so it is not claimed as evidence. The managed provider configuration and firing path are proven.
+Independent mailbox-level receipt was not visible during the immediate observation window, so mailbox receipt is not claimed. The managed provider configuration and firing path are proven.
 
-## Disaster recovery objectives and evidence
+## Disaster recovery — PASS
 
-### Isolated backup restore — PASS
+### Isolated backup restore
 
-A real isolated backup restore was executed without restoring over production.
+The backup restore path was exercised without restoring over production.
 
-Recovery target used:
+Evidence includes:
 
-`toca-mcp-dr-final-31932660953`
-
-Observed backup-based RPO:
-
-**9,024s (~2h30m)**.
-
-Restored-data validation proved:
-
-- current migration count 16;
+- isolated target `toca-mcp-dr-final-31932660953`;
+- migration count 16;
 - 21 critical tables readable;
 - critical foreign keys validated;
 - append-only triggers enabled;
-- Audit Ledger verifier completed without an integrity failure on the selected recovery point;
-- production unchanged.
+- Audit Ledger verification valid;
+- measured RTO **496s (~8m16s)**;
+- production unchanged;
+- deterministic target cleanup.
 
-Measured restore-start-to-validated-data RTO:
+### Isolated PITR restore
 
-**496s (~8m16s)**.
-
-Therefore the tested backup recovery path satisfies the <=60m RTO objective.
-
-### Isolated PITR drill — PASS
-
-Run `31936171307`, attempt 2, executed a separate PostgreSQL PITR restore target:
-
-`toca-mcp-pitr-31936171307`
+Run `31936171307`, attempt 2, exercised a separate timestamp-based PostgreSQL PITR target `toca-mcp-pitr-31936171307`.
 
 Provider recovery-window readback showed latest recoverable data lag of **128s (2m08s)**.
 
-The drill selected recovery timestamp:
+Selected recovery timestamp:
 
 `2026-08-16T08:26:12.648Z`
 
-against reference time:
-
-`2026-08-16T08:34:46Z`.
-
 Measured PITR RPO:
 
-**514s (8m34s)**.
+**514s (8m34s)** against objective <=900s — **PASS**.
 
-The <=15m PITR RPO objective therefore passes.
+Measured restore-start-to-validated-data RTO:
 
-Temporal-boundary proof used existing append-only production evidence without inserting a synthetic database marker:
-
-- `operational_signals/c24795ae-14f1-4952-80af-314187c1ff78` at `08:26:10.648Z` was present in the restored target;
-- `audit_ledger_events/49fff740-196b-4a0b-a5f1-d68a14e02ad3` at `08:29:42.328Z` was absent.
+**584s (9m44s)** against objective <=3600s — **PASS**.
 
 Restored-data validation proved:
 
@@ -127,47 +109,76 @@ Restored-data validation proved:
 - 22 critical tables readable;
 - critical foreign keys validated;
 - required append-only triggers enabled;
-- intended before/after PITR boundary reproduced.
+- before-marker present;
+- after-marker absent;
+- production unchanged after drill.
 
-Restore-to-`RUNNABLE` time:
-
-**549s (9m09s)**.
-
-Restore-start-to-validated-data RTO:
-
-**584s (9m44s)**.
-
-The <=60m RTO objective passes for the PITR path as well.
-
-Successful PITR evidence artifact:
+PITR evidence artifact:
 
 - ID `9261022842`;
 - SHA-256 `6524043e56f2eacef34b129fa7eb2c7130711ce43e3071f67476573527dd5140`.
 
-Canonical evidence: `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`.
-
-## DR cleanup — PASS
-
-Backup-restore cleanup run `31933900598` deleted its isolated recovery target after deletion protection was disabled only for that target.
-
-The PITR drill also disabled deletion protection only on `toca-mcp-pitr-31936171307`, deleted its probe/validation jobs and deleted the PITR target.
-
-Final PITR readback proved:
-
-- temporary PITR target absent;
-- production still `RUNNABLE`;
-- production deletion protection enabled;
-- automated backups enabled;
-- PITR enabled;
-- normalized production settings unchanged from the pre-drill snapshot.
-
 No temporary DR instance remains from either drill.
 
-## PITR RPO objective — PASS
+## Outbox stalled closure — PASS
 
-The prior RPO caveat is closed by the real timestamp-based PITR drill. Measured PITR RPO is **514s (8m34s)** against the <=900s objective.
+The previous `OUTBOX_DELIVERY_STALLED` condition was caused by 14 R29 verifier-created events. Direct readback proved all 14 were verifier residue and not business events.
 
-This evidence is distinct from the older backup-age RPO of ~2h30m: backup restore and PITR are separate recovery modes, and the <=15m objective is now directly demonstrated on the PITR path.
+PR #157 added the verifier-owned drain path. The historical cleanup run `31935924301` transitioned only those 14 pre-classified events through durable delivery state changes:
+
+- matched `14`;
+- drained `14`;
+- delivered `14`;
+- pending `0`;
+- external publication `false`.
+
+No business event was deleted.
+
+The canonical production rollout run `31937475975` then deployed runtime source `3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732` after exact-head full Quality.
+
+Canonical post-deploy R29 run `31937724476` created fresh verifier events and proved:
+
+- matched `3`;
+- drained `3`;
+- delivered `3`;
+- pending `0`;
+- provider/durable/Audit readback valid;
+- fail-closed behavior valid;
+- migrations 020/021 valid;
+- temporary verifier jobs removed;
+- no external publication;
+- full Quality after cleanup PASS.
+
+## Final SLO Production Assessment — PASS
+
+Final assessment run `31937982829` executed against the deployed Cloud Run image and real production PostgreSQL database.
+
+Measured at `2026-08-16T09:03:30.865Z`:
+
+- Core requests `15`;
+- Core failures `0`;
+- Core availability `1.000` against target `0.999` — **MET**;
+- scheduler ticks `880`;
+- scheduler failures `0`;
+- scheduler success `1.000` against target `0.995` — **MET**;
+- successful external writes `15`;
+- verified external writes `15`;
+- Outbox pending/claimed/retryable **`0`**;
+- oldest pending Outbox age **`0s`**;
+- pending Outbox rows **none**;
+- Audit Ledger integrity **valid**;
+- latest successful backup age approximately `4.60h`;
+- PITR **enabled**;
+- canonical alerts **`[]`**;
+- canonical assessment **`healthy=true`**;
+- Foundation daily-control durable value `1`.
+
+Final assessment artifact:
+
+- ID `9261211173`;
+- SHA-256 `984ee6bf3f6dac4559cbcdb7636695dd285b57fbe00d7d27bfd0a6653fd266e3`.
+
+The assessment verified before and after execution that repository changes after the deployed runtime source were documentation-only, so no unverified runtime drift was accepted.
 
 ## Incident mode for ambiguous provider writes
 
@@ -182,20 +193,25 @@ After restart, timeout or partial failure:
 
 ## Current exit state
 
-Current release reliability path is operationally closed for controlled real-system tests:
+Foundation reliability/SLO is **PRODUCTION_VERIFIED**:
 
 - telemetry source plane PASS;
-- SLO evaluator PASS;
+- final SLO Production Assessment `healthy=true`;
+- Outbox pending `0` and oldest age `0s`;
+- R29 fresh-event drain regression proof PASS;
+- Foundation Daily Operations durable production evidence PASS;
 - Monitoring/Logging IAM PASS;
 - managed notification channels PASS;
-- four permanent Foundation policies PASS;
+- four permanent Foundation alert policies PASS;
 - controlled alert provider-path firing proof PASS;
 - real isolated backup restore PASS;
 - real isolated PITR restore PASS;
 - restored-data validation PASS;
-- RTO <=60m PASS on both tested recovery paths;
+- RTO <=60m PASS;
 - PITR RPO <=15m PASS;
 - DR cleanup PASS;
 - production unchanged readback PASS.
 
-WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. Optional mailbox-level alert receipt recheck remains continuing operational validation and does not alter the DR proof.
+FOUNDATION, SLO and DAILY_OPERATIONS are **PRODUCTION_VERIFIED** for the verified Foundation scope.
+
+WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153.
