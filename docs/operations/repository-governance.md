@@ -1,19 +1,21 @@
 # Repository Governance — Foundation v1
 
-Status: **VERSIONED CONTROLS READY; HOSTED `main` RULESET STILL REQUIRES REPOSITORY-ADMIN APPLICATION**
+Status: **HOSTED `main` RULESET ACTIVE — VERSIONED CONTROLS VERIFIED**
 
 Repository: `luizidebook/toca-mcp-server`
 
-Reconciliation baseline: `main@bba883595ad22081a94208ff07ce4348c28de1af` after M-FOUND-11 and M-FOUND-12 were merged and post-merge Quality was green.
+Final V1 governance reconciliation baseline: `main@45d076d700e50e992993af4ab86dcafc9e2c2503` after the Dependabot configuration cleanup was merged.
 
 ## Current observed state
 
-- `main` is not protected by a hosted GitHub branch-protection/ruleset control.
+- GitHub ruleset `main-protection` (`20903350`) is active on the default branch.
+- The ruleset requires pull requests, exact required status check `quality`, strict up-to-date evaluation, conversation resolution, and blocks branch deletion/non-fast-forward updates.
+- The ruleset has no bypass actors configured; normal development cannot bypass the required check.
 - Repository visibility is private.
-- The collaborator audit found a single collaborator: `luizidebook`, role `admin`.
 - The canonical CI workflow is `.github/workflows/quality.yml` (`Quality Gate`).
-- GitHub Actions is operational again; startup failures are not accepted as successful checks.
-- Foundation merges use exact green head SHAs and post-merge `main` Quality verification even before the hosted rule is applied.
+- GitHub Actions is operational; startup failures are not accepted as successful checks.
+- Foundation merges use exact green head SHAs and post-merge `main` Quality verification.
+- `.github/CODEOWNERS` governs repository-wide and security-sensitive paths; current solo-maintainer policy intentionally requires zero human approvals while exact-head Quality remains mandatory.
 
 ## ACL baseline
 
@@ -30,26 +32,22 @@ When a second trusted maintainer is added, require at least one approving review
 
 ## Required hosted `main` protection / ruleset
 
-The GitHub-hosted repository control must require:
+The GitHub-hosted control is applied and read back with the V1-required properties:
 
 1. pull request before merge;
 2. required status check `quality` from `Quality Gate` on the exact head;
-3. branch up to date with `main` before merge;
+3. strict required-check evaluation against current `main`;
 4. conversation resolution before merge;
-5. no force pushes;
+5. no force/non-fast-forward updates;
 6. no branch deletion;
-7. no direct pushes except an explicit emergency/break-glass path;
-8. no status-check bypass for normal development;
-9. merge only after the exact green head SHA is captured;
-10. a disposable validation PR after the hosted rule is applied.
+7. no configured bypass actors for normal development;
+8. merge only after the exact green head SHA is captured.
 
 ### Review count
 
-Current solo-maintainer state: **0 required approvals**. This is not a substitute for CI; exact-head Quality is the merge gate.
+Current solo-maintainer state: **0 required approvals**. This is intentional and is not a substitute for CI; exact-head Quality is the merge gate.
 
 Future two-maintainer state: **1 required approval + required CODEOWNERS review**, dismiss stale approvals on new commits.
-
-The available repository connector can read the hosted branch state but does not expose branch-protection/ruleset mutation. This document therefore does not claim that the GitHub-hosted rule is active until a repository-admin API/UI action is performed and read-back confirms it.
 
 ## Supply-chain baseline
 
@@ -65,18 +63,18 @@ Permanent Foundation/production workflows are required to:
 
 `scripts/check-workflow-supply-chain.mjs` is executed before dependency installation by the canonical Quality Gate. It rejects floating action references for the permanent workflow set, including Quality, production deploys, cost/infrastructure controls, Marketing Autopilot and M-FOUND-12 validation workflows.
 
-Dependabot is configured weekly for npm/pnpm dependencies and GitHub Actions. Dependency updates remain normal PRs and must pass exact-head Quality.
+Dependabot is configured weekly for npm/pnpm dependencies and GitHub Actions. Dependency updates remain normal maintenance PRs and must pass exact-head Quality before merge; major-version updates are not release blockers by themselves and are not merged into a frozen release merely to obtain an empty PR queue.
 
 ## Workflow reduction
 
-The following obsolete privileged/bootstrap/one-shot workflows are intentionally removed by this closeout instead of being kept as latent execution surfaces:
+The following obsolete privileged/bootstrap/one-shot workflow files were intentionally removed by closeout instead of being kept as latent execution surfaces:
 
 - old GCP auth/artifact/image/preflight/staging bootstrap smokes;
 - the four fixed first-publication one-shot workflows now superseded by the canonical governed publication path;
 - expired dated Meta Ads event execution;
 - obsolete Meta Ads OAuth/diagnostic/gate workflows bound to the superseded ad account.
 
-Historical evidence remains available in Git/PR/Audit history; deletion of the workflow file only removes the executable trigger surface.
+GitHub Actions may continue to expose historical workflow-registration records after the YAML file has been removed. Those historical records are not equivalent to executable workflow files on the current `main`; the executable surface is determined by the workflow files actually versioned on the current tree. Historical evidence remains available in Git/PR/Audit history.
 
 ## Break-glass policy
 
