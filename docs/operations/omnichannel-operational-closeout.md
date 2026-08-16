@@ -8,12 +8,12 @@ This closeout records the operational state of the existing Omnichannel domain. 
 
 ## Final readiness classification
 
-| Gate | WhatsApp | Email | Nurture |
-| --- | --- | --- | --- |
-| CONTRACT_READY | YES | YES | YES |
-| PROVIDER_READY | NO | NO | INTERNAL ENGINE ONLY; outbound providers remain unavailable |
-| REAL_SEND_VALIDATED | NO | NO | NO external send performed |
-| READBACK_VALIDATED | NO | NO | NO external delivery read-back available |
+| Gate                       | WhatsApp                  | Email                     | Nurture                                                                    |
+| -------------------------- | ------------------------- | ------------------------- | -------------------------------------------------------------------------- |
+| CONTRACT_READY             | YES                       | YES                       | YES                                                                        |
+| PROVIDER_READY             | NO                        | NO                        | INTERNAL ENGINE ONLY; outbound providers remain unavailable                |
+| REAL_SEND_VALIDATED        | NO                        | NO                        | NO external send performed                                                 |
+| READBACK_VALIDATED         | NO                        | NO                        | NO external delivery read-back available                                   |
 | Operational classification | BLOCKED_EXTERNAL_PROVIDER | BLOCKED_EXTERNAL_PROVIDER | CONTRACT_READY, but external delivery remains blocked by channel providers |
 
 No production send was attempted because there is no proven production provider binding and no explicitly approved safe test destination/sender binding. Creating a fake adapter or treating an unused secret as a provider binding would violate the production gate.
