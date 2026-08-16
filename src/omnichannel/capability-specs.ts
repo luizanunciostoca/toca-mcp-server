@@ -2,9 +2,7 @@ import type { CapabilityStatus } from '../core/tool-registry.js';
 import type { RouteId } from '../governance/types.js';
 import { OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES } from '../governance/omnichannel-capability-contracts.js';
 
-export const OMNICHANNEL_DEPENDENCY_BLOCKERS = [
-  'PRIVACY_CONSENT_SUPPRESSION_NOT_CANONICAL_ON_MAIN',
-] as const;
+export const OMNICHANNEL_DEPENDENCY_BLOCKERS = [] as const;
 export type OmnichannelDependencyBlocker = (typeof OMNICHANNEL_DEPENDENCY_BLOCKERS)[number];
 
 export const OMNICHANNEL_CAPABILITY_IDS = [
@@ -70,8 +68,8 @@ export function validateOmnichannelCapabilitySpecs(): void {
     if (spec.runtimeExposed || spec.productionExecutionAllowed) {
       throw new Error(`OMNICHANNEL_RUNTIME_EXPOSURE_FORBIDDEN:${spec.capabilityId}`);
     }
-    if (spec.blockedBy.length !== OMNICHANNEL_DEPENDENCY_BLOCKERS.length) {
-      throw new Error(`OMNICHANNEL_DEPENDENCY_BLOCKER_MISMATCH:${spec.capabilityId}`);
+    if (spec.blockedBy.length !== 0) {
+      throw new Error(`OMNICHANNEL_RESOLVED_DEPENDENCY_BLOCKER_PRESENT:${spec.capabilityId}`);
     }
   }
 
