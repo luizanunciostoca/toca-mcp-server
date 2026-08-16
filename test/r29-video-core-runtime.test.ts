@@ -68,7 +68,7 @@ describe('Video/R29 current TOCA Core runtime integration', () => {
     expect(CORE_MCP_TOOL_NAMES.some((name) => name.includes('video'))).toBe(false);
   });
 
-  it('registers all 25 technical capabilities only when the durable Postgres runtime is enabled', () => {
+  it('registers all 25 production-validated technical capabilities only when the durable Postgres runtime is enabled', () => {
     expect(R29_VIDEO_CAPABILITIES).toHaveLength(25);
 
     const disabled = createToolRegistry();
@@ -78,10 +78,19 @@ describe('Video/R29 current TOCA Core runtime integration', () => {
       expect(disabled.get(capabilityId), capabilityId).toBeUndefined();
       expect(enabled.get(capabilityId), capabilityId).toMatchObject({
         name: capabilityId,
-        capabilityStatus: 'IMPLEMENTED',
+        capabilityStatus: 'PRODUCTION_VALIDATED',
         idempotent: true,
       });
     }
+
+    expect(enabled.get('video.caption.embed')).toMatchObject({
+      capabilityStatus: 'PRODUCTION_VALIDATED',
+      sideEffects: true,
+    });
+    expect(enabled.get('content_item.channel.adapt')).toMatchObject({
+      capabilityStatus: 'PRODUCTION_VALIDATED',
+      sideEffects: true,
+    });
   });
 
   it('fails closed without the Video/R29 runtime service', () => {
