@@ -47,7 +47,7 @@ Lifecycle conclusion: **historically provider-backed; not promoted to generic da
 
 Current evidence:
 
-- the current validated ad-account target is `394512749760530`; old diagnostics/workflows that referenced `311793958882290` are superseded and must not be used;
+- the primary Meta Ads account is now `311793958882290`; `394512749760530` is superseded as an operational target and remains relevant only to historical provider evidence;
 - canonical account/Pixel relationship was identified during provider diagnostics;
 - provider validate-only operations reached final Ad validation and exposed provider readiness/billing gates without creating an active campaign;
 - PR #118 ports settled-state/read-back hardening, `WITH_ISSUES`/delivery-check fail-closed behavior and final Ad `validate_only` preflight onto the current controlled-write path;
@@ -57,7 +57,7 @@ Required sequence:
 
 1. reconcile #118 to the then-current `main` and pass exact-head Quality;
 2. granted `ads_management` proof;
-3. exact active ad account `394512749760530` + currency proof;
+3. exact active ad account `311793958882290` + currency proof;
 4. exact Pixel assignment proof;
 5. provider `validate_only` preflight returns no created Ad ID;
 6. explicit approved `CREATE_PAUSED` descriptor/hash;

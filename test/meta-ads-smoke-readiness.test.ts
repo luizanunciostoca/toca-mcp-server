@@ -88,14 +88,14 @@ describe('Meta Ads provider smoke readiness', () => {
   it('matches pixel assignment by account_id or provider id', () => {
     expect(
       isMetaAdsPixelAssignedToAccount(
-        [{ id: 'act_394512749760530', account_id: '394512749760530' }],
-        '394512749760530',
+        [{ id: 'act_311793958882290', account_id: '311793958882290' }],
+        '311793958882290',
       ),
     ).toBe(true);
     expect(
       isMetaAdsPixelAssignedToAccount(
-        [{ id: 'act_311793958882290', account_id: '311793958882290' }],
-        '394512749760530',
+        [{ id: 'act_2036212826847237', account_id: '2036212826847237' }],
+        '311793958882290',
       ),
     ).toBe(false);
   });

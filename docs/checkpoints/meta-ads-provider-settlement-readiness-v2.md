@@ -1,6 +1,6 @@
 # Meta Ads Provider Settlement Readiness v2
 
-Status: **CODE READY / PROVIDER PREPARE BLOCKED BY META BILLING — NO WRITE / NO SPEND**
+Status: **CODE READY / PRIMARY ACCOUNT `311793958882290` REQUIRES FRESH PREPARE — NO WRITE / NO SPEND**
 
 Current reconciliation baseline: `main@8bd2d2c1f1715fc1f054c38c8c95eaaa1648e1d8`.
 
@@ -35,7 +35,13 @@ The run passed repository Quality, GCP authentication, the production write-disa
 
 This is provider/billing state, not a repository validation failure. No campaign, ad set, creative or ad was created, no activation occurred, no retry was issued, and no spend was possible.
 
-The provider write gate remains **BLOCKED_EXTERNAL_BILLING**. `CREATE_PAUSED` must not be executed until the same exact-code PREPARE succeeds after the billing state is corrected.
+## Primary account transition — 2026-08-15
+
+The operational Meta Ads primary account is now `311793958882290`. The prior PREPARE against `394512749760530` remains immutable historical evidence only; its billing result must not be used to infer billing or write readiness for `311793958882290`.
+
+The canonical campaign plan already targeted `311793958882290`. This reconciliation aligns the provider-validation workflow, approval fixtures and operational documentation with that primary account and adds a regression test so code and workflow cannot silently diverge again.
+
+The old `394512749760530` target remains historically **BLOCKED_EXTERNAL_BILLING**, but it is no longer the operational target. The primary `311793958882290` target is **REVALIDATION_REQUIRED**: `CREATE_PAUSED` must not be executed until a fresh exact-code PREPARE succeeds for `311793958882290`.
 
 ## Current code reconciliation evidence
 

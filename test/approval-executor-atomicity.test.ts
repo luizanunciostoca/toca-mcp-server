@@ -12,7 +12,7 @@ import {
 } from '../src/governance/approval-governance.js';
 
 const capabilityId = 'meta_ads.campaign.create_paused';
-const targetAccount = 'act_394512749760530';
+const targetAccount = 'act_311793958882290';
 const descriptor = {
   campaign: 'TOCA | THE PARTY | atomicity',
   dailyBudgetMinor: 17_000,
