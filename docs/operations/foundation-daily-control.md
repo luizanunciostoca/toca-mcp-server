@@ -2,6 +2,10 @@
 
 Status: **DAILY OPERATIONS — PRODUCTION_VERIFIED**
 
+Final deployed runtime SHA: `ac0ba469a57f12c801148b5821e14e34fd86d281`.
+
+Canonical ratification: `docs/operations/foundation-slo-production-verification-2026-08-16.md`.
+
 This process makes daily TOCA OS execution explicit without adding another scheduler, workflow engine or provider-write path.
 
 ## Runtime
@@ -10,11 +14,11 @@ The existing private `toca-managed-instagram-daemon` is invoked by the authentic
 
 Completion is persisted in `operational_signals` under:
 
-- name: `foundation.daily_control.completed`
-- correlation: `foundation:daily-control:<YYYY-MM-DD>`
-- durable attribute: `dayKey=<YYYY-MM-DD>`
+- name: `foundation.daily_control.completed`;
+- correlation: `foundation:daily-control:<YYYY-MM-DD>`;
+- durable attribute: `dayKey=<YYYY-MM-DD>`.
 
-Therefore warm/cold runtime restarts do not turn the daily process into a second logical completion. Concurrent attempts are serialized at completion through a PostgreSQL advisory transaction lock.
+Warm/cold runtime restarts therefore do not turn the daily process into a second logical completion. Concurrent attempts are serialized at completion through a PostgreSQL advisory transaction lock.
 
 ## What it does
 
@@ -53,19 +57,31 @@ This preserves least privilege. The application must not receive broad GCP admin
 
 ## Production verification
 
-The production activation gate is closed.
+The production activation gate is closed and was ratified only after the final canonical R29 workflow completed.
 
-Final evidence is recorded in `docs/operations/foundation-slo-production-verification-2026-08-16.md`.
+Final runtime/deployment chain:
 
-At the final assessment:
+- final production deploy `31938116522` on `ac0ba469a57f12c801148b5821e14e34fd86d281` — **SUCCESS**;
+- canonical final R29 run `31938375409` — **SUCCESS**;
+- R29 post-cleanup full Quality — **PASS**;
+- post-R29 Production Assessment `31938670357` — **SUCCESS**.
 
-- authenticated production deploy and scheduler smoke passed;
-- `operational_signals` contained a healthy durable daily completion with correlation `foundation:daily-control:2026-08-15` and `value=1`;
-- the completion was ~9.13 hours old, within the 36-hour health window;
-- managed scheduler success was 880/880;
-- Transactional Outbox pending/claimed/retryable count was 0;
-- oldest pending Outbox age was 0 seconds;
-- SLO assessment returned `healthy=true` with no alerts;
-- Audit Ledger integrity was valid.
+At the final post-R29 assessment:
 
-Therefore Daily Operations is **PRODUCTION_VERIFIED** for the current release.
+- durable daily-control correlation: `foundation:daily-control:2026-08-15`;
+- durable value: `1`;
+- completion: `2026-08-15T23:56:01.439Z`;
+- age: approximately `9.39h`, within the 36-hour health window;
+- managed scheduler success: `879/879`;
+- Transactional Outbox pending/claimed/retryable: `0`;
+- oldest pending Outbox age: `0s`;
+- Audit Ledger integrity: valid;
+- canonical SLO alerts: none;
+- canonical SLO assessment: `healthy=true`.
+
+Final ratification artifact:
+
+- ID `9261408650`;
+- SHA-256 `b1c4ceb6da7bb0eb3a49e260296ff3bc870635ffa357eea0daae3ac43e7da819`.
+
+Therefore Daily Operations is **PRODUCTION_VERIFIED** for the current Foundation scope.
