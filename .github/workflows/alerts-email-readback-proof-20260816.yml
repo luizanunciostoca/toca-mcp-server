@@ -1,0 +1,173 @@
+name: Alerts Gmail Delivery Readback Proof 2026-08-16
+
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: ['.github/workflows/alerts-email-readback-proof-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  TARGET_EMAIL: luizidebook@gmail.com
+  PROD_SERVICE: toca-mcp-production
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Snapshot permanent state and create temporary firing policy
+        id: setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          TEST_RUN="alerts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          PROOF_ID="p${GITHUB_RUN_ID}${GITHUB_RUN_ATTEMPT}"
+          SMOKE_JOB="toca-alert-email-${GITHUB_RUN_ID}"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-before.json
+          CHANNEL="$(jq -r --arg email "$TARGET_EMAIL" '.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email and .enabled==true) | .name' /tmp/channels-before.json | head -n1)"
+          test -n "$CHANNEL"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies-before.json
+          jq -S '[.alertPolicies[]? | select(.displayName=="TOCA P0 Audit Ledger Integrity" or .displayName=="TOCA P1 Foundation Daily Control Failed" or .displayName=="TOCA P1 Stale Scheduler Jobs" or .displayName=="TOCA P1 Outbox Stalled") | {name,displayName,enabled,notificationChannels,validity,userLabels}] | sort_by(.name)' /tmp/policies-before.json > evidence/permanent-policies-before.json
+          jq -S --arg email "$TARGET_EMAIL" '[.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | {name,type,displayName,enabled,labels,userLabels}] | sort_by(.name)' /tmp/channels-before.json > evidence/target-channel-before.json
+          sha256sum evidence/permanent-policies-before.json evidence/target-channel-before.json > evidence/before.sha256
+
+          SYN_FILTER="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SMOKE_JOB}\" AND jsonPayload.event=\"toca.monitoring.email_delivery_proof\" AND jsonPayload.test_run=\"${TEST_RUN}\""
+          jq -n --arg display "TOCA Alerts Email Proof ${TEST_RUN}" --arg filter "$SYN_FILTER" --arg channel "$CHANNEL" --arg proof "$PROOF_ID" '{displayName:$display,documentation:{content:"Controlled TOCA OS firing + email delivery proof. Temporary policy.",mimeType:"text/markdown"},userLabels:{toca_managed:"true",synthetic:"true",email_readback:"true",proof_id:$proof},conditions:[{displayName:"TOCA alerts email proof log",conditionMatchedLog:{filter:$filter}}],combiner:"OR",enabled:true,alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"},notificationChannels:[$channel]}' >/tmp/syn.json
+          HTTP="$(curl --silent --output /tmp/syn-result.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/syn.json "${API}/alertPolicies")"
+          test "$HTTP" = 200 || { cat /tmp/syn-result.json >&2; exit 90; }
+          SYN_POLICY="$(jq -r '.name' /tmp/syn-result.json)"
+          test -n "$SYN_POLICY"
+          jq -S . /tmp/syn-result.json > evidence/temporary-policy-created.json
+
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "test_run=$TEST_RUN" >> "$GITHUB_OUTPUT"
+          echo "proof_id=$PROOF_ID" >> "$GITHUB_OUTPUT"
+          echo "smoke_job=$SMOKE_JOB" >> "$GITHUB_OUTPUT"
+          echo "synthetic_policy=$SYN_POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Emit exact synthetic alert log and read back emission timestamp
+        id: emit
+        shell: bash
+        env:
+          TEST_RUN: ${{ steps.setup.outputs.test_run }}
+          SMOKE_JOB: ${{ steps.setup.outputs.smoke_job }}
+        run: |
+          set -euo pipefail
+          cleanup() { gcloud run jobs delete "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          IMAGE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(spec.template.spec.containers[0].image)')"
+          test -n "$IMAGE"
+          CLOCK_TS="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          PAYLOAD="{\"severity\":\"ERROR\",\"event\":\"toca.monitoring.email_delivery_proof\",\"test_run\":\"${TEST_RUN}\",\"synthetic\":true,\"emitted_at\":\"${CLOCK_TS}\",\"message\":\"TOCA Alerts Gmail delivery proof ${TEST_RUN}\"}"
+          gcloud run jobs create "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command /bin/sh --args="^@^-lc@printf '%s\\n' '${PAYLOAD}'" --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 60s --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          for _ in $(seq 1 24); do
+            gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SMOKE_JOB}\" AND jsonPayload.event=\"toca.monitoring.email_delivery_proof\" AND jsonPayload.test_run=\"${TEST_RUN}\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=10 --format=json >/tmp/logs.json || true
+            if [ "$(jq 'length' /tmp/logs.json 2>/dev/null || echo 0)" -ge 1 ]; then
+              jq -S 'sort_by(.timestamp) | .[0]' /tmp/logs.json > evidence/emission-log.json
+              LOG_TS="$(jq -r '.timestamp' evidence/emission-log.json)"
+              echo "log_timestamp=$LOG_TS" >> "$GITHUB_OUTPUT"
+              echo "ALERT_EMISSION_LOG=PASS test_run=$TEST_RUN timestamp=$LOG_TS"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 91
+
+      - name: Authenticate infrastructure administrator for firing proof and cleanup
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Prove incident firing, preserve delivery window, cleanup temporary policy, revalidate permanent state
+        id: firing
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.setup.outputs.channel }}
+          TEST_RUN: ${{ steps.setup.outputs.test_run }}
+          PROOF_ID: ${{ steps.setup.outputs.proof_id }}
+          SYN_POLICY: ${{ steps.setup.outputs.synthetic_policy }}
+          LOG_TS: ${{ steps.emit.outputs.log_timestamp }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          ALERTS_API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts"
+          INCIDENT_FOUND=false
+
+          for _ in $(seq 1 48); do
+            curl --fail --silent -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode "filter=(policy.user_labels.proof_id=\"${PROOF_ID}\")" "${ALERTS_API}" >/tmp/alerts.json || true
+            if jq -e --arg policy "$SYN_POLICY" '[.alerts[]? | select(.policy.name==$policy and .state=="OPEN")] | length >= 1' /tmp/alerts.json >/dev/null 2>&1; then
+              jq -S --arg policy "$SYN_POLICY" '[.alerts[]? | select(.policy.name==$policy and .state=="OPEN")] | sort_by(.openTime // .open_time) | last' /tmp/alerts.json > evidence/firing-incident.json
+              INCIDENT_FOUND=true
+              break
+            fi
+            sleep 5
+          done
+          test "$INCIDENT_FOUND" = true
+
+          INCIDENT_NAME="$(jq -r '.name' evidence/firing-incident.json)"
+          INCIDENT_STATE="$(jq -r '.state' evidence/firing-incident.json)"
+          INCIDENT_OPEN_TIME="$(jq -r '.openTime // .open_time' evidence/firing-incident.json)"
+          POLICY_DISPLAY="$(jq -r '.policy.displayName // .policy.display_name' evidence/firing-incident.json)"
+          test "$INCIDENT_STATE" = OPEN
+          test -n "$INCIDENT_OPEN_TIME"
+          echo "ALERT_FIRING=PASS incident=$INCIDENT_NAME open_time=$INCIDENT_OPEN_TIME policy=$POLICY_DISPLAY"
+          echo "incident_name=$INCIDENT_NAME" >> "$GITHUB_OUTPUT"
+          echo "incident_open_time=$INCIDENT_OPEN_TIME" >> "$GITHUB_OUTPUT"
+
+          # Keep the temporary policy alive after firing so Cloud Monitoring can deliver the email.
+          sleep 180
+
+          HTTP="$(curl --silent --output /tmp/delete-result.json --write-out '%{http_code}' -X DELETE -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${SYN_POLICY}")"
+          test "$HTTP" = 200
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-after.json
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies-after.json
+          jq -S '[.alertPolicies[]? | select(.displayName=="TOCA P0 Audit Ledger Integrity" or .displayName=="TOCA P1 Foundation Daily Control Failed" or .displayName=="TOCA P1 Stale Scheduler Jobs" or .displayName=="TOCA P1 Outbox Stalled") | {name,displayName,enabled,notificationChannels,validity,userLabels}] | sort_by(.name)' /tmp/policies-after.json > evidence/permanent-policies-after.json
+          jq -S --arg email "$TARGET_EMAIL" '[.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | {name,type,displayName,enabled,labels,userLabels}] | sort_by(.name)' /tmp/channels-after.json > evidence/target-channel-after.json
+          cmp evidence/permanent-policies-before.json evidence/permanent-policies-after.json
+          cmp evidence/target-channel-before.json evidence/target-channel-after.json
+
+          jq -n --arg testRun "$TEST_RUN" --arg targetEmail "$TARGET_EMAIL" --arg channel "$CHANNEL" --arg emissionTimestamp "$LOG_TS" --arg incident "$INCIDENT_NAME" --arg incidentOpenTime "$INCIDENT_OPEN_TIME" --arg syntheticPolicy "$SYN_POLICY" '{schemaVersion:1,testRun:$testRun,targetEmail:$targetEmail,channel:$channel,emissionTimestamp:$emissionTimestamp,incidentName:$incident,incidentState:"OPEN",incidentOpenTime:$incidentOpenTime,syntheticPolicy:$syntheticPolicy,syntheticPolicyDeleted:true,permanentPoliciesUnchanged:true,targetNotificationChannelUnchanged:true,mailboxReadback:"PENDING_EXTERNAL_GMAIL_READBACK"}' > evidence/alerts-email-delivery-proof.json
+          cat evidence/alerts-email-delivery-proof.json
+
+      - name: Upload firing evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: alerts-email-readback-proof-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
