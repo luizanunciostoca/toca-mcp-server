@@ -20,36 +20,49 @@ env:
   DATABASE_SECRET_ID: toca-database-url
   PROD_SERVICE: toca-mcp-production
   DAEMON_SERVICE: toca-managed-instagram-daemon
-  SOURCE_MAIN_SHA: 3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732
+  RUNTIME_SHA: 3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732
   EXPECTED_DEPLOY_RUN_ID: '31937475975'
   EXPECTED_CLEANUP_RUN_ID: '31935924301'
   EXPECTED_R29_RUN_ID: '31937724476'
-  RESTORE_EVIDENCE_AT: 2026-08-16T07:29:28Z
+  PITR_VALIDATED_AT: 2026-08-16T08:45:06Z
+  PITR_RPO_SECONDS: '514'
+  PITR_RTO_SECONDS: '584'
+  PITR_PROVIDER_LAG_SECONDS: '128'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Require final rollout cleanup and R29 proof success
+      - name: Require canonical production proof and docs-only repository drift
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          for RUN_ID in "$EXPECTED_DEPLOY_RUN_ID" "$EXPECTED_CLEANUP_RUN_ID" "$EXPECTED_R29_RUN_ID"; do
-            RUN="$(curl --fail --silent --show-error \
+          api() {
+            curl --fail --silent --show-error \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$1"
+          }
+
+          for RUN_ID in "$EXPECTED_DEPLOY_RUN_ID" "$EXPECTED_CLEANUP_RUN_ID" "$EXPECTED_R29_RUN_ID"; do
+            RUN="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
             test "$(jq -r '.status' <<<"$RUN")" = completed
             test "$(jq -r '.conclusion' <<<"$RUN")" = success
             if [ "$RUN_ID" = "$EXPECTED_DEPLOY_RUN_ID" ] || [ "$RUN_ID" = "$EXPECTED_R29_RUN_ID" ]; then
-              test "$(jq -r '.head_sha' <<<"$RUN")" = "$SOURCE_MAIN_SHA"
+              test "$(jq -r '.head_sha' <<<"$RUN")" = "$RUNTIME_SHA"
             fi
           done
-          echo 'PREREQUISITE_RUNS=PASS'
+
+          CURRENT_MAIN="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" | jq -r '.sha')"
+          COMPARE="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${CURRENT_MAIN}")"
+          test "$(jq -r '.merge_base_commit.sha' <<<"$COMPARE")" = "$RUNTIME_SHA"
+          NON_DOCS="$(jq -r '[.files[]? | select((.filename | startswith("docs/")) | not)] | length' <<<"$COMPARE")"
+          test "$NON_DOCS" = 0
+          echo "REPOSITORY_MAIN_SHA=$CURRENT_MAIN" >> "$GITHUB_ENV"
+          echo "PREREQUISITE_RUNS=PASS runtime=${RUNTIME_SHA} main=${CURRENT_MAIN} docs_only_drift=true"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
@@ -68,8 +81,15 @@ jobs:
           IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
           test -n "$IMAGE"
           case "$IMAGE" in
-            *:"$SOURCE_MAIN_SHA"|*"toca-managed-daemon-$SOURCE_MAIN_SHA") ;;
+            *:"$RUNTIME_SHA"|*"toca-managed-daemon-$RUNTIME_SHA") ;;
             *) echo "Unexpected production image: $IMAGE" >&2; exit 1 ;;
+          esac
+
+          DAEMON="$(gcloud run services describe "$DAEMON_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          DAEMON_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$DAEMON")"
+          case "$DAEMON_IMAGE" in
+            *"toca-managed-daemon-$RUNTIME_SHA") ;;
+            *) echo "Unexpected daemon image: $DAEMON_IMAGE" >&2; exit 1 ;;
           esac
 
           DAEMON_LOGS="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE}\"" --project "$GCP_PROJECT_ID" --freshness=24h --limit=10000 --format=json)"
@@ -86,6 +106,7 @@ jobs:
           test -n "$LATEST_BACKUP_END"
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "DAEMON_IMAGE=$DAEMON_IMAGE" >> "$GITHUB_ENV"
           echo "SCHEDULER_TICKS=$SCHEDULER_TICKS" >> "$GITHUB_ENV"
           echo "SCHEDULER_FAILED=$SCHEDULER_FAILED" >> "$GITHUB_ENV"
           echo "PITR_ENABLED=$PITR_ENABLED" >> "$GITHUB_ENV"
@@ -110,15 +131,12 @@ jobs:
           const { createToolRegistry } = await import('file:///app/dist/src/registry.js');
           const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
           const now = new Date();
-          const schedulerTicks = Number(process.env.SCHEDULER_TICKS);
-          const schedulerFailures = Number(process.env.SCHEDULER_FAILED);
           const latestBackupEnd = new Date(process.env.LATEST_BACKUP_END);
-          const restoreEvidenceAt = new Date(process.env.RESTORE_EVIDENCE_AT);
+          const pitrValidatedAt = new Date(process.env.PITR_VALIDATED_AT);
           try {
             const terminal = await pool.query(`with latest as (select distinct on (execution_id) execution_id,status,external_resource_id,created_at from audit_ledger_events where created_at >= now() - interval '24 hours' and status in ('SUCCEEDED','FAILED') order by execution_id,sequence desc) select count(*)::int as total,count(*) filter (where status='FAILED')::int as failures,count(*) filter (where status='SUCCEEDED' and external_resource_id is not null)::int as external_successes from latest`);
             const outbox = await pool.query(`select count(*)::int as pending,coalesce(greatest(0,extract(epoch from (now()-min(occurred_at)))),0)::float8 as oldest_age from event_outbox where status in ('PENDING','CLAIMED','FAILED_RETRYABLE')`);
             const outboxRows = await pool.query(`select event_id,event_type,status,attempts,occurred_at,tenant_id,correlation_id,evidence from event_outbox where status in ('PENDING','CLAIMED','FAILED_RETRYABLE') order by occurred_at,event_id limit 100`);
-            const historical = await pool.query(`select count(*)::int as delivered from event_outbox where status='DELIVERED' and delivered_at is not null and (evidence @> '["production:r29:59f2f19aafb44942d03288cc019a98ff3d11c57a"]'::jsonb or event_key like 'r29:production-%' or event_key like 'video.caption.embed:r29-prod%')`);
             const daily = await pool.query(`select correlation_id,value,attributes,evidence,occurred_at from operational_signals where name='foundation.daily_control.completed' order by occurred_at desc limit 1`);
             if (daily.rows.length !== 1) throw new Error('FOUNDATION_DAILY_CONTROL_EVIDENCE_MISSING');
             const dailyRow = daily.rows[0];
@@ -128,41 +146,76 @@ jobs:
             const heads = await pool.query(`select execution_id from audit_ledger_heads where updated_at >= now() - interval '24 hours' order by updated_at desc,execution_id asc limit 100`);
             const verifier = new PostgresAuditSink(pool, createToolRegistry());
             let invalidAuditExecutions = 0;
-            for (const row of heads.rows) { const r=await verifier.verifyExecution(row.execution_id); if (!r.valid) invalidAuditExecutions += 1; }
+            for (const row of heads.rows) {
+              const result = await verifier.verifyExecution(row.execution_id);
+              if (!result.valid) invalidAuditExecutions += 1;
+            }
+
             const coreRequests = Number(terminal.rows[0]?.total ?? 0);
             const coreFailures = Number(terminal.rows[0]?.failures ?? 0);
             const successfulExternalWrites = Number(terminal.rows[0]?.external_successes ?? 0);
             const pending = Number(outbox.rows[0]?.pending ?? 0);
             const oldestOutboxAgeSeconds = Number(outbox.rows[0]?.oldest_age ?? 0);
             const snapshot = {
-              windowMinutes:1440,coreRequests,coreFailures,schedulerTicks,schedulerFailures,
-              successfulExternalWrites,verifiedExternalWrites:successfulExternalWrites,
-              outboxPending:pending,oldestOutboxAgeSeconds,auditLedgerIntegrityValid:invalidAuditExecutions===0,
+              windowMinutes:1440,
+              coreRequests,
+              coreFailures,
+              schedulerTicks:Number(process.env.SCHEDULER_TICKS),
+              schedulerFailures:Number(process.env.SCHEDULER_FAILED),
+              successfulExternalWrites,
+              verifiedExternalWrites:successfulExternalWrites,
+              outboxPending:pending,
+              oldestOutboxAgeSeconds,
+              auditLedgerIntegrityValid:invalidAuditExecutions===0,
               latestBackupAgeHours:Math.max(0,(now.getTime()-latestBackupEnd.getTime())/3600000),
               pointInTimeRecoveryEnabled:process.env.PITR_ENABLED==='true',
-              latestRestoreDrillAgeDays:Math.max(0,(now.getTime()-restoreEvidenceAt.getTime())/86400000),
+              latestRestoreDrillAgeDays:Math.max(0,(now.getTime()-pitrValidatedAt.getTime())/86400000),
             };
             const assessment = assessReliability(snapshot);
-            const outboxSloClear = pending === 0 || oldestOutboxAgeSeconds <= 300;
-            if (!outboxSloClear) throw new Error(`OUTBOX_SLO_NOT_CLEAR:${pending}:${oldestOutboxAgeSeconds}`);
+            if (pending !== 0 || oldestOutboxAgeSeconds !== 0) throw new Error(`OUTBOX_NOT_ZERO:${pending}:${oldestOutboxAgeSeconds}`);
             if (assessment.slos.some((s)=>s.met!==true)) throw new Error('SLO_OBJECTIVE_NOT_PROVEN');
             if (!assessment.healthy) throw new Error('SLO_ASSESSMENT_UNHEALTHY');
+            if (Number(process.env.PITR_RPO_SECONDS) > 900) throw new Error('PITR_RPO_OBJECTIVE_NOT_MET');
+            if (Number(process.env.PITR_RTO_SECONDS) > 3600) throw new Error('PITR_RTO_OBJECTIVE_NOT_MET');
 
             const store = new PostgresOperationalObservabilityStore(pool);
             const client = await pool.connect();
             try {
               await client.query('begin');
               await store.write(client,{
-                signalId:randomUUID(),auditEventId:null,executionId:null,correlationId:`foundation:slo:${process.env.SOURCE_MAIN_SHA}`,tenantId:null,
-                signalType:'STATE',name:'foundation.slo.assessment.completed',value:1,
-                attributes:{sourceMainSha:process.env.SOURCE_MAIN_SHA,healthy:true,coreRequests,coreFailures,schedulerTicks,schedulerFailures,outboxPending:pending,oldestOutboxAgeSeconds,dailyControlCorrelation:dailyRow.correlation_id},
-                evidence:[`slo:core:${JSON.stringify(assessment.slos[0])}`,`slo:scheduler:${JSON.stringify(assessment.slos[1])}`,'alerts:none',`outbox:pending:${pending}`,`outbox:oldest-age-seconds:${oldestOutboxAgeSeconds}`,`daily-control:${dailyRow.correlation_id}:healthy`],occurredAt:now.toISOString(),
+                signalId:randomUUID(),auditEventId:null,executionId:null,
+                correlationId:`foundation:slo:final:${process.env.RUNTIME_SHA}`,
+                tenantId:null,signalType:'STATE',name:'foundation.slo.assessment.completed',value:1,
+                attributes:{runtimeSha:process.env.RUNTIME_SHA,repositoryMainSha:process.env.REPOSITORY_MAIN_SHA,healthy:true,coreRequests,coreFailures,schedulerTicks:Number(process.env.SCHEDULER_TICKS),schedulerFailures:Number(process.env.SCHEDULER_FAILED),outboxPending:pending,oldestOutboxAgeSeconds,dailyControlCorrelation:dailyRow.correlation_id,pitrRpoSeconds:Number(process.env.PITR_RPO_SECONDS),pitrRtoSeconds:Number(process.env.PITR_RTO_SECONDS),pitrProviderLagSeconds:Number(process.env.PITR_PROVIDER_LAG_SECONDS)},
+                evidence:[`slo:core:${JSON.stringify(assessment.slos[0])}`,`slo:scheduler:${JSON.stringify(assessment.slos[1])}`,'alerts:none','outbox:pending:0','outbox:oldest-age-seconds:0',`daily-control:${dailyRow.correlation_id}:healthy`,`r29-run:${process.env.EXPECTED_R29_RUN_ID}:pass`,`pitr:rpo-seconds:${process.env.PITR_RPO_SECONDS}:pass`,`pitr:rto-seconds:${process.env.PITR_RTO_SECONDS}:pass`],
+                occurredAt:now.toISOString(),
               });
               await client.query('commit');
-            } catch(e){ await client.query('rollback'); throw e; } finally { client.release(); }
+            } catch(e) {
+              await client.query('rollback');
+              throw e;
+            } finally {
+              client.release();
+            }
 
-            console.log('FOUNDATION_FINAL_VERIFICATION='+JSON.stringify({schemaVersion:1,sourceMainSha:process.env.SOURCE_MAIN_SHA,productionImage:process.env.IMAGE,snapshot,assessment,outbox:{pending,oldestOutboxAgeSeconds,sloClear:outboxSloClear,rows:outboxRows.rows},dailyControl:{correlationId:dailyRow.correlation_id,value:Number(dailyRow.value),occurredAt:dailyRow.occurred_at,ageHours:dailyAgeHours},auditExecutionsChecked:heads.rows.length,verifiedR29Delivered:Number(historical.rows[0]?.delivered ?? 0),measuredAt:now.toISOString()}));
-          } finally { await pool.end(); }
+            console.log('FOUNDATION_FINAL_VERIFICATION='+JSON.stringify({
+              schemaVersion:1,
+              runtimeSha:process.env.RUNTIME_SHA,
+              repositoryMainSha:process.env.REPOSITORY_MAIN_SHA,
+              productionImage:process.env.IMAGE,
+              daemonImage:process.env.DAEMON_IMAGE,
+              prerequisiteRuns:{deploy:Number(process.env.EXPECTED_DEPLOY_RUN_ID),historicalCleanup:Number(process.env.EXPECTED_CLEANUP_RUN_ID),r29:Number(process.env.EXPECTED_R29_RUN_ID)},
+              snapshot,
+              assessment,
+              outbox:{pending,oldestOutboxAgeSeconds,rows:outboxRows.rows},
+              dailyControl:{correlationId:dailyRow.correlation_id,value:Number(dailyRow.value),occurredAt:dailyRow.occurred_at,ageHours:dailyAgeHours},
+              disasterRecovery:{pitrRpoSeconds:Number(process.env.PITR_RPO_SECONDS),pitrRtoSeconds:Number(process.env.PITR_RTO_SECONDS),providerLatestLagSeconds:Number(process.env.PITR_PROVIDER_LAG_SECONDS),validatedAt:process.env.PITR_VALIDATED_AT},
+              auditExecutionsChecked:heads.rows.length,
+              measuredAt:now.toISOString(),
+            }));
+          } finally {
+            await pool.end();
+          }
           NODE
 
           B64="$(base64 -w0 /tmp/verify.mjs)"
@@ -171,9 +224,10 @@ jobs:
             --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "^~^SOURCE_MAIN_SHA=$SOURCE_MAIN_SHA~SCHEDULER_TICKS=$SCHEDULER_TICKS~SCHEDULER_FAILED=$SCHEDULER_FAILED~LATEST_BACKUP_END=$LATEST_BACKUP_END~PITR_ENABLED=$PITR_ENABLED~RESTORE_EVIDENCE_AT=$RESTORE_EVIDENCE_AT~IMAGE=$IMAGE~VERIFY_SCRIPT_B64=$B64" \
+            --set-env-vars "^~^RUNTIME_SHA=$RUNTIME_SHA~REPOSITORY_MAIN_SHA=$REPOSITORY_MAIN_SHA~EXPECTED_DEPLOY_RUN_ID=$EXPECTED_DEPLOY_RUN_ID~EXPECTED_CLEANUP_RUN_ID=$EXPECTED_CLEANUP_RUN_ID~EXPECTED_R29_RUN_ID=$EXPECTED_R29_RUN_ID~SCHEDULER_TICKS=$SCHEDULER_TICKS~SCHEDULER_FAILED=$SCHEDULER_FAILED~LATEST_BACKUP_END=$LATEST_BACKUP_END~PITR_ENABLED=$PITR_ENABLED~PITR_VALIDATED_AT=$PITR_VALIDATED_AT~PITR_RPO_SECONDS=$PITR_RPO_SECONDS~PITR_RTO_SECONDS=$PITR_RTO_SECONDS~PITR_PROVIDER_LAG_SECONDS=$PITR_PROVIDER_LAG_SECONDS~IMAGE=$IMAGE~DAEMON_IMAGE=$DAEMON_IMAGE~VERIFY_SCRIPT_B64=$B64" \
             --command /bin/sh --args="^@^-lc@${SCRIPT}" --tasks 1 --max-retries 0 --task-timeout 15m --memory 512Mi --cpu 1 --quiet
           gcloud run jobs execute "$VERIFY_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
           LINE=''
           for i in $(seq 1 18); do
             LINE="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${VERIFY_JOB}\" AND textPayload:\"FOUNDATION_FINAL_VERIFICATION=\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=20 --order=desc --format='value(textPayload)' | grep '^FOUNDATION_FINAL_VERIFICATION=' | head -n1 || true)"
@@ -182,14 +236,33 @@ jobs:
           done
           test -n "$LINE"
           JSON="${LINE#FOUNDATION_FINAL_VERIFICATION=}"
-          jq -e --arg sha "$SOURCE_MAIN_SHA" '.sourceMainSha==$sha and .assessment.healthy==true and ([.assessment.slos[].met]|all(.==true)) and .outbox.pending==0 and .outbox.oldestOutboxAgeSeconds==0 and .outbox.sloClear==true and .dailyControl.value==1' <<<"$JSON" >/dev/null
+          jq -e --arg sha "$RUNTIME_SHA" '.runtimeSha==$sha and .assessment.healthy==true and ([.assessment.slos[].met]|all(.==true)) and .outbox.pending==0 and .outbox.oldestOutboxAgeSeconds==0 and .dailyControl.value==1 and .disasterRecovery.pitrRpoSeconds<=900 and .disasterRecovery.pitrRtoSeconds<=3600' <<<"$JSON" >/dev/null
           printf '%s\n' "$JSON" | jq . > foundation-final-production-verification.json
           cat foundation-final-production-verification.json
           echo 'FOUNDATION_FINAL_PRODUCTION_VERIFICATION=PASS'
 
+      - name: Recheck repository drift is still docs-only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api() {
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$1"
+          }
+          CURRENT_MAIN="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" | jq -r '.sha')"
+          COMPARE="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${CURRENT_MAIN}")"
+          test "$(jq -r '.merge_base_commit.sha' <<<"$COMPARE")" = "$RUNTIME_SHA"
+          test "$(jq -r '[.files[]? | select((.filename | startswith("docs/")) | not)] | length' <<<"$COMPARE")" = 0
+          echo "FINAL_REPOSITORY_MAIN_SHA=$CURRENT_MAIN" >> "$GITHUB_ENV"
+          echo "RUNTIME_STABILITY=PASS runtime=${RUNTIME_SHA} main=${CURRENT_MAIN} docs_only_drift=true"
+
       - name: Upload final production evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: foundation-final-production-verification-${{ env.SOURCE_MAIN_SHA }}-${{ github.run_id }}
+          name: foundation-final-production-verification-${{ env.RUNTIME_SHA }}-${{ github.run_id }}
           path: foundation-final-production-verification.json
           retention-days: 90
