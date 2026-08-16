@@ -46,11 +46,12 @@ jobs:
             src/providers/google-ads/google-ads-phase.ts \
             src/registry.ts \
             src/server.ts \
+            test/capability-resolution.test.ts \
             test/config.test.ts \
             test/google-ads-api-client.test.ts \
             test/google-ads-create-idempotency.test.ts \
             test/google-ads-paid-media.test.ts \
             test/governance-catalog.test.ts
-          test "$(git diff --cached --name-only | wc -l)" = '16'
+          test "$(git diff --cached --name-only | wc -l)" = '17'
           git commit -m 'feat(r28): reconcile Google Ads with TOCA Core facade'
           git push origin HEAD:reconcile/r28-google-ads-current-main
