@@ -1,0 +1,42 @@
+name: Temporary DR Docs Formatter 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-pitr-rpo-closeout-20260816]
+    paths: ['.github/workflows/temp-dr-docs-format-20260816.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format only DR closeout docs and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm prettier --write \
+            docs/operations/cloud-sql-dr-provider-revalidation-2026-08-16.md \
+            docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md \
+            docs/operations/foundation-reliability-provider-evidence.md \
+            docs/operations/reliability-slo-alerting-dr.md
+          git rm .github/workflows/temp-dr-docs-format-20260816.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/operations/cloud-sql-dr-provider-revalidation-2026-08-16.md \
+                  docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md \
+                  docs/operations/foundation-reliability-provider-evidence.md \
+                  docs/operations/reliability-slo-alerting-dr.md
+          git commit -m 'style(dr): format PITR evidence docs'
+          git push origin HEAD:ops/cloud-sql-pitr-rpo-closeout-20260816
