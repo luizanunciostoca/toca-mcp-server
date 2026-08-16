@@ -2,7 +2,7 @@
 
 Status: **CODE READY / PROVIDER PREPARE BLOCKED BY META BILLING — NO WRITE / NO SPEND**
 
-Current reconciliation baseline: `main@aaca384bf6d72f29ecb88681dcab02b280bde478`.
+Current reconciliation baseline: `main@8bd2d2c1f1715fc1f054c38c8c95eaaa1648e1d8`.
 
 This branch preserves the unique provider-settlement behavior from legacy PR #78 without rebasing its old workflow stack and without widening the public MCP surface.
 
@@ -37,6 +37,18 @@ This is provider/billing state, not a repository validation failure. No campaign
 
 The provider write gate remains **BLOCKED_EXTERNAL_BILLING**. `CREATE_PAUSED` must not be executed until the same exact-code PREPARE succeeds after the billing state is corrected.
 
+## Current code reconciliation evidence
+
+The seven-file hardening delta was replayed cleanly onto the post-Privacy/post-Omnichannel main without restoring legacy workflow breadth.
+
+- current base: `main@8bd2d2c1f1715fc1f054c38c8c95eaaa1648e1d8`;
+- seven files only: controlled provider-validation workflow, settlement checkpoint, smoke entrypoint, provider preflight/readiness modules and focused tests;
+- replay Quality run `31918195435`: **SUCCESS**;
+- clean finalization Quality run `31918263236`: **SUCCESS**;
+- this documentation-only evidence refresh re-triggers the canonical repository Quality Gate on the exact PR head.
+
+The provider workflow remains manually dispatched, asserts public MCP Meta Ads writes are disabled, uses zero Cloud Run retries, separates PREPARE from EXECUTE, and requires exact smoke ID/request hash/plan payload before any future `CREATE_PAUSED` mutation.
+
 ## Why this replaces legacy #78
 
 PR #78 is based on a substantially older Foundation state and includes branch-era smoke/diagnostic workflow changes. Current `main` already owns the canonical Meta Ads controlled-write service, guardrails and smoke entrypoint. Reusing those boundaries and porting only the missing settled-readiness primitives avoids a parallel Paid Media subsystem and avoids restoring temporary CI breadth.
@@ -59,6 +71,8 @@ A future controlled provider run must still prove, on the exact current code:
 
 Until that sequence succeeds, lifecycle remains unchanged.
 
-## Legacy PR closure rule
+## Merge gate
 
-Do not close #78 merely because this branch exists. Close #78 as superseded only after this clean replacement passes the exact-head Quality Gate and is merged into `main`.
+This hardening may merge because it strengthens fail-closed provider validation without enabling activation or spend. Merge requires a green canonical Quality Gate on the exact current head and a fixed-head merge. The external billing blocker remains open after merge and must not be represented as provider-write validation success.
+
+After this clean replacement merges, legacy PR #78 may be closed as superseded.
