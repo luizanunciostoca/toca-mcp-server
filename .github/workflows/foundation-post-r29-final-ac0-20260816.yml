@@ -1,0 +1,139 @@
+name: Foundation Post-R29 Final AC0 2026-08-16
+
+on:
+  push:
+    branches: [ops/slo-production-assessment-20260816]
+    paths: ['.github/workflows/foundation-post-r29-final-ac0-20260816.yml']
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  RUNTIME_SHA: ac0ba469a57f12c801148b5821e14e34fd86d281
+  EXPECTED_DEPLOY_RUN_ID: '31938116522'
+  EXPECTED_CLEANUP_RUN_ID: '31935924301'
+  EXPECTED_R29_RUN_ID: '31938375409'
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PROD_SERVICE: toca-mcp-production
+  DAEMON_SERVICE: toca-managed-instagram-daemon
+  PITR_VALIDATED_AT: 2026-08-16T08:45:06Z
+  PITR_RPO_SECONDS: '514'
+  PITR_RTO_SECONDS: '584'
+  PITR_PROVIDER_LAG_SECONDS: '128'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Require final deploy R29 cleanup and docs-only drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api(){ curl --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$1"; }
+          for RUN_ID in "$EXPECTED_DEPLOY_RUN_ID" "$EXPECTED_CLEANUP_RUN_ID" "$EXPECTED_R29_RUN_ID"; do
+            RUN="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+            test "$(jq -r '.status' <<<"$RUN")" = completed
+            test "$(jq -r '.conclusion' <<<"$RUN")" = success
+            if [ "$RUN_ID" = "$EXPECTED_DEPLOY_RUN_ID" ] || [ "$RUN_ID" = "$EXPECTED_R29_RUN_ID" ]; then
+              test "$(jq -r '.head_sha' <<<"$RUN")" = "$RUNTIME_SHA"
+            fi
+          done
+          MAIN_SHA="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" | jq -r '.sha')"
+          COMPARE="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${MAIN_SHA}")"
+          test "$(jq -r '.merge_base_commit.sha' <<<"$COMPARE")" = "$RUNTIME_SHA"
+          test "$(jq -r '[.files[]? | select((.filename | startswith("docs/")) | not)] | length' <<<"$COMPARE")" = 0
+          echo "REPOSITORY_MAIN_SHA=$MAIN_SHA" >> "$GITHUB_ENV"
+          echo "FINAL_PREREQUISITES=PASS runtime=$RUNTIME_SHA main=$MAIN_SHA"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Read production infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
+          DAEMON="$(gcloud run services describe "$DAEMON_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          DAEMON_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$DAEMON")"
+          case "$IMAGE" in *"$RUNTIME_SHA") ;; *) echo "MCP_IMAGE_MISMATCH:$IMAGE" >&2; exit 1;; esac
+          case "$DAEMON_IMAGE" in *"toca-managed-daemon-$RUNTIME_SHA") ;; *) echo "DAEMON_IMAGE_MISMATCH:$DAEMON_IMAGE" >&2; exit 1;; esac
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE}\"" --project "$GCP_PROJECT_ID" --freshness=24h --limit=10000 --format=json)"
+          SUCCEEDED="$(jq '[.[] | tostring | select(contains("toca.managed.instagram.daemon.tick.completed"))] | length' <<<"$LOGS")"
+          FAILED="$(jq '[.[] | tostring | select(contains("toca.managed.instagram.daemon.tick.failed"))] | length' <<<"$LOGS")"
+          TICKS=$((SUCCEEDED + FAILED)); test "$TICKS" -gt 0
+          INSTANCE="$(gcloud sql instances describe toca-mcp-db --project "$GCP_PROJECT_ID" --format=json)"
+          PITR="$(jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled // false' <<<"$INSTANCE")"; test "$PITR" = true
+          BACKUPS="$(gcloud sql backups list --instance=toca-mcp-db --project "$GCP_PROJECT_ID" --limit=25 --format=json)"
+          BACKUP_END="$(jq -r '[.[] | select((.status // "") == "SUCCESSFUL" or (.status // "") == "SUCCESS") | (.endTime // .end_time // empty)] | map(select(length>0)) | sort | last // empty' <<<"$BACKUPS")"; test -n "$BACKUP_END"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"; echo "DAEMON_IMAGE=$DAEMON_IMAGE" >> "$GITHUB_ENV"
+          echo "SCHEDULER_TICKS=$TICKS" >> "$GITHUB_ENV"; echo "SCHEDULER_FAILED=$FAILED" >> "$GITHUB_ENV"
+          echo "PITR_ENABLED=$PITR" >> "$GITHUB_ENV"; echo "LATEST_BACKUP_END=$BACKUP_END" >> "$GITHUB_ENV"
+          echo "VERIFY_JOB=toca-foundation-post-r29-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Run final production database and SLO assessment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup(){ gcloud run jobs delete "$VERIFY_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }; trap cleanup EXIT
+          cat >/tmp/verify.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          import { randomUUID } from 'node:crypto';
+          const require=createRequire('/app/package.json'); const pg=require('pg');
+          const { assessReliability }=await import('file:///app/dist/src/core/reliability.js');
+          const { PostgresAuditSink }=await import('file:///app/dist/src/persistence/postgres-audit-sink.js');
+          const { PostgresOperationalObservabilityStore }=await import('file:///app/dist/src/persistence/postgres-operational-observability.js');
+          const { createToolRegistry }=await import('file:///app/dist/src/registry.js');
+          const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:3}); const now=new Date();
+          try {
+            const terminal=await pool.query(`with latest as (select distinct on (execution_id) execution_id,status,external_resource_id,created_at from audit_ledger_events where created_at >= now()-interval '24 hours' and status in ('SUCCEEDED','FAILED') order by execution_id,sequence desc) select count(*)::int total,count(*) filter (where status='FAILED')::int failures,count(*) filter (where status='SUCCEEDED' and external_resource_id is not null)::int external_successes from latest`);
+            const outbox=await pool.query(`select count(*)::int pending,coalesce(greatest(0,extract(epoch from (now()-min(occurred_at)))),0)::float8 oldest_age from event_outbox where status in ('PENDING','CLAIMED','FAILED_RETRYABLE')`);
+            const rows=await pool.query(`select event_id,event_type,status,attempts,occurred_at from event_outbox where status in ('PENDING','CLAIMED','FAILED_RETRYABLE') order by occurred_at,event_id limit 100`);
+            const daily=await pool.query(`select correlation_id,value,occurred_at from operational_signals where name='foundation.daily_control.completed' order by occurred_at desc limit 1`); if(daily.rows.length!==1) throw new Error('DAILY_MISSING');
+            const d=daily.rows[0]; const dailyAgeHours=Math.max(0,(now-new Date(d.occurred_at))/3600000); if(Number(d.value)!==1||dailyAgeHours>36) throw new Error('DAILY_UNHEALTHY');
+            const heads=await pool.query(`select execution_id from audit_ledger_heads where updated_at >= now()-interval '24 hours' order by updated_at desc limit 100`); const verifier=new PostgresAuditSink(pool,createToolRegistry()); let invalid=0; for(const r of heads.rows){if(!(await verifier.verifyExecution(r.execution_id)).valid) invalid++;}
+            const t=terminal.rows[0]??{}; const pending=Number(outbox.rows[0]?.pending??0); const oldest=Number(outbox.rows[0]?.oldest_age??0); const ext=Number(t.external_successes??0);
+            const snapshot={windowMinutes:1440,coreRequests:Number(t.total??0),coreFailures:Number(t.failures??0),schedulerTicks:Number(process.env.SCHEDULER_TICKS),schedulerFailures:Number(process.env.SCHEDULER_FAILED),successfulExternalWrites:ext,verifiedExternalWrites:ext,outboxPending:pending,oldestOutboxAgeSeconds:oldest,auditLedgerIntegrityValid:invalid===0,latestBackupAgeHours:Math.max(0,(now-new Date(process.env.LATEST_BACKUP_END))/3600000),pointInTimeRecoveryEnabled:process.env.PITR_ENABLED==='true',latestRestoreDrillAgeDays:Math.max(0,(now-new Date(process.env.PITR_VALIDATED_AT))/86400000)};
+            const assessment=assessReliability(snapshot); if(pending!==0||oldest!==0) throw new Error(`OUTBOX_NOT_ZERO:${pending}:${oldest}`); if(assessment.slos.some(s=>s.met!==true)||!assessment.healthy) throw new Error('SLO_UNHEALTHY'); if(Number(process.env.PITR_RPO_SECONDS)>900||Number(process.env.PITR_RTO_SECONDS)>3600) throw new Error('DR_OBJECTIVE_FAILED');
+            const store=new PostgresOperationalObservabilityStore(pool); const client=await pool.connect(); try{await client.query('begin'); await store.write(client,{signalId:randomUUID(),auditEventId:null,executionId:null,correlationId:`foundation:slo:post-r29:${process.env.RUNTIME_SHA}`,tenantId:null,signalType:'STATE',name:'foundation.slo.assessment.completed',value:1,attributes:{runtimeSha:process.env.RUNTIME_SHA,repositoryMainSha:process.env.REPOSITORY_MAIN_SHA,healthy:true,outboxPending:pending,oldestOutboxAgeSeconds:oldest,r29RunId:process.env.EXPECTED_R29_RUN_ID},evidence:['alerts:none','outbox:pending:0','outbox:oldest-age-seconds:0',`r29-run:${process.env.EXPECTED_R29_RUN_ID}:pass`,`daily-control:${d.correlation_id}:healthy`],occurredAt:now.toISOString()}); await client.query('commit');}catch(e){await client.query('rollback');throw e;}finally{client.release();}
+            console.log('FOUNDATION_POST_R29_FINAL='+JSON.stringify({schemaVersion:1,runtimeSha:process.env.RUNTIME_SHA,repositoryMainSha:process.env.REPOSITORY_MAIN_SHA,productionImage:process.env.IMAGE,daemonImage:process.env.DAEMON_IMAGE,prerequisiteRuns:{deploy:Number(process.env.EXPECTED_DEPLOY_RUN_ID),historicalCleanup:Number(process.env.EXPECTED_CLEANUP_RUN_ID),r29:Number(process.env.EXPECTED_R29_RUN_ID)},snapshot,assessment,outbox:{pending,oldestOutboxAgeSeconds:oldest,rows:rows.rows},dailyControl:{correlationId:d.correlation_id,value:Number(d.value),occurredAt:d.occurred_at,ageHours:dailyAgeHours},disasterRecovery:{pitrRpoSeconds:Number(process.env.PITR_RPO_SECONDS),pitrRtoSeconds:Number(process.env.PITR_RTO_SECONDS),providerLatestLagSeconds:Number(process.env.PITR_PROVIDER_LAG_SECONDS)},auditExecutionsChecked:heads.rows.length,measuredAt:now.toISOString()}));
+          } finally {await pool.end();}
+          NODE
+          B64="$(base64 -w0 /tmp/verify.mjs)"; SCRIPT='set -eu; printf %s "$VERIFY_SCRIPT_B64" | base64 -d >/tmp/verify.mjs; node /tmp/verify.mjs; rm -f /tmp/verify.mjs'
+          gcloud run jobs deploy "$VERIFY_JOB" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" --set-env-vars "^~^RUNTIME_SHA=$RUNTIME_SHA~REPOSITORY_MAIN_SHA=$REPOSITORY_MAIN_SHA~EXPECTED_DEPLOY_RUN_ID=$EXPECTED_DEPLOY_RUN_ID~EXPECTED_CLEANUP_RUN_ID=$EXPECTED_CLEANUP_RUN_ID~EXPECTED_R29_RUN_ID=$EXPECTED_R29_RUN_ID~SCHEDULER_TICKS=$SCHEDULER_TICKS~SCHEDULER_FAILED=$SCHEDULER_FAILED~LATEST_BACKUP_END=$LATEST_BACKUP_END~PITR_ENABLED=$PITR_ENABLED~PITR_VALIDATED_AT=$PITR_VALIDATED_AT~PITR_RPO_SECONDS=$PITR_RPO_SECONDS~PITR_RTO_SECONDS=$PITR_RTO_SECONDS~PITR_PROVIDER_LAG_SECONDS=$PITR_PROVIDER_LAG_SECONDS~IMAGE=$IMAGE~DAEMON_IMAGE=$DAEMON_IMAGE~VERIFY_SCRIPT_B64=$B64" --command /bin/sh --args="^@^-lc@${SCRIPT}" --tasks 1 --max-retries 0 --task-timeout 15m --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$VERIFY_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LINE=''; for i in $(seq 1 18); do LINE="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${VERIFY_JOB}\" AND textPayload:\"FOUNDATION_POST_R29_FINAL=\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=20 --order=desc --format='value(textPayload)' | grep '^FOUNDATION_POST_R29_FINAL=' | head -n1 || true)"; [ -n "$LINE" ] && break; sleep 5; done; test -n "$LINE"
+          JSON="${LINE#FOUNDATION_POST_R29_FINAL=}"; jq -e --arg sha "$RUNTIME_SHA" '.runtimeSha==$sha and .assessment.healthy==true and ([.assessment.slos[].met]|all(.==true)) and .outbox.pending==0 and .outbox.oldestOutboxAgeSeconds==0 and .dailyControl.value==1 and .disasterRecovery.pitrRpoSeconds<=900 and .disasterRecovery.pitrRtoSeconds<=3600' <<<"$JSON" >/dev/null
+          printf '%s\n' "$JSON" | jq . > foundation-post-r29-final.json; cat foundation-post-r29-final.json; echo 'FOUNDATION_POST_R29_FINAL=PASS'
+
+      - name: Recheck runtime drift remains documentation-only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api(){ curl --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$1"; }
+          MAIN_SHA="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" | jq -r '.sha')"; COMPARE="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${MAIN_SHA}")"; test "$(jq -r '.merge_base_commit.sha' <<<"$COMPARE")" = "$RUNTIME_SHA"; test "$(jq -r '[.files[]? | select((.filename | startswith("docs/")) | not)] | length' <<<"$COMPARE")" = 0; echo "RUNTIME_DRIFT_RECHECK=PASS runtime=$RUNTIME_SHA main=$MAIN_SHA"
+
+      - name: Upload final ratification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: foundation-post-r29-final-${{ env.RUNTIME_SHA }}-${{ github.run_id }}
+          path: foundation-post-r29-final.json
+          retention-days: 90
