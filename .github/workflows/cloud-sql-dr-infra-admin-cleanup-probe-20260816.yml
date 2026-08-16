@@ -1,0 +1,43 @@
+name: Cloud SQL DR Infra Admin Cleanup Probe 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-validation-final-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-infra-admin-cleanup-probe-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  SOURCE_INSTANCE: toca-mcp-db
+  TARGET_INSTANCE: toca-mcp-dr-final-31932660953
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read-only IAM and target boundary probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOURCE_INSTANCE" != "$TARGET_INSTANCE"
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          SOURCE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          TARGET="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          jq -n --slurpfile p /tmp/perms.json --argjson s "$SOURCE" --argjson t "$TARGET" '{permissions:($p[0].permissions//[]),source:{name:$s.name,state:$s.state,deletionProtection:$s.settings.deletionProtectionEnabled,backupEnabled:$s.settings.backupConfiguration.enabled,pitrEnabled:$s.settings.backupConfiguration.pointInTimeRecoveryEnabled},target:{name:$t.name,state:$t.state,deletionProtection:$t.settings.deletionProtectionEnabled}}'
+          test "$(jq -r '.name' <<<"$SOURCE")" = 'toca-mcp-db'
+          test "$(jq -r '.settings.deletionProtectionEnabled' <<<"$SOURCE")" = true
+          test "$(jq -r '.name' <<<"$TARGET")" = 'toca-mcp-dr-final-31932660953'
