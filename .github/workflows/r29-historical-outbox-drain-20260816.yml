@@ -1,0 +1,130 @@
+name: R29 Historical Outbox Drain 2026-08-16
+
+on:
+  push:
+    branches: [ops/slo-production-assessment-20260816]
+    paths: ['.github/workflows/r29-historical-outbox-drain-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PROD_SERVICE: toca-mcp-production
+  EXCLUDED_NEW_SHA: e0696df1d1860261afba78f1634e8c979401cdc7
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Drain only exact historical R29 verifier artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
+          test -n "$IMAGE"
+          JOB="toca-r29-historical-drain-${GITHUB_RUN_ID}"
+          cleanup(){ gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          cat >/tmp/drain.mjs <<'NODE'
+          import { randomUUID } from 'node:crypto';
+          import { createRequire } from 'node:module';
+          const require = createRequire('/app/package.json');
+          const pg = require('pg');
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+          const excludedEvidence = `production:r29:${process.env.EXCLUDED_NEW_SHA}`;
+          const workerId = 'r29-production-verifier-validation-sink';
+          const now = new Date().toISOString();
+          const allowedTypes = new Set(['content_item.created','content_item.version_created','content.video_artifact.created']);
+          const client = await pool.connect();
+          let drained = 0;
+          try {
+            await client.query('begin');
+            const result = await client.query(`
+              select event_id,event_type,status,attempts,max_attempts,version,tenant_id,correlation_id,evidence
+              from event_outbox e
+              where e.status='PENDING'
+                and e.attempts=0
+                and e.event_type = any($1::text[])
+                and not (e.evidence @> $2::jsonb)
+                and exists (select 1 from jsonb_array_elements_text(e.evidence) x(value) where x.value like 'production:r29:%')
+                and exists (select 1 from jsonb_array_elements_text(e.evidence) x(value) where x.value like 'validation-run:%')
+                and (
+                  (e.tenant_id like 'r29-production-%' and e.correlation_id like 'r29-production-runtime-%') or
+                  (e.tenant_id like 'r29-prod-%' and e.correlation_id like 'r29-prod-%')
+                )
+              order by e.occurred_at,e.event_id
+              for update`, [Array.from(allowedTypes), JSON.stringify([excludedEvidence])]);
+
+            const counts = result.rows.reduce((acc,row) => { acc[row.event_type]=(acc[row.event_type]||0)+1; return acc; }, {});
+            if (result.rows.length !== 14) throw new Error(`R29_HISTORICAL_COUNT_INVALID:${result.rows.length}`);
+            if (counts['content.video_artifact.created'] !== 5 || counts['content_item.created'] !== 4 || counts['content_item.version_created'] !== 5)
+              throw new Error(`R29_HISTORICAL_TYPE_COUNTS_INVALID:${JSON.stringify(counts)}`);
+
+            for (const row of result.rows) {
+              if (!allowedTypes.has(row.event_type) || row.status !== 'PENDING' || Number(row.attempts) !== 0 || Number(row.max_attempts) < 1)
+                throw new Error(`R29_HISTORICAL_ROW_INVALID:${row.event_id}`);
+              const executionId = `r29-historical-validation-sink-${randomUUID()}`;
+              const attemptNumber = 1;
+              const claimed = await client.query(`update event_outbox set status='CLAIMED',attempts=$2,claimed_by=$3,claim_execution_id=$4,claimed_at=$5::timestamptz,delivered_at=null,last_error_code=null,version=version+1 where event_id=$1 and version=$6 and status='PENDING' returning event_id`, [row.event_id,attemptNumber,workerId,executionId,now,row.version]);
+              if (claimed.rows.length !== 1) throw new Error(`R29_HISTORICAL_CLAIM_CONFLICT:${row.event_id}`);
+              await client.query(`insert into event_outbox_delivery_attempts (execution_id,event_id,worker_id,attempt_number,status,claimed_at,completed_at,error_code,evidence) values ($1,$2,$3,$4,'CLAIMED',$5::timestamptz,null,null,'[]'::jsonb)`, [executionId,row.event_id,workerId,attemptNumber,now]);
+              const evidence = ['r29:historical-validation-cleanup:2026-08-16','r29:external-publication:false'];
+              const attempt = await client.query(`update event_outbox_delivery_attempts set status='DELIVERED',completed_at=$2::timestamptz,error_code=null,evidence=$3::jsonb where execution_id=$1 and status='CLAIMED' returning execution_id`, [executionId,now,JSON.stringify(evidence)]);
+              if (attempt.rows.length !== 1) throw new Error(`R29_HISTORICAL_ATTEMPT_CONFLICT:${row.event_id}`);
+              const delivered = await client.query(`update event_outbox set status='DELIVERED',delivered_at=$2::timestamptz,claimed_by=null,claim_execution_id=null,claimed_at=null,last_error_code=null,version=version+1 where event_id=$1 and claim_execution_id=$3 and status='CLAIMED' returning event_id`, [row.event_id,now,executionId]);
+              if (delivered.rows.length !== 1) throw new Error(`R29_HISTORICAL_DELIVER_CONFLICT:${row.event_id}`);
+              drained += 1;
+            }
+            await client.query('commit');
+          } catch (error) {
+            await client.query('rollback');
+            throw error;
+          } finally { client.release(); }
+
+          try {
+            const remainingHistorical = await pool.query(`select count(*)::int as n from event_outbox e where e.status in ('PENDING','CLAIMED','FAILED_RETRYABLE') and e.event_type = any($1::text[]) and not (e.evidence @> $2::jsonb) and exists (select 1 from jsonb_array_elements_text(e.evidence) x(value) where x.value like 'production:r29:%') and exists (select 1 from jsonb_array_elements_text(e.evidence) x(value) where x.value like 'validation-run:%') and ((e.tenant_id like 'r29-production-%' and e.correlation_id like 'r29-production-runtime-%') or (e.tenant_id like 'r29-prod-%' and e.correlation_id like 'r29-prod-%'))`, [Array.from(allowedTypes), JSON.stringify([excludedEvidence])]);
+            const allPending = await pool.query(`select count(*)::int as n from event_outbox where status in ('PENDING','CLAIMED','FAILED_RETRYABLE')`);
+            const result = {schemaVersion:1,drained,remainingHistorical:Number(remainingHistorical.rows[0]?.n ?? -1),allPendingAfter:Number(allPending.rows[0]?.n ?? -1),excludedNewSha:process.env.EXCLUDED_NEW_SHA,externalPublicationExecuted:false,completedAt:now};
+            console.log(`R29_HISTORICAL_OUTBOX_DRAIN=${JSON.stringify(result)}`);
+            if (drained !== 14 || result.remainingHistorical !== 0) throw new Error(`R29_HISTORICAL_READBACK_INVALID:${JSON.stringify(result)}`);
+          } finally { await pool.end(); }
+          NODE
+
+          B64="$(base64 -w0 /tmp/drain.mjs)"
+          SCRIPT='set -eu; printf %s "$SCRIPT_B64" | base64 -d >/tmp/drain.mjs; node /tmp/drain.mjs; rm -f /tmp/drain.mjs'
+          gcloud run jobs deploy "$JOB" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" --set-env-vars "^~^EXCLUDED_NEW_SHA=$EXCLUDED_NEW_SHA~SCRIPT_B64=$B64" --command /bin/sh --args="^@^-lc@${SCRIPT}" --tasks 1 --max-retries 0 --task-timeout 5m --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LINE=''
+          for i in $(seq 1 12); do
+            LINE="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\" AND textPayload:\"R29_HISTORICAL_OUTBOX_DRAIN=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=20 --order=desc --format='value(textPayload)' | grep '^R29_HISTORICAL_OUTBOX_DRAIN=' | head -n1 || true)"
+            [ -n "$LINE" ] && break
+            sleep 5
+          done
+          test -n "$LINE"
+          JSON="${LINE#R29_HISTORICAL_OUTBOX_DRAIN=}"
+          printf '%s\n' "$JSON" | jq -e '.drained==14 and .remainingHistorical==0 and .externalPublicationExecuted==false' >/dev/null
+          printf '%s\n' "$JSON" | jq . > r29-historical-outbox-drain.json
+      - name: Upload cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r29-historical-outbox-drain-${{ github.sha }}
+          path: r29-historical-outbox-drain.json
+          if-no-files-found: warn
+          retention-days: 90
