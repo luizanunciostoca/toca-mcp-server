@@ -9,16 +9,25 @@ permissions:
   actions: write
   contents: read
 
+env:
+  FINAL_MAIN_SHA: 58f31df28e63629d3933bbce67bf912932d05829
+  DISPATCH_PURPOSE: r29-final-workflow-run-proof
+
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch official production deploy on current main
+      - name: Dispatch one official production deploy on exact final main
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          MAIN_SHA="$(curl --fail --silent -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${API}/git/ref/heads/main" | jq -r '.object.sha')"
+          test "$MAIN_SHA" = "$FINAL_MAIN_SHA"
+          ACTIVE="$(curl --fail --silent -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${API}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/runs?branch=main&per_page=10" | jq '[.workflow_runs[] | select(.status != "completed")] | length')"
+          test "$ACTIVE" = '0'
           HTTP="$(curl --silent --output /tmp/response.txt --write-out '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -26,7 +35,7 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             -H 'Content-Type: application/json' \
             --data '{"ref":"main"}' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/dispatches")"
+            "${API}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/dispatches")"
           cat /tmp/response.txt
           test "$HTTP" = '204'
-          echo 'EXACT_MAIN_DEPLOY_DISPATCH=PASS'
+          echo "EXACT_MAIN_DEPLOY_DISPATCH=PASS sha=$MAIN_SHA purpose=$DISPATCH_PURPOSE"
