@@ -48,6 +48,27 @@ const videoContentInputSchema = z.object({
   event_id: z.string().min(1).optional(),
   experiment_id: z.string().min(1).optional(),
 });
+
+function videoContentSchemaFor(capabilityId: string) {
+  switch (capabilityId) {
+    case 'video.export.reel':
+    case 'video.export.story':
+      return videoContentInputSchema.extend({ approval_ref: z.string().min(1) });
+    case 'content_item.channel.adapt':
+      return videoContentInputSchema.extend({
+        target_channel: z.string().min(1),
+        target_format: z.string().min(1),
+      });
+    case 'content_item.language.localize':
+      return videoContentInputSchema.extend({ target_language: z.string().min(1) });
+    case 'content_item.event.link':
+      return videoContentInputSchema.extend({ event_id: z.string().min(1) });
+    case 'content_item.experiment.link':
+      return videoContentInputSchema.extend({ experiment_id: z.string().min(1) });
+    default:
+      return videoContentInputSchema;
+  }
+}
 const googleAdsPlanSchema = z.object({
   customerId: z.string().min(1),
   currencyCode: z.string().length(3),
@@ -227,7 +248,7 @@ function resolveBinding(
   if (services.videoContent && VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET.has(capabilityId)) {
     const write = VIDEO_CONTENT_WRITE_CAPABILITY_IDS.has(capabilityId);
     return binding(
-      videoContentInputSchema,
+      videoContentSchemaFor(capabilityId),
       (input) => services.videoContent!.execute(capabilityId, input as VideoContentRuntimeInput),
       write
         ? {

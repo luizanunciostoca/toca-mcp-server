@@ -5,11 +5,13 @@ import { PostgresTransactionalOutbox } from '../events/postgres-transactional-ou
 import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
 import { PostgresContentItemStore } from '../persistence/postgres-content-item-store.js';
 import {
+  CONTENT_ITEM_FORMATS,
   planContentRepurpose,
   validateAccessibility,
   validateFactClaims,
   validateRights,
   type AccessibilityCheck,
+  type ContentItemFormat,
   type ContentItemStore,
   type ContentItemVersion,
   type ContentValidationStatus,
@@ -135,10 +137,7 @@ class PostgresVideoArtifactStore {
     this.#outbox = outbox ?? new PostgresTransactionalOutbox(pool);
   }
 
-  async put(
-    capabilityId: string,
-    input: VideoContentRuntimeInput,
-  ): Promise<PersistedArtifact> {
+  async put(capabilityId: string, input: VideoContentRuntimeInput): Promise<PersistedArtifact> {
     const idempotencyKey = runtimeIdempotencyKey(capabilityId, input);
     const payloadSha256 = sha256(canonicalJson(input.payload));
     const artifactId = `r29_${sha256(`${capabilityId}|${input.content_item_id}|${idempotencyKey}`).slice(0, 40)}`;
@@ -263,7 +262,10 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
       case 'content_item.experiment.link':
         return this.#linkExperiment(input);
       case 'content_item.fact.validate':
-        return validationResult(validateFactClaims(payloadArray<FactClaimCheck>(input, 'checks')), input);
+        return validationResult(
+          validateFactClaims(payloadArray<FactClaimCheck>(input, 'checks')),
+          input,
+        );
       case 'content_item.rights.validate':
         return validationResult(validateRights(payloadArray<RightsCheck>(input, 'checks')), input);
       case 'content_item.accessibility.validate':
@@ -283,7 +285,12 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
           payloadObject<VideoTimeline>(input, 'timeline'),
           payloadObject<SafeAreaPolicy>(input, 'policy'),
         );
-        return { ...result, content_item_id: input.content_item_id, version_id: input.version_id, evidence: input.evidence };
+        return {
+          ...result,
+          content_item_id: input.content_item_id,
+          version_id: input.version_id,
+          evidence: input.evidence,
+        };
       }
       case 'video.duration.validate':
         return validationResult(
@@ -295,7 +302,12 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
         );
       case 'video.quality.validate': {
         const quality = validateVideoQuality(payloadArray<VideoGateResult>(input, 'gates'));
-        return { ...quality, content_item_id: input.content_item_id, version_id: input.version_id, evidence: input.evidence };
+        return {
+          ...quality,
+          content_item_id: input.content_item_id,
+          version_id: input.version_id,
+          evidence: input.evidence,
+        };
       }
       default:
         validateVideoWritePayload(capabilityId, input);
@@ -318,20 +330,59 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
 
     if (capabilityId.startsWith('content_item.')) {
       const item = await this.#contentStore.get(input.content_item_id);
-      const verified = item !== undefined;
+      const contentRef = `toca://r29/content/${encodeURIComponent(input.content_item_id)}`;
+      const record = asRecord(result);
+      let verified = false;
+      let externalResourceId = contentRef;
+
+      if (
+        capabilityId === 'content_item.version.create' ||
+        capabilityId === 'content_item.variant.create' ||
+        capabilityId === 'content_item.channel.adapt' ||
+        capabilityId === 'content_item.language.localize'
+      ) {
+        const resultVersionId =
+          typeof record.versionId === 'string' ? record.versionId.trim() : undefined;
+        const versions = await this.#contentStore.listVersions(input.content_item_id);
+        verified = Boolean(
+          item &&
+          resultVersionId &&
+          item.currentVersionId === resultVersionId &&
+          versions.some((version) => version.versionId === resultVersionId),
+        );
+        if (resultVersionId) {
+          externalResourceId = `${contentRef}/versions/${encodeURIComponent(resultVersionId)}`;
+        }
+      } else if (capabilityId === 'content_item.event.link') {
+        const targetEventId = optionalInputText(input.event_id ?? input.payload.event_id);
+        verified = Boolean(item && targetEventId && item.eventId === targetEventId);
+      } else if (capabilityId === 'content_item.experiment.link') {
+        const targetExperimentId = optionalInputText(
+          input.experiment_id ?? input.payload.experiment_id,
+        );
+        verified = Boolean(item && targetExperimentId && item.experimentId === targetExperimentId);
+      }
+
       return {
         verified,
-        evidence: [verified ? `r29:content:${input.content_item_id}:readback` : 'r29:content:missing'],
-        ...(verified
-          ? { externalResourceId: `toca://r29/content/${encodeURIComponent(input.content_item_id)}` }
-          : { reason: 'R29_CONTENT_READBACK_MISSING' }),
+        evidence: [
+          verified
+            ? `r29:content:${input.content_item_id}:${capabilityId}:verified`
+            : `r29:content:${input.content_item_id}:${capabilityId}:mismatch`,
+        ],
+        externalResourceId,
+        ...(!verified ? { reason: 'R29_CONTENT_READBACK_MISMATCH' } : {}),
       };
     }
 
     const record = asRecord(result);
     const artifactRef = typeof record.artifactRef === 'string' ? record.artifactRef : undefined;
     if (!artifactRef) {
-      return { verified: false, evidence: ['r29:artifact-ref:missing'], reason: 'R29_ARTIFACT_REF_REQUIRED' };
+      return {
+        verified: false,
+        evidence: ['r29:artifact-ref:missing'],
+        reason: 'R29_ARTIFACT_REF_REQUIRED',
+      };
     }
     const artifact = await this.#artifactStore.get(artifactRef);
     const expectedSha = sha256(canonicalJson(input.payload));
@@ -342,8 +393,12 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
       artifact.payloadSha256 === expectedSha;
     return {
       verified,
-      evidence: [verified ? `r29:artifact:${artifactRef}:verified` : `r29:artifact:${artifactRef}:mismatch`],
-      ...(verified ? { externalResourceId: artifactRef } : { reason: 'R29_ARTIFACT_READBACK_MISMATCH' }),
+      evidence: [
+        verified ? `r29:artifact:${artifactRef}:verified` : `r29:artifact:${artifactRef}:mismatch`,
+      ],
+      ...(verified
+        ? { externalResourceId: artifactRef }
+        : { reason: 'R29_ARTIFACT_READBACK_MISMATCH' }),
     };
   }
 
@@ -383,6 +438,16 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
     const sourceAssetIds = optionalPayloadStringArray(input, 'source_asset_ids');
     const derivedAssetIds = optionalPayloadStringArray(input, 'derived_asset_ids');
     const variantKey = optionalPayloadText(input, 'variant_key');
+    const channel =
+      derivationType === 'CHANNEL_ADAPTATION'
+        ? requireText(input.target_channel ?? '', 'R29_TARGET_CHANNEL_REQUIRED')
+        : input.target_channel;
+    const format =
+      derivationType === 'CHANNEL_ADAPTATION' ? contentItemFormat(input.target_format) : undefined;
+    const language =
+      derivationType === 'LOCALIZATION'
+        ? requireText(input.target_language ?? '', 'R29_TARGET_LANGUAGE_REQUIRED')
+        : input.target_language;
     return this.#contentStore.createVersion({
       versionId,
       contentItemId: input.content_item_id,
@@ -390,8 +455,9 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
       derivationType,
       sourceVersionId: input.version_id,
       ...(variantKey ? { variantKey } : {}),
-      ...(input.target_channel ? { channel: input.target_channel } : {}),
-      ...(input.target_language ? { language: input.target_language } : {}),
+      ...(channel ? { channel } : {}),
+      ...(format ? { format } : {}),
+      ...(language ? { language } : {}),
       ...(sourceAssetIds ? { sourceAssetIds } : {}),
       ...(derivedAssetIds ? { derivedAssetIds } : {}),
       payload,
@@ -405,7 +471,10 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
   async #linkEvent(input: VideoContentRuntimeInput): Promise<unknown> {
     const item = await this.#contentStore.get(input.content_item_id);
     if (!item) throw new Error('R29_CONTENT_ITEM_NOT_FOUND');
-    const targetId = requireText(input.event_id ?? payloadText(input, 'event_id'), 'R29_EVENT_ID_REQUIRED');
+    const targetId = requireText(
+      input.event_id ?? payloadText(input, 'event_id'),
+      'R29_EVENT_ID_REQUIRED',
+    );
     return this.#contentStore.linkEvent({
       contentItemId: input.content_item_id,
       expectedRecordVersion: item.recordVersion,
@@ -493,14 +562,18 @@ function validateVideoWritePayload(capabilityId: string, input: VideoContentRunt
     }
     case 'video.caption.embed':
     case 'video.thumbnail.generate':
-      if (Object.keys(input.payload).length === 0) throw new Error('R29_VIDEO_ARTIFACT_PAYLOAD_REQUIRED');
+      if (Object.keys(input.payload).length === 0)
+        throw new Error('R29_VIDEO_ARTIFACT_PAYLOAD_REQUIRED');
       break;
     default:
       throw new Error(`R29_VIDEO_RUNTIME_UNHANDLED:${capabilityId}`);
   }
 }
 
-function validationResult(status: ContentValidationStatus, input: VideoContentRuntimeInput): unknown {
+function validationResult(
+  status: ContentValidationStatus,
+  input: VideoContentRuntimeInput,
+): unknown {
   return {
     status,
     content_item_id: input.content_item_id,
@@ -587,6 +660,21 @@ function optionalPayloadStringArray(
   const value = input.payload[key];
   if (value === undefined || value === null) return undefined;
   return payloadStringArray(input, key);
+}
+
+function contentItemFormat(value: string | undefined): ContentItemFormat {
+  const normalized = requireText(value ?? '', 'R29_TARGET_FORMAT_REQUIRED');
+  if (!(CONTENT_ITEM_FORMATS as readonly string[]).includes(normalized)) {
+    throw new Error('R29_TARGET_FORMAT_INVALID');
+  }
+  return normalized as ContentItemFormat;
+}
+
+function optionalInputText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
 }
 
 function normalizeEvidence(value: readonly string[]): readonly string[] {

@@ -59,7 +59,9 @@ describe('R20/R29 capability contracts', () => {
         side_effects: true,
         approval_required: false,
       });
-      expect(getCapabilityDefinition(capabilityId)?.input_schema.required).toContain('approval_ref');
+      expect(getCapabilityDefinition(capabilityId)?.input_schema.required).toContain(
+        'approval_ref',
+      );
     }
 
     expect(requestedCapabilities.some((capabilityId) => capabilityId.includes('publish'))).toBe(
