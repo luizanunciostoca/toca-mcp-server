@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { META_ADS_PRIMARY_ACCOUNT_ID } from './meta-ads-account-binding.js';
 
 export const THE_PARTY_2026_08_15_APPROVAL = 'APPROVED_THE_PARTY_2026_08_15_R170_TOTAL';
-export const THE_PARTY_2026_08_15_ACCOUNT_ID = '311793958882290';
+export const THE_PARTY_2026_08_15_ACCOUNT_ID = META_ADS_PRIMARY_ACCOUNT_ID;
 export const THE_PARTY_2026_08_15_CURRENCY = 'BRL';
 export const THE_PARTY_2026_08_15_PIXEL_ID = '461233076843065';
 export const THE_PARTY_2026_08_15_PAGE_ID = '306103746115875';

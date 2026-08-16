@@ -30,13 +30,13 @@ describe('Meta Ads no-side-effect provider preflight', () => {
 
     await expect(
       validateMetaAdsAdWriteReadiness(api, {
-        accountId: '394512749760530',
+        accountId: '311793958882290',
         creativeId: 'creative-1',
         validationId: 'validation-1',
       }),
     ).resolves.toEqual({ validated: true, adSetId: 'adset-1', creativeId: 'creative-1' });
 
-    expect(post).toHaveBeenCalledWith('act_394512749760530/ads', {
+    expect(post).toHaveBeenCalledWith('act_311793958882290/ads', {
       name: 'TOCA | P0 VALIDATE_ONLY | validation-1',
       adset_id: 'adset-1',
       creative: JSON.stringify({ creative_id: 'creative-1' }),
@@ -55,7 +55,7 @@ describe('Meta Ads no-side-effect provider preflight', () => {
 
     await expect(
       validateMetaAdsAdWriteReadiness(api, {
-        accountId: '394512749760530',
+        accountId: '311793958882290',
         creativeId: 'creative-1',
         validationId: 'validation-1',
       }),
@@ -68,7 +68,7 @@ describe('Meta Ads no-side-effect provider preflight', () => {
 
     await expect(
       validateMetaAdsAdWriteReadiness(api, {
-        accountId: '394512749760530',
+        accountId: '311793958882290',
         creativeId: 'creative-1',
         validationId: 'validation-1',
       }),

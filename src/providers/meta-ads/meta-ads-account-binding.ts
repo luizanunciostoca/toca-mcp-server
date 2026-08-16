@@ -1,0 +1,2 @@
+export const META_ADS_PRIMARY_ACCOUNT_ID = '311793958882290' as const;
+export const META_ADS_PRIMARY_ACCOUNT_REF = `act_${META_ADS_PRIMARY_ACCOUNT_ID}` as const;
