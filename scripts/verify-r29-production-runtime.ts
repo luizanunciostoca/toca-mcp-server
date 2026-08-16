@@ -29,15 +29,9 @@ const adaptedVersionId = `r29-production-story-${suffix}`;
 const correlationId = `r29-production-runtime-${suffix}`;
 const contentKey = `r29:production-runtime:${suffix}`;
 const sourceAssetId = `r29-source-${suffix}`;
-const evidence = [
-  `production:r29:${sourceSha}`,
-  `validation-run:${validationRunId}`,
-];
+const evidence = [`production:r29:${sourceSha}`, `validation-run:${validationRunId}`];
 
-if (
-  CORE_MCP_TOOL_NAMES.length !== 12 ||
-  !CORE_MCP_TOOL_NAMES.includes('toca.execute')
-) {
+if (CORE_MCP_TOOL_NAMES.length !== 12 || !CORE_MCP_TOOL_NAMES.includes('toca.execute')) {
   throw new Error('R29_PRODUCTION_CORE_SURFACE_MISMATCH');
 }
 
@@ -86,9 +80,7 @@ try {
   });
 
   const runtime = new PostgresVideoContentRuntime(pool1);
-  const runtimeResolver = createRuntimeCapabilityResolver({
-    videoContent: runtime,
-  });
+  const runtimeResolver = createRuntimeCapabilityResolver({ videoContent: runtime });
   const auditSink = new PostgresAuditSink(pool1, registry);
 
   videoInput = {
@@ -117,16 +109,10 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(
-    firstVideo.providerReadbackVerified,
-    'R29_PRODUCTION_VIDEO_READBACK_NOT_VERIFIED',
-  );
+  assert(firstVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_READBACK_NOT_VERIFIED');
   videoExecutionId = firstVideo.executionId;
   videoResult = firstVideo.result;
-  artifactExternalResourceId = requiredResultText(
-    firstVideo.result,
-    'artifactRef',
-  );
+  artifactExternalResourceId = requiredResultText(firstVideo.result, 'artifactRef');
 
   const retriedVideo = await executeCoreCapability(
     {
@@ -137,14 +123,8 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(
-    retriedVideo.providerReadbackVerified,
-    'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED',
-  );
-  const retriedArtifactRef = requiredResultText(
-    retriedVideo.result,
-    'artifactRef',
-  );
+  assert(retriedVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED');
+  const retriedArtifactRef = requiredResultText(retriedVideo.result, 'artifactRef');
   assert(
     retriedArtifactRef === artifactExternalResourceId,
     'R29_PRODUCTION_VIDEO_IDEMPOTENCY_FAILED',
@@ -176,10 +156,7 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(
-    adapted.providerReadbackVerified,
-    'R29_PRODUCTION_ADAPT_READBACK_NOT_VERIFIED',
-  );
+  assert(adapted.providerReadbackVerified, 'R29_PRODUCTION_ADAPT_READBACK_NOT_VERIFIED');
 
   const artifactCount = await pool1.query<{ count: number }>(
     `select count(*)::int as count
@@ -188,10 +165,7 @@ try {
     [contentItemId],
   );
   artifactRows = artifactCount.rows[0]?.count ?? 0;
-  assert(
-    artifactRows === 1,
-    'R29_PRODUCTION_ARTIFACT_IDEMPOTENCY_COUNT_INVALID',
-  );
+  assert(artifactRows === 1, 'R29_PRODUCTION_ARTIFACT_IDEMPOTENCY_COUNT_INVALID');
 
   const outboxCount = await pool1.query<{ count: number }>(
     `select count(*)::int as count
@@ -208,8 +182,7 @@ try {
   const auditRecords = await auditSink.listByCorrelation(correlationId, 100);
   assert(
     auditRecords.some(
-      (record) =>
-        record.toolName === 'video.caption.embed' && record.status === 'SUCCEEDED',
+      (record) => record.toolName === 'video.caption.embed' && record.status === 'SUCCEEDED',
     ),
     'R29_PRODUCTION_VIDEO_AUDIT_MISSING',
   );
@@ -236,9 +209,7 @@ try {
       },
     );
   } catch (error) {
-    failClosed =
-      error instanceof Error &&
-      error.message.includes('has no active runtime binding');
+    failClosed = error instanceof Error && error.message.includes('has no active runtime binding');
   }
   assert(failClosed, 'R29_PRODUCTION_FAIL_CLOSED_NOT_VERIFIED');
 } finally {
@@ -262,9 +233,7 @@ try {
     restartedReadback.externalResourceId === artifactExternalResourceId;
   assert(durableReadbackVerified, 'R29_PRODUCTION_DURABLE_READBACK_FAILED');
 
-  const persistedItem = await new PostgresContentItemStore(pool2).get(
-    contentItemId,
-  );
+  const persistedItem = await new PostgresContentItemStore(pool2).get(contentItemId);
   assert(persistedItem !== undefined, 'R29_PRODUCTION_CONTENT_ITEM_MISSING');
   assert(
     persistedItem.currentVersionId === adaptedVersionId &&
