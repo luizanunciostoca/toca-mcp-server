@@ -1,0 +1,38 @@
+name: Alerts v5 Incident Readback 2026-08-16
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: [.github/workflows/alerts-v5-incident-readback-20260816.yml]
+permissions:
+  contents: read
+  id-token: write
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  ALERT_ID: 0.obi0tel279f
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read exact incident resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          URL="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts/${ALERT_ID}"
+          HTTP="$(curl --silent --output /tmp/alert.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" "$URL")"
+          echo "ALERT_GET_HTTP=$HTTP"
+          if [ "$HTTP" = 200 ]; then jq -S . /tmp/alert.json; exit 0; fi
+          cat /tmp/alert.json
+          echo 'FALLBACK_LIST_MATCH:'
+          curl --fail --silent -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=100' "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts" >/tmp/alerts.json
+          jq -S --arg id "$ALERT_ID" '[.. | objects | select(tostring | contains($id))]' /tmp/alerts.json
+          test "$HTTP" = 200
