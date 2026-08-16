@@ -25,6 +25,7 @@ const INVALID_VALIDATION_EFFECTIVE_STATUSES = new Set([
   'ARCHIVED',
   'DISAPPROVED',
 ]);
+const VALIDATION_END_TIME_SAFETY_WINDOW_MS = 5 * 60 * 1000;
 
 export function evaluateMetaAdsProviderSmokeReadiness(
   snapshot: MetaAdsProviderSmokeSnapshot,
@@ -60,7 +61,11 @@ export function isMetaAdsPixelAssignedToAccount(
 
 export function selectMetaAdsValidationAdSet(
   adSets: readonly Readonly<Record<string, unknown>>[],
+  now: Date = new Date(),
 ): Readonly<Record<string, unknown>> | undefined {
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) throw new Error('META_ADS_SMOKE_VALIDATE_ONLY_INVALID_NOW');
+
   return adSets.find((adSet) => {
     const id = scalarString(adSet.id);
     const status = scalarString(adSet.status);
@@ -69,9 +74,17 @@ export function selectMetaAdsValidationAdSet(
       Boolean(id) &&
       VALIDATION_AD_SET_STATUSES.has(status) &&
       !INVALID_VALIDATION_EFFECTIVE_STATUSES.has(effectiveStatus) &&
-      !nonEmptyCollection(adSet.issues_info)
+      !nonEmptyCollection(adSet.issues_info) &&
+      hasUsableValidationWindow(adSet.end_time, nowMs)
     );
   });
+}
+
+function hasUsableValidationWindow(value: unknown, nowMs: number): boolean {
+  const endTime = scalarString(value);
+  if (!endTime) return true;
+  const endTimeMs = Date.parse(endTime);
+  return Number.isFinite(endTimeMs) && endTimeMs > nowMs + VALIDATION_END_TIME_SAFETY_WINDOW_MS;
 }
 
 function evaluateEffectiveStatus(

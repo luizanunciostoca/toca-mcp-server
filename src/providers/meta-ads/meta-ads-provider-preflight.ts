@@ -19,7 +19,7 @@ export async function validateMetaAdsAdWriteReadiness(
 ): Promise<MetaAdsNoSideEffectAdValidationEvidence> {
   const response = asRecord(
     await api.get(`act_${input.accountId}/adsets`, {
-      fields: 'id,name,status,effective_status,issues_info',
+      fields: 'id,name,status,effective_status,issues_info,end_time',
       limit: '200',
     }),
   );

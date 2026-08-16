@@ -26,7 +26,7 @@ function apiMock(options: {
 
 describe('Meta Ads no-side-effect provider preflight', () => {
   it('validates the final Ad payload without creating an Ad', async () => {
-    const { api, post } = apiMock({});
+    const { api, get, post } = apiMock({});
 
     await expect(
       validateMetaAdsAdWriteReadiness(api, {
@@ -36,6 +36,10 @@ describe('Meta Ads no-side-effect provider preflight', () => {
       }),
     ).resolves.toEqual({ validated: true, adSetId: 'adset-1', creativeId: 'creative-1' });
 
+    expect(get).toHaveBeenCalledWith('act_311793958882290/adsets', {
+      fields: 'id,name,status,effective_status,issues_info,end_time',
+      limit: '200',
+    });
     expect(post).toHaveBeenCalledWith('act_311793958882290/ads', {
       name: 'TOCA | P0 VALIDATE_ONLY | validation-1',
       adset_id: 'adset-1',
@@ -50,6 +54,28 @@ describe('Meta Ads no-side-effect provider preflight', () => {
       adSets: [
         { id: 'broken-1', status: 'PAUSED', effective_status: 'WITH_ISSUES' },
         { id: 'archived-1', status: 'ARCHIVED' },
+      ],
+    });
+
+    await expect(
+      validateMetaAdsAdWriteReadiness(api, {
+        accountId: '311793958882290',
+        creativeId: 'creative-1',
+        validationId: 'validation-1',
+      }),
+    ).rejects.toThrow('META_ADS_SMOKE_VALIDATE_ONLY_ADSET_NOT_FOUND');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('fails closed instead of validating against an expired Ad Set', async () => {
+    const { api, post } = apiMock({
+      adSets: [
+        {
+          id: 'expired-adset',
+          status: 'PAUSED',
+          effective_status: 'CAMPAIGN_PAUSED',
+          end_time: '2000-01-01T00:00:00.000Z',
+        },
       ],
     });
 
