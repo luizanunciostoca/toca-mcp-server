@@ -1,12 +1,12 @@
 # Foundation Daily Control — Real TOCA OS Operating Process
 
-Status: **IMPLEMENTED IN RUNTIME / DEPLOYMENT + EXACT-HEAD QUALITY PENDING**
+Status: **DAILY OPERATIONS — PRODUCTION_VERIFIED**
 
 This process makes daily TOCA OS execution explicit without adding another scheduler, workflow engine or provider-write path.
 
 ## Runtime
 
-The existing private `toca-managed-instagram-daemon` is already invoked by the authenticated Cloud Scheduler minute trigger. After 08:00 in `America/Bahia`, the daemon attempts the Foundation daily control during its normal tick.
+The existing private `toca-managed-instagram-daemon` is invoked by the authenticated Cloud Scheduler minute trigger. After 08:00 in `America/Bahia`, the daemon attempts the Foundation daily control during its normal tick.
 
 Completion is persisted in `operational_signals` under:
 
@@ -47,19 +47,25 @@ The runtime sweep intentionally does not grant itself infrastructure-admin permi
 - PITR enabled state;
 - Cloud Run/Cloud Scheduler infrastructure health;
 - alert-notification delivery;
-- quarterly isolated restore drill.
+- isolated restore/PITR drills.
 
 This preserves least privilege. The application must not receive broad GCP administrative permissions merely to claim operational completeness.
 
-## Production activation gate
+## Production verification
 
-The code path becomes a production daily process only after:
+The production activation gate is closed.
 
-1. PR #117 exact-head Quality passes;
-2. #117 is reconciled with any preceding governance/Foundation merges;
-3. the daemon is redeployed through the hardened production workflow;
-4. `/healthz` reports a `lastDailyControlDay` after the next eligible tick;
-5. `operational_signals` contains exactly one completed logical control for that Bahia date;
-6. Cloud Monitoring routes the emitted P0/P1 signals/logs to the approved operator notification channel.
+Final evidence is recorded in `docs/operations/foundation-slo-production-verification-2026-08-16.md`.
 
-Until those steps execute, the truthful state is **daily control implemented, production activation pending CI/deploy**.
+At the final assessment:
+
+- authenticated production deploy and scheduler smoke passed;
+- `operational_signals` contained a healthy durable daily completion with correlation `foundation:daily-control:2026-08-15` and `value=1`;
+- the completion was ~9.13 hours old, within the 36-hour health window;
+- managed scheduler success was 880/880;
+- Transactional Outbox pending/claimed/retryable count was 0;
+- oldest pending Outbox age was 0 seconds;
+- SLO assessment returned `healthy=true` with no alerts;
+- Audit Ledger integrity was valid.
+
+Therefore Daily Operations is **PRODUCTION_VERIFIED** for the current release.
