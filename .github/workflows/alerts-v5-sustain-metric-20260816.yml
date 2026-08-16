@@ -1,0 +1,36 @@
+name: Alerts v5 Sustain Metric 2026-08-16
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: [.github/workflows/alerts-v5-sustain-metric-20260816.yml]
+permissions:
+  contents: read
+  id-token: write
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  TARGET_JOB: toca-alert-metric-v5-31938048761
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+jobs:
+  sustain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Execute same temporary job across consecutive buckets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs describe "$TARGET_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
+          for i in 1 2 3 4; do
+            START="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+            gcloud run jobs execute "$TARGET_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+            END="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+            echo "SUSTAIN_EXECUTION_${i}=PASS start=${START} end=${END}"
+            if [ "$i" -lt 4 ]; then sleep 40; fi
+          done
