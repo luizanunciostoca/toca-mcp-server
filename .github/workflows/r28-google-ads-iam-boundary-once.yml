@@ -1,0 +1,54 @@
+name: R28 Google Ads IAM Boundary Once
+on:
+  push:
+    branches: [ops/r28-google-ads-final-revalidate-20260816-v2]
+    paths: ['.github/workflows/r28-google-ads-iam-boundary-once.yml']
+permissions:
+  contents: read
+  id-token: write
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+jobs:
+  deployer:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - shell: bash
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-access-token)"
+          echo DEPLOYER_IAM_BOUNDARY_BEGIN
+          curl -fsS -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions" \
+            --data '{"permissions":["resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","secretmanager.secrets.list","secretmanager.secrets.get","secretmanager.secrets.create","secretmanager.versions.add","secretmanager.versions.access"]}'
+          echo
+          echo DEPLOYER_IAM_BOUNDARY_END
+  infra-admin:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - shell: bash
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-access-token)"
+          echo INFRA_IAM_BOUNDARY_BEGIN
+          curl -fsS -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions" \
+            --data '{"permissions":["resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","secretmanager.secrets.list","secretmanager.secrets.get","secretmanager.secrets.create","secretmanager.versions.add","secretmanager.versions.access"]}'
+          echo
+          echo INFRA_IAM_BOUNDARY_END
