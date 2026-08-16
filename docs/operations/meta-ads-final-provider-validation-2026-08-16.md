@@ -1,6 +1,6 @@
 # Meta Ads Final Controlled Provider Validation — 2026-08-16
 
-Status: **PRODUCTION_VALIDATED — CONTROLLED CREATE_PAUSED ONLY**
+Status: **META ADS — PRODUCTION_VERIFIED / CONTROLLED CREATE_PAUSED — PROVIDER-VALIDATED**
 
 This document records the final clean provider-backed validation of `meta_ads.campaign.create_paused` on the canonical Meta Ads account without widening the public MCP surface, enabling generic writes, activating any validation asset, or introducing blind retries.
 
@@ -130,7 +130,7 @@ No Meta Ads source, workflow, provider binding, account configuration or runtime
 
 ## Final classification
 
-`meta_ads.campaign.create_paused` remains **PRODUCTION_VALIDATED for controlled PAUSED-only creation on primary account `311793958882290`**.
+`meta_ads.campaign.create_paused` is **provider-validated for controlled PAUSED-only creation on primary account `311793958882290`**, while its runtime registry status remains `IMPLEMENTED` by design.
 
 The final 2026-08-16 validation additionally proves a clean single-run mutation and settled provider readback with campaign, Ad Set and Ad all `PAUSED`/`PAUSED`, exact PREPARE-to-EXECUTE hash binding, public writes still disabled and temporary execution infrastructure cleaned up.
 
@@ -143,3 +143,45 @@ This validation does **not** authorize or claim validation for:
 - spend as a validation mechanism.
 
 Future production writes must continue to require exact approval/descriptor binding, provider resource identity, fail-closed settlement checks and no blind retry after ambiguous external outcomes.
+
+## 6. Independent exact-ID READBACK and spend proof
+
+After the successful controlled CREATE_PAUSED, a separate GET-only provider verification was executed so the final classification does not rely only on the mutation workflow's in-process settlement result.
+
+Independent READBACK run:
+
+- workflow run: `31939348180`;
+- current-main gate at execution: `c3d2131690055e0a2636c44eadce2277aa5aba64`;
+- artifact ID: `9261583620`;
+- artifact digest: `sha256:4fd6bbf16a1e65470760963833666a0b5ce0069a6c7d1842c3bb2c60085c0c87`;
+- operation: GET-only Meta Marketing API readback under the production runtime identity;
+- provider mutation retry: none.
+
+The exact provider IDs were re-read independently:
+
+- campaign `52618058314265`: `status=PAUSED`, `effective_status=PAUSED`;
+- Ad Set `52618058315465`: `status=PAUSED`, `effective_status=PAUSED`;
+- Ad `52618058325265`: `status=PAUSED`, `effective_status=PAUSED`.
+
+The independent evidence recorded:
+
+- `allPaused=true`;
+- `noActiveEffectiveStatus=true`;
+- `verified=true`;
+- campaign Insights `data=[]` for the exact validation campaign;
+- normalized real provider spend: **BRL 0.00**;
+- spend evidence classification: `PROVIDER_INSIGHTS_NO_ROW_ZERO_DELIVERY`.
+
+This closes the required chain as:
+
+`READ -> PREPARE -> CREATE_PAUSED -> independent exact-ID READBACK`.
+
+For completeness, the fresh READ used immediately before the final PREPARE/EXECUTE window also completed successfully as run `31938462172`, with artifact `9261342231` and digest `sha256:37041e9391c9a2428934498c772701936c18caa9a577ef465733a0e62f9606e1`.
+
+No ACTIVATE operation was executed at any point. Public MCP Meta Ads writes remained disabled throughout the controlled proof.
+
+## Final promotion decision
+
+The operational Meta Ads closeout is **PRODUCTION_VERIFIED** for the strictly controlled PAUSED-only scope proven above.
+
+The runtime registry intentionally remains **`IMPLEMENTED`** for `meta_ads.campaign.create_paused`. The repository Architecture Gate enforces this controlled-write boundary while public Meta Ads writes remain disabled, so promoting the registry entry itself would incorrectly widen the runtime lifecycle contract. This does not weaken the provider evidence: the PAUSED-only provider operation is independently validated and the Meta Ads operational closeout is `PRODUCTION_VERIFIED`. It does not enable `META_ADS_WRITE_ENABLED`, widen the public MCP surface, or authorize activation, budget expansion, automatic retry after ambiguous outcomes, or spend.

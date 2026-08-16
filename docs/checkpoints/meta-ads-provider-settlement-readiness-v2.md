@@ -1,6 +1,6 @@
 # Meta Ads Provider Settlement Readiness v2
 
-Status: **PRIMARY CREATE_PAUSED PROVIDER-VALIDATED — PAUSED / ZERO SPEND / NO ACTIVATION**
+Status: **META ADS — PRODUCTION_VERIFIED / CONTROLLED CREATE_PAUSED PROVIDER-VALIDATED — PAUSED / ZERO SPEND / NO ACTIVATION**
 
 Current reconciliation baseline: `main@0f812077c84cea92547352320e2cc859ec832003`.
 
@@ -123,3 +123,9 @@ The current primary account has fresh provider proof for granted `ads_management
 The account migration and expired-Ad-Set hardening are merged and Quality-green. The historical billing blocker belongs only to superseded account `394512749760530` and must not be represented as a current blocker for primary account `311793958882290`.
 
 `CREATE_PAUSED` is provider-validated only for exact approved PAUSED-only creation. Future executions must retain exact descriptor/hash binding, zero blind retries and provider read-back. Activation, budget expansion and spend are not validated or authorized by this checkpoint.
+
+## Final closeout superseding note — 2026-08-16
+
+The current final provider proof is recorded in `docs/operations/meta-ads-final-provider-validation-2026-08-16.md`. In addition to the clean exact CREATE_PAUSED execution, independent GET-only run `31939348180` re-read campaign `52618058314265`, Ad Set `52618058315465` and Ad `52618058325265` as `PAUSED` / `PAUSED`, proved no effective `ACTIVE` state, and recorded real provider spend `BRL 0.00` from campaign Insights. No ACTIVATE call occurred and public MCP Meta Ads writes remained disabled.
+
+Final classification: **META ADS = PRODUCTION_VERIFIED** for the controlled PAUSED-only scope; controlled CREATE_PAUSED is provider-validated. The runtime registry intentionally remains **`IMPLEMENTED`** while public Meta Ads writes are disabled, preserving the Architecture Gate controlled-write boundary.

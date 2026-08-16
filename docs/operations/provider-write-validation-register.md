@@ -66,6 +66,21 @@ Production validation evidence:
 
 Lifecycle conclusion: **PRODUCTION_VALIDATED for controlled CREATE_PAUSED on account `311793958882290`; activation, budget expansion and spend remain unvalidated and prohibited**.
 
+Final closeout supplement — 2026-08-16:
+
+- internal settlement timeout root cause fixed by PR #160; no current Meta/admin blocker remains;
+- READ `31938462172` passed; artifact `9261342231`;
+- PREPARE `31938638085` passed; artifact `9261422433`;
+- exact CREATE_PAUSED `31938973330` passed; artifact `9261553921`;
+- exact campaign / Ad Set / Ad: `52618058314265` / `52618058315465` / `52618058325265`;
+- independent GET-only READBACK `31939348180` passed; artifact `9261583620`;
+- campaign, Ad Set and Ad are all configured/effective `PAUSED`;
+- no created object has effective `ACTIVE` status;
+- exact campaign Insights returned no delivery row; normalized real spend is `BRL 0.00`;
+- ACTIVATE was not executed; public MCP Meta Ads writes remained disabled.
+
+Operational domain closeout: **META ADS = PRODUCTION_VERIFIED** for controlled PAUSED-only creation. Provider validation classification: **controlled CREATE_PAUSED is PRODUCTION_VALIDATED**. Runtime registry status remains **`IMPLEMENTED` by design** while public Meta Ads writes stay disabled; the Architecture Gate enforces this controlled-write boundary.
+
 ### 4. Google Ads
 
 Current evidence:
