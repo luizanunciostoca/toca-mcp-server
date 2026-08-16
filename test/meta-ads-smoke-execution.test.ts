@@ -71,7 +71,8 @@ describe('Meta Ads CREATE_PAUSED recovery checkpoint', () => {
           checkpointCalls += 1;
           return Promise.resolve();
         },
-        reconcile: () => Promise.reject(new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT')),
+        reconcile: () =>
+          Promise.reject(new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT')),
       });
     } catch (error) {
       caught = error;

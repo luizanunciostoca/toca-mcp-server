@@ -1,8 +1,8 @@
 # Meta Ads Provider Settlement Readiness v2
 
-Status: **PRIMARY PREPARE VALIDATED / CREATE_PAUSED PENDING — NO WRITE / NO SPEND**
+Status: **PRIMARY CREATE_PAUSED PROVIDER-VALIDATED — PAUSED / ZERO SPEND / NO ACTIVATION**
 
-Current reconciliation baseline: `main@808454749b1d56ae7c42a1f7cc543959da1ef391`.
+Current reconciliation baseline: `main@0f812077c84cea92547352320e2cc859ec832003`.
 
 This checkpoint records the controlled Meta Ads provider-settlement path without widening the public MCP surface or enabling generic provider writes.
 
@@ -92,29 +92,34 @@ PR #132 fixed this without widening write capability:
 
 PR #132 exact-head Quality passed and was fixed-head merged. Post-merge `main@808454749b1d56ae7c42a1f7cc543959da1ef391` Quality run `31920308690` is **SUCCESS**.
 
+## Real primary-account CREATE_PAUSED evidence — PASS after read-only reconciliation
+
+A single exact-hash provider mutation was executed against primary account `311793958882290` from source `main@0f812077c84cea92547352320e2cc859ec832003`, using approved request SHA-256 `47d719b08c31ca8db827e8d9c89c3f8374cf915ee22653ad270cdc0096c8d243`, zero provider retries and no activation path.
+
+Mutation run `31920903042` created provider resources but the original bounded settlement loop timed out with `META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT`; the mutation was not retried. GET-only reconciliation run `31921580945` subsequently proved:
+
+- campaign `52618007729865`: configured/effective `PAUSED`;
+- Ad Set `52618007731065`: configured/effective `PAUSED`;
+- creative `2844574235935509`, bound to account `311793958882290`;
+- Ad `52618007737265`: configured/effective `PAUSED`;
+- campaign -> Ad Set -> Ad -> creative relationships match;
+- duplicate counts are exactly one for campaign, Ad Set and Ad;
+- no `issues_info`, no failed delivery checks and no effective `ACTIVE` state;
+- provider Insights returned no delivery rows and total spend `0`;
+- no activation call occurred.
+
+Sanitized read-back artifact: ID `9256521917`, digest `sha256:f70b4cd4a272588e1f5480eb8fd3a2f0172ecd5c643f1aede24fa25058422cf5`.
+
+The timeout exposed an observability/recovery gap, not a failed provider write. The hardened execution now records returned provider IDs and approved hash immediately after `createPaused` and before settlement polling. A later read-back failure must reconcile those exact IDs by GET and must never trigger a blind second create.
+
 ## Provider evidence boundary
 
-The current primary account now has fresh provider proof for:
+The current primary account has fresh provider proof for granted `ads_management`, exact active BRL account binding, Pixel assignment, no-side-effect `validate_only`, one exact approved CREATE_PAUSED mutation, exact provider resource identities, settled PAUSED read-back, no provider issues and zero spend.
 
-1. granted `ads_management` permission;
-2. exact active ad account + `BRL` currency;
-3. Pixel assignment to that account;
-4. successful no-side-effect `validate_only` preflight with no created Ad ID.
-
-This is sufficient to close the PREPARE readiness gate. It does **not** promote `meta_ads.campaign.create_paused` to production-validated write status because no provider mutation was performed.
-
-The remaining controlled sequence is:
-
-5. explicit approved `CREATE_PAUSED` descriptor/hash bound to the exact prepared plan;
-6. one bounded provider mutation with no activation;
-7. settled provider read-back with campaign/ad set/ad remaining safely paused and with no issues/delivery failures;
-8. immutable audit evidence;
-9. zero activation and zero spend.
-
-Until that write-and-readback sequence succeeds, lifecycle remains **IMPLEMENTED / PREPARE VALIDATED / CREATE_PAUSED PROVIDER SETTLEMENT PENDING**.
+`meta_ads.campaign.create_paused` is therefore **PRODUCTION_VALIDATED for controlled PAUSED-only creation on primary account `311793958882290`**. This does not validate or authorize activation, budget expansion, automatic retries or spend.
 
 ## Merge and safety gate
 
 The account migration and expired-Ad-Set hardening are merged and Quality-green. The historical billing blocker belongs only to superseded account `394512749760530` and must not be represented as a current blocker for primary account `311793958882290`.
 
-`CREATE_PAUSED` remains a separate controlled operation. It must use the exact prepared descriptor/hash, remain PAUSED-only, use zero mutation retries and require provider settlement/read-back. Activation and spend are not authorized by this checkpoint.
+`CREATE_PAUSED` is provider-validated only for exact approved PAUSED-only creation. Future executions must retain exact descriptor/hash binding, zero blind retries and provider read-back. Activation, budget expansion and spend are not validated or authorized by this checkpoint.

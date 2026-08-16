@@ -53,20 +53,18 @@ Current evidence:
 - PR #118 ports settled-state/read-back hardening, `WITH_ISSUES`/delivery-check fail-closed behavior and final Ad `validate_only` preflight onto the current controlled-write path;
 - the replacement provider-smoke workflow is manual PREPARE/EXECUTE, exact plan/hash bound, PAUSED-only and zero-retry; it no longer writes on `push`.
 
-Required sequence:
+Production validation evidence:
 
-1. reconcile #118 to the then-current `main` and pass exact-head Quality;
-2. granted `ads_management` proof;
-3. exact active ad account `311793958882290` + currency proof;
-4. exact Pixel assignment proof;
-5. provider `validate_only` preflight returns no created Ad ID;
-6. explicit approved `CREATE_PAUSED` descriptor/hash;
-7. one bounded create-paused mutation;
-8. provider states settle safely as paused with no `issues_info` or failed delivery checks;
-9. immutable evidence/read-back;
-10. zero activation and zero spend.
+1. primary-account PREPARE passed provider `validate_only`;
+2. exact approved request SHA-256 `47d719b08c31ca8db827e8d9c89c3f8374cf915ee22653ad270cdc0096c8d243`;
+3. one bounded CREATE_PAUSED mutation in run `31920903042`, zero retries and no activation;
+4. the initial settlement poll timed out, so the mutation was not retried;
+5. GET-only reconciliation run `31921580945` recovered exact campaign / Ad Set / creative / Ad IDs `52618007729865` / `52618007731065` / `2844574235935509` / `52618007737265`;
+6. campaign, Ad Set and Ad settled configured/effective `PAUSED`, with no issues or failed delivery checks;
+7. duplicate counts are one and provider spend is `0`;
+8. sanitized artifact `9256521917`, digest `sha256:f70b4cd4a272588e1f5480eb8fd3a2f0172ecd5c643f1aede24fa25058422cf5`.
 
-Lifecycle conclusion: **IMPLEMENTED / fresh CREATE_PAUSED provider settlement validation pending; do not activate or spend**.
+Lifecycle conclusion: **PRODUCTION_VALIDATED for controlled CREATE_PAUSED on account `311793958882290`; activation, budget expansion and spend remain unvalidated and prohibited**.
 
 ### 4. Google Ads
 
