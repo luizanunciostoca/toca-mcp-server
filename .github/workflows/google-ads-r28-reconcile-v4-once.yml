@@ -3,7 +3,9 @@ name: Google Ads R28 Reconcile V4 Once
 on:
   push:
     branches: [reconcile/r28-google-ads-current-main]
-    paths: ['.github/workflows/google-ads-r28-reconcile-v4-once.yml']
+    paths:
+      - '.github/workflows/google-ads-r28-reconcile-v4-once.yml'
+      - 'scripts/google_ads_r28_reconcile_wrapper_once.py'
 
 permissions:
   contents: write
