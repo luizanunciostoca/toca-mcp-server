@@ -65,7 +65,12 @@ jobs:
           test -n "$IMAGE"
           test -n "$VALIDATION_RUN_ID"
           JOB_NAME="toca-r29-runtime-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DRAIN_JOB_NAME="toca-r29-outbox-drain-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
+            gcloud run jobs delete "$DRAIN_JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
             gcloud run jobs delete "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
@@ -131,4 +136,50 @@ jobs:
               .externalPublicationExecuted == false
             ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq .
+
+          gcloud run jobs deploy "$DRAIN_JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "SOURCE_SHA=$SOURCE_SHA,VALIDATION_RUN_ID=$VALIDATION_RUN_ID" \
+            --command node \
+            --args dist/scripts/drain-r29-validation-outbox.js \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+
+          gcloud run jobs execute "$DRAIN_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+          DRAIN_LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${DRAIN_JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=20m \
+            --limit=100 \
+            --order=asc \
+            --format='value(textPayload)' || true)"
+          printf '%s\n' "$DRAIN_LOGS"
+          DRAIN_LINE="$(printf '%s\n' "$DRAIN_LOGS" | grep 'R29_VALIDATION_OUTBOX_DRAIN=' | tail -n1)"
+          test -n "$DRAIN_LINE"
+          DRAIN_JSON="${DRAIN_LINE#R29_VALIDATION_OUTBOX_DRAIN=}"
+          printf '%s\n' "$DRAIN_JSON" | jq -e \
+            --arg sha "$SOURCE_SHA" \
+            --arg run "$VALIDATION_RUN_ID" '
+              .schemaVersion == 1 and
+              .sourceSha == $sha and
+              .validationRunId == $run and
+              .matched == 3 and
+              .drained == 3 and
+              .delivered == 3 and
+              .pending == 0 and
+              .transport == "r29-production-verifier-validation-sink" and
+              .externalPublicationExecuted == false
+            ' >/dev/null
+          printf '%s\n' "$DRAIN_JSON" | jq .
           echo 'TOCA_R29_PRODUCTION_RUNTIME_GATE=PASS'
