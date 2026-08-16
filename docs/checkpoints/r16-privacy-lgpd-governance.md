@@ -1,8 +1,8 @@
 # R16 — Privacy, LGPD, Consent, Preferences and Suppression
 
-Status: **IMPLEMENTATION + HARDENING COMPLETE / EXACT-HEAD QUALITY BLOCKED BY ACTIONS**
+Status: **IMPLEMENTATION + HARDENING COMPLETE / FINAL CANONICAL QUALITY PENDING**
 
-Validated base before this checkpoint repair: `main@b0d067e9cc6b469fdb1421ab7a25a25a3b0f1f47`.
+Current reconciled base: `main@9454085ec9f2e67eae249560183bf6c20bdf81b6`.
 
 PR: #115 — `feat/r16-privacy-consent-preferences-v2`.
 
@@ -105,6 +105,14 @@ Unknown contact, ambiguous identity, unknown consent/preference or suppression m
 
 Omnichannel must not copy the privacy ledger, consent state, suppression state or ContactRecord master.
 
+## Reconciliation evidence
+
+The R16 delta was rebuilt cleanly against `main@9454085ec9f2e67eae249560183bf6c20bdf81b6` with exactly 17 Privacy files and no unrelated workflow in the PR diff.
+
+- materialization Quality run `31917288523`: **SUCCESS**;
+- clean finalization Quality run `31917400049`: **SUCCESS**;
+- final PR head is re-triggering the repository canonical Quality workflow after this documentation-only evidence refresh.
+
 ## Merge order
 
 Required order:
@@ -112,14 +120,12 @@ Required order:
 1. revalidate #115 against then-current `main`;
 2. exact-head canonical Quality Gate must start and pass;
 3. merge #115 using the exact validated head SHA;
-4. confirm post-merge `main` Quality;
+4. confirm post-merge `main` Quality and production migration gate applies `014`;
 5. reconcile #104 against the merged Privacy migration/contracts;
 6. remove/avoid any duplicate privacy-domain abstraction in #104;
 7. run exact-head Quality on the reconciled Omnichannel PR;
 8. only then consider Omnichannel merge/provider-write validation.
 
-## Current blocker
+## Current merge gate
 
-At the time of this checkpoint repair, GitHub Actions is failing before jobs are created. This is an external CI startup condition, not a passing Quality result.
-
-Therefore R16 is **code/hardening complete but not merge-authorized**. Do not bypass the gate and do not merge Omnichannel first.
+R16 is code/hardening complete and cleanly reconciled. The only remaining gate before merge is a successful canonical repository Quality run on the exact current PR head. Omnichannel remains blocked until R16 is merged, post-merge `main` is green and migration `014` is verified in production.
