@@ -1,0 +1,48 @@
+name: Cloud SQL PITR IAM Probe 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-pitr-rpo-drill-20260816]
+    paths: ['.github/workflows/cloud-sql-pitr-iam-probe-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe deployer Cloud SQL permissions without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          cat >/tmp/request.json <<'JSON'
+          {"permissions":["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.update","cloudsql.instances.delete","cloudsql.instances.create","cloudsql.instances.restoreBackup","cloudsql.backupRuns.get","cloudsql.backupRuns.list"]}
+          JSON
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          echo "DEPLOYER_TEST_IAM_HTTP=$HTTP"
+          cat /tmp/perms.json
+          test "$HTTP" = 200
+          for P in cloudsql.instances.get cloudsql.instances.clone cloudsql.instances.update cloudsql.instances.delete cloudsql.instances.create cloudsql.instances.restoreBackup cloudsql.backupRuns.get cloudsql.backupRuns.list; do
+            if jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/perms.json >/dev/null; then
+              echo "DEPLOYER_PERMISSION_${P}=GRANTED"
+            else
+              echo "DEPLOYER_PERMISSION_${P}=MISSING"
+            fi
+          done
