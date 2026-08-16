@@ -69,13 +69,24 @@ export async function runFoundationDailyControl(input: {
     };
   }
 
-  const alreadyCompleted = await input.pool.query<{ exists: boolean }>(
-    `select exists (
-       select 1 from operational_signals
-       where name = $1 and attributes->>'dayKey' = $2
-     ) as exists`,
-    [CONTROL_NAME, clock.dayKey],
-  );
+  let alreadyCompleted: pg.QueryResult<{ exists: boolean }>;
+  try {
+    alreadyCompleted = await input.pool.query<{ exists: boolean }>(
+      `select exists (
+         select 1 from operational_signals
+         where name = $1 and attributes->>'dayKey' = $2
+       ) as exists`,
+      [CONTROL_NAME, clock.dayKey],
+    );
+  } catch (error) {
+    input.telemetry.increment('foundation.daily_control.failed');
+    input.logger.error('foundation.daily_control.failed', {
+      dayKey: clock.dayKey,
+      phase: 'COMPLETION_READ',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   if (alreadyCompleted.rows[0]?.exists) {
     return {
       ran: false,
