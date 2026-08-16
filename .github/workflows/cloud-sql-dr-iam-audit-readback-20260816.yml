@@ -1,0 +1,46 @@
+name: Cloud SQL DR IAM Audit Readback 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-drill-v3-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-iam-audit-readback-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read recent IAM admin activity only
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${DEPLOY_SA}"
+          gcloud logging read \
+            'logName:"cloudaudit.googleapis.com%2Factivity" AND timestamp>="2026-08-16T00:00:00Z"' \
+            --project "$GCP_PROJECT_ID" --limit=500 --order=asc --format=json > /tmp/activity.json
+          jq --arg member "$MEMBER" '[.[] | select((.protoPayload.methodName // "") | test("SetIamPolicy|CreateRole|UpdateRole")) | {timestamp,methodName:.protoPayload.methodName,principalEmail:.protoPayload.authenticationInfo.principalEmail,resourceName:.protoPayload.resourceName,roles:[((.protoPayload.request.policy.bindings // .protoPayload.request.bindings // [])[]) | select((.members // []) | index($member)) | .role]} | select((.roles|length)>0 or (.methodName|test("CreateRole|UpdateRole")))]' /tmp/activity.json > /tmp/matches.json
+          jq -n --arg member "$MEMBER" --slurpfile matches /tmp/matches.json --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schemaVersion:1,member:$member,matches:($matches[0] // []),verifiedAt:$verifiedAt}' > cloud-sql-dr-iam-audit-readback.json
+          jq . cloud-sql-dr-iam-audit-readback.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-dr-iam-audit-readback-${{ github.sha }}
+          path: cloud-sql-dr-iam-audit-readback.json
+          retention-days: 90
