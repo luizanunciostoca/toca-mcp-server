@@ -4,6 +4,7 @@ import type {
   VideoContentRuntimeInput,
   VideoContentRuntimeService,
 } from '../src/content/runtime.js';
+import { resolveCapabilityDefinition } from '../src/governance/capability-resolution.js';
 import { CORE_MCP_TOOL_NAMES } from '../src/mcp/core-surface.js';
 import { createRuntimeCapabilityResolver } from '../src/mcp/runtime-capability-resolver.js';
 import { createToolRegistry } from '../src/registry.js';
@@ -91,6 +92,18 @@ describe('Video/R29 current TOCA Core runtime integration', () => {
       capabilityStatus: 'PRODUCTION_VALIDATED',
       sideEffects: true,
     });
+  });
+
+  it('keeps canonical lifecycle aligned with the production runtime without exposing video as a public MCP tool', () => {
+    for (const capabilityId of R29_VIDEO_CAPABILITIES) {
+      expect(
+        resolveCapabilityDefinition(capabilityId)?.canonical_definition,
+        capabilityId,
+      ).toMatchObject({
+        lifecycle_status: 'PRODUCTION_VALIDATED',
+        execution_surface: 'INTERNAL_ENGINE',
+      });
+    }
   });
 
   it('fails closed without the Video/R29 runtime service', () => {

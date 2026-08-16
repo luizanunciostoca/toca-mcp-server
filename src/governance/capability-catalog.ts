@@ -136,12 +136,10 @@ function isVideoContentTechnicalExtension(capabilityId: string): boolean {
 }
 
 function lifecycleStatus(capabilityId: string): CapabilityStatus {
-  return (
-    runtimeDefinitions.get(capabilityId)?.capabilityStatus ??
-    (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId)
-      ? 'IMPLEMENTED'
-      : 'PLANNED')
-  );
+  const runtimeStatus = runtimeDefinitions.get(capabilityId)?.capabilityStatus;
+  if (runtimeStatus) return runtimeStatus;
+  if (isVideoContentTechnicalExtension(capabilityId)) return 'PRODUCTION_VALIDATED';
+  return implementedInternal.has(capabilityId) ? 'IMPLEMENTED' : 'PLANNED';
 }
 
 function action(capabilityId: string): string {
@@ -491,7 +489,12 @@ function createDefinition(
     owner: OWNER,
     reviewer_role: REVIEWER_ROLE,
     approver_role: APPROVER_ROLE,
-    last_validated_at: status === 'PRODUCTION_VALIDATED' ? '2026-08-14T00:00:00Z' : null,
+    last_validated_at:
+      status === 'PRODUCTION_VALIDATED'
+        ? isVideoContentTechnicalExtension(capabilityId)
+          ? '2026-08-16T05:31:59Z'
+          : '2026-08-14T00:00:00Z'
+        : null,
     evidence: evidence(capabilityId, status),
     execution_surface: executionSurface(capabilityId, status),
   };
