@@ -1,0 +1,83 @@
+name: Cloud SQL DR Cleanup 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-drill-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-cleanup-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  SOURCE_INSTANCE: toca-mcp-db
+  TARGET_INSTANCE: toca-mcp-drill-31931686855
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Test cleanup permission and remove only the drill target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TARGET_INSTANCE" = 'toca-mcp-drill-31931686855'
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          case "$TARGET_INSTANCE" in toca-mcp-drill-*) ;; *) exit 91 ;; esac
+
+          SOURCE_BEFORE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_BEFORE" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+
+          TARGET_BEFORE="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$TARGET_BEFORE" | jq -e '.name=="toca-mcp-drill-31931686855" and .settings.deletionProtectionEnabled==true' >/dev/null
+
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/request.json
+          HTTP="$(curl --silent --output /tmp/permissions.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          GRANTED="$(jq -c '(.permissions // [])|sort' /tmp/permissions.json)"
+          echo "DR_CLEANUP_GRANTED_PERMISSIONS=$GRANTED"
+          jq -e '(.permissions // []) | index("cloudsql.instances.delete") != null' /tmp/permissions.json >/dev/null
+          if ! jq -e '(.permissions // []) | index("cloudsql.instances.update") != null' /tmp/permissions.json >/dev/null; then
+            echo 'DR_CLEANUP_UPDATE_PERMISSION=MISSING'
+            jq -n --arg target "$TARGET_INSTANCE" --argjson granted "$GRANTED" '{schemaVersion:1,targetInstance:$target,updatePermission:false,deleted:false,grantedPermissions:$granted}' > cloud-sql-dr-cleanup-evidence.json
+            exit 42
+          fi
+
+          echo 'DR_CLEANUP_UPDATE_PERMISSION=GRANTED'
+          gcloud sql instances patch "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --no-deletion-protection --quiet
+          TARGET_PATCHED="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$TARGET_PATCHED" | jq -e '.name=="toca-mcp-drill-31931686855" and .settings.deletionProtectionEnabled==false' >/dev/null
+
+          gcloud sql instances delete "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --quiet
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo 'DR_CLEANUP_TARGET_STILL_EXISTS' >&2
+            exit 43
+          fi
+
+          SOURCE_AFTER="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_AFTER" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+
+          jq -n --arg target "$TARGET_INSTANCE" --argjson granted "$GRANTED" --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schemaVersion:1,targetInstance:$target,updatePermission:true,deletionProtectionDisabledOnTemporaryTarget:true,deleted:true,productionStillProtected:true,grantedPermissions:$granted,verifiedAt:$verifiedAt}' > cloud-sql-dr-cleanup-evidence.json
+          echo 'DR_CLEANUP=PASS'
+      - name: Upload cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-dr-cleanup-evidence-${{ github.sha }}
+          path: cloud-sql-dr-cleanup-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
