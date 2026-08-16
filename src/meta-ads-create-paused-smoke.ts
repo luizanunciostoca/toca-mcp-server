@@ -414,7 +414,7 @@ async function reconcileProviderPaused(
   adSetId: string,
   adIds: readonly string[],
 ): Promise<MetaAdsProviderSmokeSnapshot> {
-  const maxAttempts = 12;
+  const maxAttempts = 20;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const campaign = asRecord(
       await api.get(campaignId, { fields: 'id,name,status,effective_status,issues_info' }),
