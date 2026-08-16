@@ -1,16 +1,13 @@
 import type { ContactRecord } from '../crm/crm-records.js';
+import type { PrivacyScope, SuppressionDecision } from '../privacy/contracts.js';
 
 export const OMNICHANNEL_CHANNELS = ['WHATSAPP', 'EMAIL'] as const;
 export type OmnichannelChannel = (typeof OMNICHANNEL_CHANNELS)[number];
 
 export type ContactResolutionStatus = 'RESOLVED' | 'AMBIGUOUS' | 'NOT_FOUND';
-export type ConsentDecisionStatus = 'GRANTED' | 'DENIED' | 'UNKNOWN' | 'REVOKED' | 'EXPIRED';
 export type ApprovalDecisionStatus = 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'REVOKED';
 
-export interface TenantScopeRef {
-  readonly tenantId: string;
-  readonly workspaceId: string;
-  readonly organizationId: string;
+export interface TenantScopeRef extends PrivacyScope {
   readonly correlationId: string;
 }
 
@@ -20,17 +17,10 @@ export interface ContactResolutionProof extends TenantScopeRef {
   readonly status: ContactResolutionStatus;
 }
 
-export interface ConsentDecisionProof extends TenantScopeRef {
+export interface PrivacyDecisionProof extends TenantScopeRef {
   readonly decisionId: string;
-  readonly purpose: string;
-  readonly channel: OmnichannelChannel;
-  readonly status: ConsentDecisionStatus;
-}
-
-export interface SuppressionDecisionProof extends TenantScopeRef {
-  readonly decisionId: string;
-  readonly channel: OmnichannelChannel;
-  readonly suppressed: boolean;
+  readonly subjectRef: string;
+  readonly decision: SuppressionDecision;
 }
 
 export interface PolicyDecisionProof extends TenantScopeRef {
@@ -46,21 +36,19 @@ export interface ApprovalDecisionProof extends TenantScopeRef {
 export interface OutboundEligibilityContext extends TenantScopeRef {
   readonly channel: OmnichannelChannel;
   readonly contact: ContactResolutionProof;
-  readonly consent: ConsentDecisionProof;
-  readonly suppression: SuppressionDecisionProof;
+  readonly privacy: PrivacyDecisionProof;
   readonly policy: PolicyDecisionProof;
   readonly approval?: ApprovalDecisionProof;
 }
 
 export interface AudienceEligibilitySnapshot extends TenantScopeRef {
   readonly snapshotId: string;
-  readonly purpose: string;
+  readonly purposeId: string;
   readonly resolvedContactCount: number;
   readonly ambiguousContactCount: number;
   readonly unresolvedContactCount: number;
-  readonly consentUnknownCount: number;
-  readonly consentDeniedCount: number;
-  readonly suppressedCount: number;
+  readonly privacyUnknownBlockedCount: number;
+  readonly privacySuppressedCount: number;
   readonly policyDeniedCount: number;
 }
 
@@ -127,7 +115,7 @@ export interface NurtureWorkflowBinding {
 
 export const OMNICHANNEL_REQUIRED_DEPENDENCIES = {
   crm: ['ContactRecord'],
-  privacy: ['consent decision', 'suppression decision', 'purpose/legal-basis policy decision'],
+  privacy: ['PrivacyScope', 'SuppressionDecision', 'privacy.suppression.check'],
   workflow: ['durable workflow engine', 'timers', 'human tasks', 'approval engine'],
   evidence: ['transactional outbox', 'audit ledger'],
 } as const;
@@ -138,28 +126,29 @@ export function assertOutboundEligibility(
 ): void {
   validateScope(context);
   validateScopeMatch(context, context.contact, 'CONTACT');
-  validateScopeMatch(context, context.consent, 'CONSENT');
-  validateScopeMatch(context, context.suppression, 'SUPPRESSION');
+  validateScopeMatch(context, context.privacy, 'PRIVACY');
   validateScopeMatch(context, context.policy, 'POLICY');
 
   if (context.contact.status !== 'RESOLVED' || !context.contact.contactRecordId?.trim()) {
     throw new Error('OMNICHANNEL_CONTACT_NOT_RESOLVED');
   }
-  if (context.consent.channel !== context.channel) {
-    throw new Error('OMNICHANNEL_CONSENT_CHANNEL_MISMATCH');
+
+  requireText(context.privacy.decisionId, 'OMNICHANNEL_PRIVACY_DECISION_ID_REQUIRED');
+  requireText(context.privacy.subjectRef, 'OMNICHANNEL_PRIVACY_SUBJECT_REF_REQUIRED');
+  requireText(context.privacy.decision.purposeId, 'OMNICHANNEL_PRIVACY_PURPOSE_REQUIRED');
+  if (context.privacy.decision.channel !== context.channel) {
+    throw new Error('OMNICHANNEL_PRIVACY_CHANNEL_MISMATCH');
   }
-  if (context.consent.status !== 'GRANTED') {
-    throw new Error('OMNICHANNEL_CONSENT_NOT_GRANTED');
+  if (context.privacy.decision.state === 'UNKNOWN_BLOCKED') {
+    throw new Error('OMNICHANNEL_PRIVACY_UNKNOWN_BLOCKED');
   }
-  if (!context.consent.purpose.trim()) {
-    throw new Error('OMNICHANNEL_CONSENT_PURPOSE_REQUIRED');
+  if (context.privacy.decision.state === 'SUPPRESSED') {
+    throw new Error('OMNICHANNEL_PRIVACY_SUPPRESSED');
   }
-  if (context.suppression.channel !== context.channel) {
-    throw new Error('OMNICHANNEL_SUPPRESSION_CHANNEL_MISMATCH');
+  if (context.privacy.decision.state !== 'ALLOWED' || context.privacy.decision.blocked) {
+    throw new Error('OMNICHANNEL_PRIVACY_NOT_ALLOWED');
   }
-  if (context.suppression.suppressed) {
-    throw new Error('OMNICHANNEL_RECIPIENT_SUPPRESSED');
-  }
+
   if (!context.policy.allowed) {
     throw new Error('OMNICHANNEL_POLICY_DENIED');
   }
@@ -176,15 +165,14 @@ export function assertOutboundEligibility(
 export function assertAudienceEligibilitySnapshot(snapshot: AudienceEligibilitySnapshot): void {
   validateScope(snapshot);
   requireText(snapshot.snapshotId, 'OMNICHANNEL_AUDIENCE_SNAPSHOT_ID_REQUIRED');
-  requireText(snapshot.purpose, 'OMNICHANNEL_AUDIENCE_PURPOSE_REQUIRED');
+  requireText(snapshot.purposeId, 'OMNICHANNEL_AUDIENCE_PURPOSE_REQUIRED');
 
   const counters = [
     snapshot.resolvedContactCount,
     snapshot.ambiguousContactCount,
     snapshot.unresolvedContactCount,
-    snapshot.consentUnknownCount,
-    snapshot.consentDeniedCount,
-    snapshot.suppressedCount,
+    snapshot.privacyUnknownBlockedCount,
+    snapshot.privacySuppressedCount,
     snapshot.policyDeniedCount,
   ];
   if (counters.some((value) => !Number.isInteger(value) || value < 0)) {
@@ -196,9 +184,8 @@ export function assertAudienceEligibilitySnapshot(snapshot: AudienceEligibilityS
   if (
     snapshot.ambiguousContactCount > 0 ||
     snapshot.unresolvedContactCount > 0 ||
-    snapshot.consentUnknownCount > 0 ||
-    snapshot.consentDeniedCount > 0 ||
-    snapshot.suppressedCount > 0 ||
+    snapshot.privacyUnknownBlockedCount > 0 ||
+    snapshot.privacySuppressedCount > 0 ||
     snapshot.policyDeniedCount > 0
   ) {
     throw new Error('OMNICHANNEL_AUDIENCE_NOT_ELIGIBLE');
