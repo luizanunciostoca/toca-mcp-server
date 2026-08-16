@@ -1,0 +1,32 @@
+name: Cancel Duplicate Final Deploy 2026-08-16
+
+on:
+  push:
+    branches: [ops/final-exact-main-deploy-20260816]
+    paths: ['.github/workflows/cancel-duplicate-final-deploy-20260816.yml']
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel duplicate deploy only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRIMARY=31936869755
+          DUPLICATE=31936924167
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs"
+          primary_sha="$(curl --silent -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${API}/${PRIMARY}" | jq -r '.head_sha')"
+          duplicate_sha="$(curl --silent -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${API}/${DUPLICATE}" | jq -r '.head_sha')"
+          test "$primary_sha" = '58f31df28e63629d3933bbce67bf912932d05829'
+          test "$duplicate_sha" = "$primary_sha"
+          HTTP="$(curl --silent --output /tmp/cancel.txt --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${API}/${DUPLICATE}/cancel")"
+          cat /tmp/cancel.txt
+          case "$HTTP" in 202|409) ;; *) exit 1 ;; esac
+          echo "DUPLICATE_FINAL_DEPLOY_CANCELLED=$DUPLICATE"
