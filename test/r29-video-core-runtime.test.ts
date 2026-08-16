@@ -96,7 +96,10 @@ describe('Video/R29 current TOCA Core runtime integration', () => {
 
   it('keeps canonical lifecycle aligned with the production runtime without exposing video as a public MCP tool', () => {
     for (const capabilityId of R29_VIDEO_CAPABILITIES) {
-      expect(resolveCapabilityDefinition(capabilityId)?.canonical_definition, capabilityId).toMatchObject({
+      expect(
+        resolveCapabilityDefinition(capabilityId)?.canonical_definition,
+        capabilityId,
+      ).toMatchObject({
         lifecycle_status: 'PRODUCTION_VALIDATED',
         execution_surface: 'INTERNAL_ENGINE',
       });
