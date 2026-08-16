@@ -1,6 +1,10 @@
 # Foundation Daily Control — Real TOCA OS Operating Process
 
-Status: **IMPLEMENTED IN RUNTIME / DEPLOYMENT + EXACT-HEAD QUALITY PENDING**
+Status: **PRODUCTION_VERIFIED**
+
+Production verification source: `e0696df1d1860261afba78f1634e8c979401cdc7`.
+
+Canonical closeout evidence: `docs/operations/foundation-production-verification-2026-08-16.md`.
 
 This process makes daily TOCA OS execution explicit without adding another scheduler, workflow engine or provider-write path.
 
@@ -51,15 +55,18 @@ The runtime sweep intentionally does not grant itself infrastructure-admin permi
 
 This preserves least privilege. The application must not receive broad GCP administrative permissions merely to claim operational completeness.
 
-## Production activation gate
+## Production verification
 
-The code path becomes a production daily process only after:
+The previous production-activation gate is closed.
 
-1. PR #117 exact-head Quality passes;
-2. #117 is reconciled with any preceding governance/Foundation merges;
-3. the daemon is redeployed through the hardened production workflow;
-4. `/healthz` reports a `lastDailyControlDay` after the next eligible tick;
-5. `operational_signals` contains exactly one completed logical control for that Bahia date;
-6. Cloud Monitoring routes the emitted P0/P1 signals/logs to the approved operator notification channel.
+Final post-rollout assessment run `31936391315` proved on the deployed source:
 
-Until those steps execute, the truthful state is **daily control implemented, production activation pending CI/deploy**.
+- `foundation.daily_control.completed` correlation `foundation:daily-control:2026-08-15`;
+- durable value `1`;
+- completion at `2026-08-15T23:56:01.439Z`;
+- 886 sampled scheduler ticks with 0 failures;
+- Transactional Outbox pending/claimed/retryable count `0`;
+- oldest pending Outbox age `0s`;
+- canonical SLO assessment `healthy=true`.
+
+The authoritative evidence and cross-run trace are recorded in `docs/operations/foundation-production-verification-2026-08-16.md`.
