@@ -120,4 +120,55 @@ describe('Meta Ads provider smoke readiness', () => {
       selectMetaAdsValidationAdSet([{ id: 'archived-1', status: 'ARCHIVED' }]),
     ).toBeUndefined();
   });
+
+  it('skips expired or nearly expired ad sets before provider validate-only', () => {
+    const now = new Date('2026-08-16T01:00:00.000Z');
+    expect(
+      selectMetaAdsValidationAdSet(
+        [
+          {
+            id: 'expired-1',
+            status: 'PAUSED',
+            effective_status: 'CAMPAIGN_PAUSED',
+            end_time: '2026-08-15T23:59:59.000Z',
+          },
+          {
+            id: 'too-close-1',
+            status: 'ACTIVE',
+            effective_status: 'ACTIVE',
+            end_time: '2026-08-16T01:04:59.000Z',
+          },
+          {
+            id: 'future-1',
+            status: 'PAUSED',
+            effective_status: 'CAMPAIGN_PAUSED',
+            end_time: '2026-08-16T03:00:00.000Z',
+          },
+        ],
+        now,
+      ),
+    ).toEqual({
+      id: 'future-1',
+      status: 'PAUSED',
+      effective_status: 'CAMPAIGN_PAUSED',
+      end_time: '2026-08-16T03:00:00.000Z',
+    });
+  });
+
+  it('fails closed on invalid dated ad sets when no evergreen alternative exists', () => {
+    const now = new Date('2026-08-16T01:00:00.000Z');
+    expect(
+      selectMetaAdsValidationAdSet(
+        [
+          {
+            id: 'invalid-end-time',
+            status: 'PAUSED',
+            effective_status: 'CAMPAIGN_PAUSED',
+            end_time: 'not-a-date',
+          },
+        ],
+        now,
+      ),
+    ).toBeUndefined();
+  });
 });
