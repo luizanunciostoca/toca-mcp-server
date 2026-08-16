@@ -28,6 +28,8 @@ Validation source SHA: `b5fcf6133fe2aa00e299a076ac30be7a867c3d6e`.
 
 Provider evidence timestamp: `2026-08-16T04:05:21.359Z`.
 
+Promotion base SHA revalidated: `35b6aa15479a8a0c999b1260581e4ba7fd389f27`.
+
 ## Credential and scope evidence
 
 The production Meta token is real and readable. `me/permissions` succeeded.
