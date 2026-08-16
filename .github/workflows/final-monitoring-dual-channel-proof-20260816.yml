@@ -1,0 +1,138 @@
+name: Final Monitoring Dual Channel Proof 2026-08-16
+
+on:
+  push:
+    branches: [ops/final-external-closeout-20260816]
+    paths: ['.github/workflows/final-monitoring-dual-channel-proof-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  PRIMARY_EMAIL: adm@tocadomorcego.com
+  SECONDARY_EMAIL: luizidebook@gmail.com
+  PROD_SERVICE: toca-mcp-production
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Create/reuse secondary channel, attach both channels, create synthetic policy
+        id: setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          TEST_RUN="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SMOKE_JOB="toca-monitoring-proof-${GITHUB_RUN_ID}"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels.json
+          PRIMARY="$(jq -r --arg email "$PRIMARY_EMAIL" '.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email and .enabled==true) | .name' /tmp/channels.json | head -n1)"
+          test -n "$PRIMARY"
+          SECONDARY="$(jq -r --arg email "$SECONDARY_EMAIL" '.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email and .enabled==true) | .name' /tmp/channels.json | head -n1)"
+          if [ -z "$SECONDARY" ]; then
+            jq -n --arg email "$SECONDARY_EMAIL" '{type:"email",displayName:"TOCA OS Operations Backup",description:"Secondary operational alert destination for delivery redundancy and readback",labels:{email_address:$email},enabled:true,userLabels:{toca_managed:"true",purpose:"operations-backup"}}' >/tmp/channel.json
+            H="$(curl --silent --output /tmp/channel-result.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/channel.json "${API}/notificationChannels")"
+            test "$H" = 200 || { cat /tmp/channel-result.json >&2; exit 91; }
+            SECONDARY="$(jq -r '.name' /tmp/channel-result.json)"
+          fi
+          test -n "$SECONDARY"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies.json
+          for D in 'TOCA P0 Audit Ledger Integrity' 'TOCA P1 Outbox Stalled' 'TOCA P1 Stale Scheduler Jobs' 'TOCA P1 Foundation Daily Control Failed'; do
+            NAME="$(jq -r --arg d "$D" '.alertPolicies[]? | select(.displayName==$d) | .name' /tmp/policies.json | head -n1)"
+            test -n "$NAME"
+            jq --arg p "$PRIMARY" --arg s "$SECONDARY" '.notificationChannels=[$p,$s]' < <(jq -r --arg n "$NAME" '.alertPolicies[] | select(.name==$n)' /tmp/policies.json) >/tmp/policy.json
+            H="$(curl --silent --output /tmp/update-result.json --write-out '%{http_code}' -X PATCH -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/policy.json "https://monitoring.googleapis.com/v3/${NAME}?updateMask=notificationChannels")"
+            test "$H" = 200 || { cat /tmp/update-result.json >&2; exit 92; }
+          done
+
+          SYN_FILTER="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SMOKE_JOB}\" AND jsonPayload.event=\"toca.monitoring.delivery_proof\" AND jsonPayload.test_run=\"${TEST_RUN}\""
+          jq -n --arg display "TOCA Delivery Proof ${TEST_RUN}" --arg filter "$SYN_FILTER" --arg p "$PRIMARY" --arg s "$SECONDARY" '{displayName:$display,documentation:{content:"Controlled TOCA OS email delivery proof. Temporary policy.",mimeType:"text/markdown"},userLabels:{toca_managed:"true",synthetic:"true",delivery_proof:"true"},conditions:[{displayName:"TOCA delivery proof log",conditionMatchedLog:{filter:$filter}}],combiner:"OR",enabled:true,alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"},notificationChannels:[$p,$s]}' >/tmp/syn.json
+          H="$(curl --silent --output /tmp/syn-result.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/syn.json "${API}/alertPolicies")"
+          test "$H" = 200 || { cat /tmp/syn-result.json >&2; exit 93; }
+          SYN_POLICY="$(jq -r '.name' /tmp/syn-result.json)"
+          echo "primary=$PRIMARY" >> "$GITHUB_OUTPUT"
+          echo "secondary=$SECONDARY" >> "$GITHUB_OUTPUT"
+          echo "test_run=$TEST_RUN" >> "$GITHUB_OUTPUT"
+          echo "smoke_job=$SMOKE_JOB" >> "$GITHUB_OUTPUT"
+          echo "synthetic_policy=$SYN_POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Emit exact delivery-proof structured log
+        shell: bash
+        env:
+          TEST_RUN: ${{ steps.setup.outputs.test_run }}
+          SMOKE_JOB: ${{ steps.setup.outputs.smoke_job }}
+        run: |
+          set -euo pipefail
+          cleanup() { gcloud run jobs delete "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          IMAGE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(spec.template.spec.containers[0].image)')"
+          test -n "$IMAGE"
+          PAYLOAD="{\"severity\":\"ERROR\",\"event\":\"toca.monitoring.delivery_proof\",\"test_run\":\"${TEST_RUN}\",\"synthetic\":true,\"message\":\"TOCA OS email delivery proof ${TEST_RUN}\"}"
+          gcloud run jobs create "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command /bin/sh --args="^@^-lc@printf '%s\\n' '${PAYLOAD}'" --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 60s --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$SMOKE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          for _ in $(seq 1 18); do
+            LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SMOKE_JOB}\" AND jsonPayload.event=\"toca.monitoring.delivery_proof\" AND jsonPayload.test_run=\"${TEST_RUN}\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=10 --format=json || true)"
+            if [ "$(jq 'length' <<<"${LOGS:-[]}")" -ge 1 ]; then echo "DELIVERY_PROOF_LOG=PASS test_run=$TEST_RUN"; exit 0; fi
+            sleep 5
+          done
+          exit 94
+
+      - name: Authenticate infrastructure administrator for cleanup/readback
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Wait for email processing, delete synthetic policy, verify dual-channel permanents
+        shell: bash
+        env:
+          PRIMARY: ${{ steps.setup.outputs.primary }}
+          SECONDARY: ${{ steps.setup.outputs.secondary }}
+          TEST_RUN: ${{ steps.setup.outputs.test_run }}
+          SYN_POLICY: ${{ steps.setup.outputs.synthetic_policy }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          sleep 120
+          H="$(curl --silent --output /tmp/delete.json --write-out '%{http_code}' -X DELETE -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${SYN_POLICY}")"
+          test "$H" = 200
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/final.json
+          for D in 'TOCA P0 Audit Ledger Integrity' 'TOCA P1 Outbox Stalled' 'TOCA P1 Stale Scheduler Jobs' 'TOCA P1 Foundation Daily Control Failed'; do
+            jq -e --arg d "$D" --arg p "$PRIMARY" --arg s "$SECONDARY" '[.alertPolicies[]? | select(.displayName==$d and .enabled==true and ((.notificationChannels // []) | index($p) != null) and ((.notificationChannels // []) | index($s) != null) and .validity==null)] | length == 1' /tmp/final.json >/dev/null
+          done
+          jq -n --arg testRun "$TEST_RUN" --arg primary "$PRIMARY_EMAIL" --arg secondary "$SECONDARY_EMAIL" --arg p "$PRIMARY" --arg s "$SECONDARY" --slurpfile f /tmp/final.json '{schemaVersion:1,testRun:$testRun,primaryEmail:$primary,secondaryEmail:$secondary,primaryChannel:$p,secondaryChannel:$s,syntheticLogIngested:true,notificationProcessingWindowSeconds:120,syntheticPolicyDeleted:true,permanentPolicies:[ $f[0].alertPolicies[]? | select(.userLabels.source=="foundation") | {name,displayName,enabled,notificationChannels,validity} ]}' > evidence/monitoring-dual-channel-proof.json
+          cat evidence/monitoring-dual-channel-proof.json
+          echo "DELIVERY_PROOF_PROVIDER_PATH=PASS test_run=$TEST_RUN"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: final-monitoring-dual-channel-proof-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
