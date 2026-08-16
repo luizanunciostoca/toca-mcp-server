@@ -50,9 +50,9 @@ describe('TOCA OS route and capability catalogs', () => {
     }
   });
 
-  it('materializes the 758-capability catalog using contract v1.1 without pretending inference is explicit', () => {
+  it('materializes the 783-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(758);
+    expect(CAPABILITY_CATALOG).toHaveLength(783);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
@@ -99,6 +99,20 @@ describe('TOCA OS route and capability catalogs', () => {
       lifecycle_status: 'IMPLEMENTED',
       risk_class: 'READ',
       side_effects: false,
+    });
+    expect(getCapabilityDefinition('video.timeline.compose')).toMatchObject({
+      route_id: 'R20',
+      primary_route_id: 'R20',
+      lifecycle_status: 'IMPLEMENTED',
+      execution_surface: 'INTERNAL_ENGINE',
+      contract_quality: 'EXPLICIT',
+    });
+    expect(getCapabilityDefinition('content_item.variant.create')).toMatchObject({
+      route_id: 'R29',
+      primary_route_id: 'R29',
+      lifecycle_status: 'IMPLEMENTED',
+      execution_surface: 'INTERNAL_ENGINE',
+      contract_quality: 'EXPLICIT',
     });
   });
 
@@ -197,6 +211,7 @@ describe('TOCA OS route and capability catalogs', () => {
     expect(facebookLogin?.scopes).toContain('instagram_content_publish');
     expect(instagramLogin).toBeDefined();
     expect(instagramLogin?.scopes).toContain('instagram_business_basic');
+    expect(instagramLogin).toContain;
     expect(instagramLogin?.scopes).toContain('instagram_business_content_publish');
   });
 
