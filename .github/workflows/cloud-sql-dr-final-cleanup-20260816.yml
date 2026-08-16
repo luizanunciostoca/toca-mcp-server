@@ -24,7 +24,7 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Disable protection only on exact DR target, delete it, and prove production unchanged
+      - name: Disable protection only when needed, delete exact DR target, and prove production unchanged
         shell: bash
         run: |
           set -euo pipefail
@@ -36,7 +36,8 @@ jobs:
           printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/request.json
           HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
           test "$HTTP" = 200
-          for P in cloudsql.instances.get cloudsql.instances.update cloudsql.instances.delete; do
+
+          for P in cloudsql.instances.get cloudsql.instances.delete; do
             if ! jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/perms.json >/dev/null; then
               echo "DR_CLEANUP_BLOCKED_MISSING_PERMISSION=$P" >&2
               exit 41
@@ -51,7 +52,13 @@ jobs:
           printf '%s' "$TARGET" | jq -e --arg t "$TARGET_INSTANCE" '.name==$t and .name!="toca-mcp-db" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1"' >/dev/null
 
           if [ "$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$TARGET")" = true ]; then
+            if ! jq -e '(.permissions // []) | index("cloudsql.instances.update") != null' /tmp/perms.json >/dev/null; then
+              echo 'DR_CLEANUP_BLOCKED_TARGET_PROTECTED_AND_UPDATE_PERMISSION_MISSING' >&2
+              exit 43
+            fi
             gcloud sql instances patch "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --no-deletion-protection --quiet
+          else
+            echo 'DR_CLEANUP_TARGET_ALREADY_UNPROTECTED=PASS'
           fi
 
           TARGET_AFTER_PATCH="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
