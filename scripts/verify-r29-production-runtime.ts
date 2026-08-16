@@ -188,8 +188,7 @@ try {
   );
   assert(
     auditRecords.some(
-      (record) =>
-        record.toolName === 'content_item.channel.adapt' && record.status === 'SUCCEEDED',
+      (record) => record.toolName === 'content_item.channel.adapt' && record.status === 'SUCCEEDED',
     ),
     'R29_PRODUCTION_ADAPT_AUDIT_MISSING',
   );
