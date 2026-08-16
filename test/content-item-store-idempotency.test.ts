@@ -67,7 +67,8 @@ function createStore() {
   const client = {
     async query(sql: string) {
       queries.push(sql);
-      if (sql === 'begin' || sql === 'commit' || sql === 'rollback') return { rows: [], rowCount: 0 };
+      if (sql === 'begin' || sql === 'commit' || sql === 'rollback')
+        return { rows: [], rowCount: 0 };
       if (sql.includes('select * from content_items') && sql.includes('for update')) {
         return { rows: [currentItemRow], rowCount: 1 };
       }
@@ -102,9 +103,9 @@ describe('PostgresContentItemStore version idempotency', () => {
   it('fails closed when the same idempotency key is reused for a different intent', async () => {
     const { store, queries } = createStore();
 
-    await expect(store.createVersion(versionInput({ headline: 'Different intent' }))).rejects.toThrow(
-      'CONTENT_VERSION_IDEMPOTENCY_CONFLICT',
-    );
+    await expect(
+      store.createVersion(versionInput({ headline: 'Different intent' })),
+    ).rejects.toThrow('CONTENT_VERSION_IDEMPOTENCY_CONFLICT');
 
     expect(queries.some((query) => query.startsWith('update content_items'))).toBe(false);
     expect(queries.at(-1)).toBe('rollback');
