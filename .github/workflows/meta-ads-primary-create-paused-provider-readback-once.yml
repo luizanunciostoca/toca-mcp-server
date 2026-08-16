@@ -123,7 +123,10 @@ jobs:
               .duplicateCounts.campaign == 1 and
               .duplicateCounts.adSet == 1 and
               .duplicateCounts.ad == 1 and
-              .duplicateCounts.creative == 1 and
+              (.resourceIds.campaignId | length > 0) and
+              (.resourceIds.adSetId | length > 0) and
+              (.resourceIds.creativeId | length > 0) and
+              (.resourceIds.adId | length > 0) and
               .safety.configuredPaused == true and
               .safety.noActiveEffectiveStatus == true and
               .safety.zeroSpend == true
@@ -131,7 +134,7 @@ jobs:
 
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-create-paused-provider-readback.json
           echo "META_ADS_CREATE_PAUSED_PROVIDER_READBACK=PASS exit=$EXEC_STATUS"
-          jq '{duplicateCounts,campaign,adSet,ad,creative,insights,spend,safety}' meta-ads-create-paused-provider-readback.json
+          jq '{duplicateCounts,resourceIds,campaign,adSet,ad,creative,insights,spend,safety}' meta-ads-create-paused-provider-readback.json
 
       - name: Upload immutable sanitized readback evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
