@@ -12,12 +12,14 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GCP_PROJECT_ID: toca-mcp-production
       GCP_REGION: southamerica-east1
+      GCP_ARTIFACT_REPOSITORY: toca-mcp
       GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
       GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
       FAILED_JOB_NAME: toca-meta-ads-validation-31935162022-1
       FAILED_EXECUTION_NAME: toca-meta-ads-validation-31935162022-1-qtzvs
       META_TOKEN_SECRET_ID: toca-meta-oauth-token
@@ -37,16 +39,7 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Describe failed Cloud Run execution when retained
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run jobs executions describe "$FAILED_EXECUTION_NAME" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --format='json(metadata.name,status.conditions,status.failedCount,status.succeededCount,status.logUri)'
-      - name: Recover safe Meta Ads checkpoint and errors
-        if: always()
+      - name: Recover exact failed-run checkpoint and error
         shell: bash
         run: |
           set -euo pipefail
@@ -55,59 +48,62 @@ jobs:
             "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_SMOKE_PROVIDER_CHECKPOINT=\"" \
             --project "$GCP_PROJECT_ID" --freshness=6h --limit=20 --order=asc \
             --format='value(timestamp,textPayload)' || true
-          echo '--- EXECUTE RESULT ---'
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_SMOKE_EXECUTE_RESULT=\"" \
-            --project "$GCP_PROJECT_ID" --freshness=6h --limit=20 --order=asc \
-            --format='value(timestamp,textPayload)' || true
           echo '--- APPLICATION ERRORS ---'
           gcloud logging read \
             "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND severity>=ERROR" \
             --project "$GCP_PROJECT_ID" --freshness=6h --limit=50 --order=asc \
             --format='value(timestamp,severity,textPayload,jsonPayload.message)' || true
-      - name: GET-only account and failed-attempt readback
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+      - name: Build temporary read-only image
         shell: bash
         run: |
           set -euo pipefail
-          TOKEN="$(gcloud secrets versions access latest --secret "$META_TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID")"
-          trap 'unset TOKEN' EXIT
-          meta_get() {
-            local path="$1"
-            shift
-            curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer $TOKEN" \
-              --get "$META_GRAPH_BASE_URL/$path" "$@"
-          }
-
-          ACCOUNT="$(meta_get "act_${META_ADS_ACCOUNT_ID}" --data-urlencode 'fields=id,name,currency,account_status,business')"
-          PERMISSIONS="$(meta_get 'me/permissions')"
-          CAMPAIGN="$(meta_get "$CAMPAIGN_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info')"
-          ADSET="$(meta_get "$ADSET_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info,daily_budget,start_time,end_time')"
-          CREATIVE="$(meta_get "$CREATIVE_ID" --data-urlencode 'fields=id,name')"
-          AD="$(meta_get "$AD_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info')"
-          INSIGHTS="$(meta_get "$CAMPAIGN_ID/insights" --data-urlencode 'fields=spend,impressions,clicks' --data-urlencode 'date_preset=maximum')"
-
-          jq -e --arg account "$META_ADS_ACCOUNT_ID" '
-            (.id | tostring | endswith($account)) and .currency == "BRL" and (.account_status | tostring) == "1"
-          ' <<<"$ACCOUNT" >/dev/null
-          jq -e '[.data[] | select(.permission == "ads_read" and .status == "granted")] | length == 1' <<<"$PERMISSIONS" >/dev/null
-          jq -e '[.data[] | select(.permission == "ads_management" and .status == "granted")] | length == 1' <<<"$PERMISSIONS" >/dev/null
-          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$CAMPAIGN" >/dev/null
-          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$ADSET" >/dev/null
-          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$AD" >/dev/null
-          SPEND="$(jq -r '([.data[]?.spend // "0"] | map(tonumber) | add) // 0' <<<"$INSIGHTS")"
-          jq -n --argjson spend "$SPEND" '$spend == 0' >/dev/null
-
-          jq -n \
-            --argjson account "$ACCOUNT" \
-            --argjson campaign "$CAMPAIGN" \
-            --argjson adset "$ADSET" \
-            --argjson creative "$CREATIVE" \
-            --argjson ad "$AD" \
-            --argjson insights "$INSIGHTS" \
-            '{account:$account,campaign:$campaign,adSet:$adset,creative:$creative,ad:$ad,insights:$insights}' \
-            | tee meta-ads-failed-attempt-readback.json
-          echo "META_ADS_FAILED_ATTEMPT_SPEND=$SPEND"
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-final-readback-${GITHUB_SHA}"
+          READBACK_JOB="toca-meta-ads-readback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "READBACK_JOB=$READBACK_JOB" >> "$GITHUB_ENV"
+      - name: Deploy GET-only runtime readback job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$READBACK_JOB" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/meta-ads-final-readback.js \
+            --set-env-vars "^~^META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL~META_ADS_ACCOUNT_ID=$META_ADS_ACCOUNT_ID~META_ADS_CAMPAIGN_ID=$CAMPAIGN_ID~META_ADS_ADSET_ID=$ADSET_ID~META_ADS_CREATIVE_ID=$CREATIVE_ID~META_ADS_AD_ID=$AD_ID" \
+            --set-secrets "META_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+      - name: Execute and capture GET-only provider readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$READBACK_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          RESULT=''
+          for attempt in $(seq 1 12); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${READBACK_JOB} AND textPayload:\"META_ADS_FINAL_READBACK_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=15m --limit=20 --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_FINAL_READBACK_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT="${LINE#META_ADS_FINAL_READBACK_RESULT=}"; break; fi
+            sleep 5
+          done
+          test -n "$RESULT"
+          printf '%s' "$RESULT" | jq -e '
+            .campaign.status == "PAUSED" and .campaign.effective_status != "ACTIVE" and
+            .adSet.status == "PAUSED" and .adSet.effective_status != "ACTIVE" and
+            .ad.status == "PAUSED" and .ad.effective_status != "ACTIVE" and
+            .spend == 0
+          ' >/dev/null
+          printf '%s\n' "$RESULT" | jq . | tee meta-ads-failed-attempt-readback.json
       - name: Upload GET-only readback evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -115,3 +111,8 @@ jobs:
           path: meta-ads-failed-attempt-readback.json
           if-no-files-found: error
           retention-days: 30
+      - name: Remove temporary readback job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$READBACK_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet || true
