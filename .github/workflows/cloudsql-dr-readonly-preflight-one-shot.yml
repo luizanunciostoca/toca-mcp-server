@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 15
     env:
       GCP_PROJECT_ID: toca-mcp-production
+      GCP_PROJECT_NUMBER: '990081828836'
       CLOUD_SQL_INSTANCE: toca-mcp-db
       GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
@@ -85,21 +86,21 @@ jobs:
           QUOTA_HTTP="$(curl --silent --output quota-full.json --write-out '%{http_code}' \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H 'Accept: application/json' \
-            "https://serviceusage.googleapis.com/v1/projects/${GCP_PROJECT_ID}/services/sqladmin.googleapis.com/consumerQuotaMetrics?view=FULL&pageSize=200")"
+            "https://serviceusage.googleapis.com/v1beta1/projects/${GCP_PROJECT_NUMBER}/services/sqladmin.googleapis.com/consumerQuotaMetrics?view=FULL&pageSize=200")"
           echo "QUOTA_HTTP=$QUOTA_HTTP"
-          jq -n --argjson http "$QUOTA_HTTP" --argjson body "$(cat quota-full.json)" \
-            '{httpStatus:$http,body:$body}' > quota-evidence.json
           if [ "$QUOTA_HTTP" = "200" ]; then
-            jq '{metrics:[(.metrics // [])[] | {metric,displayName,consumerQuotaLimits:[(.consumerQuotaLimits // [])[] | {name,unit,isPrecise,quotaBuckets:[(.quotaBuckets // [])[] | {effectiveLimit,defaultLimit,dimensions}]}]}]}' \
+            jq '{metrics:[(.metrics // [])[] | {metric,displayName,unit,consumerQuotaLimits:[(.consumerQuotaLimits // [])[] | {name,unit,isPrecise,quotaBuckets:[(.quotaBuckets // [])[] | {effectiveLimit,defaultLimit,dimensions}]}]}]}' \
               quota-full.json > quota-sanitized.json
-            echo 'CLOUD_SQL_QUOTA_METRICS:'
-            jq '[.metrics[] | select((.metric|ascii_downcase|contains("instance")) or (.displayName|ascii_downcase|contains("instance")))]' quota-sanitized.json
+            echo 'CLOUD_SQL_QUOTA_METRICS_MATCHING_INSTANCE_OR_REGION:'
+            jq '[.metrics[] | select(((.metric // "")|ascii_downcase|contains("instance")) or ((.displayName // "")|ascii_downcase|contains("instance")) or ((.metric // "")|ascii_downcase|contains("region")) or ((.displayName // "")|ascii_downcase|contains("region")))]' quota-sanitized.json
           else
-            jq '{httpStatus:.httpStatus,error:(.body.error // .body)}' quota-evidence.json > quota-sanitized.json
+            jq -n --argjson http "$QUOTA_HTTP" --rawfile body quota-full.json \
+              '{httpStatus:$http,errorBody:$body}' > quota-sanitized.json
             cat quota-sanitized.json
           fi
 
       - name: Upload sanitized evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cloudsql-dr-readonly-preflight-${{ github.sha }}
