@@ -1,4 +1,4 @@
-name: Meta Ads Settlement Materialize One-Shot
+name: Meta Ads Settlement Finalize One-Shot
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  materialize:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -25,12 +25,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Materialize exact seven-file settlement hardening
+      - name: Build exact clean Meta Ads hardening candidate
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE=94ed37a9abf8f8a709c3e5387338354ca69fab5e
-          git fetch origin "$SOURCE"
+          BASE=8bd2d2c1f1715fc1f054c38c8c95eaaa1648e1d8
+          SOURCE="$(git rev-parse HEAD)"
+          git checkout -B meta-ads-final "$BASE"
           git checkout "$SOURCE" -- \
             .github/workflows/meta-ads-create-paused-provider-smoke.yml \
             docs/checkpoints/meta-ads-provider-settlement-readiness-v2.md \
@@ -40,12 +41,27 @@ jobs:
             test/meta-ads-provider-preflight.test.ts \
             test/meta-ads-smoke-readiness.test.ts
           test "$(git diff --cached --name-only | wc -l)" -eq 7
+          pnpm exec prettier --write \
+            .github/workflows/meta-ads-create-paused-provider-smoke.yml \
+            docs/checkpoints/meta-ads-provider-settlement-readiness-v2.md \
+            src/meta-ads-create-paused-smoke.ts \
+            src/providers/meta-ads/meta-ads-provider-preflight.ts \
+            src/providers/meta-ads/meta-ads-smoke-readiness.ts \
+            test/meta-ads-provider-preflight.test.ts \
+            test/meta-ads-smoke-readiness.test.ts
+          git add \
+            .github/workflows/meta-ads-create-paused-provider-smoke.yml \
+            docs/checkpoints/meta-ads-provider-settlement-readiness-v2.md \
+            src/meta-ads-create-paused-smoke.ts \
+            src/providers/meta-ads/meta-ads-provider-preflight.ts \
+            src/providers/meta-ads/meta-ads-smoke-readiness.ts \
+            test/meta-ads-provider-preflight.test.ts \
+            test/meta-ads-smoke-readiness.test.ts
           pnpm quality
-      - name: Commit materialized hardening
-        shell: bash
-        run: |
-          set -euo pipefail
+          test "$(git diff --cached --name-only | wc -l)" -eq 7
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'fix(meta-ads): replay provider settlement hardening on current main'
-          git push origin HEAD:reconcile/meta-ads-provider-settlement-v2
+          git commit -m 'fix(meta-ads): harden provider settlement and CREATE_PAUSED validation'
+          FINAL_SHA="$(git rev-parse HEAD)"
+          git push --force origin HEAD:fix/meta-ads-provider-settlement-readiness-v2
+          echo "META_ADS_FINAL_SHA=$FINAL_SHA"
