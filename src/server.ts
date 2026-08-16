@@ -8,16 +8,20 @@ import {
   type ExecutionIdentityResolver,
 } from './core/identity.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import type { InstagramCorePublicationRuntime } from './mcp/instagram-publication-runtime.js';
 import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
 import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { PostgresEventRecordStore } from './persistence/postgres-event-record-store.js';
+import { PostgresPublicationExecutionStore } from './persistence/postgres-publication-store.js';
 import { PostgresWorkflowStore } from './persistence/postgres-workflow-store.js';
 import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
 import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
+import { InstagramPublicationExecutor } from './providers/instagram/instagram-publication-executor.js';
+import { MetaInstagramPublicationTransport } from './providers/instagram/meta-instagram-publication-transport.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { MetaAdsControlledWriteService } from './providers/meta-ads/meta-ads-controlled-write.js';
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
@@ -29,6 +33,12 @@ import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagra
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.2.0';
 const TOCA_TENANT_ID = 'toca-do-morcego';
+const DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES = [
+  'instagram.publish.image',
+  'instagram.publish.carousel',
+  'instagram.publish.reel',
+  'instagram.publish.story',
+] as const;
 
 export interface TocaServerOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -54,8 +64,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const pool = config.DATABASE_URL
     ? createPostgresPool({ connectionString: config.DATABASE_URL })
     : undefined;
+  const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
+    instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     googleAdsPhase: config.GOOGLE_ADS_PHASE,
@@ -86,6 +98,23 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     config.META_ACCESS_TOKEN_ENV_KEY
       ? new InstagramHistoryProvider(createMetaClient(), config.INSTAGRAM_BUSINESS_ACCOUNT_ID)
       : undefined;
+
+  let instagramPublication: InstagramCorePublicationRuntime | undefined;
+  if (
+    instagramDirectPublicationEnabled &&
+    pool &&
+    config.META_ACCESS_TOKEN_ENV_KEY &&
+    config.INSTAGRAM_BUSINESS_ACCOUNT_ID
+  ) {
+    const store = new PostgresPublicationExecutionStore(pool);
+    const transport = new MetaInstagramPublicationTransport(createMetaClient());
+    instagramPublication = {
+      executor: new InstagramPublicationExecutor(store, transport),
+      transport,
+      allowedInstagramAccountId: config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+    };
+  }
+
   const metaAdsRead =
     config.META_ADS_READ_ENABLED && config.META_ACCESS_TOKEN_ENV_KEY
       ? new MetaAdsReadProvider(createMetaClient())
@@ -186,6 +215,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
 
   const runtimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
+    ...(instagramPublication ? { instagramPublication } : {}),
     ...(metaAdsRead ? { metaAdsRead } : {}),
     ...(metaAdsWrite ? { metaAdsWrite } : {}),
     ...(metaAdsWriteProvider ? { metaAdsWriteProvider } : {}),
@@ -226,6 +256,12 @@ function csvValues(value: string): string[] {
     .filter(Boolean);
 }
 
+function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
+  return Boolean(
+    config.DATABASE_URL && config.META_ACCESS_TOKEN_ENV_KEY && config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+  );
+}
+
 function runtimeServiceIdentity(
   env: NodeJS.ProcessEnv,
   config: RuntimeConfig,
@@ -233,16 +269,21 @@ function runtimeServiceIdentity(
   const cloudRunService = env.K_SERVICE?.trim();
   if (config.NODE_ENV !== 'production' || !config.MCP_ENABLED || !cloudRunService) return undefined;
 
+  const directPublicationEnabled = directPublicationRuntimeConfigured(config);
   return createTrustedServiceExecutionIdentity({
     principalId: `cloud-run-service:${cloudRunService}`,
     tenantId: TOCA_TENANT_ID,
-    roles: ['OPERATOR'],
+    roles: directPublicationEnabled ? ['OPERATOR', 'EXTERNAL_WRITER'] : ['OPERATOR'],
     allowedCapabilityIds: [
       'instagram.toca_schedule.create',
       'instagram.toca_schedule.reschedule',
       'instagram.toca_schedule.cancel',
+      ...(directPublicationEnabled ? DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES : []),
     ],
-    allowedTargetAccounts: [],
+    allowedTargetAccounts:
+      directPublicationEnabled && config.INSTAGRAM_BUSINESS_ACCOUNT_ID
+        ? [config.INSTAGRAM_BUSINESS_ACCOUNT_ID]
+        : [],
     evidence: [
       `runtime:cloud-run:${cloudRunService}`,
       'deployment-contract:cloud-run-authenticated-boundary',
