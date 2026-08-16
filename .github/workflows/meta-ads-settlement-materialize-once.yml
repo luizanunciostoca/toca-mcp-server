@@ -1,0 +1,51 @@
+name: Meta Ads Settlement Materialize One-Shot
+
+on:
+  push:
+    branches: [reconcile/meta-ads-provider-settlement-v2]
+    paths: ['.github/workflows/meta-ads-settlement-materialize-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: reconcile/meta-ads-provider-settlement-v2
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize exact seven-file settlement hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE=94ed37a9abf8f8a709c3e5387338354ca69fab5e
+          git fetch origin "$SOURCE"
+          git checkout "$SOURCE" -- \
+            .github/workflows/meta-ads-create-paused-provider-smoke.yml \
+            docs/checkpoints/meta-ads-provider-settlement-readiness-v2.md \
+            src/meta-ads-create-paused-smoke.ts \
+            src/providers/meta-ads/meta-ads-provider-preflight.ts \
+            src/providers/meta-ads/meta-ads-smoke-readiness.ts \
+            test/meta-ads-provider-preflight.test.ts \
+            test/meta-ads-smoke-readiness.test.ts
+          test "$(git diff --cached --name-only | wc -l)" -eq 7
+          pnpm quality
+      - name: Commit materialized hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'fix(meta-ads): replay provider settlement hardening on current main'
+          git push origin HEAD:reconcile/meta-ads-provider-settlement-v2
