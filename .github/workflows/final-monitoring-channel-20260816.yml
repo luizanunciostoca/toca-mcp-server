@@ -1,0 +1,71 @@
+name: Final Monitoring Channel 2026-08-16
+
+on:
+  push:
+    branches: [ops/final-external-closeout-20260816]
+    paths: ['.github/workflows/final-monitoring-channel-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  OPS_EMAIL: adm@tocadomorcego.com
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  channel-and-iam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Create or reuse approved operations email channel and probe remaining IAM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+
+          printf '%s' '{"permissions":["monitoring.notificationChannels.list","monitoring.notificationChannels.get","monitoring.notificationChannels.create","monitoring.notificationChannels.update","monitoring.alertPolicies.list","monitoring.alertPolicies.get","monitoring.alertPolicies.create","monitoring.alertPolicies.update","logging.notificationRules.create","logging.notificationRules.get","logging.notificationRules.list","resourcemanager.projects.setIamPolicy"]}' >/tmp/perms-request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms-request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+
+          for P in monitoring.notificationChannels.list monitoring.notificationChannels.get monitoring.notificationChannels.create monitoring.alertPolicies.list monitoring.alertPolicies.get monitoring.alertPolicies.create; do
+            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/perms.json >/dev/null
+          done
+
+          LOG_CREATE="$(jq -r '(.permissions // []) | index("logging.notificationRules.create") != null' /tmp/perms.json)"
+          SET_IAM="$(jq -r '(.permissions // []) | index("resourcemanager.projects.setIamPolicy") != null' /tmp/perms.json)"
+          echo "LOGGING_NOTIFICATION_RULES_CREATE=$LOG_CREATE"
+          echo "PROJECT_SET_IAM_POLICY=$SET_IAM"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-before.json
+          CHANNEL_NAME="$(jq -r --arg email "$OPS_EMAIL" '.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | .name' /tmp/channels-before.json | head -n1)"
+          if [ -z "$CHANNEL_NAME" ]; then
+            jq -n --arg email "$OPS_EMAIL" '{type:"email",displayName:"TOCA OS Operations",description:"Owner-approved TOCA OS operational alerts destination",labels:{email_address:$email},enabled:true,userLabels:{toca_managed:"true",purpose:"operations"}}' >/tmp/channel.json
+            CREATE_HTTP="$(curl --silent --output /tmp/channel-created.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/channel.json "${API}/notificationChannels")"
+            if [ "$CREATE_HTTP" != 200 ]; then cat /tmp/channel-created.json >&2; exit 91; fi
+            CHANNEL_NAME="$(jq -r '.name' /tmp/channel-created.json)"
+          fi
+          test -n "$CHANNEL_NAME"
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${CHANNEL_NAME}" >/tmp/channel-readback.json
+          jq -e --arg email "$OPS_EMAIL" '.type=="email" and .labels.email_address==$email and .enabled==true' /tmp/channel-readback.json >/dev/null
+
+          jq -n --arg email "$OPS_EMAIL" --arg channel "$CHANNEL_NAME" --arg logCreate "$LOG_CREATE" --arg setIam "$SET_IAM" --slurpfile c /tmp/channel-readback.json --slurpfile p /tmp/perms.json '{schemaVersion:1,email:$email,channelName:$channel,channelReadback:{type:$c[0].type,displayName:$c[0].displayName,enabled:$c[0].enabled,verificationStatus:($c[0].verificationStatus//"UNSPECIFIED")},loggingNotificationRulesCreate:($logCreate=="true"),projectSetIamPolicy:($setIam=="true"),grantedPermissions:($p[0].permissions//[])}' > evidence/monitoring-channel-iam.json
+          cat evidence/monitoring-channel-iam.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: final-monitoring-channel-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
