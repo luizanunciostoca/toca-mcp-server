@@ -1,4 +1,9 @@
 import type { CapabilityStatus, RiskClass, ToolDefinition } from '../core/tool-registry.js';
+import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from '../content/capability-contracts.js';
+import {
+  VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_IDS,
+  VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET,
+} from '../content/capability-ids.js';
 import { createToolRegistry } from '../registry.js';
 import {
   CAPABILITY_CONTRACT_OVERRIDES,
@@ -126,10 +131,16 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
 
 const knownRuntimeTools = new Set(runtimeDefinitions.keys());
 
+function isVideoContentTechnicalExtension(capabilityId: string): boolean {
+  return VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET.has(capabilityId);
+}
+
 function lifecycleStatus(capabilityId: string): CapabilityStatus {
   return (
     runtimeDefinitions.get(capabilityId)?.capabilityStatus ??
-    (implementedInternal.has(capabilityId) ? 'IMPLEMENTED' : 'PLANNED')
+    (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId)
+      ? 'IMPLEMENTED'
+      : 'PLANNED')
   );
 }
 
@@ -304,7 +315,8 @@ function config(capabilityId: string): readonly string[] {
 
 function executionSurface(capabilityId: string, status: CapabilityStatus): ExecutionSurface {
   if (knownRuntimeTools.has(capabilityId)) return 'MCP_TOOL';
-  if (implementedInternal.has(capabilityId)) return 'INTERNAL_ENGINE';
+  if (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId))
+    return 'INTERNAL_ENGINE';
   if (/^(drive|design|presentation)\./.test(capabilityId)) return 'CONNECTOR';
   if (
     /^(copy|editorial|campaign|analytics|performance|context|quality_gate|people|legal)\./.test(
@@ -324,6 +336,9 @@ function humanDescription(capabilityId: string): string {
 function evidence(capabilityId: string, status: CapabilityStatus): readonly string[] {
   if (status === 'PLANNED' || status === 'SPECIFIED') return [];
   if (knownRuntimeTools.has(capabilityId)) return ['src/registry.ts'];
+  if (isVideoContentTechnicalExtension(capabilityId)) {
+    return ['src/content/runtime.ts', 'src/content/content-item.ts', 'src/content/video.ts'];
+  }
   if (capabilityId.startsWith('google_business.')) {
     return ['src/local-discovery/google-business.ts'];
   }
@@ -335,9 +350,15 @@ function evidence(capabilityId: string, status: CapabilityStatus): readonly stri
 }
 
 function contractQuality(capabilityId: string): CapabilityContractQuality {
-  const explicit = CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality;
+  const explicit =
+    VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality ??
+    CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality;
   if (explicit) return explicit;
-  if (knownRuntimeTools.has(capabilityId) || implementedInternal.has(capabilityId)) {
+  if (
+    knownRuntimeTools.has(capabilityId) ||
+    implementedInternal.has(capabilityId) ||
+    isVideoContentTechnicalExtension(capabilityId)
+  ) {
     return 'RUNTIME_BOUND';
   }
   return 'LEGACY_INFERRED';
@@ -345,7 +366,8 @@ function contractQuality(capabilityId: string): CapabilityContractQuality {
 
 function authenticationMode(capabilityId: string): AuthenticationMode {
   if (capabilityId.startsWith('system.')) return 'NONE';
-  if (implementedInternal.has(capabilityId)) return 'INTERNAL';
+  if (implementedInternal.has(capabilityId) || isVideoContentTechnicalExtension(capabilityId))
+    return 'INTERNAL';
   if (/^(drive|google_ads|google_business)\./.test(capabilityId)) return 'OAUTH2';
   if (/^(instagram|social|engagement|meta_ads)\./.test(capabilityId)) return 'UNKNOWN';
   return 'INTERNAL';
@@ -397,7 +419,9 @@ function createDefinition(
 ): CapabilityDefinition {
   assertCapabilityNamespace(capabilityId);
   const runtimeDefinition = runtimeDefinitions.get(capabilityId);
-  const override = CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
+  const override =
+    VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES[capabilityId] ??
+    CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
   const inferredRisk = runtimeDefinition?.riskClass ?? inferredRiskClass(capabilityId);
   const risk = override?.risk_class ?? inferredRisk;
   const status = lifecycleStatus(capabilityId);
@@ -474,7 +498,11 @@ function createDefinition(
 }
 
 function allRouteCapabilityIds(routeId: RouteId): readonly string[] {
-  return [...ROUTE_CAPABILITY_IDS[routeId], ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? [])];
+  return [
+    ...ROUTE_CAPABILITY_IDS[routeId],
+    ...(TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? []),
+    ...(VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_IDS[routeId] ?? []),
+  ];
 }
 
 export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [

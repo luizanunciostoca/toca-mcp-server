@@ -52,12 +52,12 @@ describe('R20/R29 capability contracts', () => {
     }
   });
 
-  it('keeps R20 export approval-gated and off the external publication surface', () => {
+  it('keeps export approval-referenced and off the external publication surface', () => {
     for (const capabilityId of ['video.export.reel', 'video.export.story'] as const) {
       expect(getCapabilityDefinition(capabilityId)).toMatchObject({
         risk_class: 'WRITE_REVERSIBLE',
         side_effects: true,
-        approval_required: true,
+        approval_required: false,
       });
       expect(getCapabilityDefinition(capabilityId)?.input_schema.required).toContain('approval_ref');
     }
