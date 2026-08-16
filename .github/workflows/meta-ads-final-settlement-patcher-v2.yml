@@ -1,0 +1,37 @@
+name: Meta Ads Final Settlement Patcher v2
+
+on:
+  push:
+    branches:
+      - fix/meta-ads-final-settlement-window
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply bounded settlement fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE='src/meta-ads-create-paused-smoke.ts'
+          WORKFLOW='.github/workflows/meta-ads-create-paused-provider-smoke.yml'
+          test "$(grep -c 'const maxAttempts = 12;' "$SOURCE")" -eq 1
+          test "$(grep -c -- '--task-timeout 180s' "$WORKFLOW")" -eq 2
+          sed -i 's/const maxAttempts = 12;/const maxAttempts = 48;/' "$SOURCE"
+          sed -i 's/--task-timeout 180s/--task-timeout 480s/g' "$WORKFLOW"
+          test "$(grep -c 'const maxAttempts = 48;' "$SOURCE")" -eq 1
+          test "$(grep -c -- '--task-timeout 480s' "$WORKFLOW")" -eq 2
+          rm -f .github/workflows/meta-ads-final-settlement-patcher.yml
+          rm -f .github/workflows/meta-ads-final-settlement-patcher-v2.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$SOURCE" "$WORKFLOW" .github/workflows/meta-ads-final-settlement-patcher.yml .github/workflows/meta-ads-final-settlement-patcher-v2.yml
+          git commit -m 'fix(meta-ads): extend bounded provider settlement window'
+          git push origin HEAD:fix/meta-ads-final-settlement-window
