@@ -25,18 +25,39 @@ const validInput: VideoContentRuntimeInput = {
   payload: { brief: { test: true } },
 };
 
+function runtimeInputFor(capabilityId: string): VideoContentRuntimeInput {
+  switch (capabilityId) {
+    case 'video.export.reel':
+    case 'video.export.story':
+      return { ...validInput, approval_ref: 'approval-r29-runtime-test' };
+    case 'content_item.channel.adapt':
+      return { ...validInput, target_channel: 'INSTAGRAM', target_format: 'REEL' };
+    case 'content_item.language.localize':
+      return { ...validInput, target_language: 'pt-BR' };
+    case 'content_item.event.link':
+      return { ...validInput, event_id: 'event-r29-runtime-test' };
+    case 'content_item.experiment.link':
+      return { ...validInput, experiment_id: 'experiment-r29-runtime-test' };
+    default:
+      return validInput;
+  }
+}
+
 class FakeVideoContentRuntime implements VideoContentRuntimeService {
-  readonly execute = vi.fn(async (capabilityId: string, input: VideoContentRuntimeInput) => ({
-    capabilityId,
-    contentItemId: input.content_item_id,
-  }));
+  readonly execute = vi.fn((capabilityId: string, input: VideoContentRuntimeInput) =>
+    Promise.resolve({
+      capabilityId,
+      contentItemId: input.content_item_id,
+    }),
+  );
 
   readonly readback = vi.fn(
-    async (capabilityId: string, _result: unknown, input: VideoContentRuntimeInput) => ({
-      verified: true,
-      evidence: [`test:readback:${capabilityId}`],
-      externalResourceId: `toca://r29/content/${input.content_item_id}`,
-    }),
+    (capabilityId: string, _result: unknown, input: VideoContentRuntimeInput) =>
+      Promise.resolve({
+        verified: true,
+        evidence: [`test:readback:${capabilityId}`],
+        externalResourceId: `toca://r29/content/${input.content_item_id}`,
+      }),
   );
 }
 
@@ -70,14 +91,17 @@ describe('Video/R29 current TOCA Core runtime integration', () => {
     }
   });
 
-  it('binds all 25 capabilities through the current core resolver', () => {
+  it('binds all 25 capabilities through the current core resolver with strict schemas', () => {
     const videoContent = new FakeVideoContentRuntime();
     const resolver = createRuntimeCapabilityResolver({ videoContent });
 
     for (const capabilityId of R29_VIDEO_CAPABILITIES) {
       const binding = resolver(capabilityId);
       expect(binding, capabilityId).toBeDefined();
-      expect(() => binding!.inputSchema.parse(validInput), capabilityId).not.toThrow();
+      expect(
+        () => binding!.inputSchema.parse(runtimeInputFor(capabilityId)),
+        capabilityId,
+      ).not.toThrow();
     }
   });
 
