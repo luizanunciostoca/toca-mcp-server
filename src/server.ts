@@ -187,6 +187,12 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ...(metaAdsWrite ? { metaAdsWrite } : {}),
     ...(metaAdsWriteProvider ? { metaAdsWriteProvider } : {}),
     ...(googleAds ? { googleAds } : {}),
+    ...(googleAds && config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID
+      ? { googleAdsTargetAccount: config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID.replaceAll('-', '') }
+      : {}),
+    ...(googleAds && config.GOOGLE_ADS_ALLOWED_CURRENCY
+      ? { googleAdsCurrency: config.GOOGLE_ADS_ALLOWED_CURRENCY.toUpperCase() }
+      : {}),
     ...(instagramScheduler ? { instagramScheduler } : {}),
   });
 
