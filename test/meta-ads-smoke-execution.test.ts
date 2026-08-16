@@ -56,9 +56,38 @@ describe('Meta Ads CREATE_PAUSED recovery checkpoint', () => {
     expect(settled.providerVerification).toBe(snapshot);
   });
 
-  it('preserves exact IDs and approved hash when settlement times out without recreating', async () => {
+  it('retries only provider settlement timeout without recreating', async () => {
     let createCalls = 0;
     let checkpointCalls = 0;
+    let reconcileCalls = 0;
+    const settled = await runMetaAdsCreatePausedSettlement(context, {
+      createPaused: () => {
+        createCalls += 1;
+        return Promise.resolve(result);
+      },
+      checkpointCreated: () => {
+        checkpointCalls += 1;
+        return Promise.resolve();
+      },
+      reconcile: () => {
+        reconcileCalls += 1;
+        if (reconcileCalls === 1) {
+          return Promise.reject(new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT'));
+        }
+        return Promise.resolve(snapshot);
+      },
+    });
+
+    expect(createCalls).toBe(1);
+    expect(checkpointCalls).toBe(1);
+    expect(reconcileCalls).toBe(2);
+    expect(settled.providerVerification).toBe(snapshot);
+  });
+
+  it('preserves exact IDs and approved hash when bounded settlement still times out', async () => {
+    let createCalls = 0;
+    let checkpointCalls = 0;
+    let reconcileCalls = 0;
     let caught: unknown;
 
     try {
@@ -71,8 +100,10 @@ describe('Meta Ads CREATE_PAUSED recovery checkpoint', () => {
           checkpointCalls += 1;
           return Promise.resolve();
         },
-        reconcile: () =>
-          Promise.reject(new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT')),
+        reconcile: () => {
+          reconcileCalls += 1;
+          return Promise.reject(new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT'));
+        },
       });
     } catch (error) {
       caught = error;
@@ -80,6 +111,7 @@ describe('Meta Ads CREATE_PAUSED recovery checkpoint', () => {
 
     expect(createCalls).toBe(1);
     expect(checkpointCalls).toBe(1);
+    expect(reconcileCalls).toBe(2);
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toBe('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT');
     expect(metaAdsProviderCreationCheckpointFromError(caught)).toEqual({
@@ -88,6 +120,27 @@ describe('Meta Ads CREATE_PAUSED recovery checkpoint', () => {
       approvedRequestSha256: requestSha256,
       ...result,
     });
+  });
+
+  it('does not retry non-settlement errors', async () => {
+    let reconcileCalls = 0;
+    let caught: unknown;
+    try {
+      await runMetaAdsCreatePausedSettlement(context, {
+        createPaused: () => Promise.resolve(result),
+        checkpointCreated: () => Promise.resolve(),
+        reconcile: () => {
+          reconcileCalls += 1;
+          return Promise.reject(new Error('META_ADS_PROVIDER_FATAL'));
+        },
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(reconcileCalls).toBe(1);
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe('META_ADS_PROVIDER_FATAL');
   });
 
   it('preserves the provider checkpoint even if durable checkpoint persistence itself fails', async () => {
