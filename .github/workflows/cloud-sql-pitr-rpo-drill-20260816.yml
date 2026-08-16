@@ -1,0 +1,482 @@
+name: Cloud SQL PITR RPO Drill 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-pitr-rpo-drill-20260816]
+    paths: ['.github/workflows/cloud-sql-pitr-rpo-drill-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  REPO_BASELINE_SHA: e0696df1d1860261afba78f1634e8c979401cdc7
+  SOURCE_INSTANCE: toca-mcp-db
+  PROD_SERVICE: toca-mcp-production
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DATABASE_URL_SECRET: toca-database-url
+
+jobs:
+  pitr-rpo-drill:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Execute isolated PITR drill and RPO proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+
+          TARGET="toca-mcp-pitr-${GITHUB_RUN_ID}"
+          PROBE_JOB="toca-mcp-pitr-probe-${GITHUB_RUN_ID}"
+          VALIDATE_JOB="toca-mcp-pitr-val-${GITHUB_RUN_ID}"
+          SOURCE_CONNECTION="${GCP_PROJECT_ID}:${GCP_REGION}:${SOURCE_INSTANCE}"
+          TARGET_CONNECTION="${GCP_PROJECT_ID}:${GCP_REGION}:${TARGET}"
+          EVIDENCE="evidence/cloud-sql-pitr-rpo-drill.json"
+
+          TARGET_CREATED=false
+          TARGET_DELETED=false
+          PROBE_JOB_CREATED=false
+          PROBE_JOB_DELETED=false
+          VALIDATE_JOB_CREATED=false
+          VALIDATE_JOB_DELETED=false
+          VALIDATION_PASSED=false
+          PRODUCTION_UNCHANGED=false
+          BEFORE_MARKER_PRESENT=false
+          AFTER_MARKER_ABSENT=false
+          MIGRATION_COUNT=-1
+          CRITICAL_TABLE_COUNT=-1
+
+          EARLIEST_RECOVERY=""
+          LATEST_RECOVERY=""
+          REFERENCE_AT=""
+          PROVIDER_LATEST_LAG=-1
+          PITR_POINT=""
+          SELECTED_RPO=-1
+          BEFORE_KIND=""
+          BEFORE_ID=""
+          BEFORE_TS=""
+          AFTER_KIND=""
+          AFTER_ID=""
+          AFTER_TS=""
+          RESTORE_STARTED=""
+          RESTORE_RUNNABLE_AT=""
+          VALIDATION_COMPLETED_AT=""
+          RESTORE_SECONDS=-1
+          RTO=-1
+          PROD_IMAGE=""
+          PROD_DIGEST=""
+          TARGET_DP="unknown"
+
+          case "$TARGET" in toca-mcp-pitr-*) ;; *) exit 90 ;; esac
+          test "$TARGET" != "$SOURCE_INSTANCE"
+
+          write_evidence() {
+            jq -n \
+              --arg repoBaselineSha "$REPO_BASELINE_SHA" \
+              --arg workflowSha "$GITHUB_SHA" \
+              --arg sourceInstance "$SOURCE_INSTANCE" \
+              --arg targetInstance "$TARGET" \
+              --arg productionImage "$PROD_IMAGE" \
+              --arg productionImageDigest "$PROD_DIGEST" \
+              --arg earliestRecoveryTime "$EARLIEST_RECOVERY" \
+              --arg latestRecoveryTime "$LATEST_RECOVERY" \
+              --arg referenceAt "$REFERENCE_AT" \
+              --arg pitrPoint "$PITR_POINT" \
+              --arg beforeKind "$BEFORE_KIND" \
+              --arg beforeId "$BEFORE_ID" \
+              --arg beforeTimestamp "$BEFORE_TS" \
+              --arg afterKind "$AFTER_KIND" \
+              --arg afterId "$AFTER_ID" \
+              --arg afterTimestamp "$AFTER_TS" \
+              --arg restoreStarted "$RESTORE_STARTED" \
+              --arg restoreRunnableAt "$RESTORE_RUNNABLE_AT" \
+              --arg validationCompletedAt "$VALIDATION_COMPLETED_AT" \
+              --arg targetDeletionProtection "$TARGET_DP" \
+              --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --argjson providerLatestLagSeconds "$PROVIDER_LATEST_LAG" \
+              --argjson selectedRpoSeconds "$SELECTED_RPO" \
+              --argjson restoreSeconds "$RESTORE_SECONDS" \
+              --argjson rtoSeconds "$RTO" \
+              --argjson migrationCount "$MIGRATION_COUNT" \
+              --argjson criticalTableCount "$CRITICAL_TABLE_COUNT" \
+              --argjson targetCreated "$TARGET_CREATED" \
+              --argjson validationPassed "$VALIDATION_PASSED" \
+              --argjson beforeMarkerPresent "$BEFORE_MARKER_PRESENT" \
+              --argjson afterMarkerAbsent "$AFTER_MARKER_ABSENT" \
+              --argjson probeJobDeleted "$PROBE_JOB_DELETED" \
+              --argjson validationJobDeleted "$VALIDATE_JOB_DELETED" \
+              --argjson targetDeleted "$TARGET_DELETED" \
+              --argjson productionUnchanged "$PRODUCTION_UNCHANGED" \
+              '{
+                schemaVersion:1,
+                repoBaselineSha:$repoBaselineSha,
+                workflowSha:$workflowSha,
+                sourceInstance:$sourceInstance,
+                targetInstance:$targetInstance,
+                productionImage:$productionImage,
+                productionImageDigest:$productionImageDigest,
+                recoveryWindow:{
+                  earliest:$earliestRecoveryTime,
+                  latest:$latestRecoveryTime,
+                  referenceAt:$referenceAt,
+                  providerLatestLagSeconds:$providerLatestLagSeconds
+                },
+                selectedRecovery:{
+                  pointInTime:$pitrPoint,
+                  measuredRpoSeconds:$selectedRpoSeconds,
+                  objectiveSeconds:900,
+                  objectiveMet:($selectedRpoSeconds >= 0 and $selectedRpoSeconds <= 900)
+                },
+                temporalBoundary:{
+                  before:{kind:$beforeKind,id:$beforeId,timestamp:$beforeTimestamp,presentInRestore:$beforeMarkerPresent},
+                  after:{kind:$afterKind,id:$afterId,timestamp:$afterTimestamp,absentInRestore:$afterMarkerAbsent}
+                },
+                timing:{
+                  restoreStarted:$restoreStarted,
+                  restoreRunnableAt:$restoreRunnableAt,
+                  validationCompletedAt:$validationCompletedAt,
+                  restoreSeconds:$restoreSeconds,
+                  rtoSeconds:$rtoSeconds,
+                  rtoObjectiveSeconds:3600,
+                  rtoObjectiveMet:($rtoSeconds >= 0 and $rtoSeconds <= 3600)
+                },
+                validation:{
+                  passed:$validationPassed,
+                  migrationCount:$migrationCount,
+                  criticalTableCount:$criticalTableCount
+                },
+                restore:{targetCreated:$targetCreated,deletionProtectionAfterPatch:$targetDeletionProtection},
+                cleanup:{probeJobDeleted:$probeJobDeleted,validationJobDeleted:$validationJobDeleted,targetDeleted:$targetDeleted},
+                production:{mutatedByRestore:false,unchangedSettingsReadback:$productionUnchanged},
+                verifiedAt:$verifiedAt
+              }' > "$EVIDENCE"
+          }
+
+          cleanup() {
+            rc=$?
+            set +e
+
+            if [ "$PROBE_JOB_CREATED" = true ]; then
+              if gcloud run jobs delete "$PROBE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1; then
+                PROBE_JOB_DELETED=true
+              fi
+            else
+              PROBE_JOB_DELETED=true
+            fi
+
+            if [ "$VALIDATE_JOB_CREATED" = true ]; then
+              if gcloud run jobs delete "$VALIDATE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1; then
+                VALIDATE_JOB_DELETED=true
+              fi
+            else
+              VALIDATE_JOB_DELETED=true
+            fi
+
+            if TJSON="$(gcloud sql instances describe "$TARGET" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+              TARGET_CREATED=true
+              TARGET_DP="$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$TJSON")"
+              if [ "$TARGET_DP" != false ]; then
+                gcloud sql instances patch "$TARGET" --project "$GCP_PROJECT_ID" --no-deletion-protection --quiet >/dev/null 2>&1
+                TJSON="$(gcloud sql instances describe "$TARGET" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null || true)"
+                TARGET_DP="$(jq -r '.settings.deletionProtectionEnabled // true' <<<"$TJSON")"
+              fi
+              if [ "$TARGET_DP" = false ]; then
+                gcloud sql instances delete "$TARGET" --project "$GCP_PROJECT_ID" --quiet >/dev/null 2>&1
+                for _ in $(seq 1 60); do
+                  if ! gcloud sql instances describe "$TARGET" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+                    TARGET_DELETED=true
+                    break
+                  fi
+                  sleep 5
+                done
+              fi
+            else
+              TARGET_DELETED=true
+            fi
+
+            if AFTER="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+              printf '%s' "$AFTER" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,tier:.settings.tier,edition:.settings.edition,availabilityType:.settings.availabilityType,dataDiskType:.settings.dataDiskType,dataDiskSizeGb:.settings.dataDiskSizeGb}}' >/tmp/source-after.json
+              if [ -f /tmp/source-before.json ] && cmp -s /tmp/source-before.json /tmp/source-after.json; then
+                PRODUCTION_UNCHANGED=true
+              fi
+            fi
+
+            write_evidence
+            cat "$EVIDENCE" || true
+
+            if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+            test "$VALIDATION_PASSED" = true || exit 96
+            test "$PROBE_JOB_DELETED" = true || exit 97
+            test "$VALIDATE_JOB_DELETED" = true || exit 98
+            test "$TARGET_DELETED" = true || exit 99
+            test "$PRODUCTION_UNCHANGED" = true || exit 100
+            test "$SELECTED_RPO" -ge 0 && test "$SELECTED_RPO" -le 900 || exit 101
+            test "$RTO" -ge 0 && test "$RTO" -le 3600 || exit 102
+          }
+          trap cleanup EXIT
+
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/perms-request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms-request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          for P in cloudsql.instances.get cloudsql.instances.clone cloudsql.instances.update cloudsql.instances.delete; do
+            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/perms.json >/dev/null
+          done
+          echo 'PITR_IAM_PREFLIGHT=PASS'
+
+          SOURCE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+          printf '%s' "$SOURCE" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,tier:.settings.tier,edition:.settings.edition,availabilityType:.settings.availabilityType,dataDiskType:.settings.dataDiskType,dataDiskSizeGb:.settings.dataDiskSizeGb}}' >/tmp/source-before.json
+
+          RHTTP="$(curl --silent --output /tmp/recovery.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/v1/projects/${GCP_PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime")"
+          test "$RHTTP" = 200
+          EARLIEST_RECOVERY="$(jq -r '.earliestRecoveryTime // empty' /tmp/recovery.json)"
+          LATEST_RECOVERY="$(jq -r '.latestRecoveryTime // empty' /tmp/recovery.json)"
+          test -n "$EARLIEST_RECOVERY"
+          test -n "$LATEST_RECOVERY"
+          REFERENCE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REFERENCE_EPOCH="$(date -u -d "$REFERENCE_AT" +%s)"
+          LATEST_EPOCH="$(date -u -d "$LATEST_RECOVERY" +%s)"
+          PROVIDER_LATEST_LAG=$((REFERENCE_EPOCH - LATEST_EPOCH))
+          if [ "$PROVIDER_LATEST_LAG" -lt 0 ] && [ "$PROVIDER_LATEST_LAG" -ge -30 ]; then PROVIDER_LATEST_LAG=0; fi
+          test "$PROVIDER_LATEST_LAG" -ge 0
+          test "$PROVIDER_LATEST_LAG" -le 900
+          echo "PITR_RECOVERY_WINDOW=PASS latest=$LATEST_RECOVERY provider_latest_lag_seconds=$PROVIDER_LATEST_LAG"
+
+          SERVICE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PROD_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
+          REVISION="$(jq -r '.status.latestReadyRevisionName // empty' <<<"$SERVICE")"
+          test -n "$PROD_IMAGE"
+          test -n "$REVISION"
+          REV="$(gcloud run revisions describe "$REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PROD_DIGEST="$(jq -r '.status.imageDigest // empty' <<<"$REV")"
+          test -n "$PROD_DIGEST"
+
+          cat >/tmp/probe.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          const require = createRequire('/app/package.json');
+          const pg = require('pg');
+          const sourceUrl = new URL(process.env.SOURCE_DATABASE_URL);
+          sourceUrl.searchParams.set('host', `/cloudsql/${process.env.SOURCE_CONNECTION}`);
+          const pool = new pg.Pool({ connectionString: sourceUrl.toString() });
+          try {
+            const result = await pool.query(`
+              select kind,id,ts
+              from (
+                select 'operational_signals'::text as kind, signal_id::text as id, occurred_at as ts
+                from operational_signals
+                where occurred_at >= now() - interval '30 minutes'
+                union all
+                select 'audit_ledger_events'::text as kind, event_id::text as id, created_at as ts
+                from audit_ledger_events
+                where created_at >= now() - interval '30 minutes'
+              ) temporal
+              order by ts desc, kind, id
+              limit 300
+            `);
+            const rows = result.rows.map(r => ({kind:r.kind,id:r.id,ts:new Date(r.ts).toISOString()}));
+            if (rows.length < 2) throw new Error(`DR_TEMPORAL_EVIDENCE_INSUFFICIENT:${rows.length}`);
+            console.log(`DR_MARKERS_B64=${Buffer.from(JSON.stringify(rows)).toString('base64')}`);
+          } finally {
+            await pool.end();
+          }
+          NODE
+          PROBE_B64="$(base64 -w0 /tmp/probe.mjs)"
+          rm -f /tmp/probe.mjs
+          PROBE_SCRIPT='set -eu; printf %s "$DR_SCRIPT_B64" | base64 -d >/tmp/probe.mjs; node /tmp/probe.mjs; rm -f /tmp/probe.mjs; unset SOURCE_DATABASE_URL DR_SCRIPT_B64'
+
+          gcloud run jobs create "$PROBE_JOB" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$PROD_IMAGE" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$SOURCE_CONNECTION" \
+            --set-secrets "SOURCE_DATABASE_URL=${DATABASE_URL_SECRET}:latest" \
+            --set-env-vars "SOURCE_CONNECTION=${SOURCE_CONNECTION},DR_SCRIPT_B64=${PROBE_B64}" \
+            --command /bin/sh --args="^@^-lc@${PROBE_SCRIPT}" --tasks 1 --parallelism 1 --max-retries 0 \
+            --task-timeout 10m --memory 512Mi --cpu 1 --quiet
+          PROBE_JOB_CREATED=true
+          gcloud run jobs execute "$PROBE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          MARKERS_B64=""
+          for _ in $(seq 1 12); do
+            LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${PROBE_JOB}\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=200 --order=asc --format='value(textPayload)' || true)"
+            MARKERS_B64="$(printf '%s\n' "$LOGS" | grep -o 'DR_MARKERS_B64=[A-Za-z0-9+/=]*' | tail -1 | cut -d= -f2- || true)"
+            [ -n "$MARKERS_B64" ] && break
+            sleep 5
+          done
+          test -n "$MARKERS_B64"
+          printf '%s' "$MARKERS_B64" | base64 -d >/tmp/markers.json
+          jq -e 'type=="array" and length>=2' /tmp/markers.json >/dev/null
+
+          SELECTION_B64="$(
+            MARKERS_JSON=/tmp/markers.json EARLIEST="$EARLIEST_RECOVERY" LATEST="$LATEST_RECOVERY" REFERENCE="$REFERENCE_AT" node - <<'NODE'
+          const fs = require('fs');
+          const rows = JSON.parse(fs.readFileSync(process.env.MARKERS_JSON,'utf8'))
+            .map(r => ({...r, epoch: Math.floor(Date.parse(r.ts)/1000)}))
+            .filter(r => Number.isFinite(r.epoch))
+            .sort((a,b) => a.epoch-b.epoch || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
+          const earliest = Math.floor(Date.parse(process.env.EARLIEST)/1000);
+          const latest = Math.floor(Date.parse(process.env.LATEST)/1000);
+          const reference = Math.floor(Date.parse(process.env.REFERENCE)/1000);
+          let selected = null;
+          for (let i=0; i<rows.length-1; i++) {
+            const before = rows[i];
+            const after = rows[i+1];
+            const gap = after.epoch - before.epoch;
+            if (gap < 10 || gap > 300) continue;
+            const point = Math.floor((before.epoch + after.epoch) / 2);
+            const rpo = reference - point;
+            if (point < earliest || point > latest) continue;
+            if (rpo < 0 || rpo > 900) continue;
+            if (!selected || point > selected.pointEpoch) {
+              selected = {before,after,pointEpoch:point,rpoSeconds:rpo};
+            }
+          }
+          if (!selected) {
+            console.error('DR_NO_TEMPORAL_BOUNDARY_WITHIN_RPO_OBJECTIVE');
+            process.exit(1);
+          }
+          selected.pointInTime = new Date(selected.pointEpoch*1000).toISOString();
+          process.stdout.write(Buffer.from(JSON.stringify(selected)).toString('base64'));
+          NODE
+          )"
+          test -n "$SELECTION_B64"
+          printf '%s' "$SELECTION_B64" | base64 -d >/tmp/selection.json
+          PITR_POINT="$(jq -r '.pointInTime' /tmp/selection.json)"
+          SELECTED_RPO="$(jq -r '.rpoSeconds' /tmp/selection.json)"
+          BEFORE_KIND="$(jq -r '.before.kind' /tmp/selection.json)"
+          BEFORE_ID="$(jq -r '.before.id' /tmp/selection.json)"
+          BEFORE_TS="$(jq -r '.before.ts' /tmp/selection.json)"
+          AFTER_KIND="$(jq -r '.after.kind' /tmp/selection.json)"
+          AFTER_ID="$(jq -r '.after.id' /tmp/selection.json)"
+          AFTER_TS="$(jq -r '.after.ts' /tmp/selection.json)"
+          test "$SELECTED_RPO" -ge 0
+          test "$SELECTED_RPO" -le 900
+          echo "PITR_TEMPORAL_BOUNDARY=PASS point=$PITR_POINT rpo_seconds=$SELECTED_RPO before=$BEFORE_KIND:$BEFORE_ID@$BEFORE_TS after=$AFTER_KIND:$AFTER_ID@$AFTER_TS"
+
+          gcloud run jobs delete "$PROBE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          PROBE_JOB_DELETED=true
+          PROBE_JOB_CREATED=false
+
+          RESTORE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_EPOCH="$(date -u -d "$RESTORE_STARTED" +%s)"
+          gcloud sql instances clone "$SOURCE_INSTANCE" "$TARGET" \
+            --project "$GCP_PROJECT_ID" \
+            --point-in-time "$PITR_POINT" \
+            --quiet
+          TARGET_CREATED=true
+
+          TJSON="$(gcloud sql instances describe "$TARGET" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$TJSON" | jq -e --arg t "$TARGET" '.name==$t and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1"' >/dev/null
+          RESTORE_RUNNABLE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RUNNABLE_EPOCH="$(date -u -d "$RESTORE_RUNNABLE_AT" +%s)"
+          RESTORE_SECONDS=$((RUNNABLE_EPOCH - START_EPOCH))
+
+          TARGET_DP="$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$TJSON")"
+          if [ "$TARGET_DP" != false ]; then
+            gcloud sql instances patch "$TARGET" --project "$GCP_PROJECT_ID" --no-deletion-protection --quiet
+            TJSON="$(gcloud sql instances describe "$TARGET" --project "$GCP_PROJECT_ID" --format=json)"
+            TARGET_DP="$(jq -r '.settings.deletionProtectionEnabled // true' <<<"$TJSON")"
+          fi
+          test "$TARGET_DP" = false
+
+          cat >/tmp/validate.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          const require = createRequire('/app/package.json');
+          const pg = require('pg');
+          const url = new URL(process.env.SOURCE_DATABASE_URL);
+          url.searchParams.set('host', `/cloudsql/${process.env.TARGET_CONNECTION}`);
+          const pool = new pg.Pool({ connectionString: url.toString() });
+          const tables = ['schema_migrations','event_outbox','event_outbox_delivery_attempts','event_consumer_receipts','audit_ledger_events','audit_ledger_heads','operational_signals','event_records','event_record_revisions','event_record_external_refs','crm_contacts','crm_contact_channels','crm_leads','crm_opportunities','crm_record_revisions','crm_idempotency_keys','privacy_ledger_events','content_items','content_item_versions','content_item_validations','content_item_history','content_video_artifacts'];
+          const triggers = ['audit_ledger_events_append_only','operational_signals_append_only','audit_ledger_heads_no_delete','privacy_ledger_no_update','privacy_ledger_no_delete','content_item_versions_append_only','content_item_validations_append_only','content_item_history_append_only','content_video_artifacts_append_only'];
+          const markerExists = async (kind,id) => {
+            if (kind === 'operational_signals') {
+              return (await pool.query('select 1 from operational_signals where signal_id=$1 limit 1',[id])).rowCount === 1;
+            }
+            if (kind === 'audit_ledger_events') {
+              return (await pool.query('select 1 from audit_ledger_events where event_id=$1 limit 1',[id])).rowCount === 1;
+            }
+            throw new Error(`DR_UNSUPPORTED_MARKER_KIND:${kind}`);
+          };
+          try {
+            const versions = await pool.query('select version from schema_migrations order by version');
+            if (versions.rows.length !== 16) throw new Error(`DR_MIGRATION_COUNT_MISMATCH:${versions.rows.length}`);
+            for (const table of tables) {
+              const reg = await pool.query('select to_regclass($1) as reg',[`public.${table}`]);
+              if (!reg.rows[0]?.reg) throw new Error(`DR_TABLE_MISSING:${table}`);
+              await pool.query(`select count(*)::bigint as n from ${table}`);
+            }
+            const fk = await pool.query(`select count(*)::int as n from pg_constraint c join pg_class r on r.oid=c.conrelid where c.contype='f' and r.relname = any($1::text[]) and not c.convalidated`,[tables]);
+            if (fk.rows[0].n !== 0) throw new Error('DR_UNVALIDATED_FOREIGN_KEYS');
+            const tgs = await pool.query(`select tgname,tgenabled from pg_trigger where not tgisinternal and tgname = any($1::text[])`,[triggers]);
+            const enabled = new Set(tgs.rows.filter(r => r.tgenabled !== 'D').map(r => r.tgname));
+            for (const name of triggers) if (!enabled.has(name)) throw new Error(`DR_TRIGGER_MISSING:${name}`);
+            const beforePresent = await markerExists(process.env.BEFORE_KIND,process.env.BEFORE_ID);
+            const afterPresent = await markerExists(process.env.AFTER_KIND,process.env.AFTER_ID);
+            if (!beforePresent) throw new Error(`DR_BEFORE_MARKER_MISSING:${process.env.BEFORE_KIND}:${process.env.BEFORE_ID}`);
+            if (afterPresent) throw new Error(`DR_AFTER_MARKER_UNEXPECTEDLY_PRESENT:${process.env.AFTER_KIND}:${process.env.AFTER_ID}`);
+            console.log(`DR_PITR_VALIDATION=PASS migrations=${versions.rows.length} critical_tables=${tables.length} before_marker_present=1 after_marker_absent=1`);
+          } finally {
+            await pool.end();
+          }
+          NODE
+          VALIDATE_B64="$(base64 -w0 /tmp/validate.mjs)"
+          rm -f /tmp/validate.mjs
+          VALIDATE_SCRIPT='set -eu; printf %s "$DR_SCRIPT_B64" | base64 -d >/tmp/validate.mjs; node /tmp/validate.mjs; rm -f /tmp/validate.mjs; unset SOURCE_DATABASE_URL DR_SCRIPT_B64'
+
+          gcloud run jobs create "$VALIDATE_JOB" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$PROD_IMAGE" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$TARGET_CONNECTION" \
+            --set-secrets "SOURCE_DATABASE_URL=${DATABASE_URL_SECRET}:latest" \
+            --set-env-vars "TARGET_CONNECTION=${TARGET_CONNECTION},BEFORE_KIND=${BEFORE_KIND},BEFORE_ID=${BEFORE_ID},AFTER_KIND=${AFTER_KIND},AFTER_ID=${AFTER_ID},DR_SCRIPT_B64=${VALIDATE_B64}" \
+            --command /bin/sh --args="^@^-lc@${VALIDATE_SCRIPT}" --tasks 1 --parallelism 1 --max-retries 0 \
+            --task-timeout 15m --memory 512Mi --cpu 1 --quiet
+          VALIDATE_JOB_CREATED=true
+          gcloud run jobs execute "$VALIDATE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          VLOGS=""
+          for _ in $(seq 1 12); do
+            VLOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${VALIDATE_JOB}\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=300 --order=asc --format='value(textPayload)' || true)"
+            printf '%s' "$VLOGS" | grep -q 'DR_PITR_VALIDATION=PASS' && break
+            sleep 5
+          done
+          printf '%s\n' "$VLOGS"
+          VALIDATION_LINE="$(printf '%s\n' "$VLOGS" | grep 'DR_PITR_VALIDATION=PASS' | tail -1)"
+          test -n "$VALIDATION_LINE"
+          MIGRATION_COUNT="$(sed -n 's/.*migrations=\([0-9][0-9]*\).*/\1/p' <<<"$VALIDATION_LINE")"
+          CRITICAL_TABLE_COUNT="$(sed -n 's/.*critical_tables=\([0-9][0-9]*\).*/\1/p' <<<"$VALIDATION_LINE")"
+          test "$MIGRATION_COUNT" = 16
+          test "$CRITICAL_TABLE_COUNT" -ge 21
+          BEFORE_MARKER_PRESENT=true
+          AFTER_MARKER_ABSENT=true
+          VALIDATION_PASSED=true
+          VALIDATION_COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          DONE_EPOCH="$(date -u -d "$VALIDATION_COMPLETED_AT" +%s)"
+          RTO=$((DONE_EPOCH - START_EPOCH))
+          test "$RTO" -ge 0
+          test "$RTO" -le 3600
+          echo "CLOUD_SQL_PITR_RPO_DRILL=PASS provider_latest_lag_seconds=$PROVIDER_LATEST_LAG selected_rpo_seconds=$SELECTED_RPO restore_seconds=$RESTORE_SECONDS rto_seconds=$RTO target=$TARGET"
+
+      - name: Upload PITR/RPO evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-pitr-rpo-evidence-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
