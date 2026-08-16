@@ -1,68 +1,49 @@
 # TOCA OS — Controlled Real-System Test Readiness — 2026-08-16
 
-Status: **READY FOR CONTROLLED REAL-SYSTEM TESTS WITH EXPLICIT EXTERNAL HARDENING ITEMS**
+Status: **READY FOR CONTROLLED REAL-SYSTEM TESTS — CURRENT RELEASE SCOPE OPERATIONALLY CLOSED**
 
-Authoritative application baseline: `main@ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Repository closeout baseline: `main@72b2d7648c0fe08b49b37070343268a8df999147`.
 
-This document is the current closeout snapshot for the release scope approved on 2026-08-16. It supersedes older blocker/status statements in reliability and DR documents when those statements conflict with the provider evidence below.
+Production application source SHA: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+
+This document is the current operational source of truth for the release scope approved on 2026-08-16.
 
 ## Release scope decision
 
 The owner explicitly deferred these integrations to a future phase:
 
 - WhatsApp;
-- Email;
+- Email sending/provider integration;
 - Google Ads.
 
-They remain catalogued/fail-closed where applicable and are tracked in GitHub issue #153. They do **not** block the current controlled-test release. No real WhatsApp/email audience send and no Google Ads activation were performed to manufacture readiness.
+They are tracked in GitHub issue #153 and do **not** block the current controlled-test release. Existing contracts/fail-closed guards are preserved.
 
-## Current application/runtime truth
+## Application/runtime — PASS
 
-Production source SHA:
+Verified on the production source SHA:
 
-`ce70c66c129b1c629f78e776b023a7fe9cf63569`
-
-Verified on that exact SHA:
-
-- post-merge Quality Gate: PASS (`31932142394`);
-- immutable production deploy: PASS (`31932142398`);
-- official production schema gate: `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=16`;
-- authenticated minute-trigger provision/readback: PASS;
-- real `/tick` smoke: PASS;
+- Quality Gate PASS;
+- immutable production deploy PASS (`31932142398`);
+- production schema gate at migration count 16;
+- authenticated minute Scheduler trigger PASS;
+- real `/tick` smoke PASS;
 - Cloud Run runtime remains fail-closed and scale-to-zero;
-- TOCA Core public MCP facade remains exactly 12 tools;
-- Video/R29 production verifier: PASS (`31932355423`);
-- R29 provider/durable readback verified;
-- one append-only artifact and one transactional Outbox event verified;
-- Audit Ledger verification passed for the R29 production execution;
-- no external publication was executed by the R29 verifier.
+- public TOCA Core facade remains exactly 12 tools;
+- Video/R29 production verifier PASS (`31932355423`);
+- provider/durable readback, Outbox and Audit Ledger checks PASS;
+- no external publication executed by the R29 verifier.
 
-Representative R29 verifier result:
+## Cloud SQL disaster recovery — PASS for tested backup recovery path
 
-- source SHA: `ce70c66c129b1c629f78e776b023a7fe9cf63569`;
-- execution surface: `toca.execute`;
-- execution engine: `executeCoreCapability`;
-- public tool count: `12`;
-- `providerReadbackVerified=true`;
-- `durableReadbackVerified=true`;
-- `artifactRows=1`;
-- `outboxRows=1`;
-- `auditValid=true`;
-- `failClosed=true`;
-- `externalPublicationExecuted=false`.
+Production `toca-mcp-db` remains PostgreSQL 18 in `southamerica-east1`, `RUNNABLE`, with:
 
-## Cloud SQL recovery controls
-
-Production `toca-mcp-db` is PostgreSQL 18 in `southamerica-east1` and has been repeatedly read back as:
-
-- `RUNNABLE`;
 - deletion protection enabled;
 - automated backups enabled;
 - PITR enabled.
 
-### Real isolated restore drill
+### Restore and validation
 
-Final recovery target:
+Final recovery target used:
 
 `toca-mcp-dr-final-31932660953`
 
@@ -70,151 +51,127 @@ Backup:
 
 `projects/toca-mcp-production/backups/05416bd5-6ce8-409f-85f8-c53bdcf0b8b9`
 
-Restore evidence (`31932660953`, artifact `9259793788`):
+Provider evidence:
 
-- backup completed: `2026-08-16T04:27:19.186Z`;
-- restore began: `2026-08-16T06:57:43Z`;
-- target created as PostgreSQL 18, Enterprise, tier `db-g1-small`, `southamerica-east1`;
-- source production instance was not used as the restore target;
-- production readback remained unchanged;
-- backup-based RPO observed at restore start: **9,024 seconds (~2h30m)**.
+- backup end: `2026-08-16T04:27:19.186Z`;
+- restore start: `2026-08-16T06:57:43Z`;
+- backup-based observed RPO: **9,024s (~2h30m)**;
+- restored schema recovered to migration count 16;
+- 21 critical tables validated;
+- critical foreign keys and append-only triggers validated;
+- Audit Ledger verifier completed without an integrity failure on the selected recovery point;
+- measured restore-start-to-validated-data RTO: **496s (~8m16s)**, within the <=60m objective;
+- production remained unchanged throughout the drill.
 
-The target inherited deletion protection from the provider even though the new-target restore requested no deletion protection.
+### Final cleanup — PASS
 
-### Restored-data validation
+After deletion protection was disabled only on the isolated target, run `31933900598` deleted `toca-mcp-dr-final-31932660953` and read back that it no longer exists.
 
-Run `31932980178`, artifact `9259838301`, artifact digest:
+Final cleanup evidence also proved production remained unchanged, deletion-protected, backed up and PITR-enabled.
 
-`sha256:52f70ddc2e807bd61006f1d168db8953fc32c3b9045cbeb9d979eaf3c4313b84`
+Artifact:
 
-Validation executed against the isolated target using the exact deployed production image. It proved:
+- ID `9260108983`;
+- SHA-256 `e6adf99c54418b2eb19a751963e2ebfc5d94e26e609dfc10ad8ca39f3dd6cc9c`.
 
-- recovery migrations `020_content_item_versioning_video.sql` and `021_r29_video_artifacts.sql` applied only to the isolated target;
-- `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=16` on the recovery target;
-- `DR_DATABASE_VALIDATION=PASS migrations=16 critical_tables=21 audit_executions=0`;
-- 21 critical tables readable;
-- critical foreign keys validated;
-- required append-only triggers enabled;
-- Audit Ledger verifier completed without an integrity failure (the selected recovery point contained zero ledger executions);
-- temporary validation job deleted;
-- production remained unchanged, protected, backed up and PITR-enabled.
+No temporary Cloud SQL DR target remains.
 
-Measured recovery time from restore start through schema recovery and validation:
+### RPO caveat
 
-**RTO = 496 seconds (~8m16s)**, within the Foundation RTO objective of 60 minutes.
+The tested drill used the latest successful backup, not a PITR timestamp. Therefore it validates the backup restore path and RTO objective, but does not demonstrate the <=15-minute PITR RPO objective. PITR is enabled and read back in production. A future PITR-specific drill is continuing reliability validation, not a blocker for this release.
 
-The backup drill does **not** prove the <=15-minute RPO objective. The selected successful backup was ~2h30m old at restore start. Production PITR remains enabled; a future PITR-specific drill is required to measure the <=15-minute RPO objective truthfully.
+## Telemetry, SLO and managed alerting — PASS for current operational path
 
-### Remaining DR cleanup only
-
-The current deployer has:
-
-- `cloudsql.instances.get`;
-- `cloudsql.instances.delete`.
-
-It does not have `cloudsql.instances.update` (`31932927957`). The isolated recovery target is still `deletionProtection=true`.
-
-External provider-admin action required:
-
-1. disable deletion protection **only** on `toca-mcp-dr-final-31932660953`;
-2. never alter deletion protection on `toca-mcp-db`;
-3. after the target becomes unprotected, the deployer can delete it and record absence + production readback.
-
-Cloud SQL requires deletion protection to be disabled before an instance can be deleted. This is a cleanup blocker, not a failed restore or failed data-validation blocker.
-
-## Telemetry, SLO and Cloud Monitoring
-
-Application-side reliability signals are deployed and operational:
+Application-side reliability signals are deployed:
 
 - structured JSON logging;
-- RuntimeTelemetry/Prometheus surfaces;
+- RuntimeTelemetry/Prometheus;
 - Foundation daily control;
 - P0/P1/P2 classification;
-- Outbox stale detection;
+- Outbox stalled detection;
 - stale scheduler detection;
 - Audit Ledger integrity verification;
 - SLO/error-budget evaluator.
 
-Fresh IAM/provider readback (`31928759193`) proved the infrastructure-admin identity can now list/create/update/delete Monitoring alert policies and notification channels. The earlier Monitoring-IAM blocker is therefore obsolete.
+### IAM — PASS
 
-However, inventory currently contains:
+Fresh readback proved the infrastructure-admin identity has the required Monitoring permissions and `logging.notificationRules.create`.
 
-- zero notification channels;
-- zero alert policies.
+The previous Logging/Monitoring IAM blocker is closed.
 
-A real attempt to create the first **log-based** Foundation policy (`31932813654`) failed before any policy was created with:
+### Notification channels — PASS
 
-`logging.notificationRules.create` denied.
+Primary owner-approved operations channel:
 
-Google Cloud requires a Logging notification rule for log-based alert policies. The remaining least-privilege predefined role is:
+- `adm@tocadomorcego.com`;
+- channel `projects/toca-mcp-production/notificationChannels/8031185508488706896`.
 
-`roles/logging.configWriter`
+Secondary redundant operations channel:
 
-for:
+- `luizidebook@gmail.com`;
+- channel `projects/toca-mcp-production/notificationChannels/9216772763667438415`.
 
-`toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`
+Both channels are enabled and attached to every permanent Foundation policy below.
 
-After that grant, create only policies backed by existing source signals:
+### Permanent Foundation policies — PASS
 
-- P0 Audit Ledger integrity failure;
-- P1 stalled Outbox;
-- P1 stale scheduler jobs;
-- P1 Foundation daily-control failure.
+Provider readback confirms four enabled, valid policies (`validity=null`):
 
-Do not create duplicate application metrics merely to satisfy the checklist.
+- P0 `TOCA P0 Audit Ledger Integrity` — `1233118609333698263`;
+- P1 `TOCA P1 Foundation Daily Control Failed` — `14464734765997818401`;
+- P1 `TOCA P1 Stale Scheduler Jobs` — `3398047250843043934`;
+- P1 `TOCA P1 Outbox Stalled` — `3398047250843045119`.
 
-### Notification delivery
+All four have both operational channels attached.
 
-No operator notification destination has been approved/configured. No email/webhook/Pub/Sub destination should be invented merely to report PASS.
+### Controlled firing/provider-path proof — PASS
 
-A final managed-delivery PASS requires:
+Run `31934254574` executed a temporary log-based delivery-proof policy after both channels and all four permanent policies were configured.
 
-1. owner-approved operator destination;
-2. minimum managed notification channel;
-3. policy attachment;
-4. safe synthetic firing test;
-5. delivery/readback evidence.
+Observed:
 
-Current external closeout is tracked in issue #154.
+- synthetic structured log emitted after policy creation;
+- log ingestion readback PASS (`DELIVERY_PROOF_LOG=PASS`);
+- 120-second notification-processing window allowed;
+- temporary synthetic policy deleted afterwards;
+- all four permanent policies remained enabled, valid and attached to both channels;
+- provider-path result: `DELIVERY_PROOF_PROVIDER_PATH=PASS`.
 
-## Readiness classification
+Artifact:
 
-### PASS now
+- ID `9260213391`;
+- SHA-256 `af9803d8c9bbb43a8338bbd47ba64a6f61eedbe03922db2bb0479e388ee50575`.
 
-- source/main reconciliation;
-- Quality Gate;
-- build/deploy;
-- production schema gate;
-- authenticated scheduler trigger;
-- Cloud Run runtime fail-closed behavior;
-- 12-tool public Core facade;
-- Video/R29 production execution/readback/audit;
-- Cloud SQL backup/PITR/deletion-protection readback;
+The connected Gmail mailbox did not expose the synthetic alert during the immediate readback window, so this document does **not** claim independent mailbox-level receipt. The provider configuration, firing path, channel bindings and cleanup are nevertheless proven. Mailbox-level verification can be repeated later without changing application readiness.
+
+## Current release classification
+
+### PASS
+
+- application code and Quality Gate;
+- production deploy and schema;
+- scheduler and real `/tick` smoke;
+- fail-closed runtime and 12-tool Core facade;
+- Video/R29 production readback/audit;
+- Cloud SQL backups/PITR/deletion protection;
 - real isolated backup restore;
-- recovered schema migration to current version;
-- critical restored-data validation;
-- measured RTO within objective;
-- telemetry/SLO source code and runtime signals.
+- restored-data validation;
+- measured RTO <=60m;
+- DR cleanup with no temporary target left behind;
+- telemetry/SLO source plane;
+- Monitoring/Logging IAM;
+- two managed operations notification channels;
+- four permanent Foundation alert policies;
+- controlled log-based alert provider-path firing proof.
 
-### Explicitly deferred, non-blocking
+### Explicitly deferred to future scope
 
 - WhatsApp;
-- Email;
+- Email sending/provider integration;
 - Google Ads.
 
 Tracking: #153.
 
-### External hardening still open
-
-- grant `roles/logging.configWriter` to the approved infrastructure-admin identity so log-based policies can materialize;
-- select/approve the real operator notification destination and prove managed delivery;
-- disable deletion protection on the exact temporary DR target `toca-mcp-dr-final-31932660953`, then delete/read back that target;
-- later run a PITR-specific drill if the <=15-minute RPO objective must be provider-validated rather than merely protected by enabled PITR.
-
-Tracking: #145 and #154.
-
 ## Final release statement
 
-The truthful current statement is:
-
-**TOCA OS is ready for controlled real-system tests in the current release scope. Core/runtime/deploy/R29 and the isolated Cloud SQL recovery path have real provider evidence. WhatsApp, Email and Google Ads are intentionally deferred. Full operational hardening is not yet 100% closed because log-based managed alert creation/delivery and deletion of the protected temporary DR target still require explicit provider-admin actions.**
+**TOCA OS is ready for controlled real-system tests in the approved current release scope. No known application, deployment, Cloud SQL cleanup, Monitoring IAM, notification-channel or permanent alert-policy blocker remains. WhatsApp, Email sending/provider integration and Google Ads are intentionally deferred to future implementation. A future PITR-specific RPO drill and optional mailbox-level alert receipt recheck are continuing operational validation, not current release blockers.**

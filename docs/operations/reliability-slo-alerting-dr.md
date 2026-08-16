@@ -1,205 +1,139 @@
 # Foundation v1 — Telemetry, Alerting, SLO and Disaster Recovery
 
-Status: **CODE/RUNTIME + BACKUP-RESTORE RTO VALIDATED; MANAGED ALERT DELIVERY AND PITR-RPO DRILL STILL OPEN**
+Status: **CURRENT RELEASE TELEMETRY/ALERTING + BACKUP-RESTORE RTO OPERATIONALLY VALIDATED**
 
-Current baseline: `main@ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
 
 Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md` and `docs/operations/foundation-reliability-provider-evidence.md`.
 
-## Existing telemetry and evidence surfaces
+## Telemetry and SLO source plane
 
-Foundation v1 has:
+Foundation v1 includes:
 
 - structured JSON logging;
-- in-process `RuntimeTelemetry` counters/observations;
-- Prometheus rendering;
-- immutable Audit Ledger with integrity verification;
-- append-only `operational_signals` persisted with governed audit transitions;
+- RuntimeTelemetry/Prometheus;
+- immutable Audit Ledger verification;
+- append-only `operational_signals`;
 - durable Workflow, Approval, Transactional Outbox and EventRecord persistence;
-- Cloud SQL automated backups, PITR and deletion protection;
-- provider read-back requirements for governed external side effects;
-- daily reliability control and deterministic incident/SLO evaluation.
+- Foundation daily control;
+- deterministic SLO/error-budget evaluation;
+- canonical P0/P1/P2 severity classification.
 
-## Foundation v1 SLOs
+## Foundation objectives
 
-- Core governed request availability: target >=99.9%, rolling 30d with 1h burn windows, sourced from HTTP/Core execution outcome telemetry + audit.
-- Managed scheduler tick success: target >=99.5%, rolling 30d with 1h burn windows, sourced from daemon tick telemetry.
-- Verified terminal external writes: 100% invariant for every write, sourced from provider read-back + Audit Ledger.
-- Oldest pending Outbox age: <=300s continuously, sourced from the Transactional Outbox store.
-- Audit Ledger integrity: 100% valid invariant, continuous/daily verification by the ledger verifier.
-- Latest successful Cloud SQL backup: <=36h old, checked continuously/daily from Cloud SQL backup metadata.
-- Cloud SQL PITR: enabled, checked continuously/daily from Cloud SQL instance metadata.
-- Restore drill evidence: <=90d old, verified quarterly from the DR evidence bundle.
+Operational objectives remain:
 
-An external provider timeout/ambiguous outcome may reduce availability but must never become an unverified success.
+- Core governed request availability >=99.9%;
+- managed scheduler tick success >=99.5%;
+- verified terminal external writes = 100% invariant;
+- oldest pending Outbox age <=300s;
+- Audit Ledger integrity = 100% valid invariant;
+- latest successful Cloud SQL backup <=36h old;
+- Cloud SQL PITR enabled;
+- restore-drill evidence <=90d old;
+- PostgreSQL recovery RTO <=60m;
+- PostgreSQL PITR RPO objective <=15m.
 
-## Alert severity
+No ambiguous provider write may be converted into an unverified success.
 
-### P0
+## Managed alerting — operationally configured
 
-Immediate correctness/integrity or uncontrolled-side-effect risk, including:
+The previous Monitoring/Logging IAM blockers are closed.
 
-- Audit Ledger integrity failure;
-- external-write success without required provider read-back;
-- PITR unexpectedly disabled;
-- high error-budget burn rate;
-- wrong provider target/account readback;
-- cross-tenant/approval-binding invariant failure.
+Operational channels:
 
-Response: fail closed, preserve evidence, identify blast radius and reconcile provider truth before any ambiguous retry.
+- primary `adm@tocadomorcego.com`;
+- secondary `luizidebook@gmail.com`.
 
-### P1
-
-Service degradation or recovery-risk threshold exceeded, including:
-
-- SLO below target without P0 burn threshold;
-- Outbox oldest pending work >300s;
-- backup age >36h or missing backup evidence;
-- stale scheduler/process work;
-- provider readback/reconciliation backlog.
-
-### P2
-
-Maintenance/reliability debt, including stale restore-drill evidence or non-critical telemetry/provider-read degradation.
-
-## Error budget
-
-For ratio SLO target `T`:
-
-`permitted failure ratio = 1 - T`
-
-`error budget fraction consumed = observed failure ratio / permitted failure ratio`
-
-No-traffic windows return no invented green result.
-
-## Alert delivery architecture
-
-Application code owns deterministic classification and source evidence. Cloud Monitoring/Logging owns managed incident/notification delivery. Do not create a parallel alert daemon.
-
-Existing source signals are sufficient for the first managed policies:
+Permanent enabled/valid policies:
 
 - P0 Audit Ledger integrity failure;
-- P1 stalled Outbox;
+- P1 Foundation daily-control failure;
 - P1 stale scheduler jobs;
-- P1 Foundation daily-control failure.
+- P1 stalled Outbox.
 
-Fresh provider evidence shows Monitoring alert-policy/channel IAM is now available. A first real log-based policy create was rejected only because `logging.notificationRules.create` is missing. The required predefined role is `roles/logging.configWriter` for the approved infrastructure-admin identity.
+All four policies have both channels attached.
 
-There are currently zero managed notification channels. A real operator destination must be explicitly approved; do not invent an email/webhook merely to report PASS.
+Controlled provider-path proof run `31934254574` created a temporary log-based policy, emitted a matching structured Cloud Run log, read back ingestion, allowed a notification-processing window, deleted the temporary policy and then re-read all permanent policies as enabled/valid with both channels.
 
-## Disaster recovery objectives
+Evidence:
 
-Foundation objectives remain:
+- `DELIVERY_PROOF_LOG=PASS`;
+- `DELIVERY_PROOF_PROVIDER_PATH=PASS`;
+- artifact `9260213391`;
+- SHA-256 `af9803d8c9bbb43a8338bbd47ba64a6f61eedbe03922db2bb0479e388ee50575`.
 
-- **RPO <=15 minutes** for PostgreSQL-governed state when PITR is used;
-- **RTO <=60 minutes** to restore the database/service execution boundary to a controlled fail-closed state.
+Independent mailbox-level receipt was not visible through the connected Gmail during the immediate observation window, so it is not claimed as evidence. The managed provider configuration and firing path are proven.
 
-## Executed backup restore drill
+## Disaster recovery objectives and evidence
 
-A real isolated restore was executed on 2026-08-16. Production was never replaced.
+A real isolated backup restore was executed without restoring over production.
 
-Recovery target:
+Recovery target used:
 
 `toca-mcp-dr-final-31932660953`
-
-Backup end:
-
-`2026-08-16T04:27:19.186Z`
-
-Restore start:
-
-`2026-08-16T06:57:43Z`
 
 Observed backup-based RPO:
 
 **9,024s (~2h30m)**.
 
-Restored-data validation run `31932980178` used the exact deployed application image and proved:
+Restored-data validation proved:
 
-- schema recovered to migration count 16;
+- current migration count 16;
 - 21 critical tables readable;
 - critical foreign keys validated;
 - append-only triggers enabled;
-- Audit Ledger verifier completed without an integrity failure;
-- production unchanged;
-- validation job cleaned up.
+- Audit Ledger verifier completed without an integrity failure on the selected recovery point;
+- production unchanged.
 
 Measured restore-start-to-validated-data RTO:
 
 **496s (~8m16s)**.
 
-Therefore the tested **RTO objective passes**.
+Therefore the tested backup recovery path satisfies the <=60m RTO objective.
 
-The backup-based drill does **not** validate <=15-minute RPO because the selected backup was older than that objective. PITR remains enabled in production. A PITR-specific drill is required before claiming measured <=15-minute RPO.
+## DR cleanup — PASS
 
-## Recovery priority
+Run `31933900598` deleted the isolated target after deletion protection was disabled only for that target.
 
-Recovery order remains:
+Readback proved:
 
-1. approved repository/release identity;
-2. Cloud SQL recovery point;
-3. migrations/schema compatibility;
-4. Audit Ledger integrity;
-5. Approval/Workflow/Outbox consistency;
-6. EventRecord/CRM state;
-7. private Core/MCP fail-closed runtime;
-8. scheduler/timers without provider write enablement;
-9. provider READ/reconciliation;
-10. provider WRITE capability-by-capability only after read-back readiness is restored.
+- temporary target absent;
+- production still `RUNNABLE`;
+- production deletion protection enabled;
+- automated backups enabled;
+- PITR enabled.
 
-## DR safety boundaries
+No temporary DR instance remains.
 
-- never restore over the production primary during a drill;
-- never disable production deletion protection merely for testing;
-- never grant DR mutation permissions to the normal runtime identity;
-- isolate temporary restore targets;
-- prove production readback before/after;
-- delete drill targets after evidence capture.
+## RPO caveat
 
-The current validated target inherited deletion protection. The deployer has `cloudsql.instances.delete` but lacks `cloudsql.instances.update`. Therefore the final cleanup requires an administrator to disable deletion protection **only** on `toca-mcp-dr-final-31932660953`; after that, existing automation can delete/read back the target.
+The backup-based drill does not demonstrate the <=15-minute RPO objective because it did not restore to a PITR timestamp. Production PITR is enabled and verified. A future PITR-specific drill should measure the <=15m objective directly; that is continuing reliability validation rather than a current release blocker.
 
 ## Incident mode for ambiguous provider writes
 
 After restart, timeout or partial failure:
 
-- do not blindly retry an external mutation;
-- use durable idempotency/execution/approval descriptors and provider identifiers;
-- perform provider read-back/reconciliation first;
-- repair local state only through the approved reconciliation path;
-- if provider state proves no mutation happened and approval/idempotency still permit execution, use the bounded governed retry;
+- do not blindly retry external mutations;
+- use durable idempotency/execution/approval descriptors;
+- reconcile provider truth first;
+- repair local state only through approved reconciliation paths;
+- execute bounded governed retry only when provider truth proves the mutation did not happen and approval/idempotency still permit it;
 - otherwise preserve ambiguity and escalate.
-
-## Daily checks
-
-The operating loop should continue to inspect:
-
-- Core health/availability;
-- scheduler tick success/last success;
-- Outbox pending count/oldest age;
-- Audit Ledger integrity;
-- approvals/workflows exceeding expected duration;
-- ambiguous provider readback/reconciliation backlog;
-- backup age and PITR state;
-- provider credential/scope/account-binding readiness only for capabilities intended to run that day.
 
 ## Current exit state
 
-PASS:
+Current release reliability path is operationally closed for controlled real-system tests:
 
-- deterministic SLO evaluator;
-- runtime source telemetry;
-- Foundation daily control;
-- real backup restore;
-- recovered schema/critical-data validation;
-- measured RTO <=60m.
+- telemetry source plane PASS;
+- SLO evaluator PASS;
+- Monitoring/Logging IAM PASS;
+- managed notification channels PASS;
+- four permanent Foundation policies PASS;
+- controlled alert provider-path firing proof PASS;
+- real isolated backup restore PASS;
+- restored-data validation PASS;
+- RTO <=60m PASS;
+- DR cleanup PASS.
 
-Open external hardening:
-
-- grant `roles/logging.configWriter` for log-based policies;
-- approve/configure a real operator notification channel and prove delivery;
-- remove deletion protection on the exact temporary DR target and delete it;
-- execute a future PITR-specific drill before claiming measured <=15m RPO.
-
-WhatsApp, Email and Google Ads are intentionally deferred by the owner (#153) and are outside this reliability exit gate.
-
-Current release classification: **ready for controlled real-system tests in the approved current scope; not yet 100% provider-hardened until the external items above are closed.**
+WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. A future PITR-specific RPO drill and optional mailbox-level receipt recheck are continuing operational validation, not current release blockers.
