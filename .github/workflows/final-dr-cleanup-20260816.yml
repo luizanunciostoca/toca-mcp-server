@@ -1,0 +1,71 @@
+name: Final DR Cleanup 2026-08-16
+
+on:
+  push:
+    branches: [ops/final-external-closeout-20260816]
+    paths: ['.github/workflows/final-dr-cleanup-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-db
+  TARGET_INSTANCE: toca-mcp-dr-final-31932660953
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Delete only the validated temporary recovery target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          SOURCE_BEFORE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_BEFORE" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+          printf '%s' "$SOURCE_BEFORE" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled}}' >/tmp/source-before.json
+
+          if TARGET="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+            printf '%s' "$TARGET" | jq -e --arg t "$TARGET_INSTANCE" '.name==$t and .name!="toca-mcp-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1"' >/dev/null
+            DP="$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$TARGET")"
+            echo "TARGET_DELETION_PROTECTION=$DP"
+            test "$DP" = false
+            gcloud sql instances delete "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --quiet
+          else
+            echo 'TARGET_ALREADY_ABSENT=true'
+          fi
+
+          for _ in $(seq 1 30); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then break; fi
+            sleep 5
+          done
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo 'DR_TARGET_DELETE_READBACK_FAILED' >&2
+            exit 90
+          fi
+
+          SOURCE_AFTER="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_AFTER" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+          printf '%s' "$SOURCE_AFTER" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled}}' >/tmp/source-after.json
+          cmp -s /tmp/source-before.json /tmp/source-after.json
+
+          jq -n --arg target "$TARGET_INSTANCE" --arg source "$SOURCE_INSTANCE" --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schemaVersion:1,targetInstance:$target,targetDeleted:true,sourceInstance:$source,productionUnchanged:true,productionDeletionProtection:true,backupEnabled:true,pitrEnabled:true,verifiedAt:$verifiedAt}' > evidence/dr-cleanup.json
+          cat evidence/dr-cleanup.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: final-dr-cleanup-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
