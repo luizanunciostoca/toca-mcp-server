@@ -11,6 +11,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 original_normalize_runtime_resolver = module.normalize_runtime_resolver
+original_normalize_paid_media_test = module.normalize_paid_media_test
 
 
 def normalize_runtime_resolver() -> None:
@@ -24,5 +25,28 @@ def normalize_runtime_resolver() -> None:
     path.write_text(text.replace(old, new, 1))
 
 
+def normalize_paid_media_test() -> None:
+    original_normalize_paid_media_test()
+    path = Path('test/google-ads-paid-media.test.ts')
+    text = path.read_text()
+    text = text.replace(": ReturnType<GoogleAdsApiClient['listAccessibleCustomers']>", '')
+    text = text.replace(": ReturnType<GoogleAdsApiClient['search']>", '')
+    text = text.replace(": ReturnType<GoogleAdsApiClient['mutate']>", '')
+    old = """                  id: '456',
+                  resourceName: 'customers/9999999999/campaigns/456',
+                  status: 'PAUSED',
+"""
+    new = """                  id: '456',
+                  resourceName: 'customers/9999999999/campaigns/456',
+                  name: 'Cross Account Campaign',
+                  status: 'PAUSED',
+                  campaignBudget: 'customers/9999999999/campaignBudgets/789',
+"""
+    if old not in text:
+        raise RuntimeError('cross-account readback campaign anchor missing')
+    path.write_text(text.replace(old, new, 1))
+
+
 module.normalize_runtime_resolver = normalize_runtime_resolver
+module.normalize_paid_media_test = normalize_paid_media_test
 module.main()
