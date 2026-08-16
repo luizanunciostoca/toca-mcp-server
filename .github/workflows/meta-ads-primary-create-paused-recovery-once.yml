@@ -1,0 +1,77 @@
+name: Meta Ads Primary CREATE_PAUSED Recovery One-Shot
+
+on:
+  push:
+    branches: [ops/meta-ads-primary-create-paused-311793958882290]
+    paths: ['.github/workflows/meta-ads-primary-create-paused-recovery-once.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      SOURCE_JOB_NAME: toca-meta-ads-exec-31920903042-1
+      SOURCE_EXECUTION_NAME: toca-meta-ads-exec-31920903042-1-8sdch
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Assert recovery is read-only repository delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='0f812077c84cea92547352320e2cc859ec832003'
+          test "$(git merge-base HEAD "$BASE")" = "$BASE"
+          git diff --name-only "$BASE" HEAD | grep -Fx '.github/workflows/meta-ads-primary-create-paused-once.yml'
+          git diff --name-only "$BASE" HEAD | grep -Fx '.github/workflows/meta-ads-primary-create-paused-recovery-once.yml'
+          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = '2'
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Recover exact execution logs read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${SOURCE_JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=30m \
+            --limit=500 \
+            --order=asc \
+            --format=json > /tmp/raw.json
+
+          jq --arg execution "$SOURCE_EXECUTION_NAME" '[.[] | {
+            timestamp,
+            severity,
+            textPayload,
+            jsonPayload,
+            executionName: (.labels."run.googleapis.com/execution_name" // null)
+          } | select(.executionName == $execution or .executionName == null)]' /tmp/raw.json \
+            | sed -E 's/(access_token[=:])[A-Za-z0-9._-]+/\1[REDACTED]/g; s/(Bearer )[A-Za-z0-9._-]+/\1[REDACTED]/g' \
+            > /tmp/sanitized.json
+
+          test "$(jq 'length' /tmp/sanitized.json)" -gt 0
+          echo 'META_ADS_CREATE_PAUSED_RECOVERY_LOG_BEGIN'
+          cat /tmp/sanitized.json
+          echo 'META_ADS_CREATE_PAUSED_RECOVERY_LOG_END'
+
+          jq -r '.[] | [.timestamp, .severity, (.textPayload // .jsonPayload.message // .jsonPayload.error.message // "")] | @tsv' /tmp/sanitized.json \
+            | grep -E 'META_ADS|Meta|meta|campaign|ad set|adset|creative|adId|campaignId|error|ERROR|failed|FAILED|PAUSED|WITH_ISSUES|delivery|provider' \
+            || true
