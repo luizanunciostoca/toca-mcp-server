@@ -8,6 +8,12 @@ import {
   type MetaAdsWriteGuardrails,
 } from './providers/meta-ads/meta-ads-controlled-write.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
+import { validateMetaAdsAdWriteReadiness } from './providers/meta-ads/meta-ads-provider-preflight.js';
+import {
+  evaluateMetaAdsProviderSmokeReadiness,
+  isMetaAdsPixelAssignedToAccount,
+  type MetaAdsProviderSmokeSnapshot,
+} from './providers/meta-ads/meta-ads-smoke-readiness.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
 const config = loadConfig(process.env);
@@ -50,12 +56,20 @@ async function preparePlan(): Promise<{
   readonly geo: Readonly<Record<string, unknown>>;
   readonly sourceCreativeId: string;
   readonly account: Readonly<Record<string, unknown>>;
+  readonly pixelAccess: Readonly<Record<string, unknown>>;
+  readonly writeReadiness: Awaited<ReturnType<typeof validateMetaAdsAdWriteReadiness>>;
   readonly grantedScopes: readonly string[];
 }> {
   const grantedScopes = await verifyPermissions();
   const account = await verifyAccount();
+  const pixelAccess = await verifyPixelAccess();
   const geoTarget = canonicalMorroCustomLocation();
   const sourceCreative = await resolveSourceCreative();
+  const writeReadiness = await validateMetaAdsAdWriteReadiness(api, {
+    accountId,
+    creativeId: sourceCreative.id,
+    validationId: `prepare-${smokeId}`,
+  });
 
   const now = new Date();
   const start = new Date(now.getTime() + 30 * 60 * 1000);
@@ -108,6 +122,8 @@ async function preparePlan(): Promise<{
     geo: geoEvidence(geoTarget),
     sourceCreativeId: sourceCreative.id,
     account,
+    pixelAccess,
+    writeReadiness,
     grantedScopes,
   };
 }
@@ -121,11 +137,7 @@ async function executePlan(): Promise<{
   readonly creativeIds: readonly string[];
   readonly adIds: readonly string[];
   readonly status: 'PAUSED';
-  readonly providerVerification: {
-    readonly campaign: Readonly<Record<string, unknown>>;
-    readonly adSet: Readonly<Record<string, unknown>>;
-    readonly ads: readonly Readonly<Record<string, unknown>>[];
-  };
+  readonly providerVerification: MetaAdsProviderSmokeSnapshot;
 }> {
   if (!config.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
   const approvedSha256 = requiredEnv('META_ADS_SMOKE_APPROVED_SHA256');
@@ -142,6 +154,13 @@ async function executePlan(): Promise<{
 
   await verifyPermissions();
   await verifyAccount();
+  await verifyPixelAccess();
+  const sourceCreative = await resolveSourceCreative();
+  await validateMetaAdsAdWriteReadiness(api, {
+    accountId,
+    creativeId: sourceCreative.id,
+    validationId: `execute-${smokeId}`,
+  });
   const service = new MetaAdsControlledWriteService(provider, guardrailsFor(approvedSha256));
   service.prepare(plan);
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
@@ -168,21 +187,11 @@ async function executePlan(): Promise<{
 
   try {
     const result = await service.createPaused(plan, approvedSha256);
-    const campaign = asRecord(
-      await api.get(result.campaignId, { fields: 'id,name,status,effective_status' }),
+    const providerVerification = await reconcileProviderPaused(
+      result.campaignId,
+      result.adSetId,
+      result.adIds,
     );
-    const adSet = asRecord(
-      await api.get(result.adSetId, { fields: 'id,name,status,effective_status' }),
-    );
-    const ads = await Promise.all(
-      result.adIds.map(async (id) =>
-        asRecord(await api.get(id, { fields: 'id,name,status,effective_status' })),
-      ),
-    );
-
-    assertProviderPaused('campaign', campaign);
-    assertProviderPaused('adset', adSet);
-    for (const ad of ads) assertProviderPaused('ad', ad);
 
     await pool.query(
       `insert into audit_events
@@ -205,9 +214,7 @@ async function executePlan(): Promise<{
           creativeIds: result.creativeIds,
           adIds: result.adIds,
           status: result.status,
-          campaign,
-          adSet,
-          ads,
+          ...providerVerification,
         }),
       ],
     );
@@ -216,7 +223,7 @@ async function executePlan(): Promise<{
       smokeId,
       campaignName: plan.campaign.name,
       ...result,
-      providerVerification: { campaign, adSet, ads },
+      providerVerification,
     };
   } catch (error) {
     await pool.query(
@@ -298,13 +305,101 @@ async function verifyPermissions(): Promise<readonly string[]> {
 
 async function verifyAccount(): Promise<Readonly<Record<string, unknown>>> {
   const account = asRecord(
-    await api.get(`act_${accountId}`, { fields: 'id,name,currency,account_status' }),
+    await api.get(`act_${accountId}`, { fields: 'id,name,currency,account_status,business' }),
   );
   if (scalarString(account.currency) !== currency)
     throw new Error('META_ADS_SMOKE_CURRENCY_MISMATCH');
   if (!scalarString(account.id).endsWith(accountId))
     throw new Error('META_ADS_SMOKE_ACCOUNT_ID_MISMATCH');
+  if (scalarString(account.account_status) !== '1')
+    throw new Error('META_ADS_SMOKE_ACCOUNT_NOT_ACTIVE');
   return account;
+}
+
+async function verifyPixelAccess(): Promise<Readonly<Record<string, unknown>>> {
+  const businessesResponse = asRecord(
+    await api.get('me/businesses', { fields: 'id,name', limit: '200' }),
+  );
+  const businesses = Array.isArray(businessesResponse.data)
+    ? businessesResponse.data.map(asRecord)
+    : [];
+
+  for (const business of businesses) {
+    const businessId = scalarString(business.id);
+    if (!businessId) continue;
+
+    let pixelsResponse: Record<string, unknown>;
+    try {
+      pixelsResponse = asRecord(
+        await api.get(`${businessId}/adspixels`, {
+          fields: 'id,name,is_unavailable',
+          limit: '200',
+        }),
+      );
+    } catch {
+      continue;
+    }
+
+    const pixels = Array.isArray(pixelsResponse.data) ? pixelsResponse.data.map(asRecord) : [];
+    const pixel = pixels.find((candidate) => scalarString(candidate.id) === pixelId);
+    if (!pixel) continue;
+    if (pixel.is_unavailable === true) throw new Error('META_ADS_SMOKE_PIXEL_UNAVAILABLE');
+
+    const assignedResponse = asRecord(
+      await api.get(`${pixelId}/adaccounts`, {
+        business: businessId,
+        fields: 'id,account_id,name,account_status',
+        limit: '200',
+      }),
+    );
+    const assignedAccounts = Array.isArray(assignedResponse.data)
+      ? assignedResponse.data.map(asRecord)
+      : [];
+    if (!isMetaAdsPixelAssignedToAccount(assignedAccounts, accountId)) {
+      throw new Error('META_ADS_SMOKE_PIXEL_ACCOUNT_ACCESS_REQUIRED');
+    }
+
+    return {
+      pixelId,
+      pixelName: scalarString(pixel.name),
+      businessId,
+      businessName: scalarString(business.name),
+      accountId,
+      assigned: true,
+    };
+  }
+
+  throw new Error('META_ADS_SMOKE_PIXEL_NOT_FOUND_IN_ACCESSIBLE_BUSINESS');
+}
+
+async function reconcileProviderPaused(
+  campaignId: string,
+  adSetId: string,
+  adIds: readonly string[],
+): Promise<MetaAdsProviderSmokeSnapshot> {
+  const maxAttempts = 12;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const campaign = asRecord(
+      await api.get(campaignId, { fields: 'id,name,status,effective_status,issues_info' }),
+    );
+    const adSet = asRecord(
+      await api.get(adSetId, { fields: 'id,name,status,effective_status,issues_info' }),
+    );
+    const ads = await Promise.all(
+      adIds.map(async (id) =>
+        asRecord(
+          await api.get(id, {
+            fields: 'id,name,status,effective_status,issues_info,failed_delivery_checks',
+          }),
+        ),
+      ),
+    );
+    const snapshot: MetaAdsProviderSmokeSnapshot = { campaign, adSet, ads };
+    const readiness = evaluateMetaAdsProviderSmokeReadiness(snapshot);
+    if (readiness.state === 'READY') return snapshot;
+    if (attempt < maxAttempts) await delay(5_000);
+  }
+  throw new Error('META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT');
 }
 
 function canonicalMorroCustomLocation(): Readonly<Record<string, unknown>> {
@@ -350,6 +445,7 @@ async function resolveSourceCreative(): Promise<{
   const spec = { ...selected.spec };
   delete spec.page_id;
   delete spec.instagram_actor_id;
+  delete spec.instagram_user_id;
   return { id: selected.id, objectStorySpec: spec };
 }
 
@@ -371,14 +467,6 @@ function guardrailsFor(approvedRequestSha256: string): MetaAdsWriteGuardrails {
     allowedInstagramActorId: instagramActorId,
     approvedRequestSha256,
   };
-}
-
-function assertProviderPaused(kind: string, entity: Readonly<Record<string, unknown>>): void {
-  const status = scalarString(entity.status);
-  const effective = scalarString(entity.effective_status);
-  if (status !== 'PAUSED') throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_NOT_PAUSED`);
-  if (effective === 'ACTIVE')
-    throw new Error(`META_ADS_SMOKE_${kind.toUpperCase()}_EFFECTIVE_ACTIVE`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -428,4 +516,8 @@ function parsePositiveNumber(value: string): number {
 
 function normalizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
