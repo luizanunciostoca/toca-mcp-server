@@ -12,7 +12,7 @@ The machine-readable sources are:
 - `src/governance/route-catalog.ts`: R01-R32, owners, priorities, subflows and terminal states;
 - `src/governance/capability-ids.ts`: requested capability identifiers by route plus transversal
   and existing technical identifiers;
-- `src/governance/capability-catalog.ts`: normalized metadata for all 758 catalog entries;
+- `src/governance/capability-catalog.ts`: normalized metadata for all 783 catalog entries;
 - `src/registry.ts`: the intentionally smaller set exposed by the running MCP server.
 
 Catalog presence does not imply execution. `execution_surface: CATALOG_ONLY` and
@@ -48,6 +48,13 @@ canonical integrity.
 R28 retains its stable route identifier and historical name for compatibility, while the Paid Media
 execution model is extended to Google Ads through technical capabilities in the same route. This
 is deliberately not a new R33 and does not create a second paid-media governance subsystem.
+
+R29 remains the canonical content lifecycle. Its content versioning, variant, channel adaptation,
+localization, validation, EventRecord/experiment linkage and repurposing technical capabilities are
+implemented as internal-engine extensions. Short-form video production remains an R20 integration
+layer with deterministic briefs, storyboards, scripts, asset selection, timeline, accessibility,
+rights, quality and approved artifact export. Neither extension adds a route, a public MCP tool, a
+parallel scheduler or an external publication path.
 
 ## Capability lifecycle
 
