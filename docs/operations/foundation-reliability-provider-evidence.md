@@ -1,153 +1,185 @@
 # Foundation v1 Reliability — Provider Evidence
 
-Status: **CODE/RECOVERY CONTROLS VALIDATED; MONITORING DELIVERY AND CLOUD SQL RESTORE DRILL BLOCKED BY CURRENT IAM**
+Status: **TELEMETRY/SLO PASS; REAL DR RESTORE + VALIDATION PASS; MANAGED ALERTING AND DR CLEANUP REQUIRE EXTERNAL ADMIN ACTIONS**
 
-Baseline repository main for this closeout: `95ce5d72321509a91989f0e76830e5a530e20135`.
+Current application baseline: `main@ce70c66c129b1c629f78e776b023a7fe9cf63569`.
 
-This document records executed GCP evidence. It intentionally distinguishes provider state that was actually verified from operations that cannot be performed with the currently approved service identities.
+Authoritative release snapshot: `docs/operations/controlled-test-readiness-2026-08-16.md`.
 
-## Cloud SQL recovery controls — verified
+This document supersedes earlier same-day blocker statements when later provider runs produced stronger evidence.
 
-GCP readback run `31914009163` executed with Workload Identity Federation and two existing service identities.
+## Production/runtime evidence
 
-The infrastructure-admin identity authenticated successfully but could not read `toca-mcp-db`; the provider returned that the instance was not visible or the identity was not authorized.
+Post-merge evidence on the exact current main SHA:
 
-The workflow then reauthenticated as `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`. That identity successfully verified the production Cloud SQL instance and required recovery controls:
+- Quality Gate `31932142394`: PASS;
+- production deploy `31932142398`: PASS;
+- production schema gate: `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=16`;
+- authenticated minute trigger readback/smoke: PASS;
+- runtime/MCP fail-closed behavior preserved;
+- R29 production verification `31932355423`: PASS;
+- public MCP facade remains 12 tools;
+- R29 provider/durable readback, outbox, audit and fail-closed checks passed;
+- R29 verifier executed no external publication.
 
-- instance `toca-mcp-db` is `RUNNABLE`;
-- database version is PostgreSQL 18;
-- deletion protection is enabled;
-- automated backups are enabled;
-- point-in-time recovery is enabled;
-- at least one successful backup exists;
-- latest successful backup age is within the Foundation objective of 36 hours.
+## Telemetry and SLO source plane — PASS
 
-Sanitized evidence artifact from run `31914009163`:
+Deployed reliability surfaces include:
 
-- artifact id: `9254448378`;
-- archive digest: `sha256:50989398010a24c17356f641bcb06ebd82e43a27833421981ff35dd1499e26f8`.
+- structured JSON logging;
+- RuntimeTelemetry counters/observations;
+- Prometheus rendering;
+- Foundation daily control;
+- Outbox stalled detection;
+- stale scheduler detection;
+- Audit Ledger integrity verification;
+- deterministic SLO/error-budget evaluation;
+- canonical P0/P1/P2 classification.
 
-Historical infrastructure run `31844320778` independently verified backup/PITR before the completed provider-managed storage shrink, so the current deployer readback is consistent with the existing infrastructure-control history.
+The application preserves source evidence even when managed notification delivery is unavailable.
 
-## Cloud Monitoring alert transport — IAM blocked
+## Cloud Monitoring — previous IAM blocker partially closed
 
-The same run performed read-only REST inventory of Cloud Monitoring notification channels and alert policies.
+Older runs showed HTTP 403 for Monitoring inventory. That state is obsolete.
 
-Results:
+Fresh IAM/provider readback `31928759193` proved the infrastructure-admin identity now has the required Monitoring alert-policy and notification-channel edit permissions. Provider inventory returned HTTP 200.
 
-- infrastructure-admin notification channels: HTTP 403;
-- infrastructure-admin alert policies: HTTP 403;
-- deployer notification channels: HTTP 403;
-- deployer alert policies: HTTP 403.
+Current inventory:
 
-Therefore Foundation code can classify P0/P1/P2 incidents and preserve telemetry/evidence, but no current approved GitHub/GCP service identity can inventory, configure or test the managed Cloud Monitoring delivery plane.
+- notification channels: `0`;
+- alert policies: `0`.
 
-No broader Monitoring role is granted by this closeout merely to mark the checklist complete. Alert delivery remains an explicit provider-admin IAM blocker until a separately authorized identity grants the minimum Monitoring permissions and the resulting channel/policies are read back and tested.
+### Log-based policy creation blocker
 
-### 2026-08-16 telemetry → alert routing → SLO revalidation
+Run `31932813654` attempted to create the first Foundation log-based alert policy. The provider rejected the first create before any policy was materialized:
 
-Revalidated against production `main@81f6f84df6b725bfc5994c2d1582241b7936c614` using only read-only Cloud Monitoring inventory and `projects.testIamPermissions`.
+`Permission 'logging.notificationRules.create' denied`
 
-Current production deployment evidence already proves:
+Google Cloud creates a Logging notification rule behind a log-based alerting policy. The remaining predefined least-privilege role for this requirement is:
 
-- immutable image deployment from the current main SHA;
-- official production migration gate passed with `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=14`;
-- authenticated minute trigger smoke passed;
-- Cloud Run runtime and MCP scheduler surface remained fail-closed and scale-to-zero;
-- Foundation daily control telemetry and SLO classification code are deployed.
+`roles/logging.configWriter`
 
-A fresh Monitoring inventory re-run of `31914009163` again returned HTTP 403 for both notification-channel and alert-policy inventory under both existing operations identities.
+Principal:
 
-Read-only IAM probe `31924349410` then tested the infrastructure-administrator identity. `projects.testIamPermissions` returned HTTP 200 with none of the requested permissions granted, including:
+`toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`
 
-- `resourcemanager.projects.setIamPolicy`;
-- `monitoring.notificationChannels.list`;
-- `monitoring.notificationChannels.create`;
-- `monitoring.alertPolicies.list`;
-- `monitoring.alertPolicies.create`.
+The already-granted Monitoring roles should be preserved. Do not grant broad Logging Admin, Project Editor or Owner merely to close this control.
 
-Sanitized evidence:
+After the Logging grant, create only the minimum policies backed by existing source signals:
 
-- run: `31924349410`;
-- artifact id: `9257366328`;
-- artifact archive digest: `sha256:689d196f5a89f48f0e82febc08da99897df0d04807b80cd82c412b3605f85e66`.
+- P0 Audit Ledger integrity failure;
+- P1 stalled Outbox;
+- P1 stale scheduler jobs;
+- P1 Foundation daily-control failure.
 
-Read-only IAM probe `31924394406` repeated the project-IAM boundary check for both operations identities. Results:
+A synthetic policy/event may be used transiently for incident-generation proof, but must be deleted after the smoke.
 
-- `toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`: `resourcemanager.projects.setIamPolicy` not granted;
-- `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`: `resourcemanager.projects.setIamPolicy` not granted;
-- deployer: `monitoring.notificationChannels.list/create` not granted;
-- deployer: `monitoring.alertPolicies.list/create` not granted.
+### Managed notification delivery blocker
 
-Sanitized evidence:
+There is no approved notification destination and no existing managed channel.
 
-- run: `31924394406`;
-- artifact id: `9257378884`;
-- artifact archive digest: `sha256:e10f1e86789e00dce02e6a8bcbeac72964c4dc563b1f70363d6c073c03e63cc3`.
+A delivery PASS requires an owner-approved operator destination, followed by:
 
-This proves there is no authorized self-service path from the existing GitHub Workload Identity identities to grant the missing Monitoring permissions. The block is administrative at project IAM, not application code.
+1. create/reuse the minimum managed notification channel;
+2. attach it to the approved P0/P1 policies;
+3. safely fire a synthetic signal;
+4. prove the incident reached the managed destination;
+5. store provider readback evidence.
 
-Minimum provider-admin action required on project `toca-mcp-production`:
+No email/webhook/Pub/Sub target should be invented merely to report PASS.
 
-- grant `roles/monitoring.notificationChannelEditor` to `serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`;
-- grant `roles/monitoring.alertPolicyEditor` to `serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`.
+## Cloud SQL recovery controls — PASS
 
-Do not grant either role to the Cloud Run runtime service account. Do not grant broad `roles/monitoring.admin`, project Owner, project Editor, or service-account-key permissions merely to close alerting.
+Production `toca-mcp-db` has repeatedly been read back as:
 
-After that external IAM grant, the required completion sequence is deterministic:
+- `RUNNABLE`;
+- PostgreSQL 18;
+- deletion protection enabled;
+- automated backups enabled;
+- PITR enabled.
 
-1. inventory existing managed notification channels and reuse the approved operator channel if one exists;
-2. create only the minimum Cloud Monitoring alert policies needed for Foundation daily-control failure, stalled Outbox, stale scheduler/workflow execution, Audit Ledger integrity failure, Cloud Run/runtime unavailability and schema-migration deployment failure where the source signal exists;
-3. preserve the canonical P0/P1/P2 classification and do not duplicate application metrics;
-4. execute a safe firing test and prove the incident reaches the approved managed channel;
-5. read back channels and policies and store provider evidence;
-6. only then change the truthful status from `BLOCKED_IAM` to `PASS` for alert routing.
+## Real isolated restore drill — PASS for backup recovery path
 
-Until those provider-admin steps are possible, telemetry and SLO evaluation are **PASS**, while managed alert policy, notification channel and firing-test delivery remain **BLOCKED_IAM**.
+Final recovery target:
 
-## Disaster-recovery restore permissions — read-only proof
+`toca-mcp-dr-final-31932660953`
 
-Run `31914127336` used the deployer identity to call Google Cloud `testIamPermissions` only. It did not create, clone, restore, modify or delete any Cloud SQL resource.
+Backup:
 
-Granted permissions among the requested DR set were exactly:
+`projects/toca-mcp-production/backups/05416bd5-6ce8-409f-85f8-c53bdcf0b8b9`
 
-- `cloudsql.backupRuns.get`;
-- `cloudsql.backupRuns.list`;
-- `cloudsql.instances.get`.
+Restore evidence:
+
+- run `31932660953`;
+- artifact `9259793788`;
+- backup end `2026-08-16T04:27:19.186Z`;
+- restore start `2026-08-16T06:57:43Z`;
+- backup-based observed RPO `9,024s`;
+- target PostgreSQL 18 / Enterprise / `db-g1-small` / `southamerica-east1`;
+- production never used as the target and read back unchanged.
+
+Restored-data validation:
+
+- run `31932980178`;
+- artifact `9259838301`;
+- digest `sha256:52f70ddc2e807bd61006f1d168db8953fc32c3b9045cbeb9d979eaf3c4313b84`;
+- recovery migrations brought the isolated database to migration count 16;
+- 21 critical tables validated;
+- critical foreign keys and append-only triggers validated;
+- Audit Ledger verifier completed without an integrity failure;
+- validation Cloud Run job deleted;
+- production readback unchanged;
+- measured restore-start-to-validated-data RTO: **496s (~8m16s)**.
+
+Foundation RTO objective <=60m is therefore validated for this backup recovery path.
+
+### RPO caveat
+
+The <=15-minute PostgreSQL RPO objective is associated with PITR. This drill restored the latest successful backup, which was ~2h30m old at restore start. Therefore the drill does not demonstrate <=15m RPO even though production PITR is enabled and verified. A future PITR-specific drill is required for that measured claim.
+
+### DR cleanup blocker only
+
+The current recovery target is still deletion-protected.
+
+IAM probe `31932927957`:
+
+Granted:
+
+- `cloudsql.instances.get`;
+- `cloudsql.instances.delete`.
 
 Not granted:
 
-- `cloudsql.instances.create`;
-- `cloudsql.instances.delete`;
-- `cloudsql.instances.clone`;
-- `cloudsql.instances.restoreBackup`.
+- `cloudsql.instances.update`.
 
-Sanitized evidence artifact:
+Exact external action:
 
-- artifact id: `9254461931`;
-- archive digest: `sha256:455ae4fdd5fa4ff061d784259249d04e0db16d13cb55b2f259447d6c84209344`.
+- disable deletion protection **only** on `toca-mcp-dr-final-31932660953`;
+- never alter `toca-mcp-db` deletion protection;
+- then delete the temporary target with the existing deployer and prove absence + production readback.
 
-This proves that a real isolated Cloud SQL restore drill cannot currently be executed by the deployer. The repository infrastructure control plane also intentionally forbids arbitrary instance create/restore/delete. Both IAM and policy therefore fail closed.
+Restore/data validation is complete; this is only cleanup.
 
-## Current truthful closeout state
+## Current truthful closeout
 
-Validated now:
+PASS now:
 
-- deterministic SLO/error-budget evaluator;
-- P0/P1/P2 classification;
-- structured telemetry and Prometheus surfaces;
-- immutable Audit Ledger verification;
-- Outbox and stale-job daily checks;
-- real Cloud SQL backup/PITR/deletion-protection readback;
-- one-per-day read-only Foundation control implemented inside the existing daemon;
-- documented RPO/RTO objectives and fail-closed recovery ordering.
+- production deploy/schema/trigger/runtime gates;
+- telemetry and SLO evaluator;
+- source operational signals;
+- Cloud SQL backup/PITR/deletion-protection readback;
+- real isolated backup restore;
+- recovered schema/data validation;
+- RTO <=60m for the tested backup recovery path.
 
-Provider-admin validation still required outside the current permission envelope:
+External completion still required:
 
-1. grant the minimum Cloud Monitoring read/configuration permissions to an approved operations identity;
-2. configure and test P0/P1 managed notification routing;
-3. separately approve a tightly bounded Cloud SQL DR identity/operation with create/restore/delete permissions only for an isolated drill target;
-4. execute the timed restore drill and record measured RPO/RTO;
-5. remove or revoke the temporary DR mutation privilege after the drill if it is not needed for normal operations.
+1. grant `roles/logging.configWriter` to the approved infrastructure-admin identity;
+2. create/read back minimum log-based Foundation policies;
+3. approve a real operator notification destination and prove managed delivery;
+4. remove deletion protection from the exact temporary DR target and delete/read back that target;
+5. later execute a PITR-specific drill before claiming measured <=15m RPO.
 
-Until those administrative prerequisites exist, the correct statement is: **reliability code and live recovery safeguards are validated; managed alert delivery and provider restore drill remain blocked by explicit IAM/control-plane boundaries.**
+WhatsApp, Email and Google Ads are intentionally deferred by the owner and tracked in #153; they are not current reliability blockers.
+
+The truthful release statement is: **ready for controlled real-system tests in the approved current scope; full provider hardening is not yet 100% closed until managed alert delivery and temporary DR-target cleanup are completed.**
