@@ -1,0 +1,165 @@
+name: Temporary Daily Runtime Evidence
+
+on:
+  push:
+    branches: [ops/daily-runtime-evidence-20260816]
+    paths:
+      - '.github/workflows/temporary-daily-runtime-evidence.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: temporary-daily-runtime-evidence
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate deployer read-only inspection
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify singleton scheduler and daemon topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${SERVICE_URL}/tick" \
+            --arg audience "$SERVICE_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .state == "ENABLED" and
+              .schedule == "* * * * *" and
+              .timeZone == "America/Bahia" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$SERVICE_JSON" | jq -e '
+            .spec.template.spec.containerConcurrency == 1 and
+            ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
+            (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
+            ([$container := .spec.template.spec.containers[0] | $container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"])
+          ' >/dev/null
+
+          printf '%s\n' "$SCHEDULER_JSON" | jq '{name, state, schedule, timeZone, lastAttemptTime, status}'
+          echo 'TOCA_DAILY_RUNTIME_SINGLETON_TOPOLOGY=PASS'
+
+      - name: Prove real ticks, restart safety and daily-control deduplication
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILTER_BASE='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-managed-instagram-daemon"'
+
+          DAILY_JSON="$(gcloud logging read \
+            "$FILTER_BASE AND (jsonPayload.event=\"foundation.daily_control.completed\" OR jsonPayload.event=\"foundation.daily_control.findings\")" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=36h \
+            --limit=100 \
+            --order=asc \
+            --format=json)"
+          SELF_TEST_JSON="$(gcloud logging read \
+            "$FILTER_BASE AND jsonPayload.event=\"daemon.scheduler_self_test.succeeded\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=36h \
+            --limit=100 \
+            --order=asc \
+            --format=json)"
+          TICK_JSON="$(gcloud logging read \
+            "$FILTER_BASE AND jsonPayload.event=\"daemon.tick.succeeded\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=30m \
+            --limit=100 \
+            --order=asc \
+            --format=json)"
+          FAILED_JSON="$(gcloud logging read \
+            "$FILTER_BASE AND jsonPayload.event=\"foundation.daily_control.failed\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=36h \
+            --limit=100 \
+            --order=asc \
+            --format=json)"
+
+          printf '%s' "$DAILY_JSON" > /tmp/daily.json
+          printf '%s' "$SELF_TEST_JSON" > /tmp/self-test.json
+          printf '%s' "$TICK_JSON" > /tmp/ticks.json
+          printf '%s' "$FAILED_JSON" > /tmp/failed.json
+
+          jq -e 'length >= 1' /tmp/daily.json >/dev/null
+          jq -e 'length >= 1' /tmp/self-test.json >/dev/null
+          jq -e 'length >= 1' /tmp/ticks.json >/dev/null
+
+          python3 - <<'PY'
+          import json
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          with open('/tmp/daily.json', encoding='utf-8') as f:
+              daily = json.load(f)
+          counts = {}
+          evidence = []
+          for entry in daily:
+              ts = entry.get('timestamp')
+              if not ts:
+                  raise SystemExit('DAILY_CONTROL_TIMESTAMP_MISSING')
+              day = datetime.fromisoformat(ts.replace('Z', '+00:00')).astimezone(ZoneInfo('America/Bahia')).date().isoformat()
+              counts[day] = counts.get(day, 0) + 1
+              payload = entry.get('jsonPayload') or {}
+              evidence.append({
+                  'dayKey': day,
+                  'timestamp': ts,
+                  'event': payload.get('event'),
+                  'healthy': (payload.get('snapshot') or {}).get('healthy'),
+                  'outboxPending': (payload.get('snapshot') or {}).get('outboxPending'),
+                  'staleRunningJobs': (payload.get('snapshot') or {}).get('staleRunningJobs'),
+                  'invalidAuditExecutions': (payload.get('snapshot') or {}).get('invalidAuditExecutions'),
+                  'findings': payload.get('findings'),
+              })
+          duplicates = {day: count for day, count in counts.items() if count > 1}
+          if duplicates:
+              raise SystemExit(f'DAILY_CONTROL_DUPLICATE_COMPLETION:{duplicates}')
+          print('TOCA_DAILY_CONTROL_COUNTS=' + json.dumps(counts, sort_keys=True))
+          print('TOCA_DAILY_CONTROL_EVIDENCE=' + json.dumps(evidence[-3:], sort_keys=True, separators=(',', ':')))
+          PY
+
+          echo "TOCA_SCHEDULER_SELF_TEST_SUCCEEDED_COUNT=$(jq 'length' /tmp/self-test.json)"
+          echo "TOCA_RECENT_TICK_SUCCEEDED_COUNT=$(jq 'length' /tmp/ticks.json)"
+          echo "TOCA_DAILY_CONTROL_FAILED_COUNT=$(jq 'length' /tmp/failed.json)"
+          echo 'TOCA_DAILY_RUNTIME_EVIDENCE=PASS'
