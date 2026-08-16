@@ -94,11 +94,12 @@ Nurture reuses the existing TOCA durable workflow engine, including persisted wo
 
 ## Validation evidence
 
-The old six-file Omnichannel delta was replayed onto the post-Privacy main without conflicts.
+The old six-file Omnichannel delta was replayed onto the post-Privacy main without conflicts and then reduced to a clean six-file head.
 
 - replay/materialization run `31917722667`: **SUCCESS**, including full `pnpm quality`;
 - canonical Privacy binding run `31917888004`: **SUCCESS**, including Prettier plus full `pnpm quality`;
-- the final PR head must still run the repository canonical Quality Gate after temporary reconciliation workflow removal.
+- clean finalization run `31918002049`: **SUCCESS**, full `pnpm quality`, one clean Omnichannel commit on `main@8fa4f35211fd90dff9b8dd4c2a020898e563e7e9`;
+- this documentation-only evidence commit re-triggers the repository canonical Quality Gate on the exact final PR head.
 
 ## What remains intentionally out of scope
 
