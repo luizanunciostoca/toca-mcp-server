@@ -25,7 +25,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Materialize and validate current-architecture Google Ads R28
-        run: python scripts/google-ads-r28-reconcile-once.py
+        run: python scripts/google_ads_r28_reconcile_wrapper_once.py
       - name: Commit permanent reconciliation only
         shell: bash
         run: |
