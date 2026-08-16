@@ -33,6 +33,8 @@ export class MetaAdsPostCreateSettlementError extends Error {
   }
 }
 
+const maxSettlementReadbackPasses = 2;
+
 export async function runMetaAdsCreatePausedSettlement(
   context: MetaAdsCreatePausedSettlementContext,
   dependencies: MetaAdsCreatePausedSettlementDependencies,
@@ -54,11 +56,33 @@ export async function runMetaAdsCreatePausedSettlement(
     if (result.requestSha256 !== context.approvedRequestSha256) {
       throw new Error('META_ADS_SMOKE_PROVIDER_RESULT_SHA_MISMATCH');
     }
-    const providerVerification = await dependencies.reconcile(result);
+    const providerVerification = await reconcileWithBoundedSettlementRetry(result, dependencies);
     return { result, checkpoint, providerVerification };
   } catch (error) {
     throw new MetaAdsPostCreateSettlementError(error, checkpoint);
   }
+}
+
+async function reconcileWithBoundedSettlementRetry(
+  result: ControlledCreatePausedResult,
+  dependencies: MetaAdsCreatePausedSettlementDependencies,
+): Promise<MetaAdsProviderSmokeSnapshot> {
+  let lastError: unknown;
+  for (let pass = 1; pass <= maxSettlementReadbackPasses; pass += 1) {
+    try {
+      return await dependencies.reconcile(result);
+    } catch (error) {
+      lastError = error;
+      if (!isProviderReconciliationTimeout(error) || pass === maxSettlementReadbackPasses) {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
+function isProviderReconciliationTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === 'META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT';
 }
 
 export function metaAdsProviderCreationCheckpointFromError(
