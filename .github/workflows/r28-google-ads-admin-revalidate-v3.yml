@@ -1,0 +1,130 @@
+name: R28 Google Ads Admin Revalidate V3
+
+on:
+  push:
+    branches:
+      - ops/r28-google-ads-final-revalidate-20260816-v2
+    paths:
+      - '.github/workflows/r28-google-ads-admin-revalidate-v3.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: r28-google-ads-admin-revalidate-v3
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  CLOUD_RUN_SERVICE: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  deployer-read:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Inspect Cloud Run and Secret Manager metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          svc="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$svc" > /tmp/service.json
+          echo "R28_DEPLOYER_REVISION=$(jq -r '.status.latestReadyRevisionName // empty' /tmp/service.json)"
+          echo "R28_DEPLOYER_IMAGE=$(jq -r '.spec.template.spec.containers[0].image // empty' /tmp/service.json)"
+          echo "R28_DEPLOYER_RUNTIME_SA=$(jq -r '.spec.template.spec.serviceAccountName // empty' /tmp/service.json)"
+          echo 'R28_DEPLOYER_GOOGLE_ADS_ENV_BEGIN'
+          jq -c '[.spec.template.spec.containers[0].env[]? | select(.name | startswith("GOOGLE_ADS_")) | {name, value:(.value // null), secretRef:(.valueFrom.secretKeyRef.name // .valueSource.secretKeyRef.secret // null), secretVersion:(.valueFrom.secretKeyRef.key // .valueSource.secretKeyRef.version // null)}]' /tmp/service.json
+          echo 'R28_DEPLOYER_GOOGLE_ADS_ENV_END'
+
+          token="$(gcloud auth print-access-token)"
+          perms='{"permissions":["secretmanager.secrets.list","run.services.get","run.services.update","iam.serviceAccounts.actAs"]}'
+          echo 'R28_DEPLOYER_TEST_IAM_BEGIN'
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions" \
+            --data "$perms" || true
+          echo
+          echo 'R28_DEPLOYER_TEST_IAM_END'
+
+          set +e
+          names="$(gcloud secrets list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/tmp/secrets.err)"
+          rc=$?
+          set -e
+          echo "R28_DEPLOYER_SECRET_LIST_RC=$rc"
+          if [ "$rc" -eq 0 ]; then
+            echo 'R28_DEPLOYER_GOOGLE_ADS_SECRET_CANDIDATES_BEGIN'
+            printf '%s\n' "$names" | grep -Ei '(google[-_]?ads|ads[-_]?google)' || true
+            echo 'R28_DEPLOYER_GOOGLE_ADS_SECRET_CANDIDATES_END'
+          else
+            echo "R28_DEPLOYER_SECRET_LIST_ERROR=$(tr '\n' ' ' </tmp/secrets.err | sed -E 's/[[:space:]]+/ /g' | cut -c1-800)"
+          fi
+
+  infra-admin-read:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Authenticate infra admin
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Inspect Secret Manager metadata and exact candidate IAM only
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-access-token)"
+          perms='{"permissions":["secretmanager.secrets.list","run.services.get","run.services.update","iam.serviceAccounts.actAs"]}'
+          echo 'R28_INFRA_TEST_IAM_BEGIN'
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions" \
+            --data "$perms" || true
+          echo
+          echo 'R28_INFRA_TEST_IAM_END'
+
+          set +e
+          names="$(gcloud secrets list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/tmp/secrets.err)"
+          rc=$?
+          set -e
+          echo "R28_INFRA_SECRET_LIST_RC=$rc"
+          if [ "$rc" -ne 0 ]; then
+            echo "R28_INFRA_SECRET_LIST_ERROR=$(tr '\n' ' ' </tmp/secrets.err | sed -E 's/[[:space:]]+/ /g' | cut -c1-800)"
+            exit 0
+          fi
+
+          candidates="$(printf '%s\n' "$names" | grep -Ei '(google[-_]?ads|ads[-_]?google)' || true)"
+          echo 'R28_INFRA_GOOGLE_ADS_SECRET_CANDIDATES_BEGIN'
+          printf '%s\n' "$candidates"
+          echo 'R28_INFRA_GOOGLE_ADS_SECRET_CANDIDATES_END'
+
+          while IFS= read -r secret; do
+            [ -n "$secret" ] || continue
+            echo "R28_INFRA_SECRET_IAM_BEGIN=$secret"
+            gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null \
+              | jq -c --arg runtime "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" '[.bindings[]? | select((.members // []) | index($runtime)) | {role,members:[ $runtime ]}]' \
+              || true
+            echo "R28_INFRA_SECRET_IAM_END=$secret"
+          done <<< "$candidates"
