@@ -1,0 +1,60 @@
+name: Alerts Incident Read Identities 2026-08-16
+
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: ['.github/workflows/alerts-incident-read-identities-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate deployer
+        id: auth_deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          create_credentials_file: true
+          export_environment_variables: true
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe deployer
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          HTTP="$(curl --silent --output /tmp/deployer-alerts.json --write-out '%{http_code}' -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=5' "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts")"
+          echo "DEPLOYER_ALERTS_HTTP=$HTTP"
+          jq -S . /tmp/deployer-alerts.json || cat /tmp/deployer-alerts.json
+      - name: Authenticate runtime
+        id: auth_runtime
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Probe runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          HTTP="$(curl --silent --output /tmp/runtime-alerts.json --write-out '%{http_code}' -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=5' "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts")"
+          echo "RUNTIME_ALERTS_HTTP=$HTTP"
+          jq -S . /tmp/runtime-alerts.json || cat /tmp/runtime-alerts.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alerts-incident-read-identities-${{ github.sha }}
+          path: /tmp/*-alerts.json
+          retention-days: 90
