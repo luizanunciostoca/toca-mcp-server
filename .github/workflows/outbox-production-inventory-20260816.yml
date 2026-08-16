@@ -1,0 +1,73 @@
+name: Outbox Production Inventory 2026-08-16
+
+on:
+  push:
+    branches: [ops/slo-production-assessment-20260816]
+    paths: ['.github/workflows/outbox-production-inventory-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PROD_SERVICE: toca-mcp-production
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Query production outbox without mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
+          JOB="toca-outbox-inventory-${GITHUB_RUN_ID}"
+          cleanup(){ gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          cat >/tmp/inventory.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          const require=createRequire('/app/package.json');
+          const pg=require('pg');
+          const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+          try {
+            const summary=await pool.query(`select status,event_type,count(*)::int as count,min(occurred_at) as oldest,max(occurred_at) as newest,min(attempts)::int as min_attempts,max(attempts)::int as max_attempts from event_outbox where status <> 'DELIVERED' group by status,event_type order by status,event_type`);
+            const rows=await pool.query(`select event_id,event_key,event_type,aggregate_type,aggregate_id,status,attempts,max_attempts,available_at,occurred_at,last_error_code,correlation_id,evidence,payload from event_outbox where status <> 'DELIVERED' order by occurred_at,event_id limit 100`);
+            const receipts=await pool.query(`select e.event_id,e.event_type,e.status,count(r.*)::int as receipt_count from event_outbox e left join event_consumer_receipts r on r.event_id=e.event_id where e.status <> 'DELIVERED' group by e.event_id,e.event_type,e.status order by e.event_id`);
+            console.log('OUTBOX_INVENTORY='+JSON.stringify({summary:summary.rows,rows:rows.rows,receipts:receipts.rows,readOnly:true,measuredAt:new Date().toISOString()}));
+          } finally { await pool.end(); }
+          NODE
+          B64="$(base64 -w0 /tmp/inventory.mjs)"
+          SCRIPT='set -eu; printf %s "$SCRIPT_B64" | base64 -d >/tmp/inventory.mjs; node /tmp/inventory.mjs; rm -f /tmp/inventory.mjs'
+          gcloud run jobs deploy "$JOB" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" --set-env-vars "SCRIPT_B64=$B64" --command /bin/sh --args="^@^-lc@${SCRIPT}" --tasks 1 --max-retries 0 --task-timeout 5m --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          for i in $(seq 1 12); do
+            LINE="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\" AND textPayload:\"OUTBOX_INVENTORY=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=20 --order=desc --format='value(textPayload)' | grep '^OUTBOX_INVENTORY=' | head -n1 || true)"
+            [ -n "$LINE" ] && break
+            sleep 5
+          done
+          test -n "$LINE"
+          JSON="${LINE#OUTBOX_INVENTORY=}"
+          printf '%s\n' "$JSON" | jq . > outbox-production-inventory.json
+          cat outbox-production-inventory.json
+      - name: Upload inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: outbox-production-inventory-${{ github.sha }}
+          path: outbox-production-inventory.json
+          if-no-files-found: warn
+          retention-days: 90
