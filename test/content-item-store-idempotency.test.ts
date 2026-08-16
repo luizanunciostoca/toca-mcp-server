@@ -65,25 +65,26 @@ function versionInput(payload: { readonly headline: string } = { headline: 'Vers
 function createStore() {
   const queries: string[] = [];
   const client = {
-    async query(sql: string) {
+    query(sql: string) {
       queries.push(sql);
-      if (sql === 'begin' || sql === 'commit' || sql === 'rollback')
-        return { rows: [], rowCount: 0 };
+      if (sql === 'begin' || sql === 'commit' || sql === 'rollback') {
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }
       if (sql.includes('select * from content_items') && sql.includes('for update')) {
-        return { rows: [currentItemRow], rowCount: 1 };
+        return Promise.resolve({ rows: [currentItemRow], rowCount: 1 });
       }
       if (sql.includes('select * from content_item_versions') && sql.includes('idempotency_key')) {
-        return { rows: [existingVersionRow], rowCount: 1 };
+        return Promise.resolve({ rows: [existingVersionRow], rowCount: 1 });
       }
-      throw new Error(`UNEXPECTED_QUERY:${sql}`);
+      return Promise.reject(new Error(`UNEXPECTED_QUERY:${sql}`));
     },
     release() {},
   };
   const pool = {
-    connect: async () => client,
+    connect: () => Promise.resolve(client),
   } as unknown as pg.Pool;
   const store = new PostgresContentItemStore(pool, {
-    outbox: { enqueue: async () => {} } as never,
+    outbox: { enqueue: () => Promise.resolve() },
   });
   return { store, queries };
 }
