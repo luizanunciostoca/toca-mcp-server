@@ -31,6 +31,16 @@ const contentKey = `r29:production-runtime:${suffix}`;
 const sourceAssetId = `r29-source-${suffix}`;
 const evidence = [`production:r29:${sourceSha}`, `validation-run:${validationRunId}`];
 
+console.log(
+  `R29_PRODUCTION_RUNTIME_START=${JSON.stringify({
+    schemaVersion: 1,
+    sourceSha,
+    validationRunId,
+    executionSurface: 'toca.execute',
+    externalPublicationExecuted: false,
+  })}`,
+);
+
 if (CORE_MCP_TOOL_NAMES.length !== 12 || !CORE_MCP_TOOL_NAMES.includes('toca.execute')) {
   throw new Error('R29_PRODUCTION_CORE_SURFACE_MISMATCH');
 }
