@@ -8,6 +8,10 @@ import {
   type MetaAdsWriteGuardrails,
 } from './providers/meta-ads/meta-ads-controlled-write.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
+import {
+  metaAdsProviderCreationCheckpointFromError,
+  runMetaAdsCreatePausedSettlement,
+} from './providers/meta-ads/meta-ads-smoke-execution.js';
 import { validateMetaAdsAdWriteReadiness } from './providers/meta-ads/meta-ads-provider-preflight.js';
 import {
   evaluateMetaAdsProviderSmokeReadiness,
@@ -186,12 +190,40 @@ async function executePlan(): Promise<{
   );
 
   try {
-    const result = await service.createPaused(plan, approvedSha256);
-    const providerVerification = await reconcileProviderPaused(
-      result.campaignId,
-      result.adSetId,
-      result.adIds,
+    const settled = await runMetaAdsCreatePausedSettlement(
+      {
+        smokeId,
+        campaignName: plan.campaign.name,
+        approvedRequestSha256: approvedSha256,
+      },
+      {
+        createPaused: () => service.createPaused(plan, approvedSha256),
+        checkpointCreated: async (checkpoint) => {
+          console.log(`META_ADS_SMOKE_PROVIDER_CHECKPOINT=${JSON.stringify(checkpoint)}`);
+          await pool.query(
+            `insert into audit_events
+               (correlation_id, actor_id, tool_name, risk_class, decision, normalized_payload, provider_result)
+             values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
+            [
+              correlationId,
+              'github-actions/provider-smoke',
+              'meta_ads.campaign.create_paused',
+              'WRITE_EXTERNAL',
+              'SMOKE_PROVIDER_CREATED',
+              JSON.stringify({
+                requestSha256: approvedSha256,
+                smokeId,
+                campaignName: plan.campaign.name,
+              }),
+              JSON.stringify(checkpoint),
+            ],
+          );
+        },
+        reconcile: (result) =>
+          reconcileProviderPaused(result.campaignId, result.adSetId, result.adIds),
+      },
     );
+    const { result, providerVerification } = settled;
 
     await pool.query(
       `insert into audit_events
@@ -241,7 +273,12 @@ async function executePlan(): Promise<{
           smokeId,
           campaignName: plan.campaign.name,
         }),
-        JSON.stringify({ error: normalizeError(error) }),
+        JSON.stringify({
+          error: normalizeError(error),
+          ...(metaAdsProviderCreationCheckpointFromError(error)
+            ? { providerCheckpoint: metaAdsProviderCreationCheckpointFromError(error) }
+            : {}),
+        }),
       ],
     );
     throw error;
