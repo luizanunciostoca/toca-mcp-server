@@ -48,25 +48,97 @@ jobs:
           sed -i '/^pnpm quality$/d' /tmp/reconcile.sh
           bash /tmp/reconcile.sh
 
-      - name: Apply current repository lint conventions
+      - name: Align legacy code with current lint and exact-optional contracts
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec eslint \
-            src/mcp/runtime-capability-resolver.ts \
-            test/google-ads-api-client.test.ts \
-            test/google-ads-paid-media.test.ts \
-            --fix || true
-
           python - <<'PY'
           import re
           from pathlib import Path
 
           resolver = Path('src/mcp/runtime-capability-resolver.ts')
           value = resolver.read_text()
-          value = value.replace('  GoogleAdsCampaignPlan,\n', '')
-          value = value.replace('input as GoogleAdsCampaignPlan', 'input')
+          import_anchor = "import type { InstagramHistoryProvider } from '../providers/instagram/instagram-history-provider.js';\n"
+          if "GoogleAdsCampaignPlan" not in value:
+              value = value.replace(
+                  import_anchor,
+                  "import type { GoogleAdsCampaignPlan } from '../providers/google-ads/google-ads-paid-media.js';\n" + import_anchor,
+                  1,
+              )
+          schema_end = "const googleAdsCampaignReferenceSchema = z.object({ campaignIdOrName: z.string().min(1) });\n"
+          helper = """
+
+          function googleAdsPlanFromInput(
+            input: z.infer<typeof googleAdsPlanSchema>,
+          ): GoogleAdsCampaignPlan {
+            return {
+              customerId: input.customerId,
+              currencyCode: input.currencyCode,
+              campaignName: input.campaignName,
+              budgetName: input.budgetName,
+              dailyBudgetMicros: input.dailyBudgetMicros,
+              advertisingChannelType: input.advertisingChannelType ?? 'SEARCH',
+              targeting: {
+                locationCriterionIds: input.targeting.locationCriterionIds,
+                ...(input.targeting.languageCriterionIds !== undefined
+                  ? { languageCriterionIds: input.targeting.languageCriterionIds }
+                  : {}),
+                ...(input.targeting.presenceOnly !== undefined
+                  ? { presenceOnly: input.targeting.presenceOnly }
+                  : {}),
+              },
+            };
+          }
+          """
+          if schema_end not in value:
+              raise SystemExit('resolver schema end anchor missing')
+          value = value.replace(schema_end, schema_end + helper, 1)
+          value = value.replace('services.googleAds!.prepare(input as GoogleAdsCampaignPlan)', 'services.googleAds!.prepare(googleAdsPlanFromInput(input))')
+          value = value.replace('services.googleAds!.prepare(input)', 'services.googleAds!.prepare(googleAdsPlanFromInput(input))')
+          value = value.replace('services.googleAds!.validateTargeting(input as GoogleAdsCampaignPlan)', 'services.googleAds!.validateTargeting(googleAdsPlanFromInput(input))')
+          value = value.replace('services.googleAds!.validateTargeting(input)', 'services.googleAds!.validateTargeting(googleAdsPlanFromInput(input))')
+          value = value.replace('services.googleAds!.createPaused(input as GoogleAdsCampaignPlan)', 'services.googleAds!.createPaused(googleAdsPlanFromInput(input))')
+          value = value.replace('services.googleAds!.createPaused(input)', 'services.googleAds!.createPaused(googleAdsPlanFromInput(input))')
           resolver.write_text(value)
+
+          api = Path('src/providers/google-ads/google-ads-api-client.ts')
+          value = api.read_text()
+          old = """    return {
+      body: payload,
+      ...(response.headers.get('request-id')
+        ? { requestId: response.headers.get('request-id') ?? undefined }
+        : {}),
+    };
+"""
+          new = """    const requestId = response.headers.get('request-id');
+    return {
+      body: payload,
+      ...(requestId ? { requestId } : {}),
+    };
+"""
+          if old not in value:
+              raise SystemExit('api response request-id anchor missing')
+          api.write_text(value.replace(old, new, 1))
+
+          paid = Path('src/providers/google-ads/google-ads-paid-media.ts')
+          value = paid.read_text()
+          old = """    const results = response.body.results ?? [];
+    const first = results[0] as Record<string, unknown> | undefined;
+    const campaign = first?.campaign as Record<string, unknown> | undefined;
+"""
+          new = """    const rawResults = response.body.results;
+    const results = Array.isArray(rawResults)
+      ? rawResults.filter(
+          (item): item is Record<string, unknown> =>
+            item !== null && typeof item === 'object' && !Array.isArray(item),
+        )
+      : [];
+    const first = results[0];
+    const campaign = first?.campaign as Record<string, unknown> | undefined;
+"""
+          if old not in value:
+              raise SystemExit('paid-media readback results anchor missing')
+          paid.write_text(value.replace(old, new, 1))
 
           api_test = Path('test/google-ads-api-client.test.ts')
           value = api_test.read_text()
@@ -77,7 +149,7 @@ jobs:
               raise SystemExit('fakeFetch anchor missing')
           value = value.replace(first, first + '      await Promise.resolve();\n', 1)
           old_url = '      calls.push({ url: String(input), init });'
-          new_url = "      calls.push({ url: typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url, init });"
+          new_url = "      calls.push({\n        url: typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url,\n        ...(init ? { init } : {}),\n      });"
           if old_url not in value:
               raise SystemExit('fakeFetch URL anchor missing')
           value = value.replace(old_url, new_url, 1)
@@ -86,38 +158,48 @@ jobs:
           if old_body not in value:
               raise SystemExit('request body anchor missing')
           value = value.replace(old_body, new_body, 1)
-          boundary_patterns = [
+          for pattern in (
               "async () => new Response('{}', { status: 200 })",
               "(async () => new Response('{}', { status: 200 }))",
-          ]
-          boundary_replaced = False
-          for pattern in boundary_patterns:
+          ):
               if pattern in value:
-                  replacement = "async () => { await Promise.resolve(); return new Response('{}', { status: 200 }); }"
-                  value = value.replace(pattern, replacement, 1)
-                  boundary_replaced = True
+                  value = value.replace(
+                      pattern,
+                      "async () => { await Promise.resolve(); return new Response('{}', { status: 200 }); }",
+                      1,
+                  )
                   break
-          if not boundary_replaced:
+          else:
               raise SystemExit('boundary fake fetch anchor missing')
           api_test.write_text(value)
 
           paid_test = Path('test/google-ads-paid-media.test.ts')
           value = paid_test.read_text()
+          signatures = {
+              'async listAccessibleCustomers() {': "async listAccessibleCustomers(): ReturnType<GoogleAdsApiClient['listAccessibleCustomers']> {",
+              'async search(query: string) {': "async search(query: string): ReturnType<GoogleAdsApiClient['search']> {",
+              'async mutate(path: string, body: Record<string, unknown>) {': "async mutate(path: string, body: Record<string, unknown>): ReturnType<GoogleAdsApiClient['mutate']> {",
+              'override async mutate(path: string, body: Record<string, unknown>) {': "override async mutate(path: string, body: Record<string, unknown>): ReturnType<GoogleAdsApiClient['mutate']> {",
+              'override async search(query: string) {': "override async search(query: string): ReturnType<GoogleAdsApiClient['search']> {",
+          }
+          for old_sig, new_sig in signatures.items():
+              if old_sig in value:
+                  value = value.replace(old_sig, new_sig)
           for method in ('listAccessibleCustomers', 'search', 'mutate'):
-              pattern = rf'(?m)^(\s*)(override\s+)?async {method}(\([^\n]*\)\s*\{{)\n'
+              pattern = rf'(?m)^(\s*)(override\s+)?async {method}([^\n]*\{{)\n(?!\s*await Promise\.resolve\(\);)'
               def inject(match):
                   indent = match.group(1)
                   override = match.group(2) or ''
-                  signature = match.group(3)
-                  return f'{indent}{override}async {method}{signature}\n{indent}  await Promise.resolve();\n'
-              value, count = re.subn(pattern, inject, value)
-              if count == 0:
-                  raise SystemExit(f'paid-media method anchor missing: {method}')
+                  rest = match.group(3)
+                  return f'{indent}{override}async {method}{rest}\n{indent}  await Promise.resolve();\n'
+              value = re.sub(pattern, inject, value)
           paid_test.write_text(value)
           PY
 
           pnpm exec prettier --write \
             src/mcp/runtime-capability-resolver.ts \
+            src/providers/google-ads/google-ads-api-client.ts \
+            src/providers/google-ads/google-ads-paid-media.ts \
             test/google-ads-api-client.test.ts \
             test/google-ads-paid-media.test.ts
 
