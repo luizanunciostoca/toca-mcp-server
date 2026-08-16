@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           BASE='81f6f84df6b725bfc5994c2d1582241b7936c614'
           test "$(git merge-base HEAD "$BASE")" = "$BASE"
-          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = '3'
+          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = '2'
 
           awk '
             /- name: Reconcile legacy R28 delta into current core facade/ { wanted=1; next }
