@@ -83,28 +83,37 @@ Lifecycle conclusion: **do not promote; live READ prerequisite missing**.
 
 ### 5. Privacy-governed WhatsApp / Email outbound
 
-Current evidence:
+Current evidence revalidated on 2026-08-16 against `main@81f6f84df6b725bfc5994c2d1582241b7936c614`:
 
-- Privacy PR #115 has been rebuilt directly on merged M-FOUND-11 `main@18c36ba428d1b10981b5ea68a23b561daa07bd96`;
-- Privacy exact-head `d949a7b874d88791e86fe2613ecd9a74feb8db1c` passed full Quality run `31912655861`;
-- Omnichannel PR #104 remains downstream and must stay blocked until Privacy is actually merged and post-merge `main` is green.
+- Privacy/R16 PR #115 is merged and canonical;
+- Omnichannel PR #104 is merged and reconciled against canonical Privacy + CRM Core;
+- all 18 Omnichannel capabilities remain `SPECIFIED`, `runtimeExposed=false` and `productionExecutionAllowed=false`;
+- Omnichannel imports canonical `PrivacyScope` / `SuppressionDecision` and does not recreate consent, preferences, suppression or `ContactRecord`;
+- canonical R16 `privacy.suppression.check` fails closed for unknown legal basis, unknown consent, unknown required preference and suppression;
+- Omnichannel refuses outbound for `AMBIGUOUS`/unresolved contact identity, `UNKNOWN_BLOCKED`, `SUPPRESSED`, policy denial or inactive approval;
+- WhatsApp/Email sends require approval + `idempotency_key`, while the external provider boundary remains non-idempotent and forbids blind resend after uncertain outcome;
+- Nurture reuses the existing TOCA Core durable workflow engine/timers and creates no parallel scheduler;
+- no real WhatsApp or Email provider implementation/binding, approved sender/number/domain, webhook path or provider-backed read-back exists in the repository/runtime configuration;
+- `.env.example` contains no Omnichannel provider variables;
+- GitHub Actions secret/variable metadata is inaccessible to the current integration and therefore cannot be used as readiness evidence; in any case there is no Omnichannel runtime adapter to consume such a secret.
 
-Required sequence:
+Operational classification:
 
-1. merge Privacy #115 by exact green head after any necessary final-main reconciliation;
-2. verify post-merge `main` Quality;
-3. reconcile #104 against the merged canonical privacy ledger/decision contracts;
-4. prove one unambiguous CRM `ContactRecord` resolution;
-5. prove purpose + channel policy + consent/preference where required;
-6. prove `privacy.suppression.check` explicitly permits the use;
-7. prove provider credential/account/template/sender binding;
-8. exact approval/idempotency where required;
-9. one bounded safe test write only after the above gates;
-10. delivery/provider read-back and immutable audit evidence.
+- **CONTRACT_READY:** YES for WhatsApp, Email and Nurture;
+- **PROVIDER_READY:** NO for WhatsApp and Email;
+- **REAL_SEND_VALIDATED:** NO;
+- **READBACK_VALIDATED:** NO;
+- **BLOCKERS:** `BLOCKED_EXTERNAL_PROVIDER`.
 
-Unknown contact, unknown legal basis/consent/preference or suppression must fail before the provider call.
+No provider fake and no test send were created merely to claim production readiness. Detailed credential, sender/domain/number, webhook, verification, DNS, template approval, safe-test-destination and read-back gates are recorded in `docs/operations/omnichannel-operational-closeout.md`.
 
-Lifecycle conclusion: **blocked by Privacy merge and provider connectivity validation**.
+Required sequence after a real provider is selected and bound:
+
+`READ/VERIFY -> PREPARE -> CONTROLLED SAFE TEST SEND -> PROVIDER READBACK`.
+
+Unknown contact, ambiguous identity, unknown legal basis/consent/preference or suppression must fail before the provider call. A real audience/campaign send is prohibited during validation.
+
+Lifecycle conclusion: **contracts ready; production outbound remains `BLOCKED_EXTERNAL_PROVIDER`; do not promote lifecycle until real provider binding plus controlled send/read-back evidence exists**.
 
 ## Provider-write rules for Foundation v1
 
