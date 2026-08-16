@@ -1,0 +1,52 @@
+name: R29 Reconcile Format
+
+on:
+  push:
+    branches:
+      - reconcile/r29-video-content-repurposing-current-main
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format reconciliation files
+        run: |
+          pnpm exec prettier --write \
+            src/governance/capability-catalog.ts \
+            test/content-item-store-idempotency.test.ts \
+            test/r20-r29-capability-contracts.test.ts
+
+      - name: Emit formatted blobs
+        run: |
+          for file in \
+            src/governance/capability-catalog.ts \
+            test/content-item-store-idempotency.test.ts \
+            test/r20-r29-capability-contracts.test.ts
+          do
+            echo "R29_FORMAT_BEGIN=$file"
+            base64 -w0 "$file"
+            echo
+            echo "R29_FORMAT_END=$file"
+          done
