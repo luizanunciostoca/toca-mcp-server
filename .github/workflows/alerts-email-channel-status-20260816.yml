@@ -1,0 +1,48 @@
+name: Alerts Email Channel Status 2026-08-16
+
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: ['.github/workflows/alerts-email-channel-status-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  TARGET_CHANNEL: projects/toca-mcp-production/notificationChannels/9216772763667438415
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read exact email channel state
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${TARGET_CHANNEL}" >/tmp/channel.json
+          jq -S '{name,type,displayName,enabled,verificationStatus,labels,userLabels,creationRecord,mutationRecords}' /tmp/channel.json | tee channel-status.json
+          STATUS="$(jq -r '.verificationStatus // "VERIFICATION_STATUS_UNSPECIFIED"' /tmp/channel.json)"
+          ENABLED="$(jq -r '.enabled' /tmp/channel.json)"
+          EMAIL="$(jq -r '.labels.email_address // empty' /tmp/channel.json)"
+          test "$ENABLED" = true
+          test "$EMAIL" = "luizidebook@gmail.com"
+          echo "CHANNEL_VERIFICATION_STATUS=$STATUS"
+      - name: Upload status evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alerts-email-channel-status-${{ github.sha }}
+          path: channel-status.json
+          retention-days: 90
