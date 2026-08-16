@@ -20,6 +20,13 @@ jobs:
       GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
       FAILED_JOB_NAME: toca-meta-ads-validation-31935162022-1
       FAILED_EXECUTION_NAME: toca-meta-ads-validation-31935162022-1-qtzvs
+      META_TOKEN_SECRET_ID: toca-meta-oauth-token
+      META_GRAPH_BASE_URL: https://graph.facebook.com/v24.0
+      META_ADS_ACCOUNT_ID: '311793958882290'
+      CAMPAIGN_ID: '52618047446865'
+      ADSET_ID: '52618047458265'
+      CREATIVE_ID: '2844574235935509'
+      AD_ID: '52618047512465'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -58,8 +65,53 @@ jobs:
             "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND severity>=ERROR" \
             --project "$GCP_PROJECT_ID" --freshness=6h --limit=50 --order=asc \
             --format='value(timestamp,severity,textPayload,jsonPayload.message)' || true
-          echo '--- META ADS MARKERS ---'
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_\"" \
-            --project "$GCP_PROJECT_ID" --freshness=6h --limit=100 --order=asc \
-            --format='value(timestamp,textPayload)' || true
+      - name: GET-only account and failed-attempt readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest --secret "$META_TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID")"
+          trap 'unset TOKEN' EXIT
+          meta_get() {
+            local path="$1"
+            shift
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $TOKEN" \
+              --get "$META_GRAPH_BASE_URL/$path" "$@"
+          }
+
+          ACCOUNT="$(meta_get "act_${META_ADS_ACCOUNT_ID}" --data-urlencode 'fields=id,name,currency,account_status,business')"
+          PERMISSIONS="$(meta_get 'me/permissions')"
+          CAMPAIGN="$(meta_get "$CAMPAIGN_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info')"
+          ADSET="$(meta_get "$ADSET_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info,daily_budget,start_time,end_time')"
+          CREATIVE="$(meta_get "$CREATIVE_ID" --data-urlencode 'fields=id,name')"
+          AD="$(meta_get "$AD_ID" --data-urlencode 'fields=id,name,status,effective_status,issues_info')"
+          INSIGHTS="$(meta_get "$CAMPAIGN_ID/insights" --data-urlencode 'fields=spend,impressions,clicks' --data-urlencode 'date_preset=maximum')"
+
+          jq -e --arg account "$META_ADS_ACCOUNT_ID" '
+            (.id | tostring | endswith($account)) and .currency == "BRL" and (.account_status | tostring) == "1"
+          ' <<<"$ACCOUNT" >/dev/null
+          jq -e '[.data[] | select(.permission == "ads_read" and .status == "granted")] | length == 1' <<<"$PERMISSIONS" >/dev/null
+          jq -e '[.data[] | select(.permission == "ads_management" and .status == "granted")] | length == 1' <<<"$PERMISSIONS" >/dev/null
+          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$CAMPAIGN" >/dev/null
+          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$ADSET" >/dev/null
+          jq -e '.status == "PAUSED" and .effective_status != "ACTIVE"' <<<"$AD" >/dev/null
+          SPEND="$(jq -r '([.data[]?.spend // "0"] | map(tonumber) | add) // 0' <<<"$INSIGHTS")"
+          jq -n --argjson spend "$SPEND" '$spend == 0' >/dev/null
+
+          jq -n \
+            --argjson account "$ACCOUNT" \
+            --argjson campaign "$CAMPAIGN" \
+            --argjson adset "$ADSET" \
+            --argjson creative "$CREATIVE" \
+            --argjson ad "$AD" \
+            --argjson insights "$INSIGHTS" \
+            '{account:$account,campaign:$campaign,adSet:$adset,creative:$creative,ad:$ad,insights:$insights}' \
+            | tee meta-ads-failed-attempt-readback.json
+          echo "META_ADS_FAILED_ATTEMPT_SPEND=$SPEND"
+      - name: Upload GET-only readback evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: meta-ads-failed-attempt-readback
+          path: meta-ads-failed-attempt-readback.json
+          if-no-files-found: error
+          retention-days: 30
