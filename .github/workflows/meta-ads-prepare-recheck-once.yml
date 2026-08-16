@@ -42,12 +42,15 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Assert source parent is validated main
+      - name: Assert source is validated main plus only this one-shot
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = 'b9b44d172a044306a41115f5247813cd2dca5a4f'
+          BASE='b9b44d172a044306a41115f5247813cd2dca5a4f'
+          test "$(git merge-base HEAD "$BASE")" = "$BASE"
+          test "$(git diff --name-only "$BASE" HEAD)" = '.github/workflows/meta-ads-prepare-recheck-once.yml'
 
       - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
