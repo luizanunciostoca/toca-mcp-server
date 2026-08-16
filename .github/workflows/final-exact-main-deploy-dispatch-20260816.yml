@@ -1,0 +1,32 @@
+name: Final Exact Main Deploy Dispatch 2026-08-16
+
+on:
+  push:
+    branches: [ops/final-exact-main-deploy-20260816]
+    paths: ['.github/workflows/final-exact-main-deploy-dispatch-20260816.yml']
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch official production deploy on current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP="$(curl --silent --output /tmp/response.txt --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'Content-Type: application/json' \
+            --data '{"ref":"main"}' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-toca-managed-instagram-daemon-gcp.yml/dispatches")"
+          cat /tmp/response.txt
+          test "$HTTP" = '204'
+          echo 'EXACT_MAIN_DEPLOY_DISPATCH=PASS'
