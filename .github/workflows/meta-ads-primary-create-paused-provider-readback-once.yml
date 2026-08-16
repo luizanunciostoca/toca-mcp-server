@@ -1,0 +1,173 @@
+name: Meta Ads Primary CREATE_PAUSED Provider Readback One-Shot
+
+on:
+  push:
+    branches: [ops/meta-ads-primary-create-paused-311793958882290]
+    paths: ['.github/workflows/meta-ads-primary-create-paused-provider-readback-once.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      TOKEN_SECRET_ID: toca-meta-oauth-token
+      GRAPH_VERSION: v24.0
+      ACCOUNT_ID: '311793958882290'
+      SMOKE_ID: primary-create-paused-31920903042-1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Assert readback-only repository delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='0f812077c84cea92547352320e2cc859ec832003'
+          test "$(git merge-base HEAD "$BASE")" = "$BASE"
+          git diff --name-only "$BASE" HEAD | grep -Fx '.github/workflows/meta-ads-primary-create-paused-once.yml'
+          git diff --name-only "$BASE" HEAD | grep -Fx '.github/workflows/meta-ads-primary-create-paused-recovery-once.yml'
+          git diff --name-only "$BASE" HEAD | grep -Fx '.github/workflows/meta-ads-primary-create-paused-provider-readback-once.yml'
+          test "$(git diff --name-only "$BASE" HEAD | wc -l)" = '3'
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Query exact Meta resources read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest --secret "$TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID")"
+          test -n "$TOKEN"
+          GRAPH="https://graph.facebook.com/${GRAPH_VERSION}"
+          CAMPAIGN_NAME="TOCA | P0 SMOKE CREATE_PAUSED | ${SMOKE_ID}"
+          ADSET_NAME="P0 Smoke | Morro locality | Purchase | ${SMOKE_ID}"
+          CREATIVE_NAME="P0 Smoke Creative | ${SMOKE_ID}"
+          AD_NAME="P0 Smoke Ad | ${SMOKE_ID}"
+
+          query_edge() {
+            edge="$1"
+            fields="$2"
+            expected_name="$3"
+            outfile="$4"
+            printf '[]' > "$outfile"
+            after=''
+            exhausted='false'
+            for page in $(seq 1 20); do
+              args=(-fsS -G "$GRAPH/act_${ACCOUNT_ID}/${edge}" \
+                --data-urlencode "fields=${fields}" \
+                --data-urlencode 'limit=500' \
+                --data-urlencode "access_token=${TOKEN}")
+              if [ -n "$after" ]; then args+=(--data-urlencode "after=${after}"); fi
+              curl "${args[@]}" > /tmp/page.json
+              jq -e '.error == null' /tmp/page.json >/dev/null
+              jq --arg name "$expected_name" '.data // [] | map(select(.name == $name))' /tmp/page.json > /tmp/matches.json
+              jq -s '.[0] + .[1]' "$outfile" /tmp/matches.json > /tmp/merged.json
+              mv /tmp/merged.json "$outfile"
+              next="$(jq -r '.paging.next // empty' /tmp/page.json)"
+              if [ -z "$next" ]; then exhausted='true'; break; fi
+              after="$(jq -r '.paging.cursors.after // empty' /tmp/page.json)"
+              test -n "$after"
+            done
+            test "$exhausted" = 'true'
+          }
+
+          query_edge campaigns 'id,name,status,effective_status,issues_info,created_time,updated_time' "$CAMPAIGN_NAME" /tmp/campaign.json
+          query_edge adsets 'id,name,status,effective_status,issues_info,campaign_id,start_time,end_time,created_time,updated_time' "$ADSET_NAME" /tmp/adset.json
+          query_edge ads 'id,name,status,effective_status,issues_info,failed_delivery_checks,campaign_id,adset_id,creative{id,name},created_time,updated_time' "$AD_NAME" /tmp/ad.json
+          query_edge adcreatives 'id,name,account_id,object_story_id,effective_object_story_id' "$CREATIVE_NAME" /tmp/creative.json
+
+          CAMPAIGN_COUNT="$(jq 'length' /tmp/campaign.json)"
+          ADSET_COUNT="$(jq 'length' /tmp/adset.json)"
+          AD_COUNT="$(jq 'length' /tmp/ad.json)"
+          CREATIVE_COUNT="$(jq 'length' /tmp/creative.json)"
+
+          test "$CAMPAIGN_COUNT" = '1'
+          test "$ADSET_COUNT" = '1'
+          test "$AD_COUNT" = '1'
+          test "$CREATIVE_COUNT" = '1'
+
+          CAMPAIGN_ID="$(jq -r '.[0].id' /tmp/campaign.json)"
+          ADSET_ID="$(jq -r '.[0].id' /tmp/adset.json)"
+          AD_ID="$(jq -r '.[0].id' /tmp/ad.json)"
+          CREATIVE_ID="$(jq -r '.[0].id' /tmp/creative.json)"
+
+          jq -e --arg campaign "$CAMPAIGN_ID" '.[0].campaign_id == $campaign' /tmp/adset.json >/dev/null
+          jq -e --arg campaign "$CAMPAIGN_ID" --arg adset "$ADSET_ID" --arg creative "$CREATIVE_ID" '
+            .[0].campaign_id == $campaign and
+            .[0].adset_id == $adset and
+            .[0].creative.id == $creative
+          ' /tmp/ad.json >/dev/null
+
+          curl -fsS -G "$GRAPH/${CAMPAIGN_ID}/insights" \
+            --data-urlencode 'fields=spend,impressions,clicks' \
+            --data-urlencode 'date_preset=maximum' \
+            --data-urlencode "access_token=${TOKEN}" > /tmp/insights.json
+          jq -e '.error == null' /tmp/insights.json >/dev/null
+
+          jq -n \
+            --arg accountId "$ACCOUNT_ID" \
+            --arg smokeId "$SMOKE_ID" \
+            --arg recoveredAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile campaign /tmp/campaign.json \
+            --slurpfile adset /tmp/adset.json \
+            --slurpfile ad /tmp/ad.json \
+            --slurpfile creative /tmp/creative.json \
+            --slurpfile insights /tmp/insights.json '
+            {
+              accountId: $accountId,
+              smokeId: $smokeId,
+              recoveredAt: $recoveredAt,
+              duplicateCounts: {
+                campaign: ($campaign[0] | length),
+                adSet: ($adset[0] | length),
+                ad: ($ad[0] | length),
+                creative: ($creative[0] | length)
+              },
+              campaign: $campaign[0][0],
+              adSet: $adset[0][0],
+              ad: $ad[0][0],
+              creative: $creative[0][0],
+              insights: ($insights[0].data // [])
+            }
+          ' > meta-ads-create-paused-provider-readback.json
+
+          jq -e '
+            .campaign.status == "PAUSED" and
+            .campaign.effective_status != "ACTIVE" and
+            .adSet.status == "PAUSED" and
+            .adSet.effective_status != "ACTIVE" and
+            .ad.status == "PAUSED" and
+            .ad.effective_status != "ACTIVE" and
+            ((.campaign.issues_info // []) | length == 0) and
+            ((.adSet.issues_info // []) | length == 0) and
+            ((.ad.issues_info // []) | length == 0) and
+            ((.ad.failed_delivery_checks // []) | length == 0)
+          ' meta-ads-create-paused-provider-readback.json >/dev/null
+
+          jq -e '[.insights[]?.spend // "0" | tonumber] | add <= 0' meta-ads-create-paused-provider-readback.json >/dev/null
+
+          echo 'META_ADS_CREATE_PAUSED_PROVIDER_READBACK=PASS'
+          cat meta-ads-create-paused-provider-readback.json
+
+      - name: Upload immutable sanitized readback evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meta-ads-create-paused-provider-readback-${{ github.run_id }}
+          path: meta-ads-create-paused-provider-readback.json
+          if-no-files-found: error
+          retention-days: 90
