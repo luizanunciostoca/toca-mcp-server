@@ -30,7 +30,7 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Test cleanup permission and remove only the drill target
+      - name: Confirm manual protection change and delete only the drill target
         shell: bash
         run: |
           set -euo pipefail
@@ -42,25 +42,15 @@ jobs:
           printf '%s' "$SOURCE_BEFORE" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
 
           TARGET_BEFORE="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
-          printf '%s' "$TARGET_BEFORE" | jq -e '.name=="toca-mcp-drill-31931686855" and .settings.deletionProtectionEnabled==true' >/dev/null
+          printf '%s' "$TARGET_BEFORE" | jq -e '.name=="toca-mcp-drill-31931686855" and .settings.deletionProtectionEnabled==false' >/dev/null
 
           TOKEN="$(gcloud auth print-access-token)"
-          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.update","cloudsql.instances.delete"]}' >/tmp/request.json
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.delete"]}' >/tmp/request.json
           HTTP="$(curl --silent --output /tmp/permissions.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
           test "$HTTP" = 200
           GRANTED="$(jq -c '(.permissions // [])|sort' /tmp/permissions.json)"
           echo "DR_CLEANUP_GRANTED_PERMISSIONS=$GRANTED"
-          jq -e '(.permissions // []) | index("cloudsql.instances.delete") != null' /tmp/permissions.json >/dev/null
-          if ! jq -e '(.permissions // []) | index("cloudsql.instances.update") != null' /tmp/permissions.json >/dev/null; then
-            echo 'DR_CLEANUP_UPDATE_PERMISSION=MISSING'
-            jq -n --arg target "$TARGET_INSTANCE" --argjson granted "$GRANTED" '{schemaVersion:1,targetInstance:$target,updatePermission:false,deleted:false,grantedPermissions:$granted}' > cloud-sql-dr-cleanup-evidence.json
-            exit 42
-          fi
-
-          echo 'DR_CLEANUP_UPDATE_PERMISSION=GRANTED'
-          gcloud sql instances patch "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --no-deletion-protection --quiet
-          TARGET_PATCHED="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
-          printf '%s' "$TARGET_PATCHED" | jq -e '.name=="toca-mcp-drill-31931686855" and .settings.deletionProtectionEnabled==false' >/dev/null
+          jq -e '(.permissions // []) | index("cloudsql.instances.get") != null and index("cloudsql.instances.delete") != null' /tmp/permissions.json >/dev/null
 
           gcloud sql instances delete "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --quiet
           if gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
@@ -71,7 +61,7 @@ jobs:
           SOURCE_AFTER="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
           printf '%s' "$SOURCE_AFTER" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
 
-          jq -n --arg target "$TARGET_INSTANCE" --argjson granted "$GRANTED" --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schemaVersion:1,targetInstance:$target,updatePermission:true,deletionProtectionDisabledOnTemporaryTarget:true,deleted:true,productionStillProtected:true,grantedPermissions:$granted,verifiedAt:$verifiedAt}' > cloud-sql-dr-cleanup-evidence.json
+          jq -n --arg target "$TARGET_INSTANCE" --argjson granted "$GRANTED" --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schemaVersion:2,targetInstance:$target,deletionProtectionObserved:false,deleted:true,productionStillProtected:true,productionRunnable:true,backupsEnabled:true,pitrEnabled:true,grantedPermissions:$granted,verifiedAt:$verifiedAt}' > cloud-sql-dr-cleanup-evidence.json
           echo 'DR_CLEANUP=PASS'
       - name: Upload cleanup evidence
         if: always()
