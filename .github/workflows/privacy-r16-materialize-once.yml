@@ -1,4 +1,4 @@
-name: Privacy R16 Materialize One-Shot
+name: Privacy R16 Finalize One-Shot
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  materialize:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -25,13 +25,15 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Materialize exact Privacy R16 files from validated old head
+      - name: Build exact clean Privacy R16 candidate
         shell: bash
         run: |
           set -euo pipefail
-          OLD_HEAD=d949a7b874d88791e86fe2613ecd9a74feb8db1c
-          git fetch origin "$OLD_HEAD"
-          git checkout "$OLD_HEAD" -- \
+          BASE=9454085ec9f2e67eae249560183bf6c20bdf81b6
+          SOURCE=572f4bfcb5cb1795f31ded72489874e09e1f61b9
+          git fetch origin "$BASE" "$SOURCE"
+          git checkout -B privacy-final "$BASE"
+          git checkout "$SOURCE" -- \
             docs/checkpoints/r16-privacy-lgpd-governance.md \
             migrations/014_privacy_governance.sql \
             src/persistence/postgres-privacy-ledger-store.ts \
@@ -51,11 +53,9 @@ jobs:
             test/privacy-postgres-contract.test.ts
           test "$(git diff --cached --name-only | wc -l)" -eq 17
           pnpm quality
-      - name: Commit exact R16 delta
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'feat(privacy): materialize R16 LGPD governance on current main'
-          git push origin HEAD:reconcile/privacy-r16-materialize
+          git commit -m 'feat(privacy): add R16 consent and LGPD governance'
+          FINAL_SHA="$(git rev-parse HEAD)"
+          git push --force origin HEAD:feat/r16-privacy-consent-preferences-v2
+          echo "PRIVACY_R16_FINAL_SHA=$FINAL_SHA"
