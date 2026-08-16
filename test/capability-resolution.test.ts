@@ -14,9 +14,9 @@ describe('M-FOUND-03 capability canonicalization', () => {
     const effective = getEffectiveCapabilityCatalog();
     expect(CAPABILITY_ALIAS_RULES).toHaveLength(8);
     expect(effective).toMatchObject({
-      raw_count: 745,
+      raw_count: 758,
       compatibility_alias_count: 8,
-      effective_count: 737,
+      effective_count: 750,
     });
   });
 

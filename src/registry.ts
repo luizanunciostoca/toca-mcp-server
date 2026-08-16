@@ -1,4 +1,8 @@
 import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';
+import {
+  googleAdsPhaseAtLeast,
+  type GoogleAdsPhase,
+} from './providers/google-ads/google-ads-phase.js';
 
 const bootstrapTools: readonly ToolDefinition[] = [
   {
@@ -129,6 +133,93 @@ const metaAdsWriteTools: readonly ToolDefinition[] = [
     capabilityStatus: 'IMPLEMENTED',
     sideEffects: true,
     idempotent: false,
+  },
+];
+
+const googleAdsTools: readonly (ToolDefinition & { readonly minimumPhase: GoogleAdsPhase })[] = [
+  ...[
+    'google_ads.account.inspect',
+    'google_ads.campaigns.list',
+    'google_ads.insights.get',
+    'google_ads.conversion_actions.list',
+    'google_ads.spend.monitor',
+    'google_ads.conversions.monitor',
+  ].map((name) => ({
+    name,
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'READ' as const,
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED' as const,
+    sideEffects: false,
+    idempotent: true,
+    minimumPhase: 'READ_ONLY' as const,
+  })),
+  ...['google_ads.campaign.prepare', 'google_ads.targeting.validate'].map((name) => ({
+    name,
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'READ' as const,
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED' as const,
+    sideEffects: false,
+    idempotent: true,
+    minimumPhase: 'PREPARE' as const,
+  })),
+  {
+    name: 'google_ads.campaign.create_paused',
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: false,
+    minimumPhase: 'CREATE_PAUSED',
+  },
+  {
+    name: 'google_ads.campaign.readback',
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'READ',
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+    minimumPhase: 'READBACK',
+  },
+  {
+    name: 'google_ads.campaign.activate',
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'FINANCIAL_IMPACT',
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+    minimumPhase: 'MANAGE',
+  },
+  {
+    name: 'google_ads.campaign.pause',
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+    minimumPhase: 'MANAGE',
+  },
+  {
+    name: 'google_ads.campaign.update_budget',
+    version: '1.0.0',
+    provider: 'Google Ads API',
+    riskClass: 'FINANCIAL_IMPACT',
+    requiredScopes: ['https://www.googleapis.com/auth/adwords'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+    minimumPhase: 'MANAGE',
   },
 ];
 
@@ -292,6 +383,7 @@ export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
   readonly metaAdsReadsEnabled?: boolean;
   readonly metaAdsWritesEnabled?: boolean;
+  readonly googleAdsPhase?: GoogleAdsPhase;
   readonly tocaManagedInstagramSchedulerEnabled?: boolean;
 }
 
@@ -302,6 +394,11 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
   if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
   if (options.metaAdsWritesEnabled) for (const tool of metaAdsWriteTools) registry.register(tool);
+  if (options.googleAdsPhase) {
+    for (const { minimumPhase, ...tool } of googleAdsTools) {
+      if (googleAdsPhaseAtLeast(options.googleAdsPhase, minimumPhase)) registry.register(tool);
+    }
+  }
   if (options.tocaManagedInstagramSchedulerEnabled)
     for (const tool of tocaManagedInstagramSchedulerTools) registry.register(tool);
   return registry;

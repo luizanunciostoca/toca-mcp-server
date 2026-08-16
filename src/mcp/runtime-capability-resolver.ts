@@ -1,4 +1,8 @@
 import * as z from 'zod/v4';
+import type {
+  GoogleAdsCampaignPlan,
+  GoogleAdsPaidMediaProvider,
+} from '../providers/google-ads/google-ads-paid-media.js';
 import type { InstagramHistoryProvider } from '../providers/instagram/instagram-history-provider.js';
 import type { MetaAdsControlledGraphProvider } from '../providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import {
@@ -20,6 +24,52 @@ import type {
 } from './core-execution.js';
 
 const recordSchema = z.record(z.string(), z.unknown());
+const googleAdsPlanSchema = z.object({
+  customerId: z.string().min(1),
+  currencyCode: z.string().length(3),
+  campaignName: z.string().min(1),
+  budgetName: z.string().min(1),
+  dailyBudgetMicros: z.number().int().positive(),
+  advertisingChannelType: z.literal('SEARCH').optional(),
+  targeting: z.object({
+    locationCriterionIds: z.array(z.string().regex(/^\d+$/)).min(1),
+    languageCriterionIds: z.array(z.string().regex(/^\d+$/)).optional(),
+    presenceOnly: z.boolean().optional(),
+  }),
+});
+const googleAdsDateRangeSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+const googleAdsCampaignReferenceSchema = z.object({ campaignIdOrName: z.string().min(1) });
+const googleAdsCampaignIdSchema = z.object({ campaignId: z.string().regex(/^\d+$/) });
+const googleAdsActivateSchema = googleAdsCampaignIdSchema.extend({
+  expectedDailyBudgetMicros: z.number().int().positive(),
+});
+const googleAdsBudgetUpdateSchema = googleAdsCampaignIdSchema.extend({
+  dailyBudgetMicros: z.number().int().positive(),
+});
+
+function googleAdsPlanFromInput(input: z.infer<typeof googleAdsPlanSchema>): GoogleAdsCampaignPlan {
+  return {
+    customerId: input.customerId,
+    currencyCode: input.currencyCode,
+    campaignName: input.campaignName,
+    budgetName: input.budgetName,
+    dailyBudgetMicros: input.dailyBudgetMicros,
+    advertisingChannelType: input.advertisingChannelType ?? 'SEARCH',
+    targeting: {
+      locationCriterionIds: input.targeting.locationCriterionIds,
+      ...(input.targeting.languageCriterionIds !== undefined
+        ? { languageCriterionIds: input.targeting.languageCriterionIds }
+        : {}),
+      ...(input.targeting.presenceOnly !== undefined
+        ? { presenceOnly: input.targeting.presenceOnly }
+        : {}),
+    },
+  };
+}
+
 const mediaListSchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
   after: z.string().min(1).optional(),
@@ -123,11 +173,20 @@ const rescheduleSchema = z.object({
 const jobIdSchema = z.object({ jobId: z.string().min(1) });
 
 export interface RuntimeCapabilityServices {
+  readonly googleAds?: GoogleAdsPaidMediaProvider;
+  readonly googleAdsTargetAccount?: string;
+  readonly googleAdsCurrency?: string;
   readonly instagramHistory?: InstagramHistoryProvider;
   readonly metaAdsRead?: MetaAdsReadProvider;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
   readonly instagramScheduler?: TocaManagedInstagramScheduler;
+}
+
+interface GoogleAdsRuntimeContext {
+  readonly provider: GoogleAdsPaidMediaProvider;
+  readonly targetAccount: string;
+  readonly currency: string;
 }
 
 export function createRuntimeCapabilityResolver(
@@ -140,7 +199,228 @@ function resolveBinding(
   capabilityId: string,
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
+  const googleAds = googleAdsRuntimeContext(services);
   switch (capabilityId) {
+    case 'google_ads.account.inspect':
+      return googleAds
+        ? binding(z.object({}), () => googleAds.provider.inspectAccount(), {
+            targetAccount: () => googleAds.targetAccount,
+          })
+        : undefined;
+    case 'google_ads.campaigns.list':
+      return googleAds
+        ? binding(
+            z.object({ limit: z.number().int().min(1).max(500).default(100) }),
+            (input) => googleAds.provider.listCampaigns(input.limit),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.insights.get':
+      return googleAds
+        ? binding(
+            googleAdsDateRangeSchema.extend({
+              limit: z.number().int().min(1).max(500).default(100),
+            }),
+            (input) => googleAds.provider.getInsights(input.startDate, input.endDate, input.limit),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.conversion_actions.list':
+      return googleAds
+        ? binding(
+            z.object({ limit: z.number().int().min(1).max(500).default(100) }),
+            (input) => googleAds.provider.listConversionActions(input.limit),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.spend.monitor':
+      return googleAds
+        ? binding(
+            googleAdsDateRangeSchema,
+            (input) => googleAds.provider.spendMonitor(input.startDate, input.endDate),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.conversions.monitor':
+      return googleAds
+        ? binding(
+            googleAdsDateRangeSchema,
+            (input) => googleAds.provider.conversionsMonitor(input.startDate, input.endDate),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.campaign.prepare':
+      return googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => Promise.resolve(googleAds.provider.prepare(googleAdsPlanFromInput(input))),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.targeting.validate':
+      return googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => googleAds.provider.validateTargeting(googleAdsPlanFromInput(input)),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.campaign.create_paused':
+      return googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => googleAds.provider.createPaused(googleAdsPlanFromInput(input)),
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) =>
+                `google-ads:create-paused:${googleAds.provider.prepare(googleAdsPlanFromInput(input)).requestSha256}`,
+              financialContext: (input) => ({
+                amountMinor: googleAds.provider.minorUnitsForMicros(input.dailyBudgetMicros),
+                currency: googleAds.currency,
+              }),
+              providerReadback: async (result) => {
+                const record = result;
+                const resourceName =
+                  typeof record.campaignResourceName === 'string'
+                    ? record.campaignResourceName
+                    : undefined;
+                if (!resourceName) {
+                  return {
+                    verified: false,
+                    evidence: ['google-ads:create-paused:resource-name-missing'],
+                    reason: 'GOOGLE_ADS_CREATED_RESOURCE_NAME_REQUIRED',
+                  };
+                }
+                const readback = await googleAds.provider.verifyPaused(resourceName);
+                return {
+                  verified: readback.verified,
+                  evidence: [JSON.stringify(readback.evidence)],
+                  externalResourceId: resourceName,
+                  ...(!readback.verified
+                    ? { reason: 'GOOGLE_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' }
+                    : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.readback':
+      return googleAds
+        ? binding(
+            googleAdsCampaignReferenceSchema,
+            (input) => googleAds.provider.readbackCampaign(input.campaignIdOrName),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.campaign.activate':
+      return googleAds
+        ? binding(
+            googleAdsActivateSchema,
+            async (input) => {
+              const currentBudgetMicros = await googleAds.provider.readActivationBudgetMicros(
+                input.campaignId,
+              );
+              if (currentBudgetMicros !== input.expectedDailyBudgetMicros) {
+                throw new Error('GOOGLE_ADS_ACTIVATION_BUDGET_DRIFT');
+              }
+              return googleAds.provider.updateStatus(input.campaignId, 'ENABLED');
+            },
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) =>
+                `google-ads:activate:${input.campaignId}:${input.expectedDailyBudgetMicros}`,
+              financialContext: (input) => ({
+                amountMinor: googleAds.provider.minorUnitsForMicros(
+                  input.expectedDailyBudgetMicros,
+                ),
+                currency: googleAds.currency,
+              }),
+              providerReadback: async (_result, input) => {
+                const readback = await googleAds.provider.readbackCampaign(input.campaignId);
+                const state = googleAdsCampaignState(readback);
+                const verified =
+                  state.status === 'ENABLED' &&
+                  state.budgetMicros === input.expectedDailyBudgetMicros &&
+                  Boolean(state.resourceName);
+                return {
+                  verified,
+                  evidence: [
+                    JSON.stringify({
+                      campaignId: input.campaignId,
+                      status: state.status,
+                      budgetMicros: state.budgetMicros,
+                      resourceName: state.resourceName,
+                    }),
+                  ],
+                  ...(state.resourceName ? { externalResourceId: state.resourceName } : {}),
+                  ...(!verified ? { reason: 'GOOGLE_ADS_ACTIVATION_READBACK_MISMATCH' } : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.pause':
+      return googleAds
+        ? binding(
+            googleAdsCampaignIdSchema,
+            (input) => googleAds.provider.updateStatus(input.campaignId, 'PAUSED'),
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) => `google-ads:pause:${input.campaignId}`,
+              providerReadback: async (_result, input) => {
+                const readback = await googleAds.provider.verifyPaused(input.campaignId);
+                return {
+                  verified: readback.verified,
+                  evidence: [JSON.stringify(readback.evidence)],
+                  externalResourceId: `customers/${googleAds.targetAccount}/campaigns/${input.campaignId}`,
+                  ...(!readback.verified
+                    ? { reason: 'GOOGLE_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' }
+                    : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.update_budget':
+      return googleAds
+        ? binding(
+            googleAdsBudgetUpdateSchema,
+            (input) => googleAds.provider.updateBudget(input.campaignId, input.dailyBudgetMicros),
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) =>
+                `google-ads:update-budget:${input.campaignId}:${input.dailyBudgetMicros}`,
+              financialContext: (input) => ({
+                amountMinor: googleAds.provider.minorUnitsForMicros(input.dailyBudgetMicros),
+                currency: googleAds.currency,
+              }),
+              providerReadback: async (result, input) => {
+                const amountMicros = await googleAds.provider.readBudgetMicros(input.campaignId);
+                const budgetResource =
+                  typeof result.budgetResource === 'string' ? result.budgetResource : undefined;
+                const verified =
+                  amountMicros === input.dailyBudgetMicros && budgetResource !== undefined;
+                return {
+                  verified,
+                  evidence: [
+                    JSON.stringify({
+                      campaignId: input.campaignId,
+                      amountMicros,
+                      expectedAmountMicros: input.dailyBudgetMicros,
+                      budgetResource,
+                    }),
+                  ],
+                  ...(budgetResource ? { externalResourceId: budgetResource } : {}),
+                  ...(!verified ? { reason: 'GOOGLE_ADS_BUDGET_READBACK_MISMATCH' } : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
     case 'instagram.media.list':
       return services.instagramHistory
         ? binding(mediaListSchema, (input) => services.instagramHistory!.listMedia(input))
@@ -358,6 +638,40 @@ function binding<T, TResult>(
       : {}),
     ...(options.sideEffectValidated !== undefined
       ? { sideEffectValidated: options.sideEffectValidated }
+      : {}),
+  };
+}
+
+function googleAdsRuntimeContext(
+  services: RuntimeCapabilityServices,
+): GoogleAdsRuntimeContext | undefined {
+  const targetAccount = services.googleAdsTargetAccount?.trim();
+  const currency = services.googleAdsCurrency?.trim().toUpperCase();
+  if (!services.googleAds || !targetAccount || !currency) return undefined;
+  return { provider: services.googleAds, targetAccount, currency };
+}
+
+function googleAdsCampaignState(readback: Record<string, unknown>): {
+  readonly status?: string;
+  readonly resourceName?: string;
+  readonly budgetMicros?: number;
+} {
+  const rows = Array.isArray(readback.results)
+    ? readback.results.filter(
+        (item): item is Record<string, unknown> =>
+          item !== null && typeof item === 'object' && !Array.isArray(item),
+      )
+    : [];
+  const row = rows[0];
+  const campaign = row?.campaign as Record<string, unknown> | undefined;
+  const budget = row?.campaignBudget as Record<string, unknown> | undefined;
+  const rawBudgetMicros = budget?.amountMicros;
+  const parsedBudgetMicros = Number(rawBudgetMicros);
+  return {
+    ...(typeof campaign?.status === 'string' ? { status: campaign.status } : {}),
+    ...(typeof campaign?.resourceName === 'string' ? { resourceName: campaign.resourceName } : {}),
+    ...(Number.isSafeInteger(parsedBudgetMicros) && parsedBudgetMicros > 0
+      ? { budgetMicros: parsedBudgetMicros }
       : {}),
   };
 }

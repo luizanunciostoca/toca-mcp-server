@@ -13,10 +13,27 @@ import {
 import { ROUTE_IDS } from '../src/governance/types.js';
 import { createToolRegistry } from '../src/registry.js';
 
+const googleAdsCapabilities = [
+  'google_ads.account.inspect',
+  'google_ads.campaigns.list',
+  'google_ads.insights.get',
+  'google_ads.conversion_actions.list',
+  'google_ads.campaign.prepare',
+  'google_ads.campaign.create_paused',
+  'google_ads.campaign.readback',
+  'google_ads.campaign.activate',
+  'google_ads.campaign.pause',
+  'google_ads.campaign.update_budget',
+  'google_ads.targeting.validate',
+  'google_ads.spend.monitor',
+  'google_ads.conversions.monitor',
+] as const;
+
 describe('TOCA OS route and capability catalogs', () => {
   it('registers exactly R01-R32 as stable macroprocesses', () => {
     expect(() => validateRouteCatalog()).not.toThrow();
     expect(ROUTE_CATALOG.map((route) => route.routeId)).toEqual(ROUTE_IDS);
+    expect(ROUTE_IDS).not.toContain('R33');
     expect(getRouteDefinition('R21')).toMatchObject({
       name: 'GOVERNANCE_DRIFT_RECONCILIATION',
       priority: 'P0',
@@ -28,11 +45,14 @@ describe('TOCA OS route and capability catalogs', () => {
     );
     expect(getRouteDefinition('R30').subflows).toContain('REVIEW_RESPONSE');
     expect(getRouteDefinition('R31').subflows).toContain('LOCAL_PERFORMANCE');
+    for (const capabilityId of googleAdsCapabilities) {
+      expect(getRouteDefinition('R28').capabilityIds).toContain(capabilityId);
+    }
   });
 
-  it('materializes the 745-capability catalog using contract v1.1 without pretending inference is explicit', () => {
+  it('materializes the 758-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(745);
+    expect(CAPABILITY_CATALOG).toHaveLength(758);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
@@ -79,6 +99,45 @@ describe('TOCA OS route and capability catalogs', () => {
       lifecycle_status: 'IMPLEMENTED',
       risk_class: 'READ',
       side_effects: false,
+    });
+  });
+
+  it('keeps Google Ads inside R28 with OAuth scope and fail-closed write lifecycle', () => {
+    for (const capabilityId of googleAdsCapabilities) {
+      expect(getCapabilityDefinition(capabilityId)).toMatchObject({
+        route_id: 'R28',
+        primary_route_id: 'R28',
+        provider: 'Google Ads API',
+        authentication_mode: 'OAUTH2',
+        lifecycle_status: 'IMPLEMENTED',
+        execution_surface: 'MCP_TOOL',
+        required_scopes: ['https://www.googleapis.com/auth/adwords'],
+      });
+    }
+
+    expect(getCapabilityDefinition('google_ads.campaign.create_paused')).toMatchObject({
+      risk_class: 'WRITE_EXTERNAL',
+      approval_required: true,
+      side_effects: true,
+      lifecycle_status: 'IMPLEMENTED',
+    });
+    expect(getCapabilityDefinition('google_ads.campaign.activate')).toMatchObject({
+      risk_class: 'FINANCIAL_IMPACT',
+      approval_required: true,
+      side_effects: true,
+      lifecycle_status: 'IMPLEMENTED',
+    });
+    expect(getCapabilityDefinition('google_ads.campaign.update_budget')).toMatchObject({
+      risk_class: 'FINANCIAL_IMPACT',
+      approval_required: true,
+      side_effects: true,
+      lifecycle_status: 'IMPLEMENTED',
+    });
+    expect(getCapabilityDefinition('google_ads.campaign.pause')).toMatchObject({
+      risk_class: 'WRITE_EXTERNAL',
+      approval_required: true,
+      side_effects: true,
+      lifecycle_status: 'IMPLEMENTED',
     });
   });
 
@@ -146,6 +205,7 @@ describe('TOCA OS route and capability catalogs', () => {
       instagramReadsEnabled: true,
       metaAdsReadsEnabled: true,
       metaAdsWritesEnabled: true,
+      googleAdsPhase: 'MANAGE',
       tocaManagedInstagramSchedulerEnabled: true,
     });
     expect(runtime.list().length).toBeLessThan(CAPABILITY_CATALOG.length);
