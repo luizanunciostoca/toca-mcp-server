@@ -39,16 +39,16 @@ jobs:
             src/privacy/contracts.ts \
             src/privacy/in-memory.ts \
             src/privacy/index.ts \
-            src/privacy/privacy-governance-ledger.ts \
-            src/privacy/privacy-governance-payload.ts \
-            src/privacy/privacy-governance-policy.ts \
-            src/privacy/privacy-governance-service.ts \
-            tests/privacy-capability-registry.test.ts \
-            tests/privacy-fixtures.test.ts \
-            tests/privacy-governance-sensitive.test.ts \
-            tests/privacy-governance.test.ts \
-            tests/privacy-postgres-contract.test.ts \
-            tests/privacy-rights-service.test.ts
+            src/privacy/privacy-governance-base.ts \
+            src/privacy/privacy-governance-core.ts \
+            src/privacy/privacy-governance-helpers.ts \
+            src/privacy/privacy-governance-rights.ts \
+            src/privacy/privacy-governance.ts \
+            test/privacy-capability-registry.test.ts \
+            test/privacy-governance-fixtures.ts \
+            test/privacy-governance-sensitive.test.ts \
+            test/privacy-governance.test.ts \
+            test/privacy-postgres-contract.test.ts
           test "$(git diff --cached --name-only | wc -l)" -eq 17
           pnpm quality
       - name: Commit exact R16 delta
