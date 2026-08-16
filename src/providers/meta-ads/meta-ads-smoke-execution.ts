@@ -82,7 +82,9 @@ async function reconcileWithBoundedSettlementRetry(
 }
 
 function isProviderReconciliationTimeout(error: unknown): boolean {
-  return error instanceof Error && error.message === 'META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT';
+  return (
+    error instanceof Error && error.message === 'META_ADS_SMOKE_PROVIDER_RECONCILIATION_TIMEOUT'
+  );
 }
 
 export function metaAdsProviderCreationCheckpointFromError(
