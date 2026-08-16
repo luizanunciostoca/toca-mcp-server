@@ -110,6 +110,89 @@ try {
     },
   };
 
+  const adaptInput: VideoContentRuntimeInput = {
+    tenant_id: tenantId,
+    workspace_id: workspaceId,
+    organization_id: organizationId,
+    content_item_id: contentItemId,
+    version_id: rootVersionId,
+    correlation_id: correlationId,
+    idempotency_key: `r29:production:adapt:${suffix}`,
+    evidence,
+    target_channel: 'INSTAGRAM',
+    target_format: 'STORY',
+    payload: {
+      new_version_id: adaptedVersionId,
+      source_refs: [`toca://verification/r29/${sourceSha}`],
+      source_asset_ids: [sourceAssetId],
+    },
+  };
+
+  const providerVideoResult = await runtime.execute('video.caption.embed', videoInput);
+  const providerVideoReadback = await runtime.readback(
+    'video.caption.embed',
+    providerVideoResult,
+    videoInput,
+  );
+  assert(providerVideoReadback.verified, 'R29_PRODUCTION_PROVIDER_VIDEO_READBACK_FAILED');
+  const providerArtifactRef = requiredResultText(providerVideoResult, 'artifactRef');
+
+  const providerVideoRetry = await runtime.execute('video.caption.embed', videoInput);
+  const providerRetryReadback = await runtime.readback(
+    'video.caption.embed',
+    providerVideoRetry,
+    videoInput,
+  );
+  assert(providerRetryReadback.verified, 'R29_PRODUCTION_PROVIDER_VIDEO_RETRY_READBACK_FAILED');
+  assert(
+    requiredResultText(providerVideoRetry, 'artifactRef') === providerArtifactRef,
+    'R29_PRODUCTION_PROVIDER_VIDEO_IDEMPOTENCY_FAILED',
+  );
+
+  const providerAdaptResult = await runtime.execute('content_item.channel.adapt', adaptInput);
+  const providerAdaptReadback = await runtime.readback(
+    'content_item.channel.adapt',
+    providerAdaptResult,
+    adaptInput,
+  );
+  assert(providerAdaptReadback.verified, 'R29_PRODUCTION_PROVIDER_ADAPT_READBACK_FAILED');
+
+  const preflightArtifactCount = await pool1.query<{ count: number }>(
+    `select count(*)::int as count
+       from content_video_artifacts
+      where content_item_id = $1 and capability_id = 'video.caption.embed'`,
+    [contentItemId],
+  );
+  const preflightArtifactRows = preflightArtifactCount.rows[0]?.count ?? 0;
+  assert(preflightArtifactRows === 1, 'R29_PRODUCTION_PROVIDER_ARTIFACT_COUNT_INVALID');
+
+  const preflightOutboxCount = await pool1.query<{ count: number }>(
+    `select count(*)::int as count
+       from event_outbox
+      where aggregate_id = $1 and event_type = 'content.video_artifact.created'`,
+    [contentItemId],
+  );
+  const preflightOutboxRows = preflightOutboxCount.rows[0]?.count ?? 0;
+  assert(preflightOutboxRows === 1, 'R29_PRODUCTION_PROVIDER_OUTBOX_COUNT_INVALID');
+
+  console.log(
+    `R29_PRODUCTION_PROVIDER_PREFLIGHT=${JSON.stringify({
+      schemaVersion: 1,
+      sourceSha,
+      validationRunId,
+      providerRuntime: 'PostgresVideoContentRuntime',
+      videoCapability: 'video.caption.embed',
+      r29Capability: 'content_item.channel.adapt',
+      videoReadbackVerified: providerVideoReadback.verified,
+      r29ReadbackVerified: providerAdaptReadback.verified,
+      deterministicRetryVerified: providerRetryReadback.verified,
+      artifactRows: preflightArtifactRows,
+      outboxRows: preflightOutboxRows,
+      artifactExternalResourceId: providerArtifactRef,
+      externalPublicationExecuted: false,
+    })}`,
+  );
+
   const firstVideo = await executeCoreCapability(
     {
       capabilityId: 'video.caption.embed',
@@ -140,23 +223,6 @@ try {
     'R29_PRODUCTION_VIDEO_IDEMPOTENCY_FAILED',
   );
 
-  const adaptInput: VideoContentRuntimeInput = {
-    tenant_id: tenantId,
-    workspace_id: workspaceId,
-    organization_id: organizationId,
-    content_item_id: contentItemId,
-    version_id: rootVersionId,
-    correlation_id: correlationId,
-    idempotency_key: `r29:production:adapt:${suffix}`,
-    evidence,
-    target_channel: 'INSTAGRAM',
-    target_format: 'STORY',
-    payload: {
-      new_version_id: adaptedVersionId,
-      source_refs: [`toca://verification/r29/${sourceSha}`],
-      source_asset_ids: [sourceAssetId],
-    },
-  };
   const adapted = await executeCoreCapability(
     {
       capabilityId: 'content_item.channel.adapt',
