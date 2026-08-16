@@ -1,14 +1,12 @@
 # Omnichannel CRM — WhatsApp, Email and Nurture contracts
 
-Status: **BLOCKED BY PRIVACY/CONSENT — CONTRACTS READY, RUNTIME DISABLED**
+Status: **PRIVACY INTEGRATED — CONTRACTS READY / RUNTIME AND PROVIDERS DISABLED**
 
-Reconciled `main` SHA: `88de675febdb1142f65c1354effef2ef2a9e0588`
+Reconciled base: `main@8fa4f35211fd90dff9b8dd4c2a020898e563e7e9`.
 
 ## Scope
 
-This checkpoint prepares the provider-neutral contracts and fail-closed safety boundary for the Omnichannel CRM front without recreating CRM Core Records, Privacy/Consent or a second scheduler.
-
-The requested capability surface is:
+This checkpoint defines provider-neutral, fail-closed contracts for the requested Omnichannel CRM surface without duplicating CRM Core, Privacy, workflow scheduling, transactional outbox or audit infrastructure.
 
 ### WhatsApp
 
@@ -37,126 +35,93 @@ The requested capability surface is:
 - `nurture.sequence.pause`
 - `nurture.sequence.outcome.record`
 
-## Dependency audit
+## Canonical dependencies
 
-The branch was originally cut from `76aec57a707161f4ca8484059b8ec302b9be6910`, when neither dependent front was canonical on `main`.
+CRM Core and Privacy are now canonical on `main`.
 
-During final reconciliation:
+- `ContactRecord` remains owned by `src/crm/crm-records.ts`.
+- R16 Privacy merged through PR #115 at `main@8fa4f35211fd90dff9b8dd4c2a020898e563e7e9`.
+- Production migration gate applied `014_privacy_governance.sql` and verified `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=14`.
+- `src/omnichannel/contracts.ts` imports canonical `PrivacyScope` and `SuppressionDecision` from `src/privacy/contracts.ts`.
+- The former blocker `PRIVACY_CONSENT_SUPPRESSION_NOT_CANONICAL_ON_MAIN` is removed.
 
-- `M-FOUND-10 CRM Core Records` merged through PR #102 as commit `a33bfb18614b01b1f263edd1d8dee497c3a47495`;
-- `ContactRecord` is now canonical in `src/crm/crm-records.ts` and the omnichannel contact proof type is bound to that canonical `ContactRecord['contactId']`;
-- `Privacy / Consent / Preferences` PR #103 remains open/draft and is not canonical on `main`;
-- the branch was replayed onto `main` SHA `88de675febdb1142f65c1354effef2ef2a9e0588` after the concurrent Google Business merge.
+## Privacy integration contract
 
-The remaining mandatory blocker is therefore:
+Omnichannel does not maintain a parallel consent or suppression model.
 
-- `PRIVACY_CONSENT_SUPPRESSION_NOT_CANONICAL_ON_MAIN`
+The canonical outbound privacy gate is `privacy.suppression.check`. Its `SuppressionDecision` incorporates the scoped purpose/legal-basis state and, when applicable, consent, revocation, channel preference, retention/delete suppression and unknown-state blocking.
 
-This PR must remain blocked until Privacy/Consent is merged and the branch is rebased/revalidated again.
+Single-recipient outbound therefore requires, in one tenant/workspace/organization/correlation scope:
 
-## Architectural decisions
+1. one unambiguous canonical `ContactRecord` resolution;
+2. an opaque Privacy `subjectRef` binding;
+3. a canonical Privacy execution reference;
+4. `SuppressionDecision.state === ALLOWED` and `blocked === false` for the exact purpose/channel;
+5. the independent outbound policy decision to allow the operation;
+6. an active approval when required.
 
-These 18 capabilities remain dependency-gated specifications and are deliberately **not** added to the executable capability catalog or MCP runtime while Privacy/Consent is absent.
+`SUPPRESSED`, `UNKNOWN_BLOCKED`, channel mismatch, identity ambiguity, cross-scope evidence or policy denial fails closed before any provider call.
 
-The current canonical catalog on the reconciled `main` already contains 745 entries after another independent front. This checkpoint does not mutate that catalog; tests assert that none of the 18 blocked Omnichannel IDs enters the catalog or runtime.
+The external capability schemas mirror this same boundary with `privacy_execution_id`, `privacy_subject_ref`, `privacy_state`, `privacy_blocked`, `privacy_purpose_id` and `privacy_channel`; they no longer define local `consent_status` or `suppression_decision_id` contracts.
 
-Future primary route mapping after dependency integration is:
+Batch email eligibility records aggregate canonical Privacy results using separate zero-required counts for `UNKNOWN_BLOCKED` and `SUPPRESSED` recipients.
 
-- WhatsApp and Email channel lifecycle: `R30`;
-- Nurture / CRM lifecycle: `R10`.
+## Runtime and provider boundary
 
-No `R33` is created.
+This PR does **not** activate Omnichannel.
 
-All specifications remain `SPECIFIED`, `runtimeExposed=false` and `productionExecutionAllowed=false` while the Privacy blocker exists.
+All 18 capability specifications remain:
 
-## CRM reuse
+- `SPECIFIED`;
+- `runtimeExposed=false`;
+- `productionExecutionAllowed=false`.
 
-The canonical CRM core is reused rather than copied. `src/omnichannel/contracts.ts` imports the canonical `ContactRecord` type and uses `ContactRecord['contactId']` in contact-resolution and provider-send contracts.
+They are deliberately not inserted into the executable capability catalog or MCP runtime by this checkpoint.
 
-No second `ContactRecord`, deduplication store, lead model or opportunity model is introduced by this front.
+No WhatsApp or Email provider is selected here. No provider credentials/scopes are invented. A provider binding must be separately proven `PRODUCTION_VALIDATED` before external send can be enabled.
 
-## Outbound safety contract
-
-Single-recipient outbound requires all of the following evidence in the same tenant/workspace/organization/correlation scope:
-
-1. one unambiguous resolved canonical `ContactRecord` identity;
-2. purpose-bound consent with status `GRANTED` for the exact channel;
-3. suppression decision with `suppressed=false`;
-4. policy decision with `allowed=true`;
-5. an active approval when the operation requires approval.
-
-Ambiguous or unresolved identity, `UNKNOWN`/denied/revoked/expired consent, channel mismatch, suppression, policy denial or cross-scope evidence fails closed.
-
-Batch email preparation/send uses an immutable audience-eligibility snapshot. Dispatch is invalid when any ambiguous, unresolved, unknown-consent, denied-consent, suppressed or policy-denied recipient remains in the snapshot.
-
-## Provider boundary
-
-No WhatsApp or email provider is selected by this checkpoint. No scopes, credentials, production configuration or provider support are invented.
-
-Provider adapters expose contracts for template validation, send and read-back. A binding cannot be treated as production-ready until its state is explicitly `PRODUCTION_VALIDATED` with separate provider-backed evidence.
-
-External send capabilities are `WRITE_EXTERNAL`, approval-required and non-idempotent at the provider boundary. Automatic blind resend is forbidden; provider read-back and reconciliation are required after uncertain results.
+External sends remain `WRITE_EXTERNAL`, approval-required and non-idempotent at the provider boundary. Blind automatic resend is forbidden; uncertain results require provider read-back/reconciliation.
 
 ## Nurture boundary
 
-Nurture sequences are modeled as definitions/instances of the existing durable workflow engine.
+Nurture reuses the existing TOCA durable workflow engine, including persisted workflow state, timers, human tasks, approvals, concurrency controls, transactional outbox and audit ledger. This checkpoint creates no parallel scheduler, timer daemon or queue.
 
-They must reuse the foundation's persisted workflow instances, steps, timers, human tasks, concurrency control, approvals, transactional outbox and audit ledger. This checkpoint introduces no scheduler, timer daemon or queue parallel to that foundation.
+## Route ownership
 
-Enrollment requires the same ContactRecord, consent, suppression, policy and approval evidence as governed outbound. Pausing uses workflow-instance identity and optimistic versioning. Outcomes are append-only evidence attached to the workflow/audit lineage.
+- WhatsApp and Email lifecycle: `R30`.
+- Nurture / CRM lifecycle: `R10`.
+- No `R33` is created.
 
-## What is intentionally not implemented
+## Validation evidence
 
-This checkpoint does not:
+The old six-file Omnichannel delta was replayed onto the post-Privacy main without conflicts.
 
-- define or duplicate `ContactRecord`;
-- define or duplicate consent/preference/retention persistence;
-- add a WhatsApp or email provider SDK;
-- configure provider credentials or permission scopes;
-- register MCP tools for these capabilities;
-- promote any capability to `IMPLEMENTED`, `CONNECTED` or `PRODUCTION_VALIDATED`;
-- send any WhatsApp message or email;
-- create a parallel scheduler;
-- merge while Privacy/Consent is absent.
+- replay/materialization run `31917722667`: **SUCCESS**, including full `pnpm quality`;
+- canonical Privacy binding run `31917888004`: **SUCCESS**, including Prettier plus full `pnpm quality`;
+- the final PR head must still run the repository canonical Quality Gate after temporary reconciliation workflow removal.
 
-## Quality history
+## What remains intentionally out of scope
 
-Early branch runs exposed only local checkpoint issues and were corrected:
+This contract checkpoint does not:
 
-- initial Prettier normalization;
-- strict optional-property fixture correction;
-- readonly fixture correction;
-- inventory test corrected to rely on canonical catalog behavior instead of a stale route-only count assumption.
+- duplicate `ContactRecord`;
+- duplicate Privacy ledger, consent, preference or suppression persistence;
+- implement a WhatsApp/Email provider SDK;
+- configure outbound production credentials/scopes;
+- expose the 18 capabilities as MCP tools;
+- send a WhatsApp message or email;
+- create another scheduler;
+- promote any Omnichannel capability to `IMPLEMENTED`, `CONNECTED` or `PRODUCTION_VALIDATED`.
 
-A full Quality Gate must pass again after every reconciliation with `main` and, critically, after Privacy/Consent is merged.
+Those promotions require separate implementation/provider evidence and must preserve the existing Foundation controls: identity, typed schema, authorization, policy, risk, approval, idempotency, durable workflow, provider read-back, EventRecord/CRM where applicable, Transactional Outbox and Audit Ledger.
 
-## Integration gate after Privacy merge
+## Merge gate
 
-Before this front can leave blocked status:
+The contract integration may merge only when:
 
-1. rebase/replay onto the then-current fixed `main` after Privacy/Consent merges;
-2. bind the Privacy dependency ports to the canonical consent/suppression/purpose contracts instead of redefining them;
-3. reconcile route consumption and register the 18 IDs as technical extensions only when their canonical contracts are available;
-4. wire nurture to the existing durable workflow persistence, timers and human-task APIs;
-5. wire outbound execution through existing policy, approval atomicity, idempotency, transactional outbox and audit ledger;
-6. add a real provider adapter/configuration only with official provider permission evidence;
-7. keep external sends below `PRODUCTION_VALIDATED` until integration and provider-backed smoke tests pass;
-8. require provider read-back before reporting delivery/send completion;
-9. run the complete repository Quality Gate on the rebased fixed head;
-10. merge only by the exact green head SHA and run post-merge validation.
-
-## Acceptance criteria for this blocked checkpoint
-
-This pre-integration checkpoint is valid when:
-
-- all 18 requested IDs have explicit closed contracts;
-- canonical `ContactRecord` is reused rather than duplicated;
-- Privacy decisions remain an external canonical dependency until PR #103 merges;
-- unknown consent and ambiguous identity are impossible to pass as eligible outbound;
-- provider adapters are unbound and production use is fail-closed;
-- nurture refers to the durable workflow engine rather than a new scheduler;
-- the existing capability catalog is not mutated by these blocked IDs;
-- none of the 18 capabilities appears in the MCP runtime;
-- tests lock these invariants;
-- the repository Quality Gate passes on the reconciled branch;
-- the PR remains draft/blocked until Privacy/Consent is canonical on `main`.
+1. the reconciled PR diff contains exactly the six Omnichannel files and no temporary workflow;
+2. canonical Privacy imports/bindings remain in place;
+3. all 18 capabilities remain non-runtime and production-disabled;
+4. the exact-head canonical Quality Gate is green;
+5. merge uses the exact validated head SHA;
+6. post-merge `main` Quality is green.
