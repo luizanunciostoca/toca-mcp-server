@@ -13,8 +13,7 @@ export interface MetaAdsProviderSmokeSnapshot {
 }
 
 export type MetaAdsProviderSmokeReadiness =
-  | { readonly state: 'READY' }
-  | { readonly state: 'PENDING'; readonly entities: readonly string[] };
+  { readonly state: 'READY' } | { readonly state: 'PENDING'; readonly entities: readonly string[] };
 
 const TRANSIENT_EFFECTIVE_STATUSES = new Set(['IN_PROCESS', 'PENDING_REVIEW', 'PREAPPROVED']);
 const AD_SET_SAFE_EFFECTIVE_STATUSES = new Set(['PAUSED', 'CAMPAIGN_PAUSED']);
@@ -85,9 +84,7 @@ function hasUsableValidationWindow(value: unknown, nowMs: number): boolean {
   const endTime = scalarString(value);
   if (!endTime) return true;
   const endTimeMs = Date.parse(endTime);
-  return (
-    Number.isFinite(endTimeMs) && endTimeMs > nowMs + VALIDATION_END_TIME_SAFETY_WINDOW_MS
-  );
+  return Number.isFinite(endTimeMs) && endTimeMs > nowMs + VALIDATION_END_TIME_SAFETY_WINDOW_MS;
 }
 
 function evaluateEffectiveStatus(
