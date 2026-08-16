@@ -42,6 +42,13 @@ const googleAdsDateRangeSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 const googleAdsCampaignReferenceSchema = z.object({ campaignIdOrName: z.string().min(1) });
+const googleAdsCampaignIdSchema = z.object({ campaignId: z.string().regex(/^\d+$/) });
+const googleAdsActivateSchema = googleAdsCampaignIdSchema.extend({
+  expectedDailyBudgetMicros: z.number().int().positive(),
+});
+const googleAdsBudgetUpdateSchema = googleAdsCampaignIdSchema.extend({
+  dailyBudgetMicros: z.number().int().positive(),
+});
 
 function googleAdsPlanFromInput(input: z.infer<typeof googleAdsPlanSchema>): GoogleAdsCampaignPlan {
   return {
@@ -167,11 +174,19 @@ const jobIdSchema = z.object({ jobId: z.string().min(1) });
 
 export interface RuntimeCapabilityServices {
   readonly googleAds?: GoogleAdsPaidMediaProvider;
+  readonly googleAdsTargetAccount?: string;
+  readonly googleAdsCurrency?: string;
   readonly instagramHistory?: InstagramHistoryProvider;
   readonly metaAdsRead?: MetaAdsReadProvider;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
   readonly instagramScheduler?: TocaManagedInstagramScheduler;
+}
+
+interface GoogleAdsRuntimeContext {
+  readonly provider: GoogleAdsPaidMediaProvider;
+  readonly targetAccount: string;
+  readonly currency: string;
 }
 
 export function createRuntimeCapabilityResolver(
@@ -184,68 +199,84 @@ function resolveBinding(
   capabilityId: string,
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
+  const googleAds = googleAdsRuntimeContext(services);
   switch (capabilityId) {
     case 'google_ads.account.inspect':
-      return services.googleAds
-        ? binding(z.object({}), () => services.googleAds!.inspectAccount())
+      return googleAds
+        ? binding(z.object({}), () => googleAds.provider.inspectAccount(), {
+            targetAccount: () => googleAds.targetAccount,
+          })
         : undefined;
     case 'google_ads.campaigns.list':
-      return services.googleAds
-        ? binding(z.object({ limit: z.number().int().min(1).max(500).default(100) }), (input) =>
-            services.googleAds!.listCampaigns(input.limit),
+      return googleAds
+        ? binding(
+            z.object({ limit: z.number().int().min(1).max(500).default(100) }),
+            (input) => googleAds.provider.listCampaigns(input.limit),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.insights.get':
-      return services.googleAds
+      return googleAds
         ? binding(
             googleAdsDateRangeSchema.extend({
               limit: z.number().int().min(1).max(500).default(100),
             }),
-            (input) => services.googleAds!.getInsights(input.startDate, input.endDate, input.limit),
+            (input) => googleAds.provider.getInsights(input.startDate, input.endDate, input.limit),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.conversion_actions.list':
-      return services.googleAds
-        ? binding(z.object({ limit: z.number().int().min(1).max(500).default(100) }), (input) =>
-            services.googleAds!.listConversionActions(input.limit),
+      return googleAds
+        ? binding(
+            z.object({ limit: z.number().int().min(1).max(500).default(100) }),
+            (input) => googleAds.provider.listConversionActions(input.limit),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.spend.monitor':
-      return services.googleAds
-        ? binding(googleAdsDateRangeSchema, (input) =>
-            services.googleAds!.spendMonitor(input.startDate, input.endDate),
+      return googleAds
+        ? binding(
+            googleAdsDateRangeSchema,
+            (input) => googleAds.provider.spendMonitor(input.startDate, input.endDate),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.conversions.monitor':
-      return services.googleAds
-        ? binding(googleAdsDateRangeSchema, (input) =>
-            services.googleAds!.conversionsMonitor(input.startDate, input.endDate),
+      return googleAds
+        ? binding(
+            googleAdsDateRangeSchema,
+            (input) => googleAds.provider.conversionsMonitor(input.startDate, input.endDate),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.campaign.prepare':
-      return services.googleAds
-        ? binding(googleAdsPlanSchema, (input) =>
-            Promise.resolve(services.googleAds!.prepare(googleAdsPlanFromInput(input))),
+      return googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => Promise.resolve(googleAds.provider.prepare(googleAdsPlanFromInput(input))),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.targeting.validate':
-      return services.googleAds
-        ? binding(googleAdsPlanSchema, (input) =>
-            services.googleAds!.validateTargeting(googleAdsPlanFromInput(input)),
+      return googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => googleAds.provider.validateTargeting(googleAdsPlanFromInput(input)),
+            { targetAccount: () => googleAds.targetAccount },
           )
         : undefined;
     case 'google_ads.campaign.create_paused':
-      return services.googleAds
+      return googleAds
         ? binding(
             googleAdsPlanSchema,
-            (input) => services.googleAds!.createPaused(googleAdsPlanFromInput(input)),
+            (input) => googleAds.provider.createPaused(googleAdsPlanFromInput(input)),
             {
-              targetAccount: (input) => input.customerId,
+              targetAccount: () => googleAds.targetAccount,
               idempotencyKey: (input) =>
-                `google-ads:create-paused:${services.googleAds!.prepare(googleAdsPlanFromInput(input)).requestSha256}`,
+                `google-ads:create-paused:${googleAds.provider.prepare(googleAdsPlanFromInput(input)).requestSha256}`,
               financialContext: (input) => ({
-                amountMinor: services.googleAds!.minorUnitsForMicros(input.dailyBudgetMicros),
-                currency: input.currencyCode.toUpperCase(),
+                amountMinor: googleAds.provider.minorUnitsForMicros(input.dailyBudgetMicros),
+                currency: googleAds.currency,
               }),
               providerReadback: async (result) => {
                 const record = result;
@@ -260,7 +291,7 @@ function resolveBinding(
                     reason: 'GOOGLE_ADS_CREATED_RESOURCE_NAME_REQUIRED',
                   };
                 }
-                const readback = await services.googleAds!.verifyPaused(resourceName);
+                const readback = await googleAds.provider.verifyPaused(resourceName);
                 return {
                   verified: readback.verified,
                   evidence: [JSON.stringify(readback.evidence)],
@@ -275,9 +306,119 @@ function resolveBinding(
           )
         : undefined;
     case 'google_ads.campaign.readback':
-      return services.googleAds
-        ? binding(googleAdsCampaignReferenceSchema, (input) =>
-            services.googleAds!.readbackCampaign(input.campaignIdOrName),
+      return googleAds
+        ? binding(
+            googleAdsCampaignReferenceSchema,
+            (input) => googleAds.provider.readbackCampaign(input.campaignIdOrName),
+            { targetAccount: () => googleAds.targetAccount },
+          )
+        : undefined;
+    case 'google_ads.campaign.activate':
+      return googleAds
+        ? binding(
+            googleAdsActivateSchema,
+            async (input) => {
+              const currentBudgetMicros = await googleAds.provider.readActivationBudgetMicros(
+                input.campaignId,
+              );
+              if (currentBudgetMicros !== input.expectedDailyBudgetMicros) {
+                throw new Error('GOOGLE_ADS_ACTIVATION_BUDGET_DRIFT');
+              }
+              return googleAds.provider.updateStatus(input.campaignId, 'ENABLED');
+            },
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) =>
+                `google-ads:activate:${input.campaignId}:${input.expectedDailyBudgetMicros}`,
+              financialContext: (input) => ({
+                amountMinor: googleAds.provider.minorUnitsForMicros(
+                  input.expectedDailyBudgetMicros,
+                ),
+                currency: googleAds.currency,
+              }),
+              providerReadback: async (_result, input) => {
+                const readback = await googleAds.provider.readbackCampaign(input.campaignId);
+                const state = googleAdsCampaignState(readback);
+                const verified =
+                  state.status === 'ENABLED' &&
+                  state.budgetMicros === input.expectedDailyBudgetMicros &&
+                  Boolean(state.resourceName);
+                return {
+                  verified,
+                  evidence: [
+                    JSON.stringify({
+                      campaignId: input.campaignId,
+                      status: state.status,
+                      budgetMicros: state.budgetMicros,
+                      resourceName: state.resourceName,
+                    }),
+                  ],
+                  ...(state.resourceName ? { externalResourceId: state.resourceName } : {}),
+                  ...(!verified ? { reason: 'GOOGLE_ADS_ACTIVATION_READBACK_MISMATCH' } : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.pause':
+      return googleAds
+        ? binding(
+            googleAdsCampaignIdSchema,
+            (input) => googleAds.provider.updateStatus(input.campaignId, 'PAUSED'),
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) => `google-ads:pause:${input.campaignId}`,
+              providerReadback: async (_result, input) => {
+                const readback = await googleAds.provider.verifyPaused(input.campaignId);
+                return {
+                  verified: readback.verified,
+                  evidence: [JSON.stringify(readback.evidence)],
+                  externalResourceId: `customers/${googleAds.targetAccount}/campaigns/${input.campaignId}`,
+                  ...(!readback.verified
+                    ? { reason: 'GOOGLE_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' }
+                    : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.update_budget':
+      return googleAds
+        ? binding(
+            googleAdsBudgetUpdateSchema,
+            (input) => googleAds.provider.updateBudget(input.campaignId, input.dailyBudgetMicros),
+            {
+              targetAccount: () => googleAds.targetAccount,
+              idempotencyKey: (input) =>
+                `google-ads:update-budget:${input.campaignId}:${input.dailyBudgetMicros}`,
+              financialContext: (input) => ({
+                amountMinor: googleAds.provider.minorUnitsForMicros(input.dailyBudgetMicros),
+                currency: googleAds.currency,
+              }),
+              providerReadback: async (result, input) => {
+                const amountMicros = await googleAds.provider.readBudgetMicros(input.campaignId);
+                const budgetResource =
+                  typeof result.budgetResource === 'string' ? result.budgetResource : undefined;
+                const verified =
+                  amountMicros === input.dailyBudgetMicros && budgetResource !== undefined;
+                return {
+                  verified,
+                  evidence: [
+                    JSON.stringify({
+                      campaignId: input.campaignId,
+                      amountMicros,
+                      expectedAmountMicros: input.dailyBudgetMicros,
+                      budgetResource,
+                    }),
+                  ],
+                  ...(budgetResource ? { externalResourceId: budgetResource } : {}),
+                  ...(!verified ? { reason: 'GOOGLE_ADS_BUDGET_READBACK_MISMATCH' } : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
           )
         : undefined;
     case 'instagram.media.list':
@@ -497,6 +638,38 @@ function binding<T, TResult>(
       : {}),
     ...(options.sideEffectValidated !== undefined
       ? { sideEffectValidated: options.sideEffectValidated }
+      : {}),
+  };
+}
+
+function googleAdsRuntimeContext(services: RuntimeCapabilityServices): GoogleAdsRuntimeContext | undefined {
+  const targetAccount = services.googleAdsTargetAccount?.trim();
+  const currency = services.googleAdsCurrency?.trim().toUpperCase();
+  if (!services.googleAds || !targetAccount || !currency) return undefined;
+  return { provider: services.googleAds, targetAccount, currency };
+}
+
+function googleAdsCampaignState(readback: Record<string, unknown>): {
+  readonly status?: string;
+  readonly resourceName?: string;
+  readonly budgetMicros?: number;
+} {
+  const rows = Array.isArray(readback.results)
+    ? readback.results.filter(
+        (item): item is Record<string, unknown> =>
+          item !== null && typeof item === 'object' && !Array.isArray(item),
+      )
+    : [];
+  const row = rows[0];
+  const campaign = row?.campaign as Record<string, unknown> | undefined;
+  const budget = row?.campaignBudget as Record<string, unknown> | undefined;
+  const rawBudgetMicros = budget?.amountMicros;
+  const parsedBudgetMicros = Number(rawBudgetMicros);
+  return {
+    ...(typeof campaign?.status === 'string' ? { status: campaign.status } : {}),
+    ...(typeof campaign?.resourceName === 'string' ? { resourceName: campaign.resourceName } : {}),
+    ...(Number.isSafeInteger(parsedBudgetMicros) && parsedBudgetMicros > 0
+      ? { budgetMicros: parsedBudgetMicros }
       : {}),
   };
 }
