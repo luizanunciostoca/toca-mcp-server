@@ -1,10 +1,10 @@
 # Foundation v1 — Telemetry, Alerting, SLO and Disaster Recovery
 
-Status: **CURRENT RELEASE TELEMETRY/ALERTING + BACKUP-RESTORE RTO OPERATIONALLY VALIDATED**
+Status: **CURRENT RELEASE TELEMETRY/ALERTING + BACKUP/PITR DR OPERATIONALLY VALIDATED**
 
 Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
 
-Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md` and `docs/operations/foundation-reliability-provider-evidence.md`.
+Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md`, `docs/operations/foundation-reliability-provider-evidence.md` and `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`.
 
 ## Telemetry and SLO source plane
 
@@ -67,6 +67,8 @@ Independent mailbox-level receipt was not visible through the connected Gmail du
 
 ## Disaster recovery objectives and evidence
 
+### Isolated backup restore — PASS
+
 A real isolated backup restore was executed without restoring over production.
 
 Recovery target used:
@@ -92,23 +94,80 @@ Measured restore-start-to-validated-data RTO:
 
 Therefore the tested backup recovery path satisfies the <=60m RTO objective.
 
+### Isolated PITR drill — PASS
+
+Run `31936171307`, attempt 2, executed a separate PostgreSQL PITR restore target:
+
+`toca-mcp-pitr-31936171307`
+
+Provider recovery-window readback showed latest recoverable data lag of **128s (2m08s)**.
+
+The drill selected recovery timestamp:
+
+`2026-08-16T08:26:12.648Z`
+
+against reference time:
+
+`2026-08-16T08:34:46Z`.
+
+Measured PITR RPO:
+
+**514s (8m34s)**.
+
+The <=15m PITR RPO objective therefore passes.
+
+Temporal-boundary proof used existing append-only production evidence without inserting a synthetic database marker:
+
+- `operational_signals/c24795ae-14f1-4952-80af-314187c1ff78` at `08:26:10.648Z` was present in the restored target;
+- `audit_ledger_events/49fff740-196b-4a0b-a5f1-d68a14e02ad3` at `08:29:42.328Z` was absent.
+
+Restored-data validation proved:
+
+- migration count 16;
+- 22 critical tables readable;
+- critical foreign keys validated;
+- required append-only triggers enabled;
+- intended before/after PITR boundary reproduced.
+
+Restore-to-`RUNNABLE` time:
+
+**549s (9m09s)**.
+
+Restore-start-to-validated-data RTO:
+
+**584s (9m44s)**.
+
+The <=60m RTO objective passes for the PITR path as well.
+
+Successful PITR evidence artifact:
+
+- ID `9261022842`;
+- SHA-256 `6524043e56f2eacef34b129fa7eb2c7130711ce43e3071f67476573527dd5140`.
+
+Canonical evidence: `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`.
+
 ## DR cleanup — PASS
 
-Run `31933900598` deleted the isolated target after deletion protection was disabled only for that target.
+Backup-restore cleanup run `31933900598` deleted its isolated recovery target after deletion protection was disabled only for that target.
 
-Readback proved:
+The PITR drill also disabled deletion protection only on `toca-mcp-pitr-31936171307`, deleted its probe/validation jobs and deleted the PITR target.
 
-- temporary target absent;
+Final PITR readback proved:
+
+- temporary PITR target absent;
 - production still `RUNNABLE`;
 - production deletion protection enabled;
 - automated backups enabled;
-- PITR enabled.
+- PITR enabled;
+- normalized production settings unchanged from the pre-drill snapshot.
 
-No temporary DR instance remains.
+No temporary DR instance remains from either drill.
 
-## RPO caveat
+## PITR RPO objective — PASS
 
-The backup-based drill does not demonstrate the <=15-minute RPO objective because it did not restore to a PITR timestamp. Production PITR is enabled and verified. A future PITR-specific drill should measure the <=15m objective directly; that is continuing reliability validation rather than a current release blocker.
+The prior RPO caveat is closed by the real timestamp-based PITR drill. Measured PITR RPO is **514s (8m34s)** against the <=900s objective.
+
+This evidence is distinct from the older backup-age RPO of ~2h30m: backup restore and PITR are separate recovery modes, and the <=15m objective is now directly demonstrated on the PITR path.
 
 ## Incident mode for ambiguous provider writes
 
@@ -132,8 +191,11 @@ Current release reliability path is operationally closed for controlled real-sys
 - four permanent Foundation policies PASS;
 - controlled alert provider-path firing proof PASS;
 - real isolated backup restore PASS;
+- real isolated PITR restore PASS;
 - restored-data validation PASS;
-- RTO <=60m PASS;
-- DR cleanup PASS.
+- RTO <=60m PASS on both tested recovery paths;
+- PITR RPO <=15m PASS;
+- DR cleanup PASS;
+- production unchanged readback PASS.
 
-WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. A future PITR-specific RPO drill and optional mailbox-level receipt recheck are continuing operational validation, not current release blockers.
+WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. Optional mailbox-level alert receipt recheck remains continuing operational validation and does not alter the DR proof.
