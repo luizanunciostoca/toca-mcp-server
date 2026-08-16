@@ -211,7 +211,6 @@ describe('TOCA OS route and capability catalogs', () => {
     expect(facebookLogin?.scopes).toContain('instagram_content_publish');
     expect(instagramLogin).toBeDefined();
     expect(instagramLogin?.scopes).toContain('instagram_business_basic');
-    expect(instagramLogin).toContain;
     expect(instagramLogin?.scopes).toContain('instagram_business_content_publish');
   });
 
