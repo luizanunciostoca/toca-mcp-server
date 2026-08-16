@@ -1,0 +1,43 @@
+name: Cloud SQL DR Role Binding Readback 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-drill-v3-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-role-binding-readback-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  INFRA_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOYER: serviceAccount:toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.INFRA_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read only deployer custom-role bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud projects get-iam-policy "$GCP_PROJECT_ID" --format=json > /tmp/policy.json
+          jq --arg member "$DEPLOYER" '{schemaVersion:1,bindings:[.bindings[] | select((.members // []) | index($member)) | select(.role | startswith("projects/") or startswith("organizations/")) | {role,members:[.members[] | select(. == $member)]}],verifiedAt:(now|todateiso8601)}' /tmp/policy.json > cloud-sql-dr-role-binding-readback.json
+          cat cloud-sql-dr-role-binding-readback.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-dr-role-binding-readback-${{ github.sha }}
+          path: cloud-sql-dr-role-binding-readback.json
+          retention-days: 90
