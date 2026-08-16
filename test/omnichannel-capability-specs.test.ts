@@ -9,7 +9,7 @@ import {
   validateOmnichannelCapabilitySpecs,
 } from '../src/omnichannel/capability-specs.js';
 
-describe('omnichannel dependency-gated capability specifications', () => {
+describe('omnichannel capability specifications after canonical Privacy integration', () => {
   it('specifies exactly the requested capabilities without mutating the canonical catalog', () => {
     expect(() => validateOmnichannelCapabilitySpecs()).not.toThrow();
     expect(OMNICHANNEL_CAPABILITY_IDS).toHaveLength(18);
@@ -20,15 +20,13 @@ describe('omnichannel dependency-gated capability specifications', () => {
     }
   });
 
-  it('keeps every capability non-runtime and non-production while Privacy remains absent', () => {
-    expect(OMNICHANNEL_DEPENDENCY_BLOCKERS).toEqual([
-      'PRIVACY_CONSENT_SUPPRESSION_NOT_CANONICAL_ON_MAIN',
-    ]);
+  it('clears the resolved Privacy dependency but keeps runtime and production execution disabled', () => {
+    expect(OMNICHANNEL_DEPENDENCY_BLOCKERS).toEqual([]);
     for (const spec of OMNICHANNEL_CAPABILITY_SPECS) {
       expect(spec.lifecycleStatus).toBe('SPECIFIED');
       expect(spec.runtimeExposed).toBe(false);
       expect(spec.productionExecutionAllowed).toBe(false);
-      expect(spec.blockedBy).toEqual(OMNICHANNEL_DEPENDENCY_BLOCKERS);
+      expect(spec.blockedBy).toEqual([]);
     }
   });
 
@@ -39,7 +37,7 @@ describe('omnichannel dependency-gated capability specifications', () => {
     }
   });
 
-  it('does not expose the blocked specifications through the MCP runtime', () => {
+  it('does not expose the specifications through the MCP runtime', () => {
     const runtimeIds = new Set(
       createToolRegistry({
         instagramReadsEnabled: true,
