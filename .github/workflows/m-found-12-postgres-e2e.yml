@@ -8,9 +8,11 @@ on:
     paths:
       - 'test/m-found-12-postgres-e2e.test.ts'
       - 'test/r29-video-postgres-e2e.test.ts'
+      - 'test/r29-video-core-runtime.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'src/content/**'
+      - 'src/registry.ts'
       - 'src/persistence/**'
       - 'src/events/**'
       - 'src/workflow/**'
