@@ -508,7 +508,7 @@ export class PostgresVideoContentRuntime implements VideoContentRuntimeService {
       readonly channel: string;
       readonly format: ContentItemVersion['format'];
       readonly language: string;
-      readonly variantKey?: string;
+      readonly variantKey: string;
     }>(input, 'destinations');
     return {
       status: 'READY',
