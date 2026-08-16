@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { PostgresVideoContentRuntime, type VideoContentRuntimeInput } from '../src/content/runtime.js';
+import {
+  PostgresVideoContentRuntime,
+  type VideoContentRuntimeInput,
+} from '../src/content/runtime.js';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import { executeCoreCapability } from '../src/mcp/core-execution.js';
 import { CORE_MCP_TOOL_NAMES } from '../src/mcp/core-surface.js';
@@ -26,9 +29,15 @@ const adaptedVersionId = `r29-production-story-${suffix}`;
 const correlationId = `r29-production-runtime-${suffix}`;
 const contentKey = `r29:production-runtime:${suffix}`;
 const sourceAssetId = `r29-source-${suffix}`;
-const evidence = [`production:r29:${sourceSha}`, `validation-run:${validationRunId}`];
+const evidence = [
+  `production:r29:${sourceSha}`,
+  `validation-run:${validationRunId}`,
+];
 
-if (CORE_MCP_TOOL_NAMES.length !== 12 || !CORE_MCP_TOOL_NAMES.includes('toca.execute')) {
+if (
+  CORE_MCP_TOOL_NAMES.length !== 12 ||
+  !CORE_MCP_TOOL_NAMES.includes('toca.execute')
+) {
   throw new Error('R29_PRODUCTION_CORE_SURFACE_MISMATCH');
 }
 
@@ -106,7 +115,10 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(firstVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_READBACK_NOT_VERIFIED');
+  assert(
+    firstVideo.providerReadbackVerified,
+    'R29_PRODUCTION_VIDEO_READBACK_NOT_VERIFIED',
+  );
   videoExecutionId = firstVideo.executionId;
   videoResult = firstVideo.result;
   artifactExternalResourceId = requiredResultText(firstVideo.result, 'artifactRef');
@@ -120,7 +132,10 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(retriedVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED');
+  assert(
+    retriedVideo.providerReadbackVerified,
+    'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED',
+  );
   assert(
     requiredResultText(retriedVideo.result, 'artifactRef') === artifactExternalResourceId,
     'R29_PRODUCTION_VIDEO_IDEMPOTENCY_FAILED',
@@ -152,7 +167,10 @@ try {
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(adapted.providerReadbackVerified, 'R29_PRODUCTION_ADAPT_READBACK_NOT_VERIFIED');
+  assert(
+    adapted.providerReadbackVerified,
+    'R29_PRODUCTION_ADAPT_READBACK_NOT_VERIFIED',
+  );
 
   const artifactCount = await pool1.query<{ count: number }>(
     `select count(*)::int as count
@@ -178,13 +196,15 @@ try {
   const auditRecords = await auditSink.listByCorrelation(correlationId, 100);
   assert(
     auditRecords.some(
-      (record) => record.toolName === 'video.caption.embed' && record.status === 'SUCCEEDED',
+      (record) =>
+        record.toolName === 'video.caption.embed' && record.status === 'SUCCEEDED',
     ),
     'R29_PRODUCTION_VIDEO_AUDIT_MISSING',
   );
   assert(
     auditRecords.some(
-      (record) => record.toolName === 'content_item.channel.adapt' && record.status === 'SUCCEEDED',
+      (record) =>
+        record.toolName === 'content_item.channel.adapt' && record.status === 'SUCCEEDED',
     ),
     'R29_PRODUCTION_ADAPT_AUDIT_MISSING',
   );
@@ -225,13 +245,15 @@ try {
     videoInput,
   );
   durableReadbackVerified =
-    restartedReadback.verified && restartedReadback.externalResourceId === artifactExternalResourceId;
+    restartedReadback.verified &&
+    restartedReadback.externalResourceId === artifactExternalResourceId;
   assert(durableReadbackVerified, 'R29_PRODUCTION_DURABLE_READBACK_FAILED');
 
   const persistedItem = await new PostgresContentItemStore(pool2).get(contentItemId);
   assert(persistedItem !== undefined, 'R29_PRODUCTION_CONTENT_ITEM_MISSING');
   assert(
-    persistedItem.currentVersionId === adaptedVersionId && persistedItem.currentContentVersion === 2,
+    persistedItem.currentVersionId === adaptedVersionId &&
+      persistedItem.currentContentVersion === 2,
     'R29_PRODUCTION_VERSION_READBACK_FAILED',
   );
 } finally {
