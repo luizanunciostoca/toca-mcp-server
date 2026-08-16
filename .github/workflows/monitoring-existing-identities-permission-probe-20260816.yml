@@ -1,0 +1,55 @@
+name: Monitoring Existing Identities Permission Probe 2026-08-16
+
+on:
+  push:
+    branches: [ops/monitoring-alert-policies-final-20260816]
+    paths: ['.github/workflows/monitoring-existing-identities-permission-probe-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  infra-admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe exact permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["logging.notificationRules.create","logging.notificationRules.get","logging.notificationRules.list","logging.notificationRules.update","logging.notificationRules.delete","monitoring.alertPolicies.create","monitoring.alertPolicies.get","monitoring.alertPolicies.list","monitoring.alertPolicies.update","monitoring.alertPolicies.delete","monitoring.notificationChannels.create","monitoring.notificationChannels.list","resourcemanager.projects.setIamPolicy"]}' >/tmp/request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          jq -n --arg identity "$GCP_INFRA_ADMIN_SERVICE_ACCOUNT" --slurpfile p /tmp/perms.json '{identity:$identity,granted:($p[0].permissions//[])}'
+
+  deployer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe exact permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["logging.notificationRules.create","logging.notificationRules.get","logging.notificationRules.list","logging.notificationRules.update","logging.notificationRules.delete","monitoring.alertPolicies.create","monitoring.alertPolicies.get","monitoring.alertPolicies.list","monitoring.alertPolicies.update","monitoring.alertPolicies.delete","monitoring.notificationChannels.create","monitoring.notificationChannels.list","resourcemanager.projects.setIamPolicy"]}' >/tmp/request.json
+          HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          jq -n --arg identity "$GCP_DEPLOY_SERVICE_ACCOUNT" --slurpfile p /tmp/perms.json '{identity:$identity,granted:($p[0].permissions//[])}'
