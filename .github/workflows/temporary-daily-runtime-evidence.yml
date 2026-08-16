@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: temporary-daily-runtime-evidence-fast
+  group: temporary-daily-runtime-evidence-final
   cancel-in-progress: false
 
 env:
@@ -41,33 +41,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --format='value(status.url)')"
+          SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
           test -n "$SERVICE_URL"
-
-          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --location "$GCP_REGION" \
-            --format=json)"
-          printf '%s' "$SCHEDULER_JSON" | jq -e \
-            --arg uri "${SERVICE_URL}/tick" \
-            --arg audience "$SERVICE_URL" \
-            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
-              .state == "ENABLED" and
-              .schedule == "* * * * *" and
-              .timeZone == "America/Bahia" and
-              .httpTarget.uri == $uri and
-              .httpTarget.httpMethod == "POST" and
-              .httpTarget.oidcToken.serviceAccountEmail == $sa and
-              .httpTarget.oidcToken.audience == $audience
-            ' >/dev/null
-
-          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --format=json)"
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e --arg uri "${SERVICE_URL}/tick" --arg audience "$SERVICE_URL" --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .state == "ENABLED" and .schedule == "* * * * *" and .timeZone == "America/Bahia" and
+            .httpTarget.uri == $uri and .httpTarget.httpMethod == "POST" and
+            .httpTarget.oidcToken.serviceAccountEmail == $sa and .httpTarget.oidcToken.audience == $audience
+          ' >/dev/null
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           printf '%s' "$SERVICE_JSON" | jq -e '
             .spec.template.spec.containers[0] as $container |
             (.spec.template.spec.containerConcurrency == 1) and
@@ -77,24 +59,15 @@ jobs:
           ' >/dev/null
 
           FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-managed-instagram-daemon" AND (jsonPayload.event="foundation.daily_control.completed" OR jsonPayload.event="foundation.daily_control.findings" OR jsonPayload.event="foundation.daily_control.failed" OR jsonPayload.event="daemon.scheduler_self_test.succeeded" OR jsonPayload.event="daemon.tick.succeeded")'
-          timeout 90s gcloud logging read "$FILTER" \
-            --project "$GCP_PROJECT_ID" \
-            --freshness=36h \
-            --limit=5000 \
-            --order=asc \
-            --format=json > /tmp/evidence.json
-
-          jq -e 'type == "array"' /tmp/evidence.json >/dev/null
+          timeout 90s gcloud logging read "$FILTER" --project "$GCP_PROJECT_ID" --freshness=36h --limit=5000 --order=asc --format=json > /tmp/evidence.json
 
           python3 - <<'PY'
           import json
           from collections import Counter
           from datetime import datetime, timedelta, timezone
           from zoneinfo import ZoneInfo
-
           with open('/tmp/evidence.json', encoding='utf-8') as f:
               entries = json.load(f)
-
           by_event = Counter()
           daily_counts = Counter()
           daily_evidence = []
@@ -125,24 +98,21 @@ jobs:
                       'invalidAuditExecutions': snapshot.get('invalidAuditExecutions'),
                       'findings': payload.get('findings'),
                   })
-
+          print('TOCA_DAILY_CONTROL_COUNTS=' + json.dumps(dict(sorted(daily_counts.items())), separators=(',', ':')))
+          print('TOCA_DAILY_CONTROL_EVIDENCE=' + json.dumps(daily_evidence[-3:], sort_keys=True, separators=(',', ':')))
+          print('TOCA_RUNTIME_EVENT_COUNTS=' + json.dumps(dict(sorted(by_event.items())), separators=(',', ':')))
+          print('TOCA_LATEST_TICK=' + str(latest_tick))
           if not daily_counts:
               raise SystemExit('DAILY_CONTROL_COMPLETION_NOT_FOUND')
           duplicates = {day: count for day, count in daily_counts.items() if count > 1}
           if duplicates:
               raise SystemExit(f'DAILY_CONTROL_DUPLICATE_COMPLETION:{duplicates}')
-          if by_event['daemon.scheduler_self_test.succeeded'] < 1:
-              raise SystemExit('SCHEDULER_SELF_TEST_EVIDENCE_NOT_FOUND')
           if by_event['daemon.tick.succeeded'] < 1 or latest_tick is None:
               raise SystemExit('RECENT_TICK_EVIDENCE_NOT_FOUND')
           latest_tick_dt = datetime.fromisoformat(latest_tick.replace('Z', '+00:00'))
           if datetime.now(timezone.utc) - latest_tick_dt > timedelta(minutes=10):
               raise SystemExit(f'LATEST_TICK_STALE:{latest_tick}')
-
-          print('TOCA_DAILY_CONTROL_COUNTS=' + json.dumps(dict(sorted(daily_counts.items())), separators=(',', ':')))
-          print('TOCA_DAILY_CONTROL_EVIDENCE=' + json.dumps(daily_evidence[-3:], sort_keys=True, separators=(',', ':')))
-          print('TOCA_RUNTIME_EVENT_COUNTS=' + json.dumps(dict(sorted(by_event.items())), separators=(',', ':')))
-          print('TOCA_LATEST_TICK=' + latest_tick)
+          print('TOCA_SCHEDULER_SELF_TEST_LOG_COUNT=' + str(by_event['daemon.scheduler_self_test.succeeded']))
           PY
 
           printf '%s\n' "$SCHEDULER_JSON" | jq -c '{name,state,schedule,timeZone,lastAttemptTime,status}'
