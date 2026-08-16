@@ -86,7 +86,9 @@ try {
   });
 
   const runtime = new PostgresVideoContentRuntime(pool1);
-  const runtimeResolver = createRuntimeCapabilityResolver({ videoContent: runtime });
+  const runtimeResolver = createRuntimeCapabilityResolver({
+    videoContent: runtime,
+  });
   const auditSink = new PostgresAuditSink(pool1, registry);
 
   videoInput = {
@@ -121,7 +123,10 @@ try {
   );
   videoExecutionId = firstVideo.executionId;
   videoResult = firstVideo.result;
-  artifactExternalResourceId = requiredResultText(firstVideo.result, 'artifactRef');
+  artifactExternalResourceId = requiredResultText(
+    firstVideo.result,
+    'artifactRef',
+  );
 
   const retriedVideo = await executeCoreCapability(
     {
@@ -136,8 +141,12 @@ try {
     retriedVideo.providerReadbackVerified,
     'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED',
   );
+  const retriedArtifactRef = requiredResultText(
+    retriedVideo.result,
+    'artifactRef',
+  );
   assert(
-    requiredResultText(retriedVideo.result, 'artifactRef') === artifactExternalResourceId,
+    retriedArtifactRef === artifactExternalResourceId,
     'R29_PRODUCTION_VIDEO_IDEMPOTENCY_FAILED',
   );
 
@@ -179,7 +188,10 @@ try {
     [contentItemId],
   );
   artifactRows = artifactCount.rows[0]?.count ?? 0;
-  assert(artifactRows === 1, 'R29_PRODUCTION_ARTIFACT_IDEMPOTENCY_COUNT_INVALID');
+  assert(
+    artifactRows === 1,
+    'R29_PRODUCTION_ARTIFACT_IDEMPOTENCY_COUNT_INVALID',
+  );
 
   const outboxCount = await pool1.query<{ count: number }>(
     `select count(*)::int as count
@@ -225,7 +237,8 @@ try {
     );
   } catch (error) {
     failClosed =
-      error instanceof Error && error.message.includes('has no active runtime binding');
+      error instanceof Error &&
+      error.message.includes('has no active runtime binding');
   }
   assert(failClosed, 'R29_PRODUCTION_FAIL_CLOSED_NOT_VERIFIED');
 } finally {
@@ -249,7 +262,9 @@ try {
     restartedReadback.externalResourceId === artifactExternalResourceId;
   assert(durableReadbackVerified, 'R29_PRODUCTION_DURABLE_READBACK_FAILED');
 
-  const persistedItem = await new PostgresContentItemStore(pool2).get(contentItemId);
+  const persistedItem = await new PostgresContentItemStore(pool2).get(
+    contentItemId,
+  );
   assert(persistedItem !== undefined, 'R29_PRODUCTION_CONTENT_ITEM_MISSING');
   assert(
     persistedItem.currentVersionId === adaptedVersionId &&
