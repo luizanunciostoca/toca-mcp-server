@@ -1,0 +1,49 @@
+name: Meta Ads Final Settlement Patcher
+
+on:
+  push:
+    branches:
+      - fix/meta-ads-final-settlement-window
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore(meta-ads): stage one-shot settlement patcher'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Apply bounded settlement fix and remove patcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/meta-ads-create-paused-smoke.ts')
+          text = source.read_text()
+          old = '  const maxAttempts = 12;'
+          new = '  const maxAttempts = 48;'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one maxAttempts pattern, found {text.count(old)}')
+          source.write_text(text.replace(old, new))
+
+          workflow = Path('.github/workflows/meta-ads-create-paused-provider-smoke.yml')
+          wf = workflow.read_text()
+          old_timeout = '            --task-timeout 180s \\\n'
+          count = wf.count(old_timeout)
+          if count != 2:
+              raise SystemExit(f'expected exactly two 180s task timeouts, found {count}')
+          workflow.write_text(wf.replace(old_timeout, '            --task-timeout 480s \\\n'))
+          PY
+          rm .github/workflows/meta-ads-final-settlement-patcher.yml
+          git diff --check
+          git diff -- src/meta-ads-create-paused-smoke.ts .github/workflows/meta-ads-create-paused-provider-smoke.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/meta-ads-create-paused-smoke.ts .github/workflows/meta-ads-create-paused-provider-smoke.yml .github/workflows/meta-ads-final-settlement-patcher.yml
+          git commit -m 'fix(meta-ads): extend bounded provider settlement window'
+          git push origin HEAD:fix/meta-ads-final-settlement-window
