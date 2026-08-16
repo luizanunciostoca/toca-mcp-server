@@ -1,0 +1,161 @@
+name: Meta Ads Primary PREPARE After Expiry Fix One-Shot
+
+on:
+  push:
+    branches: [ops/meta-ads-primary-prepare-after-expiry-fix]
+    paths: ['.github/workflows/meta-ads-primary-prepare-after-expiry-fix-once.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-primary-prepare-after-expiry-fix
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  MCP_SERVICE_NAME: toca-mcp-production
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  META_ADS_ACCOUNT_ID: '311793958882290'
+  META_ADS_CURRENCY: BRL
+  META_ADS_PIXEL_ID: '461233076843065'
+  META_ADS_PAGE_ID: '306103746115875'
+  META_ADS_INSTAGRAM_ACTOR_ID: '17841402033495654'
+  META_ADS_DAILY_BUDGET_MINOR: '17000'
+  META_ADS_MAX_DAILY_BUDGET_MINOR: '100000'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Assert exact production source plus one-shot only
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='808454749b1d56ae7c42a1f7cc543959da1ef391'
+          test "$(git merge-base HEAD "$BASE")" = "$BASE"
+          test "$(git diff --name-only "$BASE" HEAD)" = '.github/workflows/meta-ads-primary-prepare-after-expiry-fix-once.yml'
+          grep -F "META_ADS_ACCOUNT_ID: '311793958882290'" .github/workflows/meta-ads-create-paused-provider-smoke.yml
+          grep -F "issues_info,end_time" src/providers/meta-ads/meta-ads-provider-preflight.ts
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Assert public MCP Meta Ads writes remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? | select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] | length == 0)
+          ' >/dev/null
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable validation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-primary-prepare-${GITHUB_SHA}"
+          JOB_NAME="toca-meta-ads-primary-prepare-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SMOKE_ID="primary-prepare-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          echo "SMOKE_ID=$SMOKE_ID" >> "$GITHUB_ENV"
+
+      - name: Deploy validate-only PREPARE job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/meta-ads-create-paused-smoke.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_SMOKE_MODE=PREPARE~META_ADS_SMOKE_ACCOUNT_ID=$META_ADS_ACCOUNT_ID~META_ADS_SMOKE_CURRENCY=$META_ADS_CURRENCY~META_ADS_SMOKE_PIXEL_ID=$META_ADS_PIXEL_ID~META_ADS_SMOKE_PAGE_ID=$META_ADS_PAGE_ID~META_ADS_SMOKE_INSTAGRAM_ACTOR_ID=$META_ADS_INSTAGRAM_ACTOR_ID~META_ADS_SMOKE_ID=$SMOKE_ID~META_ADS_SMOKE_DAILY_BUDGET_MINOR=$META_ADS_DAILY_BUDGET_MINOR~META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR=$META_ADS_MAX_DAILY_BUDGET_MINOR" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+      - name: Execute PREPARE and capture provider truth
+        shell: bash
+        run: |
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXEC_STATUS=$?
+          set -e
+
+          sleep 5
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc \
+            --format='value(textPayload)' > /tmp/provider.log || true
+
+          RESULT_LINE="$(grep 'META_ADS_SMOKE_PREPARE_RESULT=' /tmp/provider.log | tail -n1 || true)"
+          if [ "$EXEC_STATUS" -eq 0 ]; then
+            test -n "$RESULT_LINE"
+            RESULT_JSON="${RESULT_LINE#META_ADS_SMOKE_PREPARE_RESULT=}"
+            printf '%s' "$RESULT_JSON" | jq -e \
+              --arg smoke "$SMOKE_ID" \
+              --arg account "$META_ADS_ACCOUNT_ID" \
+              --arg pixel "$META_ADS_PIXEL_ID" '
+                .smokeId == $smoke and
+                (.account.id | tostring | endswith($account)) and
+                .account.currency == "BRL" and
+                .pixelAccess.pixelId == $pixel and
+                .pixelAccess.accountId == $account and
+                .pixelAccess.assigned == true and
+                .writeReadiness.validated == true and
+                (.grantedScopes | index("ads_management") != null) and
+                (.requestSha256 | test("^[a-f0-9]{64}$")) and
+                (.planBase64 | length > 0)
+              ' >/dev/null
+            printf '%s\n' "$RESULT_JSON" | jq 'del(.planBase64)' > meta-ads-primary-prepare-evidence.json
+            echo 'META_ADS_PRIMARY_PREPARE=PASS'
+            cat meta-ads-primary-prepare-evidence.json
+            exit 0
+          fi
+
+          echo "META_ADS_PRIMARY_PREPARE=FAILED exit=$EXEC_STATUS"
+          sed -E 's/(access_token=)[^&[:space:]]+/\1[REDACTED]/g; s/(Bearer )[A-Za-z0-9._-]+/\1[REDACTED]/g' /tmp/provider.log | tail -n 120
+          exit "$EXEC_STATUS"
+
+      - name: Upload sanitized PREPARE evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meta-ads-primary-prepare-${{ github.run_id }}
+          path: meta-ads-primary-prepare-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove temporary provider validation job
+        if: always()
+        run: gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet || true
