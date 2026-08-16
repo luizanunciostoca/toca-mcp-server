@@ -1,4 +1,4 @@
-name: Omnichannel R16 Materialize One-Shot
+name: Omnichannel R16 Privacy Binding One-Shot
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  materialize:
+  bind-privacy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -25,26 +25,231 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Materialize exact Omnichannel delta
+      - name: Replace duplicate consent and suppression wire contracts
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE=7a746bb901f03d9faf1b113de148f63fdefc62b6
-          git fetch origin "$SOURCE"
-          git checkout "$SOURCE" -- \
-            docs/checkpoints/omnichannel-whatsapp-email-nurture-contracts.md \
-            src/governance/omnichannel-capability-contracts.ts \
-            src/omnichannel/capability-specs.ts \
-            src/omnichannel/contracts.ts \
-            test/omnichannel-capability-specs.test.ts \
-            test/omnichannel-contracts.test.ts
-          test "$(git diff --cached --name-only | wc -l)" -eq 6
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/governance/omnichannel-capability-contracts.ts')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing expected block: {label}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          """const singleRecipientEligibilityProperties = {
+            contact_record_id: text,
+            contact_resolution_id: text,
+            contact_resolution_status: { type: 'string', const: 'RESOLVED' } as const,
+            consent_decision_id: text,
+            consent_status: { type: 'string', const: 'GRANTED' } as const,
+            consent_purpose: text,
+            suppression_decision_id: text,
+            suppressed: { type: 'boolean', const: false } as const,
+            policy_decision_id: text,
+            policy_allowed: { type: 'boolean', const: true } as const,
+          } as const;
+          const singleRecipientEligibilityRequired = [
+            'contact_record_id',
+            'contact_resolution_id',
+            'contact_resolution_status',
+            'consent_decision_id',
+            'consent_status',
+            'consent_purpose',
+            'suppression_decision_id',
+            'suppressed',
+            'policy_decision_id',
+            'policy_allowed',
+          ] as const;""",
+          """const singleRecipientEligibilityProperties = {
+            contact_record_id: text,
+            contact_resolution_id: text,
+            contact_resolution_status: { type: 'string', const: 'RESOLVED' } as const,
+            privacy_execution_id: text,
+            privacy_subject_ref: text,
+            privacy_state: { type: 'string', const: 'ALLOWED' } as const,
+            privacy_blocked: { type: 'boolean', const: false } as const,
+            privacy_purpose_id: text,
+            privacy_channel: { type: 'string', enum: ['WHATSAPP', 'EMAIL'] } as const,
+            policy_decision_id: text,
+            policy_allowed: { type: 'boolean', const: true } as const,
+          } as const;
+          const singleRecipientEligibilityRequired = [
+            'contact_record_id',
+            'contact_resolution_id',
+            'contact_resolution_status',
+            'privacy_execution_id',
+            'privacy_subject_ref',
+            'privacy_state',
+            'privacy_blocked',
+            'privacy_purpose_id',
+            'privacy_channel',
+            'policy_decision_id',
+            'policy_allowed',
+          ] as const;""",
+          'single-recipient privacy binding')
+
+          replace_once(
+          """const audienceEligibilityProperties = {
+            audience_snapshot_id: text,
+            consent_purpose: text,
+            resolved_contact_count: { type: 'integer', minimum: 1 } as const,
+            ambiguous_contact_count: { type: 'integer', const: 0 } as const,
+            unresolved_contact_count: { type: 'integer', const: 0 } as const,
+            consent_unknown_count: { type: 'integer', const: 0 } as const,
+            consent_denied_count: { type: 'integer', const: 0 } as const,
+            suppressed_count: { type: 'integer', const: 0 } as const,
+            policy_denied_count: { type: 'integer', const: 0 } as const,
+          } as const;""",
+          """const audienceEligibilityProperties = {
+            audience_snapshot_id: text,
+            privacy_purpose_id: text,
+            resolved_contact_count: { type: 'integer', minimum: 1 } as const,
+            ambiguous_contact_count: { type: 'integer', const: 0 } as const,
+            unresolved_contact_count: { type: 'integer', const: 0 } as const,
+            privacy_unknown_blocked_count: { type: 'integer', const: 0 } as const,
+            privacy_suppressed_count: { type: 'integer', const: 0 } as const,
+            policy_denied_count: { type: 'integer', const: 0 } as const,
+          } as const;""",
+          'audience privacy binding')
+
+          replace_once(
+          """const whatsappOptInInput = inputSchema(
+            'whatsapp.opt_in.verify',
+            { contact_record_id: text, purpose: text },
+            ['contact_record_id', 'purpose'],
+          );
+          const whatsappOptInOutput = outputSchema(
+            'whatsapp.opt_in.verify',
+            {
+              consent_decision_id: text,
+              consent_status: {
+                type: 'string',
+                enum: ['GRANTED', 'DENIED', 'UNKNOWN', 'REVOKED', 'EXPIRED'],
+              },
+              purpose: text,
+            },
+            ['consent_decision_id', 'consent_status', 'purpose'],
+          );""",
+          """const whatsappOptInInput = inputSchema(
+            'whatsapp.opt_in.verify',
+            {
+              contact_record_id: text,
+              privacy_subject_ref: text,
+              purpose_id: text,
+              preference_required: { type: 'boolean' },
+            },
+            ['contact_record_id', 'privacy_subject_ref', 'purpose_id', 'preference_required'],
+          );
+          const whatsappOptInOutput = outputSchema(
+            'whatsapp.opt_in.verify',
+            {
+              privacy_execution_id: text,
+              privacy_state: {
+                type: 'string',
+                enum: ['ALLOWED', 'SUPPRESSED', 'UNKNOWN_BLOCKED'],
+              },
+              privacy_blocked: { type: 'boolean' },
+              purpose_id: text,
+              channel: { type: 'string', const: 'WHATSAPP' },
+              reasons: { type: 'array', items: text },
+            },
+            ['privacy_execution_id', 'privacy_state', 'privacy_blocked', 'purpose_id', 'channel', 'reasons'],
+          );""",
+          'whatsapp privacy output')
+
+          replace_once(
+          """const emailSuppressionInput = inputSchema('email.suppression.verify', { contact_record_id: text }, [
+            'contact_record_id',
+          ]);
+          const emailSuppressionOutput = outputSchema(
+            'email.suppression.verify',
+            {
+              suppression_decision_id: text,
+              suppressed: { type: 'boolean' },
+              reason: { type: ['string', 'null'] },
+            },
+            ['suppression_decision_id', 'suppressed', 'reason'],
+          );""",
+          """const emailSuppressionInput = inputSchema(
+            'email.suppression.verify',
+            {
+              contact_record_id: text,
+              privacy_subject_ref: text,
+              purpose_id: text,
+              preference_required: { type: 'boolean' },
+            },
+            ['contact_record_id', 'privacy_subject_ref', 'purpose_id', 'preference_required'],
+          );
+          const emailSuppressionOutput = outputSchema(
+            'email.suppression.verify',
+            {
+              privacy_execution_id: text,
+              privacy_state: {
+                type: 'string',
+                enum: ['ALLOWED', 'SUPPRESSED', 'UNKNOWN_BLOCKED'],
+              },
+              privacy_blocked: { type: 'boolean' },
+              purpose_id: text,
+              channel: { type: 'string', const: 'EMAIL' },
+              reasons: { type: 'array', items: text },
+            },
+            ['privacy_execution_id', 'privacy_state', 'privacy_blocked', 'purpose_id', 'channel', 'reasons'],
+          );""",
+          'email privacy output')
+
+          text = text.replace(
+              'Verify purpose-bound WhatsApp consent through the canonical Privacy/Consent dependency.',
+              'Verify WhatsApp outbound eligibility through canonical privacy.suppression.check, which resolves purpose, legal basis, consent, preferences and suppression fail-closed.',
+          )
+          text = text.replace("operation: 'consent.verify.whatsapp'", "operation: 'privacy.suppression.check.whatsapp'")
+          text = text.replace(
+              'Prepare a WhatsApp outbound payload only for a resolved, consented, unsuppressed and policy-allowed ContactRecord.',
+              'Prepare a WhatsApp outbound payload only for a resolved ContactRecord with canonical Privacy state ALLOWED and policy approval.',
+          )
+          text = text.replace(
+              'Verify email suppression state through the canonical Privacy/Preferences dependency.',
+              'Verify email outbound eligibility through canonical privacy.suppression.check, including purpose, legal basis, consent, preferences and suppression.',
+          )
+          text = text.replace("operation: 'suppression.verify.email'", "operation: 'privacy.suppression.check.email'")
+
+          forbidden = [
+              'consent_decision_id',
+              'consent_status',
+              'suppression_decision_id',
+              'consent_unknown_count',
+              'consent_denied_count',
+          ]
+          for token in forbidden:
+              if token in text:
+                  raise SystemExit(f'duplicate privacy wire token remains: {token}')
+
+          path.write_text(text)
+
+          contracts = Path('src/omnichannel/contracts.ts')
+          c = contracts.read_text()
+          c = c.replace('readonly decisionId: string;\n  readonly subjectRef: string;\n  readonly decision: SuppressionDecision;', 'readonly executionId: string;\n  readonly subjectRef: string;\n  readonly decision: SuppressionDecision;', 1)
+          c = c.replace("requireText(context.privacy.decisionId, 'OMNICHANNEL_PRIVACY_DECISION_ID_REQUIRED');", "requireText(context.privacy.executionId, 'OMNICHANNEL_PRIVACY_EXECUTION_ID_REQUIRED');", 1)
+          contracts.write_text(c)
+
+          tests = Path('test/omnichannel-contracts.test.ts')
+          t = tests.read_text().replace("decisionId: 'privacy-1',", "executionId: 'privacy-execution-1',", 1)
+          tests.write_text(t)
+          PY
+          pnpm exec prettier --write src/governance/omnichannel-capability-contracts.ts src/omnichannel/contracts.ts test/omnichannel-contracts.test.ts
           pnpm quality
-      - name: Commit materialized delta
+      - name: Commit canonical Privacy binding
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'chore(omnichannel): replay contracts on canonical Privacy main'
+          git add src/governance/omnichannel-capability-contracts.ts src/omnichannel/contracts.ts test/omnichannel-contracts.test.ts
+          git diff --cached --quiet && { echo 'expected Privacy binding changes'; exit 1; }
+          git commit -m 'refactor(omnichannel): consume canonical R16 Privacy decisions'
           git push origin HEAD:reconcile/omnichannel-r16
