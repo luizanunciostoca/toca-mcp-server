@@ -88,19 +88,29 @@ jobs:
             --task-timeout 300s \
             --quiet
 
+          set +e
           gcloud run jobs execute "$JOB_NAME" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --wait \
             --quiet
+          EXECUTION_STATUS=$?
+          set -e
 
-          RESULT_LINE="$(gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"R29_PRODUCTION_RUNTIME_VERIFY=\"" \
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
             --project "$GCP_PROJECT_ID" \
             --freshness=20m \
-            --limit=20 \
-            --order=desc \
-            --format='value(textPayload)' | grep 'R29_PRODUCTION_RUNTIME_VERIFY=' | head -n1)"
+            --limit=200 \
+            --order=asc \
+            --format='value(textPayload)' || true)"
+          printf '%s\n' "$LOGS"
+          if [ "$EXECUTION_STATUS" -ne 0 ]; then
+            echo "TOCA_R29_PRODUCTION_RUNTIME_GATE=FAILED:execution_status=${EXECUTION_STATUS}"
+            exit "$EXECUTION_STATUS"
+          fi
+
+          RESULT_LINE="$(printf '%s\n' "$LOGS" | grep 'R29_PRODUCTION_RUNTIME_VERIFY=' | tail -n1)"
           test -n "$RESULT_LINE"
           RESULT_JSON="${RESULT_LINE#R29_PRODUCTION_RUNTIME_VERIFY=}"
           printf '%s\n' "$RESULT_JSON" | jq -e \
