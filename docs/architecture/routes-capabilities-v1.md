@@ -12,7 +12,7 @@ The machine-readable sources are:
 - `src/governance/route-catalog.ts`: R01-R32, owners, priorities, subflows and terminal states;
 - `src/governance/capability-ids.ts`: requested capability identifiers by route plus transversal
   and existing technical identifiers;
-- `src/governance/capability-catalog.ts`: normalized metadata for all 745 catalog entries;
+- `src/governance/capability-catalog.ts`: normalized metadata for all 758 catalog entries;
 - `src/registry.ts`: the intentionally smaller set exposed by the running MCP server.
 
 Catalog presence does not imply execution. `execution_surface: CATALOG_ONLY` and
@@ -44,6 +44,10 @@ conflicts always require a human decision.
 R32 complements R21: R21 reconciles truth between systems; R32 validates information quality
 inside registries, including unique IDs, ownership, status, paths, existence, freshness and
 canonical integrity.
+
+R28 retains its stable route identifier and historical name for compatibility, while the Paid Media
+execution model is extended to Google Ads through technical capabilities in the same route. This
+is deliberately not a new R33 and does not create a second paid-media governance subsystem.
 
 ## Capability lifecycle
 

@@ -1,4 +1,8 @@
 import * as z from 'zod/v4';
+import type {
+  GoogleAdsCampaignPlan,
+  GoogleAdsPaidMediaProvider,
+} from '../providers/google-ads/google-ads-paid-media.js';
 import type { InstagramHistoryProvider } from '../providers/instagram/instagram-history-provider.js';
 import type { MetaAdsControlledGraphProvider } from '../providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import {
@@ -20,6 +24,45 @@ import type {
 } from './core-execution.js';
 
 const recordSchema = z.record(z.string(), z.unknown());
+const googleAdsPlanSchema = z.object({
+  customerId: z.string().min(1),
+  currencyCode: z.string().length(3),
+  campaignName: z.string().min(1),
+  budgetName: z.string().min(1),
+  dailyBudgetMicros: z.number().int().positive(),
+  advertisingChannelType: z.literal('SEARCH').optional(),
+  targeting: z.object({
+    locationCriterionIds: z.array(z.string().regex(/^\d+$/)).min(1),
+    languageCriterionIds: z.array(z.string().regex(/^\d+$/)).optional(),
+    presenceOnly: z.boolean().optional(),
+  }),
+});
+const googleAdsDateRangeSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+const googleAdsCampaignReferenceSchema = z.object({ campaignIdOrName: z.string().min(1) });
+
+function googleAdsPlanFromInput(input: z.infer<typeof googleAdsPlanSchema>): GoogleAdsCampaignPlan {
+  return {
+    customerId: input.customerId,
+    currencyCode: input.currencyCode,
+    campaignName: input.campaignName,
+    budgetName: input.budgetName,
+    dailyBudgetMicros: input.dailyBudgetMicros,
+    advertisingChannelType: input.advertisingChannelType ?? 'SEARCH',
+    targeting: {
+      locationCriterionIds: input.targeting.locationCriterionIds,
+      ...(input.targeting.languageCriterionIds !== undefined
+        ? { languageCriterionIds: input.targeting.languageCriterionIds }
+        : {}),
+      ...(input.targeting.presenceOnly !== undefined
+        ? { presenceOnly: input.targeting.presenceOnly }
+        : {}),
+    },
+  };
+}
+
 const mediaListSchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
   after: z.string().min(1).optional(),
@@ -123,6 +166,7 @@ const rescheduleSchema = z.object({
 const jobIdSchema = z.object({ jobId: z.string().min(1) });
 
 export interface RuntimeCapabilityServices {
+  readonly googleAds?: GoogleAdsPaidMediaProvider;
   readonly instagramHistory?: InstagramHistoryProvider;
   readonly metaAdsRead?: MetaAdsReadProvider;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
@@ -141,6 +185,101 @@ function resolveBinding(
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
   switch (capabilityId) {
+    case 'google_ads.account.inspect':
+      return services.googleAds
+        ? binding(z.object({}), () => services.googleAds!.inspectAccount())
+        : undefined;
+    case 'google_ads.campaigns.list':
+      return services.googleAds
+        ? binding(z.object({ limit: z.number().int().min(1).max(500).default(100) }), (input) =>
+            services.googleAds!.listCampaigns(input.limit),
+          )
+        : undefined;
+    case 'google_ads.insights.get':
+      return services.googleAds
+        ? binding(
+            googleAdsDateRangeSchema.extend({
+              limit: z.number().int().min(1).max(500).default(100),
+            }),
+            (input) => services.googleAds!.getInsights(input.startDate, input.endDate, input.limit),
+          )
+        : undefined;
+    case 'google_ads.conversion_actions.list':
+      return services.googleAds
+        ? binding(z.object({ limit: z.number().int().min(1).max(500).default(100) }), (input) =>
+            services.googleAds!.listConversionActions(input.limit),
+          )
+        : undefined;
+    case 'google_ads.spend.monitor':
+      return services.googleAds
+        ? binding(googleAdsDateRangeSchema, (input) =>
+            services.googleAds!.spendMonitor(input.startDate, input.endDate),
+          )
+        : undefined;
+    case 'google_ads.conversions.monitor':
+      return services.googleAds
+        ? binding(googleAdsDateRangeSchema, (input) =>
+            services.googleAds!.conversionsMonitor(input.startDate, input.endDate),
+          )
+        : undefined;
+    case 'google_ads.campaign.prepare':
+      return services.googleAds
+        ? binding(googleAdsPlanSchema, (input) =>
+            Promise.resolve(services.googleAds!.prepare(googleAdsPlanFromInput(input))),
+          )
+        : undefined;
+    case 'google_ads.targeting.validate':
+      return services.googleAds
+        ? binding(googleAdsPlanSchema, (input) =>
+            services.googleAds!.validateTargeting(googleAdsPlanFromInput(input)),
+          )
+        : undefined;
+    case 'google_ads.campaign.create_paused':
+      return services.googleAds
+        ? binding(
+            googleAdsPlanSchema,
+            (input) => services.googleAds!.createPaused(googleAdsPlanFromInput(input)),
+            {
+              targetAccount: (input) => input.customerId,
+              idempotencyKey: (input) =>
+                `google-ads:create-paused:${services.googleAds!.prepare(googleAdsPlanFromInput(input)).requestSha256}`,
+              financialContext: (input) => ({
+                amountMinor: services.googleAds!.minorUnitsForMicros(input.dailyBudgetMicros),
+                currency: input.currencyCode.toUpperCase(),
+              }),
+              providerReadback: async (result) => {
+                const record = result;
+                const resourceName =
+                  typeof record.campaignResourceName === 'string'
+                    ? record.campaignResourceName
+                    : undefined;
+                if (!resourceName) {
+                  return {
+                    verified: false,
+                    evidence: ['google-ads:create-paused:resource-name-missing'],
+                    reason: 'GOOGLE_ADS_CREATED_RESOURCE_NAME_REQUIRED',
+                  };
+                }
+                const readback = await services.googleAds!.verifyPaused(resourceName);
+                return {
+                  verified: readback.verified,
+                  evidence: [JSON.stringify(readback.evidence)],
+                  externalResourceId: resourceName,
+                  ...(!readback.verified
+                    ? { reason: 'GOOGLE_ADS_CAMPAIGN_NOT_READ_BACK_AS_PAUSED' }
+                    : {}),
+                };
+              },
+              sideEffectValidated: false,
+            },
+          )
+        : undefined;
+    case 'google_ads.campaign.readback':
+      return services.googleAds
+        ? binding(googleAdsCampaignReferenceSchema, (input) =>
+            services.googleAds!.readbackCampaign(input.campaignIdOrName),
+          )
+        : undefined;
     case 'instagram.media.list':
       return services.instagramHistory
         ? binding(mediaListSchema, (input) => services.instagramHistory!.listMedia(input))

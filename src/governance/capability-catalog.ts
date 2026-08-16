@@ -117,6 +117,7 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
     instagramReadsEnabled: true,
     metaAdsReadsEnabled: true,
     metaAdsWritesEnabled: true,
+    googleAdsPhase: 'MANAGE',
     tocaManagedInstagramSchedulerEnabled: true,
   })
     .list()
@@ -208,7 +209,7 @@ function isMutationAction(capabilityId: string): boolean {
 }
 
 function isProviderWrite(capabilityId: string): boolean {
-  if (/^meta_ads\./.test(capabilityId)) return isMutationAction(capabilityId);
+  if (/^(meta_ads|google_ads)\./.test(capabilityId)) return isMutationAction(capabilityId);
   if (/^google_business\./.test(capabilityId)) {
     return (
       capabilityId === 'google_business.post.create' ||
@@ -227,6 +228,9 @@ function isProviderWrite(capabilityId: string): boolean {
 }
 
 function isFinancial(capabilityId: string): boolean {
+  if (/^google_ads\./.test(capabilityId)) {
+    return /\.(activate|update_budget)$/.test(capabilityId);
+  }
   return (
     /^meta_ads\./.test(capabilityId) &&
     /\.(activate|resume|update_budget|increase|decrease|budget_adjust)$/.test(capabilityId)
@@ -252,6 +256,7 @@ function inferredRiskClass(capabilityId: string): RiskClass {
 
 function inferredProvider(capabilityId: string): string {
   if (/^meta_ads\./.test(capabilityId)) return 'Meta Marketing API';
+  if (/^google_ads\./.test(capabilityId)) return 'Google Ads API';
   if (/^google_business\./.test(capabilityId)) return 'Google Business Profile';
   if (/^(instagram|social|engagement)\./.test(capabilityId)) return 'Meta/Instagram';
   if (/^drive\./.test(capabilityId)) return 'Google Drive';
@@ -269,6 +274,7 @@ function inferredProvider(capabilityId: string): string {
  */
 function inferredScopes(capabilityId: string, risk: RiskClass): readonly string[] {
   if (/^meta_ads\./.test(capabilityId)) return risk === 'READ' ? ['ads_read'] : ['ads_management'];
+  if (/^google_ads\./.test(capabilityId)) return ['https://www.googleapis.com/auth/adwords'];
   if (/^(instagram|social|engagement)\./.test(capabilityId)) return [];
   if (/^drive\./.test(capabilityId)) return ['drive.file'];
   return [];
@@ -276,6 +282,19 @@ function inferredScopes(capabilityId: string, risk: RiskClass): readonly string[
 
 function config(capabilityId: string): readonly string[] {
   if (/^meta_ads\./.test(capabilityId)) return ['META_GRAPH_API_VERSION', 'META_ACCESS_TOKEN_REF'];
+  if (/^google_ads\./.test(capabilityId)) {
+    return [
+      'GOOGLE_ADS_PHASE',
+      'GOOGLE_ADS_CUSTOMER_ID',
+      'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
+      'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+      'GOOGLE_ADS_ALLOWED_CUSTOMER_ID',
+      'GOOGLE_ADS_ALLOWED_CURRENCY',
+      'GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS',
+      'GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS',
+      'GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS',
+    ];
+  }
   if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     return ['INSTAGRAM_BUSINESS_ACCOUNT_ID', 'META_ACCESS_TOKEN_REF'];
   }
@@ -327,8 +346,7 @@ function contractQuality(capabilityId: string): CapabilityContractQuality {
 function authenticationMode(capabilityId: string): AuthenticationMode {
   if (capabilityId.startsWith('system.')) return 'NONE';
   if (implementedInternal.has(capabilityId)) return 'INTERNAL';
-  if (capabilityId.startsWith('drive.')) return 'OAUTH2';
-  if (capabilityId.startsWith('google_business.')) return 'OAUTH2';
+  if (/^(drive|google_ads|google_business)\./.test(capabilityId)) return 'OAUTH2';
   if (/^(instagram|social|engagement|meta_ads)\./.test(capabilityId)) return 'UNKNOWN';
   return 'INTERNAL';
 }
@@ -347,7 +365,7 @@ function runtimePermissionRequirements(
   return [
     {
       provider: runtime.provider,
-      authentication_mode: 'UNKNOWN',
+      authentication_mode: capabilityId.startsWith('google_ads.') ? 'OAUTH2' : 'UNKNOWN',
       operation,
       scopes: runtime.requiredScopes,
       access_level: accessLevel(runtime.riskClass),
@@ -389,7 +407,7 @@ function createDefinition(
     runtimeDefinition?.idempotent ??
     (!sideEffects || !isProviderWrite(capabilityId));
   const external =
-    /^(instagram|meta_ads|social|engagement|google_business|drive|release|security)\./.test(
+    /^(instagram|meta_ads|google_ads|social|engagement|google_business|drive|release|security)\./.test(
       capabilityId,
     );
   const operation = override?.operation ?? capabilityId;

@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { googleAdsPhaseAtLeast } from './providers/google-ads/google-ads-phase.js';
 
 const booleanFromEnv = z
   .enum(['true', 'false'])
@@ -35,6 +36,36 @@ const configSchema = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
+    GOOGLE_ADS_PHASE: z
+      .enum(['OFF', 'READ_ONLY', 'PREPARE', 'CREATE_PAUSED', 'READBACK', 'MANAGE'])
+      .default('OFF'),
+    GOOGLE_ADS_API_VERSION: z
+      .string()
+      .trim()
+      .regex(/^v\d+$/)
+      .default('v25'),
+    GOOGLE_ADS_CUSTOMER_ID: z
+      .string()
+      .trim()
+      .regex(/^\d{3}-?\d{3}-?\d{4}$/)
+      .optional(),
+    GOOGLE_ADS_LOGIN_CUSTOMER_ID: z
+      .string()
+      .trim()
+      .regex(/^\d{3}-?\d{3}-?\d{4}$/)
+      .optional(),
+    GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_ALLOWED_CUSTOMER_ID: z
+      .string()
+      .trim()
+      .regex(/^\d{3}-?\d{3}-?\d{4}$/)
+      .optional(),
+    GOOGLE_ADS_ALLOWED_CURRENCY: z.string().trim().length(3).optional(),
+    GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: z.coerce.number().int().positive().optional(),
+    GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: z.coerce.number().int().positive().optional(),
+    GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: z.string().trim().min(1).optional(),
     INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().trim().min(1).optional(),
     META_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     META_ENABLED: booleanFromEnv,
@@ -147,6 +178,57 @@ const configSchema = z
             message: `${field} is required when META_ADS_WRITE_ENABLED=true`,
           });
         }
+      }
+    }
+
+    if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+      const requiredGoogleAdsFields = [
+        'GOOGLE_ADS_CUSTOMER_ID',
+        'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+        'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
+        'GOOGLE_ADS_ALLOWED_CUSTOMER_ID',
+        'GOOGLE_ADS_ALLOWED_CURRENCY',
+        'GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS',
+        'GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS',
+        'GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS',
+      ] as const;
+      for (const field of requiredGoogleAdsFields) {
+        if (!config[field]) {
+          context.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} is required when GOOGLE_ADS_PHASE is not OFF`,
+          });
+        }
+      }
+      if (
+        config.GOOGLE_ADS_CUSTOMER_ID &&
+        config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID &&
+        normalizeGoogleAdsCustomerId(config.GOOGLE_ADS_CUSTOMER_ID) !==
+          normalizeGoogleAdsCustomerId(config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_ADS_ALLOWED_CUSTOMER_ID'],
+          message: 'GOOGLE_ADS_ALLOWED_CUSTOMER_ID must match GOOGLE_ADS_CUSTOMER_ID',
+        });
+      }
+      if (
+        config.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS &&
+        1_000_000 % config.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS !== 0
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS'],
+          message: 'GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS must divide 1,000,000 exactly',
+        });
+      }
+      if (googleAdsPhaseAtLeast(config.GOOGLE_ADS_PHASE, 'CREATE_PAUSED') && !config.DATABASE_URL) {
+        context.addIssue({
+          code: 'custom',
+          path: ['DATABASE_URL'],
+          message: 'DATABASE_URL is required from GOOGLE_ADS_PHASE=CREATE_PAUSED onward',
+        });
       }
     }
 
@@ -313,7 +395,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
   }
 
+  if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+    if (!config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY || !config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY) {
+      throw new Error('Google Ads secret references are required when GOOGLE_ADS_PHASE is not OFF');
+    }
+    assertReferencedSecret(
+      env,
+      config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY,
+      'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+    );
+    assertReferencedSecret(
+      env,
+      config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY,
+      'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
+    );
+  }
+
   return config;
+}
+
+function normalizeGoogleAdsCustomerId(value: string): string {
+  return value.replaceAll('-', '');
 }
 
 function assertReferencedSecret(env: NodeJS.ProcessEnv, key: string, source: string): void {

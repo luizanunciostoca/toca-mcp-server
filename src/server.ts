@@ -13,6 +13,8 @@ import { PostgresApprovalStore } from './persistence/postgres-approval-store.js'
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { PostgresEventRecordStore } from './persistence/postgres-event-record-store.js';
 import { PostgresWorkflowStore } from './persistence/postgres-workflow-store.js';
+import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
+import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
@@ -51,6 +53,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
+    googleAdsPhase: config.GOOGLE_ADS_PHASE,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
   });
 
@@ -129,11 +132,61 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     });
   }
 
+  let googleAds: GoogleAdsPaidMediaProvider | undefined;
+  if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+    const {
+      GOOGLE_ADS_CUSTOMER_ID: customerId,
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: loginCustomerId,
+      GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY: accessTokenEnvKey,
+      GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: developerTokenEnvKey,
+      GOOGLE_ADS_ALLOWED_CUSTOMER_ID: allowedCustomerId,
+      GOOGLE_ADS_ALLOWED_CURRENCY: allowedCurrency,
+      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: maxDailyBudgetMicros,
+      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: currencyMinorUnitMicros,
+      GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: allowedLocationIdsRaw,
+      GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: allowedLanguageIdsRaw,
+    } = config;
+    if (
+      !customerId ||
+      !accessTokenEnvKey ||
+      !developerTokenEnvKey ||
+      !allowedCustomerId ||
+      !allowedCurrency ||
+      !maxDailyBudgetMicros ||
+      !currencyMinorUnitMicros ||
+      !allowedLocationIdsRaw
+    ) {
+      throw new Error('GOOGLE_ADS_RUNTIME_GUARDRAILS_REQUIRED');
+    }
+    const api = new GoogleAdsRestApiClient(
+      {
+        apiVersion: config.GOOGLE_ADS_API_VERSION,
+        customerId,
+        ...(loginCustomerId ? { loginCustomerId } : {}),
+        accessTokenRef: { provider: 'env', key: accessTokenEnvKey },
+        developerTokenRef: { provider: 'env', key: developerTokenEnvKey },
+      },
+      secrets,
+    );
+    googleAds = new GoogleAdsPaidMediaProvider(api, {
+      allowedCustomerId,
+      allowedCurrency,
+      maxDailyBudgetMicros,
+      currencyMinorUnitMicros,
+      allowedLocationCriterionIds: csvValues(allowedLocationIdsRaw),
+      ...(allowedLanguageIdsRaw
+        ? { allowedLanguageCriterionIds: csvValues(allowedLanguageIdsRaw) }
+        : {}),
+      allowedAdvertisingChannelTypes: ['SEARCH'],
+    });
+  }
+
   const runtimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
     ...(metaAdsRead ? { metaAdsRead } : {}),
     ...(metaAdsWrite ? { metaAdsWrite } : {}),
     ...(metaAdsWriteProvider ? { metaAdsWriteProvider } : {}),
+    ...(googleAds ? { googleAds } : {}),
     ...(instagramScheduler ? { instagramScheduler } : {}),
   });
 
@@ -154,6 +207,13 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   });
 
   return server;
+}
+
+function csvValues(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function runtimeServiceIdentity(
