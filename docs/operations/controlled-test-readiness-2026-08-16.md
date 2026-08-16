@@ -2,7 +2,7 @@
 
 Status: **READY FOR CONTROLLED REAL-SYSTEM TESTS — CURRENT RELEASE SCOPE OPERATIONALLY CLOSED**
 
-Repository closeout baseline: `main@72b2d7648c0fe08b49b37070343268a8df999147`.
+Repository closeout baseline: `main@58f31df28e63629d3933bbce67bf912932d05829`.
 
 Production application source SHA: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
 
@@ -33,7 +33,7 @@ Verified on the production source SHA:
 - provider/durable readback, Outbox and Audit Ledger checks PASS;
 - no external publication executed by the R29 verifier.
 
-## Cloud SQL disaster recovery — PASS for tested backup recovery path
+## Cloud SQL disaster recovery — PASS for backup and PITR recovery paths
 
 Production `toca-mcp-db` remains PostgreSQL 18 in `southamerica-east1`, `RUNNABLE`, with:
 
@@ -41,9 +41,9 @@ Production `toca-mcp-db` remains PostgreSQL 18 in `southamerica-east1`, `RUNNABL
 - automated backups enabled;
 - PITR enabled.
 
-### Restore and validation
+### Isolated backup restore and validation — PASS
 
-Final recovery target used:
+Recovery target used:
 
 `toca-mcp-dr-final-31932660953`
 
@@ -63,22 +63,93 @@ Provider evidence:
 - measured restore-start-to-validated-data RTO: **496s (~8m16s)**, within the <=60m objective;
 - production remained unchanged throughout the drill.
 
-### Final cleanup — PASS
+Backup cleanup run `31933900598` deleted `toca-mcp-dr-final-31932660953` and read back that it no longer exists. Production remained unchanged, deletion-protected, backed up and PITR-enabled.
 
-After deletion protection was disabled only on the isolated target, run `31933900598` deleted `toca-mcp-dr-final-31932660953` and read back that it no longer exists.
-
-Final cleanup evidence also proved production remained unchanged, deletion-protected, backed up and PITR-enabled.
-
-Artifact:
+Backup cleanup artifact:
 
 - ID `9260108983`;
 - SHA-256 `e6adf99c54418b2eb19a751963e2ebfc5d94e26e609dfc10ad8ca39f3dd6cc9c`.
 
-No temporary Cloud SQL DR target remains.
+### Isolated PITR/RPO drill — PASS
 
-### RPO caveat
+Run `31936171307`, attempt 2, executed a real timestamp-based PostgreSQL PITR restore to the separate target:
 
-The tested drill used the latest successful backup, not a PITR timestamp. Therefore it validates the backup restore path and RTO objective, but does not demonstrate the <=15-minute PITR RPO objective. PITR is enabled and read back in production. A future PITR-specific drill is continuing reliability validation, not a blocker for this release.
+`toca-mcp-pitr-31936171307`
+
+Before mutation, live IAM and production-safety preflights passed. Production itself was never the restore target and its deletion protection was never disabled.
+
+Provider recovery-window evidence at `2026-08-16T08:34:46Z`:
+
+- latest recoverable time: `2026-08-16T08:32:38.577470502Z`;
+- latest-recovery lag: **128s (2m08s)**, within the <=15m objective.
+
+Selected PITR timestamp:
+
+`2026-08-16T08:26:12.648Z`
+
+Measured PITR RPO:
+
+**514s (8m34s)**.
+
+The <=15-minute PITR RPO objective therefore passes.
+
+Temporal-boundary proof reused existing append-only production evidence instead of inserting a synthetic database marker:
+
+- before: `operational_signals/c24795ae-14f1-4952-80af-314187c1ff78` at `2026-08-16T08:26:10.648Z` — present in the restored target;
+- after: `audit_ledger_events/49fff740-196b-4a0b-a5f1-d68a14e02ad3` at `2026-08-16T08:29:42.328Z` — absent from the restored target.
+
+PITR restored-data validation proved:
+
+- PostgreSQL connection succeeded;
+- migration count 16;
+- 22 critical tables readable;
+- critical foreign keys validated;
+- required append-only triggers enabled;
+- intended before/after recovery boundary reproduced.
+
+Timing:
+
+- restore-to-`RUNNABLE`: **549s (9m09s)**;
+- restore-start-to-validated-data RTO: **584s (9m44s)**;
+- <=60m RTO objective: **PASS**.
+
+Final provider assertion:
+
+`CLOUD_SQL_PITR_RPO_DRILL=PASS rpo_seconds=514 rto_seconds=584 provider_latest_lag_seconds=128`
+
+### PITR final cleanup — PASS
+
+The workflow disabled deletion protection only on the temporary PITR target, deleted the validation/probe jobs, deleted `toca-mcp-pitr-31936171307`, and read back target absence.
+
+Post-cleanup evidence proved production remained:
+
+- `RUNNABLE`;
+- deletion-protected;
+- backed up;
+- PITR-enabled;
+- unchanged against the normalized pre-drill settings snapshot.
+
+Successful PITR evidence artifact:
+
+- ID `9261022842`;
+- SHA-256 `6524043e56f2eacef34b129fa7eb2c7130711ce43e3071f67476573527dd5140`.
+
+Canonical PITR evidence:
+
+`docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`
+
+No temporary Cloud SQL DR target remains from either tested recovery path.
+
+### RPO/RTO classification
+
+The recovery modes now have separate measured evidence:
+
+- backup restore: validated; backup-age RPO **9,024s (~2h30m)**; RTO **496s (~8m16s)**;
+- PITR restore: validated; RPO **514s (8m34s)**; RTO **584s (9m44s)**;
+- PostgreSQL PITR RPO <=15m: **PASS**;
+- PostgreSQL recovery RTO <=60m: **PASS**.
+
+The former PITR-specific RPO evidence gap is closed.
 
 ## Telemetry, SLO and managed alerting — PASS for current operational path
 
@@ -155,9 +226,12 @@ The connected Gmail mailbox did not expose the synthetic alert during the immedi
 - Video/R29 production readback/audit;
 - Cloud SQL backups/PITR/deletion protection;
 - real isolated backup restore;
+- real isolated timestamp PITR restore;
 - restored-data validation;
-- measured RTO <=60m;
+- measured RTO <=60m on both tested recovery paths;
+- measured PITR RPO <=15m;
 - DR cleanup with no temporary target left behind;
+- production unchanged readback after DR drill;
 - telemetry/SLO source plane;
 - Monitoring/Logging IAM;
 - two managed operations notification channels;
@@ -174,4 +248,4 @@ Tracking: #153.
 
 ## Final release statement
 
-**TOCA OS is ready for controlled real-system tests in the approved current release scope. No known application, deployment, Cloud SQL cleanup, Monitoring IAM, notification-channel or permanent alert-policy blocker remains. WhatsApp, Email sending/provider integration and Google Ads are intentionally deferred to future implementation. A future PITR-specific RPO drill and optional mailbox-level alert receipt recheck are continuing operational validation, not current release blockers.**
+**TOCA OS is ready for controlled real-system tests in the approved current release scope. No known application, deployment, Cloud SQL backup/PITR recovery, RPO/RTO, DR cleanup, Monitoring IAM, notification-channel or permanent alert-policy blocker remains. WhatsApp, Email sending/provider integration and Google Ads are intentionally deferred to future implementation. Optional mailbox-level alert receipt recheck remains continuing operational validation and does not alter the completed DR proof.**
