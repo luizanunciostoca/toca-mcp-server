@@ -1,0 +1,92 @@
+name: Alerts v5 Finalize Proof 2026-08-16
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: [.github/workflows/alerts-v5-finalize-noenv-20260816.yml]
+permissions:
+  contents: read
+  id-token: write
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  TARGET_EMAIL: luizidebook@gmail.com
+  TARGET_POLICY: projects/toca-mcp-production/alertPolicies/15137347235286796147
+  TARGET_JOB: toca-alert-metric-v5-31938048761
+  ALERT_ID: 0.obi0tel279f
+  TEST_RUN: alerts-v5-31938048761-1
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read incident, cleanup only temporary resources, compare permanent state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+
+          INCIDENT_HTTP="$(curl --silent --output /tmp/incident.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" "${API}/alerts/${ALERT_ID}")"
+          echo "INCIDENT_GET_HTTP=$INCIDENT_HTTP"
+          if [ "$INCIDENT_HTTP" = 200 ]; then
+            jq -S . /tmp/incident.json | tee evidence/incident-readback.json
+          else
+            curl --fail --silent -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=100' "${API}/alerts" >/tmp/alerts.json
+            jq -S --arg id "$ALERT_ID" --arg p "$TARGET_POLICY" '[.. | objects | select((tostring | contains($id)) or (tostring | contains($p)))]' /tmp/alerts.json | tee evidence/incident-readback.json
+            test "$(jq 'length' evidence/incident-readback.json)" -ge 1
+          fi
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies-before.json
+          jq -S '[.alertPolicies[]? | select(.displayName=="TOCA P0 Audit Ledger Integrity" or .displayName=="TOCA P1 Foundation Daily Control Failed" or .displayName=="TOCA P1 Stale Scheduler Jobs" or .displayName=="TOCA P1 Outbox Stalled") | {name,displayName,enabled,notificationChannels,validity,userLabels}] | sort_by(.name)' /tmp/policies-before.json > evidence/permanent-policies-before-cleanup.json
+          test "$(jq 'length' evidence/permanent-policies-before-cleanup.json)" = 4
+          jq -e 'all(.[]; .enabled == true and .validity == null)' evidence/permanent-policies-before-cleanup.json >/dev/null
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-before.json
+          jq -S --arg email "$TARGET_EMAIL" '[.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | {name,type,displayName,enabled,verificationStatus,labels,userLabels}] | sort_by(.name)' /tmp/channels-before.json > evidence/target-channel-before-cleanup.json
+          test "$(jq 'length' evidence/target-channel-before-cleanup.json)" -ge 1
+
+          POLICY_HTTP="$(curl --silent --output /tmp/temp-policy.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${TARGET_POLICY}")"
+          echo "TEMP_POLICY_GET_HTTP=$POLICY_HTTP"
+          if [ "$POLICY_HTTP" = 200 ]; then
+            jq -S . /tmp/temp-policy.json > evidence/temporary-policy-before-delete.json
+            DELETE_HTTP="$(curl --silent --output /tmp/policy-delete.json --write-out '%{http_code}' -X DELETE -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${TARGET_POLICY}")"
+            echo "TEMP_POLICY_DELETE_HTTP=$DELETE_HTTP"
+            test "$DELETE_HTTP" = 200
+          else
+            test "$POLICY_HTTP" = 404
+          fi
+          AFTER_POLICY="$(curl --silent --output /tmp/policy-after.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${TARGET_POLICY}")"
+          echo "TEMP_POLICY_AFTER_HTTP=$AFTER_POLICY"
+          test "$AFTER_POLICY" = 404
+
+          gcloud run jobs delete "$TARGET_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          if gcloud run jobs describe "$TARGET_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json >/tmp/job-after.json 2>/dev/null; then
+            echo 'TEMP_JOB_STILL_PRESENT' >&2
+            exit 92
+          fi
+          echo 'TEMP_JOB_AFTER=ABSENT'
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies-after.json
+          jq -S '[.alertPolicies[]? | select(.displayName=="TOCA P0 Audit Ledger Integrity" or .displayName=="TOCA P1 Foundation Daily Control Failed" or .displayName=="TOCA P1 Stale Scheduler Jobs" or .displayName=="TOCA P1 Outbox Stalled") | {name,displayName,enabled,notificationChannels,validity,userLabels}] | sort_by(.name)' /tmp/policies-after.json > evidence/permanent-policies-after-cleanup.json
+          cmp evidence/permanent-policies-before-cleanup.json evidence/permanent-policies-after-cleanup.json
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-after.json
+          jq -S --arg email "$TARGET_EMAIL" '[.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | {name,type,displayName,enabled,verificationStatus,labels,userLabels}] | sort_by(.name)' /tmp/channels-after.json > evidence/target-channel-after-cleanup.json
+          cmp evidence/target-channel-before-cleanup.json evidence/target-channel-after-cleanup.json
+
+          FINISHED="$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
+          jq -n --arg testRun "$TEST_RUN" --arg alertId "$ALERT_ID" --arg policy "$TARGET_POLICY" --arg job "$TARGET_JOB" --arg finishedAt "$FINISHED" '{schemaVersion:1,testRun:$testRun,alertId:$alertId,temporaryPolicy:$policy,temporaryJob:$job,temporaryPolicyAbsent:true,temporaryJobAbsent:true,permanentPoliciesUnchanged:true,targetChannelUnchanged:true,finishedAt:$finishedAt}' | tee evidence/final-cleanup-proof.json
+          echo 'ALERTS_V5_FINAL_CLEANUP=PASS'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alerts-v5-finalize-${{ github.sha }}
+          path: evidence
+          retention-days: 90
