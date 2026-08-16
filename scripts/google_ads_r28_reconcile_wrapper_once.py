@@ -60,6 +60,20 @@ def normalize_paid_media_test() -> None:
         raise RuntimeError('cross-account readback budget row anchor missing')
     path.write_text(text.replace(campaign_close, complete_row, 1))
 
+    resolution = Path('test/capability-resolution.test.ts')
+    contract = resolution.read_text()
+    old_counts = """      raw_count: 745,
+      compatibility_alias_count: 8,
+      effective_count: 737,
+"""
+    new_counts = """      raw_count: 758,
+      compatibility_alias_count: 8,
+      effective_count: 750,
+"""
+    if old_counts not in contract:
+        raise RuntimeError('capability catalog count contract anchor missing')
+    resolution.write_text(contract.replace(old_counts, new_counts, 1))
+
 
 module.normalize_runtime_resolver = normalize_runtime_resolver
 module.normalize_paid_media_test = normalize_paid_media_test
