@@ -6,11 +6,9 @@ This record is the production-evidence closeout for Foundation, SLO and Daily Op
 
 ## Maturity decision
 
-| Surface          | Previous maturity | Final maturity          |
-| ---------------- | ----------------- | ----------------------- |
-| FOUNDATION       | CODE_COMPLETE      | **PRODUCTION_VERIFIED** |
-| SLO              | CODE_COMPLETE      | **PRODUCTION_VERIFIED** |
-| DAILY_OPERATIONS | CODE_COMPLETE      | **PRODUCTION_VERIFIED** |
+- FOUNDATION: `CODE_COMPLETE` → **PRODUCTION_VERIFIED**;
+- SLO: `CODE_COMPLETE` → **PRODUCTION_VERIFIED**;
+- DAILY_OPERATIONS: `CODE_COMPLETE` → **PRODUCTION_VERIFIED**.
 
 Verified production application/runtime source for this decision:
 
