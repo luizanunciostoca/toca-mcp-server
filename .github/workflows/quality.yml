@@ -35,10 +35,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format check
-        run: |
-          pnpm exec prettier scripts/verify-r29-production-runtime.ts --write
-          git diff -- scripts/verify-r29-production-runtime.ts
-          git diff --exit-code -- scripts/verify-r29-production-runtime.ts
+        run: pnpm format:check
       - name: Architecture check
         run: pnpm architecture:check
       - name: Lint
