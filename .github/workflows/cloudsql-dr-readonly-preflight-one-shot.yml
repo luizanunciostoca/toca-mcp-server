@@ -1,0 +1,112 @@
+name: Cloud SQL DR Readonly Preflight One-Shot
+
+on:
+  push:
+    branches:
+      - feat/foundation-v1-reliability-closeout
+    paths:
+      - .github/workflows/cloudsql-dr-readonly-preflight-one-shot.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      CLOUD_SQL_INSTANCE: toca-mcp-db
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+    steps:
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Describe production and list backups (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --format=json > instance-full.json
+          gcloud sql backups list \
+            --instance "$CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --limit=50 \
+            --format=json > backups-full.json
+
+          jq '{
+            instance:.name,
+            region:.region,
+            databaseVersion:.databaseVersion,
+            state:.state,
+            deletionProtectionEnabled:.settings.deletionProtectionEnabled,
+            backupEnabled:.settings.backupConfiguration.enabled,
+            pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,
+            retainedBackups:(.settings.backupConfiguration.backupRetentionSettings.retainedBackups // null),
+            retentionUnit:(.settings.backupConfiguration.backupRetentionSettings.retentionUnit // null),
+            transactionLogRetentionDays:(.settings.backupConfiguration.transactionLogRetentionDays // null)
+          }' instance-full.json > instance-sanitized.json
+
+          jq '[.[] | select(.status == "SUCCESSFUL") | {id,startTime,endTime,status,type,location}] | sort_by(.endTime) | reverse' \
+            backups-full.json > backups-sanitized.json
+
+          echo 'CLOUD_SQL_INSTANCE_SANITIZED:'
+          cat instance-sanitized.json
+          echo 'CLOUD_SQL_SUCCESSFUL_BACKUPS_TOP5:'
+          jq '.[0:5]' backups-sanitized.json
+
+      - name: Revalidate DR IAM and Cloud SQL quota read access (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          cat > /tmp/iam-request.json <<'JSON'
+          {"permissions":["cloudsql.instances.get","cloudsql.backupRuns.get","cloudsql.backupRuns.list","cloudsql.instances.create","cloudsql.instances.delete","cloudsql.instances.clone","cloudsql.instances.restoreBackup","serviceusage.quotas.get"]}
+          JSON
+          IAM_HTTP="$(curl --silent --output iam-permissions.json --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/iam-request.json \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$IAM_HTTP" = "200"
+          jq '{permissions:(.permissions // [] | sort)}' iam-permissions.json > iam-sanitized.json
+          echo "IAM_HTTP=$IAM_HTTP"
+          cat iam-sanitized.json
+
+          QUOTA_HTTP="$(curl --silent --output quota-full.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Accept: application/json' \
+            "https://serviceusage.googleapis.com/v1/projects/${GCP_PROJECT_ID}/services/sqladmin.googleapis.com/consumerQuotaMetrics?view=FULL&pageSize=200")"
+          echo "QUOTA_HTTP=$QUOTA_HTTP"
+          jq -n --argjson http "$QUOTA_HTTP" --argjson body "$(cat quota-full.json)" \
+            '{httpStatus:$http,body:$body}' > quota-evidence.json
+          if [ "$QUOTA_HTTP" = "200" ]; then
+            jq '{metrics:[(.metrics // [])[] | {metric,displayName,consumerQuotaLimits:[(.consumerQuotaLimits // [])[] | {name,unit,isPrecise,quotaBuckets:[(.quotaBuckets // [])[] | {effectiveLimit,defaultLimit,dimensions}]}]}]}' \
+              quota-full.json > quota-sanitized.json
+            echo 'CLOUD_SQL_QUOTA_METRICS:'
+            jq '[.metrics[] | select((.metric|ascii_downcase|contains("instance")) or (.displayName|ascii_downcase|contains("instance")))]' quota-sanitized.json
+          else
+            jq '{httpStatus:.httpStatus,error:(.body.error // .body)}' quota-evidence.json > quota-sanitized.json
+            cat quota-sanitized.json
+          fi
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudsql-dr-readonly-preflight-${{ github.sha }}
+          path: |
+            instance-sanitized.json
+            backups-sanitized.json
+            iam-sanitized.json
+            quota-sanitized.json
+          if-no-files-found: error
+          retention-days: 90
