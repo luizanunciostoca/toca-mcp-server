@@ -1,0 +1,117 @@
+name: Cloud SQL DR Drill Preflight 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-drill-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-drill-preflight-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  CLOUD_SQL_SOURCE_INSTANCE: toca-mcp-db
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DATABASE_URL_SECRET: toca-database-url
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Verify isolated DR preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_INSTANCE="toca-mcp-drill-${GITHUB_RUN_ID}"
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+
+          cat >/tmp/permissions-request.json <<'JSON'
+          {"permissions":["cloudsql.instances.get","cloudsql.instances.connect","cloudsql.backupRuns.get","cloudsql.backupRuns.list","cloudsql.instances.create","cloudsql.instances.restoreBackup","cloudsql.instances.delete"]}
+          JSON
+          HTTP="$(curl --silent --output /tmp/permissions.json --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/permissions-request.json \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = "200"
+          GRANTED="$(jq -c '(.permissions // []) | sort' /tmp/permissions.json)"
+          for P in cloudsql.instances.get cloudsql.backupRuns.get cloudsql.backupRuns.list cloudsql.instances.create cloudsql.instances.restoreBackup cloudsql.instances.delete; do
+            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/permissions.json >/dev/null
+          done
+
+          SOURCE_JSON="$(gcloud sql instances describe "$CLOUD_SQL_SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_JSON" | jq -e '
+            .name == "toca-mcp-db" and
+            .state == "RUNNABLE" and
+            .databaseVersion == "POSTGRES_18" and
+            .region == "southamerica-east1" and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupConfiguration.enabled == true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled == true
+          ' >/dev/null
+
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo 'DR_PREFLIGHT_TARGET_ALREADY_EXISTS' >&2
+            exit 1
+          fi
+
+          BACKUPS_JSON="$(gcloud sql backups list --instance "$CLOUD_SQL_SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --limit=50 --format=json)"
+          LATEST="$(jq -c '[.[] | select(.status == "SUCCESSFUL" and .endTime != null)] | sort_by(.endTime) | last' <<<"$BACKUPS_JSON")"
+          test "$LATEST" != "null"
+          BACKUP_ID="$(jq -r '.id' <<<"$LATEST")"
+          BACKUP_END="$(jq -r '.endTime' <<<"$LATEST")"
+          test -n "$BACKUP_ID"
+          test -n "$BACKUP_END"
+          NOW_EPOCH="$(date -u +%s)"
+          BACKUP_EPOCH="$(date -u -d "$BACKUP_END" +%s)"
+          AGE_SECONDS=$((NOW_EPOCH - BACKUP_EPOCH))
+          test "$AGE_SECONDS" -ge 0
+          test "$AGE_SECONDS" -le 129600
+
+          SECRET_READABLE=false
+          if gcloud secrets versions access latest --secret "$DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" >/tmp/database-url 2>/tmp/database-secret.err; then
+            test -s /tmp/database-url
+            chmod 600 /tmp/database-url
+            SECRET_READABLE=true
+          fi
+
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg project "$GCP_PROJECT_ID" \
+            --arg sourceInstance "$CLOUD_SQL_SOURCE_INSTANCE" \
+            --arg targetInstance "$TARGET_INSTANCE" \
+            --arg backupId "$BACKUP_ID" \
+            --arg backupEnd "$BACKUP_END" \
+            --argjson backupAgeSeconds "$AGE_SECONDS" \
+            --argjson grantedPermissions "$GRANTED" \
+            --argjson databaseSecretReadable "$SECRET_READABLE" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,sourceSha:$sourceSha,project:$project,sourceInstance:$sourceInstance,targetInstance:$targetInstance,backupId:$backupId,backupEnd:$backupEnd,backupAgeSeconds:$backupAgeSeconds,grantedPermissions:$grantedPermissions,databaseSecretReadable:$databaseSecretReadable,sourceProductionMutation:false,verifiedAt:$verifiedAt}' \
+            > cloud-sql-dr-preflight.json
+
+          rm -f /tmp/database-url /tmp/database-secret.err /tmp/permissions-request.json /tmp/permissions.json
+          echo "CLOUD_SQL_DR_PREFLIGHT=PASS target=$TARGET_INSTANCE backup_id=$BACKUP_ID backup_age_seconds=$AGE_SECONDS database_secret_readable=$SECRET_READABLE"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-dr-preflight-${{ github.sha }}
+          path: cloud-sql-dr-preflight.json
+          if-no-files-found: error
+          retention-days: 90
