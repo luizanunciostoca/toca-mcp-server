@@ -30,7 +30,8 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Describe failed Cloud Run execution
+      - name: Describe failed Cloud Run execution when retained
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +39,7 @@ jobs:
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --format='json(metadata.name,status.conditions,status.failedCount,status.succeededCount,status.logUri)'
       - name: Recover safe Meta Ads checkpoint and errors
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
