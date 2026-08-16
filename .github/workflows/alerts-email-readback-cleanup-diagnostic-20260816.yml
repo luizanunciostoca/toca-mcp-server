@@ -1,0 +1,93 @@
+name: Alerts Email Proof Cleanup Diagnostic 2026-08-16
+
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: ['.github/workflows/alerts-email-readback-cleanup-diagnostic-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  STALE_POLICY: projects/toca-mcp-production/alertPolicies/2832383679683331058
+  STALE_JOB: toca-alert-email-31935809653
+  TARGET_EMAIL: luizidebook@gmail.com
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  cleanup-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Cleanup stale synthetic resources and diagnose alerts API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+
+          POLICY_HTTP="$(curl --silent --output /tmp/policy-before.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${STALE_POLICY}")"
+          echo "STALE_POLICY_GET_HTTP=$POLICY_HTTP"
+          if [ "$POLICY_HTTP" = 200 ]; then
+            DELETE_HTTP="$(curl --silent --output /tmp/policy-delete.json --write-out '%{http_code}' -X DELETE -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${STALE_POLICY}")"
+            echo "STALE_POLICY_DELETE_HTTP=$DELETE_HTTP"
+            test "$DELETE_HTTP" = 200
+          elif [ "$POLICY_HTTP" != 404 ]; then
+            cat /tmp/policy-before.json >&2 || true
+            exit 90
+          fi
+          AFTER_HTTP="$(curl --silent --output /tmp/policy-after.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${STALE_POLICY}")"
+          echo "STALE_POLICY_AFTER_HTTP=$AFTER_HTTP"
+          test "$AFTER_HTTP" = 404
+
+          if gcloud run jobs describe "$STALE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json >/tmp/job-before.json 2>/dev/null; then
+            gcloud run jobs delete "$STALE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          fi
+          if gcloud run jobs describe "$STALE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json >/tmp/job-after.json 2>/dev/null; then
+            echo "STALE_JOB_PRESENT_AFTER_CLEANUP" >&2
+            exit 91
+          fi
+          echo "STALE_JOB_ABSENT=PASS"
+
+          ALERTS_HTTP="$(curl --silent --output /tmp/alerts.json --write-out '%{http_code}' -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=5' "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts")"
+          echo "ALERTS_LIST_HTTP=$ALERTS_HTTP"
+          jq -S . /tmp/alerts.json > evidence/alerts-list-response.json 2>/dev/null || cp /tmp/alerts.json evidence/alerts-list-response.txt
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/policies.json
+          jq -S '[.alertPolicies[]? | select(.displayName=="TOCA P0 Audit Ledger Integrity" or .displayName=="TOCA P1 Foundation Daily Control Failed" or .displayName=="TOCA P1 Stale Scheduler Jobs" or .displayName=="TOCA P1 Outbox Stalled") | {name,displayName,enabled,notificationChannels,validity,userLabels}] | sort_by(.name)' /tmp/policies.json > evidence/permanent-policies.json
+          test "$(jq 'length' evidence/permanent-policies.json)" = 4
+          jq -e 'all(.[]; .enabled == true and .validity == null)' evidence/permanent-policies.json >/dev/null
+
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/notificationChannels?pageSize=100" >/tmp/channels.json
+          jq -S --arg email "$TARGET_EMAIL" '[.notificationChannels[]? | select(.type=="email" and .labels.email_address==$email) | {name,type,displayName,enabled,labels,userLabels}]' /tmp/channels.json > evidence/target-channel.json
+          test "$(jq 'length' evidence/target-channel.json)" -ge 1
+          jq -e 'any(.[]; .enabled == true)' evidence/target-channel.json >/dev/null
+
+          jq -n --arg stalePolicy "$STALE_POLICY" --arg stalePolicyAfterHttp "$AFTER_HTTP" --arg staleJob "$STALE_JOB" --arg alertsListHttp "$ALERTS_HTTP" '{schemaVersion:1,staleSyntheticPolicy:$stalePolicy,staleSyntheticPolicyAfterHttp:$stalePolicyAfterHttp,staleCloudRunJob:$staleJob,staleCloudRunJobAbsent:true,alertsListHttp:$alertsListHttp,permanentPoliciesHealthy:true,targetChannelHealthy:true}' > evidence/cleanup-diagnostic.json
+          cat evidence/cleanup-diagnostic.json
+
+          if [ "$ALERTS_HTTP" != 200 ]; then
+            echo "ALERTS_API_DIAGNOSTIC_FAIL_HTTP=$ALERTS_HTTP" >&2
+            cat /tmp/alerts.json >&2 || true
+            exit 92
+          fi
+          echo "ALERTS_API_ACCESS=PASS"
+      - name: Upload cleanup diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: alerts-email-cleanup-diagnostic-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
