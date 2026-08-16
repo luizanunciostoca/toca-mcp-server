@@ -82,6 +82,67 @@ jobs:
           docker push "$IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
+  migrate-production:
+    needs: quality-build-image
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      IMAGE: ${{ needs.quality-build-image.outputs.image }}
+    steps:
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Apply and verify official production migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE"
+          JOB_NAME="toca-production-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --command node \
+            --args dist/scripts/migrate-and-verify.js \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=20m \
+            --limit=200 \
+            --order=asc \
+            --format='value(textPayload)' || true)"
+          printf '%s\n' "$LOGS"
+          printf '%s' "$LOGS" | grep -Eq 'PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=[0-9]+'
+          echo 'TOCA_PRODUCTION_SCHEMA_MIGRATION_GATE=PASS'
+
   provision-minute-trigger:
     needs: quality-build-image
     runs-on: ubuntu-latest
@@ -164,7 +225,7 @@ jobs:
           echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
 
   deploy-runtime:
-    needs: [quality-build-image, provision-minute-trigger]
+    needs: [quality-build-image, migrate-production, provision-minute-trigger]
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
