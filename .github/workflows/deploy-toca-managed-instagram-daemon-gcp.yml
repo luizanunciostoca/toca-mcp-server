@@ -289,7 +289,7 @@ jobs:
           ' >/dev/null
           echo 'TOCA_MANAGED_INSTAGRAM_SCALE_TO_ZERO_RUNTIME=VERIFIED'
 
-      - name: Deploy MCP production scheduler and direct-publication surface
+      - name: Deploy MCP production scheduler surface
         run: |
           set -euo pipefail
           gcloud run deploy "$MCP_SERVICE_NAME" \
@@ -299,7 +299,7 @@ jobs:
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
-            --update-env-vars "NODE_ENV=production,MCP_ENABLED=true,TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true,TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=true,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,META_ENABLED=false,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
+            --update-env-vars "NODE_ENV=production,MCP_ENABLED=true,TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true,TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,META_ENABLED=false,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
             --min-instances 0 \
             --max-instances 1 \
             --cpu-throttling \
@@ -308,25 +308,24 @@ jobs:
             --no-allow-unauthenticated \
             --quiet
 
-      - name: Verify MCP direct-publication boundary and scale-to-zero
+      - name: Verify MCP scheduler surface remains fail-closed and scale-to-zero
         run: |
           set -euo pipefail
           MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --format=json)"
-          printf '%s' "$MCP_JSON" | jq -e --arg instagram "$INSTAGRAM_ACCOUNT_ID" '
+          printf '%s' "$MCP_JSON" | jq -e '
             .spec.template.spec.containers[0] as $container |
             ([$container.env[] | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
             ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
-            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
-            ([$container.env[] | select(.name == "INSTAGRAM_BUSINESS_ACCOUNT_ID") | .value] == [$instagram]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
             ([$container.env[] | select(.name == "META_ENABLED") | .value] == ["false"]) and
             ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
             (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1")
           ' >/dev/null
-          echo 'TOCA_MCP_PRODUCTION_INSTAGRAM_DIRECT_PUBLICATION_DEPLOYED=1'
+          echo 'TOCA_MCP_PRODUCTION_SCHEDULER_TOOLS_DEPLOYED=1'
 
   verify-minute-trigger:
     needs: [provision-minute-trigger, deploy-runtime]
