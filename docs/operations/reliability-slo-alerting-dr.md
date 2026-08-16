@@ -22,16 +22,14 @@ Foundation v1 has:
 
 ## Foundation v1 SLOs
 
-| SLI | Target | Window | Source |
-| --- | ---: | ---: | --- |
-| Core governed request availability | >=99.9% | rolling 30d; 1h burn windows | HTTP/Core execution outcome telemetry + audit |
-| Managed scheduler tick success | >=99.5% | rolling 30d; 1h burn windows | daemon tick telemetry |
-| Verified terminal external writes | 100% invariant | every write | provider read-back + Audit Ledger |
-| Oldest pending Outbox age | <=300s | continuous | Transactional Outbox store |
-| Audit Ledger integrity | 100% valid invariant | continuous/daily verification | ledger verifier |
-| Latest successful Cloud SQL backup | <=36h old | continuous/daily | Cloud SQL backup metadata |
-| Cloud SQL PITR | enabled | continuous/daily | Cloud SQL instance metadata |
-| Restore drill evidence | <=90d old | quarterly | DR evidence bundle |
+- Core governed request availability: target >=99.9%, rolling 30d with 1h burn windows, sourced from HTTP/Core execution outcome telemetry + audit.
+- Managed scheduler tick success: target >=99.5%, rolling 30d with 1h burn windows, sourced from daemon tick telemetry.
+- Verified terminal external writes: 100% invariant for every write, sourced from provider read-back + Audit Ledger.
+- Oldest pending Outbox age: <=300s continuously, sourced from the Transactional Outbox store.
+- Audit Ledger integrity: 100% valid invariant, continuous/daily verification by the ledger verifier.
+- Latest successful Cloud SQL backup: <=36h old, checked continuously/daily from Cloud SQL backup metadata.
+- Cloud SQL PITR: enabled, checked continuously/daily from Cloud SQL instance metadata.
+- Restore drill evidence: <=90d old, verified quarterly from the DR evidence bundle.
 
 An external provider timeout/ambiguous outcome may reduce availability but must never become an unverified success.
 
