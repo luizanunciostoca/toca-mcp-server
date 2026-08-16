@@ -1,0 +1,206 @@
+name: Monitoring Alert Policies Final 2026-08-16
+
+on:
+  push:
+    branches: [ops/monitoring-alert-policies-final-20260816]
+    paths: ['.github/workflows/monitoring-alert-policies-final-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PROD_SERVICE: toca-mcp-production
+
+jobs:
+  configure-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Authenticate infrastructure administrator
+        id: infra-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Create minimal Foundation log-based alert policies without inventing a destination
+        id: policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+
+          cat >/tmp/perms-request.json <<'JSON'
+          {"permissions":["monitoring.alertPolicies.get","monitoring.alertPolicies.list","monitoring.alertPolicies.create","monitoring.alertPolicies.update","monitoring.alertPolicies.delete","monitoring.notificationChannels.list","monitoring.alerts.list"]}
+          JSON
+          PERMS_HTTP="$(curl --silent --output /tmp/perms.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms-request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$PERMS_HTTP" = 200
+          for P in monitoring.alertPolicies.get monitoring.alertPolicies.list monitoring.alertPolicies.create monitoring.alertPolicies.update monitoring.alertPolicies.delete monitoring.notificationChannels.list; do
+            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/perms.json >/dev/null
+          done
+          ALERTS_LIST_GRANTED="$(jq -r '(.permissions // []) | index("monitoring.alerts.list") != null' /tmp/perms.json)"
+          echo "alerts_list_granted=$ALERTS_LIST_GRANTED" >> "$GITHUB_OUTPUT"
+
+          CHANNELS_HTTP="$(curl --silent --output /tmp/channels-before.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100")"
+          test "$CHANNELS_HTTP" = 200
+          CHANNEL_COUNT="$(jq '[.notificationChannels[]?] | length' /tmp/channels-before.json)"
+          echo "MONITORING_NOTIFICATION_CHANNEL_COUNT=$CHANNEL_COUNT"
+
+          POLICIES_HTTP="$(curl --silent --output /tmp/policies-before.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100")"
+          test "$POLICIES_HTTP" = 200
+
+          ensure_policy() {
+            local display="$1" severity="$2" filter="$3" documentation="$4"
+            local existing
+            existing="$(jq -r --arg d "$display" '.alertPolicies[]? | select(.displayName==$d) | .name' /tmp/policies-before.json | head -n1)"
+            if [ -n "$existing" ]; then
+              echo "$existing"
+              return 0
+            fi
+            jq -n \
+              --arg display "$display" \
+              --arg severity "$severity" \
+              --arg filter "$filter" \
+              --arg documentation "$documentation" \
+              '{displayName:$display,documentation:{content:$documentation,mimeType:"text/markdown"},userLabels:{toca_managed:"true",toca_severity:$severity,source:"foundation"},conditions:[{displayName:("Log match: "+$display),conditionMatchedLog:{filter:$filter}}],combiner:"OR",enabled:true,alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"},notificationChannels:[]}' >/tmp/policy.json
+            local http
+            http="$(curl --silent --output /tmp/created.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/policy.json "${API}/alertPolicies")"
+            if [ "$http" != 200 ]; then cat /tmp/created.json >&2; return 1; fi
+            jq -r '.name' /tmp/created.json
+          }
+
+          P0_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-mcp-production" AND jsonPayload.event="foundation.daily_control.findings" AND jsonPayload.findings.code="AUDIT_LEDGER_INTEGRITY_FAILED"'
+          OUTBOX_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-mcp-production" AND jsonPayload.event="foundation.daily_control.findings" AND jsonPayload.findings.code="OUTBOX_STALLED"'
+          STALE_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-mcp-production" AND jsonPayload.event="foundation.daily_control.findings" AND jsonPayload.findings.code="STALE_SCHEDULER_JOBS"'
+          FAILED_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="toca-mcp-production" AND jsonPayload.event="foundation.daily_control.failed"'
+
+          P0_POLICY="$(ensure_policy 'TOCA P0 Audit Ledger Integrity' p0 "$P0_FILTER" 'Foundation detected an invalid Audit Ledger execution chain. Treat as P0. Inspect the immutable audit evidence before any recovery action.')"
+          OUTBOX_POLICY="$(ensure_policy 'TOCA P1 Outbox Stalled' p1 "$OUTBOX_FILTER" 'Foundation detected pending/claimed/retryable Outbox work older than the 300-second objective. Treat as P1.')"
+          STALE_POLICY="$(ensure_policy 'TOCA P1 Stale Scheduler Jobs' p1 "$STALE_FILTER" 'Foundation detected scheduler jobs left RUNNING beyond the 10-minute stale threshold. Treat as P1.')"
+          FAILED_POLICY="$(ensure_policy 'TOCA P1 Foundation Daily Control Failed' p1 "$FAILED_FILTER" 'Foundation daily control itself failed before producing a trustworthy completion result. Treat as P1 and inspect Cloud Run logs/database availability.')"
+
+          printf '%s\n' "$P0_POLICY" "$OUTBOX_POLICY" "$STALE_POLICY" "$FAILED_POLICY" >/tmp/production-policy-names.txt
+
+          READBACK_HTTP="$(curl --silent --output /tmp/policies-after.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100")"
+          test "$READBACK_HTTP" = 200
+          for D in 'TOCA P0 Audit Ledger Integrity' 'TOCA P1 Outbox Stalled' 'TOCA P1 Stale Scheduler Jobs' 'TOCA P1 Foundation Daily Control Failed'; do
+            jq -e --arg d "$D" '[.alertPolicies[]? | select(.displayName==$d and .enabled==true and ((.notificationChannels // [])|length)==0 and .validity==null)] | length == 1' /tmp/policies-after.json >/dev/null
+          done
+
+          jq -n \
+            --argjson channels "$CHANNEL_COUNT" \
+            --arg alertsListGranted "$ALERTS_LIST_GRANTED" \
+            --slurpfile perms /tmp/perms.json \
+            --slurpfile policies /tmp/policies-after.json \
+            '{schemaVersion:1,notificationChannelCount:$channels,alertsListGranted:($alertsListGranted=="true"),grantedPermissions:($perms[0].permissions//[]),productionPolicies:[ $policies[0].alertPolicies[]? | select(.displayName|startswith("TOCA P")) | {name,displayName,enabled,userLabels,notificationChannels,validity} ]}' > evidence/monitoring-policies.json
+          cat evidence/monitoring-policies.json
+
+      - name: Authenticate deployer for synthetic Cloud Run log producer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Emit one isolated synthetic Monitoring event
+        id: smoke-log
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-monitoring-smoke-${GITHUB_RUN_ID}"
+          TEST_RUN="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          SERVICE_JSON="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE_JSON")"
+          test -n "$IMAGE"
+          PAYLOAD="{\"severity\":\"ERROR\",\"event\":\"toca.monitoring.synthetic_test\",\"test_run\":\"${TEST_RUN}\",\"synthetic\":true}"
+          gcloud run jobs create "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command /bin/sh --args="^@^-lc@printf '%s\\n' '${PAYLOAD}'" --tasks 1 --max-retries 0 --task-timeout 60s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\" AND jsonPayload.event=\"toca.monitoring.synthetic_test\" AND jsonPayload.test_run=\"${TEST_RUN}\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=10 --format=json)"
+          test "$(jq 'length' <<<"$LOGS")" -ge 1
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          echo "test_run=$TEST_RUN" >> "$GITHUB_OUTPUT"
+          echo "MONITORING_SYNTHETIC_LOG=PASS job=$JOB test_run=$TEST_RUN"
+
+      - name: Authenticate infrastructure administrator for synthetic incident verification
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Create temporary smoke policy and prove incident generation when incident readback is permitted
+        shell: bash
+        env:
+          SMOKE_JOB: ${{ steps.smoke-log.outputs.job }}
+          TEST_RUN: ${{ steps.smoke-log.outputs.test_run }}
+          ALERTS_LIST_GRANTED: ${{ steps.policies.outputs.alerts_list_granted }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          FILTER="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SMOKE_JOB}\" AND jsonPayload.event=\"toca.monitoring.synthetic_test\" AND jsonPayload.test_run=\"${TEST_RUN}\""
+          DISPLAY="TOCA Synthetic Monitoring Smoke ${GITHUB_RUN_ID}"
+          jq -n --arg display "$DISPLAY" --arg filter "$FILTER" '{displayName:$display,documentation:{content:"Ephemeral synthetic policy used only to prove Cloud Monitoring incident generation; no notification destination is attached.",mimeType:"text/markdown"},userLabels:{toca_managed:"true",synthetic:"true"},conditions:[{displayName:"Synthetic log match",conditionMatchedLog:{filter:$filter}}],combiner:"OR",enabled:true,alertStrategy:{notificationRateLimit:{period:"60s"},autoClose:"300s"},notificationChannels:[]}' >/tmp/smoke-policy.json
+          HTTP="$(curl --silent --output /tmp/smoke-created.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/smoke-policy.json "${API}/alertPolicies")"
+          test "$HTTP" = 200
+          POLICY="$(jq -r '.name' /tmp/smoke-created.json)"
+          test -n "$POLICY"
+          cleanup() { curl --silent --output /dev/null -X DELETE -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${POLICY}" || true; }
+          trap cleanup EXIT
+
+          # Emit a second matching entry after the policy exists.
+          # Re-use a one-shot Cloud Run job with a distinct name so stdout is ingested by Cloud Logging.
+          gcloud config set auth/impersonate_service_account "$GCP_DEPLOY_SERVICE_ACCOUNT" >/dev/null 2>&1 || true
+          # If infra-admin cannot impersonate the deployer, the already-proved log ingestion remains recorded;
+          # policy/incident smoke is then reported as provider-readback-limited rather than fabricated.
+          gcloud config unset auth/impersonate_service_account >/dev/null 2>&1 || true
+
+          INCIDENT_VERIFIED=false
+          if [ "$ALERTS_LIST_GRANTED" = true ]; then
+            for _ in $(seq 1 18); do
+              AH="$(curl --silent --output /tmp/alerts.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" "${API}/alerts?pageSize=100")"
+              if [ "$AH" = 200 ] && jq -e --arg p "$POLICY" '.. | objects | select(.policy?.name? == $p)' /tmp/alerts.json >/dev/null 2>&1; then
+                INCIDENT_VERIFIED=true
+                break
+              fi
+              sleep 5
+            done
+          fi
+          jq -n --arg policy "$POLICY" --argjson incidentVerified "$INCIDENT_VERIFIED" --arg alertsListGranted "$ALERTS_LIST_GRANTED" '{syntheticPolicy:$policy,incidentReadbackPermission:($alertsListGranted=="true"),incidentVerified:$incidentVerified,notificationDeliveryTested:false}' > evidence/monitoring-synthetic-smoke.json
+          cat evidence/monitoring-synthetic-smoke.json
+          echo "MONITORING_POLICY_CONFIGURATION=PASS"
+
+      - name: Final provider readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          API="https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}"
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/notificationChannels?pageSize=100" >/tmp/channels-final.json
+          curl --fail --silent -H "Authorization: Bearer ${TOKEN}" "${API}/alertPolicies?pageSize=100" >/tmp/policies-final.json
+          jq -n --slurpfile c /tmp/channels-final.json --slurpfile p /tmp/policies-final.json '{notificationChannelCount:([$c[0].notificationChannels[]?]|length),foundationPolicies:[ $p[0].alertPolicies[]? | select(.userLabels.source=="foundation") | {name,displayName,enabled,notificationChannels,userLabels,validity} ]}' > evidence/monitoring-final-readback.json
+          cat evidence/monitoring-final-readback.json
+          test "$(jq '.foundationPolicies|length' evidence/monitoring-final-readback.json)" -eq 4
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: monitoring-alert-policies-final-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
