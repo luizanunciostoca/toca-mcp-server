@@ -1,10 +1,14 @@
 # Foundation v1 — Telemetry, Alerting, SLO and Disaster Recovery
 
-Status: **CURRENT RELEASE TELEMETRY/ALERTING + BACKUP/PITR DR OPERATIONALLY VALIDATED**
+Status: **SLO — PRODUCTION_VERIFIED**
 
-Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Final assessed `main`: `666b55c29413ba4e866e0ca4563ef4690ccb9d46`.
 
-Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md`, `docs/operations/foundation-reliability-provider-evidence.md` and `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`.
+Deployed production runtime source: `3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732`.
+
+The subsequent promotion `main` advance was verified as documentation-only; no runtime, Outbox, scheduler, persistence or provider execution path changed.
+
+Current provider evidence: `docs/operations/controlled-test-readiness-2026-08-16.md`, `docs/operations/foundation-reliability-provider-evidence.md`, `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md` and `docs/operations/foundation-slo-production-verification-2026-08-16.md`.
 
 ## Telemetry and SLO source plane
 
@@ -169,6 +173,32 @@ The prior RPO caveat is closed by the real timestamp-based PITR drill. Measured 
 
 This evidence is distinct from the older backup-age RPO of ~2h30m: backup restore and PITR are separate recovery modes, and the <=15m objective is now directly demonstrated on the PITR path.
 
+## Final SLO production assessment — PASS
+
+Final assessment run `31937998177` measured the live production state after the canonical R29 runtime/drain verification:
+
+- Core governed requests: 15;
+- Core failures: 0;
+- Core availability: **1.000**, target 0.999, `met=true`;
+- scheduler ticks: 880;
+- scheduler failures: 0;
+- scheduler success: **1.000**, target 0.995, `met=true`;
+- successful external writes: 15;
+- verified external writes: 15;
+- Outbox pending/claimed/retryable: **0**;
+- oldest pending Outbox age: **0s**;
+- Audit Ledger integrity: valid;
+- Daily Control: healthy durable completion;
+- alerts: none;
+- overall assessment: **`healthy=true`**.
+
+Final evidence artifact:
+
+- ID `9261216989`;
+- SHA-256 `a938c71e7630acdcca220a10c333d768438b15d30167a970600a3638b4a50c8d`.
+
+The original stalled Outbox condition is therefore closed, not waived: the historical verifier residue was drained safely, fresh verifier-owned events were proven to drain normally, and the final independent inventory returned no pending rows.
+
 ## Incident mode for ambiguous provider writes
 
 After restart, timeout or partial failure:
@@ -182,10 +212,12 @@ After restart, timeout or partial failure:
 
 ## Current exit state
 
-Current release reliability path is operationally closed for controlled real-system tests:
+Current release reliability path is production verified:
 
 - telemetry source plane PASS;
 - SLO evaluator PASS;
+- current production SLO assessment `healthy=true`;
+- Outbox pending=0 and oldest pending age=0s;
 - Monitoring/Logging IAM PASS;
 - managed notification channels PASS;
 - four permanent Foundation policies PASS;
@@ -198,4 +230,6 @@ Current release reliability path is operationally closed for controlled real-sys
 - DR cleanup PASS;
 - production unchanged readback PASS.
 
-WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. Optional mailbox-level alert receipt recheck remains continuing operational validation and does not alter the DR proof.
+SLO is **PRODUCTION_VERIFIED** for the current release.
+
+WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153. Optional mailbox-level alert receipt recheck remains continuing operational validation and does not alter the SLO/DR production verification.
