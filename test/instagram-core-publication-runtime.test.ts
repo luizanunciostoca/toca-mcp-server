@@ -42,6 +42,11 @@ describe('Instagram direct publication Core runtime', () => {
     }
     expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
     expect(registry.get('instagram.publication.reschedule')?.capabilityStatus).toBe('PLANNED');
+
+    const catalogRegistry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
+    expect(catalogRegistry.get('instagram.publish.image')?.capabilityStatus).toBe(
+      'PRODUCTION_VALIDATED',
+    );
   });
 
   it('binds image publication to the configured account, deterministic idempotency and provider readback', async () => {
@@ -106,7 +111,10 @@ describe('Instagram direct publication Core runtime', () => {
       maxPollAttempts: 1,
     };
     expect(
-      resolveInstagramPublicationRuntimeBinding('instagram.publish.carousel', runtime)?.inputSchema.parse({
+      resolveInstagramPublicationRuntimeBinding(
+        'instagram.publish.carousel',
+        runtime,
+      )?.inputSchema.parse({
         account,
         mediaUrls: ['https://cdn.example.com/1.jpg', 'https://cdn.example.com/2.jpg'],
         correlationId: 'corr-carousel',
@@ -130,7 +138,10 @@ describe('Instagram direct publication Core runtime', () => {
       }),
     ).toBeDefined();
     expect(() =>
-      resolveInstagramPublicationRuntimeBinding('instagram.publish.carousel', runtime)?.inputSchema.parse({
+      resolveInstagramPublicationRuntimeBinding(
+        'instagram.publish.carousel',
+        runtime,
+      )?.inputSchema.parse({
         account,
         mediaUrls: ['https://cdn.example.com/only-one.jpg'],
         correlationId: 'corr-invalid',
