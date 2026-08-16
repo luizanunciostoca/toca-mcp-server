@@ -388,7 +388,7 @@ const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
   provider: contract.provider ?? 'TOCA_OS+toca-mcp',
   riskClass: contract.risk_class ?? 'READ',
   requiredScopes: contract.required_scopes ?? [],
-  capabilityStatus: 'IMPLEMENTED',
+  capabilityStatus: 'PRODUCTION_VALIDATED',
   sideEffects: contract.side_effects ?? false,
   idempotent: contract.idempotent ?? true,
 }));
