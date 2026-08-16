@@ -258,7 +258,10 @@ function csvValues(value: string): string[] {
 
 function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
   return Boolean(
-    config.DATABASE_URL && config.META_ACCESS_TOKEN_ENV_KEY && config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+    config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
+      config.DATABASE_URL &&
+      config.META_ACCESS_TOKEN_ENV_KEY &&
+      config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
   );
 }
 
