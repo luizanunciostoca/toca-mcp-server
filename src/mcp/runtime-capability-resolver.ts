@@ -642,7 +642,9 @@ function binding<T, TResult>(
   };
 }
 
-function googleAdsRuntimeContext(services: RuntimeCapabilityServices): GoogleAdsRuntimeContext | undefined {
+function googleAdsRuntimeContext(
+  services: RuntimeCapabilityServices,
+): GoogleAdsRuntimeContext | undefined {
   const targetAccount = services.googleAdsTargetAccount?.trim();
   const currency = services.googleAdsCurrency?.trim().toUpperCase();
   if (!services.googleAds || !targetAccount || !currency) return undefined;
