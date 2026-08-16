@@ -1,8 +1,10 @@
 # Foundation v1 Reliability — Provider Evidence
 
-Status: **CURRENT RELEASE RELIABILITY PATH OPERATIONALLY CLOSED — BACKUP + PITR DR VERIFIED**
+Status: **PRODUCTION_VERIFIED**
 
-Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Production runtime source: `3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732`.
+
+Canonical Foundation/SLO closeout: `docs/operations/foundation-production-verification-2026-08-16.md`.
 
 Current release snapshot: `docs/operations/controlled-test-readiness-2026-08-16.md`.
 
@@ -136,9 +138,50 @@ No temporary DR instance remains.
 
 RTO <=60m is measured and validated for both tested recovery paths.
 
-The <=15m PITR RPO objective is now directly demonstrated: measured PITR RPO **514s (8m34s)** against an objective of 900s.
+The <=15m PITR RPO objective is directly demonstrated: measured PITR RPO **514s (8m34s)** against an objective of 900s.
 
 The former PITR-specific RPO evidence gap is closed.
+
+## Outbox and SLO final production proof — PASS
+
+The original stalled-Outbox assessment was traced to 14 R29 verifier-owned events rather than business events. PR #157 added the verifier-owned drain path after runtime proof.
+
+Historical cleanup run `31935924301` safely delivered the 14 pre-classified verifier events without deleting business events or publishing externally:
+
+- matched `14`;
+- delivered `14`;
+- pending `0`.
+
+Canonical production deployment run `31937475975` passed exact-head Quality, immutable-image rollout, production migrations, scheduler provisioning and authenticated smoke on runtime source `3977d2f20ec0fb55c2f3b6b99f9ab006b7c10732`.
+
+Canonical R29 run `31937724476` then created fresh verifier events and proved:
+
+- matched `3`;
+- drained `3`;
+- delivered `3`;
+- pending `0`;
+- provider/durable/Audit readback valid;
+- fail-closed behavior valid;
+- temporary jobs removed;
+- no external publication;
+- full Quality after cleanup PASS.
+
+Final SLO Production Assessment run `31937982829` measured:
+
+- Core availability `1.000` against target `0.999` — PASS;
+- scheduler success `1.000` against target `0.995` — PASS;
+- Outbox pending `0`;
+- oldest pending Outbox age `0s`;
+- Audit Ledger integrity valid;
+- PITR enabled;
+- alerts `[]`;
+- canonical assessment `healthy=true`;
+- Foundation daily-control durable value `1`.
+
+Final assessment artifact:
+
+- ID `9261211173`;
+- SHA-256 `984ee6bf3f6dac4559cbcdb7636695dd285b57fbe00d7d27bfd0a6653fd266e3`.
 
 ## Current closeout
 
@@ -146,6 +189,8 @@ No known current-scope blocker remains in:
 
 - application/runtime;
 - telemetry/SLO source plane;
+- Foundation Daily Operations;
+- Transactional Outbox SLO;
 - Monitoring/Logging IAM;
 - managed alert policies;
 - managed operations channels;
@@ -154,5 +199,7 @@ No known current-scope blocker remains in:
 - RTO <=60m evidence;
 - PITR RPO <=15m evidence;
 - DR cleanup.
+
+Foundation, SLO and Daily Operations are **PRODUCTION_VERIFIED**.
 
 WhatsApp, Email sending/provider integration and Google Ads remain intentionally deferred in #153.
