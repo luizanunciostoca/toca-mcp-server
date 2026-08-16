@@ -1,3 +1,4 @@
+import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from './content/capability-contracts.js';
 import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';
 import {
   googleAdsPhaseAtLeast,
@@ -379,12 +380,26 @@ const plannedInstagramPublicationTools: readonly ToolDefinition[] = [
   },
 ];
 
+const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
+  VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES,
+).map(([name, contract]) => ({
+  name,
+  version: '1.0.0',
+  provider: contract.provider ?? 'TOCA_OS+toca-mcp',
+  riskClass: contract.risk_class ?? 'READ',
+  requiredScopes: contract.required_scopes ?? [],
+  capabilityStatus: 'IMPLEMENTED',
+  sideEffects: contract.side_effects ?? false,
+  idempotent: contract.idempotent ?? true,
+}));
+
 export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
   readonly metaAdsReadsEnabled?: boolean;
   readonly metaAdsWritesEnabled?: boolean;
   readonly googleAdsPhase?: GoogleAdsPhase;
   readonly tocaManagedInstagramSchedulerEnabled?: boolean;
+  readonly videoContentRuntimeEnabled?: boolean;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
@@ -401,5 +416,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   }
   if (options.tocaManagedInstagramSchedulerEnabled)
     for (const tool of tocaManagedInstagramSchedulerTools) registry.register(tool);
+  if (options.videoContentRuntimeEnabled)
+    for (const tool of videoContentRuntimeTools) registry.register(tool);
   return registry;
 }

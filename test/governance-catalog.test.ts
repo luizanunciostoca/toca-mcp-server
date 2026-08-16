@@ -52,7 +52,7 @@ describe('TOCA OS route and capability catalogs', () => {
 
   it('materializes the 758-capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(758);
+    expect(CAPABILITY_CATALOG).toHaveLength(783);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 

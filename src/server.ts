@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/server';
+import { PostgresVideoContentRuntime } from './content/runtime.js';
 import { loadConfig, type RuntimeConfig } from './config.js';
 import {
   createTrustedServiceExecutionIdentity,
@@ -49,18 +50,18 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     version: SERVER_VERSION,
     description: 'Deterministic TOCA Core execution facade for ChatGPT governed by TOCA_OS.',
   });
+  const secrets = new EnvironmentSecretResolver(env);
+  const pool = config.DATABASE_URL
+    ? createPostgresPool({ connectionString: config.DATABASE_URL })
+    : undefined;
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     googleAdsPhase: config.GOOGLE_ADS_PHASE,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
+    videoContentRuntimeEnabled: Boolean(pool),
   });
-
-  const secrets = new EnvironmentSecretResolver(env);
-  const pool = config.DATABASE_URL
-    ? createPostgresPool({ connectionString: config.DATABASE_URL })
-    : undefined;
   const createMetaClient = () => {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
@@ -181,6 +182,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     });
   }
 
+  const videoContent = pool ? new PostgresVideoContentRuntime(pool) : undefined;
+
   const runtimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
     ...(metaAdsRead ? { metaAdsRead } : {}),
@@ -194,6 +197,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       ? { googleAdsCurrency: config.GOOGLE_ADS_ALLOWED_CURRENCY.toUpperCase() }
       : {}),
     ...(instagramScheduler ? { instagramScheduler } : {}),
+    ...(videoContent ? { videoContent } : {}),
   });
 
   registerTocaCoreSurface(server, {

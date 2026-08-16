@@ -1,4 +1,11 @@
 import * as z from 'zod/v4';
+import { VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET } from '../content/capability-ids.js';
+import {
+  VIDEO_CONTENT_WRITE_CAPABILITY_IDS,
+  runtimeIdempotencyKey,
+  type VideoContentRuntimeInput,
+  type VideoContentRuntimeService,
+} from '../content/runtime.js';
 import type {
   GoogleAdsCampaignPlan,
   GoogleAdsPaidMediaProvider,
@@ -24,6 +31,44 @@ import type {
 } from './core-execution.js';
 
 const recordSchema = z.record(z.string(), z.unknown());
+const videoContentInputSchema = z.object({
+  tenant_id: z.string().min(1),
+  workspace_id: z.string().min(1),
+  organization_id: z.string().min(1),
+  content_item_id: z.string().min(1),
+  version_id: z.string().min(1),
+  correlation_id: z.string().min(1),
+  idempotency_key: z.string().min(1).optional(),
+  evidence: z.array(z.string().min(1)).min(1),
+  payload: recordSchema,
+  approval_ref: z.string().min(1).optional(),
+  target_channel: z.string().min(1).optional(),
+  target_format: z.string().min(1).optional(),
+  target_language: z.string().min(1).optional(),
+  event_id: z.string().min(1).optional(),
+  experiment_id: z.string().min(1).optional(),
+});
+
+function videoContentSchemaFor(capabilityId: string) {
+  switch (capabilityId) {
+    case 'video.export.reel':
+    case 'video.export.story':
+      return videoContentInputSchema.extend({ approval_ref: z.string().min(1) });
+    case 'content_item.channel.adapt':
+      return videoContentInputSchema.extend({
+        target_channel: z.string().min(1),
+        target_format: z.string().min(1),
+      });
+    case 'content_item.language.localize':
+      return videoContentInputSchema.extend({ target_language: z.string().min(1) });
+    case 'content_item.event.link':
+      return videoContentInputSchema.extend({ event_id: z.string().min(1) });
+    case 'content_item.experiment.link':
+      return videoContentInputSchema.extend({ experiment_id: z.string().min(1) });
+    default:
+      return videoContentInputSchema;
+  }
+}
 const googleAdsPlanSchema = z.object({
   customerId: z.string().min(1),
   currencyCode: z.string().length(3),
@@ -181,6 +226,7 @@ export interface RuntimeCapabilityServices {
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
   readonly instagramScheduler?: TocaManagedInstagramScheduler;
+  readonly videoContent?: VideoContentRuntimeService;
 }
 
 interface GoogleAdsRuntimeContext {
@@ -199,6 +245,26 @@ function resolveBinding(
   capabilityId: string,
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
+  if (services.videoContent && VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET.has(capabilityId)) {
+    const write = VIDEO_CONTENT_WRITE_CAPABILITY_IDS.has(capabilityId);
+    return binding(
+      videoContentSchemaFor(capabilityId),
+      (input) => services.videoContent!.execute(capabilityId, input as VideoContentRuntimeInput),
+      write
+        ? {
+            idempotencyKey: (input) =>
+              runtimeIdempotencyKey(capabilityId, input as VideoContentRuntimeInput),
+            providerReadback: (result, input) =>
+              services.videoContent!.readback(
+                capabilityId,
+                result,
+                input as VideoContentRuntimeInput,
+              ),
+            sideEffectValidated: true,
+          }
+        : {},
+    );
+  }
   const googleAds = googleAdsRuntimeContext(services);
   switch (capabilityId) {
     case 'google_ads.account.inspect':
