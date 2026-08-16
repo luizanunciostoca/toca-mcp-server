@@ -38,13 +38,13 @@ const contentCapabilities = [
 const requestedCapabilities = [...videoCapabilities, ...contentCapabilities] as const;
 
 describe('R20/R29 capability contracts', () => {
-  it('materializes every requested capability as an explicit internal implementation', () => {
+  it('materializes every requested capability as an explicit production-validated internal implementation', () => {
     expect(requestedCapabilities).toHaveLength(25);
     for (const capabilityId of requestedCapabilities) {
       expect(getCapabilityDefinition(capabilityId), capabilityId).toMatchObject({
         capability_id: capabilityId,
         contract_quality: 'EXPLICIT',
-        lifecycle_status: 'IMPLEMENTED',
+        lifecycle_status: 'PRODUCTION_VALIDATED',
         execution_surface: 'INTERNAL_ENGINE',
         authentication_mode: 'INTERNAL',
         idempotent: true,
