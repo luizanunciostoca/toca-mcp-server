@@ -30,6 +30,24 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     }
   });
 
+  it('binds outbound wire schemas to canonical Privacy state instead of parallel consent/suppression contracts', () => {
+    for (const capabilityId of [
+      'whatsapp.opt_in.verify',
+      'whatsapp.message.prepare',
+      'whatsapp.message.send',
+      'email.suppression.verify',
+      'email.campaign.prepare',
+      'email.campaign.send',
+      'nurture.sequence.enroll',
+    ] as const) {
+      const serialized = JSON.stringify(OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]);
+      expect(serialized).toContain('privacy_');
+      expect(serialized).not.toContain('consent_decision_id');
+      expect(serialized).not.toContain('consent_status');
+      expect(serialized).not.toContain('suppression_decision_id');
+    }
+  });
+
   it('maps channel engagement to R30 and nurture to R10 without creating R33', () => {
     for (const spec of OMNICHANNEL_CAPABILITY_SPECS) {
       expect(spec.primaryRouteId).toBe(spec.capabilityId.startsWith('nurture.') ? 'R10' : 'R30');
