@@ -1,0 +1,50 @@
+name: Cloud SQL Backup Name Readback 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-drill-20260816]
+    paths: ['.github/workflows/cloud-sql-backup-name-readback-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  CLOUD_SQL_SOURCE_INSTANCE: toca-mcp-db
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read project backup resources without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          HTTP="$(curl --get --silent --output /tmp/backups.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --data-urlencode "filter=instance:${CLOUD_SQL_SOURCE_INSTANCE}" \
+            --data-urlencode 'pageSize=100' \
+            "https://sqladmin.googleapis.com/v1/projects/${GCP_PROJECT_ID}/backups")"
+          test "$HTTP" = "200"
+          jq '{schemaVersion:1,sourceInstance:"toca-mcp-db",count:((.backups // [])|length),backups:[(.backups // [])[]|{name,type,state,instance,location,backupInterval,createTime,expiryTime}]}' /tmp/backups.json > cloud-sql-backup-name-readback.json
+          COUNT="$(jq '.count' cloud-sql-backup-name-readback.json)"
+          NAMES="$(jq '[.backups[] | select(.name != null)] | length' cloud-sql-backup-name-readback.json)"
+          echo "CLOUD_SQL_BACKUP_NAME_READBACK=PASS count=$COUNT named=$NAMES"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-backup-name-readback-${{ github.sha }}
+          path: cloud-sql-backup-name-readback.json
+          retention-days: 90
