@@ -1,0 +1,61 @@
+name: Privacy R16 Materialize One-Shot
+
+on:
+  push:
+    branches: [reconcile/privacy-r16-materialize]
+    paths: ['.github/workflows/privacy-r16-materialize-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: reconcile/privacy-r16-materialize
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize exact Privacy R16 files from validated old head
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD_HEAD=d949a7b874d88791e86fe2613ecd9a74feb8db1c
+          git fetch origin "$OLD_HEAD"
+          git checkout "$OLD_HEAD" -- \
+            docs/checkpoints/r16-privacy-lgpd-governance.md \
+            migrations/014_privacy_governance.sql \
+            src/persistence/postgres-privacy-ledger-store.ts \
+            src/privacy/capability-registry.ts \
+            src/privacy/contracts.ts \
+            src/privacy/in-memory.ts \
+            src/privacy/index.ts \
+            src/privacy/privacy-governance-ledger.ts \
+            src/privacy/privacy-governance-payload.ts \
+            src/privacy/privacy-governance-policy.ts \
+            src/privacy/privacy-governance-service.ts \
+            tests/privacy-capability-registry.test.ts \
+            tests/privacy-fixtures.test.ts \
+            tests/privacy-governance-sensitive.test.ts \
+            tests/privacy-governance.test.ts \
+            tests/privacy-postgres-contract.test.ts \
+            tests/privacy-rights-service.test.ts
+          test "$(git diff --cached --name-only | wc -l)" -eq 17
+          pnpm quality
+      - name: Commit exact R16 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'feat(privacy): materialize R16 LGPD governance on current main'
+          git push origin HEAD:reconcile/privacy-r16-materialize
