@@ -25,7 +25,7 @@ const eligible: OutboundEligibilityContext = {
   },
   privacy: {
     ...scope,
-    decisionId: 'privacy-1',
+    executionId: 'privacy-execution-1',
     subjectRef: 'subject-ref-opaque-1',
     decision: {
       state: 'ALLOWED',

@@ -18,7 +18,7 @@ export interface ContactResolutionProof extends TenantScopeRef {
 }
 
 export interface PrivacyDecisionProof extends TenantScopeRef {
-  readonly decisionId: string;
+  readonly executionId: string;
   readonly subjectRef: string;
   readonly decision: SuppressionDecision;
 }
@@ -133,7 +133,7 @@ export function assertOutboundEligibility(
     throw new Error('OMNICHANNEL_CONTACT_NOT_RESOLVED');
   }
 
-  requireText(context.privacy.decisionId, 'OMNICHANNEL_PRIVACY_DECISION_ID_REQUIRED');
+  requireText(context.privacy.executionId, 'OMNICHANNEL_PRIVACY_EXECUTION_ID_REQUIRED');
   requireText(context.privacy.subjectRef, 'OMNICHANNEL_PRIVACY_SUBJECT_REF_REQUIRED');
   requireText(context.privacy.decision.purposeId, 'OMNICHANNEL_PRIVACY_PURPOSE_REQUIRED');
   if (context.privacy.decision.channel !== context.channel) {

@@ -17,11 +17,12 @@ const singleRecipientEligibilityProperties = {
   contact_record_id: text,
   contact_resolution_id: text,
   contact_resolution_status: { type: 'string', const: 'RESOLVED' } as const,
-  consent_decision_id: text,
-  consent_status: { type: 'string', const: 'GRANTED' } as const,
-  consent_purpose: text,
-  suppression_decision_id: text,
-  suppressed: { type: 'boolean', const: false } as const,
+  privacy_execution_id: text,
+  privacy_subject_ref: text,
+  privacy_state: { type: 'string', const: 'ALLOWED' } as const,
+  privacy_blocked: { type: 'boolean', const: false } as const,
+  privacy_purpose_id: text,
+  privacy_channel: { type: 'string', enum: ['WHATSAPP', 'EMAIL'] } as const,
   policy_decision_id: text,
   policy_allowed: { type: 'boolean', const: true } as const,
 } as const;
@@ -29,11 +30,12 @@ const singleRecipientEligibilityRequired = [
   'contact_record_id',
   'contact_resolution_id',
   'contact_resolution_status',
-  'consent_decision_id',
-  'consent_status',
-  'consent_purpose',
-  'suppression_decision_id',
-  'suppressed',
+  'privacy_execution_id',
+  'privacy_subject_ref',
+  'privacy_state',
+  'privacy_blocked',
+  'privacy_purpose_id',
+  'privacy_channel',
   'policy_decision_id',
   'policy_allowed',
 ] as const;
@@ -45,13 +47,12 @@ const approvalProperties = {
 
 const audienceEligibilityProperties = {
   audience_snapshot_id: text,
-  consent_purpose: text,
+  privacy_purpose_id: text,
   resolved_contact_count: { type: 'integer', minimum: 1 } as const,
   ambiguous_contact_count: { type: 'integer', const: 0 } as const,
   unresolved_contact_count: { type: 'integer', const: 0 } as const,
-  consent_unknown_count: { type: 'integer', const: 0 } as const,
-  consent_denied_count: { type: 'integer', const: 0 } as const,
-  suppressed_count: { type: 'integer', const: 0 } as const,
+  privacy_unknown_blocked_count: { type: 'integer', const: 0 } as const,
+  privacy_suppressed_count: { type: 'integer', const: 0 } as const,
   policy_denied_count: { type: 'integer', const: 0 } as const,
 } as const;
 const audienceEligibilityRequired = Object.keys(audienceEligibilityProperties);
@@ -122,20 +123,28 @@ const whatsappContactResolveOutput = outputSchema(
 
 const whatsappOptInInput = inputSchema(
   'whatsapp.opt_in.verify',
-  { contact_record_id: text, purpose: text },
-  ['contact_record_id', 'purpose'],
+  {
+    contact_record_id: text,
+    privacy_subject_ref: text,
+    purpose_id: text,
+    preference_required: { type: 'boolean' },
+  },
+  ['contact_record_id', 'privacy_subject_ref', 'purpose_id', 'preference_required'],
 );
 const whatsappOptInOutput = outputSchema(
   'whatsapp.opt_in.verify',
   {
-    consent_decision_id: text,
-    consent_status: {
+    privacy_execution_id: text,
+    privacy_state: {
       type: 'string',
-      enum: ['GRANTED', 'DENIED', 'UNKNOWN', 'REVOKED', 'EXPIRED'],
+      enum: ['ALLOWED', 'SUPPRESSED', 'UNKNOWN_BLOCKED'],
     },
-    purpose: text,
+    privacy_blocked: { type: 'boolean' },
+    purpose_id: text,
+    channel: { type: 'string', const: 'WHATSAPP' },
+    reasons: { type: 'array', items: text },
   },
-  ['consent_decision_id', 'consent_status', 'purpose'],
+  ['privacy_execution_id', 'privacy_state', 'privacy_blocked', 'purpose_id', 'channel', 'reasons'],
 );
 
 const whatsappTemplateValidateInput = inputSchema(
@@ -261,17 +270,30 @@ const emailContactResolveOutput = outputSchema(
   ['resolution_id', 'resolution_status', 'contact_record_id'],
 );
 
-const emailSuppressionInput = inputSchema('email.suppression.verify', { contact_record_id: text }, [
-  'contact_record_id',
-]);
+const emailSuppressionInput = inputSchema(
+  'email.suppression.verify',
+  {
+    contact_record_id: text,
+    privacy_subject_ref: text,
+    purpose_id: text,
+    preference_required: { type: 'boolean' },
+  },
+  ['contact_record_id', 'privacy_subject_ref', 'purpose_id', 'preference_required'],
+);
 const emailSuppressionOutput = outputSchema(
   'email.suppression.verify',
   {
-    suppression_decision_id: text,
-    suppressed: { type: 'boolean' },
-    reason: { type: ['string', 'null'] },
+    privacy_execution_id: text,
+    privacy_state: {
+      type: 'string',
+      enum: ['ALLOWED', 'SUPPRESSED', 'UNKNOWN_BLOCKED'],
+    },
+    privacy_blocked: { type: 'boolean' },
+    purpose_id: text,
+    channel: { type: 'string', const: 'EMAIL' },
+    reasons: { type: 'array', items: text },
   },
-  ['suppression_decision_id', 'suppressed', 'reason'],
+  ['privacy_execution_id', 'privacy_state', 'privacy_blocked', 'purpose_id', 'channel', 'reasons'],
 );
 
 const emailCampaignPrepareInput = inputSchema(
@@ -480,13 +502,13 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
   }),
   'whatsapp.opt_in.verify': explicit({
     description:
-      'Verify purpose-bound WhatsApp consent through the canonical Privacy/Consent dependency.',
+      'Verify WhatsApp outbound eligibility through canonical privacy.suppression.check, which resolves purpose, legal basis, consent, preferences and suppression fail-closed.',
     risk_class: 'READ',
     side_effects: false,
     approval_required: false,
     idempotent: true,
     provider: 'TOCA Core Privacy dependency',
-    operation: 'consent.verify.whatsapp',
+    operation: 'privacy.suppression.check.whatsapp',
     authentication_mode: 'INTERNAL',
     input_schema: whatsappOptInInput,
     output_schema: whatsappOptInOutput,
@@ -510,7 +532,7 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
   }),
   'whatsapp.message.prepare': explicit({
     description:
-      'Prepare a WhatsApp outbound payload only for a resolved, consented, unsuppressed and policy-allowed ContactRecord.',
+      'Prepare a WhatsApp outbound payload only for a resolved ContactRecord with canonical Privacy state ALLOWED and policy approval.',
     risk_class: 'WRITE_REVERSIBLE',
     side_effects: true,
     approval_required: false,
@@ -584,13 +606,13 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
   }),
   'email.suppression.verify': explicit({
     description:
-      'Verify email suppression state through the canonical Privacy/Preferences dependency.',
+      'Verify email outbound eligibility through canonical privacy.suppression.check, including purpose, legal basis, consent, preferences and suppression.',
     risk_class: 'READ',
     side_effects: false,
     approval_required: false,
     idempotent: true,
     provider: 'TOCA Core Privacy dependency',
-    operation: 'suppression.verify.email',
+    operation: 'privacy.suppression.check.email',
     authentication_mode: 'INTERNAL',
     input_schema: emailSuppressionInput,
     output_schema: emailSuppressionOutput,
