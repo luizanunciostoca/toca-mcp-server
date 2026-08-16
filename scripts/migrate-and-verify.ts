@@ -6,7 +6,10 @@ import './migrate.js';
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL_REQUIRED');
 
-const migrationsDir = path.resolve(process.cwd(), process.env.MIGRATIONS_DIR ?? 'migrations');
+const migrationsDir = path.resolve(
+  process.cwd(),
+  process.env.MIGRATIONS_DIR ?? 'migrations',
+);
 const expected = (await readdir(migrationsDir))
   .filter((fileName) => fileName.endsWith('.sql'))
   .sort();
