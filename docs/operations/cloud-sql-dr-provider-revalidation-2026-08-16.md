@@ -1,187 +1,137 @@
-# Cloud SQL DR — provider revalidation 2026-08-16
+# Cloud SQL DR — Provider Revalidation — 2026-08-16
 
-Status: **BLOCKED_IAM — restore drill not executed**
+Status: **REAL ISOLATED BACKUP RESTORE + DATA VALIDATION PASS; TEMPORARY TARGET CLEANUP PENDING**
 
-This evidence record is intentionally narrow. It does not claim a tested restore, measured RPO/RTO, or `PRODUCTION_VERIFIED` DR while the current approved identities cannot create, restore and delete an isolated Cloud SQL drill target.
+Current application baseline: `main@ce70c66c129b1c629f78e776b023a7fe9cf63569`.
 
-## Repository baseline
+For the full release snapshot, see `docs/operations/controlled-test-readiness-2026-08-16.md`.
 
-- repository: `luizidebook/toca-mcp-server`
-- source branch: `main`
-- source SHA: `0ffc2cf11c1f48894976676265ea3ebf3792ae87`
-- official CI workflow: `Quality Gate` (`.github/workflows/quality.yml`)
+This file supersedes the earlier same-day statement that create/restore/delete permissions prevented a real drill. Those permissions were subsequently granted and provider execution changed the factual state.
 
-## Production Cloud SQL readback
+## Production source
 
-Fresh read-only provider revalidation reused the existing reliability readback workflow. No Cloud SQL mutation was attempted.
+Production instance:
 
-Production target:
+`toca-mcp-db`
 
-- project: `toca-mcp-production`
-- instance: `toca-mcp-db`
-- configured region: `southamerica-east1`
-- engine/version: PostgreSQL 18 (`POSTGRES_18`)
-- state: `RUNNABLE`
-- deletion protection: enabled
-- automated backups: enabled
-- PITR: enabled
+Current verified controls:
 
-Fresh provider evidence:
+- state `RUNNABLE`;
+- PostgreSQL 18;
+- region `southamerica-east1`;
+- deletion protection enabled;
+- automated backups enabled;
+- PITR enabled.
 
-- workflow run: `31914009163`
-- fresh job: `95112848317`
-- verified at: `2026-08-16T04:03:59Z`
-- latest successful backup end time: `2026-08-15T02:48:39.633Z`
-- backup age at verification: `90920` seconds
-- configured recovery-readback objective: `129600` seconds (36 hours)
-- artifact id: `9257761662`
-- artifact digest: `sha256:ead57d20392cf5f8cc74480c00961ebb65f33aff0afbab9db73cb4304a6f5b68`
+No drill in this closeout restored over production and no drill disabled production deletion protection.
 
-The existing infrastructure control plane also records and provider-verified the current backup-retention target on run `31852282477`:
+## Executed isolated restore
 
-- retained automated backups: `7`
-- transaction-log retention: `7` days
-- automated backups preserved
-- PITR preserved
+Final recovery target:
 
-That run completed `CLOUD_SQL_COST_OPTIMIZATION=VERIFIED` after reading back those exact values.
+`toca-mcp-dr-final-31932660953`
 
-## Current service identities and IAM boundary
+Selected backup:
 
-Operational identities in the current control plane:
+`projects/toca-mcp-production/backups/05416bd5-6ce8-409f-85f8-c53bdcf0b8b9`
 
-- infrastructure admin: `toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com`
-- deployer: `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`
-- runtime: `toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com`
+Restore run:
 
-The runtime identity must not receive DR mutation privileges.
+`31932660953`
 
-A fresh `projects.testIamPermissions` probe executed with the deployer identity and did not modify any resource.
+Evidence artifact:
 
-Granted from the requested DR permission set:
+`9259793788`
 
-- `cloudsql.backupRuns.get`
-- `cloudsql.backupRuns.list`
-- `cloudsql.instances.get`
+Provider evidence:
 
-Not granted:
+- backup end: `2026-08-16T04:27:19.186Z`;
+- restore start: `2026-08-16T06:57:43Z`;
+- recovery target created successfully;
+- target PostgreSQL 18;
+- target region `southamerica-east1`;
+- target tier `db-g1-small`;
+- target edition Enterprise;
+- source production instance read back unchanged;
+- observed backup-based RPO: **9,024 seconds (~2h30m)**.
 
-- `cloudsql.instances.create`
-- `cloudsql.instances.delete`
-- `cloudsql.instances.clone`
-- `cloudsql.instances.restoreBackup`
+The provider created the target with deletion protection enabled even though the restore requested an unprotected new target. This did not affect data validation, but it prevents automatic cleanup under the current deployer IAM.
 
-Fresh IAM evidence:
+## Restored-data validation
 
-- workflow run: `31914127336`
-- fresh job: `95112583488`
-- artifact id: `9257732619`
-- artifact digest: `sha256:8c780f3462de454a7afcf2f4f0da767a3f7436f98de381358e4b1f4f4cd74646`
+Validation run:
 
-A second read-only IAM boundary probe verified that neither approved operational identity can self-grant the missing project permissions:
+`31932980178`
 
-- infrastructure admin: `resourcemanager.projects.setIamPolicy` not granted
-- deployer: `resourcemanager.projects.setIamPolicy` not granted
+Artifact:
 
-Evidence:
+`9259838301`
 
-- workflow run: `31924394406`
-- fresh job: `95112650839`
-- artifact id: `9257740330`
-- artifact digest: `sha256:784582660f75a114fb9bc20280b1910123a368f4170554740c3cc66e70940129`
+Artifact digest:
 
-Therefore no authorized self-service path exists from the current GitHub Workload Identity identities to enable the isolated restore drill.
+`sha256:52f70ddc2e807bd61006f1d168db8953fc32c3b9045cbeb9d979eaf3c4313b84`
 
-## Relevant quota gate
+The validation job used the exact production image bound to `ce70c66c129b1c629f78e776b023a7fe9cf63569` and connected only to the isolated recovery target.
 
-Cloud SQL create/resource quota was not independently read back by the existing reliability probe. This remains **NOT_PROVIDER_VERIFIED** rather than inferred. It is not the current execution blocker because `cloudsql.instances.create` is denied before an isolated target can be created. After IAM is granted, quota availability must be checked immediately before target creation and the drill must stop without touching production if quota is insufficient.
+Observed recovery actions/results:
 
-## Restore target validation contract
+- migration `020_content_item_versioning_video.sql` applied on the recovery target;
+- migration `021_r29_video_artifacts.sql` applied on the recovery target;
+- `PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=16`;
+- `DR_DATABASE_VALIDATION=PASS migrations=16 critical_tables=21 audit_executions=0`;
+- 21 critical tables were readable;
+- critical foreign keys were validated;
+- required append-only triggers were enabled;
+- Audit Ledger verification completed without an integrity failure; the selected recovery point contained zero ledger executions;
+- the validation Cloud Run job was deleted after execution;
+- production was re-read with no drift and retained deletion protection, backups and PITR.
 
-The current repository contains 14 ordered migrations, `001_production_foundation.sql` through `014_privacy_governance.sql`. `scripts/migrate-and-verify.ts` executes migrations and then requires `schema_migrations` to match the repository migration file list exactly.
+Measured restore-start-to-validated-data RTO:
 
-A successful isolated restore drill must validate at least:
+**496 seconds (~8m16s)**.
 
-- `schema_migrations` — exact 14-version match after running/verifying current migrations
-- Transactional Outbox: `event_outbox`, `event_outbox_delivery_attempts`, `event_consumer_receipts`
-- Audit Ledger: `audit_ledger_events`, `audit_ledger_heads`, plus integrity verification and append-only invariants
-- EventRecord: `event_records`, `event_record_revisions`, `event_record_external_refs`
-- CRM: `crm_contacts`, `crm_contact_channels`, `crm_leads`, `crm_opportunities`, `crm_record_revisions`, `crm_idempotency_keys`
-- Privacy: `privacy_ledger_events` and append-only invariants
+Foundation RTO objective is <=60 minutes, so this drill validates the RTO objective for this recovery path.
 
-Basic consistency checks must include row counts/non-negative cardinality, required foreign-key reachability, migration-version equality and integrity checks supplied by repository code. Provider writes remain disabled during the drill.
+## RPO interpretation
 
-## Minimum external IAM action
+Foundation's PostgreSQL RPO objective is <=15 minutes when PITR is used.
 
-For the preferred backup-to-new-instance drill, the deployer already has `cloudsql.backupRuns.get`. The minimum additional DR mutation permissions are therefore:
+This drill selected the latest successful backup, not a PITR timestamp. The backup was ~2h30m old at restore start. Therefore:
 
-- `cloudsql.instances.create`
-- `cloudsql.instances.restoreBackup`
-- `cloudsql.instances.delete` — cleanup of the isolated drill target only
+- backup restore path: **validated**;
+- RTO <=60m: **validated**;
+- PITR capability enabled in production: **validated by readback**;
+- RPO <=15m: **not demonstrated by this backup-based drill**.
 
-`cloudsql.instances.clone` is not required for the backup-restore route. Add it only if the approved drill explicitly selects a clone/PITR path that requires it.
+A future PITR-specific drill is required before claiming provider-measured <=15-minute RPO.
 
-An external project IAM administrator should grant a project-level custom role with only the required permissions to the deployer, not to the runtime service account. Do not grant project Owner/Editor merely to close DR.
+## Cleanup state
 
-Example admin commands:
+Read-only IAM probe `31932927957` verified the deployer has:
 
-```bash
-PROJECT=toca-mcp-production
-SA=toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-ROLE_ID=cloudSqlDrDrillOperator
+- `cloudsql.instances.get`;
+- `cloudsql.instances.delete`.
 
-gcloud iam roles create "$ROLE_ID" \
-  --project="$PROJECT" \
-  --title="Cloud SQL DR Drill Operator" \
-  --description="Temporary least-privilege role for isolated Cloud SQL restore drills" \
-  --permissions="cloudsql.instances.create,cloudsql.instances.restoreBackup,cloudsql.instances.delete" \
-  --stage=GA
+It does not have:
 
-gcloud projects add-iam-policy-binding "$PROJECT" \
-  --member="serviceAccount:$SA" \
-  --role="projects/$PROJECT/roles/$ROLE_ID"
-```
+- `cloudsql.instances.update`.
 
-After the drill and isolated-target deletion, revoke the temporary binding:
+Current target:
 
-```bash
-gcloud projects remove-iam-policy-binding "$PROJECT" \
-  --member="serviceAccount:$SA" \
-  --role="projects/$PROJECT/roles/$ROLE_ID"
-```
+`toca-mcp-dr-final-31932660953`
 
-If a pre-existing least-privilege custom role already contains exactly the required permissions, reuse it instead of creating a duplicate role.
+Current target deletion protection:
 
-## Drill state for this revalidation
+`true`
 
-- selected backup for actual restore: **none — restore was not authorized**
-- candidate latest successful backup: `2026-08-15T02:48:39.633Z`
-- temporary instance: **not created**
-- restore start/end timestamps: **not available**
-- measured RPO: **not available; no real restore was executed**
-- measured RTO: **not available; no real restore was executed**
-- restored connection validation: **not executed**
-- migrations on restored target: **not executed**
-- `schema_migrations` on restored target: **not executed**
-- critical-table validation on restored target: **not executed**
-- cleanup: **not applicable because no temporary instance was created**
-- production mutation by this revalidation: **none**
+Cloud SQL requires deletion protection to be disabled before deletion. The exact remaining administrative action is therefore:
 
-Backup freshness, PITR enablement and retention are recovery controls; they are not substitutes for a tested restore.
+1. disable deletion protection **only** on `toca-mcp-dr-final-31932660953`;
+2. never change deletion protection on `toca-mcp-db`;
+3. let the existing deployer delete the exact temporary target;
+4. read back that the target is absent;
+5. re-read production recovery controls unchanged.
 
-## Exit condition
+This is a cleanup blocker only. Restore, schema recovery, critical-data validation and measured RTO have already passed.
 
-DR can move from `BLOCKED_IAM` to `PRODUCTION_VERIFIED` only after all of the following are captured from one real isolated drill:
-
-1. IAM/quota preflight passes;
-2. a new temporary Cloud SQL target is created without replacing production;
-3. a selected backup/PITR point is restored;
-4. connectivity, engine/version and all current migrations are validated;
-5. `schema_migrations`, Audit Ledger, Outbox, EventRecord, CRM and Privacy checks pass;
-6. real RPO and RTO are measured from recorded timestamps;
-7. only the temporary drill instance is deleted;
-8. production is read back unchanged;
-9. temporary DR IAM privilege is revoked when it is not needed for steady-state operations;
-10. provider evidence is retained.
-
-Current truthful classification: **BLOCKED_IAM**.
+Tracking: GitHub issues #145 and #154.
