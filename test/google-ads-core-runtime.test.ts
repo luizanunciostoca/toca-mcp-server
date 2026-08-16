@@ -52,10 +52,12 @@ class FakeGoogleAdsApi implements GoogleAdsApiClient {
   }
 
   async mutate(
-    _path: string,
-    _body: Record<string, unknown>,
+    path: string,
+    body: Record<string, unknown>,
   ): ReturnType<GoogleAdsApiClient['mutate']> {
     await Promise.resolve();
+    void path;
+    void body;
     this.mutateCalls += 1;
     return { body: {} };
   }
