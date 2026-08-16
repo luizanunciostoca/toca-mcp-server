@@ -1,0 +1,63 @@
+name: Meta Ads Final Diagnostic READ Only
+
+on:
+  push:
+    branches:
+      - ops/meta-ads-final-diagnostic
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      FAILED_JOB_NAME: toca-meta-ads-validation-31935162022-1
+      FAILED_EXECUTION_NAME: toca-meta-ads-validation-31935162022-1-qtzvs
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Describe failed Cloud Run execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs executions describe "$FAILED_EXECUTION_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --format='json(metadata.name,status.conditions,status.failedCount,status.succeededCount,status.logUri)'
+      - name: Recover safe Meta Ads checkpoint and errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- CHECKPOINT ---'
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_SMOKE_PROVIDER_CHECKPOINT=\"" \
+            --project "$GCP_PROJECT_ID" --freshness=6h --limit=20 --order=asc \
+            --format='value(timestamp,textPayload)' || true
+          echo '--- EXECUTE RESULT ---'
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_SMOKE_EXECUTE_RESULT=\"" \
+            --project "$GCP_PROJECT_ID" --freshness=6h --limit=20 --order=asc \
+            --format='value(timestamp,textPayload)' || true
+          echo '--- APPLICATION ERRORS ---'
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND severity>=ERROR" \
+            --project "$GCP_PROJECT_ID" --freshness=6h --limit=50 --order=asc \
+            --format='value(timestamp,severity,textPayload,jsonPayload.message)' || true
+          echo '--- META ADS MARKERS ---'
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${FAILED_JOB_NAME} AND textPayload:\"META_ADS_\"" \
+            --project "$GCP_PROJECT_ID" --freshness=6h --limit=100 --order=asc \
+            --format='value(timestamp,textPayload)' || true
