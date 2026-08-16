@@ -44,7 +44,21 @@ def normalize_paid_media_test() -> None:
 """
     if old not in text:
         raise RuntimeError('cross-account readback campaign anchor missing')
-    path.write_text(text.replace(old, new, 1))
+    text = text.replace(old, new, 1)
+
+    campaign_close = """                  campaignBudget: 'customers/9999999999/campaignBudgets/789',
+                },
+"""
+    complete_row = """                  campaignBudget: 'customers/9999999999/campaignBudgets/789',
+                },
+                campaignBudget: {
+                  resourceName: 'customers/9999999999/campaignBudgets/789',
+                  amountMicros: '17000000',
+                },
+"""
+    if campaign_close not in text:
+        raise RuntimeError('cross-account readback budget row anchor missing')
+    path.write_text(text.replace(campaign_close, complete_row, 1))
 
 
 module.normalize_runtime_resolver = normalize_runtime_resolver
