@@ -1,8 +1,10 @@
 # Foundation v1 Reliability — Provider Evidence
 
-Status: **CURRENT RELEASE RELIABILITY PATH OPERATIONALLY CLOSED**
+Status: **PRODUCTION_VERIFIED**
 
-Production application source: `ce70c66c129b1c629f78e776b023a7fe9cf63569`.
+Production application/runtime source for the Foundation production-verification decision: `e0696df1d1860261afba78f1634e8c979401cdc7`.
+
+Canonical closeout evidence: `docs/operations/foundation-production-verification-2026-08-16.md`.
 
 Current release snapshot: `docs/operations/controlled-test-readiness-2026-08-16.md`.
 
@@ -93,12 +95,28 @@ No temporary DR instance remains.
 
 RTO <=60m is measured and validated for the tested backup restore path. The <=15m RPO objective is associated with PITR and was not demonstrated by the backup-age measurement. PITR remains enabled. A future PITR-specific drill is continuing reliability evidence, not a current release blocker.
 
+## Final Foundation/SLO production closeout — PASS
+
+The stalled Outbox condition observed during the production assessment was traced to 14 R29 verifier-owned events, not business events. PR #157 added a verifier-owned drain path after runtime proof. The historical verifier backlog was transitioned to durable `DELIVERED` state without `DELETE` and without external publication.
+
+Post-fix evidence:
+
+- historical cleanup run `31935924301`: `matched=14`, `drained=14`, `delivered=14`, `pending=0`;
+- R29 runtime verification run `31936043957`: fresh verifier events `matched=3`, `drained=3`, `delivered=3`, `pending=0`;
+- final post-rollout Production Assessment run `31936391315`: outbox pending `0`, oldest pending age `0s`, `alerts=[]`, Core availability `1.000`, scheduler success `1.000`, Audit Ledger valid, PITR enabled, `healthy=true`;
+- final evidence artifact ID `9260785405`;
+- artifact SHA-256 `5c24698412a42b0badfb7cbc91fc06adad90dba0e83f731bd75f3e7e3ffd4374`.
+
+The same final assessment read a healthy durable daily-control completion (`foundation:daily-control:2026-08-15`, value `1`). Foundation, SLO and Daily Operations therefore have real production evidence and are promoted to **PRODUCTION_VERIFIED**.
+
 ## Current closeout
 
 No known current-scope blocker remains in:
 
 - application/runtime;
 - telemetry/SLO source plane;
+- Foundation Daily Operations;
+- Transactional Outbox SLO;
 - Monitoring/Logging IAM;
 - managed alert policies;
 - managed operations channels;
