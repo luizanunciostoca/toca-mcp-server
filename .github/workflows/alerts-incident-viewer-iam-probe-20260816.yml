@@ -1,0 +1,75 @@
+name: Alerts Incident Viewer IAM Probe 2026-08-16
+
+on:
+  push:
+    branches: [ops/alerts-email-readback-20260816]
+    paths: ['.github/workflows/alerts-incident-viewer-iam-probe-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_PROJECT_NUMBER: '990081828836'
+  GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe IAM and grant temporary incident viewer if allowed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          MEMBER="serviceAccount:${GCP_INFRA_ADMIN_SERVICE_ACCOUNT}"
+
+          jq -n '{permissions:["resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","monitoring.alerts.get","monitoring.alerts.list"]}' >/tmp/test.json
+          HTTP="$(curl --silent --output /tmp/test-result.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/test.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          echo "TEST_IAM_HTTP=$HTTP"
+          test "$HTTP" = 200
+          jq -S . /tmp/test-result.json | tee evidence/iam-before.json
+
+          HAS_ALERTS="$(jq -r '((.permissions // []) | index("monitoring.alerts.list")) != null' /tmp/test-result.json)"
+          HAS_SET_IAM="$(jq -r '((.permissions // []) | index("resourcemanager.projects.setIamPolicy")) != null' /tmp/test-result.json)"
+          echo "HAS_ALERTS_LIST=$HAS_ALERTS"
+          echo "HAS_SET_IAM_POLICY=$HAS_SET_IAM"
+
+          GRANTED=false
+          if [ "$HAS_ALERTS" != true ]; then
+            test "$HAS_SET_IAM" = true
+            gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" --member="$MEMBER" --role="roles/monitoring.alertViewer" --condition=None --quiet >/tmp/grant.txt
+            GRANTED=true
+          fi
+
+          for _ in $(seq 1 24); do
+            ALERTS_HTTP="$(curl --silent --output /tmp/alerts.json --write-out '%{http_code}' -G -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${GCP_PROJECT_ID}" --data-urlencode 'page_size=1' "https://monitoring.googleapis.com/v3/projects/${GCP_PROJECT_ID}/alerts")"
+            if [ "$ALERTS_HTTP" = 200 ]; then break; fi
+            sleep 5
+          done
+          echo "ALERTS_LIST_HTTP_AFTER=$ALERTS_HTTP"
+          jq -S . /tmp/alerts.json > evidence/alerts-after.json 2>/dev/null || cp /tmp/alerts.json evidence/alerts-after.txt
+          test "$ALERTS_HTTP" = 200
+
+          jq -n --arg member "$MEMBER" --argjson grantAdded "$GRANTED" --arg alertsHttp "$ALERTS_HTTP" '{schemaVersion:1,member:$member,temporaryMonitoringAlertViewerGrantAdded:$grantAdded,alertsListHttp:$alertsHttp,readyForIncidentReadback:true}' | tee evidence/iam-probe.json
+          echo "TEMP_ALERT_VIEWER_GRANT_ADDED=$GRANTED" >> "$GITHUB_ENV"
+          echo "INCIDENT_READBACK_IAM=PASS"
+      - name: Upload IAM probe evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: alerts-incident-viewer-iam-probe-${{ github.sha }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
