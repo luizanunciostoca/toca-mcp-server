@@ -380,6 +380,25 @@ const plannedInstagramPublicationTools: readonly ToolDefinition[] = [
   },
 ];
 
+const directInstagramPublicationToolNames = new Set([
+  'instagram.publish.image',
+  'instagram.publish.carousel',
+  'instagram.publish.reel',
+  'instagram.publish.story',
+]);
+
+function publicationTools(options: ToolRegistryOptions): readonly ToolDefinition[] {
+  const promoteDirectPublication =
+    options.instagramPublicationWritesEnabled === true ||
+    options.tocaManagedInstagramSchedulerEnabled === true;
+  if (!promoteDirectPublication) return plannedInstagramPublicationTools;
+  return plannedInstagramPublicationTools.map((tool) =>
+    directInstagramPublicationToolNames.has(tool.name)
+      ? { ...tool, capabilityStatus: 'PRODUCTION_VALIDATED' as const }
+      : tool,
+  );
+}
+
 const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
   VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES,
 ).map(([name, contract]) => ({
@@ -395,6 +414,7 @@ const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
 
 export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
+  readonly instagramPublicationWritesEnabled?: boolean;
   readonly metaAdsReadsEnabled?: boolean;
   readonly metaAdsWritesEnabled?: boolean;
   readonly googleAdsPhase?: GoogleAdsPhase;
@@ -404,8 +424,7 @@ export interface ToolRegistryOptions {
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry();
-  for (const tool of [...bootstrapTools, ...plannedInstagramPublicationTools])
-    registry.register(tool);
+  for (const tool of [...bootstrapTools, ...publicationTools(options)]) registry.register(tool);
   if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
   if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
   if (options.metaAdsWritesEnabled) for (const tool of metaAdsWriteTools) registry.register(tool);
