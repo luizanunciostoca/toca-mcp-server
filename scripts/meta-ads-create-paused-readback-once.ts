@@ -8,7 +8,6 @@ const graphBase = `https://graph.facebook.com/${graphVersion}`;
 
 const campaignName = `TOCA | P0 SMOKE CREATE_PAUSED | ${smokeId}`;
 const adSetName = `P0 Smoke | Morro locality | Purchase | ${smokeId}`;
-const creativeName = `P0 Smoke Creative | ${smokeId}`;
 const adName = `P0 Smoke Ad | ${smokeId}`;
 
 const campaigns = await queryEdge(
@@ -26,27 +25,43 @@ const ads = await queryEdge(
   'id,name,status,effective_status,issues_info,failed_delivery_checks,campaign_id,adset_id,creative{id,name},created_time,updated_time',
   adName,
 );
-const creatives = await queryEdge('adcreatives', 'id,name', creativeName);
+
+console.log(
+  `META_ADS_CREATE_PAUSED_PROVIDER_DISCOVERY=${JSON.stringify({
+    campaignCount: campaigns.length,
+    adSetCount: adSets.length,
+    adCount: ads.length,
+    campaigns,
+    adSets,
+    ads,
+  })}`,
+);
 
 assertSingle('campaign', campaigns);
 assertSingle('adSet', adSets);
 assertSingle('ad', ads);
-assertSingle('creative', creatives);
 
 const campaign = campaigns[0]!;
 const adSet = adSets[0]!;
 const ad = ads[0]!;
-const creative = creatives[0]!;
 
 const campaignId = scalar(campaign.id);
 const adSetId = scalar(adSet.id);
-const creativeId = scalar(creative.id);
+const adId = scalar(ad.id);
+const adCreative = record(ad.creative);
+const creativeId = scalar(adCreative.id);
+if (!campaignId || !adSetId || !adId || !creativeId) throw new Error('READBACK_RESOURCE_ID_MISSING');
 
 if (scalar(adSet.campaign_id) !== campaignId) throw new Error('READBACK_ADSET_CAMPAIGN_MISMATCH');
 if (scalar(ad.campaign_id) !== campaignId) throw new Error('READBACK_AD_CAMPAIGN_MISMATCH');
 if (scalar(ad.adset_id) !== adSetId) throw new Error('READBACK_AD_ADSET_MISMATCH');
-const adCreative = record(ad.creative);
-if (scalar(adCreative.id) !== creativeId) throw new Error('READBACK_AD_CREATIVE_MISMATCH');
+
+// Meta may normalize the requested creative name. The Ad's creative binding is
+// authoritative, so reconcile the exact provider resource by that ID.
+const creative = await graphGet(creativeId, {
+  fields: 'id,name,account_id,object_story_id,effective_object_story_id',
+});
+if (scalar(creative.id) !== creativeId) throw new Error('READBACK_CREATIVE_ID_MISMATCH');
 
 const insightsResponse = await graphGet(`${campaignId}/insights`, {
   fields: 'spend,impressions,clicks',
@@ -79,7 +94,12 @@ const evidence = {
     campaign: campaigns.length,
     adSet: adSets.length,
     ad: ads.length,
-    creative: creatives.length,
+  },
+  resourceIds: {
+    campaignId,
+    adSetId,
+    creativeId,
+    adId,
   },
   campaign,
   adSet,
