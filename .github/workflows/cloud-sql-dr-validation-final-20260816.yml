@@ -1,0 +1,318 @@
+name: Cloud SQL DR Final Validation 2026-08-16
+
+on:
+  push:
+    branches: [ops/cloud-sql-dr-validation-final-20260816]
+    paths: ['.github/workflows/cloud-sql-dr-validation-final-20260816.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  SOURCE_MAIN_SHA: ce70c66c129b1c629f78e776b023a7fe9cf63569
+  SOURCE_INSTANCE: toca-mcp-db
+  PROD_SERVICE: toca-mcp-production
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DATABASE_URL_SECRET: toca-database-url
+
+jobs:
+  dr-final:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Restore latest backup to an isolated unprotected target, validate and delete it
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_INSTANCE="toca-mcp-dr-final-${GITHUB_RUN_ID}"
+          VALIDATION_JOB="toca-mcp-dr-final-val-${GITHUB_RUN_ID}"
+          TARGET_CONNECTION="${GCP_PROJECT_ID}:${GCP_REGION}:${TARGET_INSTANCE}"
+          EVIDENCE_FILE="cloud-sql-dr-final-evidence.json"
+          RESTORE_STARTED=""
+          RESTORE_RUNNABLE_AT=""
+          VALIDATION_COMPLETED_AT=""
+          BACKUP_NAME=""
+          BACKUP_END=""
+          RPO_SECONDS=-1
+          RESTORE_SECONDS=-1
+          RTO_SECONDS=-1
+          TARGET_CREATED=false
+          TARGET_DELETED=false
+          VALIDATION_JOB_CREATED=false
+          VALIDATION_JOB_DELETED=false
+          VALIDATION_PASSED=false
+          PRODUCTION_UNCHANGED=false
+          TARGET_DELETION_PROTECTION="unknown"
+          TARGET_DATABASE_VERSION=""
+          TARGET_REGION=""
+          PROD_IMAGE=""
+          PROD_REVISION=""
+          PROD_IMAGE_DIGEST=""
+          VALIDATION_LOGS=""
+
+          case "$TARGET_INSTANCE" in
+            "$SOURCE_INSTANCE"|toca-mcp-db|toca-mcp-production)
+              echo 'DR_TARGET_SAFETY_BOUNDARY_VIOLATION' >&2
+              exit 91
+              ;;
+            toca-mcp-dr-final-*) ;;
+            *) echo 'DR_TARGET_PREFIX_INVALID' >&2; exit 92 ;;
+          esac
+
+          write_evidence() {
+            jq -n \
+              --arg sourceMainSha "$SOURCE_MAIN_SHA" \
+              --arg workflowSha "$GITHUB_SHA" \
+              --arg project "$GCP_PROJECT_ID" \
+              --arg region "$GCP_REGION" \
+              --arg sourceInstance "$SOURCE_INSTANCE" \
+              --arg targetInstance "$TARGET_INSTANCE" \
+              --arg validationJob "$VALIDATION_JOB" \
+              --arg backupName "$BACKUP_NAME" \
+              --arg backupEnd "$BACKUP_END" \
+              --arg restoreStarted "$RESTORE_STARTED" \
+              --arg restoreRunnableAt "$RESTORE_RUNNABLE_AT" \
+              --arg validationCompletedAt "$VALIDATION_COMPLETED_AT" \
+              --argjson rpoSeconds "$RPO_SECONDS" \
+              --argjson restoreSeconds "$RESTORE_SECONDS" \
+              --argjson rtoSeconds "$RTO_SECONDS" \
+              --arg targetDeletionProtection "$TARGET_DELETION_PROTECTION" \
+              --arg targetDatabaseVersion "$TARGET_DATABASE_VERSION" \
+              --arg targetRegion "$TARGET_REGION" \
+              --arg productionImage "$PROD_IMAGE" \
+              --arg productionRevision "$PROD_REVISION" \
+              --arg productionImageDigest "$PROD_IMAGE_DIGEST" \
+              --argjson targetCreated "$TARGET_CREATED" \
+              --argjson validationPassed "$VALIDATION_PASSED" \
+              --argjson targetDeleted "$TARGET_DELETED" \
+              --argjson validationJobDeleted "$VALIDATION_JOB_DELETED" \
+              --argjson productionUnchanged "$PRODUCTION_UNCHANGED" \
+              --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{schemaVersion:3,sourceMainSha:$sourceMainSha,workflowSha:$workflowSha,project:$project,region:$region,sourceInstance:$sourceInstance,targetInstance:$targetInstance,validationJob:$validationJob,backup:{name:$backupName,endTime:$backupEnd},timing:{restoreStarted:$restoreStarted,restoreRunnableAt:$restoreRunnableAt,validationCompletedAt:$validationCompletedAt,rpoSeconds:$rpoSeconds,restoreSeconds:$restoreSeconds,rtoSeconds:$rtoSeconds},restore:{targetCreated:$targetCreated,targetDeletionProtection:$targetDeletionProtection,targetDatabaseVersion:$targetDatabaseVersion,targetRegion:$targetRegion},validation:{passed:$validationPassed,productionImage:$productionImage,productionRevision:$productionRevision,productionImageDigest:$productionImageDigest},cleanup:{validationJobDeleted:$validationJobDeleted,temporaryInstanceDeleted:$targetDeleted},production:{mutatedByDrill:false,unchangedReadback:$productionUnchanged},verifiedAt:$verifiedAt}' > "$EVIDENCE_FILE"
+          }
+
+          cleanup() {
+            rc=$?
+            set +e
+            if [ "$VALIDATION_JOB_CREATED" = true ]; then
+              if gcloud run jobs delete "$VALIDATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1; then
+                VALIDATION_JOB_DELETED=true
+              fi
+            else
+              VALIDATION_JOB_DELETED=true
+            fi
+
+            if TARGET_JSON="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+              TARGET_DELETION_PROTECTION="$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$TARGET_JSON")"
+              if [ "$TARGET_DELETION_PROTECTION" = "false" ]; then
+                if gcloud sql instances delete "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --quiet >/dev/null 2>&1; then
+                  if ! gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+                    TARGET_DELETED=true
+                  fi
+                fi
+              else
+                echo 'DR_FINAL_CLEANUP_BLOCKED_DELETION_PROTECTION' >&2
+              fi
+            else
+              TARGET_DELETED=true
+            fi
+
+            if POST_SOURCE="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+              printf '%s' "$POST_SOURCE" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,tier:.settings.tier,edition:.settings.edition,availabilityType:.settings.availabilityType,dataDiskType:.settings.dataDiskType,dataDiskSizeGb:.settings.dataDiskSizeGb}}' >/tmp/dr-post-source.json
+              if cmp -s /tmp/dr-pre-source.json /tmp/dr-post-source.json; then
+                PRODUCTION_UNCHANGED=true
+              fi
+            fi
+
+            write_evidence
+            if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+            test "$VALIDATION_PASSED" = true || exit 96
+            test "$VALIDATION_JOB_DELETED" = true || exit 97
+            test "$TARGET_DELETED" = true || exit 98
+            test "$PRODUCTION_UNCHANGED" = true || exit 99
+          }
+          trap cleanup EXIT
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.backupRuns.get","cloudsql.backupRuns.list","cloudsql.instances.create","cloudsql.instances.restoreBackup","cloudsql.instances.delete"]}' >/tmp/dr-permissions-request.json
+          IAM_HTTP="$(curl --silent --output /tmp/dr-permissions.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${ACCESS_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/dr-permissions-request.json "https://cloudresourcemanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}:testIamPermissions")"
+          test "$IAM_HTTP" = 200
+          for P in cloudsql.instances.get cloudsql.backupRuns.get cloudsql.backupRuns.list cloudsql.instances.create cloudsql.instances.restoreBackup cloudsql.instances.delete; do
+            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/dr-permissions.json >/dev/null
+          done
+
+          SOURCE_JSON="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$SOURCE_JSON" | jq -e '.name=="toca-mcp-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1" and .settings.deletionProtectionEnabled==true and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' >/dev/null
+          printf '%s' "$SOURCE_JSON" | jq '{name,state,databaseVersion,region,settings:{deletionProtectionEnabled:.settings.deletionProtectionEnabled,backupEnabled:.settings.backupConfiguration.enabled,pitrEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,tier:.settings.tier,edition:.settings.edition,availabilityType:.settings.availabilityType,dataDiskType:.settings.dataDiskType,dataDiskSizeGb:.settings.dataDiskSizeGb}}' >/tmp/dr-pre-source.json
+
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo 'DR_FINAL_TARGET_ALREADY_EXISTS' >&2
+            exit 93
+          fi
+
+          BACKUPS_HTTP="$(curl --get --silent --output /tmp/dr-backups.json --write-out '%{http_code}' -H "Authorization: Bearer ${ACCESS_TOKEN}" --data-urlencode "filter=instance:${SOURCE_INSTANCE}" --data-urlencode 'pageSize=100' "https://sqladmin.googleapis.com/v1/projects/${GCP_PROJECT_ID}/backups")"
+          test "$BACKUPS_HTTP" = 200
+          LATEST="$(jq -c '[.backups[]? | select(.state=="SUCCESSFUL" and .instance=="toca-mcp-db" and .name!=null and .backupInterval.endTime!=null)] | sort_by(.backupInterval.endTime) | last' /tmp/dr-backups.json)"
+          test "$LATEST" != null
+          BACKUP_NAME="$(jq -r '.name' <<<"$LATEST")"
+          BACKUP_END="$(jq -r '.backupInterval.endTime' <<<"$LATEST")"
+          test -n "$BACKUP_NAME"
+          test -n "$BACKUP_END"
+          BACKUP_EPOCH="$(date -u -d "$BACKUP_END" +%s)"
+
+          PROD_SERVICE_JSON="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PROD_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$PROD_SERVICE_JSON")"
+          PROD_REVISION="$(jq -r '.status.latestReadyRevisionName // empty' <<<"$PROD_SERVICE_JSON")"
+          test -n "$PROD_IMAGE"
+          test -n "$PROD_REVISION"
+          [[ "$PROD_IMAGE" == *"${SOURCE_MAIN_SHA}"* ]]
+          PROD_REV_JSON="$(gcloud run revisions describe "$PROD_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PROD_IMAGE_DIGEST="$(jq -r '.status.imageDigest // empty' <<<"$PROD_REV_JSON")"
+          test -n "$PROD_IMAGE_DIGEST"
+
+          RESTORE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RESTORE_START_EPOCH="$(date -u -d "$RESTORE_STARTED" +%s)"
+          RPO_SECONDS=$((RESTORE_START_EPOCH - BACKUP_EPOCH))
+          test "$RPO_SECONDS" -ge 0
+          test "$RPO_SECONDS" -le 129600
+
+          gcloud sql backups restore "$BACKUP_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --restore-instance "$TARGET_INSTANCE" \
+            --region "$GCP_REGION" \
+            --database-version POSTGRES_18 \
+            --availability-type zonal \
+            --no-deletion-protection \
+            --no-backup \
+            --timeout 1800 \
+            --quiet
+          TARGET_CREATED=true
+
+          TARGET_JSON="$(gcloud sql instances describe "$TARGET_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          printf '%s' "$TARGET_JSON" | jq -e --arg target "$TARGET_INSTANCE" '.name==$target and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .region=="southamerica-east1" and .settings.deletionProtectionEnabled==false' >/dev/null
+          TARGET_DELETION_PROTECTION="$(jq -r '.settings.deletionProtectionEnabled' <<<"$TARGET_JSON")"
+          TARGET_DATABASE_VERSION="$(jq -r '.databaseVersion' <<<"$TARGET_JSON")"
+          TARGET_REGION="$(jq -r '.region' <<<"$TARGET_JSON")"
+          RESTORE_RUNNABLE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RESTORE_RUNNABLE_EPOCH="$(date -u -d "$RESTORE_RUNNABLE_AT" +%s)"
+          RESTORE_SECONDS=$((RESTORE_RUNNABLE_EPOCH - RESTORE_START_EPOCH))
+
+          cat >/tmp/dr-validate.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          const require = createRequire('/app/package.json');
+          const pg = require('pg');
+          const { verifyAuditLedger } = await import('file:///app/dist/src/core/audit-ledger.js');
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+          const criticalTables = [
+            'schema_migrations','event_outbox','event_outbox_delivery_attempts','event_consumer_receipts',
+            'audit_ledger_events','audit_ledger_heads','event_records','event_record_revisions','event_record_external_refs',
+            'crm_contacts','crm_contact_channels','crm_leads','crm_opportunities','crm_record_revisions','crm_idempotency_keys',
+            'privacy_ledger_events','content_items','content_item_versions','content_item_validations','content_item_history','content_video_artifacts'
+          ];
+          const triggerNames = [
+            'audit_ledger_events_append_only','audit_ledger_heads_no_delete','privacy_ledger_no_update','privacy_ledger_no_delete',
+            'content_item_versions_append_only','content_item_validations_append_only','content_item_history_append_only','content_video_artifacts_append_only'
+          ];
+          const iso = (v) => v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+          try {
+            const versions = await pool.query('select version from schema_migrations order by version');
+            if (versions.rows.length !== 16) throw new Error(`DR_MIGRATION_COUNT_MISMATCH:${versions.rows.length}`);
+            for (const table of criticalTables) {
+              const reg = await pool.query('select to_regclass($1) as reg', [`public.${table}`]);
+              if (!reg.rows[0]?.reg) throw new Error(`DR_CRITICAL_TABLE_MISSING:${table}`);
+              const c = await pool.query(`select count(*)::bigint as n from ${table}`);
+              const n = Number(c.rows[0].n);
+              if (!Number.isSafeInteger(n) || n < 0) throw new Error(`DR_INVALID_ROW_COUNT:${table}`);
+            }
+            const invalidFks = await pool.query(`select count(*)::int as n from pg_constraint c join pg_class r on r.oid=c.conrelid where c.contype='f' and r.relname = any($1::text[]) and not c.convalidated`, [criticalTables]);
+            if (invalidFks.rows[0].n !== 0) throw new Error('DR_UNVALIDATED_FOREIGN_KEYS');
+            const triggers = await pool.query(`select tgname,tgenabled from pg_trigger where not tgisinternal and tgname = any($1::text[])`, [triggerNames]);
+            const enabled = new Set(triggers.rows.filter(r => r.tgenabled !== 'D').map(r => r.tgname));
+            for (const name of triggerNames) if (!enabled.has(name)) throw new Error(`DR_APPEND_ONLY_TRIGGER_MISSING:${name}`);
+            for (const table of ['event_records','crm_contacts','crm_leads','crm_opportunities','privacy_ledger_events','content_items','content_video_artifacts']) {
+              const cols = await pool.query(`select column_name,is_nullable from information_schema.columns where table_schema='public' and table_name=$1 and column_name = any($2::text[])`, [table, ['tenant_id','workspace_id','organization_id']]);
+              for (const col of cols.rows.filter(r => r.is_nullable === 'NO')) {
+                const bad = await pool.query(`select count(*)::int as n from ${table} where btrim(${col.column_name})=''`);
+                if (bad.rows[0].n !== 0) throw new Error(`DR_SCOPE_INVARIANT_VIOLATION:${table}:${col.column_name}`);
+              }
+            }
+            const eventRows = await pool.query('select * from audit_ledger_events order by execution_id,sequence');
+            const headRows = await pool.query('select * from audit_ledger_heads');
+            const groups = new Map();
+            for (const row of eventRows.rows) {
+              const record = {eventId:row.event_id,executionId:row.execution_id,correlationId:row.correlation_id,sequence:row.sequence,previousHash:row.previous_hash,eventHash:row.event_hash,requester:row.actor_id,authorizationRoles:Array.isArray(row.authorization_roles)?row.authorization_roles:[],toolName:row.tool_name,riskClass:row.risk_class,status:row.status,evidence:Array.isArray(row.evidence)?row.evidence:[],canonicalPayload:row.canonical_payload??{},createdAt:iso(row.created_at),...(row.principal_type?{principalType:row.principal_type}:{}),...(row.tenant_id?{tenantId:row.tenant_id}:{}),...(row.workspace_id?{workspaceId:row.workspace_id}:{}),...(row.organization_id?{organizationId:row.organization_id}:{}),...(row.session_id?{sessionId:row.session_id}:{}),...(row.authentication_method?{authenticationMethod:row.authentication_method}:{}),...(row.approval_id?{approvalId:row.approval_id}:{}),...(row.connected_account?{connectedAccount:row.connected_account}:{}),...(row.external_resource_id?{externalResourceId:row.external_resource_id}:{}),...(row.error_code?{errorCode:row.error_code}:{})};
+              const list = groups.get(record.executionId) ?? [];
+              list.push(record);
+              groups.set(record.executionId,list);
+            }
+            const heads = new Map(headRows.rows.map(row => [row.execution_id,{executionId:row.execution_id,correlationId:row.correlation_id,tenantId:row.tenant_id,lastSequence:row.last_sequence,headHash:row.head_hash,updatedAt:iso(row.updated_at)}]));
+            for (const [executionId,records] of groups) {
+              const verification = verifyAuditLedger(executionId,records,heads.get(executionId));
+              if (!verification.valid) throw new Error(`DR_AUDIT_LEDGER_INVALID:${executionId}:${verification.reason}`);
+            }
+            for (const executionId of heads.keys()) if (!groups.has(executionId)) throw new Error(`DR_AUDIT_HEAD_WITHOUT_EVENTS:${executionId}`);
+            console.log(`DR_DATABASE_VALIDATION=PASS migrations=${versions.rows.length} critical_tables=${criticalTables.length} audit_executions=${groups.size}`);
+          } finally {
+            await pool.end();
+          }
+          NODE
+          DR_VALIDATION_SCRIPT_B64="$(base64 -w0 /tmp/dr-validate.mjs)"
+          rm -f /tmp/dr-validate.mjs
+
+          JOB_SCRIPT='set -eu; export DATABASE_URL="$(node -e '\''const u=new URL(process.env.SOURCE_DATABASE_URL);u.searchParams.set("host","/cloudsql/"+process.env.DR_TARGET_CONNECTION_NAME);process.stdout.write(u.toString())'\'')"; unset SOURCE_DATABASE_URL; node dist/scripts/migrate-and-verify.js; printf %s "$DR_VALIDATION_SCRIPT_B64" | base64 -d > /tmp/dr-validate.mjs; node /tmp/dr-validate.mjs; rm -f /tmp/dr-validate.mjs; unset DATABASE_URL DR_VALIDATION_SCRIPT_B64'
+
+          gcloud run jobs create "$VALIDATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$PROD_IMAGE" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$TARGET_CONNECTION" \
+            --set-secrets "SOURCE_DATABASE_URL=${DATABASE_URL_SECRET}:latest" \
+            --set-env-vars "DR_TARGET_CONNECTION_NAME=${TARGET_CONNECTION},DR_VALIDATION_SCRIPT_B64=${DR_VALIDATION_SCRIPT_B64}" \
+            --command /bin/sh \
+            --args="^@^-lc@${JOB_SCRIPT}" \
+            --tasks 1 \
+            --parallelism 1 \
+            --max-retries 0 \
+            --task-timeout 15m \
+            --memory 512Mi \
+            --cpu 1 \
+            --quiet
+          VALIDATION_JOB_CREATED=true
+
+          gcloud run jobs execute "$VALIDATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          VALIDATION_LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${VALIDATION_JOB}\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=300 --order=asc --format='value(textPayload)' || true)"
+          printf '%s\n' "$VALIDATION_LOGS"
+          printf '%s' "$VALIDATION_LOGS" | grep -q 'PRODUCTION_SCHEMA_MIGRATIONS_CURRENT=16'
+          printf '%s' "$VALIDATION_LOGS" | grep -q 'DR_DATABASE_VALIDATION=PASS migrations=16'
+          VALIDATION_PASSED=true
+          VALIDATION_COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          VALIDATION_EPOCH="$(date -u -d "$VALIDATION_COMPLETED_AT" +%s)"
+          RTO_SECONDS=$((VALIDATION_EPOCH - RESTORE_START_EPOCH))
+          echo "CLOUD_SQL_DR_FINAL_VALIDATION=PASS rpo_seconds=$RPO_SECONDS restore_seconds=$RESTORE_SECONDS rto_seconds=$RTO_SECONDS target=$TARGET_INSTANCE"
+
+      - name: Upload final DR evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloud-sql-dr-final-evidence-${{ github.sha }}
+          path: cloud-sql-dr-final-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
