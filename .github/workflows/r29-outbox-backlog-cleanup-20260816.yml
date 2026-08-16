@@ -1,0 +1,205 @@
+name: R29 Outbox Backlog Cleanup 2026-08-16
+
+on:
+  push:
+    branches: [ops/slo-production-assessment-20260816]
+    paths: ['.github/workflows/r29-outbox-backlog-cleanup-20260816.yml']
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PROD_SERVICE: toca-mcp-production
+  EXPECTED_MAIN_SHA: e0696df1d1860261afba78f1634e8c979401cdc7
+  EXPECTED_DEPLOY_RUN_ID: '31935887597'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require official exact-main deploy success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            RUN="$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_DEPLOY_RUN_ID}")"
+            STATUS="$(jq -r '.status' <<<"$RUN")"
+            CONCLUSION="$(jq -r '.conclusion // empty' <<<"$RUN")"
+            HEAD_SHA="$(jq -r '.head_sha' <<<"$RUN")"
+            test "$HEAD_SHA" = "$EXPECTED_MAIN_SHA"
+            if [ "$STATUS" = completed ]; then
+              test "$CONCLUSION" = success
+              echo "EXACT_MAIN_DEPLOY_VERIFIED=PASS sha=${HEAD_SHA} run=${EXPECTED_DEPLOY_RUN_ID}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for exact-main production deploy' >&2
+          exit 1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Drain only the 14 pre-classified R29 verifier events
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="$(gcloud run services describe "$PROD_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$SERVICE")"
+          test -n "$IMAGE"
+          case "$IMAGE" in
+            *:"$EXPECTED_MAIN_SHA") ;;
+            *) echo "Production image is not exact main SHA: $IMAGE" >&2; exit 1 ;;
+          esac
+
+          JOB="toca-r29-outbox-cleanup-${GITHUB_RUN_ID}"
+          cleanup(){ gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          cat >/tmp/cleanup.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          import { randomUUID } from 'node:crypto';
+          const require = createRequire('/app/package.json');
+          const pg = require('pg');
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+          const expectedIds = [
+            'evt_33edfb11105efa9858ddb8887810d2fcb41027f20694d420c7c3c67b5a04cfbe',
+            'evt_5c3947617a38212dd563c30d26159402d0384660298afaeb5ca6e3d0fa045142',
+            'evt_d37e705c2abae32b4950a8e2111896806a04d983b9c05ec82f549accc70d18bc',
+            'evt_3a323825f85dd77b65c2ec3ed0f1863df84486d791a52ac89444fd23348ad789',
+            'evt_6262165531f1d9c843a8e4f740a7aee4eb1cfb0241e8797872eac4d3cf87623c',
+            'evt_291154008d625d0127c31b565e909983d8101a56786a132fa14a962670d4d90b',
+            'evt_439b51829542587c61ebc21b7015cbba96870d1a8bf1a7c0126d7a7f0fad9c34',
+            'evt_9807055f713669a455bbb45f120f5d65777b36a0fcdf480c58d1922a43f52b1b',
+            'evt_a656d3abdc0453df60ee574d48d10a046651caaa3e8afd1732f6371cc84bc374',
+            'evt_52f3fe3cbe55937f393cc659be514c817a4ab2ec2dadf12c271e2b86ab5efeb3',
+            'evt_326f6814e34bfcf980fb8d71b86411119a91ce87265253affbfa28f6eb8c57db',
+            'evt_01be998f4c2fdb7aded75655db79e707e6b07e120ea2430319754b3180daa2e6',
+            'evt_0a85b372f5d0dfb52d655a1bbf1ada1ffc8e4ad19b4983cd5c26e66b75fc99f6',
+            'evt_c3861077651fc6c229dafd3088c545794fb0a1b25600d99e38d2c1d92aa8adb6',
+          ];
+          const allowedTypes = new Set(['content_item.created','content_item.version_created','content.video_artifact.created']);
+          const workerId = 'r29-production-verifier-backlog-validation-sink';
+          const completedAt = new Date().toISOString();
+          let drained = 0;
+          const client = await pool.connect();
+          try {
+            await client.query('begin');
+            const result = await client.query(
+              `select event_id,event_key,event_type,status,attempts,max_attempts,version,tenant_id,correlation_id,evidence
+                 from event_outbox
+                where event_id = any($1::text[])
+                order by occurred_at,event_id
+                for update`,
+              [expectedIds],
+            );
+            if (result.rows.length !== expectedIds.length) throw new Error(`R29_BACKLOG_COUNT_INVALID:${result.rows.length}`);
+            const found = new Set(result.rows.map((r) => r.event_id));
+            for (const id of expectedIds) if (!found.has(id)) throw new Error(`R29_BACKLOG_ID_MISSING:${id}`);
+
+            const receipts = await client.query(
+              `select event_id,count(*)::int as count from event_consumer_receipts where event_id = any($1::text[]) group by event_id`,
+              [expectedIds],
+            );
+            if (receipts.rows.some((r) => Number(r.count) !== 0) || receipts.rows.length !== 0) {
+              throw new Error('R29_BACKLOG_ALREADY_CONSUMED');
+            }
+
+            for (const row of result.rows) {
+              if (!allowedTypes.has(row.event_type)) throw new Error(`R29_BACKLOG_TYPE_UNEXPECTED:${row.event_id}`);
+              if (row.status !== 'PENDING' || Number(row.attempts) !== 0 || Number(row.max_attempts) < 1) throw new Error(`R29_BACKLOG_STATE_INVALID:${row.event_id}:${row.status}:${row.attempts}`);
+              if (!(row.event_key?.startsWith('r29:production-') || row.event_key?.startsWith('video.caption.embed:r29-prod'))) throw new Error(`R29_BACKLOG_KEY_UNEXPECTED:${row.event_id}`);
+              if (!(row.tenant_id?.startsWith('r29-prod-') || row.tenant_id?.startsWith('r29-production-'))) throw new Error(`R29_BACKLOG_TENANT_UNEXPECTED:${row.event_id}`);
+              if (!(row.correlation_id?.startsWith('r29-prod-correlation-') || row.correlation_id?.startsWith('r29-production-runtime-'))) throw new Error(`R29_BACKLOG_CORRELATION_UNEXPECTED:${row.event_id}`);
+              const evidence = Array.isArray(row.evidence) ? row.evidence : [];
+              if (!evidence.some((v) => typeof v === 'string' && v.startsWith('production:r29:'))) throw new Error(`R29_BACKLOG_EVIDENCE_UNEXPECTED:${row.event_id}`);
+
+              const executionId = `r29-backlog-validation-sink-${randomUUID()}`;
+              const attemptNumber = Number(row.attempts) + 1;
+              const claimed = await client.query(
+                `update event_outbox set status='CLAIMED',attempts=$2,claimed_by=$3,claim_execution_id=$4,claimed_at=$5::timestamptz,delivered_at=null,last_error_code=null,version=version+1 where event_id=$1 and version=$6 and status='PENDING' returning event_id`,
+                [row.event_id, attemptNumber, workerId, executionId, completedAt, row.version],
+              );
+              if (claimed.rows.length !== 1) throw new Error(`R29_BACKLOG_CLAIM_CONFLICT:${row.event_id}`);
+              await client.query(
+                `insert into event_outbox_delivery_attempts (execution_id,event_id,worker_id,attempt_number,status,claimed_at,completed_at,error_code,evidence) values ($1,$2,$3,$4,'CLAIMED',$5::timestamptz,null,null,'[]'::jsonb)`,
+                [executionId,row.event_id,workerId,attemptNumber,completedAt],
+              );
+              const deliveryEvidence = ['r29:historical-verifier-backlog:true','r29:external-publication:false',`r29:cleanup-run:${process.env.CLEANUP_RUN_ID}`];
+              const attempt = await client.query(
+                `update event_outbox_delivery_attempts set status='DELIVERED',completed_at=$2::timestamptz,error_code=null,evidence=$3::jsonb where execution_id=$1 and status='CLAIMED' returning execution_id`,
+                [executionId,completedAt,JSON.stringify(deliveryEvidence)],
+              );
+              if (attempt.rows.length !== 1) throw new Error(`R29_BACKLOG_ATTEMPT_CONFLICT:${row.event_id}`);
+              const delivered = await client.query(
+                `update event_outbox set status='DELIVERED',delivered_at=$2::timestamptz,claimed_by=null,claim_execution_id=null,claimed_at=null,last_error_code=null,version=version+1 where event_id=$1 and claim_execution_id=$3 and status='CLAIMED' returning event_id`,
+                [row.event_id,completedAt,executionId],
+              );
+              if (delivered.rows.length !== 1) throw new Error(`R29_BACKLOG_DELIVER_CONFLICT:${row.event_id}`);
+              drained += 1;
+            }
+            await client.query('commit');
+          } catch (error) {
+            await client.query('rollback');
+            throw error;
+          } finally {
+            client.release();
+          }
+
+          try {
+            const readback = await pool.query(
+              `select status,count(*)::int as count from event_outbox where event_id = any($1::text[]) group by status order by status`,
+              [expectedIds],
+            );
+            const delivered = Number(readback.rows.find((r) => r.status === 'DELIVERED')?.count ?? 0);
+            const pending = readback.rows.filter((r) => ['PENDING','CLAIMED','FAILED_RETRYABLE'].includes(r.status)).reduce((sum,r) => sum + Number(r.count),0);
+            if (drained !== 14 || delivered !== 14 || pending !== 0) throw new Error(`R29_BACKLOG_READBACK_INVALID:${drained}:${delivered}:${pending}`);
+            console.log('R29_BACKLOG_CLEANUP='+JSON.stringify({matched:14,drained,delivered,pending,transport:workerId,externalPublicationExecuted:false,completedAt}));
+          } finally {
+            await pool.end();
+          }
+          NODE
+
+          B64="$(base64 -w0 /tmp/cleanup.mjs)"
+          SCRIPT='set -eu; printf %s "$SCRIPT_B64" | base64 -d >/tmp/cleanup.mjs; node /tmp/cleanup.mjs; rm -f /tmp/cleanup.mjs'
+          gcloud run jobs deploy "$JOB" \
+            --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^~^SCRIPT_B64=$B64~CLEANUP_RUN_ID=$GITHUB_RUN_ID" \
+            --command /bin/sh --args="^@^-lc@${SCRIPT}" \
+            --tasks 1 --max-retries 0 --task-timeout 10m --memory 512Mi --cpu 1 --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LINE=''
+          for i in $(seq 1 12); do
+            LINE="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\" AND textPayload:\"R29_BACKLOG_CLEANUP=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=20 --order=desc --format='value(textPayload)' | grep '^R29_BACKLOG_CLEANUP=' | head -n1 || true)"
+            [ -n "$LINE" ] && break
+            sleep 5
+          done
+          test -n "$LINE"
+          JSON="${LINE#R29_BACKLOG_CLEANUP=}"
+          jq -e '.matched==14 and .drained==14 and .delivered==14 and .pending==0 and .externalPublicationExecuted==false' <<<"$JSON" >/dev/null
+          echo "$LINE"
