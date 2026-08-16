@@ -73,10 +73,11 @@ jobs:
             --region "$GCP_REGION" \
             --format=json)"
           printf '%s' "$SERVICE_JSON" | jq -e '
-            .spec.template.spec.containerConcurrency == 1 and
+            .spec.template.spec.containers[0] as $container |
+            (.spec.template.spec.containerConcurrency == 1) and
             ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
             (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
-            ([$container := .spec.template.spec.containers[0] | $container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"])
+            ([$container.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"])
           ' >/dev/null
 
           printf '%s\n' "$SCHEDULER_JSON" | jq '{name, state, schedule, timeZone, lastAttemptTime, status}'
@@ -142,14 +143,16 @@ jobs:
               day = datetime.fromisoformat(ts.replace('Z', '+00:00')).astimezone(ZoneInfo('America/Bahia')).date().isoformat()
               counts[day] = counts.get(day, 0) + 1
               payload = entry.get('jsonPayload') or {}
+              snapshot = payload.get('snapshot') or {}
               evidence.append({
                   'dayKey': day,
                   'timestamp': ts,
                   'event': payload.get('event'),
-                  'healthy': (payload.get('snapshot') or {}).get('healthy'),
-                  'outboxPending': (payload.get('snapshot') or {}).get('outboxPending'),
-                  'staleRunningJobs': (payload.get('snapshot') or {}).get('staleRunningJobs'),
-                  'invalidAuditExecutions': (payload.get('snapshot') or {}).get('invalidAuditExecutions'),
+                  'outboxPending': snapshot.get('outboxPending'),
+                  'oldestOutboxAgeSeconds': snapshot.get('oldestOutboxAgeSeconds'),
+                  'staleRunningJobs': snapshot.get('staleRunningJobs'),
+                  'auditExecutionsChecked': snapshot.get('auditExecutionsChecked'),
+                  'invalidAuditExecutions': snapshot.get('invalidAuditExecutions'),
                   'findings': payload.get('findings'),
               })
           duplicates = {day: count for day, count in counts.items() if count > 1}
