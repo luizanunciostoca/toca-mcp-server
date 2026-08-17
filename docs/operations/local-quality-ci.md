@@ -12,8 +12,8 @@ The local and hosted paths use the same repository commands and versions:
 - Git: required for exact source-tree attestation;
 - dependency install: `pnpm install --frozen-lockfile`.
 
-`pnpm quality` fails closed if Node is not `24.x` or pnpm is not exactly `10.15.0`.
-`pnpm postgres:e2e` uses PostgreSQL 18 and rejects non-local database hosts unless `TOCA_POSTGRES_E2E_ALLOW_EXTERNAL=1` is explicitly set.
+`package.json` pins the Node engine to `24.x`, and `pnpm quality` independently fails closed if Node is not `24.x` or pnpm is not exactly `10.15.0`.
+`pnpm postgres:e2e` uses PostgreSQL 18, rejects non-local database hosts unless `TOCA_POSTGRES_E2E_ALLOW_EXTERNAL=1` is explicitly set, and verifies the connected server is PostgreSQL major 18 before accepting migration state.
 `pnpm verify:local` requires a Git checkout with a clean working tree and an exact 40-character source commit SHA. When `TOCA_SOURCE_SHA` or `GITHUB_SHA` is supplied, it must match the checkout `HEAD` exactly.
 
 ## Canonical commands
@@ -41,17 +41,17 @@ FORMAT
 1. discovers every repository test matching `test/*-postgres-e2e.test.ts`;
 2. fails closed if no PostgreSQL E2E suite is present;
 3. starts PostgreSQL 18 when `DATABASE_URL` is not supplied;
-4. validates the database protocol/host boundary before destructive test setup;
+4. validates the database protocol/host boundary and verifies PostgreSQL major 18;
 5. applies real repository migrations;
 6. verifies exact migration state against `schema_migrations`;
 7. executes every discovered PostgreSQL E2E suite in one Vitest invocation;
 8. applies migrations a second time;
-9. verifies exact migration state again;
+9. verifies PostgreSQL major 18 and exact migration state again;
 10. removes the isolated container when the command created the database.
 
 This discovery model prevents new Foundation/R29 PostgreSQL E2E coverage from being silently omitted from the canonical local/hosted contract. In particular, when `test/foundation-worker-postgres-e2e.test.ts` from the Foundation restart-safety closeout is present on the integrated head, it is automatically included without another CI-script change.
 
-Any non-zero subprocess exit code, unsafe database protocol/host, missing runtime dependency, missing PostgreSQL E2E suites, migration mismatch, test failure, cleanup failure, dirty source tree, or source-SHA mismatch fails the command.
+Any non-zero subprocess exit code, unsafe database protocol/host, PostgreSQL major mismatch, missing runtime dependency, missing PostgreSQL E2E suites, migration mismatch, test failure, cleanup failure, dirty source tree, or source-SHA mismatch fails the command.
 
 ## One-command local verification
 
@@ -77,7 +77,7 @@ A failed run emits `TOCA_VERIFICATION_STATUS=FAILED` and exits non-zero. It must
 
 ## Container verification
 
-Docker Compose provides the same contract with an isolated PostgreSQL 18 service. The quality image includes Git, while Compose mounts only the checkout `.git` metadata read-only so the verifier can prove that the copied source tree is clean and exactly matches the requested commit.
+Docker Compose provides the same contract with an isolated PostgreSQL 18 service. The quality image includes Git, while Compose mounts only the checkout `.git` metadata read-only so the verifier can prove that the copied source tree is clean and exactly matches the requested commit. Source attestation disables Git optional locks so the read-only metadata mount remains safe.
 
 Bind the container run to the exact host checkout SHA:
 
