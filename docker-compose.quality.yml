@@ -24,5 +24,6 @@ services:
       TOCA_SOURCE_SHA: ${TOCA_SOURCE_SHA:?Set TOCA_SOURCE_SHA to the exact 40-character commit SHA}
       TOCA_VERIFICATION_EVIDENCE_DIR: /app/.artifacts/local-verification/container
     volumes:
+      - ./.git:/app/.git:ro
       - ./.artifacts:/app/.artifacts
     command: pnpm verify:local
