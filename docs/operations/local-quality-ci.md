@@ -36,15 +36,19 @@ FORMAT
 
 `pnpm postgres:e2e` executes:
 
-1. PostgreSQL 18 startup when `DATABASE_URL` is not supplied;
-2. real repository migrations;
-3. exact migration-state verification against `schema_migrations`;
-4. M-FOUND-12 and R29 PostgreSQL E2E tests;
-5. migrations a second time;
-6. exact migration-state verification again;
-7. isolated container cleanup when the command created the database.
+1. discovers every repository test matching `test/*-postgres-e2e.test.ts`;
+2. fails closed if no PostgreSQL E2E suite exists;
+3. starts PostgreSQL 18 when `DATABASE_URL` is not supplied;
+4. applies the real repository migrations;
+5. verifies the exact migration state against `schema_migrations`;
+6. executes all discovered PostgreSQL E2E suites in one Vitest invocation;
+7. applies migrations a second time;
+8. verifies the exact migration state again;
+9. removes the isolated container when the command created the database.
 
-Any non-zero subprocess exit code, unsafe database host, missing runtime dependency, migration mismatch, test failure, or cleanup failure fails the command.
+This discovery model intentionally prevents a new Foundation/R29 PostgreSQL E2E suite from being silently omitted from the canonical local/hosted contract. For example, once `test/foundation-worker-postgres-e2e.test.ts` is present on the integrated head, it is automatically included without another CI script change.
+
+Any non-zero subprocess exit code, unsafe database host, missing runtime dependency, missing PostgreSQL E2E suites, migration mismatch, test failure, or cleanup failure fails the command.
 
 ## One-command local verification
 
@@ -83,6 +87,6 @@ The verifier container runs `pnpm verify:local`; Compose only supplies the isola
 
 `.github/workflows/quality.yml` is an orchestrator: checkout, version setup, supply-chain check, frozen install, then `pnpm quality`.
 
-`.github/workflows/m-found-12-postgres-e2e.yml` is also an orchestrator: checkout, version setup, frozen install, PostgreSQL service, then `pnpm postgres:e2e`.
+`.github/workflows/m-found-12-postgres-e2e.yml` is also an orchestrator: checkout, version setup, frozen install, PostgreSQL service, then `pnpm postgres:e2e`. Its permanent triggers cover `main`, pull requests that touch the PostgreSQL E2E/runtime surface, and manual dispatch; it no longer depends on the historical M-FOUND-12 feature branch.
 
 The executable gate logic lives in repository scripts rather than duplicated YAML. GitHub Actions remains the hosted attestation layer, not the implementation of the gates.
