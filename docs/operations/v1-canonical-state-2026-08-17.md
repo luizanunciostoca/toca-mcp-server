@@ -36,19 +36,21 @@ A capability may be called executable only when all of the following are true fo
 
 1. implementation exists;
 2. the runtime resolver/handler binding exists;
-3. the capability is registered on the intended runtime surface;
-4. required feature/config/provider gates are satisfied;
-5. policy/approval boundaries permit the requested operation;
-6. the evidence state supports the claim being made.
+3. the binding is side-effect validated when the capability mutates state;
+4. the capability is registered on the intended runtime surface;
+5. required feature/config/provider gates are satisfied;
+6. policy/approval boundaries permit the requested operation;
+7. the evidence state supports the claim being made.
 
-A catalog-only entry, a `PLANNED` registry entry, a disabled feature gate, a missing provider configuration or an unmerged PR is **not executable**.
+A catalog-only entry, a `PLANNED` registry entry, a disabled feature gate, a non-validated side-effect binding, a missing provider configuration or an unmerged PR is **not executable**.
 
 ## Canonical V1 capability truth
 
 | Area / bounded scope | Canonical evidence state | Executable in canonical V1? | Provider / production truth | V1 disposition |
 | --- | --- | --- | --- | --- |
-| Foundation/Core governed path: identity, typed schema, authorization/policy/risk, approval binding, idempotency, durable workflows, PostgreSQL restart safety, transactional outbox retry, EventRecord/CRM linkage, Audit Ledger, `toca.execute` / `toca.verify` | `PRODUCTION_VERIFIED` for the bounded merged Foundation path | Yes, where registered and enabled by the runtime | M-FOUND-12 exact final candidate had Quality, PostgreSQL E2E and provider READ green; merged evidence proves restart/outbox/audit and real Meta/Instagram READ. Current closeout CI is still pending. | V1 |
-| TOCA-managed Instagram scheduler `prepare/create/reschedule/cancel/status/list` as represented on `main` | `PRODUCTION_VERIFIED` in the runtime registry | Yes when `tocaManagedInstagramSchedulerEnabled` is enabled | Registry marks the six scheduler tools `PRODUCTION_VALIDATED`; runtime/config gates still apply. | V1 |
+| Foundation/Core governed path: identity, typed schema, authorization/policy/risk, approval binding, idempotency, durable workflows, PostgreSQL restart safety, transactional outbox retry, EventRecord/CRM linkage, Audit Ledger, `toca.execute` / `toca.verify` | `PRODUCTION_VERIFIED` for the bounded merged Foundation path | Yes, where registered and enabled by the runtime | M-FND-12 exact final candidate had Quality, PostgreSQL E2E and provider READ green; merged evidence proves restart/outbox/audit and real Meta/Instagram READ. Current closeout CI is still pending. | V1 |
+| TOCA-managed Instagram scheduler `prepare/create/cancel/status/list` | `PRODUCTION_VERIFIED` for the already validated scheduler subset | Yes when `tocaManagedInstagramSchedulerEnabled` is enabled | Canonical registry and existing merged runtime evidence support this subset. | V1 |
+| `instagram.toca_schedule.reschedule` on canonical `main` | `CODE_COMPLETE` but **NOT EXECUTABLE through the governed Core binding** | **No** | The runtime registry label overstates current executability: the existing `main` resolver binding has `sideEffectValidated: false`. PR #185 changes that flag to `true` and adds exact binding tests, but it is unmerged and therefore cannot be counted. | V1 current truth; feature closeout handled by PR #185 |
 | Instagram direct publication `instagram.publish.image/carousel/reel/story` | `PLANNED` on canonical `main` runtime surface | **No** | Provider/publication implementation history exists, but canonical `main` still registers these four direct tools as `PLANNED`. PR #185 is not merged and cannot be used to promote V1 truth. | V1 current truth; feature closeout handled separately |
 | Instagram structural publication aliases (`instagram.publication.*`) | `PLANNED` on canonical `main` runtime surface | **No** unless a separate already-validated internal path is invoked through its own surface | Canonical registry keeps these declarations planned. | V1 current truth |
 | Instagram / Meta read surfaces | `PROVIDER_VERIFIED` / `PRODUCTION_VERIFIED` for the exact provider READ evidence already merged | Yes only when the relevant read flags/scopes are enabled | M-FND-12 provider READ verified production runtime identity, scopes, Page→Instagram binding and recent real media. | V1 |
@@ -68,10 +70,15 @@ A catalog-only entry, a `PLANNED` registry entry, a disabled feature gate, a mis
 The most important existing evidence remains authoritative only for its exact scope:
 
 - `docs/checkpoints/m-found-12-e2e-production-validation.md` plus merged PR #119: exact-head Foundation Quality, PostgreSQL restart/outbox/audit E2E and production-runtime Meta/Instagram provider READ;
+- PR #185 diff: proves the current-main `instagram.toca_schedule.reschedule` binding is still `sideEffectValidated: false` and that promotion work is unmerged;
 - `docs/operations/meta-ads-final-provider-validation-2026-08-16.md`: exact controlled Meta Ads provider chain and independent readback;
 - `src/registry.ts`: current canonical runtime registration, feature/phase gating and direct-publication `PLANNED` truth;
 - `src/governance/capability-catalog.ts`: structural catalog metadata; it is not independent proof of runtime executability;
 - `docs/operations/google-ads-operational-closeout.md` and `docs/operations/omnichannel-operational-closeout.md`: deferred provider scope and absence of V1 live-provider completion.
+
+## Known canonical drift requiring feature-side resolution
+
+`src/registry.ts` currently labels all six `instagram.toca_schedule.*` tools `PRODUCTION_VALIDATED`, while `instagram.toca_schedule.reschedule` is not side-effect validated in the canonical Core binding. This closeout **does not change feature code or preempt PR #185**. Until that PR (or a superseding verified implementation) is merged, the executable truth is the stricter one recorded here: `reschedule` is not executable through the governed Core surface.
 
 ## Current CI truth
 
