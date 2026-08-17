@@ -67,20 +67,32 @@ export class InMemoryScheduler implements Scheduler {
   }
 
   markSucceeded(id: string): Promise<void> {
-    const current = this.requireJob(id);
+    const current = this.requireRunningJob(id, 'SCHEDULER_SUCCESS_TRANSITION_CONFLICT');
     this.jobs.set(id, { ...current, status: 'SUCCEEDED' });
     return Promise.resolve();
   }
 
   markFailed(id: string, normalizedError: string): Promise<void> {
-    const current = this.requireJob(id);
+    const current = this.requireRunningJob(id, 'SCHEDULER_FAILURE_TRANSITION_CONFLICT');
     this.jobs.set(id, { ...current, status: 'FAILED', lastError: normalizedError });
     return Promise.resolve();
   }
 
-  private requireJob(id: string): ScheduledJob {
+  retryAfterFailure(id: string, normalizedError: string, retryAt: string): Promise<void> {
+    const current = this.requireRunningJob(id, 'SCHEDULER_RETRY_TRANSITION_CONFLICT');
+    this.jobs.set(id, {
+      ...current,
+      status: 'SCHEDULED',
+      runAt: retryAt,
+      lastError: normalizedError,
+    });
+    return Promise.resolve();
+  }
+
+  private requireRunningJob(id: string, code: string): ScheduledJob {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`Scheduled job not found: ${id}`);
+    if (job.status !== 'RUNNING') throw new Error(`${code}:${id}`);
     return job;
   }
 }
