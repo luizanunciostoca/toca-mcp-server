@@ -390,7 +390,8 @@ const directInstagramPublicationToolNames = new Set([
 function publicationTools(options: ToolRegistryOptions): readonly ToolDefinition[] {
   const promoteDirectPublication =
     options.instagramPublicationWritesEnabled === true ||
-    options.tocaManagedInstagramSchedulerEnabled === true;
+    (options.instagramPublicationWritesEnabled === undefined &&
+      options.tocaManagedInstagramSchedulerEnabled === true);
   if (!promoteDirectPublication) return plannedInstagramPublicationTools;
   return plannedInstagramPublicationTools.map((tool) =>
     directInstagramPublicationToolNames.has(tool.name)
