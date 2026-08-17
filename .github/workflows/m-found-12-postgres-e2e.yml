@@ -3,8 +3,7 @@ name: M-FOUND-12 PostgreSQL E2E
 on:
   pull_request:
     paths:
-      - 'test/m-found-12-postgres-e2e.test.ts'
-      - 'test/r29-video-postgres-e2e.test.ts'
+      - 'test/**/*-postgres-e2e.test.ts'
       - 'test/r29-video-core-runtime.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
@@ -20,13 +19,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'test/m-found-12-postgres-e2e.test.ts'
-      - 'test/r29-video-postgres-e2e.test.ts'
+      - 'test/**/*-postgres-e2e.test.ts'
+      - 'test/r29-video-core-runtime.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'scripts/run-postgres-e2e.mjs'
       - 'scripts/verify-migration-state.ts'
       - 'package.json'
+      - 'src/content/**'
+      - 'src/registry.ts'
+      - 'src/persistence/**'
+      - 'src/events/**'
+      - 'src/workflow/**'
+      - 'src/crm/**'
   workflow_dispatch:
 
 permissions:
