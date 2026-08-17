@@ -31,18 +31,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Verify permanent workflow supply chain
-        run: node scripts/check-workflow-supply-chain.mjs
+        run: pnpm workflow:supply-chain
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format check
-        run: pnpm format:check
-      - name: Architecture check
-        run: pnpm architecture:check
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Test
-        run: pnpm test
-      - name: Build
-        run: pnpm build
+      - name: Execute canonical Quality gates
+        run: pnpm quality
