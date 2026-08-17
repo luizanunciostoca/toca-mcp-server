@@ -26,6 +26,7 @@
     "start:instagram-publication-asset-staging": "node dist/src/instagram-publication-asset-staging.js",
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
+    "migration:verify": "tsx scripts/verify-migration-state.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -33,7 +34,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs",
-    "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "workflow:supply-chain": "node scripts/check-workflow-supply-chain.mjs",
+    "quality": "node scripts/quality-gates.mjs",
+    "postgres:e2e": "node scripts/run-postgres-e2e.mjs",
+    "verify:local": "node scripts/run-local-verification.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
