@@ -5,6 +5,7 @@ import { runQualityGates } from './quality-gates.mjs';
 const timestamp = new Date().toISOString().replaceAll(':', '-');
 const evidenceDir =
   process.env.TOCA_VERIFICATION_EVIDENCE_DIR ?? `.artifacts/local-verification/${timestamp}`;
+const commitShaPattern = /^[0-9a-f]{40}$/i;
 mkdirSync(evidenceDir, { recursive: true });
 
 const summary = {
@@ -12,7 +13,7 @@ const summary = {
   status: 'RUNNING',
   startedAt: new Date().toISOString(),
   finishedAt: null,
-  sourceSha: 'unknown',
+  sourceSha: 'unresolved',
   node: process.versions.node,
   pnpm: 'unknown',
   postgres: '18',
@@ -23,15 +24,33 @@ function persistSummary() {
   writeFileSync(`${evidenceDir}/summary.json`, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
 }
 
+function resolveSourceSha() {
+  const explicitSha = process.env.TOCA_SOURCE_SHA ?? process.env.GITHUB_SHA;
+  if (explicitSha) {
+    if (!commitShaPattern.test(explicitSha)) {
+      throw new Error(`SOURCE_SHA_INVALID=${explicitSha}`);
+    }
+    return explicitSha.toLowerCase();
+  }
+
+  try {
+    const gitSha = captureCommand('git', ['rev-parse', 'HEAD']);
+    if (!commitShaPattern.test(gitSha)) throw new Error(`SOURCE_SHA_INVALID=${gitSha}`);
+    return gitSha.toLowerCase();
+  } catch (error) {
+    throw new Error(
+      `SOURCE_SHA_UNRESOLVED set TOCA_SOURCE_SHA to the exact 40-character commit SHA: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 try {
   const runtime = assertCiRuntime();
   summary.node = runtime.node;
   summary.pnpm = runtime.pnpm;
-  try {
-    summary.sourceSha = captureCommand('git', ['rev-parse', 'HEAD']);
-  } catch {
-    summary.sourceSha = process.env.GITHUB_SHA ?? 'unknown';
-  }
+  summary.sourceSha = resolveSourceSha();
   persistSummary();
 
   runCommand(pnpmCommand(), ['install', '--frozen-lockfile'], {
@@ -51,6 +70,10 @@ try {
 
   runCommand(pnpmCommand(), ['postgres:e2e'], {
     name: 'POSTGRES_E2E',
+    env: {
+      ...process.env,
+      TOCA_POSTGRES_E2E_EVIDENCE_DIR: `${evidenceDir}/postgres-e2e`,
+    },
     logPath: `${evidenceDir}/postgres-e2e.log`,
   });
   summary.gates.push('POSTGRES_E2E');
@@ -58,6 +81,7 @@ try {
   summary.status = 'LOCAL_VERIFIED';
   summary.finishedAt = new Date().toISOString();
   persistSummary();
+  console.log(`TOCA_VERIFICATION_SOURCE_SHA=${summary.sourceSha}`);
   console.log(`TOCA_VERIFICATION_EVIDENCE_DIR=${evidenceDir}`);
   console.log('TOCA_VERIFICATION_STATUS=LOCAL_VERIFIED');
 } catch (error) {
