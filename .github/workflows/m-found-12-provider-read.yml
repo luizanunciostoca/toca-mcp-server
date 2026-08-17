@@ -1,23 +1,14 @@
 name: M-FOUND-12 Provider READ
 
 on:
-  push:
-    branches:
-      - feat/m-found-12-e2e-production-validation
-    paths:
-      - '.github/workflows/m-found-12-provider-read.yml'
-      - 'docs/checkpoints/m-found-12-e2e-production-validation.md'
-      - 'docs/operations/provider-write-validation-register.md'
-  pull_request:
-    paths:
-      - '.github/workflows/m-found-12-provider-read.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: m-found-12-provider-read-${{ github.event.pull_request.number || github.ref }}
+  group: m-found-12-provider-read-${{ github.ref }}
   cancel-in-progress: true
 
 env:

@@ -1,9 +1,6 @@
 name: M-FOUND-12 PostgreSQL E2E
 
 on:
-  push:
-    branches:
-      - feat/m-found-12-e2e-production-validation
   pull_request:
     paths:
       - 'test/m-found-12-postgres-e2e.test.ts'
@@ -11,12 +8,26 @@ on:
       - 'test/r29-video-core-runtime.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
+      - 'scripts/run-postgres-e2e.mjs'
+      - 'scripts/verify-migration-state.ts'
+      - 'package.json'
       - 'src/content/**'
       - 'src/registry.ts'
       - 'src/persistence/**'
       - 'src/events/**'
       - 'src/workflow/**'
       - 'src/crm/**'
+  push:
+    branches: [main]
+    paths:
+      - 'test/m-found-12-postgres-e2e.test.ts'
+      - 'test/r29-video-postgres-e2e.test.ts'
+      - '.github/workflows/m-found-12-postgres-e2e.yml'
+      - 'migrations/**'
+      - 'scripts/run-postgres-e2e.mjs'
+      - 'scripts/verify-migration-state.ts'
+      - 'package.json'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -62,12 +73,5 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Apply real repository migrations
-        run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit and Video/R29 E2E
-        run: >-
-          pnpm exec vitest run
-          test/m-found-12-postgres-e2e.test.ts
-          test/r29-video-postgres-e2e.test.ts
-      - name: Verify no migration drift was introduced during execution
-        run: pnpm migrate
+      - name: Execute canonical PostgreSQL E2E contract
+        run: pnpm postgres:e2e

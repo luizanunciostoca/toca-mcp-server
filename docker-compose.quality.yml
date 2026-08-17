@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: toca
+      POSTGRES_PASSWORD: toca-container-e2e-only
+      POSTGRES_DB: toca_e2e
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U toca -d toca_e2e']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  verifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.quality
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://toca:toca-container-e2e-only@postgres:5432/toca_e2e
+      DATABASE_SSL: 'false'
+      TOCA_VERIFICATION_EVIDENCE_DIR: /app/.artifacts/local-verification/container
+    volumes:
+      - ./.artifacts:/app/.artifacts
+    command: pnpm verify:local
