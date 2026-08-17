@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import {
   assertCiRuntime,
   captureCommand,
@@ -12,10 +13,10 @@ const POSTGRES_IMAGE = 'postgres:18';
 const POSTGRES_USER = 'toca';
 const POSTGRES_PASSWORD = 'toca-local-e2e-only';
 const POSTGRES_DATABASE = 'toca_e2e';
-const E2E_TESTS = [
-  'test/m-found-12-postgres-e2e.test.ts',
-  'test/r29-video-postgres-e2e.test.ts',
-];
+const E2E_TESTS = readdirSync('test', { withFileTypes: true })
+  .filter((entry) => entry.isFile() && /-postgres-e2e\.test\.ts$/.test(entry.name))
+  .map((entry) => `test/${entry.name}`)
+  .sort();
 
 function isSafeE2eDatabase(connectionString) {
   const url = new URL(connectionString);
@@ -78,6 +79,8 @@ function startIsolatedPostgres() {
 }
 
 assertCiRuntime();
+if (E2E_TESTS.length === 0) throw new Error('POSTGRES_E2E_TESTS_NOT_FOUND');
+console.log(`POSTGRES_E2E_TESTS=${E2E_TESTS.join(',')}`);
 let managedContainer = null;
 const env = { ...process.env };
 
