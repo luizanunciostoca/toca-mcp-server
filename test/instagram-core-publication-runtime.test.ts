@@ -43,6 +43,19 @@ describe('Instagram direct publication Core runtime', () => {
     expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
     expect(registry.get('instagram.publication.reschedule')?.capabilityStatus).toBe('PLANNED');
 
+    const disabledRuntimeRegistry = createToolRegistry({
+      instagramPublicationWritesEnabled: false,
+      tocaManagedInstagramSchedulerEnabled: true,
+    });
+    for (const capabilityId of [
+      'instagram.publish.image',
+      'instagram.publish.carousel',
+      'instagram.publish.reel',
+      'instagram.publish.story',
+    ]) {
+      expect(disabledRuntimeRegistry.get(capabilityId)?.capabilityStatus).toBe('PLANNED');
+    }
+
     const catalogRegistry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
     expect(catalogRegistry.get('instagram.publish.image')?.capabilityStatus).toBe(
       'PRODUCTION_VALIDATED',
@@ -100,7 +113,7 @@ describe('Instagram direct publication Core runtime', () => {
     expect(getPublishedMedia).toHaveBeenCalledWith('media-1');
   });
 
-  it('supports carousel, reel and story schemas without creating a parallel provider path', () => {
+  it('supports carousel 2-10 images, reel and story schemas without a parallel provider path', () => {
     const runtime = {
       executor: { execute: vi.fn(() => Promise.resolve(publishedResult())) },
       transport: {
@@ -110,17 +123,48 @@ describe('Instagram direct publication Core runtime', () => {
       pollIntervalMs: 0,
       maxPollAttempts: 1,
     };
+    const carouselBinding = resolveInstagramPublicationRuntimeBinding(
+      'instagram.publish.carousel',
+      runtime,
+    );
     expect(
-      resolveInstagramPublicationRuntimeBinding(
-        'instagram.publish.carousel',
-        runtime,
-      )?.inputSchema.parse({
+      carouselBinding?.inputSchema.parse({
         account,
         mediaUrls: ['https://cdn.example.com/1.jpg', 'https://cdn.example.com/2.jpg'],
-        correlationId: 'corr-carousel',
-        idempotencyKey: 'carousel-1',
+        correlationId: 'corr-carousel-min',
+        idempotencyKey: 'carousel-min',
       }),
     ).toBeDefined();
+    expect(
+      carouselBinding?.inputSchema.parse({
+        account,
+        mediaUrls: Array.from(
+          { length: 10 },
+          (_, index) => `https://cdn.example.com/${index + 1}.jpg`,
+        ),
+        correlationId: 'corr-carousel-max',
+        idempotencyKey: 'carousel-max',
+      }),
+    ).toBeDefined();
+    expect(() =>
+      carouselBinding?.inputSchema.parse({
+        account,
+        mediaUrls: ['https://cdn.example.com/only-one.jpg'],
+        correlationId: 'corr-carousel-underflow',
+        idempotencyKey: 'carousel-underflow',
+      }),
+    ).toThrow();
+    expect(() =>
+      carouselBinding?.inputSchema.parse({
+        account,
+        mediaUrls: Array.from(
+          { length: 11 },
+          (_, index) => `https://cdn.example.com/${index + 1}.jpg`,
+        ),
+        correlationId: 'corr-carousel-overflow',
+        idempotencyKey: 'carousel-overflow',
+      }),
+    ).toThrow();
     expect(
       resolveInstagramPublicationRuntimeBinding('instagram.publish.reel', runtime)?.inputSchema.parse({
         account,
@@ -137,17 +181,6 @@ describe('Instagram direct publication Core runtime', () => {
         idempotencyKey: 'story-1',
       }),
     ).toBeDefined();
-    expect(() =>
-      resolveInstagramPublicationRuntimeBinding(
-        'instagram.publish.carousel',
-        runtime,
-      )?.inputSchema.parse({
-        account,
-        mediaUrls: ['https://cdn.example.com/only-one.jpg'],
-        correlationId: 'corr-invalid',
-        idempotencyKey: 'invalid-1',
-      }),
-    ).toThrow();
   });
 
   it('fails closed when the request targets a different Instagram account', async () => {
