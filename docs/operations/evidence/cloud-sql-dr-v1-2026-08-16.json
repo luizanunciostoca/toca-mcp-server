@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "classification": "PRODUCTION_VERIFIED",
+  "scope": "TOCA OS V1 Cloud SQL disaster recovery",
+  "source": {
+    "project": "toca-mcp-production",
+    "instance": "toca-mcp-db",
+    "region": "southamerica-east1",
+    "databaseVersion": "POSTGRES_18"
+  },
+  "objectives": {
+    "pitrRpoSecondsMax": 900,
+    "validatedDataRtoSecondsMax": 3600,
+    "latestSuccessfulBackupAgeSecondsMax": 129600,
+    "restoreEvidenceAgeDaysMax": 90
+  },
+  "backupRestore": {
+    "status": "PASS",
+    "target": "toca-mcp-dr-final-31932660953",
+    "backupId": "projects/toca-mcp-production/backups/05416bd5-6ce8-409f-85f8-c53bdcf0b8b9",
+    "backupEndedAt": "2026-08-16T04:27:19.186Z",
+    "restoreStartedAt": "2026-08-16T06:57:43Z",
+    "backupBasedRecoveryAgeSeconds": 9024,
+    "validatedDataRtoSeconds": 496,
+    "validation": {
+      "status": "PASS",
+      "workflowRun": 31932980178,
+      "migrations": 16,
+      "criticalTables": 21,
+      "criticalForeignKeysValid": true,
+      "requiredAppendOnlyTriggersEnabled": true,
+      "auditIntegrityFailure": false
+    },
+    "cleanup": {
+      "status": "PASS",
+      "workflowRun": 31933900598,
+      "targetDeleted": true,
+      "productionUnchanged": true,
+      "productionDeletionProtection": true,
+      "backupEnabled": true,
+      "pitrEnabled": true,
+      "artifactId": 9260108983,
+      "artifactSha256": "e6adf99c54418b2eb19a751963e2ebfc5d94e26e609dfc10ad8ca39f3dd6cc9c"
+    },
+    "executionNote": "The original combined restore/verification workflow run 31932660953 concluded FAILURE after creating/restoring the isolated target. Recovery validation was subsequently completed successfully by workflow run 31932980178 and deterministic cleanup by workflow run 31933900598. This manifest intentionally does not misclassify run 31932660953 as a successful workflow run."
+  },
+  "pitrRestore": {
+    "status": "PASS",
+    "workflowRun": 31936171307,
+    "workflowAttempt": 2,
+    "workflowSha": "ba28601bbcd111ad8acb3b8cf31ea9c804d74d69",
+    "repositoryBaseline": "e0696df1d1860261afba78f1634e8c979401cdc7",
+    "target": "toca-mcp-pitr-31936171307",
+    "providerRecoveryWindow": {
+      "readAt": "2026-08-16T08:34:46Z",
+      "earliestRecoverableTime": "2026-08-10T02:39:45.709Z",
+      "latestRecoverableTime": "2026-08-16T08:32:38.577470502Z",
+      "latestRecoveryLagSeconds": 128,
+      "objectiveMet": true
+    },
+    "selectedRecoveryPoint": "2026-08-16T08:26:12.648Z",
+    "referenceTime": "2026-08-16T08:34:46Z",
+    "rpoSeconds": 514,
+    "rpoObjectiveMet": true,
+    "restoreStartedAt": "2026-08-16T08:35:22Z",
+    "targetRunnableAt": "2026-08-16T08:44:31Z",
+    "restoreToRunnableSeconds": 549,
+    "validationCompletedAt": "2026-08-16T08:45:06Z",
+    "validatedDataRtoSeconds": 584,
+    "rtoObjectiveMet": true,
+    "validation": {
+      "status": "PASS",
+      "migrations": 16,
+      "criticalTables": 22,
+      "criticalForeignKeysValid": true,
+      "requiredAppendOnlyTriggersEnabled": true,
+      "beforeBoundaryRecord": {
+        "table": "operational_signals",
+        "id": "c24795ae-14f1-4952-80af-314187c1ff78",
+        "timestamp": "2026-08-16T08:26:10.648Z",
+        "present": true
+      },
+      "afterBoundaryRecord": {
+        "table": "audit_ledger_events",
+        "id": "49fff740-196b-4a0b-a5f1-d68a14e02ad3",
+        "timestamp": "2026-08-16T08:29:42.328Z",
+        "absent": true
+      }
+    },
+    "cleanup": {
+      "status": "PASS",
+      "probeJobDeleted": true,
+      "validationJobDeleted": true,
+      "targetDeleted": true,
+      "productionUnchanged": true,
+      "productionDeletionProtection": true,
+      "backupEnabled": true,
+      "pitrEnabled": true
+    },
+    "artifact": {
+      "id": 9261022842,
+      "name": "cloud-sql-pitr-rpo-evidence-ba28601bbcd111ad8acb3b8cf31ea9c804d74d69",
+      "sha256": "6524043e56f2eacef34b129fa7eb2c7130711ce43e3071f67476573527dd5140",
+      "createdAt": "2026-08-16T08:47:19Z",
+      "expiresAt": "2026-11-14T08:34:03Z"
+    }
+  },
+  "providerConfigurationAtLastVerifiedReadback": {
+    "verifiedAt": "2026-08-16T08:47:00Z",
+    "state": "RUNNABLE",
+    "deletionProtection": true,
+    "automatedBackups": true,
+    "pitr": true,
+    "productionUnchangedAfterDrill": true,
+    "note": "This is preserved provider-backed evidence from 2026-08-16, not a live provider readback on 2026-08-17."
+  },
+  "repositoryPolicy": {
+    "retainedBackups": 7,
+    "transactionLogRetentionDays": 7,
+    "preserveDatabaseVersion": true,
+    "preserveDataDiskType": true,
+    "preserveDeletionProtection": true,
+    "preserveAutomatedBackups": true,
+    "preservePointInTimeRecovery": true,
+    "preserveStorageAutoResize": true
+  },
+  "canonicalDocuments": [
+    "docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md",
+    "docs/operations/cloud-sql-dr-provider-revalidation-2026-08-16.md",
+    "docs/operations/reliability-slo-alerting-dr.md",
+    "docs/operations/foundation-reliability-provider-evidence.md",
+    "docs/operations/cloud-sql-dr-runbook.md"
+  ],
+  "evidenceIntegrity": {
+    "pitrArtifactDigestIndependentlyRecomputed": true,
+    "backupCleanupArtifactDigestIndependentlyRecomputed": true,
+    "containsSecrets": false
+  }
+}
