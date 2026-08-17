@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { URL } from 'node:url';
 import {
   assertCiRuntime,
@@ -15,6 +15,10 @@ const POSTGRES_PASSWORD = 'toca-postgres-e2e-only';
 const POSTGRES_DB = 'toca_e2e';
 const allowedLocalHosts = new Set(['127.0.0.1', 'localhost', '::1', 'postgres']);
 const evidenceDir = process.env.TOCA_POSTGRES_E2E_EVIDENCE_DIR;
+const E2E_TESTS = readdirSync('test', { withFileTypes: true })
+  .filter((entry) => entry.isFile() && /-postgres-e2e\.test\.ts$/.test(entry.name))
+  .map((entry) => `test/${entry.name}`)
+  .sort();
 if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
 
 function assertSafeDatabaseUrl(connectionString) {
@@ -51,6 +55,8 @@ function waitForPostgres(containerName) {
 }
 
 assertCiRuntime();
+if (E2E_TESTS.length === 0) throw new Error('POSTGRES_E2E_TESTS_NOT_FOUND');
+console.log(`POSTGRES_E2E_TESTS=${E2E_TESTS.join(',')}`);
 let containerName;
 let cleanupRequired = false;
 let failure;
@@ -106,21 +112,11 @@ try {
     env,
     logPath: logPath('02-migration-state-first'),
   });
-  runCommand(
-    pnpmCommand(),
-    [
-      'exec',
-      'vitest',
-      'run',
-      'test/m-found-12-postgres-e2e.test.ts',
-      'test/r29-video-postgres-e2e.test.ts',
-    ],
-    {
-      name: 'POSTGRES_E2E_TESTS',
-      env,
-      logPath: logPath('03-postgres-e2e-tests'),
-    },
-  );
+  runCommand(pnpmCommand(), ['exec', 'vitest', 'run', ...E2E_TESTS], {
+    name: 'POSTGRES_E2E_TESTS',
+    env,
+    logPath: logPath('03-postgres-e2e-tests'),
+  });
   runCommand(pnpmCommand(), ['migrate'], {
     name: 'POSTGRES_E2E_MIGRATE_SECOND',
     env,
