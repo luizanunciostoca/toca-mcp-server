@@ -8,7 +8,9 @@ Canonical audit baseline: `main@868c64ac0dcfa4c2b28994198b1a8c9af87f7a7c` on 202
 
 ## Current observed state
 
-- The authoritative open-PR recheck returned only PR #185 (`fix/v1-instagram-direct-publication`). It is feature work and is outside this governance closeout.
+- At the audit-start authoritative recheck, the only open PR was #185 (`fix/v1-instagram-direct-publication`).
+- During this closeout, concurrent work opened PR #188 (`chore/local-reproducible-quality-ci`) and PR #189 (`docs/r29-outbox-slo-closeout-20260817`). The final recheck therefore found **three** open PRs: #185, #188 and #189.
+- PR #185 is Instagram feature work, #188 is the dedicated CI/Quality-local path, and #189 is the R29/outbox/SLO closeout. None is reimplemented by this governance closeout.
 - `.github/CODEOWNERS` exists and assigns the repository and governance-sensitive paths to `@luizidebook`.
 - The canonical Quality workflow remains `.github/workflows/quality.yml` (`Quality Gate`).
 - GitHub Actions is currently unavailable for the closeout round. No current-head `CI_VERIFIED` claim is made.
@@ -70,12 +72,12 @@ Every versioned workflow under `.github/workflows/*.yml` or `.github/workflows/*
 
 ## Workflow classification
 
-The current tree contains 12 workflow files. They are not all equivalent:
+The audit-start tree contained 12 workflow files. They are not all equivalent:
 
 - **Permanent repository/runtime controls:** `quality.yml`, `deploy-gcp.yml`, `deploy-toca-managed-instagram-daemon-gcp.yml`, `gcp-cost-hygiene.yml`, `infrastructure-control-plane.yml`, `marketing-autopilot-publication.yml`, `r29-production-runtime-verification.yml`.
 - **Permanent/manual bounded operational validation:** `deploy-instagram-publication-worker-gcp.yml`, `gcp-meta-oauth-boundary-smoke.yml`, `meta-ads-create-paused-provider-smoke.yml`.
-- **Permanent E2E test retained despite historical naming:** `m-found-12-postgres-e2e.yml`; it now also exercises R29/PostgreSQL paths. Its historical feature-branch push trigger is workflow drift to be handled by the dedicated CI/Quality closeout, not by this governance-only branch.
-- **Historical milestone / one-shot candidate:** `m-found-12-provider-read.yml`; it remains useful as evidence, but its trigger is still tied to the already-merged M-FOUND-12 feature branch. Remove or generalize it only in the CI/Quality closeout after confirming equivalent provider-read coverage and preserving evidence history.
+- **Permanent E2E test retained despite historical naming:** `m-found-12-postgres-e2e.yml`; it now also exercises R29/PostgreSQL paths. Its historical feature-branch push trigger is workflow drift delegated to the dedicated CI/Quality closeout (#188), not duplicated here.
+- **Historical milestone / one-shot candidate:** `m-found-12-provider-read.yml`; it remains useful as evidence, but its trigger is still tied to the already-merged M-FND-12 feature branch. Remove or generalize it only after #188/CI closeout confirms equivalent provider-read coverage and preserves evidence history.
 
 No workflow YAML is removed merely because its name contains `smoke` or because its original use was manual. Removal requires proof that the executable surface is obsolete or superseded and that no unique validation path is being discarded.
 
