@@ -14,6 +14,7 @@ const summary = {
   startedAt: new Date().toISOString(),
   finishedAt: null,
   sourceSha: 'unresolved',
+  sourceTree: 'unverified',
   node: process.versions.node,
   pnpm: 'unknown',
   postgres: '18',
@@ -24,33 +25,40 @@ function persistSummary() {
   writeFileSync(`${evidenceDir}/summary.json`, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
 }
 
-function resolveSourceSha() {
-  const explicitSha = process.env.TOCA_SOURCE_SHA ?? process.env.GITHUB_SHA;
-  if (explicitSha) {
-    if (!commitShaPattern.test(explicitSha)) {
-      throw new Error(`SOURCE_SHA_INVALID=${explicitSha}`);
-    }
-    return explicitSha.toLowerCase();
-  }
-
+function verifySourceTree() {
+  let gitSha;
+  let gitStatus;
   try {
-    const gitSha = captureCommand('git', ['rev-parse', 'HEAD']);
-    if (!commitShaPattern.test(gitSha)) throw new Error(`SOURCE_SHA_INVALID=${gitSha}`);
-    return gitSha.toLowerCase();
+    gitSha = captureCommand('git', ['rev-parse', 'HEAD']);
+    gitStatus = captureCommand('git', ['status', '--porcelain=v1', '--untracked-files=all']);
   } catch (error) {
     throw new Error(
-      `SOURCE_SHA_UNRESOLVED set TOCA_SOURCE_SHA to the exact 40-character commit SHA: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `SOURCE_GIT_CHECK_FAILED ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+
+  if (!commitShaPattern.test(gitSha)) throw new Error(`SOURCE_SHA_INVALID=${gitSha}`);
+  if (gitStatus) throw new Error(`SOURCE_TREE_DIRTY=${JSON.stringify(gitStatus.split('\n'))}`);
+
+  const expectedSha = process.env.TOCA_SOURCE_SHA ?? process.env.GITHUB_SHA;
+  if (expectedSha) {
+    if (!commitShaPattern.test(expectedSha)) {
+      throw new Error(`SOURCE_SHA_INVALID=${expectedSha}`);
+    }
+    if (expectedSha.toLowerCase() !== gitSha.toLowerCase()) {
+      throw new Error(`SOURCE_SHA_MISMATCH expected=${expectedSha} actual=${gitSha}`);
+    }
+  }
+
+  return gitSha.toLowerCase();
 }
 
 try {
   const runtime = assertCiRuntime();
   summary.node = runtime.node;
   summary.pnpm = runtime.pnpm;
-  summary.sourceSha = resolveSourceSha();
+  summary.sourceSha = verifySourceTree();
+  summary.sourceTree = 'clean';
   persistSummary();
 
   runCommand(pnpmCommand(), ['install', '--frozen-lockfile'], {
@@ -82,6 +90,7 @@ try {
   summary.finishedAt = new Date().toISOString();
   persistSummary();
   console.log(`TOCA_VERIFICATION_SOURCE_SHA=${summary.sourceSha}`);
+  console.log('TOCA_VERIFICATION_SOURCE_TREE=CLEAN');
   console.log(`TOCA_VERIFICATION_EVIDENCE_DIR=${evidenceDir}`);
   console.log('TOCA_VERIFICATION_STATUS=LOCAL_VERIFIED');
 } catch (error) {
