@@ -1,46 +1,54 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 
-const permanentWorkflows = [
-  '.github/workflows/quality.yml',
-  '.github/workflows/deploy-gcp.yml',
-  '.github/workflows/deploy-instagram-publication-worker-gcp.yml',
-  '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
-  '.github/workflows/gcp-cost-hygiene.yml',
-  '.github/workflows/gcp-meta-oauth-boundary-smoke.yml',
-  '.github/workflows/infrastructure-control-plane.yml',
-  '.github/workflows/marketing-autopilot-publication.yml',
-  '.github/workflows/m-found-12-postgres-e2e.yml',
-  '.github/workflows/m-found-12-provider-read.yml',
-];
-
-const immutableCommit = /^[a-f0-9]{40}$/i;
+const workflowDirectory = '.github/workflows';
+const immutableCommitShaReference = /^[0-9a-f]{40}(?:\s*#.*)?$/i;
+const actionUsePattern = /^\s*uses:\s*([^\s]+)\s*(?:#.*)?$/;
 const failures = [];
 
-for (const path of permanentWorkflows) {
-  const source = await readFile(path, 'utf8');
-  for (const [index, line] of source.split('\n').entries()) {
-    const match = line.match(/^\s*-?\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/);
+const workflowFiles = (await readdir(workflowDirectory, { withFileTypes: true }))
+  .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
+  .map((entry) => `${workflowDirectory}/${entry.name}`)
+  .sort();
+
+if (workflowFiles.length === 0) {
+  failures.push(`${workflowDirectory}: no workflow files found`);
+}
+
+for (const workflowPath of workflowFiles) {
+  const content = await readFile(workflowPath, 'utf8');
+  const lines = content.split(/\r?\n/);
+
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(actionUsePattern);
     if (!match) continue;
-    const action = match[1];
-    if (action.startsWith('./') || action.startsWith('docker://')) continue;
-    const separator = action.lastIndexOf('@');
-    const ref = separator >= 0 ? action.slice(separator + 1) : '';
-    if (!immutableCommit.test(ref)) {
+
+    const actionRef = match[1];
+    if (actionRef.startsWith('./')) continue;
+
+    const separatorIndex = actionRef.lastIndexOf('@');
+    if (separatorIndex <= 0) {
+      failures.push(`${workflowPath}:${index + 1}: external action is missing an immutable @SHA`);
+      continue;
+    }
+
+    const reference = actionRef.slice(separatorIndex + 1);
+    if (!immutableCommitShaReference.test(reference)) {
       failures.push(
-        `${path}:${index + 1}: action must use an immutable 40-char commit SHA: ${action}`,
+        `${workflowPath}:${index + 1}: external action must be pinned to a full 40-character commit SHA`,
       );
     }
   }
 
-  if (!/^permissions:\s*$/m.test(source)) {
-    failures.push(`${path}: explicit top-level permissions block is required`);
+  const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  const preJobs = jobsIndex >= 0 ? lines.slice(0, jobsIndex) : lines;
+  if (!preJobs.some((line) => /^permissions:\s*$/.test(line))) {
+    failures.push(`${workflowPath}: missing explicit top-level permissions before jobs:`);
   }
 }
 
 if (failures.length > 0) {
-  console.error('WORKFLOW_SUPPLY_CHAIN_CHECK_FAILED');
-  for (const failure of failures) console.error(`- ${failure}`);
+  for (const failure of failures) console.error(failure);
   process.exit(1);
 }
 
-console.log(`WORKFLOW_SUPPLY_CHAIN_CHECK_PASS=${permanentWorkflows.length}`);
+console.log(`WORKFLOW_SUPPLY_CHAIN_CHECK_PASS=${workflowFiles.length}`);
