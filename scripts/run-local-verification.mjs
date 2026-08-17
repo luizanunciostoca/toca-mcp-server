@@ -28,9 +28,12 @@ function persistSummary() {
 function verifySourceTree() {
   let gitSha;
   let gitStatus;
+  const gitEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
   try {
-    gitSha = captureCommand('git', ['rev-parse', 'HEAD']);
-    gitStatus = captureCommand('git', ['status', '--porcelain=v1', '--untracked-files=all']);
+    gitSha = captureCommand('git', ['rev-parse', 'HEAD'], { env: gitEnv });
+    gitStatus = captureCommand('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      env: gitEnv,
+    });
   } catch (error) {
     throw new Error(
       `SOURCE_GIT_CHECK_FAILED ${error instanceof Error ? error.message : String(error)}`,
