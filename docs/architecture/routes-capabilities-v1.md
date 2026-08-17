@@ -19,6 +19,38 @@ Catalog presence does not imply execution. `execution_surface: CATALOG_ONLY` and
 `lifecycle_status: PLANNED` are non-executable declarations. The runtime must never advertise a
 provider capability merely because it is present in the catalog.
 
+## Canonical V1 evidence truth
+
+The structural catalog and runtime lifecycle enums are not release evidence by themselves. The
+auditable V1 evidence overlay is `docs/operations/v1-canonical-state-2026-08-17.md`.
+
+For final V1 reporting, use these evidence states:
+
+`PLANNED -> IMPLEMENTED -> CODE_COMPLETE -> LOCAL_VERIFIED -> PROVIDER_VERIFIED -> PRODUCTION_VERIFIED`
+
+This evidence vocabulary is deliberately separate from the existing runtime lifecycle enum. It does
+not rewrite runtime semantics or permit skipped gates. `CI_VERIFIED` is a separate evidence flag and
+is currently `PENDING_FINAL_ACTIONS_ROUND` while GitHub Actions is unavailable.
+
+Executability requires a real resolver/handler binding, registration on the intended runtime surface,
+validated side-effect binding for mutations, satisfied feature/config/provider gates and policy/
+approval authorization. A registry label alone is insufficient.
+
+Current V1 exceptions that must be read from the evidence overlay rather than inferred from labels:
+
+- `instagram.toca_schedule.reschedule` is labelled `PRODUCTION_VALIDATED` in `src/registry.ts`, but
+  canonical `main` still has `sideEffectValidated: false` on the governed Core binding. It is therefore
+  not executable through that surface until PR #185 or an equivalent verified implementation is merged;
+- `instagram.publish.image`, `instagram.publish.carousel`, `instagram.publish.reel` and
+  `instagram.publish.story` remain `PLANNED` on canonical `main`; unmerged PR #185 is not V1 truth;
+- Meta Ads `CREATE_PAUSED` has provider/production evidence only for the exact controlled PAUSED-only
+  boundary; this does not authorize activation, generic writes or budget expansion;
+- Google Ads real provider execution is **DEFERRED / NEXT_VERSION**. The in-repository R28 path is
+  preserved as `CODE_COMPLETE`, but provider READ/PREPARE/CREATE_PAUSED/READBACK/MANAGE is not a V1
+  executable claim and is not a V1 blocker;
+- real WhatsApp and Email providers are **DEFERRED / NEXT_VERSION**. Omnichannel contracts remain V1
+  foundation work, but provider send/readback is not executable and is not a V1 blocker.
+
 ## Structural routes R21-R32
 
 | Route | Name                                  | Priority | Deterministic outcome                                  |
@@ -56,9 +88,9 @@ layer with deterministic briefs, storyboards, scripts, asset selection, timeline
 rights, quality and approved artifact export. Neither extension adds a route, a public MCP tool, a
 parallel scheduler or an external publication path.
 
-## Capability lifecycle
+## Runtime capability lifecycle
 
-R22 is the only promotion authority for executable lifecycle state:
+R22 is the only promotion authority for executable runtime lifecycle state:
 
 `PLANNED -> IMPLEMENTED -> CONNECTED -> PRODUCTION_VALIDATED`
 
@@ -70,7 +102,8 @@ R22 is the only promotion authority for executable lifecycle state:
   validated provider capability.
 
 Promotion is sequential. Documentation, a green CI run or a successful build alone cannot skip a
-state.
+state. If runtime metadata conflicts with the real binding/runtime evidence, the stricter executable
+truth wins until the metadata or implementation is reconciled.
 
 ## Approval governance
 
@@ -86,8 +119,10 @@ capability-specific guardrails remain additive.
 ## Release and structural lifecycles
 
 R23 requires branch, tests, architecture check, Quality Gate, PR review, merge, deploy, smoke,
-provider verification and release evidence. A failure after merge or deploy enters
-`ROLLBACK_REQUIRED`; release closure requires evidence and a known rollback target.
+provider verification and release evidence when those gates apply to the release scope. During the
+current GitHub Actions outage, development and direct/local validation may continue, but
+`CI_VERIFIED` remains pending and no absent check is treated as green. A failure after merge or deploy
+enters `ROLLBACK_REQUIRED`; release closure requires evidence and a known rollback target.
 
 R24-R26 and R28-R32 use typed state-machine definitions. Security fails closed on mandatory
 `FAIL` or `UNKNOWN` evidence. Disaster recovery requires an executed restore, integrity proof and
