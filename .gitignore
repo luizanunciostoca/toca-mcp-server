@@ -1,8 +1,9 @@
-node_modules
-dist
-.git
+node_modules/
+dist/
 .env
 .env.*
-coverage
-.artifacts
+!.env.example
+coverage/
+.artifacts/
 *.log
+.DS_Store
