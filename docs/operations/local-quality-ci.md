@@ -13,6 +13,7 @@ The local and hosted paths use the same repository commands and versions:
 
 `pnpm quality` fails closed if Node is not `24.x` or pnpm is not exactly `10.15.0`.
 `pnpm postgres:e2e` uses PostgreSQL 18 and rejects non-local database hosts unless `TOCA_POSTGRES_E2E_ALLOW_EXTERNAL=1` is explicitly set.
+`pnpm verify:local` requires an exact 40-character source commit SHA. It resolves that SHA from `TOCA_SOURCE_SHA`, `GITHUB_SHA`, or the current Git checkout, in that order, and fails closed if no exact SHA can be proven.
 
 ## Canonical commands
 
@@ -49,11 +50,11 @@ FORMAT
 
 This discovery model prevents new Foundation/R29 PostgreSQL E2E coverage from being silently omitted from the canonical local/hosted contract. In particular, when `test/foundation-worker-postgres-e2e.test.ts` from the Foundation restart-safety closeout is present on the integrated head, it is automatically included without another CI-script change.
 
-Any non-zero subprocess exit code, unsafe database protocol/host, missing runtime dependency, missing PostgreSQL E2E suites, migration mismatch, test failure, or cleanup failure fails the command.
+Any non-zero subprocess exit code, unsafe database protocol/host, missing runtime dependency, missing PostgreSQL E2E suites, migration mismatch, test failure, cleanup failure, or unresolved source SHA fails the command.
 
 ## One-command local verification
 
-From a clean checkout:
+From a clean Git checkout:
 
 ```bash
 corepack enable
@@ -61,11 +62,12 @@ corepack prepare pnpm@10.15.0 --activate
 pnpm verify:local
 ```
 
-The command installs with the frozen lockfile, checks permanent workflow supply-chain policy, runs all Quality gates, runs PostgreSQL E2E, and stores evidence under `.artifacts/local-verification/<timestamp>/`.
+The command installs with the frozen lockfile, checks every versioned workflow against supply-chain policy, runs all Quality gates, runs PostgreSQL E2E, and stores evidence under `.artifacts/local-verification/<timestamp>/`. PostgreSQL substeps are also stored under the verification evidence directory.
 
-A successful run emits:
+A successful run emits the exact source SHA and status:
 
 ```text
+TOCA_VERIFICATION_SOURCE_SHA=<40-character commit SHA>
 TOCA_VERIFICATION_STATUS=LOCAL_VERIFIED
 ```
 
@@ -73,14 +75,17 @@ A failed run emits `TOCA_VERIFICATION_STATUS=FAILED` and exits non-zero. It must
 
 ## Container verification
 
-Docker Compose provides the same contract with an isolated PostgreSQL 18 service:
+Docker Compose provides the same contract with an isolated PostgreSQL 18 service. Because the Docker build deliberately excludes `.git`, bind the container evidence to the exact host checkout SHA explicitly:
 
 ```bash
-docker compose -f docker-compose.quality.yml up \
+TOCA_SOURCE_SHA="$(git rev-parse HEAD)" \
+  docker compose -f docker-compose.quality.yml up \
   --build \
   --abort-on-container-exit \
   --exit-code-from verifier
 ```
+
+Compose refuses to start the verifier when `TOCA_SOURCE_SHA` is absent. The verifier independently validates that the supplied value is a full 40-character commit SHA before it can report `LOCAL_VERIFIED`.
 
 The verifier container runs `pnpm verify:local`; Compose only supplies the isolated PostgreSQL service and network.
 
