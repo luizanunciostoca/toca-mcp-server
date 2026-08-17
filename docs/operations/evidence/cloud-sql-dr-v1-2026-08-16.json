@@ -106,13 +106,13 @@
     }
   },
   "providerConfigurationAtLastVerifiedReadback": {
-    "verifiedAt": "2026-08-16T08:47:00Z",
+    "evidenceDate": "2026-08-16",
     "state": "RUNNABLE",
     "deletionProtection": true,
     "automatedBackups": true,
     "pitr": true,
     "productionUnchangedAfterDrill": true,
-    "note": "This is preserved provider-backed evidence from 2026-08-16, not a live provider readback on 2026-08-17."
+    "note": "This is preserved provider-backed evidence from 2026-08-16, not a live provider readback on 2026-08-17. Exact provider timestamps for individual recovery-window and cleanup observations remain in the canonical drill documents/artifacts."
   },
   "repositoryPolicy": {
     "retainedBackups": 7,
