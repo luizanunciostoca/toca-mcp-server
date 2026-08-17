@@ -1,133 +1,70 @@
 # R28 Google Ads operational closeout
 
-Date: 2026-08-16
+Date: 2026-08-17
 
-Status: **BLOCKED_EXTERNAL_PROVIDER — RUNTIME_BINDING_ABSENT**
+Status: **DEFERRED / NEXT_VERSION — CODE_COMPLETE REPOSITORY PATH, LIVE PROVIDER NOT V1 SCOPE**
 
-Scope: definitive provider-readiness closeout for the existing R28 Google Ads capability family only. This evidence does not create R33, does not add a domain, does not add an MCP tool, and does not widen the TOCA Core facade.
+## V1 release decision
 
-## Canonical repository state
+Google Ads real-provider completion is explicitly outside TOCA OS V1. Its absence is **not a V1 release blocker** and must not be reported as an unresolved V1 gap.
 
-- current `main`: `35b6aa15479a8a0c999b1260581e4ba7fd389f27`;
-- PR #135 (`feat(R28): reconcile Google Ads through TOCA Core facade`) is merged; its merge commit is `0ffc2cf11c1f48894976676265ea3ebf3792ae87`, which is an ancestor of the current main;
-- the only main change after that merge at reconciliation time is the unrelated Cloud SQL DR evidence commit `35b6aa15479a8a0c999b1260581e4ba7fd389f27`;
-- the reconciled catalog contains **758 capabilities**, including the existing 13 `google_ads.*` capabilities under R28;
-- public MCP surface remains exactly **12 TOCA Core tools**. Google Ads remains internal through the existing runtime capability resolver;
-- official `Quality Gate` workflow id `330272942`, run `31924776669`, passed on `main@0ffc2cf11c1f48894976676265ea3ebf3792ae87` after the PR #135 merge. This evidence change requires a new exact-head Quality run before merge.
+The repository work already completed under R28 remains valid and must not be erased or downgraded to `PLANNED` merely because the live provider was deferred.
 
-## Runtime/provider contract revalidated
+Canonical V1 classification:
 
-The current Google Ads adapter uses Google Ads REST API v25 and requires:
+| Scope | V1 evidence state | Executable live-provider claim | V1 disposition |
+| --- | --- | --- | --- |
+| Google Ads contracts, adapter, resolver and phase-gated runtime path in repository | `CODE_COMPLETE` | No production/provider claim | Preserved for next version |
+| Real provider `READ_ONLY` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
+| Real provider `PREPARE` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
+| Real provider `CREATE_PAUSED` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
+| Real provider `READBACK` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
+| Real provider `MANAGE` / activation / budget changes | Not V1 validated | No | `DEFERRED / NEXT_VERSION` |
 
-- an OAuth access-token secret reference;
-- OAuth scope `https://www.googleapis.com/auth/adwords`;
-- a Google Ads developer-token secret reference;
-- target customer id;
-- optional `login-customer-id` when a manager hierarchy requires it;
-- exact allowed-customer binding;
-- account currency;
-- approved daily budget ceiling in micros;
-- currency minor-unit conversion in micros;
-- allowed Google Ads location criterion ids;
-- optional language criterion allowlist.
+## Repository truth
 
-The mandatory provider rollout remains:
+The merged R28 work contains 13 `google_ads.*` capability definitions and a phase-gated resolver path. The public MCP surface is not widened merely by those definitions; runtime exposure still depends on Google Ads phase/configuration and TOCA Core governance.
+
+The intended provider progression remains:
 
 `OFF -> READ_ONLY -> PREPARE -> CREATE_PAUSED -> READBACK -> MANAGE`
 
-No phase may be skipped merely to obtain write evidence.
+No phase may be skipped. `CREATE_PAUSED` does not authorize activation.
 
-## Real production runtime inspection
+## Last real production inspection retained as historical evidence
 
-The production Cloud Run service was inspected through the existing GitHub -> Google Cloud Workload Identity Federation path using `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`.
+The 2026-08-16 operational inspection found no Google Ads environment/secret-reference binding on the production Cloud Run service. Specifically, there was no production binding for the required phase, customer identity, OAuth token reference, developer-token reference, allowed customer/currency/budget and targeting allowlists.
 
-Observed production state:
+The inspection therefore stopped **before any Google Ads network mutation**:
 
-- service: `toca-mcp-production`;
-- latest ready revision: `toca-mcp-production-00045-hbz`;
-- image: `southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:toca-managed-daemon-0ffc2cf11c1f48894976676265ea3ebf3792ae87`;
-- Google Ads environment / secret-reference entries on the production service: **none** (`googleAdsEnv=[]`).
+- `google_ads.account.inspect`: not executed against the real provider;
+- `google_ads.campaigns.list`: not executed against the real provider;
+- `google_ads.insights.get`: not executed against the real provider;
+- `google_ads.conversion_actions.list`: not executed against the real provider;
+- `google_ads.campaign.create_paused`: not executed;
+- `google_ads.campaign.activate`: not executed / not authorized;
+- spend caused by that closeout: `0`.
 
-Therefore production currently has no runtime binding for:
+This was a configuration/provider-readiness finding, not evidence that the in-repository implementation was absent.
 
-- `GOOGLE_ADS_PHASE`;
-- `GOOGLE_ADS_CUSTOMER_ID`;
-- `GOOGLE_ADS_LOGIN_CUSTOMER_ID` when required;
-- `GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY`;
-- `GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY`;
-- `GOOGLE_ADS_ALLOWED_CUSTOMER_ID`;
-- `GOOGLE_ADS_ALLOWED_CURRENCY`;
-- `GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS`;
-- `GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS`;
-- `GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS`;
-- `GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS` when used.
+## Next-version activation contract
 
-This is a provider/runtime configuration blocker, not a catalog or resolver blocker.
+When Google Ads is resumed in the next version, the live provider must be bound without committing secret values and validated in this order:
 
-## Credential discovery boundary
+1. bind exact customer/login-customer identity, OAuth credential reference, developer-token reference and allowed account/currency/budget/targeting limits;
+2. run real read-only account/campaign/insight/conversion checks and capture provider request evidence;
+3. generate deterministic PREPARE output without mutation;
+4. only after READ and PREPARE are correct, create one approved campaign in `PAUSED`;
+5. independently read back the exact provider resource and prove `PAUSED` and zero unintended spend;
+6. record approval, idempotency, audit and provider-readback evidence;
+7. treat `MANAGE` as a separate higher-risk promotion; do not infer it from `CREATE_PAUSED` proof.
 
-The deployed GitHub/GCP identity can describe the production Cloud Run service, but `secretmanager.secrets.list` is denied for `toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`.
+No mock, catalog entry, code binding or historical CI result may substitute for the real provider evidence above.
 
-Consequences:
+## CI truth
 
-- no claim is made that Google Ads secrets do or do not exist elsewhere in Secret Manager;
-- no credential value was exposed or copied;
-- no orphaned secret was guessed by name;
-- repository Actions secret/variable metadata also is not readable through the current GitHub integration and is not accepted as readiness evidence.
+Historical green Quality runs remain evidence for the exact historical SHAs they validated. The current V1 governance closeout has:
 
-The minimum exact discovery/binding action now requires an administrator who can identify the intended credential and exact secret names, or grant a narrowly scoped mechanism that exposes only the required secret metadata/reference without exposing secret values.
+`CI_VERIFIED = PENDING_FINAL_ACTIONS_ROUND`
 
-## Provider READ result
-
-A fail-closed operational probe checked runtime readiness before any Google Ads network call.
-
-Result:
-
-- runtime configuration complete: **false**;
-- `google_ads.account.inspect`: **NOT EXECUTED**;
-- `google_ads.campaigns.list`: **NOT EXECUTED**;
-- `google_ads.insights.get`: **NOT EXECUTED**;
-- `google_ads.conversion_actions.list`: **NOT EXECUTED**;
-- reason: `RUNTIME_PROVIDER_CONFIGURATION_INCOMPLETE`.
-
-This is intentional. The R28 contract forbids advancing to provider writes until live credential/scope/customer READs are correct.
-
-## Write result
-
-No Google Ads provider write was attempted.
-
-- `google_ads.campaign.prepare`: not advanced to provider validation because the READ prerequisite is unresolved;
-- `google_ads.campaign.create_paused`: **NOT EXECUTED**;
-- campaign resource: none;
-- campaign status: not applicable;
-- provider spend caused by this closeout: **0**;
-- `google_ads.campaign.readback`: not applicable because no campaign was created;
-- `google_ads.campaign.activate`: **NOT EXECUTED / NOT AUTHORIZED**.
-
-PR #135 explicitly does not authorize activation or a production budget update, and this closeout does not change that decision.
-
-## Exact external remediation required
-
-An authorized Google Ads / Google Cloud administrator must provide or bind the following facts without committing secret values:
-
-1. Identify the intended Google Ads customer id and, if the customer is accessed through a manager account, the required login customer id.
-2. Identify an OAuth identity that can access that customer and issue an access token containing `https://www.googleapis.com/auth/adwords`.
-3. Identify the Google Ads developer token and confirm that its access level is valid for the intended non-test customer.
-4. Confirm the Google Ads identity has sufficient account permissions for the required READ operations; before CREATE_PAUSED, confirm it also has campaign-create permission.
-5. Confirm the customer account is enabled and obtain its real currency.
-6. Confirm billing setup/status before the controlled CREATE_PAUSED step when provider data makes it available.
-7. Store the OAuth token and developer token in approved secret storage and grant the production runtime identity only the exact secret-access permissions required for those two secret resources.
-8. Bind the production runtime configuration listed above, first with `GOOGLE_ADS_PHASE=READ_ONLY`. The allowed customer must equal the target customer. Budget and location/language allowlists must be explicitly approved values for the smoke contract.
-9. Re-run the real READ sequence and capture provider request ids/evidence.
-10. Only after all READs are correct, advance to PREPARE/provider validate-only.
-11. Only after PREPARE is correct, create one uniquely named SEARCH smoke campaign in `PAUSED`, with an approved bounded budget and approved location criteria. Do not activate it.
-12. Read the exact campaign resource back, prove `PAUSED`, and query insights/spend to prove zero spend attributable to the smoke campaign.
-13. Record durable approval/idempotency/audit/readback evidence before any lifecycle/runtime binding promotion.
-
-No mock or fake provider result may satisfy these steps.
-
-## Production classification
-
-`GOOGLE ADS = BLOCKED_EXTERNAL_PROVIDER — RUNTIME_BINDING_ABSENT`
-
-The implementation is reconciled inside R28 and the post-merge PR #135 Quality Gate is green, but `PRODUCTION_VERIFIED` is not truthful until the real credential/developer-token/customer binding exists and the mandatory live READ -> PREPARE -> CREATE_PAUSED -> READBACK sequence succeeds.
+That pending CI flag is independent of the Google Ads deferral and does not turn Google Ads into a V1 blocker.
