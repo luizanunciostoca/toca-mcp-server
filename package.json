@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-creative-truth-brand-integrity-contract.mjs && node scripts/check-creative-tool-routing-contract.mjs && node scripts/check-sunset-story-renderer-contract.mjs && node scripts/check-creative-truth-generative-contract.mjs && node scripts/check-operation-scoped-generative-truth.mjs && node scripts/check-the-party-creative-standard.mjs && node scripts/check-the-party-content-context-contract.mjs && node scripts/check-the-party-writeback-contract.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-creative-truth-brand-integrity-contract.mjs && node scripts/check-creative-tool-routing-contract.mjs && node scripts/check-sunset-story-renderer-contract.mjs && node scripts/check-photo-restoration-contract.mjs && node scripts/check-creative-truth-generative-contract.mjs && node scripts/check-operation-scoped-generative-truth.mjs && node scripts/check-the-party-creative-standard.mjs && node scripts/check-the-party-content-context-contract.mjs && node scripts/check-the-party-writeback-contract.mjs",
     "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
