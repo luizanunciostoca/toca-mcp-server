@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import type { BrandAsset, CreativeStandard, VenueAsset } from '../src/contracts/creative-truth.js';
+import type { BrandAsset, CreativeStandard, VideoShot } from '../src/contracts/creative-truth.js';
 import { LocalVideoComposer } from '../src/providers/local/local-video-composer.js';
 
 const standard: CreativeStandard = {
@@ -19,22 +20,27 @@ const standard: CreativeStandard = {
   venueFidelityGateRequired: true,
 };
 
-const venue: VenueAsset = {
-  venueAssetId: 'VENUE-SUN-0244',
+const videoBytes = Uint8Array.from([1, 2, 3, 4]);
+const videoSha256 = createHash('sha256').update(videoBytes).digest('hex');
+
+const shotRegistry: VideoShot = {
+  shotId: 'SHOT-1',
   sourceAssetId: 'SUN-0244',
   sourceDriveFileId: 'source-drive',
   masterAssetId: 'MM-SUN-0244-V1',
   masterDriveFileId: 'master-drive',
   sourceSha256: 'a'.repeat(64),
-  masterSha256: 'b'.repeat(64),
+  masterSha256: videoSha256,
   operation: 'SUNSET',
   locationSignature: 'ambiente_toca',
-  dominantSubject: 'experience',
+  shotClass: 'experience',
+  durationMs: 6000,
+  orientation: '9:16',
   venueVerified: true,
   marketingReady: true,
-  generativeReferenceAllowed: true,
-  protectedElements: ['DECK', 'HORIZONTE'],
+  rightsStatus: 'OWNED',
   status: 'ACTIVE_APPROVED',
+  notes: '',
 };
 
 const toca: BrandAsset = {
@@ -49,8 +55,17 @@ const toca: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
+function brandInput() {
+  return {
+    registry: toca,
+    bytes: Uint8Array.from([10, 11, 12]),
+    contentType: 'image/png' as const,
+    driveFileId: toca.driveFileId,
+  };
+}
+
 describe('LocalVideoComposer', () => {
-  it('builds a deterministic video from verified shots and official logo files', async () => {
+  it('builds a deterministic video only from registered verified shots and official logos', async () => {
     const runner = vi.fn(async (_command: string, args: readonly string[]) => {
       const outputPath = args.at(-1);
       if (!outputPath) throw new Error('missing output path');
@@ -67,34 +82,52 @@ describe('LocalVideoComposer', () => {
       creativeMode: 'REAL_COMPOSITE',
       shots: [
         {
-          shotId: 'SHOT-1',
-          venueAsset: venue,
-          videoBytes: Uint8Array.from([1, 2, 3, 4]),
+          shotId: shotRegistry.shotId,
+          registry: shotRegistry,
+          videoBytes,
           contentType: 'video/mp4',
         },
       ],
       requiredBrands: ['TOCA_DO_MORCEGO'],
-      brandAssets: [
-        {
-          registry: toca,
-          bytes: Uint8Array.from([10, 11, 12]),
-          contentType: 'image/png',
-          driveFileId: toca.driveFileId,
-        },
-      ],
+      brandAssets: [brandInput()],
       createdAt: '2026-08-17T22:00:00-03:00',
     });
 
     expect(result.readyForReview).toBe(true);
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
+    expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-0244-V1']);
     expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
     const commandArgs = runner.mock.calls[0]?.[1] ?? [];
     expect(commandArgs.join(' ')).toContain('logo-0');
   });
 
-  it('rejects a video shot that is not venue verified before ffmpeg runs', async () => {
-    const runner = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
+  it('rejects real video bytes that are not bound to a VIDEO_SHOTS record', async () => {
+    const runner = vi.fn();
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-NO-REGISTRY',
+        creativeId: 'CREATIVE-VIDEO-NO-REGISTRY',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        shots: [
+          {
+            shotId: 'SHOT-NOT-REGISTERED',
+            videoBytes,
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [brandInput()],
+      }),
+    ).rejects.toThrow('VIDEO_SHOT_REGISTRY_BINDING_REQUIRED');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registered shot that is not venue verified before ffmpeg runs', async () => {
+    const runner = vi.fn();
     const composer = new LocalVideoComposer(runner);
 
     await expect(
@@ -106,22 +139,65 @@ describe('LocalVideoComposer', () => {
         shots: [
           {
             shotId: 'SHOT-2',
-            venueAsset: { ...venue, venueVerified: false },
-            videoBytes: Uint8Array.from([1, 2, 3, 4]),
+            registry: { ...shotRegistry, shotId: 'SHOT-2', venueVerified: false },
+            videoBytes,
             contentType: 'video/mp4',
           },
         ],
         requiredBrands: ['TOCA_DO_MORCEGO'],
-        brandAssets: [
-          {
-            registry: toca,
-            bytes: Uint8Array.from([10, 11, 12]),
-            contentType: 'image/png',
-            driveFileId: toca.driveFileId,
-          },
-        ],
+        brandAssets: [brandInput()],
       }),
     ).rejects.toThrow('FAILED_NO_VENUE_VERIFIED_ASSET');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registered shot whose bytes do not match the approved master hash', async () => {
+    const runner = vi.fn();
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-HASH',
+        creativeId: 'CREATIVE-VIDEO-HASH',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        shots: [
+          {
+            shotId: shotRegistry.shotId,
+            registry: shotRegistry,
+            videoBytes: Uint8Array.from([9, 8, 7]),
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [brandInput()],
+      }),
+    ).rejects.toThrow('VIDEO_SHOT_MASTER_HASH_MISMATCH');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registered shot whose rights are not cleared', async () => {
+    const runner = vi.fn();
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-RIGHTS',
+        creativeId: 'CREATIVE-VIDEO-RIGHTS',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        shots: [
+          {
+            shotId: shotRegistry.shotId,
+            registry: { ...shotRegistry, rightsStatus: 'PENDING' },
+            videoBytes,
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [brandInput()],
+      }),
+    ).rejects.toThrow('VIDEO_SHOT_RIGHTS_NOT_CLEARED');
     expect(runner).not.toHaveBeenCalled();
   });
 });
