@@ -7,6 +7,7 @@ import {
 } from '../../contracts/creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
 import type { SecretReference, SecretResolver } from '../../core/secrets.js';
+import type { GoogleSheetsCreativeTruthRegistry } from '../google-sheets/creative-truth-registry.js';
 
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 const DEFAULT_RESPONSE_MODEL = 'gpt-5';
@@ -48,6 +49,10 @@ export interface CreativeTruthGenerativeImageResult {
 export interface CreativeTruthOpenAiImageGeneratorOptions {
   readonly secretResolver: SecretResolver;
   readonly apiKeyReference: SecretReference;
+  readonly registry: Pick<
+    GoogleSheetsCreativeTruthRegistry,
+    'assertCanonicalPolicy' | 'listVenueAssets'
+  >;
   readonly fetchImpl?: typeof fetch;
   readonly responseModel?: string;
   readonly imageModel?: string;
@@ -76,8 +81,12 @@ export class CreativeTruthOpenAiImageGenerator {
     request: CreativeTruthGenerativeImageRequest,
   ): Promise<CreativeTruthGenerativeImageResult> {
     const references = validateRequest(request);
+    await this.options.registry.assertCanonicalPolicy();
+    const referenceSha256s = await assertCanonicalReferenceBytes(
+      references,
+      this.options.registry,
+    );
     const referenceAssetIds = references.map((reference) => reference.registry.assetId);
-    const referenceSha256s = references.map((reference) => sha256(reference.imageBytes));
     const apiKey = await this.options.secretResolver.resolve(this.options.apiKeyReference);
 
     const response = await this.fetchImpl(OPENAI_RESPONSES_ENDPOINT, {
@@ -141,7 +150,10 @@ export class CreativeTruthOpenAiImageGenerator {
 
     const payload = (await response.json()) as ResponsesApiPayload;
     const generation = payload.output?.find(
-      (item) => item.type === 'image_generation_call' && typeof item.result === 'string',
+      (item) =>
+        item.type === 'image_generation_call' &&
+        item.status === 'completed' &&
+        typeof item.result === 'string',
     );
     if (!generation || typeof generation.result !== 'string' || !generation.result.trim()) {
       throw new ExecutionError(
@@ -151,16 +163,7 @@ export class CreativeTruthOpenAiImageGenerator {
       );
     }
 
-    let outputBytes: Uint8Array;
-    try {
-      outputBytes = Uint8Array.from(Buffer.from(generation.result, 'base64'));
-    } catch {
-      throw new ExecutionError(
-        'NATIVE_IMAGE_EDIT_BINDING_FAILED',
-        'OPENAI_CREATIVE_TRUTH_IMAGE_GENERATION_RESPONSE_INVALID_BASE64',
-        false,
-      );
-    }
+    const outputBytes = Uint8Array.from(Buffer.from(generation.result, 'base64'));
     if (!isJpeg(outputBytes)) {
       throw new ExecutionError(
         'NATIVE_IMAGE_EDIT_BINDING_FAILED',
@@ -253,6 +256,38 @@ function validateRequest(
   }
 
   return references;
+}
+
+async function assertCanonicalReferenceBytes(
+  references: readonly GenerativeVenueReferenceInput[],
+  registry: Pick<GoogleSheetsCreativeTruthRegistry, 'listVenueAssets'>,
+): Promise<readonly string[]> {
+  const venueAssets = await registry.listVenueAssets();
+  const bySourceAssetId = new Map(venueAssets.map((asset) => [asset.sourceAssetId, asset]));
+  const verifiedHashes: string[] = [];
+
+  for (const reference of references) {
+    const venue = bySourceAssetId.get(reference.registry.assetId);
+    const observedSha256 = sha256(reference.imageBytes);
+    if (
+      !venue ||
+      venue.sourceDriveFileId !== reference.registry.driveFileId ||
+      !venue.venueVerified ||
+      !venue.generativeReferenceAllowed ||
+      venue.status === 'REVOKED' ||
+      !venue.sourceSha256 ||
+      venue.sourceSha256.toLowerCase() !== observedSha256
+    ) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
+        false,
+      );
+    }
+    verifiedHashes.push(observedSha256);
+  }
+
+  return verifiedHashes;
 }
 
 function buildCreativeTruthGenerationPolicy(
