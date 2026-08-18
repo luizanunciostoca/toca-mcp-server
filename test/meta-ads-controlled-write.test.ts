@@ -4,6 +4,7 @@ import {
   MetaAdsControlledWriteService,
   requestSha256,
   type ControlledCreatePausedPlan,
+  type ControlledCreativePlan,
   type MetaAdsWriteGuardrails,
 } from '../src/providers/meta-ads/meta-ads-controlled-write.js';
 import type { MetaAdsProvider } from '../src/providers/meta-ads/meta-ads-contracts.js';
@@ -146,6 +147,18 @@ function withPixel(pixelId: string): ControlledCreatePausedPlan {
   };
 }
 
+function withoutTruthBinding(creative: ControlledCreativePlan): ControlledCreativePlan {
+  return {
+    name: creative.name,
+    pageId: creative.pageId,
+    ...(creative.instagramActorId ? { instagramActorId: creative.instagramActorId } : {}),
+    objectStorySpec: creative.objectStorySpec,
+    ...(creative.providerSourceCreativeId
+      ? { providerSourceCreativeId: creative.providerSourceCreativeId }
+      : {}),
+  };
+}
+
 describe('Meta Ads controlled create-paused service', () => {
   it('generates a stable deterministic approval hash without provider writes', () => {
     const provider = createProvider();
@@ -243,7 +256,7 @@ describe('Meta Ads controlled create-paused service', () => {
     const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
     const unbound: ControlledCreatePausedPlan = {
       ...plan,
-      creatives: [{ ...plan.creatives[0]!, creativeTruthBinding: undefined }],
+      creatives: [withoutTruthBinding(plan.creatives[0]!)],
       ads: [{ name: 'Only ad', creativeIndex: 0 }],
     };
     expect(() => service.prepare(unbound)).toThrow('META_ADS_CREATIVE_TRUTH_BINDING_REQUIRED');
