@@ -161,7 +161,7 @@ describe('Creative Truth gates', () => {
     const gate = evaluateVenueFidelity({
       creativeMode: 'GENERATIVE_EXCEPTION',
       candidateSha256,
-      evidence: cleanEvidence,
+      evidence: generativeEvidence('TOCA_VENUE_REFERENCE_SET_V1', []),
     });
 
     expect(gate.status).toBe('FAILED');
@@ -175,12 +175,7 @@ describe('Creative Truth gates', () => {
       generativeException: approval,
       references: [reference('REF-1', 'SUN-0001')],
       candidateSha256,
-      evidence: {
-        ...cleanEvidence,
-        sourceSha256: undefined,
-        referenceSetId: approval.referenceSetId,
-        referenceAssetIds: ['SUN-0001'],
-      },
+      evidence: generativeEvidence(approval.referenceSetId, ['SUN-0001']),
       nowIso: '2026-08-17T22:00:00-03:00',
     });
 
@@ -201,10 +196,10 @@ describe('Creative Truth gates', () => {
       references,
       candidateSha256,
       evidence: {
-        ...cleanEvidence,
-        sourceSha256: undefined,
-        referenceSetId: approval.referenceSetId,
-        referenceAssetIds: references.map((item) => item.assetId),
+        ...generativeEvidence(
+          approval.referenceSetId,
+          references.map((item) => item.assetId),
+        ),
         architectureDriftDetected: true,
         sceneInventionDetected: true,
       },
@@ -223,19 +218,24 @@ describe('Creative Truth gates', () => {
       reference('REF-2', 'SUN-0004'),
       reference('REF-3', 'SUN-0009'),
     ];
+    const evidenceWithoutReview: FidelityEvidence = {
+      verifier: 'TEST_VERIFIER',
+      verificationMethod: 'MULTIMODAL_REVIEW',
+      candidateSha256,
+      sourceIdentityPreserved: true,
+      architectureDriftDetected: false,
+      sceneInventionDetected: false,
+      logoReconstructionDetected: false,
+      referenceSetId: approval.referenceSetId,
+      referenceAssetIds: references.map((item) => item.assetId),
+      notes: [],
+    };
     const gate = evaluateVenueFidelity({
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
       candidateSha256,
-      evidence: {
-        ...cleanEvidence,
-        sourceSha256: undefined,
-        verificationMethod: 'MULTIMODAL_REVIEW',
-        reviewRef: undefined,
-        referenceSetId: approval.referenceSetId,
-        referenceAssetIds: references.map((item) => item.assetId),
-      },
+      evidence: evidenceWithoutReview,
       nowIso: '2026-08-17T22:00:00-03:00',
     });
 
@@ -255,12 +255,10 @@ describe('Creative Truth gates', () => {
       generativeException: approval,
       references,
       candidateSha256,
-      evidence: {
-        ...cleanEvidence,
-        sourceSha256: undefined,
-        referenceSetId: approval.referenceSetId,
-        referenceAssetIds: references.map((item) => item.assetId),
-      },
+      evidence: generativeEvidence(
+        approval.referenceSetId,
+        references.map((item) => item.assetId),
+      ),
       nowIso: '2026-08-17T22:00:00-03:00',
     });
 
@@ -268,6 +266,22 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toEqual([]);
   });
 });
+
+function generativeEvidence(referenceSetId: string, referenceAssetIds: string[]): FidelityEvidence {
+  return {
+    verifier: 'TEST_VERIFIER',
+    verificationMethod: 'MULTIMODAL_PLUS_HUMAN',
+    candidateSha256,
+    sourceIdentityPreserved: true,
+    architectureDriftDetected: false,
+    sceneInventionDetected: false,
+    logoReconstructionDetected: false,
+    referenceSetId,
+    referenceAssetIds,
+    reviewRef: 'review-output-candidate-c',
+    notes: [],
+  };
+}
 
 function approvedException(): GenerativeExceptionApproval {
   return {
