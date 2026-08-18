@@ -14,6 +14,7 @@ import { assertCreativeStandard, resolveCreativeMode } from './creative-truth.js
 import {
   THE_PARTY_HYBRID_NETWORKS_STANDARD_ID,
   isThePartyVisualStandardId,
+  resolveThePartyVenueAssetPreferences,
   resolveThePartyVisualFamily,
   type ThePartyCreativeIntent,
   type ThePartyEnvironment,
@@ -96,7 +97,9 @@ export class CreativeTruthResolver {
       request.brandVariant ?? 'WHITE',
     );
     const partyContext =
-      request.operation === 'THE_PARTY' && request.thePartyEnvironment
+      request.operation === 'THE_PARTY' &&
+      standard.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID &&
+      request.thePartyEnvironment
         ? { thePartyEnvironment: request.thePartyEnvironment }
         : {};
 
@@ -146,7 +149,7 @@ export class CreativeTruthResolver {
 
     const venueAsset = request.venueAssetId
       ? await this.registry.getVenueAsset(request.venueAssetId)
-      : await this.selectVenueAsset(request.operation);
+      : await this.selectVenueAsset(request);
     if (!venueAsset || !venueAsset.venueVerified || venueAsset.status === 'REVOKED') {
       throw new ExecutionError(
         'POLICY_DENIED',
@@ -243,15 +246,32 @@ export class CreativeTruthResolver {
     return resolved;
   }
 
-  private async selectVenueAsset(operation: string): Promise<VenueAsset | undefined> {
-    const candidates = await this.registry.listVenueAssets(operation);
-    return candidates.find(
+  private async selectVenueAsset(
+    request: CreativeTruthResolutionRequest,
+  ): Promise<VenueAsset | undefined> {
+    const candidates = await this.registry.listVenueAssets(request.operation);
+    const eligible = candidates.filter(
       (asset) =>
         asset.venueVerified &&
         asset.marketingReady &&
         asset.status === 'ACTIVE_APPROVED' &&
         Boolean(asset.masterAssetId && asset.masterDriveFileId && asset.masterSha256),
     );
+
+    if (request.operation !== 'THE_PARTY') return eligible[0];
+    if (!request.thePartyIntent) {
+      throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_VISUAL_INTENT_REQUIRED', false);
+    }
+
+    const preferredAssetIds = resolveThePartyVenueAssetPreferences({
+      intent: request.thePartyIntent,
+      ...(request.thePartyEnvironment ? { environment: request.thePartyEnvironment } : {}),
+    });
+    for (const venueAssetId of preferredAssetIds) {
+      const match = eligible.find((asset) => asset.venueAssetId === venueAssetId);
+      if (match) return match;
+    }
+    return undefined;
   }
 }
 
@@ -264,7 +284,18 @@ function resolveRequestedStandardId(request: CreativeTruthResolutionRequest): st
     return explicit;
   }
 
-  if (explicit) return explicit;
+  if (explicit) {
+    if (request.thePartyIntent) {
+      const resolved = resolveThePartyVisualFamily({
+        intent: request.thePartyIntent,
+        ...(request.thePartyEnvironment ? { environment: request.thePartyEnvironment } : {}),
+      });
+      if (resolved.standardId !== explicit) {
+        throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_STANDARD_INTENT_MISMATCH', false);
+      }
+    }
+    return explicit;
+  }
   if (!request.thePartyIntent) {
     throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_VISUAL_INTENT_REQUIRED', false);
   }
