@@ -14,6 +14,11 @@ const requiredFiles = [
   'src/creative/controlled-photo-to-video-finalization.ts',
   'src/marketing-autopilot-video-generate.ts',
   'src/marketing-autopilot-video-finalize.ts',
+  'test/photo-to-video-contract.test.ts',
+  'test/controlled-photo-to-video-generation.test.ts',
+  'test/controlled-photo-to-video-finalization.test.ts',
+  'test/photo-to-video-content-writeback.test.ts',
+  'test/openai-scene-continuation-video-provider.test.ts',
   'docs/architecture/photo-to-video-routes-v1.md',
 ];
 for (const path of requiredFiles) {
@@ -28,6 +33,8 @@ requireIncludes('control/photo-to-video-policy.v1.json', [
   'OPENAI_VIDEO_API',
   'sora-2',
   'fullSyntheticVenueVideoWithoutSourceImage',
+  'durableCandidateArtifactRequired',
+  'artifactReadbackRequiredBeforeFinalization',
   'UNSUPPORTED_V1',
 ]);
 
@@ -40,6 +47,7 @@ requireIncludes('src/contracts/photo-to-video.ts', [
   'validatedAt: z.string().trim().min(1)',
   'artifactRef:',
   'artifactObjectName:',
+  'finalArtifactRef:',
   'sourceImageCompared: z.literal(true)',
   'architectureDriftDetected: z.literal(false)',
   'environmentDriftDetected: z.literal(false)',
@@ -66,6 +74,7 @@ requireIncludes('src/providers/google-sheets/photo-to-video-registry.ts', [
 ]);
 
 requireIncludes('src/providers/google-sheets/photo-to-video-content-writeback.ts', [
+  "CONTENT_ITEMS!A1:CH2000",
   'GoogleSheetsPhotoToVideoContentWriteback',
   'video_candidate_sha256',
   'video_candidate_artifact_ref',
@@ -156,6 +165,31 @@ requireIncludes('src/marketing-autopilot-video-finalize.ts', [
   'VIDEO_FINALIZE_CALLER_TIME_FORBIDDEN',
   'VIDEO_FINALIZE_CALLER_OUTPUT_FORBIDDEN',
   'publicationAuthorized: false',
+]);
+
+requireIncludes('test/controlled-photo-to-video-generation.test.ts', [
+  'persists exact candidate bytes before marking the content item review-required',
+  'candidateArtifactRef: artifactRef',
+  'invocationCallOrder',
+  'does not write GENERATED_REVIEW_REQUIRED state when durable artifact persistence fails',
+]);
+requireIncludes('test/controlled-photo-to-video-finalization.test.ts', [
+  'finalizes only the durable exact reviewed bytes',
+  'loadExact',
+  'finalArtifactRef',
+]);
+requireIncludes('test/photo-to-video-content-writeback.test.ts', [
+  'video_candidate_artifact_ref',
+  'video_final_artifact_ref',
+  'requires final writeback to match the recorded candidate and artifact exactly',
+]);
+requireIncludes('test/photo-to-video-contract.test.ts', [
+  'explicit source-to-output evidence',
+  'durable evidence reference',
+]);
+requireIncludes('test/openai-scene-continuation-video-provider.test.ts', [
+  'input_reference',
+  'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
 ]);
 
 requireIncludes('package.json', [
