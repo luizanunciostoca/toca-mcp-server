@@ -24,14 +24,14 @@ export interface LocalPhotoEnhanceInput {
   };
 }
 
-export interface LocalPhotoEnhanceResult extends CreativeEnhancementProvenance {
+export type LocalPhotoEnhanceResult = CreativeEnhancementProvenance & {
   readonly editMode: 'ENHANCE_EXISTING_IMAGE';
   readonly editorProvider: 'LOCAL_IMAGEMAGICK';
   readonly pipelineVersion: 'local-photo-enhancer-v1';
   readonly requestedScale: '200%';
   readonly outputContentType: 'image/jpeg';
   readonly outputBytes: Uint8Array;
-}
+};
 
 export type LocalPhotoEnhancerCommandRunner = (
   command: string,
@@ -81,6 +81,8 @@ export class LocalPhotoEnhancer {
       }
 
       const provenance = creativeEnhancementProvenanceSchema.parse({
+        policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+        creativeMode: 'REAL_PLUS_ENHANCEMENT',
         sourceAssetId: input.sourceAssetId,
         sourceDriveFileId: input.sourceDriveFileId,
         sourceSha256: sha256(input.imageBytes),
@@ -141,6 +143,7 @@ function validateInput(input: LocalPhotoEnhanceInput): void {
     );
   }
   if (
+    !input.creativeTruth ||
     input.creativeTruth.policyId !== TOCA_CREATIVE_TRUTH_POLICY_ID ||
     input.creativeTruth.creativeMode !== 'REAL_PLUS_ENHANCEMENT'
   ) {
