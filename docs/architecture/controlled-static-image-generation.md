@@ -4,13 +4,13 @@ Status: implementation candidate on PR #197. This document describes the executa
 
 ## Purpose
 
-The normal TOCA creative path remains `REAL_COMPOSITE` / `REAL_PLUS_ENHANCEMENT`. Full static generation exists only for an explicitly approved exception and must preserve venue/brand truth.
+The normal TOCA creative path remains `REAL_COMPOSITE` / `REAL_PLUS_ENHANCEMENT`. Full static generation exists only for an explicitly approved exception and must preserve venue and brand truth.
 
 The canonical executable path is:
 
-`content_item -> canonical operation -> canonical approval -> operation-scoped reference set -> authenticated Drive byte download -> source SHA verification -> OpenAI image generation -> candidate SHA -> post-generation review -> Venue Fidelity -> deterministic composition -> Brand Integrity -> Quality -> exact output binding -> approval/publication`
+`content item -> canonical operation -> canonical approval -> operation-scoped reference set -> authenticated Drive reference bytes -> source SHA verification -> OpenAI candidate generation -> immutable candidate manifest -> output-specific human/multimodal review -> controlled finalization -> canonical standard/context/brand revalidation -> Venue Fidelity -> deterministic composition -> Brand Integrity -> Quality -> exact final output binding -> normal approval/publication boundaries`
 
-Generation stops at the candidate boundary. The generator never returns publication eligibility.
+Generation and finalization are deliberately separate. Generation stops at a non-publishable candidate. Finalization only accepts the exact reviewed candidate and still does not authorize publication.
 
 ## Operation-scoped truth
 
@@ -25,16 +25,30 @@ Active reference sets are:
 
 `content operation == approval.operation == operation(reference_set_id)`.
 
-Missing canonical content operation, unsupported operation, approval/reference-set mismatch, cross-operation reference reuse or a deprecated reference set fails closed **before** provider access.
+Missing canonical content operation, unsupported operation, approval/reference-set mismatch, cross-operation reference reuse or a deprecated reference set fails closed before provider access and is revalidated again before final composition.
 
 ## Runtime components
 
-- `ControlledOperationScopedStaticImageGenerationService`: top-level fail-closed orchestration.
-- `GoogleSheetsOperationScopedGenerativeRegistry`: canonical operation, scoped policy, approval and reference topology reads.
+Generation:
+
+- `ControlledOperationScopedStaticImageGenerationService`: top-level fail-closed generation orchestration with trusted clock.
+- `GoogleSheetsOperationScopedGenerativeRegistry`: canonical operation, scoped policy, approval, reference, brand and standard reads.
 - `GoogleSheetsCreativeTruthRegistry`: shared Brand/Venue/Creative Truth primitives and base policy validation.
-- `GoogleDriveCreativeTruthReferenceLoader`: authenticated metadata + byte download from exact canonical Drive file IDs.
-- `CreativeTruthOperationScopedImageGenerator`: provider call only after independent canonical approval/operation/reference revalidation.
-- `marketing-autopilot-image-generate.ts`: operator CLI that writes a candidate JPEG and a non-publishable evidence manifest.
+- `GoogleDriveCreativeTruthReferenceLoader`: authenticated metadata + byte download from exact canonical Drive reference IDs.
+- `CreativeTruthOperationScopedImageGenerator`: provider call only after independent canonical approval/operation/reference/hash revalidation.
+- `marketing-autopilot-image-generate.ts`: operator CLI that writes a candidate JPEG and a non-publishable candidate manifest.
+
+Finalization:
+
+- `operationScopedGenerativeCandidateManifestSchema`: immutable candidate identity and reference lineage contract.
+- `evaluateOperationScopedGenerativeFidelity`: output-specific human/multimodal Venue Fidelity gate.
+- `ControlledOperationScopedGenerativeFinalizationService`: single canonical finalization authority.
+- `createControlledOperationScopedGenerativeFinalizationService`: production factory that owns construction of the raw local compositor so CLIs/workers cannot import it directly.
+- `LocalOperationScopedGenerativeComposer`: deterministic ImageMagick rendering primitive, not an execution authority.
+- `resolveCanonicalGenerativeBrandInputs`: canonical `BRAND_ASSETS` metadata revalidation before rendering.
+- `GoogleDriveCreativeTruthBrandAssetLoader`: loads exact official brand bytes from Drive and verifies pinned SHA-256.
+- `GoogleSheetsThePartyContentOrchestration`: canonical The Party standard/environment context resolver used by finalization.
+- `marketing-autopilot-image-finalize.ts`: operator CLI for reviewed candidate -> final exact asset. It returns `publicationAuthorized=false`.
 
 ## Canonical Drive policy boundary
 
@@ -71,7 +85,15 @@ Accepted operations for this V1 path are only:
 
 Zero matches fail closed as `FAILED_GENERATIVE_CONTENT_OPERATION_MISSING`. Duplicate identity fails closed as `FAILED_GENERATIVE_CONTENT_OPERATION_AMBIGUOUS`. Any other operation fails closed as `FAILED_GENERATIVE_CONTENT_OPERATION_UNSUPPORTED`.
 
-The higher-level service verifies this operation before loading approval/references. The low-level OpenAI adapter verifies it again immediately before provider access. This deliberate duplication prevents a direct low-level call from bypassing content-operation truth.
+The higher-level generation service verifies this operation before loading approval/references. The low-level OpenAI adapter verifies it again immediately before provider access. The finalization service verifies it a third time before deterministic composition. This deliberate duplication prevents direct low-level calls or stale candidate artifacts from bypassing current content-operation truth.
+
+## Trusted clock boundary
+
+Approval expiry is never evaluated against caller-provided time.
+
+Both controlled generation and controlled finalization own an injected trusted `now()` dependency, defaulting to current runtime time. The operator CLIs explicitly reject `--now-iso`. An invalid trusted clock fails closed with `GENERATIVE_TRUSTED_CLOCK_INVALID`.
+
+This prevents backdating an expired exception approval at either generation or finalization.
 
 ## Approval boundary
 
@@ -87,7 +109,7 @@ The canonical approval must:
 - set `allowAiLogoGeneration=false`;
 - be unexpired when an expiry exists.
 
-The approval schema itself rejects operation/reference-set mismatch. The low-level generator independently re-reads the canonical approval and requires exact identity—including `operation`—against the supplied approval object.
+The approval schema rejects operation/reference-set mismatch. The low-level generator independently re-reads the canonical approval before provider access. Finalization re-reads it again and requires exact `exceptionId`, `approvalRef`, content item, operation and reference-set binding from the candidate manifest.
 
 ## Reference boundary
 
@@ -98,7 +120,7 @@ The approval schema itself rejects operation/reference-set mismatch. The low-lev
 - `VENUE_VERIFIED`;
 - `requiredForGenerativeException=true`.
 
-Duplicate source asset IDs or insufficient coverage fail closed. References are loaded in deterministic `referenceId` order.
+Duplicate reference IDs, duplicate source asset IDs or insufficient coverage fail closed. References are loaded in deterministic `referenceId` order.
 
 `GoogleDriveCreativeTruthReferenceLoader` then:
 
@@ -120,19 +142,99 @@ After download, `CreativeTruthOperationScopedImageGenerator` re-resolves each so
 - non-empty canonical `sourceSha256`;
 - SHA-256 of actual downloaded bytes equal to canonical `sourceSha256`.
 
-A Drive metadata error, unauthorized download, source ambiguity, cross-operation venue row, substituted bytes or hash mismatch stops generation before the OpenAI request.
+The candidate manifest persists the deterministic ordered `referenceAssetIds` and `referenceSha256s`. Finalization re-reads the current canonical reference set and `VENUE_VISUALS`, then requires the same ordered identities and hashes. A revoked/replaced reference therefore invalidates an older candidate before it can become final.
 
-## The Party-specific rule
+## Candidate manifest boundary
+
+The generated candidate is represented by `operationScopedGenerativeCandidateManifestSchema` and remains non-final.
+
+The manifest binds:
+
+- `contentItemId`;
+- `operation`;
+- operation-scoped `referenceSetId`;
+- `exceptionId` and `approvalRef`;
+- exact `candidateSha256`;
+- ordered reference asset IDs and source SHA-256 values;
+- provider and model/tool metadata;
+- output MIME and optional byte length;
+- `requiresPostGenerationHumanReview=true`;
+- `requiresVenueFidelityGate=true`;
+- `readyForFinalComposition=false`;
+- `publicationEligible=false`.
+
+The schema itself rejects operation/reference-set mismatch, lineage-length mismatch, duplicate reference identities and duplicate reference source hashes.
+
+## Post-generation Venue Fidelity
+
+`evaluateOperationScopedGenerativeFidelity` accepts only evidence bound to the exact candidate SHA and exact operation-scoped reference set.
+
+A passing candidate requires:
+
+- a still-valid operation-scoped approval;
+- enough unique active verified references;
+- evidence covering only and all canonical eligible references;
+- output-specific `HUMAN_REVIEW` or `MULTIMODAL_PLUS_HUMAN` evidence with `reviewRef`;
+- no architecture drift;
+- no scene invention;
+- no AI logo reconstruction;
+- preserved source/venue identity.
+
+Evidence replayed from another candidate or another operation/reference set fails closed.
+
+## Canonical finalization boundary
+
+`ControlledOperationScopedGenerativeFinalizationService` is the only finalization authority. `LocalOperationScopedGenerativeComposer` is intentionally only a primitive and architecture checks forbid operator/worker imports outside the controlled finalizer.
+
+Immediately before render, finalization revalidates:
+
+1. candidate MIME, byte length and SHA-256;
+2. canonical Creative Truth policy;
+3. current `CONTENT_ITEMS.operation`;
+4. current approval identity and expiry using trusted time;
+5. current canonical reference topology and minimum count;
+6. current `VENUE_VISUALS` operation, Drive identity and source SHA-256;
+7. current `CREATIVE_STANDARDS` record for the requested output/visual standard;
+8. canonical The Party content/edition context when `operation=THE_PARTY`;
+9. canonical `BRAND_ASSETS` metadata;
+10. exact supplied brand bytes/locator against canonical Brand Integrity during deterministic composition.
+
+The caller may request a standard by ID, but caller-supplied standard fields are discarded and replaced by canonical registry readback.
+
+## Official brand byte boundary
+
+The finalization CLI resolves every required brand from canonical `BRAND_ASSETS` and then uses `GoogleDriveCreativeTruthBrandAssetLoader` to load the exact official file.
+
+The loader requires:
+
+- `status=ACTIVE_APPROVED`;
+- `aiReconstructionAllowed=false`;
+- `integrityMode=SHA256_PINNED`;
+- supported image MIME;
+- exact Drive metadata file identity and MIME;
+- `canDownload=true`;
+- valid image signature;
+- SHA-256 of downloaded bytes equal to the pinned registry hash.
+
+The finalization service re-resolves brand metadata again before passing it to the primitive compositor. The compositor's Brand Integrity gate re-hashes actual bytes, so caller-forged metadata or substituted logo bytes cannot become a final asset.
+
+For The Party, the hero brand must resolve to the official white asset `BRAND-THE-PARTY-WHITE-V1`.
+
+## The Party-specific boundary
 
 A The Party exception can only use `TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1`. Sunset references never define The Party venue truth.
 
-Operation-scoped reference truth does **not** replace The Party visual governance. A final The Party creative still requires the resolved The Party visual family, official hero brand, edition/environment context when Hybrid Networks applies, post-generation human/multimodal review, Venue Fidelity, Brand Integrity, Quality and exact output binding.
+The Party visual governance is enforced inside the canonical finalizer, not delegated to the CLI. For `operation=THE_PARTY`, finalization requires a canonical The Party context resolver. The effective output/visual standard must equal the current standard resolved for the same content item.
 
-## Sunset-specific rule
+For `THE_PARTY_HYBRID_NETWORKS_V1`, the environment is read from canonical content/edition context. A missing/unresolved environment fails with `THE_PARTY_ENVIRONMENT_REQUIRED`. Callers cannot provide `partyEnvironment` or `--party-environment` to override this state.
+
+This means a worker introduced later cannot bypass the edition boundary simply by calling the finalization class directly.
+
+## Sunset-specific boundary
 
 A Sunset exception can only use `TOCA_VENUE_REFERENCE_SET_SUNSET_V1`. The Party references never define Sunset venue truth.
 
-The same post-generation Creative Truth and exact-output boundaries apply.
+The final standard must be an active canonical Sunset-compatible standard. Required Toca branding and the same post-generation Creative Truth / exact-output boundaries still apply.
 
 ## OpenAI binding
 
@@ -150,7 +252,7 @@ The developer-priority policy is generated from canonical operation/reference me
 
 The only model override exposed by this path is `OPENAI_CREATIVE_RESPONSE_MODEL`. There is no automatic fallback to an older model, another reference set or prompt-only generation.
 
-## CLI
+## Generation CLI
 
 Development entrypoint:
 
@@ -162,7 +264,7 @@ pnpm dev:marketing-autopilot-image-generate -- \
   --manifest .autopilot/candidate.manifest.json
 ```
 
-Exactly one of `--prompt` or `--prompt-file` is required.
+Exactly one of `--prompt` or `--prompt-file` is required. `--now-iso` is explicitly forbidden.
 
 Secret references:
 
@@ -170,35 +272,47 @@ Secret references:
 - `GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY` — optional Drive OAuth token reference; when omitted, the Sheets token reference is reused and therefore must also have Drive download scope;
 - `OPENAI_API_KEY_ENV_KEY` — environment-variable name containing the OpenAI API key.
 
-The CLI writes the generated candidate and a manifest with:
+The legitimate next state after this command is **review required**, never final/published by implication.
 
-- `status=GENERATED_REVIEW_REQUIRED`;
-- exact `candidateSha256`;
-- `operation`;
-- operation-scoped `referenceSetId`;
-- approval/reference lineage;
-- response model/tool selection;
-- `readyForFinalComposition=false`;
-- `publicationEligible=false`.
+## Finalization CLI
+
+After an output-specific review has produced a `FidelityEvidence` JSON document, the controlled finalization entrypoint is:
+
+```text
+pnpm dev:marketing-autopilot-image-finalize -- \
+  --candidate .autopilot/candidate.jpg \
+  --candidate-manifest .autopilot/candidate.manifest.json \
+  --fidelity-evidence .autopilot/fidelity-evidence.json \
+  --creative-id <CREATIVE_ID> \
+  --standard-id <CANONICAL_STANDARD_ID> \
+  --canvas 1080x1350 \
+  --output .autopilot/final.jpg \
+  --final-manifest .autopilot/final.manifest.json
+```
+
+For an `operation=ALL` transversal output standard, `--visual-standard-id` is also required so the finalizer can re-resolve the exact operation-specific visual identity.
+
+Optional copy fields are deterministic composition inputs. `--additional-brands` may request additional registered partner brands, but cannot remove the mandatory operation brand. The Party environment is never accepted from the CLI. `--now-iso` and `--party-environment` are explicitly forbidden.
+
+Successful finalization writes the exact JPEG and deterministic final manifest, and still returns `publicationAuthorized=false`. Publication continues through the existing Approval / Policy / Capability / exact-asset provider boundaries.
 
 ## What this does not do
 
-This command does not:
+Neither command:
 
-- create or infer an exception approval;
-- infer the content operation;
-- infer The Party `INTERNATIONAL|NATIONAL` environment;
-- use the deprecated global reference set;
-- cross-use Sunset/The Party references;
-- generate a logo;
-- approve generated pixels;
-- fabricate Venue Fidelity review;
-- mark Brand Integrity or Quality as passed;
+- creates or infers an exception approval;
+- accepts the deprecated global reference set;
+- cross-uses Sunset/The Party references;
+- invents or reconstructs a logo;
+- fabricates Venue Fidelity review;
+- bypasses The Party edition/environment truth;
+- lets caller-controlled time keep an expired approval alive;
+- silently trust stale standard, reference or brand metadata;
 - publish to Instagram;
 - create or activate Meta Ads;
 - enable full generative venue video.
 
-The next legitimate state after successful generation is **review required**, never approved/published by implication.
+Generation alone never marks Brand Integrity, Venue Fidelity or Quality as passed. Finalization can produce the exact gate-bound asset, but still does not grant provider publication authorization.
 
 ## Release gate
 
