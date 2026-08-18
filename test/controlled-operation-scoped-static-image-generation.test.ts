@@ -12,6 +12,8 @@ import type {
   OperationScopedGenerativeImageResult,
 } from '../src/providers/openai/creative-truth-operation-scoped-image-generator.js';
 
+const TRUSTED_NOW = '2026-08-18T04:00:00Z';
+
 const approval: OperationScopedGenerativeExceptionApproval = {
   exceptionId: 'GEN-SUN-1',
   contentItemId: 'CONTENT-SUN-1',
@@ -92,6 +94,7 @@ function setup(
   references: readonly VenueReference[],
   contentOperation: TocaGenerativeOperation | undefined = 'SUNSET',
   approvalValue: OperationScopedGenerativeExceptionApproval = approval,
+  nowIso = TRUSTED_NOW,
 ) {
   const assertCanonicalPolicy = vi.fn(async (): Promise<void> => undefined);
   const getContentItemOperation = vi.fn(async () => contentOperation);
@@ -107,6 +110,8 @@ function setup(
     getApprovedGenerativeException,
     getReferenceSet,
     getVenueAssetBySourceAssetId,
+    getBrandAsset: vi.fn(async () => undefined),
+    getCreativeStandard: vi.fn(async () => undefined),
   };
 
   const load = vi.fn(async (entry: VenueReference) => ({
@@ -127,6 +132,7 @@ function setup(
     registry,
     referenceLoader,
     generator: { generate },
+    now: () => nowIso,
   });
   return {
     service,
@@ -147,7 +153,6 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
     const result = await deps.service.generate({
       contentItemId: 'CONTENT-SUN-1',
       prompt: 'Create a faithful Sunset scene.',
-      nowIso: '2026-08-18T04:00:00Z',
     });
 
     expect(deps.assertCanonicalPolicy).toHaveBeenCalledOnce();
@@ -166,6 +171,7 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
         approval,
         contentItemId: 'CONTENT-SUN-1',
         prompt: 'Create a faithful Sunset scene.',
+        nowIso: TRUSTED_NOW,
       }),
     );
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
@@ -180,7 +186,6 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
       deps.service.generate({
         contentItemId: 'CONTENT-SUN-1',
         prompt: 'Generate image',
-        nowIso: '2026-08-18T04:00:00Z',
       }),
     ).rejects.toThrow('FAILED_GENERATIVE_CONTENT_OPERATION_MISSING');
     expect(deps.getApprovedGenerativeException).not.toHaveBeenCalled();
@@ -194,7 +199,6 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
       deps.service.generate({
         contentItemId: 'CONTENT-SUN-1',
         prompt: 'Generate image',
-        nowIso: '2026-08-18T04:00:00Z',
       }),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH');
     expect(deps.getReferenceSet).not.toHaveBeenCalled();
@@ -212,7 +216,6 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
       deps.service.generate({
         contentItemId: 'CONTENT-SUN-1',
         prompt: 'Generate image',
-        nowIso: '2026-08-18T04:00:00Z',
       }),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_MISSING');
     expect(deps.load).not.toHaveBeenCalled();
@@ -230,9 +233,48 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
       deps.service.generate({
         contentItemId: 'CONTENT-SUN-1',
         prompt: 'Generate image',
-        nowIso: '2026-08-18T04:00:00Z',
       }),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_MISSING');
     expect(deps.load).not.toHaveBeenCalled();
+  });
+
+  it('cannot backdate an expired approval because the clock is an injected trusted dependency', async () => {
+    const expired = {
+      ...approval,
+      expiresAt: '2026-08-18T03:59:59Z',
+    };
+    const deps = setup(
+      [reference(1), reference(2), reference(3)],
+      'SUNSET',
+      expired,
+      TRUSTED_NOW,
+    );
+
+    await expect(
+      deps.service.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate image',
+      }),
+    ).rejects.toThrow('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+    expect(deps.load).not.toHaveBeenCalled();
+    expect(deps.generate).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if the trusted clock itself is invalid', async () => {
+    const deps = setup(
+      [reference(1), reference(2), reference(3)],
+      'SUNSET',
+      approval,
+      'not-a-timestamp',
+    );
+
+    await expect(
+      deps.service.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate image',
+      }),
+    ).rejects.toThrow('GENERATIVE_TRUSTED_CLOCK_INVALID');
+    expect(deps.assertCanonicalPolicy).not.toHaveBeenCalled();
+    expect(deps.generate).not.toHaveBeenCalled();
   });
 });
