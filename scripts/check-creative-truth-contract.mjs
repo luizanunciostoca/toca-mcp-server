@@ -44,6 +44,7 @@ if (
   policy.rules?.enhancementProvenanceRequired !== true ||
   policy.rules?.videoRealPlusEnhancement !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
   policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
+  policy.rules?.videoGenerativeException !== 'UNSUPPORTED_V1' ||
   policy.rules?.failClosed !== true ||
   policy.generativeException?.venueReferenceSetRequired !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
   policy.generativeException?.minimumVerifiedReferences !== 3 ||
