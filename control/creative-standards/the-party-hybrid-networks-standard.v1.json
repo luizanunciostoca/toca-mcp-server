@@ -15,7 +15,8 @@
     "driveDocumentId": "1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk",
     "canonicalManualDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
     "canonicalReferenceImageDriveId": "1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD",
-    "officialHeroLogoDriveId": "1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF"
+    "officialHeroLogoDriveId": "1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
   },
   "visualFamily": {
     "id": "HYBRID_NETWORKS",
@@ -89,7 +90,8 @@
     "venueFidelityGateRequired": true,
     "brandIntegrityGateRequired": true,
     "qualityGateRequired": true,
-    "generativeExceptionRequiresExplicitApproval": true
+    "generativeExceptionRequiresExplicitApproval": true,
+    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
   },
   "formatGuidance": {
     "story": "1080x1920_9_16",
