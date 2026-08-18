@@ -244,7 +244,7 @@ export function sha256(bytes: Uint8Array): string {
 
 function validateGenerativeException(
   input: VenueFidelityInput,
-  evidence: FidelityEvidence | undefined,
+  _evidence: FidelityEvidence | undefined,
   failures: Set<CreativeTruthFailureCode>,
 ): void {
   const approval = input.generativeException;
@@ -252,76 +252,19 @@ function validateGenerativeException(
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
     return;
   }
-  if (!input.contentItemId || approval.contentItemId !== input.contentItemId) {
+
+  // The original V1 global venue set is now canonically DEPRECATED in Drive. This
+  // legacy evaluator intentionally has no positive final-composition path anymore.
+  // New full-static generation must use the operation-scoped evaluator and finalizer
+  // bound to SUNSET or THE_PARTY. Keeping this denial here makes every older direct
+  // LocalCreativeComposer/Story/Thumbnail generative call fail closed instead of
+  // silently accepting caller-supplied legacy reference objects.
+  if (approval.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
-  }
-  if (
-    approval.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID ||
-    approval.minReferenceCount < 3
-  ) {
-    failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+    return;
   }
 
-  const nowTimestamp = Date.parse(input.nowIso ?? new Date().toISOString());
-  if (!Number.isFinite(nowTimestamp)) {
-    failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
-  }
-  if (approval.expiresAt) {
-    const expiresTimestamp = Date.parse(approval.expiresAt);
-    if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) {
-      failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
-    }
-  }
-  if (
-    approval.allowArchitecturalInvention ||
-    approval.allowEnvironmentDrift ||
-    approval.allowAiLogoGeneration
-  ) {
-    failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
-  }
-
-  const requiredReferenceCount = Math.max(3, approval.minReferenceCount);
-  const activeReferences = (input.references ?? []).filter(
-    (reference) =>
-      reference.status === 'ACTIVE' &&
-      reference.venueVerified &&
-      reference.requiredForGenerativeException &&
-      reference.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID &&
-      reference.referenceSetId === approval.referenceSetId,
-  );
-  if (activeReferences.length < requiredReferenceCount) {
-    failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
-  }
-
-  if (
-    !evidence ||
-    evidence.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID ||
-    evidence.referenceSetId !== approval.referenceSetId ||
-    !evidence.sourceIdentityPreserved
-  ) {
-    failures.add('FAILED_VENUE_FIDELITY_GATE');
-  } else {
-    validateEvidenceCandidateBinding(input, evidence, failures);
-    const activeReferenceIds = new Set(activeReferences.map((reference) => reference.assetId));
-    const evidencedActiveReferenceCount = new Set(evidence.referenceAssetIds).size;
-    const allEvidenceReferencesAreActive = evidence.referenceAssetIds.every((assetId) =>
-      activeReferenceIds.has(assetId),
-    );
-    if (
-      evidencedActiveReferenceCount < requiredReferenceCount ||
-      !allEvidenceReferencesAreActive
-    ) {
-      failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
-    }
-    if (
-      !evidence.reviewRef ||
-      !['HUMAN_REVIEW', 'MULTIMODAL_PLUS_HUMAN'].includes(evidence.verificationMethod)
-    ) {
-      failures.add('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING');
-    }
-  }
-
-  addVisualDriftFailures(evidence, failures);
+  failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
 }
 
 function parseFidelityEvidence(
