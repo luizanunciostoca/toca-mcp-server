@@ -37,7 +37,6 @@ const service = new ControlledOperationScopedStaticImageGenerationService({
 const result = await service.generate({
   contentItemId: args.contentItemId,
   prompt,
-  ...(args.nowIso ? { nowIso: args.nowIso } : {}),
 });
 
 await writeFile(args.output, result.outputBytes);
@@ -101,7 +100,6 @@ interface CliArgs {
   readonly promptFile?: string;
   readonly output: string;
   readonly manifest: string;
-  readonly nowIso?: string;
 }
 
 async function resolvePrompt(args: CliArgs): Promise<string> {
@@ -128,15 +126,15 @@ function parseArgs(argv: readonly string[]): CliArgs {
     throw new Error('IMAGE_GENERATE_EXACTLY_ONE_PROMPT_SOURCE_REQUIRED');
   }
   const manifest = values.get('manifest')?.trim() || `${output}.manifest.json`;
-  const nowIso = values.get('now-iso')?.trim();
-  if (nowIso && !Number.isFinite(Date.parse(nowIso))) throw new Error('IMAGE_GENERATE_NOW_ISO_INVALID');
+  if (values.has('now-iso')) {
+    throw new Error('IMAGE_GENERATE_CALLER_TIME_FORBIDDEN');
+  }
   return {
     contentItemId,
     ...(prompt ? { prompt } : {}),
     ...(promptFile ? { promptFile } : {}),
     output,
     manifest,
-    ...(nowIso ? { nowIso } : {}),
   };
 }
 
