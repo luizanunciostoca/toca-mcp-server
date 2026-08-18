@@ -60,7 +60,7 @@ const cleanEvidence: FidelityEvidence = {
   verifier: 'TEST_VERIFIER',
   verificationMethod: 'MULTIMODAL_PLUS_HUMAN',
   candidateSha256,
-  sourceSha256: venue.masterSha256,
+  sourceSha256: 'b'.repeat(64),
   sourceIdentityPreserved: true,
   architectureDriftDetected: false,
   sceneInventionDetected: false,
@@ -159,6 +159,7 @@ describe('Creative Truth gates', () => {
 
   it('rejects generative creation without explicit approval', () => {
     const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-001',
       creativeMode: 'GENERATIVE_EXCEPTION',
       candidateSha256,
       evidence: generativeEvidence('TOCA_VENUE_REFERENCE_SET_V1', []),
@@ -168,9 +169,34 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 
+  it('rejects an approved generative exception for another content item', () => {
+    const approval = approvedException();
+    const references = [
+      reference('REF-1', 'SUN-0001'),
+      reference('REF-2', 'SUN-0004'),
+      reference('REF-3', 'SUN-0009'),
+    ];
+    const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-OTHER',
+      creativeMode: 'GENERATIVE_EXCEPTION',
+      generativeException: approval,
+      references,
+      candidateSha256,
+      evidence: generativeEvidence(
+        approval.referenceSetId,
+        references.map((item) => item.assetId),
+      ),
+      nowIso: '2026-08-17T22:00:00-03:00',
+    });
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+  });
+
   it('rejects an approved generative exception when venue references are insufficient', () => {
     const approval = approvedException();
     const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-001',
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references: [reference('REF-1', 'SUN-0001')],
@@ -191,6 +217,7 @@ describe('Creative Truth gates', () => {
       reference('REF-3', 'SUN-0009'),
     ];
     const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-001',
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
@@ -231,6 +258,7 @@ describe('Creative Truth gates', () => {
       notes: [],
     };
     const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-001',
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
@@ -251,6 +279,7 @@ describe('Creative Truth gates', () => {
       reference('REF-3', 'SUN-0009'),
     ];
     const gate = evaluateVenueFidelity({
+      contentItemId: 'CONTENT-001',
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
