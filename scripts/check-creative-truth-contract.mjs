@@ -17,6 +17,7 @@ const requiredFiles = [
   'src/providers/local/local-photo-enhancer.ts',
   'src/providers/local/local-creative-composer.ts',
   'src/providers/local/local-story-composer.ts',
+  'src/providers/local/local-thumbnail-composer.ts',
   'src/providers/local/local-video-composer.ts',
   'src/providers/openai/openai-image-edit-provider.ts',
   'src/providers/openai/creative-truth-openai-image-enhancer.ts',
@@ -188,6 +189,14 @@ for (const marker of [
 if (storyComposer.includes('brandLabel')) {
   fail('Story composition must not use literal text as a brand/logo substitute');
 }
+
+requireIncludes('src/providers/local/local-thumbnail-composer.ts', [
+  'TOCA_THUMBNAIL_V1',
+  'TOCA_THUMBNAIL_STANDARD_REQUIRED',
+  'LocalCreativeComposer',
+  'brandAssets',
+  'manifest: composed.manifest',
+]);
 
 requireIncludes('src/providers/local/local-video-composer.ts', [
   'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
