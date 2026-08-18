@@ -25,6 +25,13 @@ const THE_PARTY_STORY_STANDARD_IDS = new Set([
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
 ]);
+const SUNSET_STORY_TEMPLATE_CLASSES = new Set<string>([
+  'SUNSET_HERO_LIFESTYLE',
+  'SUNSET_VIEW_SCENERY',
+  'SUNSET_SOCIAL_EXPERIENCE',
+  'SUNSET_DRINKS_EXPERIENCE',
+  'SUNSET_INFO_HOURS',
+]);
 
 export type StoryTemplateId = 'PHOTO_ONLY' | 'EDITORIAL_TEXT' | 'EVENT_CTA';
 
@@ -226,7 +233,12 @@ function assertStoryLineage(input: LocalStoryComposeInput): void {
 }
 
 function resolveSunsetTemplateClass(input: LocalStoryComposeInput): SunsetStoryTemplateClass {
-  if (input.sunsetTemplateClass) return input.sunsetTemplateClass;
+  if (input.sunsetTemplateClass) {
+    if (!SUNSET_STORY_TEMPLATE_CLASSES.has(input.sunsetTemplateClass)) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    return input.sunsetTemplateClass;
+  }
   if (input.templateId === 'EVENT_CTA' && input.functionalInfo?.trim()) return 'SUNSET_INFO_HOURS';
   return 'SUNSET_VIEW_SCENERY';
 }
