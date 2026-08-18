@@ -6,7 +6,7 @@ Status: active canonical integration contract on the Creative Truth branch.
 
 Make the official **The Party — Sistema Híbrido + Minimalista** identity mandatory for every final creative with `operation=THE_PARTY`, while preserving the parent `TOCA_CREATIVE_TRUTH_POLICY_V1` boundaries.
 
-The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The active canonical manual is `THE_PARTY — MANUAL_CANONICO_DE_IDENTIDADE_VISUAL_v1.2` (`1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU`). The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with pinned SHA-256 `feb5a7db499640de9904432411d47f2c319e19129c09752f2c1402ae8ceff948`.
+The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The active canonical manual is `THE_PARTY — MANUAL_CANONICO_DE_IDENTIDADE_VISUAL_v1.2` (`1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU`). The stored v1.2 exports are PDF `1c9DXMrl2emY8qgYrGN9oY0MbHBifod4I` and DOCX `1Bz0pqHaHp_I06M2jiu-_WL0t1ik2LS0T`. The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with pinned SHA-256 `feb5a7db499640de9904432411d47f2c319e19129c09752f2c1402ae8ceff948`.
 
 Repository mirrors exist only to make this contract deterministic, testable and auditable. Drive remains the business/visual source of truth. Prior Night Editorial / Campaign Impact manuals remain preserved in `09_IDENTIDADE_VISUAL/99_SUPERSEDED` only as history and must not be auto-selected.
 
@@ -44,7 +44,7 @@ This family additionally requires explicit `INTERNATIONAL` or `NATIONAL` environ
 - `WEBSITE`;
 - `PEOPLE_FIRST_CONVERSION`.
 
-A request with neither explicit standard nor recognized The Party intent fails closed with `THE_PARTY_VISUAL_INTENT_REQUIRED`.
+A request with neither explicit standard nor recognized The Party intent fails closed with `THE_PARTY_VISUAL_INTENT_REQUIRED`. When both an explicit standard and an intent are supplied, they must resolve to the same family; disagreement fails closed with `THE_PARTY_STANDARD_INTENT_MISMATCH`.
 
 ## Family 01 — Hybrid Networks
 
@@ -93,7 +93,21 @@ The canonical `VENUE_VISUALS` registry now contains a small The Party golden set
 - `VENUE-TP-0048` → `MM-TP-0048-V1` (`1TX_VOw1XmamFzwDmKLnyiw8pOrGWcnkS`): real Toca entrance / institutional context, SHA-256 `1c8e62431be258cce8f77af7336b7c8a6cab0ef0c1fd82ba19d21aaa30fd3c01`. Existing physical venue marks are protected factual elements and may not be rewritten.
 - `VENUE-TP-0113` → `MM-TP-0113-V1` (`1c-oqyVCSx852FgkRPMhEixAu1JV3NjBe`): real warm-red floor energy, SHA-256 `619e51c15bb2c75b5fc51a7684686c8f82d106e7b349d44a79dbf676644e7135`.
 
-This set removes the previous static-render blocker where `selectVenueAsset('THE_PARTY')` had no eligible marketing-ready asset.
+These are real composition masters, not generative references. Their IDs, Drive bindings and hashes are canonical runtime evidence.
+
+## Automatic real-photo selection
+
+When `venueAssetId` is omitted, `CreativeTruthResolver` no longer accepts the first eligible `THE_PARTY` registry row as an arbitrary default. It asks `resolveThePartyVenueAssetPreferences` for an ordered, intent-bound allow-list and selects only an eligible golden master from that order:
+
+- `INSTITUTIONAL_COMMUNICATION`, `LANDING_PAGE`, `WEBSITE`: `VENUE-TP-0048` then `VENUE-TP-0087`;
+- `ELEGANT_AD`, `INVITATION`, `HIGHLIGHT_COVER`, `PEOPLE_FIRST_CONVERSION`: `VENUE-TP-0087` then `VENUE-TP-0048`;
+- `LINEUP + INTERNATIONAL`: `VENUE-TP-0071` then `VENUE-TP-0130`;
+- `LINEUP + NATIONAL`: `VENUE-TP-0113` then `VENUE-TP-0130`;
+- other Hybrid Networks intents: `VENUE-TP-0130` first, followed by `VENUE-TP-0071` for International or `VENUE-TP-0113` for National.
+
+If none of the preferred real masters is currently `ACTIVE_APPROVED + VENUE_VERIFIED + MARKETING_READY` with complete master lineage, automatic selection fails closed instead of substituting a semantically unrelated image. An explicit `venueAssetId` remains possible and is treated as an intentional operator choice, but it still must pass the same Creative Truth and lineage gates.
+
+This closes both parts of the prior static-render gap: The Party now has eligible real masters and automatic requests select them by approved intent rather than registry row order.
 
 ## Multi-format application
 
