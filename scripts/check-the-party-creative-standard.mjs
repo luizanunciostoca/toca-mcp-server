@@ -2,15 +2,17 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const networkPath = 'control/creative-standards/the-party-hybrid-networks-standard.v1.json';
 const minimalistPath = 'control/creative-standards/the-party-hybrid-minimalist-standard.v1.json';
+const orchestrationPath = 'control/creative-standards/the-party-content-orchestration.v1.json';
 const familyResolverPath = 'src/creative/the-party-visual-family-resolver.ts';
 const docsPath = 'docs/architecture/the-party-creative-standard.md';
 
-for (const path of [networkPath, minimalistPath, familyResolverPath, docsPath]) {
+for (const path of [networkPath, minimalistPath, orchestrationPath, familyResolverPath, docsPath]) {
   if (!existsSync(path)) fail(`The Party canonical creative file missing: ${path}`);
 }
 
 const networks = JSON.parse(read(networkPath));
 const minimalist = JSON.parse(read(minimalistPath));
+const orchestration = JSON.parse(read(orchestrationPath));
 
 assertStandard(networks, 'THE_PARTY_HYBRID_NETWORKS_V1');
 assertStandard(minimalist, 'THE_PARTY_HYBRID_MINIMALIST_V1');
@@ -66,6 +68,55 @@ for (const standard of [networks, minimalist]) {
   ) {
     fail(`The Party Creative Truth boundary drift detected: ${standard.standardId}`);
   }
+}
+
+const requiredOrchestrationColumns = [
+  'the_party_intent',
+  'the_party_environment',
+  'creative_standard_id',
+  'creative_standard_version',
+  'visual_standard_status',
+  'hero_brand_asset_id',
+  'venue_asset_id',
+  'creative_truth_policy_id',
+  'brand_integrity_status',
+  'venue_fidelity_status',
+  'quality_gate_status',
+  'exact_asset_binding',
+  'output_sha256',
+];
+
+if (
+  orchestration.contractId !== 'THE_PARTY_CONTENT_ORCHESTRATION_V1' ||
+  orchestration.status !== 'ACTIVE_CANONICAL' ||
+  orchestration.sourceOfTruth?.contentRegistryDriveId !==
+    '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw' ||
+  orchestration.sourceOfTruth?.sheet !== 'CONTENT_ITEMS' ||
+  orchestration.sourceOfTruth?.canonicalManualDriveId !==
+    '1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU' ||
+  orchestration.sourceOfTruth?.creativeTruthRegistryDriveId !==
+    '1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU' ||
+  !Array.isArray(orchestration.requiredColumns) ||
+  requiredOrchestrationColumns.some((column) => !orchestration.requiredColumns.includes(column)) ||
+  orchestration.environmentPolicy?.requiredForStandard !== 'THE_PARTY_HYBRID_NETWORKS_V1' ||
+  orchestration.environmentPolicy?.mustNotBeInferred !== true ||
+  orchestration.environmentPolicy?.missingStatus !== 'BLOCKED_NEEDS_ENVIRONMENT' ||
+  orchestration.environmentPolicy?.failureCode !== 'THE_PARTY_ENVIRONMENT_REQUIRED' ||
+  orchestration.brandPolicy?.heroBrand !== 'THE_PARTY' ||
+  orchestration.brandPolicy?.heroBrandAssetId !== 'BRAND-THE-PARTY-WHITE-V1' ||
+  orchestration.brandPolicy?.institutionalFooterOrder?.join('|') !==
+    'TOCA_DO_MORCEGO|CORONA|RED_BULL|MORRO_DIGITAL' ||
+  orchestration.goldenVenueAssets?.join('|') !==
+    'VENUE-TP-0130|VENUE-TP-0087|VENUE-TP-0071|VENUE-TP-0048|VENUE-TP-0113' ||
+  orchestration.gateDefaults?.brand_integrity_status !== 'PENDING' ||
+  orchestration.gateDefaults?.venue_fidelity_status !== 'PENDING' ||
+  orchestration.gateDefaults?.quality_gate_status !== 'PENDING' ||
+  orchestration.readyBoundary?.resolvedVisualStandardDoesNotImplyReady !== true ||
+  orchestration.readyBoundary?.allCreativeTruthGatesMustPass !== true ||
+  orchestration.readyBoundary?.exactAssetBindingRequired !== true ||
+  orchestration.readyBoundary?.outputSha256Required !== true
+) {
+  fail('The Party content orchestration contract violates canonical fail-closed boundaries');
 }
 
 requireIncludes(familyResolverPath, [
@@ -135,6 +186,9 @@ requireIncludes(docsPath, [
   'VENUE-TP-0048',
   'VENUE-TP-0113',
   'TOCA_DO_MORCEGO` → `CORONA` → `RED_BULL` → `MORRO_DIGITAL',
+  'THE_PARTY_CONTENT_ORCHESTRATION_V1',
+  '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
+  'BLOCKED_NEEDS_ENVIRONMENT',
 ]);
 
 console.log('The Party creative standard contract OK');
