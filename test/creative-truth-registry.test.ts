@@ -42,6 +42,7 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
     true,
     'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
     'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+    'UNSUPPORTED_V1',
   ];
   for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
   return row;
@@ -50,12 +51,12 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
 describe('GoogleSheetsCreativeTruthRegistry', () => {
   it('accepts only the complete canonical policy row', async () => {
     const { client, readRange } = clientFor({
-      'POLICY!A2:Q20': [canonicalPolicyRow()],
+      'POLICY!A2:R20': [canonicalPolicyRow()],
     });
     const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
 
     await expect(registry.assertCanonicalPolicy()).resolves.toBeUndefined();
-    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:Q20');
+    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:R20');
   });
 
   it('rejects policy drift across identity, modes, gates, canonical plan and provenance controls', async () => {
@@ -75,10 +76,11 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
       canonicalPolicyRow({ 14: false }),
       canonicalPolicyRow({ 15: 'ENABLED_WITHOUT_PROVENANCE' }),
       canonicalPolicyRow({ 16: '' }),
+      canonicalPolicyRow({ 17: 'ENABLED_UNCONTROLLED' }),
     ];
 
     for (const row of driftedRows) {
-      const { client } = clientFor({ 'POLICY!A2:Q20': [row] });
+      const { client } = clientFor({ 'POLICY!A2:R20': [row] });
       const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
       await expect(registry.assertCanonicalPolicy()).rejects.toThrow(
         'TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE',
