@@ -3,14 +3,17 @@ import { CreativeTruthResolver } from '../src/creative/creative-truth-resolver.j
 import { GoogleSheetsCreativeTruthRegistry } from '../src/providers/google-sheets/creative-truth-registry.js';
 import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/media-assets.js';
 
-function registryFor(videoRows: readonly (readonly unknown[])[]) {
+function registryFor(
+  videoRows: readonly (readonly unknown[])[] = [],
+  venueRows: readonly (readonly unknown[])[] = [],
+) {
   const client: SpreadsheetValuesClient = {
     readRange: (_spreadsheetId, range) => {
-      if (range === 'POLICY!A2:R20') {
+      if (range === 'POLICY!A2:AK20') {
         return Promise.resolve([
           [
             'TOCA_CREATIVE_TRUTH_POLICY_V1',
-            '1.0',
+            '1.3',
             'ACTIVE_CANONICAL',
             'TOCA_DO_MORCEGO',
             'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
@@ -26,7 +29,26 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
             true,
             'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
             'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+            'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+            'OPERATION_SCOPED_ONLY_V1',
+            'TOCA_VENUE_REFERENCE_SET_V1',
+            'DEPRECATED',
+            'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+            'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+            'FORBIDDEN',
+            'REQUIRED',
+            'DENY',
             'UNSUPPORTED_V1',
+            'TOCA_PHOTO_TO_VIDEO_POLICY_V1',
+            'ACTIVE_V1',
+            'DENY',
+            'NON_FINAL_BACKGROUND_CANDIDATE_ONLY',
+            true,
+            'DENY',
+            'DENY',
+            'FAIL_CLOSED_NO_FINAL_ASSET',
+            'ENFORCED',
+            'FAILED_DIRECT_GENERATIVE_FINALIZATION',
           ],
         ]);
       }
@@ -50,6 +72,7 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
           ],
         ]);
       }
+      if (range === 'VENUE_VISUALS!A2:P2000') return Promise.resolve(venueRows);
       if (range === 'VIDEO_SHOTS!A2:Q2000') return Promise.resolve(videoRows);
       return Promise.resolve([]);
     },
@@ -58,7 +81,7 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
   return new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
 }
 
-function row(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
+function videoRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
   const values: unknown[] = [
     'SHOT-SUN-001',
     'SUN-VIDEO-001',
@@ -82,9 +105,32 @@ function row(overrides: Partial<Record<number, unknown>> = {}): readonly unknown
   return values;
 }
 
+function venueRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
+  const values: unknown[] = [
+    'VENUE-SUN-001',
+    'SUN-001',
+    'source-drive',
+    'MM-SUN-001-V2',
+    'master-drive',
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'SUNSET',
+    'deck_ocean_view',
+    'sunset',
+    true,
+    true,
+    false,
+    'DECK|HORIZON|SEA',
+    'ACTIVE_APPROVED',
+    'canonical v2 marketing master',
+  ];
+  for (const [index, value] of Object.entries(overrides)) values[Number(index)] = value;
+  return values;
+}
+
 describe('CreativeTruthResolver generic static boundary', () => {
   it('refuses GENERATIVE_EXCEPTION so legacy global-set reads cannot bypass operation-scoped generation', async () => {
-    const resolver = new CreativeTruthResolver(registryFor([]));
+    const resolver = new CreativeTruthResolver(registryFor());
 
     await expect(
       resolver.resolve({
@@ -96,11 +142,73 @@ describe('CreativeTruthResolver generic static boundary', () => {
       }),
     ).rejects.toThrow('GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE');
   });
+
+  it('accepts an ACTIVE_APPROVED venue only when the master is explicitly MARKETING_READY', async () => {
+    const resolver = new CreativeTruthResolver(registryFor([], [venueRow()]));
+
+    const result = await resolver.resolve({
+      contentItemId: 'CONTENT-SUN-READY',
+      standardId: 'SUNSET_FEED_V1',
+      operation: 'SUNSET',
+      requestedMode: 'REAL_COMPOSITE',
+      requiredBrands: [],
+    });
+
+    expect(result.venueAsset).toMatchObject({
+      venueAssetId: 'VENUE-SUN-001',
+      venueVerified: true,
+      marketingReady: true,
+      status: 'ACTIVE_APPROVED',
+    });
+  });
+
+  it('does not auto-select a legacy venue whose master is no longer MARKETING_READY', async () => {
+    const resolver = new CreativeTruthResolver(
+      registryFor([], [
+        venueRow({
+          11: false,
+          14: 'VENUE_VERIFIED_LEGACY_MASTER_REVALIDATION_REQUIRED',
+        }),
+      ]),
+    );
+
+    await expect(
+      resolver.resolve({
+        contentItemId: 'CONTENT-SUN-LEGACY-AUTO',
+        standardId: 'SUNSET_FEED_V1',
+        operation: 'SUNSET',
+        requestedMode: 'REAL_COMPOSITE',
+        requiredBrands: [],
+      }),
+    ).rejects.toThrow('FAILED_NO_VENUE_VERIFIED_ASSET');
+  });
+
+  it('blocks an explicitly requested legacy venue until a v2 master is promoted', async () => {
+    const resolver = new CreativeTruthResolver(
+      registryFor([], [
+        venueRow({
+          11: false,
+          14: 'VENUE_VERIFIED_LEGACY_MASTER_REVALIDATION_REQUIRED',
+        }),
+      ]),
+    );
+
+    await expect(
+      resolver.resolve({
+        contentItemId: 'CONTENT-SUN-LEGACY-EXPLICIT',
+        standardId: 'SUNSET_FEED_V1',
+        operation: 'SUNSET',
+        requestedMode: 'REAL_COMPOSITE',
+        venueAssetId: 'VENUE-SUN-001',
+        requiredBrands: [],
+      }),
+    ).rejects.toThrow('FAILED_LINEAGE_MISSING');
+  });
 });
 
 describe('CreativeTruthResolver video shots', () => {
   it('resolves only canonical, approved, venue-verified shots with master lineage and rights', async () => {
-    const resolver = new CreativeTruthResolver(registryFor([row()]));
+    const resolver = new CreativeTruthResolver(registryFor([videoRow()]));
 
     const result = await resolver.resolveVideoShots({
       operation: 'SUNSET',
@@ -122,7 +230,7 @@ describe('CreativeTruthResolver video shots', () => {
   });
 
   it('fails closed when a requested shot is not approved or venue verified', async () => {
-    const resolver = new CreativeTruthResolver(registryFor([row({ 12: false })]));
+    const resolver = new CreativeTruthResolver(registryFor([videoRow({ 12: false })]));
 
     await expect(
       resolver.resolveVideoShots({ operation: 'SUNSET', shotIds: ['SHOT-SUN-001'] }),
@@ -130,7 +238,7 @@ describe('CreativeTruthResolver video shots', () => {
   });
 
   it('fails closed when rights are not explicitly cleared', async () => {
-    const resolver = new CreativeTruthResolver(registryFor([row({ 14: 'PENDING' })]));
+    const resolver = new CreativeTruthResolver(registryFor([videoRow({ 14: 'PENDING' })]));
 
     await expect(
       resolver.resolveVideoShots({ operation: 'SUNSET', shotIds: ['SHOT-SUN-001'] }),
@@ -138,7 +246,7 @@ describe('CreativeTruthResolver video shots', () => {
   });
 
   it('rejects duplicated shot IDs to keep edit lineage deterministic', async () => {
-    const resolver = new CreativeTruthResolver(registryFor([row()]));
+    const resolver = new CreativeTruthResolver(registryFor([videoRow()]));
 
     await expect(
       resolver.resolveVideoShots({
