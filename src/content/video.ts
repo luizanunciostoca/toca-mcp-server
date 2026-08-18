@@ -1,3 +1,7 @@
+import {
+  creativeTruthPublicationBindingSchema,
+  type CreativeTruthPublicationBinding,
+} from '../contracts/creative-truth.js';
 import type { WorkflowBlueprint, WorkflowStepBlueprint } from '../workflow/workflow-contracts.js';
 import {
   requireEvidence,
@@ -170,6 +174,8 @@ export interface VideoExportManifest {
   readonly durationMs: number;
   readonly approvalRef: string;
   readonly quality: VideoQualityResult;
+  readonly finalAssetSha256: string;
+  readonly creativeTruthBinding: CreativeTruthPublicationBinding;
   readonly evidence: readonly string[];
 }
 
@@ -412,6 +418,12 @@ export function validateExportManifest(manifest: VideoExportManifest): void {
   if (manifest.quality.status !== 'PASS') throw new Error('VIDEO_EXPORT_QUALITY_NOT_PASSED');
   if (manifest.width <= 0 || manifest.height <= 0 || manifest.durationMs <= 0)
     throw new Error('VIDEO_EXPORT_MEDIA_METADATA_INVALID');
+  if (!/^[a-f0-9]{64}$/i.test(manifest.finalAssetSha256))
+    throw new Error('VIDEO_EXPORT_FINAL_ASSET_SHA256_INVALID');
+  const binding = creativeTruthPublicationBindingSchema.safeParse(manifest.creativeTruthBinding);
+  if (!binding.success) throw new Error('VIDEO_EXPORT_CREATIVE_TRUTH_BINDING_INVALID');
+  if (binding.data.outputSha256 !== manifest.finalAssetSha256)
+    throw new Error('VIDEO_EXPORT_CREATIVE_TRUTH_HASH_MISMATCH');
 }
 
 export interface VideoWorkflowInput {
@@ -452,7 +464,12 @@ export function buildVideoProductionWorkflowBlueprint(
       'captions',
       'audio',
     ]),
-    step('thumbnail', 'Generate thumbnail manifest', 'video.thumbnail.generate', ['timeline']),
+    step(
+      'thumbnail',
+      'Prepare non-final thumbnail render-intent manifest',
+      'video.thumbnail.generate',
+      ['timeline'],
+    ),
     step('quality', 'Validate final video quality', 'video.quality.validate', [
       'music-rights',
       'safe-area',
