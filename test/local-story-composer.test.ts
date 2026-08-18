@@ -9,23 +9,25 @@ import type {
   VenueAsset,
 } from '../src/contracts/creative-truth.js';
 import { LocalStoryComposer } from '../src/providers/local/local-story-composer.js';
+import {
+  SUNSET_STORY_REQUIRED_BRAND_ASSET_IDS,
+  SUNSET_STORY_REQUIRED_BRANDS,
+} from '../src/providers/local/local-sunset-story-renderer.js';
 
 const masterBytes = Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]);
 const masterSha256 = createHash('sha256').update(masterBytes).digest('hex');
 const enhancedBytes = Buffer.from([0xff, 0xd8, 0x02, 0xff, 0xd9]);
 const enhancedSha256 = createHash('sha256').update(enhancedBytes).digest('hex');
-const brandBytes = Uint8Array.from([10, 11, 12]);
-const brandSha256 = createHash('sha256').update(brandBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'SUNSET_STORY_V1',
-  version: '1.1',
+  version: '1.2',
   brandScope: 'TOCA_DO_MORCEGO',
   operation: 'SUNSET',
   channel: 'INSTAGRAM',
   format: 'STORIES',
   parentPolicyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-  canonicalDriveId: 'drive-story-standard',
+  canonicalDriveId: '1gTFxCLWnsZIy2vRKHGglXILMAexXoIUzd5WDZvpOtsM',
   repoMirrorPath: 'control/creative-standards/sunset-story-standard.v1.json',
   status: 'ACTIVE_CANONICAL',
   realAssetRequired: true,
@@ -51,18 +53,36 @@ const venue: VenueAsset = {
   status: 'ACTIVE_APPROVED',
 };
 
-const toca: BrandAsset = {
-  brandAssetId: 'BRAND-TOCA-WHITE-V1',
-  brand: 'TOCA_DO_MORCEGO',
-  variant: 'WHITE',
-  driveFileId: 'drive-toca-logo',
-  fileName: 'toca.png',
-  contentType: 'image/png',
-  integrityMode: 'SHA256_PINNED',
-  sha256: brandSha256,
-  status: 'ACTIVE_APPROVED',
-  aiReconstructionAllowed: false,
-};
+function makeBrand(
+  brandAssetId: string,
+  brand: string,
+  driveFileId: string,
+  byte: number,
+): { asset: BrandAsset; bytes: Uint8Array } {
+  const bytes = Uint8Array.from([byte, byte + 1, byte + 2]);
+  return {
+    asset: {
+      brandAssetId,
+      brand,
+      variant: 'WHITE',
+      driveFileId,
+      fileName: `${brand.toLowerCase()}.png`,
+      contentType: 'image/png',
+      integrityMode: 'SHA256_PINNED',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      status: 'ACTIVE_APPROVED',
+      aiReconstructionAllowed: false,
+    },
+    bytes,
+  };
+}
+
+const brands = [
+  makeBrand('BRAND-TOCA-WHITE-V1', 'TOCA_DO_MORCEGO', 'drive-toca-logo', 10),
+  makeBrand('BRAND-CORONA-WHITE-V1', 'CORONA', 'drive-corona-logo', 20),
+  makeBrand('BRAND-REDBULL-WHITE-V1', 'RED_BULL', 'drive-redbull-logo', 30),
+  makeBrand('BRAND-MORRO-WHITE-V1', 'MORRO_DIGITAL', 'drive-morro-logo', 40),
+] as const;
 
 const enhancementProvenance: CreativeEnhancementProvenance = {
   policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
@@ -90,13 +110,13 @@ const fidelityEvidence: FidelityEvidence = {
   notes: [],
 };
 
-function brandInput() {
-  return {
-    registry: toca,
-    bytes: brandBytes,
+function brandInputs() {
+  return brands.map(({ asset, bytes }) => ({
+    registry: asset,
+    bytes,
     contentType: 'image/png' as const,
-    driveFileId: toca.driveFileId,
-  };
+    driveFileId: asset.driveFileId,
+  }));
 }
 
 function realBase() {
@@ -110,8 +130,8 @@ function realBase() {
     standard,
     creativeMode: 'REAL_COMPOSITE' as const,
     venueAsset: venue,
-    requiredBrands: ['TOCA_DO_MORCEGO'],
-    brandAssets: [brandInput()],
+    requiredBrands: [...SUNSET_STORY_REQUIRED_BRANDS],
+    brandAssets: brandInputs(),
   };
 }
 
@@ -123,7 +143,7 @@ function successfulRunner() {
   });
 }
 
-describe('LocalStoryComposer', () => {
+describe('LocalStoryComposer — SUNSET_STORY_V1 dedicated renderer', () => {
   it('fails closed when master bytes are missing', async () => {
     const composer = new LocalStoryComposer(() => Promise.resolve());
 
@@ -136,40 +156,110 @@ describe('LocalStoryComposer', () => {
     ).rejects.toMatchObject({ code: 'SOURCE_IMAGE_BINDING_FAILURE' });
   });
 
-  it('creates a 1080x1920 Story from the verified master and official logo asset', async () => {
+  it('routes SUNSET_STORY_V1 to the dedicated fixed-grid renderer with four official brands', async () => {
     const runner = successfulRunner();
     const composer = new LocalStoryComposer(runner, 'convert');
 
     const result = await composer.compose({
       ...realBase(),
-      templateId: 'PHOTO_ONLY',
+      templateId: 'EVENT_CTA',
+      sunsetTemplateClass: 'SUNSET_VIEW_SCENERY',
+      message: 'Pôr do Sol\nna Toca',
+      supportCopy: 'Hoje o fim de tarde te espera na melhor vista da ilha.',
+      cta: 'Garanta seu ingresso',
+      functionalInfo: '16:30H ÀS 22H',
     });
 
     const [, args] = runner.mock.calls[0] ?? [];
+    const joined = args?.join(' ') ?? '';
     expect(args).toEqual(
-      expect.arrayContaining(['-resize', '1080x1920^', '-extent', '1080x1920', '-quality', '95']),
+      expect.arrayContaining([
+        '-resize',
+        '1080x1920^',
+        '-extent',
+        '1080x1920',
+        'caption:Pôr do Sol\nna Toca',
+        'caption:Hoje o fim de tarde te espera na melhor vista da ilha.',
+        '16:30H ÀS 22H',
+        'Garanta seu ingresso',
+        '-quality',
+        '95',
+      ]),
     );
-    expect(args?.some((arg) => arg.includes('brand-0'))).toBe(true);
-    expect(args?.some((arg) => arg.startsWith('caption:'))).toBe(false);
-    expect(args?.join(' ')).not.toContain('TOCA DO MORCEGO');
+    expect(joined).toContain('rectangle 0,1600 1080,1920');
+    expect(joined).toContain('+45+1700');
+    expect(joined).toContain('+270+1700');
+    expect(joined).toContain('+495+1700');
+    expect(joined).toContain('+720+1700');
+    for (let i = 0; i < 4; i += 1) expect(joined).toContain(`brand-${i}`);
+
     expect(result).toMatchObject({
       dimensions: '1080x1920',
       aspectRatio: '9:16',
-      templateId: 'PHOTO_ONLY',
+      templateId: 'EVENT_CTA',
       sourceImageBound: true,
       editorProvider: 'LOCAL_IMAGEMAGICK',
-      pipelineVersion: 'local-story-composer-v1',
       storyReady: true,
       outputContentType: 'image/jpeg',
       masterSha256,
     });
     expect(result.manifest.standardId).toBe('SUNSET_STORY_V1');
-    expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
-    expect(result.manifest.enhancementProvenance).toBeUndefined();
+    expect(result.manifest.brandAssetIds).toEqual([...SUNSET_STORY_REQUIRED_BRAND_ASSET_IDS]);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
+    const quality = result.manifest.gates.find((gate) => gate.gate === 'QUALITY');
+    expect(quality?.evidence).toMatchObject({
+      dedicatedRenderer: 'SUNSET_STORY_V1',
+      standardVersion: '1.2',
+      templateClass: 'SUNSET_VIEW_SCENERY',
+    });
   });
 
-  it('keeps the original master SHA and enhancement chain when Story renders a verified enhancement', async () => {
+  it('fails closed when any mandatory Sunset sponsor asset is absent', async () => {
+    const runner = successfulRunner();
+    const composer = new LocalStoryComposer(runner, 'convert');
+
+    await expect(
+      composer.compose({
+        ...realBase(),
+        brandAssets: brandInputs().filter((entry) => entry.registry.brand !== 'RED_BULL'),
+        templateId: 'EDITORIAL_TEXT',
+        message: 'Hoje tem um pôr do sol inesquecível',
+      }),
+    ).rejects.toThrow('FAILED_BRAND_ASSET_MISSING');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the caller omits a mandatory brand from requiredBrands', async () => {
+    const runner = successfulRunner();
+    const composer = new LocalStoryComposer(runner, 'convert');
+
+    await expect(
+      composer.compose({
+        ...realBase(),
+        requiredBrands: ['TOCA_DO_MORCEGO', 'CORONA', 'MORRO_DIGITAL'],
+        templateId: 'EDITORIAL_TEXT',
+        message: 'Hoje tem um pôr do sol inesquecível',
+      }),
+    ).rejects.toThrow('FAILED_BRAND_ASSET_MISSING');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale Sunset Story standard versions instead of silently rendering them', async () => {
+    const runner = successfulRunner();
+    const composer = new LocalStoryComposer(runner, 'convert');
+
+    await expect(
+      composer.compose({
+        ...realBase(),
+        standard: { ...standard, version: '1.1' },
+        templateId: 'EDITORIAL_TEXT',
+        message: 'Hoje tem um pôr do sol inesquecível',
+      }),
+    ).rejects.toThrow('FAILED_STANDARD_NOT_RESOLVED');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('keeps the original master SHA and enhancement provenance in REAL_PLUS_ENHANCEMENT', async () => {
     const runner = successfulRunner();
     const composer = new LocalStoryComposer(runner, 'convert');
 
@@ -182,6 +272,7 @@ describe('LocalStoryComposer', () => {
       enhancementProvenance,
       fidelityEvidence,
       templateId: 'EDITORIAL_TEXT',
+      sunsetTemplateClass: 'SUNSET_HERO_LIFESTYLE',
       message: 'O mesmo lugar real, com tratamento fiel.',
     });
 
@@ -191,31 +282,6 @@ describe('LocalStoryComposer', () => {
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-STORY-V1']);
     expect(result.manifest.enhancementProvenance).toEqual(enhancementProvenance);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
-  });
-
-  it('renders message and CTA deterministically while brand identity comes only from official files', async () => {
-    const runner = successfulRunner();
-    const composer = new LocalStoryComposer(runner, 'convert');
-
-    await composer.compose({
-      ...realBase(),
-      storyCreativeId: 'SC-TEST-TEXT-V1',
-      contentItemId: 'MKT-TEST-STORY-TEXT',
-      templateId: 'EDITORIAL_TEXT',
-      message: 'A atmosfera da Toca começa antes do pôr do sol.',
-      cta: 'Venha viver esse momento.',
-    });
-
-    const [, args] = runner.mock.calls[0] ?? [];
-    expect(args).toEqual(
-      expect.arrayContaining([
-        'caption:A atmosfera da Toca começa antes do pôr do sol.',
-        '-annotate',
-        'Venha viver esse momento.',
-      ]),
-    );
-    expect(args?.some((arg) => arg.includes('brand-0'))).toBe(true);
-    expect(args?.join(' ')).not.toContain('TOCA DO MORCEGO');
   });
 
   it('rejects a Story whose declared master does not match the verified venue master', async () => {

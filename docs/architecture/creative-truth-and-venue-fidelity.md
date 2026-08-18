@@ -7,10 +7,11 @@ Repository implementation mirror for the canonical Google Drive policy and regis
 - Policy: `TOCA_CREATIVE_TRUTH_POLICY_V1`
 - Canonical implementation plan: Drive `1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM`
 - Canonical operational registry: Drive/Sheets `1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU`
-- Venue reference set: `TOCA_VENUE_REFERENCE_SET_V1`
-- Canonical Drive enhancement-provenance, thumbnail/R20-R29 and output-bound fidelity addenda synchronized on `2026-08-18`.
+- Venue reference set: operation-scoped (`TOCA_VENUE_REFERENCE_SET_SUNSET_V1` / `TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1`); the global legacy set is deprecated for new production.
+- Canonical Drive enhancement-provenance, thumbnail/R20-R29, operation-scoped generative binding, tool-routing and output-bound fidelity addenda synchronized on `2026-08-18`.
+- Canonical Sunset Story standard: `SUNSET_STORY_V1` version `1.2`, Drive `1gTFxCLWnsZIy2vRKHGglXILMAexXoIUzd5WDZvpOtsM`.
 
-Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime `assertCanonicalPolicy()` reads the canonical `POLICY!A2:R20` row and fails closed if enhancement provenance or the video fail-closed flags drift.
+Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime canonical-registry readers fail closed when required policy, standard, asset, lineage, brand or fidelity fields drift.
 
 ## Non-negotiable rule
 
@@ -30,18 +31,9 @@ Uses a verified real master and allows fidelity-preserving enhancement only. Enh
 
 ### `GENERATIVE_EXCEPTION`
 
-Only allowed for **static image creation in V1** with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to `TOCA_VENUE_REFERENCE_SET_V1`, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled.
+Only allowed for static image creation in V1 with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to the operation-scoped reference set, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled.
 
-Approval of the **intent to generate** is not approval of the generated pixels. Before a generative candidate can pass Venue Fidelity, its evidence must:
-
-- contain the exact `candidateSha256` of the generated image being evaluated;
-- reference only `ACTIVE + VENUE_VERIFIED` assets from the approved reference set;
-- cover at least the approved `minReferenceCount`;
-- contain no architecture/scene/logo drift signal;
-- include an output-specific `reviewRef`;
-- use `HUMAN_REVIEW` or `MULTIMODAL_PLUS_HUMAN` as the verification method.
-
-Therefore a generated Toca image cannot become final merely because a pre-generation exception existed. The actual generated output must be reviewed and bound to its own hash. Full generative video is intentionally unsupported in V1 and fails closed rather than synthesizing Toca footage without a dedicated temporal/shot-level truth contract.
+Approval of the **intent to generate** is not approval of the generated pixels. Before a generative candidate can pass Venue Fidelity, its evidence must contain the exact `candidateSha256`, use only active verified references from the correct operation-scoped set, satisfy the approved reference count, contain no architecture/scene/logo drift signal, include output-specific review evidence and use an allowed review method. Generated pixels are intermediate only: marketing text, CTA, event time and brand marks are added later by deterministic composition.
 
 ## Canonical registries
 
@@ -56,17 +48,15 @@ Therefore a generated Toca image cannot become final merely because a pre-genera
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
 
-The canonical `POLICY` row additionally declares `ENHANCEMENT_PROVENANCE_REQUIRED=TRUE`, `VIDEO_REAL_PLUS_ENHANCEMENT=FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE`, `VIDEO_ENHANCEMENT_FAILURE=VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED`, and `VIDEO_GENERATIVE_EXCEPTION=UNSUPPORTED_V1`.
-
-`VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. `CreativeTruthResolver.resolveVideoShots()` resolves requested shot IDs from the canonical registry first. The shot must be `ACTIVE_APPROVED`, venue verified, marketing ready, bound to source/master lineage, carry an approved master SHA-256 and have rights explicitly cleared. The supplied bytes must then match that registered master SHA-256 before FFmpeg is allowed to run.
-
-A verified source may exist in the registry without being marketing-ready. Such a record remains useful as evidence/reference, but it is rejected for final video composition until master and rights approval are completed.
+`VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. The shot must be active/approved, venue verified, marketing ready, bound to source/master lineage, carry an approved master SHA-256 and have rights explicitly cleared. Supplied bytes must match that registered master SHA-256 before FFmpeg is allowed to run.
 
 ## Brand integrity
 
 A logo is never generated, repaired, approximated or redrawn by an image model. `BrandAsset` records pin the official Drive file ID and SHA-256 once verified. `SHA256_PINNED` records fail on digest mismatch; a registry entry that is not active and approved is not eligible for composition.
 
-The deterministic image/video composers receive the official logo bytes separately from the photographic/video source and overlay those files after creative generation or enhancement.
+The deterministic image/video composers receive official logo bytes separately from the photographic/video source and overlay those files after creative generation or enhancement.
+
+For `SUNSET_STORY_V1` version `1.2`, the footer is stricter than the generic static path: all four WHITE assets are mandatory in fixed order and exact identity — `BRAND-TOCA-WHITE-V1`, `BRAND-CORONA-WHITE-V1`, `BRAND-REDBULL-WHITE-V1`, `BRAND-MORRO-WHITE-V1`. Missing, duplicated, substituted, wrong-variant or hash-mismatched assets fail closed before rendering.
 
 ## Venue fidelity and byte identity
 
@@ -81,81 +71,55 @@ Final real-media output requires:
 
 For `REAL_COMPOSITE`, the SHA-256 of the media bytes entering composition must equal the registered master SHA-256.
 
-For `REAL_PLUS_ENHANCEMENT`, the system requires a `CreativeEnhancementProvenance` record containing:
-
-- `policyId=TOCA_CREATIVE_TRUTH_POLICY_V1`;
-- `creativeMode=REAL_PLUS_ENHANCEMENT`;
-- editor provider;
-- original master asset ID;
-- original master Drive file ID;
-- original master SHA-256;
-- enhanced output SHA-256;
-- `sourceImageBound=true`;
-- `creativeTruthBound=true`;
-- `requiresVenueFidelityGate=true`.
-
-The provenance must point to the exact registered master and its `outputSha256` must equal the bytes actually entering deterministic composition. The final `DeterministicRenderManifest` persists this provenance, creating an auditable chain:
+For `REAL_PLUS_ENHANCEMENT`, the system requires a `CreativeEnhancementProvenance` record containing policy/mode identity, editor provider, original master asset/Drive/SHA identity, enhanced output SHA, and source/Creative-Truth binding. The provenance output hash must equal the bytes entering deterministic composition. The final manifest persists this provenance, creating the auditable chain:
 
 `REGISTERED REAL MASTER SHA -> ENHANCEMENT OUTPUT SHA -> OUTPUT-BOUND FIDELITY EVIDENCE -> POST-EDIT VENUE FIDELITY PASS -> FINAL CREATIVE SHA`.
 
-`FidelityEvidence` itself contains `verificationMethod`, `candidateSha256`, optional `sourceSha256`, reference binding, verifier identity and optional `reviewRef`. For an enhancement, `sourceSha256` must equal the registered master SHA and `candidateSha256` must equal the actual enhanced bytes entering composition. A stale or replayed fidelity report fails with `FAILED_FIDELITY_EVIDENCE_BINDING`.
-
-Both the local ImageMagick enhancer and the OpenAI enhancement adapter emit the same policy-pinned **enhancement provenance** contract. The OpenAI adapter independently rehashes the supplied original bytes and returned enhanced bytes instead of trusting provider-reported digests alone. Enhancement provenance does not replace the post-edit Venue Fidelity evidence requirement.
-
-This prevents valid registry metadata from being paired with substituted media bytes while still allowing faithful enhancement. A source/master identity mismatch, enhancement-output substitution, wrong policy/mode, fidelity-evidence replay or missing post-edit Venue Fidelity evidence fails closed.
-
-For generative output, evidence is additionally reference-set-bound and output-review-bound. A generative candidate without output-specific human review fails with `FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING` even if the exception and reference set were valid before generation.
+This prevents valid registry metadata from being paired with substituted media bytes while still allowing faithful enhancement.
 
 ## Deterministic composition
 
-`LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It computes the SHA-256 of the exact candidate bytes before Venue Fidelity evaluation, preventing a caller from attaching evidence for a different candidate. It produces a final output SHA-256 and `DeterministicRenderManifest`. In enhancement mode the manifest also persists `CreativeEnhancementProvenance`; the Venue Fidelity gate evidence persisted in the manifest contains the candidate/source hash and verifier/review context.
+`LocalCreativeComposer` remains the generic deterministic composer for supported static formats and for operation standards without a more specific renderer. It composes bound source images, controlled text/CTA/functional information and official logo bytes, validates Brand Integrity / Venue Fidelity / Quality, and produces a final output SHA-256 plus `DeterministicRenderManifest`.
 
-`LocalStoryComposer` is not an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. If the Story uses a verified enhancement, its `masterSha256` remains the original real master SHA while the enhancement output SHA remains in the provenance record. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
+`LocalStoryComposer` is the Story entry point and **does not create an alternate branding path**. It validates Story lineage and dispatches by resolved standard. For non-Sunset Story standards it can delegate to `LocalCreativeComposer` under their own contracts. For `SUNSET_STORY_V1`, however, generic fallback is forbidden: it routes exclusively to `LocalSunsetStoryRenderer` / `LOCAL_SUNSET_STORY_RENDERER_V1`.
 
-`LocalThumbnailComposer` is the only final thumbnail-render path defined by this V1. It requires `TOCA_THUMBNAIL_V1`, delegates visual composition to `LocalCreativeComposer`, therefore inherits real-master byte binding, output-bound fidelity evidence, official-logo-only composition and all three Creative Truth gates, and self-verifies the resulting render manifest/output SHA through `assertVideoThumbnailCreativeTruth()`. The older R20/R29 capability `video.thumbnail.generate` is explicitly a **non-final render-intent manifest**; it cannot be treated as approved thumbnail image bytes.
+### Dedicated `SUNSET_STORY_V1` renderer
 
-`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `REAL_PLUS_ENHANCEMENT` is intentionally rejected with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master. `GENERATIVE_EXCEPTION` video is also intentionally rejected in V1 with `VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED`; the user-authorized generative exception in this version applies to full static images only. Supplying generative references/approval context to the real-video path is rejected rather than silently changing semantics.
+`LocalSunsetStoryRenderer` is the canonical final renderer for real Sunset Stories. It requires standard version `1.2`, operation `SUNSET`, Instagram Story format, a verified marketing-ready Sunset master (or verified enhancement provenance), the exact four official WHITE footer brands and one of the approved template classes:
+
+- `SUNSET_HERO_LIFESTYLE`
+- `SUNSET_VIEW_SCENERY`
+- `SUNSET_SOCIAL_EXPERIENCE`
+- `SUNSET_DRINKS_EXPERIENCE`
+- `SUNSET_INFO_HOURS`
+
+The renderer encodes the approved 1080×1920 layout system rather than relying on the generic compositor. It pins the footer band to the canonical safe region, uses fixed slots for the four brands, and applies deterministic position/scale presets for headline, support copy, CTA and functional time information per template class. The current runtime typography profile is pinned to `DejaVu-Serif` for the editorial headline and `DejaVu-Sans` for support/CTA/functional text. Those runtime font names are an implementation profile, not a claim that Drive names them as the brand's official font files; replacing them requires a new standard version and visual validation.
+
+The quality evidence produced by this renderer records `dedicatedRenderer=SUNSET_STORY_V1`, standard version, template class, runtime fonts, fixed footer geometry, required brand order and required brand asset IDs. Its final manifest keeps `exactAssetBinding=true`. If the dedicated renderer or any required official asset is unavailable, the Story fails closed; it may not fall back to generic composition or image generation.
+
+`LocalThumbnailComposer` remains the final thumbnail-render path defined by its own standard and inherits Creative Truth gates through deterministic composition. `LocalVideoComposer` assembles only registry-bound verified shots and remains subject to its own video-specific provenance/rights restrictions.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
 
+## Generative tool routing
+
+Image generation is not a direct finalizer for Toca creatives. The machine-actionable `TOCA_CREATIVE_TOOL_ROUTING_V1` contract requires:
+
+- real composition/enhancement finalization by deterministic renderers;
+- generative exceptions to produce candidate pixels only;
+- generated candidates to omit final logos, wordmarks, partner marks, marketing text, CTA, event time, price and operational status;
+- official brand bytes to be loaded from canonical Drive assets and SHA-verified before final composition;
+- final Brand Integrity, Venue Fidelity, Quality, output SHA and exact asset binding before a creative is treated as technically ready.
+
+A generated candidate cannot be returned as `FINAL`, `STORY_READY`, `REVIEW`, `APPROVED`, `PREPARED` or `PUBLISHED` merely because generation succeeded.
+
 ## Publication boundary
 
-The final asset is immutable from approval to publication. `CreativeTruthPublicationBinding` contains:
+The final asset is immutable from approval to publication. `CreativeTruthPublicationBinding` contains policy ID, standard ID, creative ID, final output SHA-256, Brand Integrity PASS, Venue Fidelity PASS, Quality PASS, exact asset locator(s) and `exactAssetBinding=true`.
 
-- policy ID;
-- standard ID;
-- creative ID;
-- final output SHA-256;
-- Brand Integrity PASS;
-- Venue Fidelity PASS;
-- Quality PASS;
-- one or more exact asset locators such as `MEDIA_URL`, provider image/video IDs/hashes or a Drive file ID;
-- `exactAssetBinding=true`.
+Instagram/Meta execution must consume the exact approved asset. Preparation, scheduling or publishing may materialize/stage the asset, but may not reconstruct or redesign it. A staged object's MIME and byte hash must match the approved descriptor before provider execution.
 
-Final R20/R29 Reel/Story export is also behind this boundary. `VideoExportManifest` requires `finalAssetSha256` plus a valid `CreativeTruthPublicationBinding`; `validateExportManifest()` rejects the export when the binding is malformed or when its `outputSha256` differs from the final exported asset SHA-256. Thus the internal export layer cannot convert a quality/approval-only video manifest into a Creative Truth bypass.
-
-Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs being published. Meta Ads validates the provider creative locator before its controlled write path. Publication or ad creation cannot silently substitute or rebuild a creative.
-
-### TOCA-managed Instagram scheduling
-
-The durable TOCA-managed scheduler carries the `CreativeTruthPublicationBinding` inside the immutable approval descriptor. The descriptor also contains the staged GCS object name, MIME type and SHA-256. Scheduling is rejected when the approved asset SHA-256 differs from the Creative Truth `outputSha256`.
-
-The managed single-asset path supports image posts, image/video Stories and MP4 Reels. A Reel descriptor must be `video/mp4`; MIME substitution is rejected. Carousel remains fail-closed in this single-asset descriptor until a dedicated multi-asset approval contract binds every child asset independently. Generic Instagram publication contracts may represent multiple URLs, but the managed scheduler must not pretend a singular approved object is a complete carousel.
-
-At execution time:
-
-1. `GcsPublicationAssetDelivery.createVerifiedDeliveryUrl()` signs the private object URL;
-2. the staged object MIME must match the approved descriptor;
-3. the complete object is fetched and SHA-256 verified against the approved final creative hash;
-4. only after byte equality is proven is the current signed `MEDIA_URL` added to the runtime binding;
-5. the production `InstagramPublicationExecutor` is instantiated with Creative Truth enforcement enabled;
-6. the executor rejects any request whose exact runtime media URL is not in the binding.
-
-GCS staging accepts the exact final image types and `video/mp4`, creates deterministic object names from correlation ID + creative asset ID + SHA prefix, and validates the externally fetchable MIME before returning the object. This gives the Reel path the same exact-asset guarantee as static image publication.
-
-This allows a short-lived signed URL to be derived at execution time without weakening exact-asset approval: object identity, object name, MIME and final-byte SHA-256 are approved first, and the derived URL is accepted only after the private object is reverified.
-
-Legacy/manual publication preparation that does not supply a Creative Truth binding cannot cross the production executor boundary. It therefore fails closed rather than becoming an alternate publication bypass.
+TOCA-managed Instagram scheduling carries the Creative Truth binding inside the immutable approval descriptor. `PUBLISHED` is only valid after provider-backed confirmation; creative resolution/rendering by itself never authorizes provider mutation.
 
 ## Failure codes
 
@@ -177,13 +141,20 @@ The policy fails closed with explicit codes, including:
 - `FAILED_VENUE_FIDELITY_GATE`
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
+- `FAILED_DIRECT_GENERATIVE_FINALIZATION`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, unsupported full-generative video, unexpected generative context on the real-video path, incomplete video edit lineage, invalid final thumbnail render manifests, final video export Creative Truth hash mismatch, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
+Sunset Story additionally treats generic-renderer use, stale standard versions and incomplete/incorrect sponsor-footer binding as hard failures under its dedicated standard contract.
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> BIND FIDELITY EVIDENCE TO MASTER + CANDIDATE SHA] -> [STATIC GENERATIVE_EXCEPTION ONLY: GENERATE FROM VERIFIED REFERENCES -> BIND EVIDENCE TO CANDIDATE SHA + ACTIVE REFERENCES -> POST-GENERATION HUMAN REVIEW] -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> FINAL OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
+Generic Creative Truth flow:
+
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [ENHANCE/GENERATE CANDIDATE IF ALLOWED] -> DETERMINISTIC FINALIZATION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> FINAL OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> EXACT-ASSET EXECUTION`
+
+Sunset Story specialization:
+
+`CONTENT_ITEM SUNSET/STORIES -> SUNSET_STORY_V1 v1.2 -> TEMPLATE CLASS -> VENUE_VERIFIED + MARKETING_READY MASTER -> LOAD + SHA-VERIFY 4 OFFICIAL WHITE BRAND ASSETS -> LOCAL_SUNSET_STORY_RENDERER_V1 -> FIXED 1080x1920 PRESET -> COPY/CTA/TIME -> FIXED FOUR-BRAND FOOTER -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 + EXACT ASSET BINDING -> STORY_READY -> REVIEW/APPROVAL -> PREPARE/PUBLISH EXACT APPROVED BYTES`
 
 ## Safety boundary
 
-No automatic provider mutation is performed merely by resolving, enhancing or rendering a creative. Existing approval and provider-write boundaries remain in force. Creative Truth is an additional prerequisite, not a replacement for approval, idempotency, budget or provider policies.
+No automatic provider mutation is performed merely by resolving, enhancing or rendering a creative. Existing approval, capability, idempotency, budget and provider-write boundaries remain in force. Creative Truth is an additional prerequisite, not a replacement for those controls.
