@@ -1,6 +1,11 @@
 import * as z from 'zod/v4';
+import {
+  TOCA_SUNSET_VENUE_REFERENCE_SET_ID,
+  TOCA_THE_PARTY_VENUE_REFERENCE_SET_ID,
+} from './creative-truth-generative-reference-sets.js';
 
 export const TOCA_CREATIVE_TRUTH_POLICY_ID = 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const;
+/** Legacy global reference set retained only for compatibility parsing; canonical execution denies it. */
 export const TOCA_VENUE_REFERENCE_SET_ID = 'TOCA_VENUE_REFERENCE_SET_V1' as const;
 export const CREATIVE_TRUTH_REGISTRY_DRIVE_ID =
   '1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU' as const;
@@ -83,7 +88,14 @@ export const creativeTruthPolicySchema = z.object({
   generativeException: z.object({
     explicitApprovalRequired: z.literal(true),
     approvalRecordRequired: z.literal(true),
-    venueReferenceSetRequired: z.literal(TOCA_VENUE_REFERENCE_SET_ID),
+    referenceStrategy: z.literal('OPERATION_SCOPED_ONLY_V1'),
+    legacyReferenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID),
+    legacyReferenceSetStatus: z.literal('DEPRECATED'),
+    sunsetReferenceSetId: z.literal(TOCA_SUNSET_VENUE_REFERENCE_SET_ID),
+    thePartyReferenceSetId: z.literal(TOCA_THE_PARTY_VENUE_REFERENCE_SET_ID),
+    crossOperationReferenceReuse: z.literal('FORBIDDEN'),
+    referenceSetOperationMatch: z.literal('REQUIRED'),
+    legacyReferenceSetExecution: z.literal('DENY'),
     minimumVerifiedReferences: z.number().int().min(3),
     venueFidelityGateStillRequired: z.literal(true),
     officialBrandAssetsStillRequired: z.literal(true),
@@ -226,6 +238,7 @@ export const creativeStandardSchema = z.object({
   venueFidelityGateRequired: z.boolean(),
 });
 
+/** Legacy global-set approval schema retained only for compatibility evidence parsing. */
 export const generativeExceptionApprovalSchema = z.object({
   exceptionId: z.string().min(1),
   contentItemId: z.string().min(1),
