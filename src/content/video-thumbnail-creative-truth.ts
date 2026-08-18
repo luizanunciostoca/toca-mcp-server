@@ -2,6 +2,7 @@ import { deterministicRenderManifestSchema } from '../contracts/creative-truth.j
 import { assertCreativeReadyForPublication } from '../creative/creative-truth.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+const TOCA_THUMBNAIL_STANDARD_ID = 'TOCA_THUMBNAIL_V1';
 
 export function assertVideoThumbnailCreativeTruth(
   contentItemId: string,
@@ -25,6 +26,9 @@ export function assertVideoThumbnailCreativeTruth(
   const parsed = deterministicRenderManifestSchema.parse(manifest);
   const ready = assertCreativeReadyForPublication(parsed);
 
+  if (ready.standardId !== TOCA_THUMBNAIL_STANDARD_ID) {
+    throw new Error('R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_STANDARD_MISMATCH');
+  }
   if (ready.contentItemId !== normalizedContentItemId) {
     throw new Error('R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_CONTENT_MISMATCH');
   }
