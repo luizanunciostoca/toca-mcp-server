@@ -45,7 +45,7 @@ export interface LocalCreativeComposeInput {
   readonly sourceImageBytes: Uint8Array;
   readonly sourceContentType: 'image/jpeg' | 'image/png' | 'image/webp';
   readonly canvas: CreativeCanvas;
-  readonly headline: string;
+  readonly headline?: string;
   readonly supportCopy?: string;
   readonly cta?: string;
   readonly functionalInfo?: string;
@@ -82,6 +82,7 @@ export class LocalCreativeComposer {
   async compose(input: LocalCreativeComposeInput): Promise<LocalCreativeComposeResult> {
     validateInput(input);
     assertCreativeStandard(input.standard);
+    assertRealAssetBinding(input);
 
     const brandGate = evaluateBrandIntegrity(
       input.requiredBrands,
@@ -127,6 +128,7 @@ export class LocalCreativeComposer {
         dimensions: input.canvas,
         outputContentType: 'image/jpeg',
         deterministicComposition: true,
+        sourceMasterHashVerified: input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
       });
       requireGatePassed(qualityGate);
 
@@ -215,26 +217,28 @@ function buildImageMagickArgs(
     `rectangle 0,${footerTop} ${w},${h}`,
   ];
 
-  args.push(
-    '(',
-    '-size',
-    `${textWidth}x${Math.round(h * 0.26)}`,
-    '-background',
-    'none',
-    '-font',
-    'DejaVu-Serif',
-    '-fill',
-    'white',
-    '-pointsize',
-    input.canvas === '1080x1080' ? '62' : '72',
-    `caption:${input.headline.trim()}`,
-    ')',
-    '-gravity',
-    'northwest',
-    '-geometry',
-    `+${side}+${Math.round(h * 0.12)}`,
-    '-composite',
-  );
+  if (input.headline?.trim()) {
+    args.push(
+      '(',
+      '-size',
+      `${textWidth}x${Math.round(h * 0.26)}`,
+      '-background',
+      'none',
+      '-font',
+      'DejaVu-Serif',
+      '-fill',
+      'white',
+      '-pointsize',
+      input.canvas === '1080x1080' ? '62' : '72',
+      `caption:${input.headline.trim()}`,
+      ')',
+      '-gravity',
+      'northwest',
+      '-geometry',
+      `+${side}+${Math.round(h * 0.12)}`,
+      '-composite',
+    );
+  }
 
   if (input.supportCopy?.trim()) {
     args.push(
@@ -353,7 +357,7 @@ function validateInput(input: LocalCreativeComposeInput): void {
   ) {
     throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
   }
-  if (!input.headline.trim() || input.headline.trim().length > 90) {
+  if ((input.headline?.trim().length ?? 0) > 90) {
     throw new ExecutionError('QUALITY_GATE_FAILED', 'CREATIVE_HEADLINE_INVALID', false);
   }
   if ((input.supportCopy?.trim().length ?? 0) > 160 || (input.cta?.trim().length ?? 0) > 60) {
@@ -361,6 +365,21 @@ function validateInput(input: LocalCreativeComposeInput): void {
   }
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
+  }
+}
+
+function assertRealAssetBinding(input: LocalCreativeComposeInput): void {
+  if (input.creativeMode === 'GENERATIVE_EXCEPTION') return;
+  const expectedMasterSha256 = input.venueAsset?.masterSha256;
+  if (!expectedMasterSha256) {
+    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'FAILED_LINEAGE_MISSING', false);
+  }
+  if (sha256(input.sourceImageBytes) !== expectedMasterSha256) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'CREATIVE_MASTER_HASH_MISMATCH',
+      false,
+    );
   }
 }
 
