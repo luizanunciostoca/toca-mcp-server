@@ -42,11 +42,13 @@ Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The ap
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
 
-`VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. The shot ID must resolve to an `ACTIVE_APPROVED` record, venue and marketing checks must be true, rights must be explicitly cleared, and the supplied bytes must match the registered master SHA-256.
+`VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. `CreativeTruthResolver.resolveVideoShots()` resolves requested shot IDs from the canonical registry first. The shot must be `ACTIVE_APPROVED`, venue verified, marketing ready, bound to source/master lineage, carry an approved master SHA-256 and have rights explicitly cleared. The supplied bytes must then match that registered master SHA-256 before FFmpeg is allowed to run.
+
+A verified source may exist in the registry without being marketing-ready. Such a record remains useful as evidence/reference, but it is rejected for final video composition until master and rights approval are completed.
 
 ## Brand integrity
 
-A logo is never generated, repaired, approximated or redrawn by an image model. `BrandAsset` records pin the official Drive file ID and optionally SHA-256 when that checksum has been captured. `SHA256_PINNED` records fail on digest mismatch; `DRIVE_FILE_ID_PINNED` records fail on file identity mismatch and remain eligible for later hash hardening.
+A logo is never generated, repaired, approximated or redrawn by an image model. `BrandAsset` records pin the official Drive file ID and SHA-256 once verified. `SHA256_PINNED` records fail on digest mismatch; a registry entry that is not active and approved is not eligible for composition.
 
 The deterministic image/video composers receive the official logo bytes separately from the photographic/video source and overlay those files after creative generation or enhancement.
 
@@ -91,6 +93,22 @@ The final asset is immutable from approval to publication. `CreativeTruthPublica
 
 Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs being published. Meta Ads validates the provider creative locator before its controlled write path. Publication or ad creation cannot silently substitute or rebuild a creative.
 
+### TOCA-managed Instagram scheduling
+
+The durable TOCA-managed scheduler carries the `CreativeTruthPublicationBinding` inside the immutable approval descriptor. The descriptor also contains the staged GCS object name and SHA-256. Scheduling is rejected when the approved asset SHA-256 differs from the Creative Truth `outputSha256`.
+
+At execution time:
+
+1. `GcsPublicationAssetDelivery.createVerifiedDeliveryUrl()` signs the private object URL;
+2. the complete object is fetched and SHA-256 verified against the approved final creative hash;
+3. only after byte equality is proven is the current signed `MEDIA_URL` added to the runtime binding;
+4. the production `InstagramPublicationExecutor` is instantiated with Creative Truth enforcement enabled;
+5. the executor rejects any request whose exact runtime media URL is not in the binding.
+
+This allows a short-lived signed URL to be derived at execution time without weakening exact-asset approval: object identity, object name and final-byte SHA-256 are approved first, and the derived URL is accepted only after the private object is reverified.
+
+Legacy/manual publication preparation that does not supply a Creative Truth binding cannot cross the production executor boundary. It therefore fails closed rather than becoming an alternate publication bypass.
+
 ## Failure codes
 
 The policy fails closed with explicit codes, including:
@@ -109,11 +127,11 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings and video rights that are not explicitly cleared.
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, managed-schedule Creative Truth hash mismatch and GCS publication object SHA-256 mismatch.
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
