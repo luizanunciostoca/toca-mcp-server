@@ -30,7 +30,6 @@ const instagramActorId = requiredEnv('META_ADS_SMOKE_INSTAGRAM_ACTOR_ID');
 const smokeId = requiredEnv('META_ADS_SMOKE_ID');
 const dailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_DAILY_BUDGET_MINOR'));
 const maxDailyBudgetMinor = parsePositiveInt(requiredEnv('META_ADS_SMOKE_MAX_DAILY_BUDGET_MINOR'));
-// Canonical destination envelope from touristic-digital-platform/apps/morro-digital-platform/src/config/destination.ts.
 const geoLatitude = parseFiniteNumber(
   process.env.META_ADS_SMOKE_GEO_LATITUDE?.trim() || '-13.3833',
 );
@@ -107,6 +106,7 @@ async function preparePlan(): Promise<{
         pageId,
         instagramActorId,
         objectStorySpec: sourceCreative.objectStorySpec,
+        providerSourceCreativeId: sourceCreative.id,
       },
     ],
     ads: [{ name: expectedAdName(), creativeIndex: 0 }],
@@ -160,6 +160,9 @@ async function executePlan(): Promise<{
   await verifyAccount();
   await verifyPixelAccess();
   const sourceCreative = await resolveSourceCreative();
+  if (plan.creatives[0]?.providerSourceCreativeId !== sourceCreative.id) {
+    throw new Error('META_ADS_SMOKE_SOURCE_CREATIVE_ID_MISMATCH');
+  }
   await validateMetaAdsAdWriteReadiness(api, {
     accountId,
     creativeId: sourceCreative.id,
@@ -184,6 +187,7 @@ async function executePlan(): Promise<{
         requestSha256: approvedSha256,
         smokeId,
         campaignName: plan.campaign.name,
+        providerSourceCreativeId: sourceCreative.id,
       }),
       JSON.stringify({ status: 'STARTED' }),
     ],
@@ -214,6 +218,7 @@ async function executePlan(): Promise<{
                 requestSha256: approvedSha256,
                 smokeId,
                 campaignName: plan.campaign.name,
+                providerSourceCreativeId: sourceCreative.id,
               }),
               JSON.stringify(checkpoint),
             ],
@@ -239,6 +244,7 @@ async function executePlan(): Promise<{
           requestSha256: approvedSha256,
           smokeId,
           campaignName: plan.campaign.name,
+          providerSourceCreativeId: sourceCreative.id,
         }),
         JSON.stringify({
           campaignId: result.campaignId,
@@ -272,6 +278,7 @@ async function executePlan(): Promise<{
           requestSha256: approvedSha256,
           smokeId,
           campaignName: plan.campaign.name,
+          providerSourceCreativeId: sourceCreative.id,
         }),
         JSON.stringify({
           error: normalizeError(error),
@@ -296,6 +303,9 @@ function assertExactSmokePlanEnvelope(plan: ControlledCreatePausedPlan): void {
   }
   if (plan.creatives.length !== 1 || plan.creatives[0]?.name !== expectedCreativeName()) {
     throw new Error('META_ADS_SMOKE_PLAN_CREATIVE_NAME_MISMATCH');
+  }
+  if (!plan.creatives[0]?.providerSourceCreativeId) {
+    throw new Error('META_ADS_SMOKE_SOURCE_CREATIVE_ID_REQUIRED');
   }
   if (
     plan.ads.length !== 1 ||
@@ -503,6 +513,7 @@ function guardrailsFor(approvedRequestSha256: string): MetaAdsWriteGuardrails {
     allowedPageId: pageId,
     allowedInstagramActorId: instagramActorId,
     approvedRequestSha256,
+    allowUnboundCreativeForProviderValidation: true,
   };
 }
 
