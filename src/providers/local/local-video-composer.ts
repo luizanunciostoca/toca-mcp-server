@@ -291,6 +291,13 @@ function validateInput(input: LocalVideoComposeInput): void {
   if (input.shots.some((shot) => !shot.shotId.trim() || shot.videoBytes.byteLength === 0)) {
     throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'VIDEO_SHOT_BYTES_REQUIRED', false);
   }
+  if (input.creativeMode === 'REAL_PLUS_ENHANCEMENT') {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+      false,
+    );
+  }
   if (
     input.creativeMode !== 'GENERATIVE_EXCEPTION' &&
     input.shots.some((shot) => !shot.registry)
