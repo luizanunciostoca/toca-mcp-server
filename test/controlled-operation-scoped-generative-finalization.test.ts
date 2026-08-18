@@ -8,7 +8,6 @@ import type {
   VenueAsset,
   VenueReference,
 } from '../src/contracts/creative-truth.js';
-import type { CanonicalBrandAssetRegistry } from '../src/creative/canonical-generative-brand-binding.js';
 import {
   ControlledOperationScopedGenerativeFinalizationService,
   type ControlledOperationScopedGenerativeFinalizationRequest,
@@ -18,6 +17,8 @@ import type {
   LocalOperationScopedGenerativeComposeInput,
   LocalOperationScopedGenerativeComposeResult,
 } from '../src/providers/local/local-operation-scoped-generative-composer.js';
+
+const TRUSTED_NOW = '2026-08-18T04:00:00Z';
 
 const approval: OperationScopedGenerativeExceptionApproval = {
   exceptionId: 'GEN-SUN-1',
@@ -88,7 +89,7 @@ const canonicalTocaBrand: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
-const standard: CreativeStandard = {
+const canonicalStandard: CreativeStandard = {
   standardId: 'SUNSET_FEED_V1',
   version: '1.0',
   brandScope: 'TOCA_DO_MORCEGO',
@@ -96,7 +97,7 @@ const standard: CreativeStandard = {
   channel: 'INSTAGRAM',
   format: 'SINGLE_IMAGE',
   parentPolicyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-  canonicalDriveId: 'drive-standard',
+  canonicalDriveId: 'canonical-drive-standard',
   repoMirrorPath: 'control/creative-standards/sunset-feed-standard.v1.json',
   status: 'ACTIVE_CANONICAL',
   realAssetRequired: true,
@@ -163,12 +164,11 @@ function request(
     candidateImageBytes: candidateBytes,
     candidateContentType: 'image/jpeg',
     creativeId: 'CREATIVE-SUN-FINAL-1',
-    standard,
+    standard: canonicalStandard,
     fidelityEvidence: fidelityEvidence(),
     canvas: '1080x1350',
     requiredBrands: ['TOCA_DO_MORCEGO'],
     brandAssets: [brandInput()],
-    nowIso: '2026-08-18T04:00:00Z',
     ...overrides,
   };
 }
@@ -179,12 +179,20 @@ function registry(
     readonly canonicalApproval?: OperationScopedGenerativeExceptionApproval | undefined;
     readonly canonicalReferences?: readonly VenueReference[];
     readonly venueOverride?: (assetId: string) => VenueAsset | undefined;
+    readonly canonicalStandard?: CreativeStandard | undefined;
+    readonly canonicalBrand?: BrandAsset | undefined;
   } = {},
 ): OperationScopedGenerativeRegistry {
   const operation = options.operation ?? 'SUNSET';
   const canonicalApproval = Object.prototype.hasOwnProperty.call(options, 'canonicalApproval')
     ? options.canonicalApproval
     : approval;
+  const resolvedStandard = Object.prototype.hasOwnProperty.call(options, 'canonicalStandard')
+    ? options.canonicalStandard
+    : canonicalStandard;
+  const resolvedBrand = Object.prototype.hasOwnProperty.call(options, 'canonicalBrand')
+    ? options.canonicalBrand
+    : canonicalTocaBrand;
   return {
     assertCanonicalPolicy: vi.fn(async () => undefined),
     getContentItemOperation: vi.fn(async () => operation),
@@ -195,15 +203,13 @@ function registry(
       const index = Number.parseInt(assetId.replace('SUN-', ''), 10);
       return Number.isFinite(index) ? venue(index) : undefined;
     }),
-  };
-}
-
-function brandRegistry(
-  resolved: BrandAsset | undefined = canonicalTocaBrand,
-): CanonicalBrandAssetRegistry {
-  return {
-    getBrandAsset: vi.fn(async (brand: string, variant: string) =>
-      brand === 'TOCA_DO_MORCEGO' && variant === 'WHITE' ? resolved : undefined,
+    getCreativeStandard: vi.fn(async (standardId) =>
+      resolvedStandard?.standardId === standardId ? resolvedStandard : undefined,
+    ),
+    getBrandAsset: vi.fn(async (brand, variant) =>
+      resolvedBrand?.brand === brand && resolvedBrand.variant === variant
+        ? resolvedBrand
+        : undefined,
     ),
   };
 }
@@ -231,7 +237,7 @@ function successfulResult(): LocalOperationScopedGenerativeComposeResult {
         { gate: 'VENUE_FIDELITY', status: 'PASSED', failureCodes: [], evidence: {} },
         { gate: 'QUALITY', status: 'PASSED', failureCodes: [], evidence: {} },
       ],
-      createdAt: '2026-08-18T04:00:00Z',
+      createdAt: TRUSTED_NOW,
     },
     provider: 'LOCAL_IMAGEMAGICK',
     pipelineVersion: 'local-operation-scoped-generative-composer-v1',
@@ -241,21 +247,21 @@ function successfulResult(): LocalOperationScopedGenerativeComposeResult {
 
 function serviceWith(
   canonicalRegistry: OperationScopedGenerativeRegistry,
-  canonicalBrandRegistry: CanonicalBrandAssetRegistry = brandRegistry(),
+  nowIso = TRUSTED_NOW,
   compose = vi.fn(async (_input: LocalOperationScopedGenerativeComposeInput) => successfulResult()),
 ) {
   return {
     compose,
     service: new ControlledOperationScopedGenerativeFinalizationService({
       registry: canonicalRegistry,
-      brandRegistry: canonicalBrandRegistry,
       composer: { compose },
+      now: () => nowIso,
     }),
   };
 }
 
 describe('ControlledOperationScopedGenerativeFinalizationService', () => {
-  it('revalidates candidate, approval, reference identity, source hashes and official brand metadata before final render', async () => {
+  it('revalidates candidate, approval, reference identity, source hashes, standard and brands before final render', async () => {
     const { service, compose } = serviceWith(registry());
 
     await service.finalize(request());
@@ -268,14 +274,14 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
       'REF-SUN-2',
       'REF-SUN-3',
     ]);
+    expect(canonicalInput.standard).toEqual(canonicalStandard);
     expect(canonicalInput.brandAssets[0]?.registry).toEqual(canonicalTocaBrand);
-    expect(canonicalInput.createdAt).toBe('2026-08-18T04:00:00Z');
+    expect(canonicalInput.createdAt).toBe(TRUSTED_NOW);
   });
 
   it('rejects candidate hash substitution before canonical state or composer access', async () => {
     const canonicalRegistry = registry();
-    const canonicalBrandRegistry = brandRegistry();
-    const { service, compose } = serviceWith(canonicalRegistry, canonicalBrandRegistry);
+    const { service, compose } = serviceWith(canonicalRegistry);
 
     await expect(
       service.finalize(
@@ -285,13 +291,11 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
       ),
     ).rejects.toThrow('GENERATIVE_FINALIZATION_CANDIDATE_HASH_MISMATCH');
     expect(canonicalRegistry.assertCanonicalPolicy).not.toHaveBeenCalled();
-    expect(canonicalBrandRegistry.getBrandAsset).not.toHaveBeenCalled();
     expect(compose).not.toHaveBeenCalled();
   });
 
   it('fails closed when CONTENT_ITEMS operation changes after candidate generation', async () => {
     const { service, compose } = serviceWith(registry({ operation: 'THE_PARTY' }));
-
     await expect(service.finalize(request())).rejects.toThrow(
       'FAILED_GENERATIVE_CONTENT_OPERATION_MISMATCH',
     );
@@ -308,7 +312,6 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
         },
       }),
     );
-
     await expect(service.finalize(request())).rejects.toThrow(
       'GENERATIVE_FINALIZATION_APPROVAL_BINDING_MISMATCH',
     );
@@ -325,7 +328,6 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
         },
       }),
     );
-
     await expect(service.finalize(request())).rejects.toThrow(
       'GENERATIVE_FINALIZATION_REFERENCE_HASH_MISMATCH',
     );
@@ -336,7 +338,6 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
     const { service, compose } = serviceWith(
       registry({ canonicalApproval: { ...approval, minReferenceCount: 4 } }),
     );
-
     await expect(service.finalize(request())).rejects.toThrow(
       'FAILED_GENERATIVE_REFERENCE_MISSING',
     );
@@ -348,14 +349,25 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
     const { service, compose } = serviceWith(
       registry({ canonicalReferences: [reference(1), duplicateReferenceId, reference(3)] }),
     );
-
     await expect(service.finalize(request())).rejects.toThrow(
       'FAILED_GENERATIVE_REFERENCE_MISSING',
     );
     expect(compose).not.toHaveBeenCalled();
   });
 
-  it('replaces caller-forged brand registry metadata with the canonical BRAND_ASSETS record', async () => {
+  it('replaces caller-forged standard metadata with canonical CREATIVE_STANDARDS readback', async () => {
+    const forgedStandard: CreativeStandard = {
+      ...canonicalStandard,
+      canonicalDriveId: 'forged-drive',
+      deterministicBrandInsertion: false,
+      venueFidelityGateRequired: false,
+    };
+    const { service, compose } = serviceWith(registry());
+    await service.finalize(request({ standard: forgedStandard }));
+    expect(compose.mock.calls[0]![0].standard).toEqual(canonicalStandard);
+  });
+
+  it('replaces caller-forged brand registry metadata with canonical BRAND_ASSETS readback', async () => {
     const forgedBrand: BrandAsset = {
       ...canonicalTocaBrand,
       brandAssetId: 'FORGED-TOCA',
@@ -363,34 +375,33 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
       sha256: 'f'.repeat(64),
     };
     const { service, compose } = serviceWith(registry());
-
     await service.finalize(request({ brandAssets: [brandInput(forgedBrand)] }));
-
-    expect(compose).toHaveBeenCalledWith(
-      expect.objectContaining({
-        brandAssets: [expect.objectContaining({ registry: canonicalTocaBrand })],
-      }),
-    );
+    expect(compose.mock.calls[0]![0].brandAssets[0]?.registry).toEqual(canonicalTocaBrand);
   });
 
-  it('fails closed when a required official brand has no canonical BRAND_ASSETS record', async () => {
-    const { service, compose } = serviceWith(registry(), brandRegistry(undefined));
-
-    await expect(service.finalize(request())).rejects.toThrow('FAILED_BRAND_ASSET_MISSING');
+  it('fails closed if the canonical standard does not exist', async () => {
+    const { service, compose } = serviceWith(registry({ canonicalStandard: undefined }));
+    await expect(service.finalize(request())).rejects.toThrow('FAILED_STANDARD_NOT_RESOLVED');
     expect(compose).not.toHaveBeenCalled();
   });
 
-  it('fails closed when an unrequired extra brand asset is supplied for deterministic composition', async () => {
-    const extra: BrandAsset = {
-      ...canonicalTocaBrand,
-      brandAssetId: 'EXTRA-MORRO',
-      brand: 'MORRO_DIGITAL',
-    };
-    const { service, compose } = serviceWith(registry());
+  it('rejects an expired approval against trusted service time with no caller backdating surface', async () => {
+    const expired = { ...approval, expiresAt: '2026-08-18T03:59:59Z' };
+    const { service, compose } = serviceWith(
+      registry({ canonicalApproval: expired }),
+      TRUSTED_NOW,
+    );
+    await expect(service.finalize(request())).rejects.toThrow(
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+    );
+    expect(compose).not.toHaveBeenCalled();
+  });
 
-    await expect(
-      service.finalize(request({ brandAssets: [brandInput(), brandInput(extra)] })),
-    ).rejects.toThrow('FAILED_BRAND_ASSET_MISSING');
+  it('fails closed if the trusted finalization clock is invalid', async () => {
+    const canonicalRegistry = registry();
+    const { service, compose } = serviceWith(canonicalRegistry, 'not-a-timestamp');
+    await expect(service.finalize(request())).rejects.toThrow('GENERATIVE_TRUSTED_CLOCK_INVALID');
+    expect(canonicalRegistry.assertCanonicalPolicy).not.toHaveBeenCalled();
     expect(compose).not.toHaveBeenCalled();
   });
 });
