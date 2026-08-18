@@ -80,7 +80,7 @@ const policy = {
     'FAILED_BRAND_INTEGRITY_GATE',
     'FAILED_QUALITY_GATE',
   ],
-} as const;
+};
 
 describe('Creative enhancement provenance contract', () => {
   it('accepts the canonical policy only with enhancement provenance and video fail-closed flags', () => {
