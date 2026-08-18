@@ -89,11 +89,12 @@ describe('LocalVideoComposer', () => {
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
     expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
-    expect(runner.mock.calls[0]?.[1].join(' ')).toContain('logo-0');
+    const commandArgs = runner.mock.calls[0]?.[1] ?? [];
+    expect(commandArgs.join(' ')).toContain('logo-0');
   });
 
   it('rejects a video shot that is not venue verified before ffmpeg runs', async () => {
-    const runner = vi.fn();
+    const runner = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
     const composer = new LocalVideoComposer(runner);
 
     await expect(
