@@ -5,6 +5,7 @@ import {
   type PhotoToVideoRouteType,
 } from '../contracts/photo-to-video.js';
 import { ExecutionError } from '../core/errors.js';
+import type { PhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-video-artifact-store.js';
 import type { CreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import type { CreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
 import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
@@ -16,6 +17,7 @@ import type { OpenAiSceneContinuationVideoProvider } from '../providers/openai/o
 export interface ControlledPhotoToVideoGenerationOptions {
   readonly registry: PhotoToVideoRegistry;
   readonly writeback: PhotoToVideoContentWriteback;
+  readonly artifactStore: PhotoToVideoArtifactStore;
   readonly sourceLoader: CreativeVideoSourceLoader;
   readonly brandLoader: CreativeTruthBrandAssetLoader;
   readonly photoMotionComposer: LocalPhotoMotionVideoComposer;
@@ -108,6 +110,7 @@ export class ControlledPhotoToVideoGenerationService {
       }
       providerCandidate = await this.options.sceneContinuationProvider.generate({
         contentItemId: resolved.content.contentItemId,
+        sourceAssetId: resolved.content.sourceAssetId,
         operation: resolved.content.operation,
         productId: resolved.content.productId,
         inheritedVisualStandardId: resolved.content.inheritedVisualStandardId,
@@ -139,6 +142,21 @@ export class ControlledPhotoToVideoGenerationService {
       standard: resolved.standard,
       heroBrand,
     });
+
+    const artifact = await this.options.artifactStore.store({
+      contentItemId: resolved.content.contentItemId,
+      routeType: request.routeType,
+      bytes: branded.outputBytes,
+      expectedSha256: branded.outputSha256,
+    });
+    if (artifact.sha256 !== branded.outputSha256) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'PHOTO_TO_VIDEO_ARTIFACT_STAGE_HASH_MISMATCH',
+        false,
+      );
+    }
+
     const createdAt = trustedNow(this.now);
     const manifest = photoToVideoCandidateManifestSchema.parse({
       schemaVersion: 1,
@@ -157,6 +175,8 @@ export class ControlledPhotoToVideoGenerationService {
       sourceSha256: source.sha256,
       providerCandidateSha256: providerCandidate.outputSha256,
       outputSha256: branded.outputSha256,
+      artifactRef: artifact.artifactRef,
+      artifactObjectName: artifact.objectName,
       outputContentType: branded.outputContentType,
       size: resolved.standard.size,
       seconds: resolved.standard.seconds,
@@ -184,6 +204,7 @@ export class ControlledPhotoToVideoGenerationService {
       routeType: manifest.routeType,
       standardId: manifest.standardId,
       candidateSha256: manifest.outputSha256,
+      candidateArtifactRef: manifest.artifactRef,
       ...(manifest.providerJobId ? { providerJobId: manifest.providerJobId } : {}),
     });
 
