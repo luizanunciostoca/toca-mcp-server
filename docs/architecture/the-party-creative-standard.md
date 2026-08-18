@@ -109,6 +109,30 @@ If none of the preferred real masters is currently `ACTIVE_APPROVED + VENUE_VERI
 
 This closes both parts of the prior static-render gap: The Party now has eligible real masters and automatic requests select them by approved intent rather than registry row order.
 
+## Content orchestration and write-back
+
+The machine-actionable bridge between editorial planning and Creative Truth is mirrored by `control/creative-standards/the-party-content-orchestration.v1.json`, contract ID `THE_PARTY_CONTENT_ORCHESTRATION_V1`. Its operational source is `TOCA_OS — MARKETING_AUTOPILOT_CONTENT_REGISTRY_v1.0` (`1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw`), sheet `CONTENT_ITEMS`.
+
+The content registry now carries 13 explicit The Party/Creative Truth columns after the existing publication fields:
+
+- `the_party_intent`;
+- `the_party_environment`;
+- `creative_standard_id`;
+- `creative_standard_version`;
+- `visual_standard_status`;
+- `hero_brand_asset_id`;
+- `venue_asset_id`;
+- `creative_truth_policy_id`;
+- `brand_integrity_status`;
+- `venue_fidelity_status`;
+- `quality_gate_status`;
+- `exact_asset_binding`;
+- `output_sha256`.
+
+Planning may resolve intent and standard in advance, but it may not fabricate gate success. Hybrid Networks items without an explicit environment remain `BLOCKED_NEEDS_ENVIRONMENT`. Gate fields start `PENDING`; `exact_asset_binding` and `output_sha256` remain unset until the exact final bytes have passed the Creative Truth pipeline. `RESOLVED` therefore means only that visual-family context is complete; it never means ready, approved, scheduled or publishable.
+
+The active rolling The Party slots in the Drive registry were preclassified according to this contract. Minimalist people-first/informational items can be visually resolved now; Hybrid Networks slots remain intentionally blocked until the edition/campaign is explicitly classified as `INTERNATIONAL` or `NATIONAL`. The runtime is not allowed to infer that value from artist, photo, dominant light, copy or prior creative.
+
 ## Multi-format application
 
 - Story: 1080×1920 / 9:16, protected safe area, quick hierarchy, hero mark and clear CTA.
