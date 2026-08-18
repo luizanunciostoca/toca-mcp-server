@@ -167,29 +167,34 @@ export const VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES: Readonly<
   ),
   'video.thumbnail.generate': internalContract(
     'video.thumbnail.generate',
-    'Generate a thumbnail derivation that preserves version and source-asset lineage.',
-    { write: true },
+    'Prepare a non-final thumbnail render-intent manifest with version/source lineage. It is not an approved image renderer: final Toca thumbnail bytes must be produced under TOCA_THUMBNAIL_V1 by the Creative Truth deterministic composer and gates.',
+    {
+      write: true,
+      verification: 'NON_FINAL_RENDER_INTENT_PERSISTED_WITH_LINEAGE_FINAL_BYTES_REQUIRE_CREATIVE_TRUTH',
+    },
   ),
   'video.export.reel': internalContract(
     'video.export.reel',
-    'Export an approved Reel artifact after rights, accessibility, safe-area, duration and quality gates pass; no publication occurs.',
+    'Export an approved Reel artifact after rights, accessibility, safe-area, duration, quality and Creative Truth exact-asset gates pass; no publication occurs.',
     {
       write: true,
       approvalRequired: false,
       extra: approvalRef,
       extraRequired: ['approval_ref'],
-      verification: 'ARTIFACT_EXISTS_LINEAGE_VALID_AND_ALL_HARD_GATES_PASS',
+      verification:
+        'ARTIFACT_EXISTS_LINEAGE_VALID_ALL_HARD_GATES_PASS_AND_CREATIVE_TRUTH_OUTPUT_SHA_MATCHES',
     },
   ),
   'video.export.story': internalContract(
     'video.export.story',
-    'Export an approved vertical Story video artifact after all hard gates pass; no publication occurs.',
+    'Export an approved vertical Story video artifact after all hard gates and Creative Truth exact-asset binding pass; no publication occurs.',
     {
       write: true,
       approvalRequired: false,
       extra: approvalRef,
       extraRequired: ['approval_ref'],
-      verification: 'ARTIFACT_EXISTS_LINEAGE_VALID_AND_ALL_HARD_GATES_PASS',
+      verification:
+        'ARTIFACT_EXISTS_LINEAGE_VALID_ALL_HARD_GATES_PASS_AND_CREATIVE_TRUTH_OUTPUT_SHA_MATCHES',
     },
   ),
   'video.quality.validate': internalContract(
