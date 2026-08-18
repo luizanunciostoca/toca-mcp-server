@@ -8,10 +8,12 @@ import {
   type PhotoToVideoReviewEvidence,
 } from '../contracts/photo-to-video.js';
 import { ExecutionError } from '../core/errors.js';
+import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
 import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
 
 export interface ControlledPhotoToVideoFinalizationOptions {
   readonly registry: PhotoToVideoRegistry;
+  readonly writeback: PhotoToVideoContentWriteback;
   readonly now?: () => Date;
 }
 
@@ -35,25 +37,44 @@ export class ControlledPhotoToVideoFinalizationService {
     const review = photoToVideoReviewEvidenceSchema.parse(request.reviewEvidence);
     const outputSha256 = sha256(request.outputBytes);
     if (!isMp4(request.outputBytes) || outputSha256 !== candidate.outputSha256.toLowerCase()) {
-      throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH', false);
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH',
+        false,
+      );
     }
     if (review.candidateSha256.toLowerCase() !== outputSha256) {
-      throw new ExecutionError('FIDELITY_GATE_FAILED', 'PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH', false);
+      throw new ExecutionError(
+        'FIDELITY_GATE_FAILED',
+        'PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH',
+        false,
+      );
     }
     if (
       candidate.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO' &&
       review.sceneContinuationFidelity !== 'PASS'
     ) {
-      throw new ExecutionError('FIDELITY_GATE_FAILED', 'SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED', false);
+      throw new ExecutionError(
+        'FIDELITY_GATE_FAILED',
+        'SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED',
+        false,
+      );
     }
     if (
       candidate.routeType === 'REAL_PHOTO_TO_MOTION_VIDEO' &&
       review.sceneContinuationFidelity !== 'NOT_APPLICABLE'
     ) {
-      throw new ExecutionError('POLICY_DENIED', 'PHOTO_MOTION_SCENE_CONTINUATION_REVIEW_INVALID', false);
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'PHOTO_MOTION_SCENE_CONTINUATION_REVIEW_INVALID',
+        false,
+      );
     }
 
-    const current = await this.options.registry.resolve(candidate.contentItemId, candidate.routeType);
+    const current = await this.options.registry.resolve(
+      candidate.contentItemId,
+      candidate.routeType,
+    );
     if (
       current.content.productId !== candidate.productId ||
       current.content.operation !== candidate.operation ||
@@ -67,7 +88,11 @@ export class ControlledPhotoToVideoFinalizationService {
       current.venueAsset.masterDriveFileId !== candidate.sourceDriveFileId ||
       current.venueAsset.masterSha256?.toLowerCase() !== candidate.sourceSha256.toLowerCase()
     ) {
-      throw new ExecutionError('STATE_CONFLICT', 'PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED', false);
+      throw new ExecutionError(
+        'STATE_CONFLICT',
+        'PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED',
+        false,
+      );
     }
     if (candidate.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO') {
       if (
@@ -75,11 +100,16 @@ export class ControlledPhotoToVideoFinalizationService {
         current.approval.exceptionId !== candidate.exceptionId ||
         current.approval.approvalRef !== candidate.approvalRef
       ) {
-        throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_CHANGED', false);
+        throw new ExecutionError(
+          'APPROVAL_REQUIRED',
+          'VIDEO_SCENE_CONTINUATION_APPROVAL_CHANGED',
+          false,
+        );
       }
     }
 
     const finalizedAt = trustedNow(this.now);
+    const outputEvidenceId = `VIDEO-${candidate.contentItemId}-${outputSha256.slice(0, 16)}`;
     const finalManifest = photoToVideoFinalManifestSchema.parse({
       schemaVersion: 1,
       status: 'VIDEO_CREATIVE_TRUTH_PASSED',
@@ -93,7 +123,7 @@ export class ControlledPhotoToVideoFinalizationService {
     });
 
     await this.options.registry.recordFinalOutput({
-      outputId: `VIDEO-${candidate.contentItemId}-${outputSha256.slice(0, 16)}`,
+      outputId: outputEvidenceId,
       contentItemId: candidate.contentItemId,
       productId: candidate.productId,
       operation: candidate.operation,
@@ -110,6 +140,14 @@ export class ControlledPhotoToVideoFinalizationService {
       sceneContinuationFidelity: review.sceneContinuationFidelity,
       status: 'VIDEO_CREATIVE_TRUTH_PASSED',
       finalizedAt,
+    });
+    await this.options.writeback.writeFinal({
+      contentItemId: candidate.contentItemId,
+      routeType: candidate.routeType,
+      standardId: candidate.standardId,
+      candidateSha256: candidate.outputSha256,
+      finalAssetSha256: outputSha256,
+      outputEvidenceId,
     });
 
     return finalManifest;
