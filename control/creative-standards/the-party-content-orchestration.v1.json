@@ -32,9 +32,17 @@
     "joinKey": "edition_id",
     "visualFamilyPolicy": "RESOLVE_BY_INTENT",
     "environmentSource": "EDITION_CONTEXT_OR_EXPLICIT_BRIEF",
+    "effectiveEnvironmentResolutionOrder": ["CONTENT_ITEM_EXPLICIT", "EDITION_CONTEXT_DECIDED"],
     "environmentDecisionStatuses": ["PENDING_DECISION", "DECIDED", "NOT_REQUIRED"],
     "propagateEnvironmentOnlyWhenDecisionStatus": "DECIDED",
+    "decisionEvidenceRequiredWhenDecided": [
+      "environment_decision_source",
+      "environment_decision_at",
+      "environment_decision_by"
+    ],
+    "derivedVisualStatusWhenEditionResolvesBlockedNetworks": "RESOLVED",
     "neverCrossEditionBoundary": true,
+    "rejectItemEditionEnvironmentConflict": true,
     "approvedCreativeMustNotBeSilentlyRecomposedAfterEnvironmentChange": true
   },
   "intentResolution": {
