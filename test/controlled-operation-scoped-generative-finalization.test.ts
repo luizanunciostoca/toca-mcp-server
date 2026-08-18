@@ -181,6 +181,7 @@ function registry(
     readonly venueOverride?: (assetId: string) => VenueAsset | undefined;
     readonly canonicalStandard?: CreativeStandard | undefined;
     readonly canonicalBrand?: BrandAsset | undefined;
+    readonly contentStandardId?: string | undefined;
   } = {},
 ): OperationScopedGenerativeFinalizationRegistry {
   const operation = options.operation ?? 'SUNSET';
@@ -193,9 +194,13 @@ function registry(
   const resolvedBrand = Object.prototype.hasOwnProperty.call(options, 'canonicalBrand')
     ? options.canonicalBrand
     : canonicalTocaBrand;
+  const contentStandardId = Object.prototype.hasOwnProperty.call(options, 'contentStandardId')
+    ? options.contentStandardId
+    : canonicalStandard.standardId;
   return {
     assertCanonicalPolicy: vi.fn(async () => undefined),
     getContentItemOperation: vi.fn(async () => operation),
+    getContentItemCreativeStandardId: vi.fn(async () => contentStandardId),
     getApprovedGenerativeException: vi.fn(async () => canonicalApproval),
     getReferenceSet: vi.fn(async () => options.canonicalReferences ?? references),
     getVenueAssetBySourceAssetId: vi.fn(async (assetId) => {
@@ -261,7 +266,7 @@ function serviceWith(
 }
 
 describe('ControlledOperationScopedGenerativeFinalizationService', () => {
-  it('revalidates candidate, approval, reference identity, source hashes, standard and brands before final render', async () => {
+  it('revalidates candidate, approval, reference identity, source hashes, content standard and brands before final render', async () => {
     const { service, compose } = serviceWith(registry());
     await service.finalize(request());
     expect(compose).toHaveBeenCalledOnce();
@@ -362,6 +367,22 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
     const { service, compose } = serviceWith(registry());
     await service.finalize(request({ standard: forgedStandard }));
     expect(compose.mock.calls[0]![0].standard).toEqual(canonicalStandard);
+  });
+
+  it('rejects finalization when CONTENT_ITEMS creative_standard_id is missing', async () => {
+    const { service, compose } = serviceWith(registry({ contentStandardId: undefined }));
+    await expect(service.finalize(request())).rejects.toThrow(
+      'GENERATIVE_FINALIZATION_CONTENT_STANDARD_REQUIRED',
+    );
+    expect(compose).not.toHaveBeenCalled();
+  });
+
+  it('rejects finalization when CONTENT_ITEMS creative_standard_id disagrees with the canonical requested standard', async () => {
+    const { service, compose } = serviceWith(registry({ contentStandardId: 'SUNSET_STORY_V1' }));
+    await expect(service.finalize(request())).rejects.toThrow(
+      'GENERATIVE_FINALIZATION_CONTENT_STANDARD_MISMATCH',
+    );
+    expect(compose).not.toHaveBeenCalled();
   });
 
   it('replaces caller-forged brand registry metadata with canonical BRAND_ASSETS readback', async () => {
