@@ -31,6 +31,7 @@ export interface VenueFidelityInput {
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references?: readonly VenueReference[];
   readonly evidence?: FidelityEvidence;
+  readonly candidateSha256?: string;
   readonly nowIso?: string;
 }
 
@@ -94,6 +95,11 @@ export function evaluateVenueFidelity(input: VenueFidelityInput): CreativeTruthG
     if (input.creativeMode === 'REAL_PLUS_ENHANCEMENT') {
       if (!evidence || !evidence.sourceIdentityPreserved) {
         failures.add('FAILED_VENUE_FIDELITY_GATE');
+      } else {
+        validateEvidenceCandidateBinding(input, evidence, failures);
+        if (!venue?.masterSha256 || evidence.sourceSha256 !== venue.masterSha256) {
+          failures.add('FAILED_FIDELITY_EVIDENCE_BINDING');
+        }
       }
       addVisualDriftFailures(evidence, failures);
     }
@@ -102,10 +108,15 @@ export function evaluateVenueFidelity(input: VenueFidelityInput): CreativeTruthG
   return gateResult('VENUE_FIDELITY', failures, {
     creativeMode: input.creativeMode,
     venueAssetId: input.venueAsset?.venueAssetId ?? null,
+    candidateSha256: input.candidateSha256 ?? null,
+    evidenceCandidateSha256: evidence?.candidateSha256 ?? null,
+    sourceSha256: evidence?.sourceSha256 ?? null,
     referenceSetId:
       input.generativeException?.referenceSetId ?? input.evidence?.referenceSetId ?? null,
     referenceAssetIds: (input.references ?? []).map((reference) => reference.assetId),
     verifier: input.evidence?.verifier ?? 'DETERMINISTIC_SOURCE_BINDING',
+    verificationMethod: input.evidence?.verificationMethod ?? null,
+    reviewRef: input.evidence?.reviewRef ?? null,
   });
 }
 
@@ -194,6 +205,7 @@ export function buildTocaImageEditPrompt(
   if (creativeMode === 'GENERATIVE_EXCEPTION') {
     common.push(
       'This is an explicitly approved generative exception, but venue truth remains binding: use only the supplied verified Toca references for spatial language, materials, architecture and atmosphere; do not invent incompatible structures.',
+      'The generated output must receive output-specific fidelity evidence and post-generation human review before it can become an approved final creative.',
     );
   } else if (creativeMode === 'REAL_PLUS_ENHANCEMENT') {
     common.push(
@@ -232,6 +244,7 @@ function validateGenerativeException(
   ) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
+
   const activeReferences = (input.references ?? []).filter(
     (reference) =>
       reference.status === 'ACTIVE' &&
@@ -241,14 +254,47 @@ function validateGenerativeException(
   if (activeReferences.length < approval.minReferenceCount) {
     failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
   }
+
+  const evidence = input.evidence;
   if (
-    !input.evidence ||
-    input.evidence.referenceSetId !== approval.referenceSetId ||
-    !input.evidence.sourceIdentityPreserved
+    !evidence ||
+    evidence.referenceSetId !== approval.referenceSetId ||
+    !evidence.sourceIdentityPreserved
   ) {
     failures.add('FAILED_VENUE_FIDELITY_GATE');
+  } else {
+    validateEvidenceCandidateBinding(input, evidence, failures);
+    const activeReferenceIds = new Set(activeReferences.map((reference) => reference.assetId));
+    const evidencedActiveReferenceCount = new Set(evidence.referenceAssetIds).size;
+    const allEvidenceReferencesAreActive = evidence.referenceAssetIds.every((assetId) =>
+      activeReferenceIds.has(assetId),
+    );
+    if (
+      evidencedActiveReferenceCount < approval.minReferenceCount ||
+      !allEvidenceReferencesAreActive
+    ) {
+      failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
+    }
+    if (
+      !evidence.reviewRef ||
+      !['HUMAN_REVIEW', 'MULTIMODAL_PLUS_HUMAN'].includes(evidence.verificationMethod)
+    ) {
+      failures.add('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING');
+    }
   }
-  addVisualDriftFailures(input.evidence, failures);
+
+  addVisualDriftFailures(evidence, failures);
+}
+
+function validateEvidenceCandidateBinding(
+  input: VenueFidelityInput,
+  evidence: FidelityEvidence,
+  failures: Set<CreativeTruthFailureCode>,
+): void {
+  const candidateSha256 = input.candidateSha256?.trim().toLowerCase();
+  if (!candidateSha256 || evidence.candidateSha256.toLowerCase() !== candidateSha256) {
+    failures.add('FAILED_FIDELITY_EVIDENCE_BINDING');
+  }
 }
 
 function addVisualDriftFailures(
