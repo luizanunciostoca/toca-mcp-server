@@ -63,6 +63,7 @@ describe('LocalPhotoEnhancer', () => {
         '-auto-orient',
         '-colorspace',
         'sRGB',
+        '-despeckle',
         '-filter',
         'Lanczos',
         '-resize',
