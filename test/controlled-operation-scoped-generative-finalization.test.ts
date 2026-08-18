@@ -11,8 +11,8 @@ import type {
 import {
   ControlledOperationScopedGenerativeFinalizationService,
   type ControlledOperationScopedGenerativeFinalizationRequest,
+  type OperationScopedGenerativeFinalizationRegistry,
 } from '../src/creative/controlled-operation-scoped-generative-finalization.js';
-import type { OperationScopedGenerativeRegistry } from '../src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import type {
   LocalOperationScopedGenerativeComposeInput,
   LocalOperationScopedGenerativeComposeResult,
@@ -182,7 +182,7 @@ function registry(
     readonly canonicalStandard?: CreativeStandard | undefined;
     readonly canonicalBrand?: BrandAsset | undefined;
   } = {},
-): OperationScopedGenerativeRegistry {
+): OperationScopedGenerativeFinalizationRegistry {
   const operation = options.operation ?? 'SUNSET';
   const canonicalApproval = Object.prototype.hasOwnProperty.call(options, 'canonicalApproval')
     ? options.canonicalApproval
@@ -246,7 +246,7 @@ function successfulResult(): LocalOperationScopedGenerativeComposeResult {
 }
 
 function serviceWith(
-  canonicalRegistry: OperationScopedGenerativeRegistry,
+  canonicalRegistry: OperationScopedGenerativeFinalizationRegistry,
   nowIso = TRUSTED_NOW,
   compose = vi.fn(async (_input: LocalOperationScopedGenerativeComposeInput) => successfulResult()),
 ) {
@@ -263,9 +263,7 @@ function serviceWith(
 describe('ControlledOperationScopedGenerativeFinalizationService', () => {
   it('revalidates candidate, approval, reference identity, source hashes, standard and brands before final render', async () => {
     const { service, compose } = serviceWith(registry());
-
     await service.finalize(request());
-
     expect(compose).toHaveBeenCalledOnce();
     const canonicalInput = compose.mock.calls[0]![0];
     expect(canonicalInput.approval).toEqual(approval);
@@ -282,7 +280,6 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
   it('rejects candidate hash substitution before canonical state or composer access', async () => {
     const canonicalRegistry = registry();
     const { service, compose } = serviceWith(canonicalRegistry);
-
     await expect(
       service.finalize(
         request({
