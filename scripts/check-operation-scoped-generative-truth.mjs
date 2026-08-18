@@ -46,6 +46,7 @@ const requiredFiles = [
   'test/creative-truth-brand-asset-loader.test.ts',
   'test/local-operation-scoped-generative-composer.test.ts',
   'test/controlled-operation-scoped-generative-finalization.test.ts',
+  'test/controlled-operation-scoped-generative-finalization-party-context.test.ts',
   'test/creative-truth-resolver.test.ts',
   'test/creative-truth-registry-ambiguity.test.ts',
 ];
@@ -176,8 +177,10 @@ requireIncludes(canonicalBrandBindingPath, [
 ]);
 
 requireIncludes(controlledFinalizerPath, [
+  'OperationScopedGenerativeThePartyContextResolver',
   'createControlledOperationScopedGenerativeFinalizationService',
   'composer: new LocalOperationScopedGenerativeComposer()',
+  'thePartyContextResolver: options.thePartyContextResolver',
   'ControlledOperationScopedGenerativeFinalizationService',
   'operationScopedGenerativeCandidateManifestSchema.safeParse',
   'const nowIso = trustedNowIso(this.now)',
@@ -188,6 +191,12 @@ requireIncludes(controlledFinalizerPath, [
   'approval.approvalRef !== manifest.approvalRef',
   'getCreativeStandard(normalizedOutputId)',
   'getCreativeStandard(normalizedVisualId)',
+  'resolveCanonicalThePartyEnvironment(',
+  'this.dependencies.thePartyContextResolver',
+  'context.standardId !== effectiveStandard.standardId',
+  'GENERATIVE_FINALIZATION_THE_PARTY_CONTEXT_REQUIRED',
+  'GENERATIVE_FINALIZATION_THE_PARTY_STANDARD_CONTEXT_MISMATCH',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
   'getVenueAssetBySourceAssetId(reference.assetId)',
   'venue.sourceSha256.toLowerCase()',
   'resolveCanonicalGenerativeBrandInputs',
@@ -202,6 +211,7 @@ requireIncludes(controlledFinalizerPath, [
 ]);
 forbidIncludes(controlledFinalizerPath, [
   'readonly nowIso?: string',
+  'readonly partyEnvironment?: ThePartyEnvironment',
   'this.dependencies.brandRegistry',
 ]);
 
@@ -236,13 +246,16 @@ requireIncludes(finalizationCliPath, [
   'fidelityEvidenceSchema.parse',
   'GoogleDriveCreativeTruthBrandAssetLoader',
   'GoogleSheetsThePartyContentOrchestration',
-  'createControlledOperationScopedGenerativeFinalizationService',
+  'thePartyContextResolver = new GoogleSheetsThePartyContentOrchestration(sheets)',
+  'createControlledOperationScopedGenerativeFinalizationService(registry, {',
+  'thePartyContextResolver,',
   'IMAGE_FINALIZE_CALLER_CANONICAL_CONTEXT_FORBIDDEN',
-  'IMAGE_FINALIZE_THE_PARTY_STANDARD_CONTEXT_MISMATCH',
-  'THE_PARTY_ENVIRONMENT_REQUIRED',
   'publicationAuthorized: false',
 ]);
-forbidIncludes(finalizationCliPath, ['local-operation-scoped-generative-composer.js']);
+forbidIncludes(finalizationCliPath, [
+  'local-operation-scoped-generative-composer.js',
+  'partyEnvironment:',
+]);
 
 requireIncludes(genericResolverPath, [
   'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
