@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { CreativeTruthPublicationBinding } from '../src/contracts/creative-truth.js';
 import {
   MetaAdsControlledWriteService,
   requestSha256,
@@ -13,6 +14,20 @@ const MORRO_LOCATION = {
   radius: 15,
   distance_unit: 'kilometer',
 } as const;
+
+function creativeBinding(creativeId: string, imageHash: string): CreativeTruthPublicationBinding {
+  return {
+    policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    standardId: 'SUNSET_AD_V1',
+    creativeId,
+    outputSha256: 'a'.repeat(64),
+    brandIntegrityStatus: 'PASSED',
+    venueFidelityStatus: 'PASSED',
+    qualityGateStatus: 'PASSED',
+    assetLocators: [{ kind: 'META_IMAGE_HASH', value: imageHash }],
+    exactAssetBinding: true,
+  };
+}
 
 const plan: ControlledCreatePausedPlan = {
   account: { adAccountId: '311793958882290', currency: 'BRL' },
@@ -43,13 +58,15 @@ const plan: ControlledCreatePausedPlan = {
       name: 'The Party 15-08 | Bar dobrado',
       pageId: '306103746115875',
       instagramActorId: '17841402033495654',
-      objectStorySpec: { page_id: '306103746115875' },
+      objectStorySpec: { link_data: { image_hash: 'approved-image-hash-1' } },
+      creativeTruthBinding: creativeBinding('CREATIVE-TRUTH-1', 'approved-image-hash-1'),
     },
     {
       name: 'The Party 15-08 | Festa da ilha',
       pageId: '306103746115875',
       instagramActorId: '17841402033495654',
-      objectStorySpec: { page_id: '306103746115875' },
+      objectStorySpec: { link_data: { image_hash: 'approved-image-hash-2' } },
+      creativeTruthBinding: creativeBinding('CREATIVE-TRUTH-2', 'approved-image-hash-2'),
     },
   ],
   ads: [
@@ -222,6 +239,33 @@ describe('Meta Ads controlled create-paused service', () => {
     expect(() => service.prepare(withPixel('999'))).toThrow('META_ADS_PIXEL_NOT_ALLOWED');
   });
 
+  it('rejects a creative without Creative Truth binding', () => {
+    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const unbound: ControlledCreatePausedPlan = {
+      ...plan,
+      creatives: [{ ...plan.creatives[0]!, creativeTruthBinding: undefined }],
+      ads: [{ name: 'Only ad', creativeIndex: 0 }],
+    };
+    expect(() => service.prepare(unbound)).toThrow('META_ADS_CREATIVE_TRUTH_BINDING_REQUIRED');
+  });
+
+  it('rejects creative substitution after approval', () => {
+    const service = new MetaAdsControlledWriteService(createProvider(), guardrails());
+    const substituted: ControlledCreatePausedPlan = {
+      ...plan,
+      creatives: [
+        {
+          ...plan.creatives[0]!,
+          objectStorySpec: { link_data: { image_hash: 'different-image-hash' } },
+        },
+      ],
+      ads: [{ name: 'Only ad', creativeIndex: 0 }],
+    };
+    expect(() => service.prepare(substituted)).toThrow(
+      'META_ADS_CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH',
+    );
+  });
+
   it('rejects creation when the explicit approval hash does not match', async () => {
     const provider = createProvider();
     const service = new MetaAdsControlledWriteService(provider, guardrails());
@@ -244,7 +288,7 @@ describe('Meta Ads controlled create-paused service', () => {
     expect(provider.createCampaign).not.toHaveBeenCalled();
   });
 
-  it('creates campaign, ad set, creatives and ads only as PAUSED', async () => {
+  it('creates campaign, ad set, creatives and ads only as PAUSED without leaking policy metadata to Meta', async () => {
     const approval = requestSha256(plan);
     const provider = createProvider();
     const service = new MetaAdsControlledWriteService(
@@ -274,6 +318,11 @@ describe('Meta Ads controlled create-paused service', () => {
           custom_event_type: 'PURCHASE',
         },
       }),
+    );
+    expect(provider.createCreative).toHaveBeenNthCalledWith(
+      1,
+      plan.account,
+      expect.not.objectContaining({ creativeTruthBinding: expect.anything() }),
     );
     expect(provider.createAd).toHaveBeenCalledTimes(2);
     expect(provider.createAd).toHaveBeenNthCalledWith(
