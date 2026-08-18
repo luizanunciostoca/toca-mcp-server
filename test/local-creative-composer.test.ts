@@ -75,7 +75,14 @@ const enhancementProvenance: CreativeEnhancementProvenance = {
   requiresVenueFidelityGate: true,
 };
 
+function brandBytes(name: string): Uint8Array {
+  if (name === 'TOCA_DO_MORCEGO') return Uint8Array.from([10, 11, 12]);
+  if (name === 'MORRO_DIGITAL') return Uint8Array.from([20, 21, 22]);
+  return Uint8Array.from([30, 31, 32]);
+}
+
 function brand(brandAssetId: string, name: string, driveFileId: string): BrandAsset {
+  const bytes = brandBytes(name);
   return {
     brandAssetId,
     brand: name,
@@ -83,7 +90,8 @@ function brand(brandAssetId: string, name: string, driveFileId: string): BrandAs
     driveFileId,
     fileName: `${name}.png`,
     contentType: 'image/png',
-    integrityMode: 'DRIVE_FILE_ID_PINNED',
+    integrityMode: 'SHA256_PINNED',
+    sha256: createHash('sha256').update(bytes).digest('hex'),
     status: 'ACTIVE_APPROVED',
     aiReconstructionAllowed: false,
   };
@@ -101,7 +109,7 @@ function tocaBrandInput() {
   const toca = brand('BRAND-TOCA-WHITE-V1', 'TOCA_DO_MORCEGO', 'drive-toca');
   return {
     registry: toca,
-    bytes: Uint8Array.from([10, 11, 12]),
+    bytes: brandBytes(toca.brand),
     contentType: 'image/png' as const,
     driveFileId: toca.driveFileId,
   };
@@ -131,13 +139,13 @@ describe('LocalCreativeComposer', () => {
       brandAssets: [
         {
           registry: toca,
-          bytes: Uint8Array.from([10, 11, 12]),
+          bytes: brandBytes(toca.brand),
           contentType: 'image/png',
           driveFileId: toca.driveFileId,
         },
         {
           registry: morro,
-          bytes: Uint8Array.from([20, 21, 22]),
+          bytes: brandBytes(morro.brand),
           contentType: 'image/png',
           driveFileId: morro.driveFileId,
         },
@@ -328,7 +336,7 @@ describe('LocalCreativeComposer', () => {
         brandAssets: [
           {
             registry: toca,
-            bytes: Uint8Array.from([10, 11, 12]),
+            bytes: brandBytes(toca.brand),
             contentType: 'image/png',
             driveFileId: toca.driveFileId,
           },
@@ -358,7 +366,7 @@ describe('LocalCreativeComposer', () => {
         brandAssets: [
           {
             registry: morro,
-            bytes: Uint8Array.from([20, 21, 22]),
+            bytes: brandBytes(morro.brand),
             contentType: 'image/png',
             driveFileId: morro.driveFileId,
             aiGenerated: true,
