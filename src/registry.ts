@@ -112,6 +112,36 @@ const metaAdsReadTools: readonly ToolDefinition[] = [
     sideEffects: false,
     idempotent: true,
   },
+  {
+    name: 'meta_ads.audience.inspect',
+    version: '1.0.0',
+    provider: 'Meta Marketing API',
+    riskClass: 'READ',
+    requiredScopes: ['ads_read'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'meta_ads.opportunity.detect',
+    version: '1.0.0',
+    provider: 'toca-mcp+Meta Marketing API',
+    riskClass: 'READ',
+    requiredScopes: ['ads_read'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'meta_ads.budget.recommend',
+    version: '1.0.0',
+    provider: 'toca-mcp+Meta Marketing API',
+    riskClass: 'READ',
+    requiredScopes: ['ads_read'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
 ];
 
 const metaAdsWriteTools: readonly ToolDefinition[] = [
