@@ -92,6 +92,17 @@ export class CreativeTruthResolver {
     }
 
     const creativeMode = resolveCreativeMode(request.requestedMode);
+    if (creativeMode === 'GENERATIVE_EXCEPTION') {
+      // The original generic resolver is intentionally not an execution path for generation.
+      // Full-static generation must bind CONTENT_ITEMS.operation + scoped approval + scoped
+      // references through ControlledOperationScopedStaticImageGenerationService instead.
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+        false,
+      );
+    }
+
     const brandAssets = await this.resolveBrands(
       request.requiredBrands,
       request.brandVariant ?? 'WHITE',
@@ -102,50 +113,6 @@ export class CreativeTruthResolver {
       request.thePartyEnvironment
         ? { thePartyEnvironment: request.thePartyEnvironment }
         : {};
-
-    if (creativeMode === 'GENERATIVE_EXCEPTION') {
-      const generativeException = await this.registry.getApprovedGenerativeException(
-        request.contentItemId,
-      );
-      if (!generativeException || generativeException.status !== 'APPROVED') {
-        throw new ExecutionError(
-          'APPROVAL_REQUIRED',
-          'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
-          false,
-        );
-      }
-      if (
-        generativeException.allowArchitecturalInvention ||
-        generativeException.allowEnvironmentDrift ||
-        generativeException.allowAiLogoGeneration
-      ) {
-        throw new ExecutionError(
-          'POLICY_DENIED',
-          'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
-          false,
-        );
-      }
-      const references = await this.registry.getReferenceSet(generativeException.referenceSetId);
-      const verified = references.filter(
-        (reference) => reference.venueVerified && reference.status === 'ACTIVE',
-      );
-      if (verified.length < generativeException.minReferenceCount) {
-        throw new ExecutionError(
-          'POLICY_DENIED',
-          'FAILED_GENERATIVE_REFERENCE_MISSING',
-          false,
-        );
-      }
-      return {
-        policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
-        creativeMode,
-        standard,
-        brandAssets,
-        generativeException,
-        references: verified,
-        ...partyContext,
-      };
-    }
 
     const venueAsset = request.venueAssetId
       ? await this.registry.getVenueAsset(request.venueAssetId)
