@@ -33,8 +33,8 @@ requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts',
 
 requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   "LEGACY_TOCA_VENUE_REFERENCE_SET_ID = 'TOCA_VENUE_REFERENCE_SET_V1'",
-  "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
-  "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1",
+  'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+  'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
   'operationScopedGenerativeExceptionApprovalSchema',
 ]);
 
@@ -43,6 +43,7 @@ requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-gene
   "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
   'CreativeTruthOperationScopedImageGenerator',
   'referenceSetOperation(approval.referenceSetId)',
+  'registry.getContentItemOperation(request.contentItemId)',
   'canonical.referenceSetId !== approval.referenceSetId',
   'venue.operation !== expectedOperation',
   'Do not borrow venue facts from another Toca operation',
@@ -63,12 +64,15 @@ forbidIncludes('src/providers/openai/creative-truth-operation-scoped-image-gener
 
 requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
   'GoogleSheetsOperationScopedGenerativeRegistry',
-  'operationScopedGenerativeExceptionApprovalSchema.parse',
+  'operationScopedGenerativeExceptionApprovalSchema.safeParse',
+  'getContentItemOperation',
+  "const CONTENT_OPERATION_RANGE = 'CONTENT_ITEMS!A2:E2000'",
   'if (matches.length !== 1) return undefined',
 ]);
 
 requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
   'ControlledOperationScopedStaticImageGenerationService',
+  'getContentItemOperation(contentItemId)',
   'getReferenceSet(approval.referenceSetId)',
   'reference.referenceSetId === approval.referenceSetId',
   'requiredForGenerativeException',
