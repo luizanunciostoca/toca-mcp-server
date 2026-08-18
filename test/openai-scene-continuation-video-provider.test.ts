@@ -118,4 +118,18 @@ describe('OpenAiSceneContinuationVideoProvider', () => {
     ).rejects.toThrow('VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('fails closed before secret/provider access when the trusted clock is invalid', async () => {
+    const fetchImpl = vi.fn();
+    const secretResolver = { resolve: vi.fn(async () => 'sk-test') };
+    const provider = new OpenAiSceneContinuationVideoProvider({
+      secretResolver,
+      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => new Date(Number.NaN),
+    });
+    await expect(provider.generate(request())).rejects.toThrow('OPENAI_VIDEO_TRUSTED_CLOCK_INVALID');
+    expect(secretResolver.resolve).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
