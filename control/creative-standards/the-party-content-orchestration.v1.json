@@ -109,5 +109,34 @@
     "allCreativeTruthGatesMustPass": true,
     "exactAssetBindingRequired": true,
     "outputSha256Required": true
+  },
+  "writeback": {
+    "runtime": "GoogleSheetsThePartyContentWriteback",
+    "method": "writeFinalCreativeTruthEvidence",
+    "sheetWriteMode": "VALUES_BATCH_UPDATE_RAW",
+    "requiresExactObservedOutputSha256": true,
+    "requiresCreativeTruthPublicationReadyManifest": true,
+    "requiresOfficialHeroBrandAsset": "BRAND-THE-PARTY-WHITE-V1",
+    "requiresVisualStandardEvidenceMatch": true,
+    "requiresNetworksEnvironmentEvidenceMatch": true,
+    "requiresRealMasterLineageOutsideGenerativeException": true,
+    "bindVenueAssetFromVenueFidelityEvidenceWhenMissing": true,
+    "propagateDecidedSameEditionEnvironmentWhenMissing": true,
+    "writeFields": [
+      "the_party_environment_when_edition_decided",
+      "venue_asset_id_when_missing",
+      "visual_standard_status=CREATIVE_TRUTH_PASSED",
+      "brand_integrity_status=PASS",
+      "venue_fidelity_status=PASS",
+      "quality_gate_status=PASS",
+      "exact_asset_binding=true",
+      "output_sha256"
+    ],
+    "revalidateImmediatelyBeforeWrite": true,
+    "stateConflictFailsClosed": true,
+    "sameExactOutputIsIdempotent": true,
+    "differentApprovedOutputRequiresNewRevision": true,
+    "providerReadbackRequired": true,
+    "silentOverwriteForbidden": true
   }
 }
