@@ -1,17 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+export type PublicationAssetContentType =
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/webp'
+  | 'video/mp4';
+
 export interface PublicationAssetStageRequest {
   readonly assetId: string;
   readonly correlationId: string;
   readonly sourcePath: string;
-  readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  readonly contentType: PublicationAssetContentType;
 }
 
 export interface PublicationAssetStageResult {
   readonly objectName: string;
   readonly publicUrl: string;
-  readonly contentType: string;
+  readonly contentType: PublicationAssetContentType;
   readonly sizeBytes: number;
   readonly sha256: string;
 }
@@ -56,7 +62,11 @@ export class GcsPublicationAssetStager {
     const identity = await this.fetchRuntimeIdentity();
     const deliveryUrl = await this.createSignedDownloadUrl(objectName, identity);
 
-    const existingContentType = await tryValidateExternalImageUrl(deliveryUrl, this.fetchImpl);
+    const existingContentType = await tryValidateExternalMediaUrl(
+      deliveryUrl,
+      request.contentType,
+      this.fetchImpl,
+    );
     if (existingContentType) {
       return {
         objectName,
@@ -85,7 +95,11 @@ export class GcsPublicationAssetStager {
       throw new Error(`PUBLICATION_ASSET_UPLOAD_FAILED:${uploadResponse.status}`);
     }
 
-    const validatedContentType = await validatePublicImageUrl(deliveryUrl, this.fetchImpl);
+    const validatedContentType = await validatePublicMediaUrl(
+      deliveryUrl,
+      request.contentType,
+      this.fetchImpl,
+    );
 
     return {
       objectName,
@@ -195,10 +209,11 @@ export function buildPublicGcsObjectUrl(bucketName: string, objectName: string):
   return `https://storage.googleapis.com${buildCanonicalObjectPath(bucketName, objectName)}`;
 }
 
-export async function validatePublicImageUrl(
+export async function validatePublicMediaUrl(
   url: string,
+  expectedContentType?: PublicationAssetContentType,
   fetchImpl: typeof fetch = fetch,
-): Promise<string> {
+): Promise<PublicationAssetContentType> {
   const response = await fetchImpl(url, {
     method: 'GET',
     headers: { Range: 'bytes=0-0' },
@@ -207,17 +222,36 @@ export async function validatePublicImageUrl(
   if (!(response.status === 200 || response.status === 206)) {
     throw new Error(`PUBLICATION_ASSET_PUBLIC_FETCH_FAILED:${response.status}`);
   }
-  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
-  if (!contentType?.startsWith('image/')) {
-    throw new Error(`PUBLICATION_ASSET_PUBLIC_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`);
+  const contentType = normalizePublicationContentType(response.headers.get('content-type'));
+  if (!contentType) {
+    const raw = response.headers.get('content-type')?.split(';', 1)[0]?.trim() ?? 'missing';
+    throw new Error(`PUBLICATION_ASSET_PUBLIC_CONTENT_TYPE_INVALID:${raw}`);
+  }
+  if (expectedContentType && contentType !== expectedContentType) {
+    throw new Error(
+      `PUBLICATION_ASSET_PUBLIC_CONTENT_TYPE_MISMATCH:${expectedContentType}:${contentType}`,
+    );
   }
   return contentType;
 }
 
-async function tryValidateExternalImageUrl(
+/** @deprecated Prefer validatePublicMediaUrl. Kept for image-only callers. */
+export async function validatePublicImageUrl(
   url: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const contentType = await validatePublicMediaUrl(url, undefined, fetchImpl);
+  if (!contentType.startsWith('image/')) {
+    throw new Error(`PUBLICATION_ASSET_PUBLIC_CONTENT_TYPE_INVALID:${contentType}`);
+  }
+  return contentType;
+}
+
+async function tryValidateExternalMediaUrl(
+  url: string,
+  expectedContentType: PublicationAssetContentType,
   fetchImpl: typeof fetch,
-): Promise<string | undefined> {
+): Promise<PublicationAssetContentType | undefined> {
   const response = await fetchImpl(url, {
     method: 'GET',
     headers: { Range: 'bytes=0-0' },
@@ -227,11 +261,30 @@ async function tryValidateExternalImageUrl(
   if (!(response.status === 200 || response.status === 206)) {
     throw new Error(`PUBLICATION_ASSET_EXISTING_FETCH_FAILED:${response.status}`);
   }
-  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
-  if (!contentType?.startsWith('image/')) {
-    throw new Error(`PUBLICATION_ASSET_EXISTING_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`);
+  const contentType = normalizePublicationContentType(response.headers.get('content-type'));
+  if (!contentType) {
+    const raw = response.headers.get('content-type')?.split(';', 1)[0]?.trim() ?? 'missing';
+    throw new Error(`PUBLICATION_ASSET_EXISTING_CONTENT_TYPE_INVALID:${raw}`);
+  }
+  if (contentType !== expectedContentType) {
+    throw new Error(
+      `PUBLICATION_ASSET_EXISTING_CONTENT_TYPE_MISMATCH:${expectedContentType}:${contentType}`,
+    );
   }
   return contentType;
+}
+
+function normalizePublicationContentType(value: string | null): PublicationAssetContentType | undefined {
+  const normalized = value?.split(';', 1)[0]?.trim().toLowerCase();
+  if (
+    normalized === 'image/jpeg' ||
+    normalized === 'image/png' ||
+    normalized === 'image/webp' ||
+    normalized === 'video/mp4'
+  ) {
+    return normalized;
+  }
+  return undefined;
 }
 
 function buildCanonicalObjectPath(bucketName: string, objectName: string): string {
@@ -278,5 +331,7 @@ function extensionFor(contentType: PublicationAssetStageRequest['contentType']):
       return 'png';
     case 'image/webp':
       return 'webp';
+    case 'video/mp4':
+      return 'mp4';
   }
 }
