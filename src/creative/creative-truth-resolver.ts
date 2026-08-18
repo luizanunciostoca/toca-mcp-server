@@ -20,6 +20,11 @@ const APPROVED_VIDEO_RIGHTS = new Set([
   'RIGHTS_CLEARED',
 ]);
 
+const THE_PARTY_STANDARD_IDS = new Set([
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+]);
+
 export interface CreativeTruthResolutionRequest {
   readonly contentItemId: string;
   readonly standardId: string;
@@ -61,6 +66,15 @@ export class CreativeTruthResolver {
     );
     if (standard.operation !== request.operation && standard.operation !== 'ALL') {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    if (
+      request.operation === 'THE_PARTY' &&
+      (!THE_PARTY_STANDARD_IDS.has(standard.standardId) || standard.operation !== 'THE_PARTY')
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    if (request.operation === 'THE_PARTY' && !request.requiredBrands.includes('THE_PARTY')) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
     }
 
     const creativeMode = resolveCreativeMode(request.requestedMode);
