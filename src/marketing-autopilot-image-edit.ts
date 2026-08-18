@@ -15,6 +15,10 @@ const result =
         sourceDriveFileId: args.sourceDriveFileId,
         imageBytes: sourceBytes,
         contentType: args.contentType,
+        creativeTruth: {
+          policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+          creativeMode: 'REAL_PLUS_ENHANCEMENT',
+        },
       });
 
 await writeFile(args.output, result.outputBytes);
@@ -39,7 +43,13 @@ process.stdout.write(
     outputSizeBytes: result.outputBytes.byteLength,
     outputPath: args.output,
     creativeTruthPolicyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+    creativeTruthBound:
+      'creativeTruthBound' in result ? result.creativeTruthBound === true : false,
     creativeMode: 'REAL_PLUS_ENHANCEMENT',
+    requiresVenueFidelityGate:
+      'requiresVenueFidelityGate' in result
+        ? result.requiresVenueFidelityGate === true
+        : true,
     venueFidelityGateRequired: true,
   })}\n`,
 );
