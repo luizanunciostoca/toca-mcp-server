@@ -23,7 +23,7 @@ Default for final image and video creatives. Uses a `VENUE_VERIFIED` / `MARKETIN
 
 ### `REAL_PLUS_ENHANCEMENT`
 
-Uses a verified real master and allows fidelity-preserving enhancement only. Enhanced bytes are expected to differ from the original master, therefore the system does **not** pretend they are the master. Instead it requires an immutable enhancement provenance record plus a post-edit Venue Fidelity PASS.
+Uses a verified real master and allows fidelity-preserving enhancement only. Enhanced bytes are expected to differ from the original master, therefore the system does **not** pretend they are the master. Instead it requires an immutable enhancement provenance record plus a post-edit Venue Fidelity PASS. In the current V1 runtime this mode is production-shaped for static image/Story composition; video remains fail-closed until a shot-level enhancement provenance model exists.
 
 ### `GENERATIVE_EXCEPTION`
 
@@ -94,7 +94,7 @@ For generative output, a fidelity verifier must state whether source/reference i
 
 `LocalStoryComposer` is not an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. If the Story uses a verified enhancement, its `masterSha256` remains the original real master SHA while the enhancement output SHA remains in the provenance record. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
 
-`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable.
+`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable. `REAL_PLUS_ENHANCEMENT` is intentionally rejected by the current video composer with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master; the composer must not emit a misleading READY artifact that the publication manifest would later reject.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
 
@@ -154,11 +154,11 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, incomplete video edit lineage, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, incomplete video edit lineage, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [OPTIONAL FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> POST-EDIT VENUE FIDELITY] -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT ONLY: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> POST-EDIT VENUE FIDELITY] -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
