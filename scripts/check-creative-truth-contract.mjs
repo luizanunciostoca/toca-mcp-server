@@ -138,6 +138,9 @@ for (const marker of [
   'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
   'VIDEO_SHOT_MASTER_HASH_MISMATCH',
   'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
+  'LocalVideoEditManifest',
+  'VIDEO_EDIT_MANIFEST_INCOMPLETE',
+  'exactMasterByteBinding',
 ]) {
   if (!localVideo.includes(marker)) {
     console.error(`Video Creative Truth binding missing: ${marker}`);
