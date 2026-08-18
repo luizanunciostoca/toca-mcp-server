@@ -77,7 +77,7 @@ export class OpenAiSceneContinuationVideoProvider {
   }
 
   async generate(request: SceneContinuationVideoRequest): Promise<SceneContinuationVideoResult> {
-    validateRequest(request, this.now());
+    validateRequest(request, trustedNow(this.now));
     const apiKey = await this.options.secretResolver.resolve(this.options.apiKeyReference);
     const form = new FormData();
     form.set('model', this.model);
@@ -186,6 +186,14 @@ function validateRequest(request: SceneContinuationVideoRequest, now: Date): voi
       );
     }
   }
+}
+
+function trustedNow(now: () => Date): Date {
+  const value = now();
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+    throw new ExecutionError('POLICY_DENIED', 'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID', false);
+  }
+  return value;
 }
 
 function buildPrompt(request: SceneContinuationVideoRequest): string {
