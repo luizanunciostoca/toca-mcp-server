@@ -18,6 +18,9 @@ export interface MarketingReadyMasterDecision {
   readonly sourceDriveFileId: string;
   readonly sourceSha256: string;
   readonly masterSha256: string;
+  readonly promotionReviewedBy: string;
+  readonly promotionReviewedAt: string;
+  readonly promotionDecisionReason: string;
 }
 
 export function assertMarketingMasterPromotion(
@@ -98,5 +101,8 @@ export function assertMarketingMasterPromotion(
     sourceDriveFileId: value.sourceDriveFileId,
     sourceSha256: value.sourceSha256,
     masterSha256: value.outputSha256,
+    promotionReviewedBy: value.promotionReviewedBy,
+    promotionReviewedAt: value.promotionReviewedAt,
+    promotionDecisionReason: value.promotionDecisionReason,
   };
 }
