@@ -28,7 +28,7 @@ const PRODUCT_POLICIES_RANGE = 'PRODUCT_VISUAL_POLICIES!A1:I1000';
 const VIDEO_STANDARDS_RANGE = 'VIDEO_CREATIVE_STANDARDS!A1:N1000';
 const VIDEO_RIGHTS_RANGE = 'VIDEO_SOURCE_RIGHTS!A1:I2000';
 const VIDEO_EXCEPTIONS_RANGE = 'VIDEO_GENERATIVE_EXCEPTIONS!A1:Q1000';
-const VIDEO_OUTPUTS_RANGE = 'VIDEO_OUTPUTS!A1:Q5000';
+const VIDEO_OUTPUTS_RANGE = 'VIDEO_OUTPUTS!A1:T5000';
 const CONTENT_RANGE = 'CONTENT_ITEMS!A1:CF2000';
 const APPROVED_RIGHTS = new Set(['OWNED', 'LICENSED', 'CLEARED', 'RIGHTS_CLEARED']);
 
@@ -69,6 +69,9 @@ export interface PhotoToVideoOutputEvidenceRecord {
   readonly sceneContinuationFidelity: 'PASS' | 'NOT_APPLICABLE';
   readonly status: 'VIDEO_CREATIVE_TRUTH_PASSED';
   readonly finalizedAt: string;
+  readonly reviewMethod: 'HUMAN' | 'MULTIMODAL_PLUS_HUMAN';
+  readonly reviewEvidenceRef: string;
+  readonly sourceImageCompared: true;
 }
 
 export interface PhotoToVideoRegistry {
@@ -167,6 +170,9 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     const routeIndex = requireHeader(headers, 'route_type', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
     const shaIndex = requireHeader(headers, 'output_sha256', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
     const statusIndex = requireHeader(headers, 'status', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
+    requireHeader(headers, 'review_method', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
+    requireHeader(headers, 'review_evidence_ref', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
+    requireHeader(headers, 'source_image_compared', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
     const matches = rows
       .slice(1)
       .filter(
@@ -189,7 +195,7 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
         false,
       );
     }
-    await this.client.appendRow(this.creativeTruthSpreadsheetId, 'VIDEO_OUTPUTS!A:Q', [
+    await this.client.appendRow(this.creativeTruthSpreadsheetId, 'VIDEO_OUTPUTS!A:T', [
       record.outputId,
       record.contentItemId,
       record.productId,
@@ -207,6 +213,9 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
       record.sceneContinuationFidelity,
       record.status,
       record.finalizedAt,
+      record.reviewMethod,
+      record.reviewEvidenceRef,
+      record.sourceImageCompared ? 'TRUE' : 'FALSE',
     ]);
   }
 
