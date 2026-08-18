@@ -94,6 +94,26 @@ describe('LocalVideoComposer', () => {
     });
 
     expect(result.readyForReview).toBe(true);
+    expect(result.editManifest).toEqual({
+      schemaVersion: 1,
+      creativeId: 'CREATIVE-VIDEO-1',
+      standardId: 'TOCA_VIDEO_V1',
+      creativeMode: 'REAL_COMPOSITE',
+      outputDimensions: '1080x1920',
+      shots: [
+        {
+          order: 1,
+          shotId: 'SHOT-1',
+          sourceAssetId: 'SUN-0244',
+          masterAssetId: 'MM-SUN-0244-V1',
+          masterSha256: videoSha256,
+          expectedDurationMs: 6000,
+          registryBound: true,
+        },
+      ],
+      referenceAssetIds: [],
+      exactMasterByteBinding: true,
+    });
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-0244-V1']);
     expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
