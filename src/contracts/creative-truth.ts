@@ -22,6 +22,7 @@ export const creativeTruthFailureCodeSchema = z.enum([
   'FAILED_GENERATIVE_REFERENCE_MISSING',
   'FAILED_STANDARD_NOT_RESOLVED',
   'FAILED_LINEAGE_MISSING',
+  'FAILED_ENHANCEMENT_PROVENANCE',
   'FAILED_VENUE_FIDELITY_GATE',
   'FAILED_BRAND_INTEGRITY_GATE',
   'FAILED_QUALITY_GATE',
@@ -237,6 +238,17 @@ export const fidelityEvidenceSchema = z.object({
   notes: z.array(z.string().min(1)).default([]),
 });
 
+export const creativeEnhancementProvenanceSchema = z.object({
+  editorProvider: z.string().min(1),
+  sourceAssetId: z.string().min(1),
+  sourceDriveFileId: z.string().min(1),
+  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  sourceImageBound: z.literal(true),
+  creativeTruthBound: z.literal(true),
+  requiresVenueFidelityGate: z.literal(true),
+});
+
 export const creativeTruthGateResultSchema = z.object({
   gate: creativeTruthGateNameSchema,
   status: z.enum(['PASSED', 'FAILED']),
@@ -285,6 +297,7 @@ export type VenueReference = z.infer<typeof venueReferenceSchema>;
 export type CreativeStandard = z.infer<typeof creativeStandardSchema>;
 export type GenerativeExceptionApproval = z.infer<typeof generativeExceptionApprovalSchema>;
 export type FidelityEvidence = z.infer<typeof fidelityEvidenceSchema>;
+export type CreativeEnhancementProvenance = z.infer<typeof creativeEnhancementProvenanceSchema>;
 export type CreativeTruthGateResult = z.infer<typeof creativeTruthGateResultSchema>;
 export type CreativeTruthPublicationBinding = z.infer<
   typeof creativeTruthPublicationBindingSchema
