@@ -4,9 +4,18 @@ const networkPath = 'control/creative-standards/the-party-hybrid-networks-standa
 const minimalistPath = 'control/creative-standards/the-party-hybrid-minimalist-standard.v1.json';
 const orchestrationPath = 'control/creative-standards/the-party-content-orchestration.v1.json';
 const familyResolverPath = 'src/creative/the-party-visual-family-resolver.ts';
+const contentOrchestrationProviderPath =
+  'src/providers/google-sheets/the-party-content-orchestration.ts';
 const docsPath = 'docs/architecture/the-party-creative-standard.md';
 
-for (const path of [networkPath, minimalistPath, orchestrationPath, familyResolverPath, docsPath]) {
+for (const path of [
+  networkPath,
+  minimalistPath,
+  orchestrationPath,
+  familyResolverPath,
+  contentOrchestrationProviderPath,
+  docsPath,
+]) {
   if (!existsSync(path)) fail(`The Party canonical creative file missing: ${path}`);
 }
 
@@ -137,6 +146,19 @@ requireIncludes(familyResolverPath, [
   'VENUE-TP-0113',
 ]);
 
+requireIncludes(contentOrchestrationProviderPath, [
+  'THE_PARTY_CONTENT_ORCHESTRATION_V1',
+  '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
+  'CONTENT_ITEMS!A1:BW2000',
+  'BRAND-THE-PARTY-WHITE-V1',
+  "THE_PARTY_HERO_BRAND = 'THE_PARTY'",
+  'buildCreativeTruthResolutionInput',
+  'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
+  'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
+  'THE_PARTY_CONTENT_FINAL_BINDING_INCOMPLETE',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
+]);
+
 requireIncludes('src/creative/creative-truth-resolver.ts', [
   'resolveThePartyVisualFamily',
   'resolveThePartyVenueAssetPreferences',
@@ -208,6 +230,13 @@ requireIncludes('test/the-party-story-thumbnail-inheritance.test.ts', [
 requireIncludes('test/video-thumbnail-creative-truth.test.ts', [
   'THE_PARTY_HYBRID_MINIMALIST_V1',
   'R29_VIDEO_THUMBNAIL_VISUAL_STANDARD_MISMATCH',
+]);
+
+requireIncludes('test/the-party-content-orchestration.test.ts', [
+  'BLOCKED_NEEDS_ENVIRONMENT',
+  'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
+  'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
+  'THE_PARTY_CONTENT_FINAL_BINDING_INCOMPLETE',
 ]);
 
 requireIncludes(docsPath, [
