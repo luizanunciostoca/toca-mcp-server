@@ -14,7 +14,6 @@ const driveTokenEnvKey =
   process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = requiredEnv('OPENAI_API_KEY_ENV_KEY');
 const responseModel = process.env.OPENAI_CREATIVE_RESPONSE_MODEL?.trim();
-const imageModel = process.env.OPENAI_CREATIVE_IMAGE_MODEL?.trim();
 
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
@@ -29,7 +28,6 @@ const generator = new CreativeTruthOpenAiImageGenerator({
   apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
   registry,
   ...(responseModel ? { responseModel } : {}),
-  ...(imageModel ? { imageModel } : {}),
 });
 const service = new ControlledStaticImageGenerationService({
   registry,
@@ -61,7 +59,7 @@ await writeFile(
       provider: result.provider,
       generationMode: result.generationMode,
       responseModel: result.responseModel,
-      imageModel: result.imageModel,
+      imageToolModelSelection: result.imageToolModelSelection,
       outputContentType: result.outputContentType,
       outputSizeBytes: result.outputBytes.byteLength,
       outputPath: args.output,
@@ -87,7 +85,7 @@ process.stdout.write(
     exceptionId: result.exceptionId,
     approvalRef: result.approvalRef,
     responseModel: result.responseModel,
-    imageModel: result.imageModel,
+    imageToolModelSelection: result.imageToolModelSelection,
     requiresPostGenerationHumanReview: true,
     requiresVenueFidelityGate: true,
     readyForFinalComposition: false,
