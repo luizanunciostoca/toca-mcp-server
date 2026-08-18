@@ -122,6 +122,18 @@ function policyRanges(
   };
 }
 
+function contentContextRows(
+  standardId = 'SUNSET_FEED_V1',
+): readonly (readonly unknown[])[] {
+  const header: unknown[] = Array.from({ length: 65 }, () => '');
+  header[0] = 'content_item_id';
+  header[64] = 'creative_standard_id';
+  const row: unknown[] = Array.from({ length: 65 }, () => '');
+  row[0] = 'CONTENT-1';
+  row[64] = standardId;
+  return [header, row];
+}
+
 describe('GoogleSheetsOperationScopedGenerativeRegistry', () => {
   it.each([
     ['TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUNSET'],
@@ -146,6 +158,47 @@ describe('GoogleSheetsOperationScopedGenerativeRegistry', () => {
       expect(readRange).toHaveBeenCalledWith('sheet', 'GENERATIVE_EXCEPTIONS!A2:O1000');
     },
   );
+
+  it('resolves creative_standard_id by canonical header name instead of a hard-coded column guess', async () => {
+    const { client, readRange } = clientFor({
+      'CONTENT_ITEMS!A1:BX2000': contentContextRows(),
+    });
+    const registry = new GoogleSheetsOperationScopedGenerativeRegistry(client, {
+      spreadsheetId: 'sheet',
+      contentSpreadsheetId: 'content-sheet',
+    });
+
+    await expect(registry.getContentItemCreativeStandardId('CONTENT-1')).resolves.toBe(
+      'SUNSET_FEED_V1',
+    );
+    expect(readRange).toHaveBeenCalledWith('content-sheet', 'CONTENT_ITEMS!A1:BX2000');
+  });
+
+  it('returns no content standard when the canonical content row exists but standard is not assigned', async () => {
+    const { client } = clientFor({
+      'CONTENT_ITEMS!A1:BX2000': contentContextRows(''),
+    });
+    const registry = new GoogleSheetsOperationScopedGenerativeRegistry(client, {
+      spreadsheetId: 'sheet',
+      contentSpreadsheetId: 'content-sheet',
+    });
+
+    await expect(registry.getContentItemCreativeStandardId('CONTENT-1')).resolves.toBeUndefined();
+  });
+
+  it('fails closed if the content registry schema does not expose creative_standard_id', async () => {
+    const { client } = clientFor({
+      'CONTENT_ITEMS!A1:BX2000': [['content_item_id'], ['CONTENT-1']],
+    });
+    const registry = new GoogleSheetsOperationScopedGenerativeRegistry(client, {
+      spreadsheetId: 'sheet',
+      contentSpreadsheetId: 'content-sheet',
+    });
+
+    await expect(registry.getContentItemCreativeStandardId('CONTENT-1')).rejects.toThrow(
+      'FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID',
+    );
+  });
 
   it('fails closed on ambiguous approved rows', async () => {
     const { client } = clientFor({
