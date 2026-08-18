@@ -9,6 +9,10 @@ import {
   creativeEnhancementProvenanceSchema,
   type CreativeEnhancementProvenance,
 } from '../../contracts/creative-truth.js';
+import {
+  SOURCE_FAITHFUL_CINEMATIC_RESTORATION_PROFILE,
+  TOCA_PHOTO_RESTORATION_POLICY_ID,
+} from '../../contracts/photo-restoration.js';
 import { ExecutionError } from '../../core/errors.js';
 
 const execFileAsync = promisify(execFile);
@@ -27,8 +31,25 @@ export interface LocalPhotoEnhanceInput {
 export type LocalPhotoEnhanceResult = CreativeEnhancementProvenance & {
   readonly editMode: 'ENHANCE_EXISTING_IMAGE';
   readonly editorProvider: 'LOCAL_IMAGEMAGICK';
-  readonly pipelineVersion: 'local-photo-enhancer-v1';
-  readonly requestedScale: '200%';
+  readonly pipelineVersion: 'local-photo-enhancer-v2';
+  readonly restorationPolicyId: typeof TOCA_PHOTO_RESTORATION_POLICY_ID;
+  readonly restorationProfile: typeof SOURCE_FAITHFUL_CINEMATIC_RESTORATION_PROFILE;
+  readonly requestedScale: '4K_LONG_EDGE';
+  readonly outputLongEdgePixels: 3840;
+  readonly stillMasterFormat: 'JPEG_HIGH_QUALITY_4K';
+  readonly proResApplicability: 'VIDEO_ONLY_NOT_APPLICABLE_TO_STILL';
+  readonly identityLock: true;
+  readonly compositionLock: true;
+  readonly structureLock: true;
+  readonly backgroundLock: true;
+  readonly generativeDetailSynthesisUsed: false;
+  readonly semanticAlterationDetected: false;
+  readonly restorationConfidence: 'REVIEW_REQUIRED';
+  readonly textDetailConfidence: 'REVIEW_REQUIRED';
+  readonly iconDetailConfidence: 'REVIEW_REQUIRED';
+  readonly microDetailConfidence: 'REVIEW_REQUIRED';
+  readonly reviewRequiredReason: 'SOURCE_FIDELITY_AND_DETAIL_REVIEW_REQUIRED';
+  readonly promotionEligible: false;
   readonly outputContentType: 'image/jpeg';
   readonly outputBytes: Uint8Array;
 };
@@ -61,11 +82,13 @@ export class LocalPhotoEnhancer {
         '-filter',
         'Lanczos',
         '-resize',
-        '200%',
+        '3840x3840',
+        '-contrast-stretch',
+        '0.15%x0.15%',
         '-unsharp',
-        '0x0.8+0.8+0.02',
+        '0x1.1+0.9+0.015',
         '-quality',
-        '95',
+        '98',
         '-define',
         'jpeg:dct-method=float',
         outputPath,
@@ -97,8 +120,25 @@ export class LocalPhotoEnhancer {
         ...provenance,
         editMode: 'ENHANCE_EXISTING_IMAGE',
         editorProvider: 'LOCAL_IMAGEMAGICK',
-        pipelineVersion: 'local-photo-enhancer-v1',
-        requestedScale: '200%',
+        pipelineVersion: 'local-photo-enhancer-v2',
+        restorationPolicyId: TOCA_PHOTO_RESTORATION_POLICY_ID,
+        restorationProfile: SOURCE_FAITHFUL_CINEMATIC_RESTORATION_PROFILE,
+        requestedScale: '4K_LONG_EDGE',
+        outputLongEdgePixels: 3840,
+        stillMasterFormat: 'JPEG_HIGH_QUALITY_4K',
+        proResApplicability: 'VIDEO_ONLY_NOT_APPLICABLE_TO_STILL',
+        identityLock: true,
+        compositionLock: true,
+        structureLock: true,
+        backgroundLock: true,
+        generativeDetailSynthesisUsed: false,
+        semanticAlterationDetected: false,
+        restorationConfidence: 'REVIEW_REQUIRED',
+        textDetailConfidence: 'REVIEW_REQUIRED',
+        iconDetailConfidence: 'REVIEW_REQUIRED',
+        microDetailConfidence: 'REVIEW_REQUIRED',
+        reviewRequiredReason: 'SOURCE_FIDELITY_AND_DETAIL_REVIEW_REQUIRED',
+        promotionEligible: false,
         outputContentType: 'image/jpeg',
         outputBytes,
       };
