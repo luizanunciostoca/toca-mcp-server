@@ -4,9 +4,20 @@ export const THE_PARTY_HYBRID_NETWORKS_STANDARD_ID = 'THE_PARTY_HYBRID_NETWORKS_
 export const THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID =
   'THE_PARTY_HYBRID_MINIMALIST_V1' as const;
 
+export const THE_PARTY_GOLDEN_VENUE_ASSET_IDS = {
+  CROWD_HIGH_IMPACT: 'VENUE-TP-0130',
+  PEOPLE_FIRST_MINIMALIST: 'VENUE-TP-0087',
+  DJ_INTERNATIONAL: 'VENUE-TP-0071',
+  INSTITUTIONAL_SPACE: 'VENUE-TP-0048',
+  WARM_NATIONAL: 'VENUE-TP-0113',
+} as const;
+
 export type ThePartyVisualStandardId =
   | typeof THE_PARTY_HYBRID_NETWORKS_STANDARD_ID
   | typeof THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID;
+
+export type ThePartyGoldenVenueAssetId =
+  (typeof THE_PARTY_GOLDEN_VENUE_ASSET_IDS)[keyof typeof THE_PARTY_GOLDEN_VENUE_ASSET_IDS];
 
 export type ThePartyEnvironment = 'INTERNATIONAL' | 'NATIONAL';
 
@@ -77,6 +88,47 @@ export function resolveThePartyVisualFamily(
   }
 
   throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_VISUAL_INTENT_UNSUPPORTED', false);
+}
+
+export function resolveThePartyVenueAssetPreferences(
+  request: ThePartyVisualFamilyRequest,
+): readonly ThePartyGoldenVenueAssetId[] {
+  const resolution = resolveThePartyVisualFamily(request);
+
+  if (resolution.family === 'HYBRID_MINIMALIST') {
+    if (
+      request.intent === 'ELEGANT_AD' ||
+      request.intent === 'INVITATION' ||
+      request.intent === 'HIGHLIGHT_COVER' ||
+      request.intent === 'PEOPLE_FIRST_CONVERSION'
+    ) {
+      return [
+        THE_PARTY_GOLDEN_VENUE_ASSET_IDS.PEOPLE_FIRST_MINIMALIST,
+        THE_PARTY_GOLDEN_VENUE_ASSET_IDS.INSTITUTIONAL_SPACE,
+      ];
+    }
+
+    return [
+      THE_PARTY_GOLDEN_VENUE_ASSET_IDS.INSTITUTIONAL_SPACE,
+      THE_PARTY_GOLDEN_VENUE_ASSET_IDS.PEOPLE_FIRST_MINIMALIST,
+    ];
+  }
+
+  const environment = resolution.environment;
+  if (!environment) {
+    throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
+  }
+
+  const environmentAsset =
+    environment === 'INTERNATIONAL'
+      ? THE_PARTY_GOLDEN_VENUE_ASSET_IDS.DJ_INTERNATIONAL
+      : THE_PARTY_GOLDEN_VENUE_ASSET_IDS.WARM_NATIONAL;
+
+  if (request.intent === 'LINEUP') {
+    return [environmentAsset, THE_PARTY_GOLDEN_VENUE_ASSET_IDS.CROWD_HIGH_IMPACT];
+  }
+
+  return [THE_PARTY_GOLDEN_VENUE_ASSET_IDS.CROWD_HIGH_IMPACT, environmentAsset];
 }
 
 export function isThePartyVisualStandardId(value: string): value is ThePartyVisualStandardId {
