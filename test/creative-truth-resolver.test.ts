@@ -21,7 +21,7 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
             true,
             true,
             true,
-            'plan-drive-id',
+            '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM',
             '2026-08-18T00:00:00-03:00',
             true,
             'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
