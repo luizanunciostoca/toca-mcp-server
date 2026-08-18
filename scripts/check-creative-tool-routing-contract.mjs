@@ -5,6 +5,7 @@ const generator = read('src/providers/openai/creative-truth-operation-scoped-ima
 const generateCli = read('src/marketing-autopilot-image-generate.ts');
 const finalizer = read('src/marketing-autopilot-image-finalize.ts');
 const composer = read('src/providers/local/local-creative-composer.ts');
+const sunsetRenderer = read('src/providers/local/local-sunset-story-renderer.ts');
 const sunsetStandard = JSON.parse(read('control/creative-standards/sunset-story-standard.v1.json'));
 
 if (
@@ -71,16 +72,29 @@ for (const marker of [
   }
 }
 
+for (const marker of [
+  'SUNSET_STORY_REQUIRED_BRANDS',
+  'SUNSET_STORY_REQUIRED_BRAND_ASSET_IDS',
+  'buildSunsetStoryArgs',
+  'exactAssetBinding: true',
+]) {
+  if (!sunsetRenderer.includes(marker)) {
+    fail(`Dedicated Sunset renderer invariant missing: ${marker}`);
+  }
+}
+
 if (
+  sunsetStandard.standardVersion !== '1.2' ||
   sunsetStandard.toolRouting?.directImageGenerationFinalization !== 'DENY' ||
   sunsetStandard.toolRouting?.imageGenerationRole !== 'GENERATIVE_EXCEPTION_CANDIDATE_ONLY' ||
-  sunsetStandard.toolRouting?.finalizer !== 'DETERMINISTIC_COMPOSER' ||
+  sunsetStandard.toolRouting?.finalizer !== 'LOCAL_SUNSET_STORY_RENDERER_V1' ||
+  sunsetStandard.toolRouting?.genericFinalizerAllowed !== false ||
   sunsetStandard.toolRouting?.officialBrandAssetByteBindingRequired !== true ||
   sunsetStandard.toolRouting?.modelRenderedLogoAllowed !== false ||
   sunsetStandard.toolRouting?.modelRenderedMarketingTextAllowed !== false ||
   sunsetStandard.toolRouting?.composerUnavailableBehavior !== 'FAIL_CLOSED'
 ) {
-  fail('SUNSET_STORY_V1 does not preserve the brand-safe tool-routing contract');
+  fail('SUNSET_STORY_V1 does not preserve the dedicated brand-safe tool-routing contract');
 }
 
 console.log('Creative tool routing fail-closed contract OK');
