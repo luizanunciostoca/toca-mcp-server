@@ -19,7 +19,8 @@ const morroLogo: BrandAsset = {
   driveFileId: 'drive-morro-white',
   fileName: 'MORRO_DIGITAL_LOGO_BRANCO.png',
   contentType: 'image/png',
-  integrityMode: 'DRIVE_FILE_ID_PINNED',
+  integrityMode: 'SHA256_PINNED',
+  sha256: 'a'.repeat(64),
   status: 'ACTIVE_APPROVED',
   aiReconstructionAllowed: false,
 };
@@ -76,6 +77,7 @@ describe('Creative Truth gates', () => {
       {
         asset: morroLogo,
         observedDriveFileId: morroLogo.driveFileId,
+        observedSha256: morroLogo.sha256,
         aiGenerated: true,
       },
     ]);
@@ -109,6 +111,41 @@ describe('Creative Truth gates', () => {
 
     expect(gate.status).toBe('FAILED');
     expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_HASH_MISMATCH');
+  });
+
+  it('rejects a Drive-ID-only logo because mutable file identity is insufficient for final branding', () => {
+    const gate = evaluateBrandIntegrity(['MORRO_DIGITAL'], [
+      {
+        asset: {
+          ...morroLogo,
+          integrityMode: 'DRIVE_FILE_ID_PINNED',
+          sha256: undefined,
+        },
+        observedDriveFileId: morroLogo.driveFileId,
+        observedSha256: morroLogo.sha256,
+      },
+    ]);
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_HASH_MISMATCH');
+  });
+
+  it('rejects ambiguous duplicate assets for the same required brand before composition can choose one', () => {
+    const gate = evaluateBrandIntegrity(['MORRO_DIGITAL'], [
+      {
+        asset: { ...morroLogo, brandAssetId: 'BRAND-MORRO-WRONG' },
+        observedDriveFileId: morroLogo.driveFileId,
+        observedSha256: 'f'.repeat(64),
+      },
+      {
+        asset: morroLogo,
+        observedDriveFileId: morroLogo.driveFileId,
+        observedSha256: morroLogo.sha256,
+      },
+    ]);
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_MISSING');
   });
 
   it('rejects unverified or non-marketing-ready venue assets by default', () => {
