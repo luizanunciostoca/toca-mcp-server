@@ -76,6 +76,50 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     expect(venue?.protectedElements).toEqual(['DECK', 'AMBIENTE', 'ILUMINACAO']);
   });
 
+  it('reads VIDEO_SHOTS with exact master lineage and rights status', async () => {
+    const { client } = clientFor({
+      'VIDEO_SHOTS!A2:Q2000': [
+        [
+          'SHOT-SUN-001',
+          'SUN-VIDEO-001',
+          'source-video-drive',
+          'MM-SUN-VIDEO-001-V1',
+          'master-video-drive',
+          'a'.repeat(64),
+          'b'.repeat(64),
+          'SUNSET',
+          'deck_ocean_view',
+          'experience',
+          '6000',
+          '9:16',
+          true,
+          true,
+          'OWNED',
+          'ACTIVE_APPROVED',
+          'verified real take',
+        ],
+      ],
+    });
+    const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
+
+    const shot = await registry.getVideoShot('SHOT-SUN-001');
+    expect(shot).toMatchObject({
+      shotId: 'SHOT-SUN-001',
+      sourceAssetId: 'SUN-VIDEO-001',
+      masterAssetId: 'MM-SUN-VIDEO-001-V1',
+      masterDriveFileId: 'master-video-drive',
+      operation: 'SUNSET',
+      durationMs: 6000,
+      venueVerified: true,
+      marketingReady: true,
+      rightsStatus: 'OWNED',
+      status: 'ACTIVE_APPROVED',
+    });
+
+    const shots = await registry.listVideoShots('SUNSET');
+    expect(shots).toHaveLength(1);
+  });
+
   it('appends gate evidence with policy and exact output hash', async () => {
     const { client, appendRow } = clientFor({});
     const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
