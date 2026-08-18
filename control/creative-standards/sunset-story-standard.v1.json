@@ -18,7 +18,7 @@
     "originalReferencesFolderId": "1mT4NJdY4wQfbTP580lxvmJC9IbH-3ttz",
     "derivedExamplesFolderId": "1oFEJBYjyZKPCLsnHfnbMul7hIv9N2BwK",
     "referenceSetId": "SUNSET_STORY_REFERENCE_SET_20260817",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1"
   },
   "canvas": {
     "width": 1080,
@@ -99,7 +99,7 @@
     "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
     "defaultModes": ["REAL_COMPOSITE", "REAL_PLUS_ENHANCEMENT"],
     "generativeExceptionRequiresExplicitApproval": true,
-    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_V1",
+    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
     "venueFidelityGateRequired": true,
     "brandIntegrityGateRequired": true,
     "qualityGateRequired": true,
