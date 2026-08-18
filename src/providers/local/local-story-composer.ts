@@ -55,6 +55,7 @@ export interface LocalStoryComposeInput {
   readonly partyEnvironment?: ThePartyEnvironment;
   readonly requiredBrands: readonly string[];
   readonly brandAssets: readonly OfficialBrandAssetInput[];
+  /** Legacy compatibility fields only. Direct generative Story composition is denied. */
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references?: readonly VenueReference[];
   readonly fidelityEvidence?: FidelityEvidence;
@@ -154,8 +155,7 @@ export class LocalStoryComposer {
             ...(input.createdAt ? { createdAt: input.createdAt } : {}),
           });
 
-    const realMasterSha256 =
-      input.creativeMode === 'GENERATIVE_EXCEPTION' ? undefined : input.venueAsset?.masterSha256;
+    const realMasterSha256 = input.venueAsset?.masterSha256;
     return {
       storyCreativeId: input.storyCreativeId,
       contentItemId: input.contentItemId,
@@ -192,6 +192,13 @@ function validateInput(input: LocalStoryComposeInput): void {
       false,
     );
   }
+  if (input.creativeMode === 'GENERATIVE_EXCEPTION') {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+      false,
+    );
+  }
   const thePartyStoryStandard = isThePartyStoryStandard(input.standard);
   if (!input.standard.format.toUpperCase().includes('STOR') && !thePartyStoryStandard) {
     throw new ExecutionError('POLICY_DENIED', 'LOCAL_STORY_STANDARD_REQUIRED', false);
@@ -216,7 +223,6 @@ function validateInput(input: LocalStoryComposeInput): void {
 }
 
 function assertStoryLineage(input: LocalStoryComposeInput): void {
-  if (input.creativeMode === 'GENERATIVE_EXCEPTION') return;
   if (
     !input.venueAsset ||
     !input.masterAssetId?.trim() ||
