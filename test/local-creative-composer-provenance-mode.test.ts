@@ -51,6 +51,28 @@ const toca: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
+const enhancementProvenance = {
+  policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const,
+  creativeMode: 'REAL_PLUS_ENHANCEMENT' as const,
+  editorProvider: 'OPENAI_IMAGE_EDIT',
+  sourceAssetId: 'MM-SUN-1-V1',
+  sourceDriveFileId: 'master-drive',
+  sourceSha256: masterSha256,
+  outputSha256: masterSha256,
+  sourceImageBound: true as const,
+  creativeTruthBound: true as const,
+  requiresVenueFidelityGate: true as const,
+};
+
+function brandInput() {
+  return {
+    registry: toca,
+    bytes: Uint8Array.from([9, 9, 9]),
+    contentType: 'image/png' as const,
+    driveFileId: toca.driveFileId,
+  };
+}
+
 describe('LocalCreativeComposer enhancement mode isolation', () => {
   it('fails closed if enhancement provenance is attached to REAL_COMPOSITE', async () => {
     const runner = vi.fn();
@@ -65,28 +87,70 @@ describe('LocalCreativeComposer enhancement mode isolation', () => {
         venueAsset: venue,
         sourceImageBytes: masterBytes,
         sourceContentType: 'image/jpeg',
-        enhancementProvenance: {
-          policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-          creativeMode: 'REAL_PLUS_ENHANCEMENT',
-          editorProvider: 'OPENAI_IMAGE_EDIT',
-          sourceAssetId: 'MM-SUN-1-V1',
-          sourceDriveFileId: 'master-drive',
-          sourceSha256: masterSha256,
-          outputSha256: masterSha256,
-          sourceImageBound: true,
-          creativeTruthBound: true,
-          requiresVenueFidelityGate: true,
-        },
+        enhancementProvenance,
         canvas: '1080x1350',
         requiredBrands: ['TOCA_DO_MORCEGO'],
-        brandAssets: [
+        brandAssets: [brandInput()],
+      }),
+    ).rejects.toThrow('FAILED_ENHANCEMENT_PROVENANCE');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if enhancement provenance is attached to GENERATIVE_EXCEPTION', async () => {
+    const runner = vi.fn();
+    const composer = new LocalCreativeComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-GENERATIVE',
+        creativeId: 'CREATIVE-GENERATIVE',
+        standard,
+        creativeMode: 'GENERATIVE_EXCEPTION',
+        sourceImageBytes: masterBytes,
+        sourceContentType: 'image/jpeg',
+        enhancementProvenance,
+        canvas: '1080x1350',
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [brandInput()],
+        generativeException: {
+          exceptionId: 'EX-1',
+          contentItemId: 'CONTENT-GENERATIVE',
+          requestedBy: 'user',
+          approvedBy: 'approver',
+          approvalRef: 'APR-1',
+          reason: 'controlled test',
+          referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
+          minReferenceCount: 1,
+          allowArchitecturalInvention: false,
+          allowEnvironmentDrift: false,
+          allowAiLogoGeneration: false,
+          status: 'APPROVED',
+          createdAt: '2026-08-18T00:00:00-03:00',
+        },
+        references: [
           {
-            registry: toca,
-            bytes: Uint8Array.from([9, 9, 9]),
-            contentType: 'image/png',
-            driveFileId: toca.driveFileId,
+            referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
+            referenceId: 'REF-1',
+            assetId: 'SUN-REF-1',
+            driveFileId: 'drive-ref-1',
+            referenceClass: 'DECK',
+            purpose: 'VENUE_FIDELITY',
+            requiredForGenerativeException: true,
+            venueVerified: true,
+            protectedElements: ['DECK'],
+            status: 'ACTIVE',
           },
         ],
+        fidelityEvidence: {
+          verifier: 'TEST',
+          sourceIdentityPreserved: true,
+          architectureDriftDetected: false,
+          sceneInventionDetected: false,
+          logoReconstructionDetected: false,
+          referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
+          referenceAssetIds: ['SUN-REF-1'],
+          notes: [],
+        },
       }),
     ).rejects.toThrow('FAILED_ENHANCEMENT_PROVENANCE');
     expect(runner).not.toHaveBeenCalled();
