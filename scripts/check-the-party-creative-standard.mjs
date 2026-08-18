@@ -162,6 +162,31 @@ requireIncludes('src/providers/local/local-creative-composer.ts', [
   "entry.registry.brand === 'THE_PARTY'",
 ]);
 
+requireIncludes('src/providers/local/local-story-composer.ts', [
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+  'partyEnvironment?: ThePartyEnvironment',
+  'partyEnvironment: input.partyEnvironment',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
+  "standard.operation === 'THE_PARTY'",
+]);
+
+requireIncludes('src/providers/local/local-thumbnail-composer.ts', [
+  'visualStandard?: CreativeStandard',
+  'partyEnvironment?: ThePartyEnvironment',
+  'THE_PARTY_THUMBNAIL_VISUAL_STANDARD_REQUIRED',
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+  'standardId: input.standard.standardId',
+  'assertVideoThumbnailCreativeTruth',
+]);
+
+requireIncludes('src/content/video-thumbnail-creative-truth.ts', [
+  'expectedVisualStandardId?: string',
+  'visualStandardApplied',
+  'R29_VIDEO_THUMBNAIL_VISUAL_STANDARD_MISMATCH',
+]);
+
 requireIncludes('src/providers/local/local-video-composer.ts', [
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
