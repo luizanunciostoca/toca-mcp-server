@@ -45,7 +45,9 @@ if (
   policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
   policy.rules?.failClosed !== true ||
   policy.publicationBoundary?.exactAssetBindingRequired !== true ||
-  policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true
+  policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true ||
+  policy.failureCodes?.includes('FAILED_FIDELITY_EVIDENCE_BINDING') !== true ||
+  policy.failureCodes?.includes('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING') !== true
 ) {
   fail('Creative Truth parent policy violates the fail-closed contract');
 }
@@ -56,6 +58,12 @@ requireIncludes('src/contracts/creative-truth.ts', [
   "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
   "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
   'creativeEnhancementProvenanceSchema',
+  'fidelityVerificationMethodSchema',
+  'candidateSha256',
+  'sourceSha256',
+  'reviewRef',
+  'FAILED_FIDELITY_EVIDENCE_BINDING',
+  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
   'policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID)',
   "creativeMode: z.literal('REAL_PLUS_ENHANCEMENT')",
   'enhancementProvenance: creativeEnhancementProvenanceSchema.optional()',
@@ -119,6 +127,12 @@ requireIncludes('src/creative/creative-truth.ts', [
   'FAILED_ARCHITECTURE_DRIFT',
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
   'FAILED_GENERATIVE_REFERENCE_MISSING',
+  'FAILED_FIDELITY_EVIDENCE_BINDING',
+  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
+  'validateEvidenceCandidateBinding',
+  'candidateSha256',
+  'reviewRef',
+  'MULTIMODAL_PLUS_HUMAN',
   'buildCreativeTruthPublicationBinding',
 ]);
 
@@ -196,6 +210,7 @@ requireIncludes('src/providers/local/local-creative-composer.ts', [
   'creativeEnhancementProvenanceSchema',
   "provenance.creativeMode !== 'REAL_PLUS_ENHANCEMENT'",
   'provenance.outputSha256 !== sha256(input.sourceImageBytes)',
+  'candidateSha256: sha256(input.sourceImageBytes)',
   'enhancementProvenance: input.enhancementProvenance',
 ]);
 
@@ -215,6 +230,7 @@ requireIncludes('src/providers/local/local-thumbnail-composer.ts', [
   'TOCA_THUMBNAIL_V1',
   'TOCA_THUMBNAIL_STANDARD_REQUIRED',
   'LocalCreativeComposer',
+  'assertVideoThumbnailCreativeTruth',
   'brandAssets',
   'manifest: composed.manifest',
 ]);
