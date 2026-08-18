@@ -17,6 +17,9 @@ import {
 } from '../../contracts/creative-truth.js';
 import type { SpreadsheetValuesClient } from './media-assets.js';
 
+const CREATIVE_TRUTH_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM';
+const CANONICAL_DEFAULT_MODES = ['REAL_COMPOSITE', 'REAL_PLUS_ENHANCEMENT'] as const;
+
 export interface CreativeTruthRegistryConfig {
   readonly spreadsheetId?: string;
 }
@@ -47,10 +50,24 @@ export class GoogleSheetsCreativeTruthRegistry {
   async assertCanonicalPolicy(): Promise<void> {
     const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:Q20');
     const policy = rows.find((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
+    const defaultModes = policy ? list(policy[4]) : [];
+    const defaultModesCanonical =
+      defaultModes.length === CANONICAL_DEFAULT_MODES.length &&
+      CANONICAL_DEFAULT_MODES.every((mode) => defaultModes.includes(mode));
+
     if (
       !policy ||
       cell(policy[2]) !== 'ACTIVE_CANONICAL' ||
+      cell(policy[3]) !== 'TOCA_DO_MORCEGO' ||
+      !defaultModesCanonical ||
+      cell(policy[5]) !== 'GENERATIVE_EXCEPTION' ||
+      !bool(policy[6]) ||
+      !bool(policy[7]) ||
+      bool(policy[8]) ||
+      bool(policy[9]) ||
+      !bool(policy[10]) ||
       !bool(policy[11]) ||
+      cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID ||
       !bool(policy[14]) ||
       cell(policy[15]) !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
       cell(policy[16]) !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED'
