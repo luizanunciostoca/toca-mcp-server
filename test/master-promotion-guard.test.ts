@@ -67,7 +67,7 @@ describe('assertMarketingMasterPromotion', () => {
   });
 
   it('blocks missing review identity as incomplete canonical metadata', () => {
-    const { promotionReviewedBy: _promotionReviewedBy, ...invalid } = validEvidence();
+    const invalid = { ...validEvidence(), promotionReviewedBy: '' };
     expect(() =>
       assertMarketingMasterPromotion(
         invalid as unknown as Parameters<typeof assertMarketingMasterPromotion>[0],
