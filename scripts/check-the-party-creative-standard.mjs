@@ -2,9 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const networkPath = 'control/creative-standards/the-party-hybrid-networks-standard.v1.json';
 const minimalistPath = 'control/creative-standards/the-party-hybrid-minimalist-standard.v1.json';
+const familyResolverPath = 'src/creative/the-party-visual-family-resolver.ts';
 const docsPath = 'docs/architecture/the-party-creative-standard.md';
 
-for (const path of [networkPath, minimalistPath, docsPath]) {
+for (const path of [networkPath, minimalistPath, familyResolverPath, docsPath]) {
   if (!existsSync(path)) fail(`The Party canonical creative file missing: ${path}`);
 }
 
@@ -67,11 +68,25 @@ for (const standard of [networks, minimalist]) {
   }
 }
 
-requireIncludes('src/creative/creative-truth-resolver.ts', [
+requireIncludes(familyResolverPath, [
+  'HIGH_IMPACT_CAMPAIGN',
+  'LINEUP',
+  'SOCIAL_PROMOTION',
+  'INSTITUTIONAL_COMMUNICATION',
+  'ELEGANT_AD',
+  'PEOPLE_FIRST_CONVERSION',
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
+]);
+
+requireIncludes('src/creative/creative-truth-resolver.ts', [
+  'resolveThePartyVisualFamily',
+  'thePartyIntent?: ThePartyCreativeIntent',
+  'thePartyEnvironment?: ThePartyEnvironment',
   "request.operation === 'THE_PARTY'",
   "request.requiredBrands.includes('THE_PARTY')",
+  'THE_PARTY_VISUAL_INTENT_REQUIRED',
 ]);
 
 requireIncludes('src/providers/local/local-creative-composer.ts', [
