@@ -4,12 +4,21 @@ import {
   type CreativeMode,
   type CreativeStandard,
   type GenerativeExceptionApproval,
+  type VideoShot,
   type VenueAsset,
   type VenueReference,
 } from '../contracts/creative-truth.js';
 import { ExecutionError } from '../core/errors.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../providers/google-sheets/creative-truth-registry.js';
 import { assertCreativeStandard, resolveCreativeMode } from './creative-truth.js';
+
+const APPROVED_VIDEO_RIGHTS = new Set([
+  'APPROVED',
+  'OWNED',
+  'LICENSED',
+  'CLEARED',
+  'RIGHTS_CLEARED',
+]);
 
 export interface CreativeTruthResolutionRequest {
   readonly contentItemId: string;
@@ -29,6 +38,17 @@ export interface CreativeTruthResolution {
   readonly brandAssets: readonly BrandAsset[];
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references: readonly VenueReference[];
+}
+
+export interface CreativeTruthVideoShotResolutionRequest {
+  readonly operation: string;
+  readonly shotIds: readonly string[];
+}
+
+export interface CreativeTruthVideoShotResolution {
+  readonly policyId: typeof TOCA_CREATIVE_TRUTH_POLICY_ID;
+  readonly operation: string;
+  readonly shots: readonly VideoShot[];
 }
 
 export class CreativeTruthResolver {
@@ -119,6 +139,56 @@ export class CreativeTruthResolver {
       venueAsset,
       brandAssets,
       references: [],
+    };
+  }
+
+  async resolveVideoShots(
+    request: CreativeTruthVideoShotResolutionRequest,
+  ): Promise<CreativeTruthVideoShotResolution> {
+    await this.registry.assertCanonicalPolicy();
+    const operation = request.operation.trim();
+    if (!operation || request.shotIds.length === 0) {
+      throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_RESOLUTION_REQUIRED', false);
+    }
+
+    const requestedIds = request.shotIds.map((shotId) => shotId.trim());
+    if (requestedIds.some((shotId) => !shotId) || new Set(requestedIds).size !== requestedIds.length) {
+      throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_RESOLUTION_INVALID', false);
+    }
+
+    const shots: VideoShot[] = [];
+    for (const shotId of requestedIds) {
+      const shot = await this.registry.getVideoShot(shotId);
+      if (
+        !shot ||
+        shot.status !== 'ACTIVE_APPROVED' ||
+        !shot.venueVerified ||
+        !shot.marketingReady
+      ) {
+        throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
+      }
+      if (
+        !shot.masterAssetId ||
+        !shot.masterDriveFileId ||
+        !shot.masterSha256 ||
+        !shot.sourceAssetId ||
+        !shot.sourceDriveFileId
+      ) {
+        throw new ExecutionError('POLICY_DENIED', 'FAILED_LINEAGE_MISSING', false);
+      }
+      if (shot.operation !== operation && shot.operation !== 'ALL') {
+        throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+      }
+      if (!APPROVED_VIDEO_RIGHTS.has(shot.rightsStatus.trim().toUpperCase())) {
+        throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_RIGHTS_NOT_CLEARED', false);
+      }
+      shots.push(shot);
+    }
+
+    return {
+      policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+      operation,
+      shots,
     };
   }
 
