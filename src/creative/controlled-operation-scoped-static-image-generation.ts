@@ -1,6 +1,8 @@
 import {
   isTocaGenerativeVenueReferenceSetId,
+  referenceSetOperation,
   type OperationScopedGenerativeExceptionApproval,
+  type TocaGenerativeOperation,
 } from '../contracts/creative-truth-generative-reference-sets.js';
 import type { VenueReference } from '../contracts/creative-truth.js';
 import { ExecutionError } from '../core/errors.js';
@@ -34,7 +36,12 @@ export class ControlledOperationScopedStaticImageGenerationService {
   ): Promise<OperationScopedGenerativeImageResult> {
     validateRequest(request);
     await this.dependencies.registry.assertCanonicalPolicy();
-    const approval = await this.resolveApproval(request.contentItemId, request.nowIso);
+    const operation = await this.resolveContentOperation(request.contentItemId);
+    const approval = await this.resolveApproval(
+      request.contentItemId,
+      operation,
+      request.nowIso,
+    );
     const references = await this.resolveRequiredReferences(approval);
     const loaded = await this.loadReferences(references);
 
@@ -47,8 +54,21 @@ export class ControlledOperationScopedStaticImageGenerationService {
     });
   }
 
+  private async resolveContentOperation(contentItemId: string): Promise<TocaGenerativeOperation> {
+    const operation = await this.dependencies.registry.getContentItemOperation(contentItemId);
+    if (!operation) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
+        false,
+      );
+    }
+    return operation;
+  }
+
   private async resolveApproval(
     contentItemId: string,
+    operation: TocaGenerativeOperation,
     nowIso?: string,
   ): Promise<OperationScopedGenerativeExceptionApproval> {
     const approval = await this.dependencies.registry.getApprovedGenerativeException(contentItemId);
@@ -64,6 +84,16 @@ export class ControlledOperationScopedStaticImageGenerationService {
       throw new ExecutionError(
         'APPROVAL_REQUIRED',
         'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+        false,
+      );
+    }
+    if (
+      approval.operation !== operation ||
+      referenceSetOperation(approval.referenceSetId) !== operation
+    ) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
         false,
       );
     }
@@ -108,7 +138,9 @@ export class ControlledOperationScopedStaticImageGenerationService {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
     }
 
-    return [...eligible].sort((left, right) => left.referenceId.localeCompare(right.referenceId));
+    return [...eligible].sort((left, right) =>
+      left.referenceId.localeCompare(right.referenceId),
+    );
   }
 
   private async loadReferences(
