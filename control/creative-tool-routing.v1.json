@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0",
+  "contractId": "TOCA_CREATIVE_TOOL_ROUTING_V1",
+  "status": "ACTIVE_CANONICAL_MIRROR",
+  "validatedAt": "2026-08-18",
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "creativeTruthRegistryId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "creativeTruthPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "canonicalPolicyVersion": "1.3"
+  },
+  "scope": {
+    "brand": "TOCA_DO_MORCEGO",
+    "operations": ["SUNSET", "THE_PARTY"],
+    "formats": ["FEED", "STORY", "AD", "THUMBNAIL", "COVER", "INSTITUTIONAL_STATIC"]
+  },
+  "routing": {
+    "realCompositeFinalizer": "DETERMINISTIC_COMPOSER",
+    "realPlusEnhancementFinalizer": "DETERMINISTIC_COMPOSER",
+    "directImageGenerationFinalCreative": "DENY",
+    "imageGenerationRole": "NON_FINAL_BACKGROUND_CANDIDATE_ONLY",
+    "generativeExceptionCandidateStatus": "GENERATED_REVIEW_REQUIRED",
+    "generativeExceptionMaySelfFinalize": false,
+    "deterministicFinalizationRequired": true,
+    "composerUnavailableBehavior": "FAIL_CLOSED_NO_FINAL_ASSET"
+  },
+  "generatedCandidate": {
+    "modelRenderedBrandPixels": "DENY",
+    "modelRenderedWordmarks": "DENY",
+    "modelRenderedPartnerMarks": "DENY",
+    "modelRenderedMarketingText": "DENY",
+    "modelRenderedCta": "DENY",
+    "modelRenderedEventTime": "DENY",
+    "modelRenderedPrice": "DENY",
+    "modelRenderedOperationalStatus": "DENY"
+  },
+  "finalAsset": {
+    "officialBrandAssetsOnly": true,
+    "brandAssetDriveIdRequired": true,
+    "brandAssetSha256Required": true,
+    "deterministicBrandInsertionRequired": true,
+    "brandIntegrityPassRequired": true,
+    "venueFidelityPassRequired": true,
+    "qualityPassRequired": true,
+    "outputSha256Required": true,
+    "exactAssetBindingRequired": true,
+    "publicationMayRecompose": false
+  },
+  "ag01": {
+    "mayReturnGeneratedCandidateAsFinalTocaCreative": false,
+    "mustResolveCanonicalStandardBeforeFinalization": true,
+    "mustResolveOfficialBrandAssetsBeforeFinalization": true,
+    "mustFailClosedWhenDeterministicFinalizerUnavailable": true
+  },
+  "failureCodes": {
+    "directGenerativeFinalization": "FAILED_DIRECT_GENERATIVE_FINALIZATION",
+    "aiLogoReconstruction": "FAILED_AI_LOGO_RECONSTRUCTION",
+    "brandIntegrity": "FAILED_BRAND_INTEGRITY_GATE",
+    "brandAssetMissing": "FAILED_BRAND_ASSET_MISSING"
+  }
+}
