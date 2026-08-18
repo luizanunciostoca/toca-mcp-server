@@ -20,7 +20,8 @@ requireIncludes('control/creative-truth-policy.v1.json', [
 
 requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts', [
   "const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses'",
-  "const DEFAULT_IMAGE_MODEL = 'gpt-image-1'",
+  "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6-sol'",
+  "const DEFAULT_IMAGE_MODEL = 'gpt-image-2'",
   'CreativeTruthOpenAiImageGenerator',
   "creativeMode: 'GENERATIVE_EXCEPTION'",
   "generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES'",
@@ -92,6 +93,8 @@ requireIncludes('test/creative-truth-openai-image-generator.test.ts', [
   'rejects ambiguous duplicate canonical rows for the same source asset',
   'uses canonical metadata, not caller-supplied descriptive text, in the provider policy prompt',
   'sends the exact canonical verified reference images under a higher-priority Creative Truth policy',
+  "expect(body.model).toBe('gpt-5.6-sol')",
+  "model: 'gpt-image-2'",
   'GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH',
   'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
   'requiresPostGenerationHumanReview',
