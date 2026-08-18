@@ -22,6 +22,8 @@ const standard: CreativeStandard = {
 
 const videoBytes = Uint8Array.from([1, 2, 3, 4]);
 const videoSha256 = createHash('sha256').update(videoBytes).digest('hex');
+const brandBytes = Uint8Array.from([10, 11, 12]);
+const brandSha256 = createHash('sha256').update(brandBytes).digest('hex');
 
 const shotRegistry: VideoShot = {
   shotId: 'SHOT-1',
@@ -50,7 +52,8 @@ const toca: BrandAsset = {
   driveFileId: 'drive-toca-logo',
   fileName: 'toca.png',
   contentType: 'image/png',
-  integrityMode: 'DRIVE_FILE_ID_PINNED',
+  integrityMode: 'SHA256_PINNED',
+  sha256: brandSha256,
   status: 'ACTIVE_APPROVED',
   aiReconstructionAllowed: false,
 };
@@ -58,7 +61,7 @@ const toca: BrandAsset = {
 function brandInput() {
   return {
     registry: toca,
-    bytes: Uint8Array.from([10, 11, 12]),
+    bytes: brandBytes,
     contentType: 'image/png' as const,
     driveFileId: toca.driveFileId,
   };
