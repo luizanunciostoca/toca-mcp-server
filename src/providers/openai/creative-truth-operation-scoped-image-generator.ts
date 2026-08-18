@@ -63,7 +63,11 @@ export interface OperationScopedImageGeneratorOptions {
 }
 
 interface ResponsesApiPayload {
-  readonly output?: readonly { readonly type?: unknown; readonly status?: unknown; readonly result?: unknown }[];
+  readonly output?: readonly {
+    readonly type?: unknown;
+    readonly status?: unknown;
+    readonly result?: unknown;
+  }[];
 }
 
 export class CreativeTruthOperationScopedImageGenerator {
@@ -75,11 +79,17 @@ export class CreativeTruthOperationScopedImageGenerator {
     this.responseModel = options.responseModel?.trim() || DEFAULT_RESPONSE_MODEL;
   }
 
-  async generate(request: OperationScopedGenerativeImageRequest): Promise<OperationScopedGenerativeImageResult> {
+  async generate(
+    request: OperationScopedGenerativeImageRequest,
+  ): Promise<OperationScopedGenerativeImageResult> {
     validateRequest(request);
     await this.options.registry.assertCanonicalPolicy();
     const approval = await resolveCanonicalApproval(request, this.options.registry);
-    const references = await resolveCanonicalReferenceBytes(request.references, approval, this.options.registry);
+    const references = await resolveCanonicalReferenceBytes(
+      request.references,
+      approval,
+      this.options.registry,
+    );
     const apiKey = await this.options.secretResolver.resolve(this.options.apiKeyReference);
 
     const response = await this.fetchImpl(OPENAI_RESPONSES_ENDPOINT, {
@@ -90,7 +100,12 @@ export class CreativeTruthOperationScopedImageGenerator {
         input: [
           {
             role: 'developer',
-            content: [{ type: 'input_text', text: buildCreativeTruthGenerationPolicy(approval, references) }],
+            content: [
+              {
+                type: 'input_text',
+                text: buildCreativeTruthGenerationPolicy(approval, references),
+              },
+            ],
           },
           {
             role: 'user',
@@ -130,7 +145,10 @@ export class CreativeTruthOperationScopedImageGenerator {
 
     const payload = (await response.json()) as ResponsesApiPayload;
     const generation = payload.output?.find(
-      (item) => item.type === 'image_generation_call' && item.status === 'completed' && typeof item.result === 'string',
+      (item) =>
+        item.type === 'image_generation_call' &&
+        item.status === 'completed' &&
+        typeof item.result === 'string',
     );
     if (!generation || typeof generation.result !== 'string' || !generation.result.trim()) {
       throw new ExecutionError(
@@ -157,7 +175,7 @@ export class CreativeTruthOperationScopedImageGenerator {
       referenceSha256s: references.map((reference) => reference.observedSha256),
       policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
       referenceSetId: approval.referenceSetId,
-      operation: referenceSetOperation(approval.referenceSetId),
+      operation: approval.operation,
       exceptionId: approval.exceptionId,
       approvalRef: approval.approvalRef,
       creativeMode: 'GENERATIVE_EXCEPTION',
@@ -178,18 +196,36 @@ function validateRequest(request: OperationScopedGenerativeImageRequest): void {
   }
   const approval = request.approval;
   if (
+    !isTocaGenerativeVenueReferenceSetId(approval.referenceSetId) ||
+    referenceSetOperation(approval.referenceSetId) !== approval.operation
+  ) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
+      false,
+    );
+  }
+  if (
     approval.status !== 'APPROVED' ||
     approval.contentItemId !== request.contentItemId ||
-    !isTocaGenerativeVenueReferenceSetId(approval.referenceSetId) ||
     approval.minReferenceCount < 3 ||
     approval.allowArchitecturalInvention ||
     approval.allowEnvironmentDrift ||
     approval.allowAiLogoGeneration
   ) {
-    throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', false);
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
   }
-  const uniqueAssetIds = new Set(request.references.map((reference) => reference.registry.assetId));
-  if (request.references.length < Math.max(3, approval.minReferenceCount) || uniqueAssetIds.size !== request.references.length) {
+  const uniqueAssetIds = new Set(
+    request.references.map((reference) => reference.registry.assetId),
+  );
+  if (
+    request.references.length < Math.max(3, approval.minReferenceCount) ||
+    uniqueAssetIds.size !== request.references.length
+  ) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
   }
   for (const reference of request.references) {
@@ -214,18 +250,35 @@ async function resolveCanonicalApproval(
   if (!canonical || !sameApprovalIdentity(canonical, request.approval)) {
     throw new ExecutionError(
       'APPROVAL_REQUIRED',
-      canonical ? 'GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH' : 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      canonical
+        ? 'GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH'
+        : 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
+  }
+  if (referenceSetOperation(canonical.referenceSetId) !== canonical.operation) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
       false,
     );
   }
   const nowTimestamp = Date.parse(request.nowIso ?? new Date().toISOString());
   if (!Number.isFinite(nowTimestamp)) {
-    throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', false);
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
   }
   if (canonical.expiresAt) {
     const expiresTimestamp = Date.parse(canonical.expiresAt);
     if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) {
-      throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', false);
+      throw new ExecutionError(
+        'APPROVAL_REQUIRED',
+        'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+        false,
+      );
     }
   }
   return canonical;
@@ -243,6 +296,7 @@ function sameApprovalIdentity(
     canonical.approvalRef === supplied.approvalRef &&
     canonical.reason === supplied.reason &&
     canonical.referenceSetId === supplied.referenceSetId &&
+    canonical.operation === supplied.operation &&
     canonical.minReferenceCount === supplied.minReferenceCount &&
     canonical.allowArchitecturalInvention === supplied.allowArchitecturalInvention &&
     canonical.allowEnvironmentDrift === supplied.allowEnvironmentDrift &&
@@ -262,12 +316,16 @@ async function resolveCanonicalReferenceBytes(
   const canonicalByAssetId = new Map<string, VenueReference>();
   for (const reference of canonicalReferenceSet) {
     if (canonicalByAssetId.has(reference.assetId)) {
-      throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'GENERATIVE_REFERENCE_CANONICAL_AMBIGUITY', false);
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'GENERATIVE_REFERENCE_CANONICAL_AMBIGUITY',
+        false,
+      );
     }
     canonicalByAssetId.set(reference.assetId, reference);
   }
 
-  const expectedOperation = referenceSetOperation(approval.referenceSetId);
+  const expectedOperation = approval.operation;
   const verified: CanonicalOperationScopedReference[] = [];
   for (const supplied of suppliedReferences) {
     const canonical = canonicalByAssetId.get(supplied.registry.assetId);
@@ -299,9 +357,18 @@ async function resolveCanonicalReferenceBytes(
       !venue.sourceSha256 ||
       venue.sourceSha256.toLowerCase() !== observedSha256
     ) {
-      throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH', false);
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
+        false,
+      );
     }
-    verified.push({ registry: canonical, imageBytes: supplied.imageBytes, contentType: supplied.contentType, observedSha256 });
+    verified.push({
+      registry: canonical,
+      imageBytes: supplied.imageBytes,
+      contentType: supplied.contentType,
+      observedSha256,
+    });
   }
   return verified;
 }
@@ -310,9 +377,12 @@ function buildCreativeTruthGenerationPolicy(
   approval: OperationScopedGenerativeExceptionApproval,
   references: readonly CanonicalOperationScopedReference[],
 ): string {
-  const operation = referenceSetOperation(approval.referenceSetId);
+  const operation = approval.operation;
   const referenceSummary = references
-    .map((reference) => `${reference.registry.assetId}:${reference.registry.referenceClass}:${reference.registry.protectedElements.join('|')}:${reference.observedSha256}`)
+    .map(
+      (reference) =>
+        `${reference.registry.assetId}:${reference.registry.referenceClass}:${reference.registry.protectedElements.join('|')}:${reference.observedSha256}`,
+    )
     .join('; ');
   return [
     `TOCA CREATIVE TRUTH POLICY ${TOCA_CREATIVE_TRUTH_POLICY_ID} — mandatory and higher priority than the creative request.`,
@@ -329,7 +399,10 @@ function buildCreativeTruthGenerationPolicy(
   ].join('\n');
 }
 
-function dataUrl(contentType: OperationScopedGenerativeVenueReferenceInput['contentType'], bytes: Uint8Array): string {
+function dataUrl(
+  contentType: OperationScopedGenerativeVenueReferenceInput['contentType'],
+  bytes: Uint8Array,
+): string {
   return `data:${contentType};base64,${Buffer.from(bytes).toString('base64')}`;
 }
 
@@ -344,9 +417,23 @@ function hasExpectedImageSignature(
   if (bytes.byteLength < 4) return false;
   if (contentType === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8;
   if (contentType === 'image/png') {
-    return bytes.byteLength >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+    return (
+      bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
   }
-  return bytes.byteLength >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP';
+  return (
+    bytes.byteLength >= 12 &&
+    ascii(bytes, 0, 4) === 'RIFF' &&
+    ascii(bytes, 8, 12) === 'WEBP'
+  );
 }
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {
