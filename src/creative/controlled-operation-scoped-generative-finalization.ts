@@ -13,9 +13,9 @@ import type {
 import { resolveCanonicalGenerativeBrandInputs } from './canonical-generative-brand-binding.js';
 import { ExecutionError } from '../core/errors.js';
 import type { OperationScopedGenerativeRegistry } from '../providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
-import type {
-  LocalOperationScopedGenerativeComposeResult,
+import {
   LocalOperationScopedGenerativeComposer,
+  type LocalOperationScopedGenerativeComposeResult,
 } from '../providers/local/local-operation-scoped-generative-composer.js';
 import type {
   CreativeCanvas,
@@ -58,6 +58,25 @@ export interface ControlledOperationScopedGenerativeFinalizationDependencies {
   readonly registry: OperationScopedGenerativeFinalizationRegistry;
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
   readonly now?: () => string;
+}
+
+export interface ControlledOperationScopedGenerativeFinalizationFactoryOptions {
+  readonly now?: () => string;
+}
+
+/**
+ * Production factory for the only operator-executable finalization boundary.
+ * The raw ImageMagick composer is constructed here so no CLI/worker can import it directly.
+ */
+export function createControlledOperationScopedGenerativeFinalizationService(
+  registry: OperationScopedGenerativeFinalizationRegistry,
+  options: ControlledOperationScopedGenerativeFinalizationFactoryOptions = {},
+): ControlledOperationScopedGenerativeFinalizationService {
+  return new ControlledOperationScopedGenerativeFinalizationService({
+    registry,
+    composer: new LocalOperationScopedGenerativeComposer(),
+    ...(options.now ? { now: options.now } : {}),
+  });
 }
 
 /**
