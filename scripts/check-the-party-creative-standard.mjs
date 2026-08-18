@@ -80,6 +80,7 @@ for (const standard of [networks, minimalist]) {
 }
 
 const requiredOrchestrationColumns = [
+  'edition_id',
   'the_party_intent',
   'the_party_environment',
   'creative_standard_id',
@@ -101,12 +102,22 @@ if (
   orchestration.sourceOfTruth?.contentRegistryDriveId !==
     '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw' ||
   orchestration.sourceOfTruth?.sheet !== 'CONTENT_ITEMS' ||
+  orchestration.sourceOfTruth?.editionRegistryDriveId !==
+    '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw' ||
+  orchestration.sourceOfTruth?.editionRegistrySheet !== 'EDITIONS' ||
   orchestration.sourceOfTruth?.canonicalManualDriveId !==
     '1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU' ||
   orchestration.sourceOfTruth?.creativeTruthRegistryDriveId !==
     '1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU' ||
   !Array.isArray(orchestration.requiredColumns) ||
   requiredOrchestrationColumns.some((column) => !orchestration.requiredColumns.includes(column)) ||
+  orchestration.editionContext?.joinKey !== 'edition_id' ||
+  orchestration.editionContext?.visualFamilyPolicy !== 'RESOLVE_BY_INTENT' ||
+  orchestration.editionContext?.environmentSource !== 'EDITION_CONTEXT_OR_EXPLICIT_BRIEF' ||
+  orchestration.editionContext?.propagateEnvironmentOnlyWhenDecisionStatus !== 'DECIDED' ||
+  orchestration.editionContext?.neverCrossEditionBoundary !== true ||
+  orchestration.editionContext?.approvedCreativeMustNotBeSilentlyRecomposedAfterEnvironmentChange !==
+    true ||
   orchestration.environmentPolicy?.requiredForStandard !== 'THE_PARTY_HYBRID_NETWORKS_V1' ||
   orchestration.environmentPolicy?.mustNotBeInferred !== true ||
   orchestration.environmentPolicy?.missingStatus !== 'BLOCKED_NEEDS_ENVIRONMENT' ||
@@ -149,10 +160,17 @@ requireIncludes(familyResolverPath, [
 requireIncludes(contentOrchestrationProviderPath, [
   'THE_PARTY_CONTENT_ORCHESTRATION_V1',
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
+  '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw',
   'CONTENT_ITEMS!A1:BW2000',
-  'BRAND-THE-PARTY-WHITE-V1',
+  'EDITIONS!A1:P2000',
+  "'edition_id'",
   "THE_PARTY_HERO_BRAND = 'THE_PARTY'",
+  'BRAND-THE-PARTY-WHITE-V1',
   'buildCreativeTruthResolutionInput',
+  'resolveEditionEnvironment',
+  "value('visual_family_policy') !== 'RESOLVE_BY_INTENT'",
+  "value('environment_status') !== 'DECIDED'",
+  'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
   'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
   'THE_PARTY_CONTENT_FINAL_BINDING_INCOMPLETE',
@@ -234,6 +252,9 @@ requireIncludes('test/video-thumbnail-creative-truth.test.ts', [
 
 requireIncludes('test/the-party-content-orchestration.test.ts', [
   'BLOCKED_NEEDS_ENVIRONMENT',
+  'PENDING_DECISION',
+  'environment_status: \'DECIDED\'',
+  'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
   'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
   'THE_PARTY_CONTENT_FINAL_BINDING_INCOMPLETE',
@@ -255,6 +276,8 @@ requireIncludes(docsPath, [
   'TOCA_DO_MORCEGO` → `CORONA` → `RED_BULL` → `MORRO_DIGITAL',
   'THE_PARTY_CONTENT_ORCHESTRATION_V1',
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
+  '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw',
+  'edition_id',
   'BLOCKED_NEEDS_ENVIRONMENT',
 ]);
 
