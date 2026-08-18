@@ -25,7 +25,10 @@
     "enhancementProvenanceRequired": true,
     "videoRealPlusEnhancement": "FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE",
     "videoEnhancementFailure": "VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED",
-    "videoGenerativeException": "UNSUPPORTED_V1",
+    "videoPhotoMotion": "ACTIVE_V1",
+    "videoGenerativeException": "SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1",
+    "fullSyntheticVenueVideo": "UNSUPPORTED_V1",
+    "photoToVideoPolicyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
     "exactApprovedAssetMustBePublished": true,
     "failClosed": true
   },
@@ -45,6 +48,20 @@
     "officialBrandAssetsStillRequired": true,
     "architecturalInventionStillForbidden": true,
     "environmentDriftStillForbidden": true
+  },
+  "photoToVideo": {
+    "policyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
+    "realPhotoToMotionVideo": "ACTIVE_V1",
+    "generativeSceneContinuationVideo": "EXPLICIT_APPROVAL_AND_RIGHTS_REQUIRED",
+    "canonicalSourcePhotoRequired": true,
+    "canonicalSourceSha256Required": true,
+    "marketingReadyMasterRequired": true,
+    "rightsEvidenceRequired": true,
+    "likenessConsentRequiredWhenPeoplePresentForSceneContinuation": true,
+    "postGenerationHumanReviewRequired": true,
+    "sceneContinuationFidelityGateRequired": true,
+    "fullSyntheticVenueVideoWithoutCanonicalSourcePhoto": "UNSUPPORTED_V1",
+    "publicationAuthorizedByGeneration": false
   },
   "requiredGates": ["BRAND_INTEGRITY", "VENUE_FIDELITY", "QUALITY"],
   "publicationBoundary": {
@@ -69,6 +86,11 @@
     "FAILED_ENHANCEMENT_PROVENANCE",
     "FAILED_VENUE_FIDELITY_GATE",
     "FAILED_BRAND_INTEGRITY_GATE",
-    "FAILED_QUALITY_GATE"
+    "FAILED_QUALITY_GATE",
+    "VIDEO_SOURCE_RIGHTS_NOT_CLEARED",
+    "VIDEO_LIKENESS_CONSENT_REQUIRED",
+    "VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED",
+    "VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH",
+    "SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED"
   ]
 }
