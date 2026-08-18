@@ -16,6 +16,7 @@ const SUPPORTED_MODELS = new Set(['sora-2', 'sora-2-pro']);
 
 export interface SceneContinuationVideoRequest {
   readonly contentItemId: string;
+  readonly sourceAssetId: string;
   readonly operation: string;
   readonly productId: string;
   readonly inheritedVisualStandardId: string;
@@ -153,6 +154,7 @@ function validateRequest(request: SceneContinuationVideoRequest, now: Date): voi
   const approval = request.approval;
   if (
     !request.contentItemId.trim() ||
+    !request.sourceAssetId.trim() ||
     !request.productId.trim() ||
     !request.operation.trim() ||
     !request.inheritedVisualStandardId.trim() ||
@@ -160,6 +162,7 @@ function validateRequest(request: SceneContinuationVideoRequest, now: Date): voi
     request.source.bytes.byteLength === 0 ||
     approval.status !== 'APPROVED' ||
     approval.contentItemId !== request.contentItemId ||
+    approval.sourceAssetId !== request.sourceAssetId ||
     approval.productId !== request.productId ||
     approval.operation !== request.operation ||
     approval.sourceSha256.toLowerCase() !== request.source.sha256.toLowerCase() ||
@@ -167,12 +170,20 @@ function validateRequest(request: SceneContinuationVideoRequest, now: Date): voi
     approval.allowArchitecturalInvention ||
     approval.allowAiLogoGeneration
   ) {
-    throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED', false);
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
+      false,
+    );
   }
   if (approval.expiresAt) {
     const expiry = Date.parse(approval.expiresAt);
     if (!Number.isFinite(expiry) || now.getTime() >= expiry) {
-      throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_EXPIRED', false);
+      throw new ExecutionError(
+        'APPROVAL_REQUIRED',
+        'VIDEO_SCENE_CONTINUATION_APPROVAL_EXPIRED',
+        false,
+      );
     }
   }
 }
