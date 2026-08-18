@@ -149,6 +149,9 @@ export class LocalCreativeComposer {
         sourceAssetIds: sourceAssetIdsFor(input),
         masterAssetIds: input.venueAsset?.masterAssetId ? [input.venueAsset.masterAssetId] : [],
         brandAssetIds: input.brandAssets.map((entry) => entry.registry.brandAssetId),
+        ...(input.enhancementProvenance
+          ? { enhancementProvenance: input.enhancementProvenance }
+          : {}),
         outputSha256,
         outputDimensions: input.canvas,
         exactAssetBinding: true,
@@ -364,6 +367,9 @@ function validateInput(input: LocalCreativeComposeInput): void {
       false,
     );
   }
+  if (input.creativeMode !== 'REAL_PLUS_ENHANCEMENT' && input.enhancementProvenance) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_ENHANCEMENT_PROVENANCE', false);
+  }
   if (
     input.creativeMode === 'GENERATIVE_EXCEPTION' &&
     (!input.generativeException || (input.references?.length ?? 0) === 0)
@@ -409,6 +415,8 @@ function assertRealAssetBinding(input: LocalCreativeComposeInput): void {
   }
   const provenance = parsed.data;
   if (
+    provenance.policyId !== TOCA_CREATIVE_TRUTH_POLICY_ID ||
+    provenance.creativeMode !== 'REAL_PLUS_ENHANCEMENT' ||
     provenance.sourceAssetId !== venue.masterAssetId ||
     provenance.sourceDriveFileId !== venue.masterDriveFileId ||
     provenance.sourceSha256 !== venue.masterSha256 ||
