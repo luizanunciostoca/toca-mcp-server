@@ -151,6 +151,12 @@ export function assertCreativeTruthBinding(request: InstagramPublishRequest): vo
   if (!parsed.success) {
     throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_BINDING_INVALID', false);
   }
+  const approvedUrls = parsed.data.assetLocators
+    .filter((locator) => locator.kind === 'MEDIA_URL')
+    .map((locator) => locator.value);
+  if (!sameOrderedValues(approvedUrls, request.mediaUrls)) {
+    throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH', false);
+  }
 }
 
 async function getPublishedEvidence(
@@ -181,4 +187,8 @@ function normalizeError(error: unknown): string {
 
 function canFail(state: PublicationState): boolean {
   return state === 'SCHEDULED' || state === 'CREATING_CONTAINER' || state === 'PROCESSING';
+}
+
+function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
