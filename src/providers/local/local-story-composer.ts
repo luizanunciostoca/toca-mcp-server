@@ -181,5 +181,8 @@ function assertStoryLineage(input: LocalStoryComposeInput): void {
 }
 
 function isThePartyStoryStandard(standard: CreativeStandard): boolean {
-  return standard.operation === 'THE_PARTY' && THE_PARTY_STORY_STANDARD_IDS.has(standard.standardId);
+  return (
+    standard.operation === 'THE_PARTY' &&
+    THE_PARTY_STORY_STANDARD_IDS.has(standard.standardId)
+  );
 }
