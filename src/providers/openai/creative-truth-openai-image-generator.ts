@@ -10,8 +10,8 @@ import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../google-sheets/creative-truth-registry.js';
 
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
-const DEFAULT_RESPONSE_MODEL = 'gpt-5.6-sol';
-const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
+const DEFAULT_RESPONSE_MODEL = 'gpt-5.6';
+const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const;
 const SUPPORTED_REFERENCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export interface GenerativeVenueReferenceInput {
@@ -49,7 +49,7 @@ export interface CreativeTruthGenerativeImageResult {
   readonly requiresVenueFidelityGate: true;
   readonly readyForFinalComposition: false;
   readonly responseModel: string;
-  readonly imageModel: string;
+  readonly imageToolModelSelection: typeof IMAGE_TOOL_MODEL_SELECTION;
 }
 
 export interface CreativeTruthOpenAiImageGeneratorOptions {
@@ -64,7 +64,6 @@ export interface CreativeTruthOpenAiImageGeneratorOptions {
   >;
   readonly fetchImpl?: typeof fetch;
   readonly responseModel?: string;
-  readonly imageModel?: string;
 }
 
 interface ResponsesApiPayload {
@@ -78,12 +77,10 @@ interface ResponsesApiPayload {
 export class CreativeTruthOpenAiImageGenerator {
   private readonly fetchImpl: typeof fetch;
   private readonly responseModel: string;
-  private readonly imageModel: string;
 
   constructor(private readonly options: CreativeTruthOpenAiImageGeneratorOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.responseModel = options.responseModel?.trim() || DEFAULT_RESPONSE_MODEL;
-    this.imageModel = options.imageModel?.trim() || DEFAULT_IMAGE_MODEL;
   }
 
   async generate(
@@ -137,8 +134,6 @@ export class CreativeTruthOpenAiImageGenerator {
           {
             type: 'image_generation',
             action: 'generate',
-            model: this.imageModel,
-            input_fidelity: 'high',
             quality: 'high',
             size: '1024x1536',
             output_format: 'jpeg',
@@ -200,7 +195,7 @@ export class CreativeTruthOpenAiImageGenerator {
       requiresVenueFidelityGate: true,
       readyForFinalComposition: false,
       responseModel: this.responseModel,
-      imageModel: this.imageModel,
+      imageToolModelSelection: IMAGE_TOOL_MODEL_SELECTION,
     };
   }
 }
