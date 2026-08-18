@@ -7,12 +7,14 @@ import { GoogleSheetsCreativeTruthRegistry } from './providers/google-sheets/cre
 import { CreativeTruthOpenAiImageGenerator } from './providers/openai/creative-truth-openai-image-generator.js';
 
 const args = parseArgs(process.argv.slice(2));
-const prompt = args.prompt ?? (await readFile(args.promptFile!, 'utf8'));
+const prompt = await resolvePrompt(args);
 const secrets = new EnvironmentSecretResolver(process.env);
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
 const driveTokenEnvKey =
   process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = requiredEnv('OPENAI_API_KEY_ENV_KEY');
+const responseModel = process.env.OPENAI_CREATIVE_RESPONSE_MODEL?.trim();
+const imageModel = process.env.OPENAI_CREATIVE_IMAGE_MODEL?.trim();
 
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
@@ -26,12 +28,8 @@ const generator = new CreativeTruthOpenAiImageGenerator({
   secretResolver: secrets,
   apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
   registry,
-  ...(process.env.OPENAI_CREATIVE_RESPONSE_MODEL?.trim()
-    ? { responseModel: process.env.OPENAI_CREATIVE_RESPONSE_MODEL.trim() }
-    : {}),
-  ...(process.env.OPENAI_CREATIVE_IMAGE_MODEL?.trim()
-    ? { imageModel: process.env.OPENAI_CREATIVE_IMAGE_MODEL.trim() }
-    : {}),
+  ...(responseModel ? { responseModel } : {}),
+  ...(imageModel ? { imageModel } : {}),
 });
 const service = new ControlledStaticImageGenerationService({
   registry,
@@ -104,6 +102,14 @@ interface CliArgs {
   readonly output: string;
   readonly manifest: string;
   readonly nowIso?: string;
+}
+
+async function resolvePrompt(args: CliArgs): Promise<string> {
+  if (args.prompt) return args.prompt;
+  if (!args.promptFile) throw new Error('IMAGE_GENERATE_PROMPT_SOURCE_MISSING');
+  const prompt = (await readFile(args.promptFile, 'utf8')).trim();
+  if (!prompt) throw new Error('IMAGE_GENERATE_PROMPT_EMPTY');
+  return prompt;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
