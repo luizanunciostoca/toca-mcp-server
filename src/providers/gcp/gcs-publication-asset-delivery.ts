@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { validatePublicImageUrl } from './gcs-publication-asset-stager.js';
+import {
+  validatePublicMediaUrl,
+  type PublicationAssetContentType,
+} from './gcs-publication-asset-stager.js';
 
 export interface GcsPublicationAssetDeliveryOptions {
   readonly projectId: string;
@@ -32,27 +35,39 @@ export class GcsPublicationAssetDelivery {
     }
   }
 
-  async createDeliveryUrl(objectName: string): Promise<string> {
+  async createDeliveryUrl(
+    objectName: string,
+    expectedContentType?: PublicationAssetContentType,
+  ): Promise<string> {
     assertPublicationObjectName(objectName);
     const identity = await this.fetchRuntimeIdentity();
     const url = await this.createSignedDownloadUrl(objectName, identity);
-    await validatePublicImageUrl(url, this.fetchImpl);
+    await validatePublicMediaUrl(url, expectedContentType, this.fetchImpl);
     return url;
   }
 
-  async createVerifiedDeliveryUrl(objectName: string, expectedSha256: string): Promise<string> {
+  async createVerifiedDeliveryUrl(
+    objectName: string,
+    expectedSha256: string,
+    expectedContentType?: PublicationAssetContentType,
+  ): Promise<string> {
     if (!/^[a-f0-9]{64}$/.test(expectedSha256)) {
       throw new Error('PUBLICATION_ASSET_EXPECTED_SHA256_INVALID');
     }
-    const url = await this.createDeliveryUrl(objectName);
+    const url = await this.createDeliveryUrl(objectName, expectedContentType);
     const response = await this.fetchImpl(url, { method: 'GET', redirect: 'follow' });
     if (!response.ok) {
       throw new Error(`PUBLICATION_ASSET_VERIFICATION_FETCH_FAILED:${response.status}`);
     }
-    const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
-    if (!contentType?.startsWith('image/')) {
+    const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+    if (!isAllowedPublicationContentType(contentType)) {
       throw new Error(
         `PUBLICATION_ASSET_VERIFICATION_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`,
+      );
+    }
+    if (expectedContentType && contentType !== expectedContentType) {
+      throw new Error(
+        `PUBLICATION_ASSET_VERIFICATION_CONTENT_TYPE_MISMATCH:${expectedContentType}:${contentType}`,
       );
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -159,6 +174,17 @@ function assertPublicationObjectName(objectName: string): void {
   ) {
     throw new Error('PUBLICATION_ASSET_OBJECT_NAME_INVALID');
   }
+}
+
+function isAllowedPublicationContentType(
+  value: string | undefined,
+): value is PublicationAssetContentType {
+  return (
+    value === 'image/jpeg' ||
+    value === 'image/png' ||
+    value === 'image/webp' ||
+    value === 'video/mp4'
+  );
 }
 
 function buildCanonicalObjectPath(bucketName: string, objectName: string): string {
