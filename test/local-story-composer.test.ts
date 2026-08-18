@@ -1,11 +1,19 @@
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import type { BrandAsset, CreativeStandard, VenueAsset } from '../src/contracts/creative-truth.js';
+import type {
+  BrandAsset,
+  CreativeEnhancementProvenance,
+  CreativeStandard,
+  FidelityEvidence,
+  VenueAsset,
+} from '../src/contracts/creative-truth.js';
 import { LocalStoryComposer } from '../src/providers/local/local-story-composer.js';
 
 const masterBytes = Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]);
 const masterSha256 = createHash('sha256').update(masterBytes).digest('hex');
+const enhancedBytes = Buffer.from([0xff, 0xd8, 0x02, 0xff, 0xd9]);
+const enhancedSha256 = createHash('sha256').update(enhancedBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'SUNSET_STORY_V1',
@@ -53,6 +61,27 @@ const toca: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
+const enhancementProvenance: CreativeEnhancementProvenance = {
+  editorProvider: 'OPENAI_IMAGE_EDIT',
+  sourceAssetId: venue.masterAssetId!,
+  sourceDriveFileId: venue.masterDriveFileId!,
+  sourceSha256: masterSha256,
+  outputSha256: enhancedSha256,
+  sourceImageBound: true,
+  creativeTruthBound: true,
+  requiresVenueFidelityGate: true,
+};
+
+const fidelityEvidence: FidelityEvidence = {
+  verifier: 'POST_EDIT_VENUE_FIDELITY_V1',
+  sourceIdentityPreserved: true,
+  architectureDriftDetected: false,
+  sceneInventionDetected: false,
+  logoReconstructionDetected: false,
+  referenceAssetIds: [],
+  notes: [],
+};
+
 function brandInput() {
   return {
     registry: toca,
@@ -78,6 +107,14 @@ function realBase() {
   };
 }
 
+function successfulRunner() {
+  return vi.fn(async (_command: string, args: readonly string[]) => {
+    const outputPath = args.at(-1);
+    if (!outputPath) throw new Error('output path missing');
+    await writeFile(outputPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  });
+}
+
 describe('LocalStoryComposer', () => {
   it('fails closed when master bytes are missing', async () => {
     const composer = new LocalStoryComposer(() => Promise.resolve());
@@ -92,11 +129,7 @@ describe('LocalStoryComposer', () => {
   });
 
   it('creates a 1080x1920 Story from the verified master and official logo asset', async () => {
-    const runner = vi.fn(async (_command: string, args: readonly string[]) => {
-      const outputPath = args.at(-1);
-      if (!outputPath) throw new Error('output path missing');
-      await writeFile(outputPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
-    });
+    const runner = successfulRunner();
     const composer = new LocalStoryComposer(runner, 'convert');
 
     const result = await composer.compose({
@@ -127,12 +160,31 @@ describe('LocalStoryComposer', () => {
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
   });
 
-  it('renders message and CTA deterministically while brand identity comes only from official files', async () => {
-    const runner = vi.fn(async (_command: string, args: readonly string[]) => {
-      const outputPath = args.at(-1);
-      if (!outputPath) throw new Error('output path missing');
-      await writeFile(outputPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  it('keeps the original master SHA as Story lineage when the rendered source is a verified enhancement', async () => {
+    const runner = successfulRunner();
+    const composer = new LocalStoryComposer(runner, 'convert');
+
+    const result = await composer.compose({
+      ...realBase(),
+      storyCreativeId: 'SC-TEST-ENHANCED-V1',
+      contentItemId: 'MKT-TEST-STORY-ENHANCED',
+      imageBytes: enhancedBytes,
+      creativeMode: 'REAL_PLUS_ENHANCEMENT',
+      enhancementProvenance,
+      fidelityEvidence,
+      templateId: 'EDITORIAL_TEXT',
+      message: 'O mesmo lugar real, com tratamento fiel.',
     });
+
+    expect(result.masterSha256).toBe(masterSha256);
+    expect(result.masterSha256).not.toBe(enhancedSha256);
+    expect(result.manifest.creativeMode).toBe('REAL_PLUS_ENHANCEMENT');
+    expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-STORY-V1']);
+    expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
+  });
+
+  it('renders message and CTA deterministically while brand identity comes only from official files', async () => {
+    const runner = successfulRunner();
     const composer = new LocalStoryComposer(runner, 'convert');
 
     await composer.compose({
