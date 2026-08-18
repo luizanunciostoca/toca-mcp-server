@@ -5,6 +5,7 @@ const requiredFiles = [
   'src/providers/google-drive/creative-truth-reference-loader.ts',
   'src/creative/controlled-static-image-generation.ts',
   'src/marketing-autopilot-image-generate.ts',
+  'docs/architecture/controlled-static-image-generation.md',
   'test/creative-truth-openai-image-generator.test.ts',
   'test/creative-truth-reference-loader.test.ts',
   'test/controlled-static-image-generation.test.ts',
@@ -26,8 +27,8 @@ requireIncludes('control/creative-truth-policy.v1.json', [
 
 requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts', [
   "const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses'",
-  "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6-sol'",
-  "const DEFAULT_IMAGE_MODEL = 'gpt-image-2'",
+  "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6'",
+  "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
   'CreativeTruthOpenAiImageGenerator',
   "creativeMode: 'GENERATIVE_EXCEPTION'",
   "generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES'",
@@ -38,7 +39,10 @@ requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts',
   "type: 'input_image'",
   "type: 'image_generation'",
   "action: 'generate'",
-  "input_fidelity: 'high'",
+  "quality: 'high'",
+  "size: '1024x1536'",
+  "output_format: 'jpeg'",
+  'output_compression: 100',
   'approval.contentItemId !== request.contentItemId',
   'approval.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID',
   'approval.minReferenceCount < 3',
@@ -73,6 +77,14 @@ requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts',
   'Do not generate, redraw, repair, imitate or approximate',
   'NOT approved final creative',
   'candidateSha256: sha256(outputBytes)',
+  'imageToolModelSelection: IMAGE_TOOL_MODEL_SELECTION',
+]);
+
+forbidIncludes('src/providers/openai/creative-truth-openai-image-generator.ts', [
+  "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6-sol'",
+  "const DEFAULT_IMAGE_MODEL = 'gpt-image-2'",
+  "input_fidelity: 'high'",
+  'model: this.imageModel',
 ]);
 
 requireIncludes('src/providers/google-drive/creative-truth-reference-loader.ts', [
@@ -106,11 +118,13 @@ requireIncludes('src/marketing-autopilot-image-generate.ts', [
   'GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY',
   "requiredEnv('OPENAI_API_KEY_ENV_KEY')",
   'OPENAI_CREATIVE_RESPONSE_MODEL',
-  'OPENAI_CREATIVE_IMAGE_MODEL',
   "status: 'GENERATED_REVIEW_REQUIRED'",
+  'imageToolModelSelection: result.imageToolModelSelection',
   'publicationEligible: false',
   'readyForFinalComposition: result.readyForFinalComposition',
 ]);
+
+forbidIncludes('src/marketing-autopilot-image-generate.ts', ['OPENAI_CREATIVE_IMAGE_MODEL']);
 
 requireIncludes('package.json', [
   '"dev:marketing-autopilot-image-generate": "tsx src/marketing-autopilot-image-generate.ts"',
@@ -141,9 +155,11 @@ requireIncludes('test/creative-truth-openai-image-generator.test.ts', [
   'rejects canonical reference assets with mismatched source SHA or Drive identity',
   'rejects ambiguous duplicate canonical rows for the same source asset',
   'uses canonical metadata, not caller-supplied descriptive text, in the provider policy prompt',
-  'sends the exact canonical verified reference images under a higher-priority Creative Truth policy',
-  "expect(body.model).toBe('gpt-5.6-sol')",
-  "model: 'gpt-image-2'",
+  'sends exact canonical references through the current Responses image-tool contract',
+  "expect(body.model).toBe('gpt-5.6')",
+  "expect(body.tools[0]).not.toHaveProperty('model')",
+  "expect(body.tools[0]).not.toHaveProperty('input_fidelity')",
+  "expect(result.imageToolModelSelection).toBe('RESPONSES_TOOL_MANAGED')",
   'GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH',
   'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
   'requiresPostGenerationHumanReview',
@@ -162,11 +178,21 @@ requireIncludes('test/controlled-static-image-generation.test.ts', [
   'fails closed when no canonical approved exception exists',
   'fails closed when canonical references are insufficient or duplicated',
   'rejects expired canonical approval before any reference download',
+  "responseModel: 'gpt-5.6'",
+  "imageToolModelSelection: 'RESPONSES_TOOL_MANAGED' as const",
 ]);
 
 requireIncludes('test/creative-truth-registry.test.ts', [
   'resolves a venue source asset only when canonical identity is unique',
   'resolves exactly one approved generative exception and rejects approval ambiguity',
+]);
+
+requireIncludes('docs/architecture/controlled-static-image-generation.md', [
+  'ControlledStaticImageGenerationService',
+  'GoogleDriveCreativeTruthReferenceLoader',
+  'CreativeTruthOpenAiImageGenerator',
+  'GENERATED_REVIEW_REQUIRED',
+  'publicationEligible=false',
 ]);
 
 console.log('Creative Truth static generative contract OK');
@@ -175,6 +201,13 @@ function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
     if (!content.includes(marker)) fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
+  }
+}
+
+function forbidIncludes(path, markers) {
+  const content = readFileSync(path, 'utf8');
+  for (const marker of markers) {
+    if (content.includes(marker)) fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
   }
 }
 
