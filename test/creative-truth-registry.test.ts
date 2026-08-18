@@ -48,6 +48,50 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
   return row;
 }
 
+function venueRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
+  const row: unknown[] = [
+    'VENUE-SUN-0244',
+    'SUN-0244',
+    'source-drive',
+    'MM-SUN-0244-V1',
+    'master-drive',
+    'a'.repeat(64),
+    'b'.repeat(64),
+    'SUNSET',
+    'ambiente_toca',
+    'experiencia_premium_lifestyle',
+    true,
+    true,
+    true,
+    'DECK|AMBIENTE|ILUMINACAO',
+    'ACTIVE_APPROVED',
+    '',
+  ];
+  for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
+  return row;
+}
+
+function approvedExceptionRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
+  const row: unknown[] = [
+    'GEN-STATIC-1',
+    'CONTENT-GEN-1',
+    'LUIZ',
+    'LUIZ',
+    'approval:content-gen-1',
+    'Explicit controlled static image generation',
+    'TOCA_VENUE_REFERENCE_SET_V1',
+    3,
+    false,
+    false,
+    false,
+    'APPROVED',
+    '2026-08-19T03:00:00Z',
+    '2026-08-18T03:00:00Z',
+  ];
+  for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
+  return row;
+}
+
 describe('GoogleSheetsCreativeTruthRegistry', () => {
   it('accepts only the complete canonical policy row', async () => {
     const { client, readRange } = clientFor({
@@ -108,26 +152,7 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
           'official',
         ],
       ],
-      'VENUE_VISUALS!A2:P2000': [
-        [
-          'VENUE-SUN-0244',
-          'SUN-0244',
-          'source-drive',
-          'MM-SUN-0244-V1',
-          'master-drive',
-          'a'.repeat(64),
-          'b'.repeat(64),
-          'SUNSET',
-          'ambiente_toca',
-          'experiencia_premium_lifestyle',
-          true,
-          true,
-          true,
-          'DECK|AMBIENTE|ILUMINACAO',
-          'ACTIVE_APPROVED',
-          '',
-        ],
-      ],
+      'VENUE_VISUALS!A2:P2000': [venueRow()],
     });
     const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
 
@@ -144,6 +169,62 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     expect(venue?.marketingReady).toBe(true);
     expect(venue?.masterAssetId).toBe('MM-SUN-0244-V1');
     expect(venue?.protectedElements).toEqual(['DECK', 'AMBIENTE', 'ILUMINACAO']);
+  });
+
+  it('resolves a venue source asset only when canonical identity is unique', async () => {
+    const uniqueClient = clientFor({
+      'VENUE_VISUALS!A2:P2000': [venueRow()],
+    });
+    const uniqueRegistry = new GoogleSheetsCreativeTruthRegistry(uniqueClient.client, {
+      spreadsheetId: 'sheet',
+    });
+    await expect(uniqueRegistry.getVenueAssetBySourceAssetId('SUN-0244')).resolves.toMatchObject({
+      venueAssetId: 'VENUE-SUN-0244',
+      sourceDriveFileId: 'source-drive',
+    });
+
+    const ambiguousClient = clientFor({
+      'VENUE_VISUALS!A2:P2000': [
+        venueRow(),
+        venueRow({ 0: 'VENUE-SUN-0244-DUPLICATE', 2: 'other-drive' }),
+      ],
+    });
+    const ambiguousRegistry = new GoogleSheetsCreativeTruthRegistry(ambiguousClient.client, {
+      spreadsheetId: 'sheet',
+    });
+    await expect(ambiguousRegistry.getVenueAssetBySourceAssetId('SUN-0244')).resolves.toBeUndefined();
+  });
+
+  it('resolves exactly one approved generative exception and rejects approval ambiguity', async () => {
+    const uniqueClient = clientFor({
+      'GENERATIVE_EXCEPTIONS!A2:N1000': [approvedExceptionRow()],
+    });
+    const uniqueRegistry = new GoogleSheetsCreativeTruthRegistry(uniqueClient.client, {
+      spreadsheetId: 'sheet',
+    });
+    await expect(uniqueRegistry.getApprovedGenerativeException('CONTENT-GEN-1')).resolves.toMatchObject({
+      exceptionId: 'GEN-STATIC-1',
+      approvalRef: 'approval:content-gen-1',
+      referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
+      minReferenceCount: 3,
+      allowArchitecturalInvention: false,
+      allowEnvironmentDrift: false,
+      allowAiLogoGeneration: false,
+      status: 'APPROVED',
+    });
+
+    const ambiguousClient = clientFor({
+      'GENERATIVE_EXCEPTIONS!A2:N1000': [
+        approvedExceptionRow(),
+        approvedExceptionRow({ 0: 'GEN-STATIC-2', 4: 'approval:content-gen-1-duplicate' }),
+      ],
+    });
+    const ambiguousRegistry = new GoogleSheetsCreativeTruthRegistry(ambiguousClient.client, {
+      spreadsheetId: 'sheet',
+    });
+    await expect(
+      ambiguousRegistry.getApprovedGenerativeException('CONTENT-GEN-1'),
+    ).resolves.toBeUndefined();
   });
 
   it('reads VIDEO_SHOTS with exact master lineage and rights status', async () => {
