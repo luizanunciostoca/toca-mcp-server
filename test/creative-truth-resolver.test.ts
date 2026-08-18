@@ -6,7 +6,7 @@ import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/med
 function registryFor(videoRows: readonly (readonly unknown[])[]) {
   const client: SpreadsheetValuesClient = {
     readRange: (_spreadsheetId, range) => {
-      if (range === 'POLICY!A2:Q20') {
+      if (range === 'POLICY!A2:R20') {
         return Promise.resolve([
           [
             'TOCA_CREATIVE_TRUTH_POLICY_V1',
@@ -26,6 +26,7 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
             true,
             'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
             'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+            'UNSUPPORTED_V1',
           ],
         ]);
       }
