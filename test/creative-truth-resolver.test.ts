@@ -30,6 +30,26 @@ function registryFor(videoRows: readonly (readonly unknown[])[]) {
           ],
         ]);
       }
+      if (range === 'CREATIVE_STANDARDS!A2:N1000') {
+        return Promise.resolve([
+          [
+            'SUNSET_FEED_V1',
+            '1.0',
+            'TOCA_DO_MORCEGO',
+            'SUNSET',
+            'INSTAGRAM',
+            'SINGLE_IMAGE',
+            'TOCA_CREATIVE_TRUTH_POLICY_V1',
+            'canonical-drive-standard',
+            'control/creative-standards/sunset-feed-standard.v1.json',
+            'ACTIVE_CANONICAL',
+            true,
+            true,
+            true,
+            'canonical test standard',
+          ],
+        ]);
+      }
       if (range === 'VIDEO_SHOTS!A2:Q2000') return Promise.resolve(videoRows);
       return Promise.resolve([]);
     },
@@ -61,6 +81,22 @@ function row(overrides: Partial<Record<number, unknown>> = {}): readonly unknown
   for (const [index, value] of Object.entries(overrides)) values[Number(index)] = value;
   return values;
 }
+
+describe('CreativeTruthResolver generic static boundary', () => {
+  it('refuses GENERATIVE_EXCEPTION so legacy global-set reads cannot bypass operation-scoped generation', async () => {
+    const resolver = new CreativeTruthResolver(registryFor([]));
+
+    await expect(
+      resolver.resolve({
+        contentItemId: 'CONTENT-SUN-1',
+        standardId: 'SUNSET_FEED_V1',
+        operation: 'SUNSET',
+        requestedMode: 'GENERATIVE_EXCEPTION',
+        requiredBrands: [],
+      }),
+    ).rejects.toThrow('GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE');
+  });
+});
 
 describe('CreativeTruthResolver video shots', () => {
   it('resolves only canonical, approved, venue-verified shots with master lineage and rights', async () => {
