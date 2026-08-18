@@ -101,9 +101,7 @@ describe('evaluateOperationScopedGenerativeFidelity', () => {
       operation: 'SUNSET',
       approval,
       references,
-      evidence: evidence({
-        referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
-      }),
+      evidence: evidence({ referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' }),
       candidateSha256,
       nowIso: '2026-08-18T04:00:00Z',
     });
@@ -128,12 +126,14 @@ describe('evaluateOperationScopedGenerativeFidelity', () => {
   });
 
   it('rejects output without human review even when candidate and references match', () => {
+    const withReview = evidence();
+    const { reviewRef: _omittedReviewRef, ...withoutReview } = withReview;
     const gate = evaluateOperationScopedGenerativeFidelity({
       contentItemId: 'CONTENT-SUN-1',
       operation: 'SUNSET',
       approval,
       references,
-      evidence: evidence({ verificationMethod: 'MULTIMODAL_REVIEW', reviewRef: undefined }),
+      evidence: { ...withoutReview, verificationMethod: 'MULTIMODAL_REVIEW' },
       candidateSha256,
       nowIso: '2026-08-18T04:00:00Z',
     });
