@@ -8,11 +8,15 @@ const requiredFiles = [
   'control/creative-standards/toca-video-standard.v1.json',
   'control/creative-standards/toca-thumbnail-standard.v1.json',
   'src/contracts/creative-truth.ts',
+  'src/contracts/creative-truth-generative-reference-sets.ts',
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
+  'src/creative/controlled-operation-scoped-static-image-generation.ts',
+  'src/creative/controlled-operation-scoped-generative-finalization.ts',
   'src/content/video.ts',
   'src/content/video-thumbnail-creative-truth.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
+  'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
   'src/providers/gcp/gcs-publication-asset-stager.ts',
   'src/providers/gcp/gcs-publication-asset-delivery.ts',
   'src/providers/local/local-photo-enhancer.ts',
@@ -23,6 +27,8 @@ const requiredFiles = [
   'src/providers/openai/openai-image-edit-provider.ts',
   'src/providers/openai/creative-truth-openai-image-enhancer.ts',
   'src/marketing-autopilot-image-edit.ts',
+  'src/marketing-autopilot-image-generate.ts',
+  'src/marketing-autopilot-image-finalize.ts',
   'src/providers/meta-ads/meta-ads-controlled-write.ts',
   'src/scheduler/toca-managed-instagram-scheduler.ts',
   'src/worker/instagram-publication-composition.ts',
@@ -36,6 +42,8 @@ if (missing.length > 0) fail(`Creative Truth architecture files missing: ${missi
 const policy = JSON.parse(read('control/creative-truth-policy.v1.json'));
 const requiredGateSet = new Set(policy.requiredGates ?? []);
 if (
+  policy.schemaVersion !== '1.1' ||
+  policy.policyVersion !== '1.1' ||
   policy.policyId !== 'TOCA_CREATIVE_TRUTH_POLICY_V1' ||
   policy.status !== 'ACTIVE_CANONICAL' ||
   policy.rules?.aiLogoReconstructionAllowed !== false ||
@@ -46,8 +54,18 @@ if (
   policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
   policy.rules?.videoGenerativeException !== 'UNSUPPORTED_V1' ||
   policy.rules?.failClosed !== true ||
-  policy.generativeException?.venueReferenceSetRequired !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+  policy.generativeException?.referenceStrategy !== 'OPERATION_SCOPED_ONLY_V1' ||
+  policy.generativeException?.legacyReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+  policy.generativeException?.legacyReferenceSetStatus !== 'DEPRECATED' ||
+  policy.generativeException?.sunsetReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' ||
+  policy.generativeException?.thePartyReferenceSetId !==
+    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' ||
+  policy.generativeException?.crossOperationReferenceReuse !== 'FORBIDDEN' ||
+  policy.generativeException?.referenceSetOperationMatch !== 'REQUIRED' ||
+  policy.generativeException?.legacyReferenceSetExecution !== 'DENY' ||
   policy.generativeException?.minimumVerifiedReferences !== 3 ||
+  policy.generativeException?.venueFidelityGateStillRequired !== true ||
+  policy.generativeException?.officialBrandAssetsStillRequired !== true ||
   policy.generativeException?.architecturalInventionStillForbidden !== true ||
   policy.generativeException?.environmentDriftStillForbidden !== true ||
   !Array.isArray(policy.requiredGates) ||
@@ -69,7 +87,17 @@ requireIncludes('src/contracts/creative-truth.ts', [
   'enhancementProvenanceRequired: z.literal(true)',
   "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
   "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
+  "videoGenerativeException: z.literal('UNSUPPORTED_V1')",
+  "referenceStrategy: z.literal('OPERATION_SCOPED_ONLY_V1')",
+  'legacyReferenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID)',
+  "legacyReferenceSetStatus: z.literal('DEPRECATED')",
+  'sunsetReferenceSetId: z.literal(TOCA_SUNSET_VENUE_REFERENCE_SET_ID)',
+  'thePartyReferenceSetId: z.literal(TOCA_THE_PARTY_VENUE_REFERENCE_SET_ID)',
+  "crossOperationReferenceReuse: z.literal('FORBIDDEN')",
+  "referenceSetOperationMatch: z.literal('REQUIRED')",
+  "legacyReferenceSetExecution: z.literal('DENY')",
   'minimumVerifiedReferences: z.number().int().min(3)',
+  'Legacy global-set approval schema retained only for compatibility evidence parsing',
   'referenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID)',
   'minReferenceCount: z.number().int().min(3).default(3)',
   'allowArchitecturalInvention: z.literal(false)',
@@ -161,12 +189,29 @@ requireIncludes('src/creative/creative-truth.ts', [
   'reviewRef',
   'MULTIMODAL_PLUS_HUMAN',
   'buildCreativeTruthPublicationBinding',
+  'The original V1 global venue set is now canonically DEPRECATED in Drive',
 ]);
 
 requireIncludes('src/creative/creative-truth-resolver.ts', [
   'resolveVideoShots',
   'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
   'FAILED_LINEAGE_MISSING',
+  "if (creativeMode === 'GENERATIVE_EXCEPTION')",
+  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+]);
+
+requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
+  'ControlledOperationScopedStaticImageGenerationService',
+  'getContentItemOperation(contentItemId)',
+  'referenceSetOperation(approval.referenceSetId) !== operation',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
+]);
+requireIncludes('src/creative/controlled-operation-scoped-generative-finalization.ts', [
+  'createControlledOperationScopedGenerativeFinalizationService',
+  'OperationScopedGenerativeFinalizationRegistry',
+  'getCreativeStandard(',
+  'resolveCanonicalGenerativeBrandInputs',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
 ]);
 
 requireIncludes('src/content/video.ts', [
@@ -190,6 +235,7 @@ requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
   'POLICY!A2:R20',
   "const CREATIVE_TRUTH_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM'",
   "const CANONICAL_DEFAULT_MODES = ['REAL_COMPOSITE', 'REAL_PLUS_ENHANCEMENT']",
+  'if (matches.length !== 1)',
   "cell(policy[3]) !== 'TOCA_DO_MORCEGO'",
   "cell(policy[5]) !== 'GENERATIVE_EXCEPTION'",
   '!bool(policy[6])',
@@ -206,6 +252,15 @@ requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
   'VIDEO_SHOTS!A2:Q2000',
   'getVideoShot',
   'listVideoShots',
+]);
+
+requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
+  'POLICY!A2:Z20',
+  'CONTENT_ITEMS!A2:E2000',
+  'GENERATIVE_EXCEPTIONS!A2:O1000',
+  'VENUE_REFERENCE_SET!A2:K1000',
+  'OPERATION_SCOPED_ONLY_V1',
+  'LEGACY_DEPRECATED',
 ]);
 
 requireIncludes('src/providers/local/local-photo-enhancer.ts', [
@@ -230,6 +285,19 @@ requireIncludes('src/marketing-autopilot-image-edit.ts', [
   'creativeTruthPolicyId: result.policyId',
   'creativeTruthBound: result.creativeTruthBound',
   'creativeMode: result.creativeMode',
+]);
+
+requireIncludes('src/marketing-autopilot-image-generate.ts', [
+  'ControlledOperationScopedStaticImageGenerationService',
+  'IMAGE_GENERATE_CALLER_TIME_FORBIDDEN',
+  'publicationEligible: false',
+]);
+requireIncludes('src/marketing-autopilot-image-finalize.ts', [
+  'createControlledOperationScopedGenerativeFinalizationService',
+  'GoogleSheetsThePartyContentOrchestration',
+  'thePartyContextResolver',
+  'IMAGE_FINALIZE_CALLER_CANONICAL_CONTEXT_FORBIDDEN',
+  'publicationAuthorized: false',
 ]);
 
 requireIncludes('src/providers/local/local-creative-composer.ts', [
