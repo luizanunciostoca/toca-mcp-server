@@ -3,7 +3,7 @@
   "standardId": "SUNSET_STORY_V1",
   "standardVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
-  "validatedAt": "2026-08-17",
+  "validatedAt": "2026-08-18",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
     "operation": "SUNSET",
@@ -38,35 +38,16 @@
   "photography": {
     "venueVerifiedRequired": true,
     "masterStatusRequired": "MARKETING_READY",
-    "preferredThemes": [
-      "PEOPLE_GOLDEN_HOUR",
-      "SOCIAL_INTERACTION",
-      "SEA_VIEW",
-      "TOCA_ARCHITECTURE_AND_LAMPS",
-      "DRINKS",
-      "LIFESTYLE_DETAILS"
-    ],
-    "preferredTreatment": [
-      "WARM_ORANGE",
-      "SOFT_GOLD",
-      "SUNLIT_SKIN",
-      "BACKLIGHT",
-      "SUNSET_REFLECTIONS",
-      "NATURAL_DEPTH_OF_FIELD"
-    ],
+    "preferredThemes": ["PEOPLE_GOLDEN_HOUR", "SOCIAL_INTERACTION", "SEA_VIEW", "TOCA_ARCHITECTURE_AND_LAMPS", "DRINKS", "LIFESTYLE_DETAILS"],
+    "preferredTreatment": ["WARM_ORANGE", "SOFT_GOLD", "SUNLIT_SKIN", "BACKLIGHT", "SUNSET_REFLECTIONS", "NATURAL_DEPTH_OF_FIELD"],
     "forbidSyntheticReplacementWhenRealAssetExists": true,
     "requireLineage": true
   },
   "typography": {
-    "headline": { "familyClass": "ELEGANT_EDITORIAL_SERIF", "defaultColor": "#FFFFFF", "maxLines": 3 },
-    "support": { "familyClass": "CLEAN_GEOMETRIC_SANS", "weight": "REGULAR_OR_MEDIUM", "maxLines": 3 },
-    "cta": {
-      "familyClass": "CLEAN_SANS",
-      "weight": "MEDIUM_OR_SEMIBOLD",
-      "container": "THIN_WHITE_OUTLINE",
-      "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
-    },
-    "time": { "familyClass": "CLEAN_SANS", "weight": "BOLD_OR_SEMIBOLD", "preferredContainer": "DISCREET_RECTANGULAR_STRIP" },
+    "headline": {"familyClass": "ELEGANT_EDITORIAL_SERIF", "defaultColor": "#FFFFFF", "maxLines": 3},
+    "support": {"familyClass": "CLEAN_GEOMETRIC_SANS", "weight": "REGULAR_OR_MEDIUM", "maxLines": 3},
+    "cta": {"familyClass": "CLEAN_SANS", "weight": "MEDIUM_OR_SEMIBOLD", "container": "THIN_WHITE_OUTLINE", "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]},
+    "time": {"familyClass": "CLEAN_SANS", "weight": "BOLD_OR_SEMIBOLD", "preferredContainer": "DISCREET_RECTANGULAR_STRIP"},
     "maxFontFamilies": 2,
     "scriptUsage": "EXCEPTIONAL_ONLY"
   },
@@ -80,11 +61,11 @@
     "translucentBlackRange": "rgba(0,0,0,0.50)-rgba(0,0,0,0.65)"
   },
   "templateClasses": [
-    { "id": "SUNSET_HERO_LIFESTYLE", "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR" },
-    { "id": "SUNSET_VIEW_SCENERY", "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE" },
-    { "id": "SUNSET_SOCIAL_EXPERIENCE", "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY" },
-    { "id": "SUNSET_DRINKS_EXPERIENCE", "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL" },
-    { "id": "SUNSET_INFO_HOURS", "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS" }
+    {"id": "SUNSET_HERO_LIFESTYLE", "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR"},
+    {"id": "SUNSET_VIEW_SCENERY", "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE"},
+    {"id": "SUNSET_SOCIAL_EXPERIENCE", "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY"},
+    {"id": "SUNSET_DRINKS_EXPERIENCE", "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL"},
+    {"id": "SUNSET_INFO_HOURS", "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS"}
   ],
   "brandFooter": {
     "required": true,
@@ -105,6 +86,15 @@
     "qualityGateRequired": true,
     "exactApprovedAssetPublicationRequired": true
   },
+  "toolRouting": {
+    "directImageGenerationFinalization": "DENY",
+    "imageGenerationRole": "GENERATIVE_EXCEPTION_CANDIDATE_ONLY",
+    "finalizer": "DETERMINISTIC_COMPOSER",
+    "officialBrandAssetByteBindingRequired": true,
+    "modelRenderedLogoAllowed": false,
+    "modelRenderedMarketingTextAllowed": false,
+    "composerUnavailableBehavior": "FAIL_CLOSED"
+  },
   "antiRepeat": {
     "allowSameTemplateClassConsecutivelyWhenAlternativesExist": false,
     "headlineRepeatWindowDays": 14,
@@ -113,40 +103,9 @@
   },
   "qualityGate": {
     "failClosed": true,
-    "rejectOn": [
-      "NOT_9_16_FINAL_DERIVATIVE",
-      "OUTPUT_NOT_1080X1920",
-      "TEXT_ILLEGIBLE",
-      "INSUFFICIENT_CONTRAST",
-      "TEXT_COVERS_ESSENTIAL_SUBJECT",
-      "EXCESSIVE_TEXT",
-      "MULTIPLE_PRIMARY_CTAS",
-      "REQUIRED_LOGOS_MISSING_OR_MISALIGNED",
-      "AI_RECREATED_LOGO",
-      "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET",
-      "ARCHITECTURE_DRIFT",
-      "COPY_TIME_OR_FACT_ERROR",
-      "ASSET_LINEAGE_MISSING",
-      "CREATIVE_STANDARD_ID_OR_VERSION_MISSING"
-    ]
+    "rejectOn": ["NOT_9_16_FINAL_DERIVATIVE", "OUTPUT_NOT_1080X1920", "TEXT_ILLEGIBLE", "INSUFFICIENT_CONTRAST", "TEXT_COVERS_ESSENTIAL_SUBJECT", "EXCESSIVE_TEXT", "MULTIPLE_PRIMARY_CTAS", "REQUIRED_LOGOS_MISSING_OR_MISALIGNED", "AI_RECREATED_LOGO", "DIRECT_IMAGE_GENERATION_USED_AS_FINALIZER", "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET", "ARCHITECTURE_DRIFT", "COPY_TIME_OR_FACT_ERROR", "ASSET_LINEAGE_MISSING", "CREATIVE_STANDARD_ID_OR_VERSION_MISSING"]
   },
-  "productionFlow": [
-    "RESOLVE_CREATIVE_TRUTH_POLICY",
-    "RESOLVE_STANDARD",
-    "SELECT_TEMPLATE_CLASS",
-    "SELECT_VENUE_VERIFIED_MARKETING_READY_MASTER",
-    "COMPOSE_1080X1920",
-    "APPLY_COPY_AND_CTA",
-    "INSERT_OFFICIAL_LOGOS_DETERMINISTICALLY",
-    "BRAND_INTEGRITY_GATE",
-    "VENUE_FIDELITY_GATE",
-    "QUALITY_GATE_SUNSET",
-    "PERSIST_EXACT_OUTPUT_AND_SHA256",
-    "STORY_READY",
-    "REVIEW_OR_APPROVAL",
-    "PREPARE",
-    "PUBLISH_EXACT_APPROVED_ASSET"
-  ],
+  "productionFlow": ["RESOLVE_CREATIVE_TRUTH_POLICY", "RESOLVE_STANDARD", "SELECT_TEMPLATE_CLASS", "SELECT_VENUE_VERIFIED_MARKETING_READY_MASTER", "COMPOSE_1080X1920", "APPLY_COPY_AND_CTA", "INSERT_OFFICIAL_LOGOS_DETERMINISTICALLY", "BRAND_INTEGRITY_GATE", "VENUE_FIDELITY_GATE", "QUALITY_GATE_SUNSET", "PERSIST_EXACT_OUTPUT_AND_SHA256", "STORY_READY", "REVIEW_OR_APPROVAL", "PREPARE", "PUBLISH_EXACT_APPROVED_ASSET"],
   "referencePolicy": {
     "originalReferencesAreVisualStyleReferences": true,
     "derivedExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
@@ -155,23 +114,7 @@
     "venueTruthComesOnlyFromVenueRegistry": true
   },
   "referenceFiles": {
-    "originals": [
-      "1VyNGIt_KnJnd05igp3G4EPHuyIqi6y8U",
-      "19Ojllgh1Fw1kqM2G85l7DO5L8-YNNcXY",
-      "1uhixdJhlqdsVkeF5RA4lvqMHcfpIbJXx",
-      "1fV8j4f61X7mJdnAvpLVl-hENVgrP9fdV",
-      "1ODUwlyyJ2iHe6sh5e962bF2pGDjIEm6l",
-      "1yX_WRNhdfPX94B_iisurXeq0NeSyh1v_",
-      "1IR71Ycs8-O9fS-kxI2vTsLIWk4HsCv-l",
-      "1IewNgQP6LFECyubP8X-Qb2nDmABN_BOM",
-      "1i2znQ4lncW2Le_IURFhVCq8v3pTdKHTu",
-      "1yHYv5KLE2klUNT9rcJuTHnqg2mgU_SHi"
-    ],
-    "derivedExamples": [
-      "1n7TDSbbVBDm_89UyD-O0F52XgmwTL67O",
-      "1A_KACkc_hr5Q36lBP7eGGt_KTs5BsUWb",
-      "1WupkyaAV3IMNn3SniszcG2dv86mC3FoX",
-      "1ZF-a9F8_K6Vuek91XZO0uMCs9zHARn9A"
-    ]
+    "originals": ["1VyNGIt_KnJnd05igp3G4EPHuyIqi6y8U", "19Ojllgh1Fw1kqM2G85l7DO5L8-YNNcXY", "1uhixdJhlqdsVkeF5RA4lvqMHcfpIbJXx", "1fV8j4f61X7mJdnAvpLVl-hENVgrP9fdV", "1ODUwlyyJ2iHe6sh5e962bF2pGDjIEm6l", "1yX_WRNhdfPX94B_iisurXeq0NeSyh1v_", "1IR71Ycs8-O9fS-kxI2vTsLIWk4HsCv-l", "1IewNgQP6LFECyubP8X-Qb2nDmABN_BOM", "1i2znQ4lncW2Le_IURFhVCq8v3pTdKHTu", "1yHYv5KLE2klUNT9rcJuTHnqg2mgU_SHi"],
+    "derivedExamples": ["1n7TDSbbVBDm_89UyD-O0F52XgmwTL67O", "1A_KACkc_hr5Q36lBP7eGGt_KTs5BsUWb", "1WupkyaAV3IMNn3SniszcG2dv86mC3FoX", "1ZF-a9F8_K6Vuek91XZO0uMCs9zHARn9A"]
   }
 }
