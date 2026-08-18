@@ -147,6 +147,18 @@ requireIncludes('src/content/video-thumbnail-creative-truth.ts', [
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
   'POLICY!A2:Q20',
+  "const CREATIVE_TRUTH_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM'",
+  "const CANONICAL_DEFAULT_MODES = ['REAL_COMPOSITE', 'REAL_PLUS_ENHANCEMENT']",
+  "cell(policy[3]) !== 'TOCA_DO_MORCEGO'",
+  "cell(policy[5]) !== 'GENERATIVE_EXCEPTION'",
+  '!bool(policy[6])',
+  '!bool(policy[7])',
+  'bool(policy[8])',
+  'bool(policy[9])',
+  '!bool(policy[10])',
+  '!bool(policy[11])',
+  'cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID',
+  '!bool(policy[14])',
   'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
   'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
   'VIDEO_SHOTS!A2:Q2000',
