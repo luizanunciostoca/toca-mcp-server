@@ -4,6 +4,7 @@ import {
   creativeTruthPublicationBindingSchema,
   type CreativeTruthPublicationBinding,
 } from '../contracts/creative-truth.js';
+import type { PublicationAssetContentType } from '../providers/gcp/gcs-publication-asset-stager.js';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
 import type { InstagramPublicationReconciler } from '../providers/instagram/instagram-publication-reconciler.js';
@@ -29,7 +30,7 @@ export const tocaManagedInstagramApprovalDescriptorSchema = z.object({
     assetId: z.string().min(1),
     objectName: z.string().min(1),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    contentType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'video/mp4']),
   }),
   creativeTruthBinding: creativeTruthPublicationBindingSchema,
   caption: z.string().optional(),
@@ -54,7 +55,11 @@ export type TocaManagedInstagramSchedulePayload = z.infer<
 >;
 
 export interface PublicationAssetDeliveryProvider {
-  createVerifiedDeliveryUrl(objectName: string, expectedSha256: string): Promise<string>;
+  createVerifiedDeliveryUrl(
+    objectName: string,
+    expectedSha256: string,
+    expectedContentType?: PublicationAssetContentType,
+  ): Promise<string>;
 }
 
 export class TocaManagedInstagramScheduler {
@@ -136,6 +141,7 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
     const mediaUrl = await this.delivery.createVerifiedDeliveryUrl(
       schedule.asset.objectName,
       schedule.asset.sha256,
+      schedule.asset.contentType,
     );
     const request: InstagramPublishRequest = {
       account: schedule.account,
@@ -194,6 +200,7 @@ export function assertApprovedTocaManagedDescriptor(
   ) {
     throw new Error('TOCA_MANAGED_INSTAGRAM_PREAPPROVAL_REQUIRED');
   }
+  assertManagedMediaEnvelope(payload);
   if (payload.creativeTruthBinding.outputSha256 !== payload.asset.sha256) {
     throw new Error('TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH');
   }
@@ -201,6 +208,27 @@ export function assertApprovedTocaManagedDescriptor(
   const actual = hashTocaManagedInstagramApprovalDescriptor(payload);
   if (actual !== payload.approval.approvedDescriptorSha256) {
     throw new Error('TOCA_MANAGED_INSTAGRAM_APPROVAL_MISMATCH');
+  }
+}
+
+function assertManagedMediaEnvelope(payload: TocaManagedInstagramSchedulePayload): void {
+  const isImage = payload.asset.contentType.startsWith('image/');
+  switch (payload.mediaType) {
+    case 'IMAGE':
+      if (!isImage) throw new Error('TOCA_MANAGED_INSTAGRAM_IMAGE_CONTENT_TYPE_REQUIRED');
+      return;
+    case 'REEL':
+      if (payload.asset.contentType !== 'video/mp4') {
+        throw new Error('TOCA_MANAGED_INSTAGRAM_REEL_MP4_REQUIRED');
+      }
+      return;
+    case 'STORY':
+      if (!isImage && payload.asset.contentType !== 'video/mp4') {
+        throw new Error('TOCA_MANAGED_INSTAGRAM_STORY_MEDIA_TYPE_INVALID');
+      }
+      return;
+    case 'CAROUSEL':
+      throw new Error('TOCA_MANAGED_INSTAGRAM_CAROUSEL_REQUIRES_MULTI_ASSET_DESCRIPTOR');
   }
 }
 
