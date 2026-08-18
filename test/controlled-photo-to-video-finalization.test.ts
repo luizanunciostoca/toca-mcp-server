@@ -5,6 +5,7 @@ import type {
   PhotoToVideoCandidateManifest,
   PhotoToVideoReviewEvidence,
 } from '../src/contracts/photo-to-video.js';
+import type { PhotoToVideoArtifactStore } from '../src/providers/gcp/gcs-photo-to-video-artifact-store.js';
 import type { PhotoToVideoContentWriteback } from '../src/providers/google-sheets/photo-to-video-content-writeback.js';
 import type {
   PhotoToVideoRegistry,
@@ -16,6 +17,10 @@ const outputBytes = Uint8Array.from([
 ]);
 const outputSha256 = createHash('sha256').update(outputBytes).digest('hex');
 const sourceSha256 = 'a'.repeat(64);
+const artifactRef =
+  'gcs://toca-bucket/instagram/photo-motion-review-v1/photo-video-1234567890abcdef12345678-aaaaaaaaaaaaaaaa.mp4';
+const artifactObjectName =
+  'instagram/photo-motion-review-v1/photo-video-1234567890abcdef12345678-aaaaaaaaaaaaaaaa.mp4';
 
 function resolved(): ResolvedPhotoToVideoContext {
   return {
@@ -103,6 +108,8 @@ function candidate(): PhotoToVideoCandidateManifest {
     sourceSha256,
     providerCandidateSha256: 'c'.repeat(64),
     outputSha256,
+    artifactRef,
+    artifactObjectName,
     outputContentType: 'video/mp4',
     size: '720x1280',
     seconds: 8,
@@ -152,29 +159,48 @@ function writeback() {
   return { value, writeCandidate, writeFinal };
 }
 
+function artifactStore(bytes = outputBytes) {
+  const loadExact = vi.fn(async () => bytes);
+  const value: PhotoToVideoArtifactStore = {
+    loadExact,
+    store: async () => ({
+      artifactRef,
+      objectName: artifactObjectName,
+      sha256: outputSha256,
+      sizeBytes: outputBytes.byteLength,
+      contentType: 'video/mp4',
+    }),
+  };
+  return { value, loadExact };
+}
+
 describe('ControlledPhotoToVideoFinalizationService', () => {
-  it('finalizes only the exact reviewed bytes and records evidence plus content state', async () => {
+  it('finalizes only the durable exact reviewed bytes and records evidence plus content state', async () => {
     const fake = registry();
     const state = writeback();
+    const artifacts = artifactStore();
     const service = new ControlledPhotoToVideoFinalizationService({
       registry: fake.value,
       writeback: state.value,
+      artifactStore: artifacts.value,
       now: () => new Date('2026-08-18T08:00:00.000Z'),
     });
     const result = await service.finalize({
-      outputBytes,
       candidateManifest: candidate(),
       reviewEvidence: review(),
     });
     expect(result.status).toBe('VIDEO_CREATIVE_TRUTH_PASSED');
     expect(result.publicationAuthorized).toBe(false);
     expect(result.readyForPrepare).toBe(true);
+    expect(result.finalArtifactRef).toBe(artifactRef);
+    expect(artifacts.loadExact).toHaveBeenCalledWith(artifactRef, outputSha256);
     expect(fake.recordFinalOutput).toHaveBeenCalledTimes(1);
     expect(state.writeFinal).toHaveBeenCalledWith(
       expect.objectContaining({
         contentItemId: 'CONTENT-1',
         candidateSha256: outputSha256,
         finalAssetSha256: outputSha256,
+        finalArtifactRef: artifactRef,
       }),
     );
   });
@@ -187,13 +213,14 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
     };
     const fake = registry(changed);
     const state = writeback();
+    const artifacts = artifactStore();
     const service = new ControlledPhotoToVideoFinalizationService({
       registry: fake.value,
       writeback: state.value,
+      artifactStore: artifacts.value,
     });
     await expect(
       service.finalize({
-        outputBytes,
         candidateManifest: candidate(),
         reviewEvidence: review(),
       }),
