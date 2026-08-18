@@ -51,6 +51,9 @@ const venue: VenueAsset = {
 
 const cleanFidelityEvidence: FidelityEvidence = {
   verifier: 'POST_EDIT_VENUE_FIDELITY_V1',
+  verificationMethod: 'MULTIMODAL_REVIEW',
+  candidateSha256: enhancedSha256,
+  sourceSha256: masterSha256,
   sourceIdentityPreserved: true,
   architectureDriftDetected: false,
   sceneInventionDetected: false,
@@ -161,7 +164,7 @@ describe('LocalCreativeComposer', () => {
     expect(commandArgs.join(' ')).not.toContain('MORRO DIGITAL LOGO');
   });
 
-  it('accepts a faithful enhanced image only when provenance binds it to the exact real master', async () => {
+  it('accepts a faithful enhanced image only when provenance and fidelity evidence bind it to the exact real master and candidate bytes', async () => {
     const runner = successfulRunner();
     const composer = new LocalCreativeComposer(runner);
 
@@ -188,6 +191,29 @@ describe('LocalCreativeComposer', () => {
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-0244-V1']);
     expect(result.manifest.enhancementProvenance).toEqual(enhancementProvenance);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
+  });
+
+  it('rejects fidelity evidence from another enhanced output before rendering', async () => {
+    const runner = vi.fn();
+    const composer = new LocalCreativeComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-ENHANCED-EVIDENCE-SUBSTITUTED',
+        creativeId: 'CREATIVE-ENHANCED-EVIDENCE-SUBSTITUTED',
+        standard,
+        creativeMode: 'REAL_PLUS_ENHANCEMENT',
+        venueAsset: venue,
+        sourceImageBytes: enhancedBytes,
+        sourceContentType: 'image/jpeg',
+        enhancementProvenance,
+        fidelityEvidence: { ...cleanFidelityEvidence, candidateSha256: 'f'.repeat(64) },
+        canvas: '1080x1350',
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [tocaBrandInput()],
+      }),
+    ).rejects.toThrow('FAILED_FIDELITY_EVIDENCE_BINDING');
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it('rejects REAL_PLUS_ENHANCEMENT without exact source/output provenance before rendering', async () => {
