@@ -106,6 +106,7 @@ export class LocalCreativeComposer {
       ...(input.generativeException ? { generativeException: input.generativeException } : {}),
       ...(input.references ? { references: input.references } : {}),
       ...(input.fidelityEvidence ? { evidence: input.fidelityEvidence } : {}),
+      candidateSha256: sha256(input.sourceImageBytes),
       nowIso: input.createdAt ?? new Date().toISOString(),
     });
     requireGatePassed(venueGate);
