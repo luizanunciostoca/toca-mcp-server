@@ -38,7 +38,7 @@ Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The ap
 - `BRAND_ASSETS`: official Drive files for Toca, Morro Digital and approved partners.
 - `VENUE_VISUALS`: real Toca source/master lineage and protected physical elements.
 - `VENUE_REFERENCE_SET`: verified spatial references used by generative exceptions.
-- `CREATIVE_STANDARDS`: Story, Feed, Ads and Video standard bindings.
+- `CREATIVE_STANDARDS`: Story, Feed, Ads, Video and Thumbnail standard bindings.
 - `VIDEO_SHOTS`: truth-bound real video takes, including source/master lineage, SHA-256, venue verification, marketing readiness and rights status.
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
@@ -97,6 +97,8 @@ For generative output, a fidelity verifier must state whether source/reference i
 
 `LocalStoryComposer` is not an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. If the Story uses a verified enhancement, its `masterSha256` remains the original real master SHA while the enhancement output SHA remains in the provenance record. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
 
+`LocalThumbnailComposer` is the only final thumbnail-render path defined by this V1. It requires `TOCA_THUMBNAIL_V1`, delegates visual composition to `LocalCreativeComposer`, therefore inherits real-master byte binding, official-logo-only composition and all three Creative Truth gates, and self-verifies the resulting render manifest/output SHA through `assertVideoThumbnailCreativeTruth()`. The older R20/R29 capability `video.thumbnail.generate` is explicitly a **non-final render-intent manifest**; it cannot be treated as approved thumbnail image bytes.
+
 `LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable. `REAL_PLUS_ENHANCEMENT` is intentionally rejected by the current video composer with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master; the composer must not emit a misleading READY artifact that the publication manifest would later reject.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
@@ -114,6 +116,8 @@ The final asset is immutable from approval to publication. `CreativeTruthPublica
 - Quality PASS;
 - one or more exact asset locators such as `MEDIA_URL`, provider image/video IDs/hashes or a Drive file ID;
 - `exactAssetBinding=true`.
+
+Final R20/R29 Reel/Story export is also behind this boundary. `VideoExportManifest` now requires `finalAssetSha256` plus a valid `CreativeTruthPublicationBinding`; `validateExportManifest()` rejects the export when the binding is malformed or when its `outputSha256` differs from the final exported asset SHA-256. Thus the internal export layer cannot convert a quality/approval-only video manifest into a Creative Truth bypass.
 
 Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs being published. Meta Ads validates the provider creative locator before its controlled write path. Publication or ad creation cannot silently substitute or rebuild a creative.
 
@@ -157,7 +161,7 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, incomplete video edit lineage, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, incomplete video edit lineage, invalid final thumbnail render manifests, final video export Creative Truth hash mismatch, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
 
 ## Operational flow
 
