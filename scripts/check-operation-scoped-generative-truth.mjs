@@ -5,11 +5,15 @@ const required = [
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
   'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
   'src/creative/controlled-operation-scoped-static-image-generation.ts',
+  'src/creative/operation-scoped-generative-fidelity.ts',
+  'src/providers/local/local-operation-scoped-generative-composer.ts',
   'src/marketing-autopilot-image-generate.ts',
   'test/creative-truth-operation-scoped-reference-sets.test.ts',
   'test/creative-truth-operation-scoped-generative-registry.test.ts',
   'test/controlled-operation-scoped-static-image-generation.test.ts',
   'test/creative-truth-operation-scoped-image-generator.test.ts',
+  'test/operation-scoped-generative-fidelity.test.ts',
+  'test/local-operation-scoped-generative-composer.test.ts',
 ];
 for (const path of required) {
   if (!existsSync(path)) fail(`Operation-scoped Creative Truth file missing: ${path}`);
@@ -74,6 +78,40 @@ requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-gene
   'requiresPostGenerationHumanReview: true',
 ]);
 
+requireIncludes('src/creative/operation-scoped-generative-fidelity.ts', [
+  'evaluateOperationScopedGenerativeFidelity',
+  'approval.operation !== input.operation',
+  'referenceSetOperation(approval.referenceSetId)',
+  'evidence.candidateSha256 !== input.candidateSha256',
+  'evidence.referenceSetId !== approval.referenceSetId',
+  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
+  "['HUMAN_REVIEW', 'MULTIMODAL_PLUS_HUMAN']",
+  'architectureDriftDetected',
+  'sceneInventionDetected',
+  'logoReconstructionDetected',
+  'crossOperationReferenceReuse: false',
+]);
+
+requireIncludes('src/providers/local/local-operation-scoped-generative-composer.ts', [
+  'LocalOperationScopedGenerativeComposer',
+  'evaluateOperationScopedGenerativeFidelity',
+  "creativeMode: 'GENERATIVE_EXCEPTION'",
+  'candidateSha256',
+  'requiredBrands',
+  'evaluateBrandIntegrity',
+  'evaluateQualityGate',
+  'exactAssetBinding: true',
+  "pipelineVersion: 'local-operation-scoped-generative-composer-v1'",
+  'GENERATIVE_OPERATION_SCOPED_VISUAL_STANDARD_REQUIRED',
+]);
+
+// Legacy global-set fidelity may remain as compatibility surface, but it must never pass finalization.
+requireIncludes('src/creative/creative-truth.ts', [
+  'The original V1 global venue set is now canonically DEPRECATED in Drive',
+  "if (approval.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID)",
+  "failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION')",
+]);
+
 requireIncludes('src/marketing-autopilot-image-generate.ts', [
   'GoogleSheetsOperationScopedGenerativeRegistry',
   'ControlledOperationScopedStaticImageGenerationService',
@@ -96,6 +134,17 @@ for (const path of [
   'control/creative-standards/the-party-content-orchestration.v1.json',
 ]) {
   requireIncludes(path, ['TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1']);
+}
+for (const path of [
+  'control/creative-standards/toca-thumbnail-standard.v1.json',
+  'control/creative-standards/toca-video-standard.v1.json',
+]) {
+  requireIncludes(path, [
+    'OPERATION_SCOPED',
+    'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+    'DEPRECATED',
+  ]);
 }
 
 requireIncludes('test/creative-truth-operation-scoped-reference-sets.test.ts', [
@@ -126,6 +175,18 @@ requireIncludes('test/creative-truth-operation-scoped-image-generator.test.ts', 
   'VENUE_VISUALS operation does not match the approved reference set',
   'rejects The Party references attached to a Sunset approval',
   'managed Responses image tool',
+]);
+requireIncludes('test/operation-scoped-generative-fidelity.test.ts', [
+  'passes only exact Sunset-scoped candidate evidence after human review',
+  'rejects a Sunset approval at a The Party finalization boundary',
+  'rejects evidence replayed against another generated candidate',
+  'rejects output without human review',
+]);
+requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
+  'renders only after exact scoped human-reviewed candidate evidence passes',
+  'candidate hash substitution',
+  'legacy generative finalization denial',
+  'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
 ]);
 
 console.log('Operation-scoped generative Creative Truth contract OK');
