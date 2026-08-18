@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "THE_PARTY_HYBRID_NETWORKS_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "validatedAt": "2026-08-18",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "THE_PARTY",
+    "channel": "ALL",
+    "format": "ALL"
+  },
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "driveDocumentId": "1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk",
+    "canonicalReferenceImageDriveId": "1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD",
+    "officialHeroLogoDriveId": "1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF"
+  },
+  "visualFamily": {
+    "id": "HYBRID_NETWORKS",
+    "label": "Identidade Híbrida nas Redes",
+    "essence": [
+      "PREMIUM_NIGHTLIFE",
+      "RICH",
+      "VIBRANT",
+      "IMMERSIVE",
+      "SOCIAL",
+      "HUMAN"
+    ],
+    "environments": {
+      "international": {
+        "dominantEnergy": "PURPLE_VIOLET",
+        "useAs": "REAL_LIGHT_OR_CONTROLLED_GRAPHIC_ACCENT"
+      },
+      "national": {
+        "dominantEnergy": "GOLD_AMBER_ORANGE_WARM_RED",
+        "useAs": "REAL_LIGHT_OR_CONTROLLED_GRAPHIC_ACCENT"
+      }
+    },
+    "preferredUseCases": [
+      "HIGH_IMPACT_CAMPAIGN",
+      "LINEUP",
+      "EVENT",
+      "ACTIVATION",
+      "SOCIAL_PROMOTION",
+      "IMMERSIVE_ANNOUNCEMENT"
+    ]
+  },
+  "brandHierarchy": {
+    "heroBrand": "THE_PARTY",
+    "heroLogoSource": "OFFICIAL_DRIVE_ASSET_ONLY",
+    "footerRequiredWhenApplicable": true,
+    "footerOrder": [
+      "TOCA_DO_MORCEGO",
+      "CORONA",
+      "RED_BULL",
+      "MORRO_DIGITAL"
+    ],
+    "forbidAiLogoReconstruction": true
+  },
+  "photography": {
+    "realTocaPhotographyPriority": true,
+    "peopleAndExperiencePriority": true,
+    "venueTruthRequired": true,
+    "forbidGenericNightclubReplacement": true,
+    "forbidSyntheticVenueReplacementByDefault": true
+  },
+  "composition": {
+    "onePrimaryIdea": true,
+    "onePrimaryCta": true,
+    "allowHigherGraphicDensityThanMinimalistFamily": true,
+    "preserveHierarchyAndLegibility": true
+  },
+  "palette": {
+    "night": "#070709",
+    "warmWhite": "#F7F4EF",
+    "gold": "#C7AA75",
+    "amber": "#A14816",
+    "purple": "#4C3553",
+    "warmRed": "#7A141C"
+  },
+  "creativeTruth": {
+    "realVenueAssetRequiredByDefault": true,
+    "officialBrandAssetsOnly": true,
+    "aiLogoReconstructionAllowed": false,
+    "architecturalInventionAllowed": false,
+    "environmentDriftAllowed": false,
+    "venueFidelityGateRequired": true,
+    "brandIntegrityGateRequired": true,
+    "qualityGateRequired": true,
+    "generativeExceptionRequiresExplicitApproval": true
+  },
+  "formatGuidance": {
+    "story": "1080x1920_9_16",
+    "feed": "1080x1350_4_5_PREFERRED",
+    "ads": "1_1_OR_4_5_OR_9_16_BY_PLACEMENT",
+    "video": "REAL_TOCA_SHOTS_WITH_FAMILY_MOTION",
+    "thumbnail": "INHERIT_SELECTED_THE_PARTY_FAMILY"
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "rejectOn": [
+      "THE_PARTY_OFFICIAL_LOGO_MISSING",
+      "AI_RECREATED_LOGO",
+      "BRAND_FOOTER_INVALID",
+      "LOGO_ORDER_INVALID",
+      "UNVERIFIED_VENUE_ASSET",
+      "SCENE_INVENTION_DETECTED",
+      "ARCHITECTURE_DRIFT",
+      "GENERIC_NIGHTCLUB_VISUAL",
+      "TEXT_ILLEGIBLE",
+      "MULTIPLE_PRIMARY_CTAS",
+      "FACTUAL_CONTENT_UNVERIFIED",
+      "ASSET_LINEAGE_MISSING"
+    ]
+  }
+}
