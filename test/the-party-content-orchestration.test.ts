@@ -3,11 +3,13 @@ import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/med
 import {
   GoogleSheetsThePartyContentOrchestration,
   THE_PARTY_CONTENT_REGISTRY_DRIVE_ID,
+  THE_PARTY_EDITION_REGISTRY_DRIVE_ID,
 } from '../src/providers/google-sheets/the-party-content-orchestration.js';
 
 const headers = [
   'content_item_id',
   'operation',
+  'edition_id',
   'the_party_intent',
   'the_party_environment',
   'creative_standard_id',
@@ -23,12 +25,20 @@ const headers = [
   'output_sha256',
 ] as const;
 
+const editionHeaders = [
+  'edition_id',
+  'visual_family_policy',
+  'the_party_environment',
+  'environment_status',
+] as const;
+
 function row(
   overrides: Partial<Record<(typeof headers)[number], unknown>> = {},
 ): readonly unknown[] {
   const values: Record<(typeof headers)[number], unknown> = {
     content_item_id: 'MKT-TP-001',
     operation: 'THE_PARTY',
+    edition_id: 'TP-20260822',
     the_party_intent: 'PEOPLE_FIRST_CONVERSION',
     the_party_environment: '',
     creative_standard_id: 'THE_PARTY_HYBRID_MINIMALIST_V1',
@@ -47,12 +57,34 @@ function row(
   return headers.map((header) => values[header]);
 }
 
-function clientFor(rows: readonly (readonly unknown[])[]): SpreadsheetValuesClient {
+function editionRow(
+  overrides: Partial<Record<(typeof editionHeaders)[number], unknown>> = {},
+): readonly unknown[] {
+  const values: Record<(typeof editionHeaders)[number], unknown> = {
+    edition_id: 'TP-20260822',
+    visual_family_policy: 'RESOLVE_BY_INTENT',
+    the_party_environment: '',
+    environment_status: 'PENDING_DECISION',
+  };
+  Object.assign(values, overrides);
+  return editionHeaders.map((header) => values[header]);
+}
+
+function clientFor(
+  rows: readonly (readonly unknown[])[],
+  editionRows: readonly (readonly unknown[])[] = [editionRow()],
+): SpreadsheetValuesClient {
   return {
     readRange: async (spreadsheetId, range) => {
-      expect(spreadsheetId).toBe(THE_PARTY_CONTENT_REGISTRY_DRIVE_ID);
-      expect(range).toBe('CONTENT_ITEMS!A1:BW2000');
-      return [headers, ...rows];
+      if (spreadsheetId === THE_PARTY_CONTENT_REGISTRY_DRIVE_ID) {
+        expect(range).toBe('CONTENT_ITEMS!A1:BW2000');
+        return [headers, ...rows];
+      }
+      if (spreadsheetId === THE_PARTY_EDITION_REGISTRY_DRIVE_ID) {
+        expect(range).toBe('EDITIONS!A1:P2000');
+        return [editionHeaders, ...editionRows];
+      }
+      throw new Error(`unexpected spreadsheet: ${spreadsheetId}`);
     },
     appendRow: async () => undefined,
   };
@@ -78,7 +110,7 @@ describe('GoogleSheetsThePartyContentOrchestration', () => {
     });
   });
 
-  it('preserves an explicit Networks environment and builds an executable resolver input', async () => {
+  it('preserves an explicit item-level Networks environment and builds an executable resolver input', async () => {
     const adapter = new GoogleSheetsThePartyContentOrchestration(
       clientFor([
         row({
@@ -101,7 +133,7 @@ describe('GoogleSheetsThePartyContentOrchestration', () => {
     });
   });
 
-  it('reads a correctly blocked Networks item but refuses to turn it into an executable request', async () => {
+  it('keeps a blocked Networks item blocked while its exact edition decision is pending', async () => {
     const adapter = new GoogleSheetsThePartyContentOrchestration(
       clientFor([
         row({
@@ -114,11 +146,63 @@ describe('GoogleSheetsThePartyContentOrchestration', () => {
     );
 
     const record = await adapter.get('MKT-TP-001');
+    expect(record.editionId).toBe('TP-20260822');
     expect(record.visualStandardStatus).toBe('BLOCKED_NEEDS_ENVIRONMENT');
     expect(record.environment).toBeUndefined();
 
     await expect(adapter.buildCreativeTruthResolutionInput('MKT-TP-001')).rejects.toThrow(
       'THE_PARTY_ENVIRONMENT_REQUIRED',
+    );
+  });
+
+  it('unblocks a Networks request only from a DECIDED environment on the same edition_id', async () => {
+    const adapter = new GoogleSheetsThePartyContentOrchestration(
+      clientFor(
+        [
+          row({
+            the_party_intent: 'SOCIAL_PROMOTION',
+            creative_standard_id: 'THE_PARTY_HYBRID_NETWORKS_V1',
+            visual_standard_status: 'BLOCKED_NEEDS_ENVIRONMENT',
+            venue_asset_id: '',
+          }),
+        ],
+        [editionRow({ the_party_environment: 'NATIONAL', environment_status: 'DECIDED' })],
+      ),
+    );
+
+    const result = await adapter.buildCreativeTruthResolutionInput('MKT-TP-001');
+    expect(result).toMatchObject({
+      contentItemId: 'MKT-TP-001',
+      standardId: 'THE_PARTY_HYBRID_NETWORKS_V1',
+      thePartyIntent: 'SOCIAL_PROMOTION',
+      thePartyEnvironment: 'NATIONAL',
+      requiredBrands: ['THE_PARTY'],
+    });
+    expect(result.venueAssetId).toBeUndefined();
+  });
+
+  it('never resolves an environment from another edition', async () => {
+    const adapter = new GoogleSheetsThePartyContentOrchestration(
+      clientFor(
+        [
+          row({
+            the_party_intent: 'LINEUP',
+            creative_standard_id: 'THE_PARTY_HYBRID_NETWORKS_V1',
+            visual_standard_status: 'BLOCKED_NEEDS_ENVIRONMENT',
+          }),
+        ],
+        [
+          editionRow({
+            edition_id: 'TP-20260829',
+            the_party_environment: 'INTERNATIONAL',
+            environment_status: 'DECIDED',
+          }),
+        ],
+      ),
+    );
+
+    await expect(adapter.buildCreativeTruthResolutionInput('MKT-TP-001')).rejects.toThrow(
+      'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
     );
   });
 
