@@ -5,6 +5,7 @@ const generator = read('src/providers/openai/creative-truth-operation-scoped-ima
 const generateCli = read('src/marketing-autopilot-image-generate.ts');
 const finalizer = read('src/marketing-autopilot-image-finalize.ts');
 const composer = read('src/providers/local/local-creative-composer.ts');
+const storyComposer = read('src/providers/local/local-story-composer.ts');
 const sunsetRenderer = read('src/providers/local/local-sunset-story-renderer.ts');
 const sunsetStandard = JSON.parse(read('control/creative-standards/sunset-story-standard.v1.json'));
 
@@ -69,6 +70,21 @@ for (const marker of [
 ]) {
   if (!composer.includes(marker)) {
     fail(`Deterministic compositor exact-brand invariant missing: ${marker}`);
+  }
+}
+
+for (const marker of [
+  "input.creativeMode === 'GENERATIVE_EXCEPTION'",
+  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+]) {
+  if (!storyComposer.includes(marker)) {
+    fail(`Story composer can bypass controlled generative routing: ${marker}`);
+  }
+}
+
+for (const activeEntrypoint of [generateCli, finalizer]) {
+  if (activeEntrypoint.includes('LocalCreativeComposer') || activeEntrypoint.includes('LocalStoryComposer')) {
+    fail('Generative entrypoint imports a generic local composer instead of controlled operation-scoped services');
   }
 }
 
