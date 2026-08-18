@@ -11,7 +11,7 @@ function manifest(
     contentItemId: 'content-thumbnail-1',
     creativeId: 'creative-thumbnail-1',
     policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-    standardId: 'TOCA_VIDEO_V1',
+    standardId: 'TOCA_THUMBNAIL_V1',
     creativeMode: 'REAL_COMPOSITE',
     sourceAssetIds: ['source-video-1'],
     masterAssetIds: ['master-video-1'],
@@ -30,10 +30,20 @@ function manifest(
 }
 
 describe('video thumbnail Creative Truth binding', () => {
-  it('accepts the exact final artifact only when all Creative Truth gates passed', () => {
+  it('accepts the exact final thumbnail artifact only under TOCA_THUMBNAIL_V1 and passed gates', () => {
     expect(() =>
       assertVideoThumbnailCreativeTruth('content-thumbnail-1', manifest(), outputSha256),
     ).not.toThrow();
+  });
+
+  it('rejects a passed manifest from a different Creative Truth standard', () => {
+    expect(() =>
+      assertVideoThumbnailCreativeTruth(
+        'content-thumbnail-1',
+        manifest({ standardId: 'TOCA_VIDEO_V1' }),
+        outputSha256,
+      ),
+    ).toThrow('R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_STANDARD_MISMATCH');
   });
 
   it('fails closed when a required Creative Truth gate did not pass', () => {
