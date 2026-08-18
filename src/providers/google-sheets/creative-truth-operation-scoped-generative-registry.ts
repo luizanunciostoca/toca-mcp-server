@@ -176,7 +176,7 @@ function assertOperationScopedPolicy(rows: readonly (readonly unknown[])[]): voi
 }
 
 function assertLegacyReferenceSetDeprecated(rows: readonly (readonly unknown[])[]): void {
-  const legacyRows = rows.filter((row) => cell(row[1]) === LEGACY_TOCA_VENUE_REFERENCE_SET_ID);
+  const legacyRows = rows.filter((row) => cell(row[0]) === LEGACY_TOCA_VENUE_REFERENCE_SET_ID);
   if (legacyRows.length === 0) deny('FAILED_GENERATIVE_REFERENCE_SET_DEPRECATED');
   if (
     legacyRows.some(
@@ -192,7 +192,7 @@ function assertReferenceSetScope(
   rows: readonly (readonly unknown[])[],
 ): void {
   const expectedOperation = referenceSetOperation(referenceSetId);
-  const setRows = rows.filter((row) => cell(row[1]) === referenceSetId);
+  const setRows = rows.filter((row) => cell(row[0]) === referenceSetId);
   if (setRows.length === 0) deny('FAILED_GENERATIVE_REFERENCE_MISSING');
   if (setRows.some((row) => cell(row[10]) !== expectedOperation)) {
     deny('FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH');
