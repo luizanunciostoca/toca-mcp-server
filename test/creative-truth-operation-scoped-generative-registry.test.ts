@@ -41,35 +41,46 @@ function approvalRow(
 }
 
 function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): unknown[] {
-  const row: unknown[] = Array.from({ length: 26 }, () => '');
-  Object.assign(row, {
-    0: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-    1: '1.0',
-    2: 'ACTIVE_CANONICAL',
-    3: 'TOCA_DO_MORCEGO',
-    4: 'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
-    5: 'GENERATIVE_EXCEPTION',
-    6: true,
-    7: true,
-    8: true,
-    9: true,
-    10: true,
-    11: true,
-    12: '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM',
-    14: true,
-    15: 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
-    16: 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
-    17: 'UNSUPPORTED_V1',
-    18: 'OPERATION_SCOPED_ONLY_V1',
-    19: 'TOCA_VENUE_REFERENCE_SET_V1',
-    20: 'DEPRECATED',
-    21: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
-    22: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
-    23: 'FORBIDDEN',
-    24: 'REQUIRED',
-    25: 'DENY',
-    ...overrides,
-  });
+  const row: unknown[] = [
+    'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    '1.3',
+    'ACTIVE_CANONICAL',
+    'TOCA_DO_MORCEGO',
+    'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
+    'GENERATIVE_EXCEPTION',
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM',
+    '2026-08-18T13:58:00-03:00',
+    true,
+    'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
+    'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+    'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+    'OPERATION_SCOPED_ONLY_V1',
+    'TOCA_VENUE_REFERENCE_SET_V1',
+    'DEPRECATED',
+    'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+    'FORBIDDEN',
+    'REQUIRED',
+    'DENY',
+    'UNSUPPORTED_V1',
+    'TOCA_PHOTO_TO_VIDEO_POLICY_V1',
+    'ACTIVE_V1',
+    'DENY',
+    'NON_FINAL_BACKGROUND_CANDIDATE_ONLY',
+    true,
+    'DENY',
+    'DENY',
+    'FAIL_CLOSED_NO_FINAL_ASSET',
+    'ENFORCED',
+    'FAILED_DIRECT_GENERATIVE_FINALIZATION',
+  ];
+  for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
   return row;
 }
 
@@ -116,7 +127,7 @@ function policyRanges(
   referenceRows: readonly (readonly unknown[])[] = canonicalReferenceRows(),
 ): Readonly<Record<string, readonly (readonly unknown[])[]>> {
   return {
-    'POLICY!A2:R20': [policyRow],
+    'POLICY!A2:AK20': [policyRow],
     'POLICY!A2:Z20': [policyRow],
     'VENUE_REFERENCE_SET!A2:K1000': referenceRows,
   };
@@ -244,14 +255,14 @@ describe('GoogleSheetsOperationScopedGenerativeRegistry', () => {
     );
   });
 
-  it('accepts only the canonical operation-scoped policy and reference topology', async () => {
+  it('accepts only the canonical v1.3 operation-scoped policy and reference topology', async () => {
     const { client, readRange } = clientFor(policyRanges());
     const registry = new GoogleSheetsOperationScopedGenerativeRegistry(client, {
       spreadsheetId: 'sheet',
     });
 
     await expect(registry.assertCanonicalPolicy()).resolves.toBeUndefined();
-    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:R20');
+    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:AK20');
     expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:Z20');
     expect(readRange).toHaveBeenCalledWith('sheet', 'VENUE_REFERENCE_SET!A2:K1000');
   });
