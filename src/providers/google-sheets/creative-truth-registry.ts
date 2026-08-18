@@ -19,6 +19,7 @@ import type { SpreadsheetValuesClient } from './media-assets.js';
 
 const CREATIVE_TRUTH_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM';
 const CANONICAL_DEFAULT_MODES = ['REAL_COMPOSITE', 'REAL_PLUS_ENHANCEMENT'] as const;
+const MINIMUM_CREATIVE_TRUTH_POLICY_VERSION = '1.3' as const;
 
 export interface CreativeTruthRegistryConfig {
   readonly spreadsheetId?: string;
@@ -48,7 +49,7 @@ export class GoogleSheetsCreativeTruthRegistry {
   }
 
   async assertCanonicalPolicy(): Promise<void> {
-    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:R20');
+    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:AK20');
     const matches = rows.filter((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
     if (matches.length !== 1) throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE');
     const policy = matches[0]!;
@@ -58,6 +59,7 @@ export class GoogleSheetsCreativeTruthRegistry {
       CANONICAL_DEFAULT_MODES.every((mode) => defaultModes.includes(mode));
 
     if (
+      !policyVersionAtLeast(cell(policy[1]), MINIMUM_CREATIVE_TRUTH_POLICY_VERSION) ||
       cell(policy[2]) !== 'ACTIVE_CANONICAL' ||
       cell(policy[3]) !== 'TOCA_DO_MORCEGO' ||
       !defaultModesCanonical ||
@@ -70,9 +72,14 @@ export class GoogleSheetsCreativeTruthRegistry {
       !bool(policy[11]) ||
       cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID ||
       !bool(policy[14]) ||
-      cell(policy[15]) !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
-      cell(policy[16]) !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
-      cell(policy[17]) !== 'UNSUPPORTED_V1'
+      cell(policy[29]) !== 'DENY' ||
+      cell(policy[30]) !== 'NON_FINAL_BACKGROUND_CANDIDATE_ONLY' ||
+      !bool(policy[31]) ||
+      cell(policy[32]) !== 'DENY' ||
+      cell(policy[33]) !== 'DENY' ||
+      cell(policy[34]) !== 'FAIL_CLOSED_NO_FINAL_ASSET' ||
+      cell(policy[35]) !== 'ENFORCED' ||
+      cell(policy[36]) !== 'FAILED_DIRECT_GENERATIVE_FINALIZATION'
     ) {
       throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE');
     }
@@ -272,7 +279,7 @@ function parseVideoShot(row: readonly unknown[]): VideoShot {
     ...(masterSha256 ? { masterSha256 } : {}),
     operation: cell(row[7]),
     locationSignature: cell(row[8]),
-    shotClass: cell(row[9]),
+    dominantSubject: cell(row[9]),
     ...(duration ? { durationMs: integer(row[10], 0) } : {}),
     orientation: cell(row[11]),
     venueVerified: bool(row[12]),
@@ -307,4 +314,23 @@ function list(value: unknown): string[] {
     .split('|')
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function policyVersionAtLeast(actual: string, minimum: string): boolean {
+  const actualParts = actual.split('.').map((part) => Number.parseInt(part, 10));
+  const minimumParts = minimum.split('.').map((part) => Number.parseInt(part, 10));
+  if (
+    actualParts.some((part) => !Number.isFinite(part)) ||
+    minimumParts.some((part) => !Number.isFinite(part))
+  ) {
+    return false;
+  }
+  const width = Math.max(actualParts.length, minimumParts.length);
+  for (let index = 0; index < width; index += 1) {
+    const left = actualParts[index] ?? 0;
+    const right = minimumParts[index] ?? 0;
+    if (left > right) return true;
+    if (left < right) return false;
+  }
+  return true;
 }
