@@ -108,40 +108,87 @@ export const sceneContinuationApprovalSchema = z.object({
 });
 export type SceneContinuationApproval = z.infer<typeof sceneContinuationApprovalSchema>;
 
-export const photoToVideoCandidateManifestSchema = z.object({
-  schemaVersion: z.literal(1),
-  status: z.literal('GENERATED_REVIEW_REQUIRED'),
-  policyId: z.literal(TOCA_PHOTO_TO_VIDEO_POLICY_ID),
-  contentItemId: z.string().trim().min(1),
-  productId: z.string().trim().min(1),
-  operation: z.string().trim().min(1),
-  outputType: photoToVideoOutputTypeSchema,
-  routeType: photoToVideoRouteTypeSchema,
-  standardId: z.string().trim().min(1),
-  standardVersion: z.string().trim().min(1),
-  inheritedVisualStandardId: z.string().trim().min(1),
-  sourceAssetId: z.string().trim().min(1),
-  sourceDriveFileId: z.string().trim().min(1),
-  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
-  providerCandidateSha256: z.string().regex(/^[a-f0-9]{64}$/i),
-  outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
-  artifactRef: z.string().regex(/^gcs:\/\/[^/]+\/instagram\/.+$/),
-  artifactObjectName: z.string().regex(/^instagram\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/),
-  outputContentType: z.literal('video/mp4'),
-  size: photoToVideoSizeSchema,
-  seconds: photoToVideoDurationSchema,
-  provider: z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API']),
-  providerJobId: z.string().trim().min(1).optional(),
-  providerModel: z.string().trim().min(1).optional(),
-  exceptionId: z.string().trim().min(1).optional(),
-  approvalRef: z.string().trim().min(1).optional(),
-  brandAssetIds: z.array(z.string().trim().min(1)).min(1),
-  exactAssetBinding: z.literal(true),
-  requiresPostGenerationHumanReview: z.literal(true),
-  requiresSceneContinuationFidelityGate: z.boolean(),
-  publicationEligible: z.literal(false),
-  createdAt: z.string().trim().min(1),
-});
+export const photoToVideoCandidateManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal('GENERATED_REVIEW_REQUIRED'),
+    policyId: z.literal(TOCA_PHOTO_TO_VIDEO_POLICY_ID),
+    contentItemId: z.string().trim().min(1),
+    productId: z.string().trim().min(1),
+    operation: z.string().trim().min(1),
+    outputType: photoToVideoOutputTypeSchema,
+    routeType: photoToVideoRouteTypeSchema,
+    standardId: z.string().trim().min(1),
+    standardVersion: z.string().trim().min(1),
+    inheritedVisualStandardId: z.string().trim().min(1),
+    sourceAssetId: z.string().trim().min(1),
+    sourceDriveFileId: z.string().trim().min(1),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    providerCandidateSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    artifactRef: z.string().regex(/^gcs:\/\/[^/]+\/instagram\/.+$/),
+    artifactObjectName: z
+      .string()
+      .regex(/^instagram\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/),
+    outputContentType: z.literal('video/mp4'),
+    size: photoToVideoSizeSchema,
+    seconds: photoToVideoDurationSchema,
+    provider: z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API']),
+    providerJobId: z.string().trim().min(1).optional(),
+    providerModel: z.string().trim().min(1).optional(),
+    exceptionId: z.string().trim().min(1).optional(),
+    approvalRef: z.string().trim().min(1).optional(),
+    thePartyEditionId: z.string().trim().min(1).optional(),
+    thePartyIntent: z.string().trim().min(1).optional(),
+    thePartyEnvironment: z.enum(['INTERNATIONAL', 'NATIONAL']).optional(),
+    heroBrandAssetId: z.string().trim().min(1),
+    heroBrandDriveFileId: z.string().trim().min(1),
+    heroBrandSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    brandAssetIds: z.array(z.string().trim().min(1)).min(1),
+    exactAssetBinding: z.literal(true),
+    requiresPostGenerationHumanReview: z.literal(true),
+    requiresSceneContinuationFidelityGate: z.boolean(),
+    publicationEligible: z.literal(false),
+    createdAt: z.string().trim().min(1),
+  })
+  .superRefine((candidate, context) => {
+    const objectName = candidate.artifactRef.replace(/^gcs:\/\/[^/]+\//, '');
+    if (objectName !== candidate.artifactObjectName) {
+      context.addIssue({
+        code: 'custom',
+        path: ['artifactObjectName'],
+        message: 'PHOTO_TO_VIDEO_ARTIFACT_REF_OBJECT_MISMATCH',
+      });
+    }
+    const partyFieldsPresent = Boolean(
+      candidate.thePartyEditionId || candidate.thePartyIntent || candidate.thePartyEnvironment,
+    );
+    if (candidate.operation === 'THE_PARTY') {
+      if (!candidate.thePartyEditionId || !candidate.thePartyIntent) {
+        context.addIssue({
+          code: 'custom',
+          path: ['thePartyEditionId'],
+          message: 'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_REQUIRED',
+        });
+      }
+      if (
+        candidate.inheritedVisualStandardId === 'THE_PARTY_HYBRID_NETWORKS_V1' &&
+        !candidate.thePartyEnvironment
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['thePartyEnvironment'],
+          message: 'PHOTO_TO_VIDEO_THE_PARTY_ENVIRONMENT_REQUIRED',
+        });
+      }
+    } else if (partyFieldsPresent) {
+      context.addIssue({
+        code: 'custom',
+        path: ['operation'],
+        message: 'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_OPERATION_MISMATCH',
+      });
+    }
+  });
 export type PhotoToVideoCandidateManifest = z.infer<typeof photoToVideoCandidateManifestSchema>;
 
 export const photoToVideoReviewEvidenceSchema = z.object({
