@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const requiredFiles = [
   'control/creative-truth-policy.v1.json',
+  'control/creative-tool-routing.v1.json',
   'control/creative-standards/sunset-story-standard.v1.json',
   'control/creative-standards/sunset-feed-standard.v1.json',
   'control/creative-standards/sunset-ad-standard.v1.json',
@@ -33,6 +34,7 @@ const requiredFiles = [
   'src/scheduler/toca-managed-instagram-scheduler.ts',
   'src/worker/instagram-publication-composition.ts',
   'src/worker/toca-managed-instagram-worker-runtime.ts',
+  'scripts/check-creative-tool-routing-contract.mjs',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
 ];
 
@@ -196,7 +198,13 @@ requireIncludes('src/content/video-thumbnail-creative-truth.ts', [
 ]);
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
-  'POLICY!A2:R20',
+  'POLICY!A2:AK20',
+  "MINIMUM_CREATIVE_TRUTH_POLICY_VERSION = '1.3'",
+  "cell(policy[29]) !== 'DENY'",
+  "cell(policy[30]) !== 'NON_FINAL_BACKGROUND_CANDIDATE_ONLY'",
+  "cell(policy[34]) !== 'FAIL_CLOSED_NO_FINAL_ASSET'",
+  "cell(policy[35]) !== 'ENFORCED'",
+  "cell(policy[36]) !== 'FAILED_DIRECT_GENERATIVE_FINALIZATION'",
   'if (matches.length !== 1)',
   'getBrandAsset(brand: string, variant: string)',
   'getVenueAsset(venueAssetId: string)',
