@@ -96,6 +96,16 @@ const requiredOrchestrationColumns = [
   'output_sha256',
 ];
 
+const forbiddenEnvironmentInferenceSources = [
+  'ARTIST_OR_LINEUP',
+  'PHOTO_OR_VIDEO_APPEARANCE',
+  'DOMINANT_COLOR_OR_LIGHT',
+  'LANGUAGE_OR_COPY',
+  'PREVIOUS_EDITION',
+  'AUDIENCE_ORIGIN',
+  'AESTHETIC_PREFERENCE',
+];
+
 if (
   orchestration.contractId !== 'THE_PARTY_CONTENT_ORCHESTRATION_V1' ||
   orchestration.status !== 'ACTIVE_CANONICAL' ||
@@ -120,6 +130,10 @@ if (
     true ||
   orchestration.environmentPolicy?.requiredForStandard !== 'THE_PARTY_HYBRID_NETWORKS_V1' ||
   orchestration.environmentPolicy?.mustNotBeInferred !== true ||
+  !Array.isArray(orchestration.environmentPolicy?.forbiddenInferenceSources) ||
+  forbiddenEnvironmentInferenceSources.some(
+    (source) => !orchestration.environmentPolicy.forbiddenInferenceSources.includes(source),
+  ) ||
   orchestration.environmentPolicy?.missingStatus !== 'BLOCKED_NEEDS_ENVIRONMENT' ||
   orchestration.environmentPolicy?.failureCode !== 'THE_PARTY_ENVIRONMENT_REQUIRED' ||
   orchestration.brandPolicy?.heroBrand !== 'THE_PARTY' ||
@@ -161,16 +175,23 @@ requireIncludes(contentOrchestrationProviderPath, [
   'THE_PARTY_CONTENT_ORCHESTRATION_V1',
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
   '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw',
-  'CONTENT_ITEMS!A1:BW2000',
+  'CONTENT_ITEMS!A1:BX2000',
   'EDITIONS!A1:P2000',
   "'edition_id'",
   "THE_PARTY_HERO_BRAND = 'THE_PARTY'",
   'BRAND-THE-PARTY-WHITE-V1',
   'buildCreativeTruthResolutionInput',
-  'resolveEditionEnvironment',
+  'findAndValidateEditionContext',
+  'reconcileEditionContext',
   "value('visual_family_policy') !== 'RESOLVE_BY_INTENT'",
-  "value('environment_status') !== 'DECIDED'",
+  "status === 'DECIDED'",
+  'environment_decision_source',
+  'environment_decision_at',
+  'environment_decision_by',
+  "environmentSource: 'EDITION_CONTEXT'",
   'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
+  'THE_PARTY_EDITION_ENVIRONMENT_DECISION_EVIDENCE_REQUIRED',
+  'THE_PARTY_CONTENT_EDITION_ENVIRONMENT_CONFLICT',
   'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
   'THE_PARTY_CONTENT_FINAL_BINDING_INCOMPLETE',
@@ -253,7 +274,9 @@ requireIncludes('test/video-thumbnail-creative-truth.test.ts', [
 requireIncludes('test/the-party-content-orchestration.test.ts', [
   'BLOCKED_NEEDS_ENVIRONMENT',
   'PENDING_DECISION',
-  'environment_status: \'DECIDED\'',
+  "environment_status: 'DECIDED'",
+  'THE_PARTY_EDITION_ENVIRONMENT_DECISION_EVIDENCE_REQUIRED',
+  'THE_PARTY_CONTENT_EDITION_ENVIRONMENT_CONFLICT',
   'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
   'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
@@ -278,6 +301,7 @@ requireIncludes(docsPath, [
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
   '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw',
   'edition_id',
+  'environment_status=DECIDED',
   'BLOCKED_NEEDS_ENVIRONMENT',
 ]);
 
