@@ -31,22 +31,12 @@ const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
   secretResolver: secrets,
   accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
 });
+const thePartyContextResolver = new GoogleSheetsThePartyContentOrchestration(sheets);
 
 const standard = await requiredStandard(registry, args.standardId);
 const visualStandard = args.visualStandardId
   ? await requiredStandard(registry, args.visualStandardId)
   : undefined;
-const thePartyContext =
-  candidateManifest.operation === 'THE_PARTY'
-    ? await new GoogleSheetsThePartyContentOrchestration(sheets).get(candidateManifest.contentItemId)
-    : undefined;
-assertCanonicalThePartyFinalizationContext(
-  candidateManifest.operation,
-  standard,
-  visualStandard,
-  thePartyContext,
-);
-
 const requiredBrands = resolveRequiredBrands(
   candidateManifest.operation,
   args.additionalBrands,
@@ -58,7 +48,9 @@ for (const brand of requiredBrands) {
   brandAssets.push(await brandLoader.load(canonicalBrand));
 }
 
-const finalizer = createControlledOperationScopedGenerativeFinalizationService(registry);
+const finalizer = createControlledOperationScopedGenerativeFinalizationService(registry, {
+  thePartyContextResolver,
+});
 const result = await finalizer.finalize({
   candidateManifest,
   candidateImageBytes,
@@ -72,7 +64,6 @@ const result = await finalizer.finalize({
   ...(args.supportCopy ? { supportCopy: args.supportCopy } : {}),
   ...(args.cta ? { cta: args.cta } : {}),
   ...(args.functionalInfo ? { functionalInfo: args.functionalInfo } : {}),
-  ...(thePartyContext?.environment ? { partyEnvironment: thePartyContext.environment } : {}),
   requiredBrands,
   brandAssets,
 });
@@ -164,26 +155,6 @@ async function requiredStandard(
   const standard = await registry.getCreativeStandard(standardId);
   if (!standard) throw new Error(`IMAGE_FINALIZE_STANDARD_NOT_FOUND:${standardId}`);
   return standard;
-}
-
-function assertCanonicalThePartyFinalizationContext(
-  operation: 'SUNSET' | 'THE_PARTY',
-  outputStandard: Awaited<ReturnType<typeof requiredStandard>>,
-  visualStandard: Awaited<ReturnType<typeof requiredStandard>> | undefined,
-  context: Awaited<ReturnType<GoogleSheetsThePartyContentOrchestration['get']>> | undefined,
-): void {
-  if (operation !== 'THE_PARTY') return;
-  if (!context) throw new Error('IMAGE_FINALIZE_THE_PARTY_CONTEXT_REQUIRED');
-  const effectiveVisualStandard = outputStandard.operation === 'ALL' ? visualStandard : outputStandard;
-  if (!effectiveVisualStandard || effectiveVisualStandard.standardId !== context.standardId) {
-    throw new Error('IMAGE_FINALIZE_THE_PARTY_STANDARD_CONTEXT_MISMATCH');
-  }
-  if (
-    context.standardId === 'THE_PARTY_HYBRID_NETWORKS_V1' &&
-    (!context.environment || context.visualStandardStatus === 'BLOCKED_NEEDS_ENVIRONMENT')
-  ) {
-    throw new Error('THE_PARTY_ENVIRONMENT_REQUIRED');
-  }
 }
 
 function resolveRequiredBrands(
