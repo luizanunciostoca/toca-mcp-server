@@ -49,14 +49,15 @@ export class GoogleSheetsCreativeTruthRegistry {
 
   async assertCanonicalPolicy(): Promise<void> {
     const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:R20');
-    const policy = rows.find((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
-    const defaultModes = policy ? list(policy[4]) : [];
+    const matches = rows.filter((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
+    if (matches.length !== 1) throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE');
+    const policy = matches[0]!;
+    const defaultModes = list(policy[4]);
     const defaultModesCanonical =
       defaultModes.length === CANONICAL_DEFAULT_MODES.length &&
       CANONICAL_DEFAULT_MODES.every((mode) => defaultModes.includes(mode));
 
     if (
-      !policy ||
       cell(policy[2]) !== 'ACTIVE_CANONICAL' ||
       cell(policy[3]) !== 'TOCA_DO_MORCEGO' ||
       !defaultModesCanonical ||
@@ -79,10 +80,11 @@ export class GoogleSheetsCreativeTruthRegistry {
 
   async getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined> {
     const rows = await this.client.readRange(this.spreadsheetId, 'BRAND_ASSETS!A2:N1000');
-    const row = rows.find(
+    const matches = rows.filter(
       (candidate) => cell(candidate[1]) === brand && cell(candidate[2]) === variant,
     );
-    if (!row) return undefined;
+    if (matches.length !== 1) return undefined;
+    const row = matches[0]!;
     const sha256 = cell(row[7]);
     return brandAssetSchema.parse({
       brandAssetId: cell(row[0]),
@@ -108,8 +110,9 @@ export class GoogleSheetsCreativeTruthRegistry {
 
   async getVenueAsset(venueAssetId: string): Promise<VenueAsset | undefined> {
     const rows = await this.client.readRange(this.spreadsheetId, 'VENUE_VISUALS!A2:P2000');
-    const row = rows.find((candidate) => cell(candidate[0]) === venueAssetId);
-    return row ? parseVenueAsset(row) : undefined;
+    const matches = rows.filter((candidate) => cell(candidate[0]) === venueAssetId);
+    if (matches.length !== 1) return undefined;
+    return parseVenueAsset(matches[0]!);
   }
 
   async getVenueAssetBySourceAssetId(sourceAssetId: string): Promise<VenueAsset | undefined> {
@@ -131,8 +134,9 @@ export class GoogleSheetsCreativeTruthRegistry {
 
   async getVideoShot(shotId: string): Promise<VideoShot | undefined> {
     const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
-    const row = rows.find((candidate) => cell(candidate[0]) === shotId);
-    return row ? parseVideoShot(row) : undefined;
+    const matches = rows.filter((candidate) => cell(candidate[0]) === shotId);
+    if (matches.length !== 1) return undefined;
+    return parseVideoShot(matches[0]!);
   }
 
   async getReferenceSet(referenceSetId: string): Promise<readonly VenueReference[]> {
@@ -157,8 +161,9 @@ export class GoogleSheetsCreativeTruthRegistry {
 
   async getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined> {
     const rows = await this.client.readRange(this.spreadsheetId, 'CREATIVE_STANDARDS!A2:N1000');
-    const row = rows.find((candidate) => cell(candidate[0]) === standardId);
-    if (!row) return undefined;
+    const matches = rows.filter((candidate) => cell(candidate[0]) === standardId);
+    if (matches.length !== 1) return undefined;
+    const row = matches[0]!;
     return creativeStandardSchema.parse({
       standardId: cell(row[0]),
       version: cell(row[1]),
