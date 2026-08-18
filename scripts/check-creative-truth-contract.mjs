@@ -6,9 +6,11 @@ const requiredFiles = [
   'control/creative-standards/sunset-feed-standard.v1.json',
   'control/creative-standards/sunset-ad-standard.v1.json',
   'control/creative-standards/toca-video-standard.v1.json',
+  'control/creative-standards/toca-thumbnail-standard.v1.json',
   'src/contracts/creative-truth.ts',
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
+  'src/content/video.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
   'src/providers/gcp/gcs-publication-asset-stager.ts',
   'src/providers/gcp/gcs-publication-asset-delivery.ts',
@@ -74,6 +76,7 @@ for (const path of [
   'control/creative-standards/sunset-feed-standard.v1.json',
   'control/creative-standards/sunset-ad-standard.v1.json',
   'control/creative-standards/toca-video-standard.v1.json',
+  'control/creative-standards/toca-thumbnail-standard.v1.json',
 ]) {
   const standard = JSON.parse(read(path));
   if (
@@ -82,6 +85,19 @@ for (const path of [
   ) {
     fail(`Creative standard is not bound to Creative Truth: ${path}`);
   }
+}
+
+const thumbnailStandard = JSON.parse(
+  read('control/creative-standards/toca-thumbnail-standard.v1.json'),
+);
+if (
+  thumbnailStandard.standardId !== 'TOCA_THUMBNAIL_V1' ||
+  thumbnailStandard.r29Boundary?.videoThumbnailGenerateIsNonFinalRenderIntent !== true ||
+  thumbnailStandard.r29Boundary?.finalThumbnailBytesMustComeFromCreativeTruthComposer !== true ||
+  thumbnailStandard.creativeTruth?.aiLogoReconstructionForbidden !== true ||
+  thumbnailStandard.creativeTruth?.architectureInventionForbidden !== true
+) {
+  fail('Toca thumbnail standard must keep R29 thumbnail intent non-final and Creative Truth-bound');
 }
 
 const storyStandard = JSON.parse(
@@ -108,6 +124,15 @@ requireIncludes('src/creative/creative-truth-resolver.ts', [
   'resolveVideoShots',
   'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
   'FAILED_LINEAGE_MISSING',
+]);
+
+requireIncludes('src/content/video.ts', [
+  'CreativeTruthPublicationBinding',
+  'creativeTruthPublicationBindingSchema',
+  'finalAssetSha256',
+  'VIDEO_EXPORT_CREATIVE_TRUTH_BINDING_INVALID',
+  'VIDEO_EXPORT_CREATIVE_TRUTH_HASH_MISMATCH',
+  'Prepare non-final thumbnail render-intent manifest',
 ]);
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
