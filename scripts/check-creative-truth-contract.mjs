@@ -10,6 +10,7 @@ const required = [
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
+  'src/providers/gcp/gcs-publication-asset-stager.ts',
   'src/providers/gcp/gcs-publication-asset-delivery.ts',
   'src/providers/local/local-creative-composer.ts',
   'src/providers/local/local-story-composer.ts',
@@ -159,6 +160,14 @@ if (!publicationComposition.includes('new InstagramPublicationExecutor') || !pub
   process.exit(1);
 }
 
+const gcsStager = readFileSync('src/providers/gcp/gcs-publication-asset-stager.ts', 'utf8');
+for (const marker of ['video/mp4', 'validatePublicMediaUrl', "return 'mp4'"]) {
+  if (!gcsStager.includes(marker)) {
+    console.error(`Reel staging is not Creative Truth publication-ready: ${marker}`);
+    process.exit(1);
+  }
+}
+
 const managedScheduler = readFileSync(
   'src/scheduler/toca-managed-instagram-scheduler.ts',
   'utf8',
@@ -167,6 +176,8 @@ for (const marker of [
   'creativeTruthBinding',
   'TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH',
   'createVerifiedDeliveryUrl',
+  'TOCA_MANAGED_INSTAGRAM_REEL_MP4_REQUIRED',
+  'TOCA_MANAGED_INSTAGRAM_CAROUSEL_REQUIRES_MULTI_ASSET_DESCRIPTOR',
 ]) {
   if (!managedScheduler.includes(marker)) {
     console.error(`TOCA-managed publication Creative Truth boundary missing: ${marker}`);
@@ -186,9 +197,10 @@ if (!managedRuntime.includes('new InstagramPublicationExecutor(store, transport,
 const gcsDelivery = readFileSync('src/providers/gcp/gcs-publication-asset-delivery.ts', 'utf8');
 if (
   !gcsDelivery.includes('createVerifiedDeliveryUrl') ||
-  !gcsDelivery.includes('PUBLICATION_ASSET_SHA256_MISMATCH')
+  !gcsDelivery.includes('PUBLICATION_ASSET_SHA256_MISMATCH') ||
+  !gcsDelivery.includes('video/mp4')
 ) {
-  console.error('GCS delivery must verify exact approved creative bytes before publication');
+  console.error('GCS delivery must verify exact approved image/Reel bytes before publication');
   process.exit(1);
 }
 
