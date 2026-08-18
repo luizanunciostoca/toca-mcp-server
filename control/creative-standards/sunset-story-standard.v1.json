@@ -3,7 +3,7 @@
   "standardId": "SUNSET_STORY_V1",
   "standardVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
-  "validatedAt": "2026-08-17",
+  "validatedAt": "2026-08-18",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
     "operation": "SUNSET",
@@ -34,7 +34,15 @@
     "brandFooterBottomPx": 1830,
     "bottomBreathingRoomMinimumPx": 70
   },
-  "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN", "REAL"],
+  "visualEssence": [
+    "SOLAR",
+    "SOPHISTICATED",
+    "SOCIAL",
+    "SENSORIAL",
+    "PREMIUM",
+    "HUMAN",
+    "REAL"
+  ],
   "photography": {
     "venueVerifiedRequired": true,
     "masterStatusRequired": "MARKETING_READY",
@@ -58,15 +66,27 @@
     "requireLineage": true
   },
   "typography": {
-    "headline": { "familyClass": "ELEGANT_EDITORIAL_SERIF", "defaultColor": "#FFFFFF", "maxLines": 3 },
-    "support": { "familyClass": "CLEAN_GEOMETRIC_SANS", "weight": "REGULAR_OR_MEDIUM", "maxLines": 3 },
+    "headline": {
+      "familyClass": "ELEGANT_EDITORIAL_SERIF",
+      "defaultColor": "#FFFFFF",
+      "maxLines": 3
+    },
+    "support": {
+      "familyClass": "CLEAN_GEOMETRIC_SANS",
+      "weight": "REGULAR_OR_MEDIUM",
+      "maxLines": 3
+    },
     "cta": {
       "familyClass": "CLEAN_SANS",
       "weight": "MEDIUM_OR_SEMIBOLD",
       "container": "THIN_WHITE_OUTLINE",
       "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
     },
-    "time": { "familyClass": "CLEAN_SANS", "weight": "BOLD_OR_SEMIBOLD", "preferredContainer": "DISCREET_RECTANGULAR_STRIP" },
+    "time": {
+      "familyClass": "CLEAN_SANS",
+      "weight": "BOLD_OR_SEMIBOLD",
+      "preferredContainer": "DISCREET_RECTANGULAR_STRIP"
+    },
     "maxFontFamilies": 2,
     "scriptUsage": "EXCEPTIONAL_ONLY"
   },
@@ -80,11 +100,26 @@
     "translucentBlackRange": "rgba(0,0,0,0.50)-rgba(0,0,0,0.65)"
   },
   "templateClasses": [
-    { "id": "SUNSET_HERO_LIFESTYLE", "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR" },
-    { "id": "SUNSET_VIEW_SCENERY", "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE" },
-    { "id": "SUNSET_SOCIAL_EXPERIENCE", "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY" },
-    { "id": "SUNSET_DRINKS_EXPERIENCE", "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL" },
-    { "id": "SUNSET_INFO_HOURS", "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS" }
+    {
+      "id": "SUNSET_HERO_LIFESTYLE",
+      "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR"
+    },
+    {
+      "id": "SUNSET_VIEW_SCENERY",
+      "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE"
+    },
+    {
+      "id": "SUNSET_SOCIAL_EXPERIENCE",
+      "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY"
+    },
+    {
+      "id": "SUNSET_DRINKS_EXPERIENCE",
+      "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL"
+    },
+    {
+      "id": "SUNSET_INFO_HOURS",
+      "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS"
+    }
   ],
   "brandFooter": {
     "required": true,
@@ -105,6 +140,15 @@
     "qualityGateRequired": true,
     "exactApprovedAssetPublicationRequired": true
   },
+  "toolRouting": {
+    "directImageGenerationFinalization": "DENY",
+    "imageGenerationRole": "GENERATIVE_EXCEPTION_CANDIDATE_ONLY",
+    "finalizer": "DETERMINISTIC_COMPOSER",
+    "officialBrandAssetByteBindingRequired": true,
+    "modelRenderedLogoAllowed": false,
+    "modelRenderedMarketingTextAllowed": false,
+    "composerUnavailableBehavior": "FAIL_CLOSED"
+  },
   "antiRepeat": {
     "allowSameTemplateClassConsecutivelyWhenAlternativesExist": false,
     "headlineRepeatWindowDays": 14,
@@ -123,6 +167,7 @@
       "MULTIPLE_PRIMARY_CTAS",
       "REQUIRED_LOGOS_MISSING_OR_MISALIGNED",
       "AI_RECREATED_LOGO",
+      "DIRECT_IMAGE_GENERATION_USED_AS_FINALIZER",
       "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET",
       "ARCHITECTURE_DRIFT",
       "COPY_TIME_OR_FACT_ERROR",
@@ -151,7 +196,12 @@
     "originalReferencesAreVisualStyleReferences": true,
     "derivedExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
     "derivedExamplesMayTeach": ["PALETTE", "TYPOGRAPHY", "LAYOUT", "CTA_STYLE"],
-    "derivedExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
+    "derivedExamplesMayNotTeach": [
+      "VENUE_GEOMETRY",
+      "ARCHITECTURE",
+      "FURNITURE",
+      "SPATIAL_FACTS"
+    ],
     "venueTruthComesOnlyFromVenueRegistry": true
   },
   "referenceFiles": {
