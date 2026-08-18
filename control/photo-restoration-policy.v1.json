@@ -1,0 +1,27 @@
+{
+  "policyId": "TOCA_PHOTO_RESTORATION_POLICY_V1",
+  "version": "1.0",
+  "status": "ACTIVE_CANONICAL_MIRROR",
+  "restorationProfile": "SOURCE_FAITHFUL_CINEMATIC_RESTORATION_V1",
+  "defaultPipeline": "local-photo-enhancer-v2",
+  "targetLongEdgePixels": 3840,
+  "stillMasterFormats": ["JPEG_HIGH_QUALITY_4K", "PNG_LOSSLESS_4K", "TIFF_MASTER_4K"],
+  "proResScope": "VIDEO_ONLY_NOT_APPLICABLE_TO_STILL",
+  "sourceImageBindingRequired": true,
+  "sourceSha256Required": true,
+  "identityLockRequired": true,
+  "compositionLockRequired": true,
+  "structureLockRequired": true,
+  "backgroundLockRequired": true,
+  "generativeDetailSynthesisAllowed": false,
+  "semanticAlterationAllowed": false,
+  "unverifiableDetailBehavior": "RESTORATION_CANDIDATE_REVIEW_REQUIRED",
+  "promotionFolderClass": "07_PRONTOS_PARA_MARKETING",
+  "promotionGuardVersion": "master-promotion-guard-v1",
+  "autoPromotionBeforeReview": false,
+  "marketingReadyOnlyAfterGuard": true,
+  "sourceOfTruth": {
+    "driveRegistryId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "sheet": "PHOTO_RESTORATION_POLICY"
+  }
+}
