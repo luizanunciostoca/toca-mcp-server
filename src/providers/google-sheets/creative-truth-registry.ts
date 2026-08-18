@@ -72,6 +72,20 @@ export class GoogleSheetsCreativeTruthRegistry {
       !bool(policy[11]) ||
       cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID ||
       !bool(policy[14]) ||
+      cell(policy[15]) !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
+      cell(policy[16]) !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
+      cell(policy[17]) !== 'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1' ||
+      cell(policy[18]) !== 'OPERATION_SCOPED_ONLY_V1' ||
+      cell(policy[19]) !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+      cell(policy[20]) !== 'DEPRECATED' ||
+      cell(policy[21]) !== 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' ||
+      cell(policy[22]) !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' ||
+      cell(policy[23]) !== 'FORBIDDEN' ||
+      cell(policy[24]) !== 'REQUIRED' ||
+      cell(policy[25]) !== 'DENY' ||
+      cell(policy[26]) !== 'UNSUPPORTED_V1' ||
+      cell(policy[27]) !== 'TOCA_PHOTO_TO_VIDEO_POLICY_V1' ||
+      cell(policy[28]) !== 'ACTIVE_V1' ||
       cell(policy[29]) !== 'DENY' ||
       cell(policy[30]) !== 'NON_FINAL_BACKGROUND_CANDIDATE_ONLY' ||
       !bool(policy[31]) ||
