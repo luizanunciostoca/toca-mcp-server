@@ -104,6 +104,7 @@ function registry(): OperationScopedGenerativeFinalizationRegistry {
   return {
     assertCanonicalPolicy: vi.fn(async () => undefined),
     getContentItemOperation: vi.fn(async () => 'THE_PARTY'),
+    getContentItemCreativeStandardId: vi.fn(async () => networksStandard.standardId),
     getApprovedGenerativeException: vi.fn(async () => approval),
     getReferenceSet: vi.fn(async () => references),
     getVenueAssetBySourceAssetId: vi.fn(async (assetId) => {
