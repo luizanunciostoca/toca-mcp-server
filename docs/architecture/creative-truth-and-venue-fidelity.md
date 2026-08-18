@@ -8,13 +8,15 @@ Repository implementation mirror for the canonical Google Drive policy and regis
 - Canonical implementation plan: Drive `1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM`
 - Canonical operational registry: Drive/Sheets `1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU`
 - Venue reference set: `TOCA_VENUE_REFERENCE_SET_V1`
-- Canonical Drive enhancement-provenance addendum synchronized on `2026-08-18`; `POLICY` now records `ENHANCEMENT_PROVENANCE_REQUIRED=true` and the fail-closed video boundary.
+- Canonical Drive enhancement-provenance, thumbnail/R20-R29 and output-bound fidelity addenda synchronized on `2026-08-18`.
 
 Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime `assertCanonicalPolicy()` reads the canonical `POLICY!A2:Q20` row and fails closed if enhancement provenance or the video fail-closed flags drift.
 
 ## Non-negotiable rule
 
 AI does not define what Toca do Morcego looks like. Real verified media and official brand files define venue and brand truth. AI may propose copy, layout, enhancement or a controlled generative concept, but it cannot invent venue architecture or reconstruct logos.
+
+A pass/fail statement about venue fidelity is not sufficient by itself. Whenever fidelity evidence is required, that evidence must be bound to the exact candidate output SHA-256 being evaluated so that evidence from one image cannot be replayed against another image.
 
 ## Creative modes
 
@@ -24,11 +26,22 @@ Default for final image and video creatives. Uses a `VENUE_VERIFIED` / `MARKETIN
 
 ### `REAL_PLUS_ENHANCEMENT`
 
-Uses a verified real master and allows fidelity-preserving enhancement only. Enhanced bytes are expected to differ from the original master, therefore the system does **not** pretend they are the master. Instead it requires an immutable enhancement provenance record plus a post-edit Venue Fidelity PASS. In the current V1 runtime this mode is production-shaped for static image/Story composition; video remains fail-closed until a shot-level enhancement provenance model exists.
+Uses a verified real master and allows fidelity-preserving enhancement only. Enhanced bytes are expected to differ from the original master, therefore the system does **not** pretend they are the master. Instead it requires an immutable enhancement provenance record plus a post-edit Venue Fidelity PASS. The fidelity evidence is bound both to the registered real master SHA-256 and to the exact enhancement-output SHA-256 entering deterministic composition. In the current V1 runtime this mode is production-shaped for static image/Story composition; video remains fail-closed until a shot-level enhancement provenance model exists.
 
 ### `GENERATIVE_EXCEPTION`
 
-Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to `TOCA_VENUE_REFERENCE_SET_V1`, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled. The generated result still must pass Venue Fidelity, Brand Integrity and Quality gates.
+Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to `TOCA_VENUE_REFERENCE_SET_V1`, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled.
+
+Approval of the **intent to generate** is not approval of the generated pixels. Before a generative candidate can pass Venue Fidelity, its evidence must:
+
+- contain the exact `candidateSha256` of the generated image being evaluated;
+- reference only `ACTIVE + VENUE_VERIFIED` assets from the approved reference set;
+- cover at least the approved `minReferenceCount`;
+- contain no architecture/scene/logo drift signal;
+- include an output-specific `reviewRef`;
+- use `HUMAN_REVIEW` or `MULTIMODAL_PLUS_HUMAN` as the verification method.
+
+Therefore a generated Toca image cannot become final merely because a pre-generation exception existed. The actual generated output must be reviewed and bound to its own hash.
 
 ## Canonical registries
 
@@ -83,21 +96,23 @@ For `REAL_PLUS_ENHANCEMENT`, the system requires a `CreativeEnhancementProvenanc
 
 The provenance must point to the exact registered master and its `outputSha256` must equal the bytes actually entering deterministic composition. The final `DeterministicRenderManifest` persists this provenance, creating an auditable chain:
 
-`REGISTERED REAL MASTER SHA -> ENHANCEMENT OUTPUT SHA -> POST-EDIT VENUE FIDELITY PASS -> FINAL CREATIVE SHA`.
+`REGISTERED REAL MASTER SHA -> ENHANCEMENT OUTPUT SHA -> OUTPUT-BOUND FIDELITY EVIDENCE -> POST-EDIT VENUE FIDELITY PASS -> FINAL CREATIVE SHA`.
 
-Both the local ImageMagick enhancer and the OpenAI enhancement adapter emit this same policy-pinned provenance contract. The OpenAI adapter independently rehashes the supplied original bytes and returned enhanced bytes instead of trusting provider-reported digests alone.
+`FidelityEvidence` itself contains `verificationMethod`, `candidateSha256`, optional `sourceSha256`, reference binding, verifier identity and optional `reviewRef`. For an enhancement, `sourceSha256` must equal the registered master SHA and `candidateSha256` must equal the actual enhanced bytes entering composition. A stale or replayed fidelity report fails with `FAILED_FIDELITY_EVIDENCE_BINDING`.
 
-This prevents valid registry metadata from being paired with substituted media bytes while still allowing faithful enhancement. A source/master identity mismatch, enhancement-output substitution, wrong policy/mode or missing post-edit Venue Fidelity evidence fails closed.
+Both the local ImageMagick enhancer and the OpenAI enhancement adapter emit the same policy-pinned **enhancement provenance** contract. The OpenAI adapter independently rehashes the supplied original bytes and returned enhanced bytes instead of trusting provider-reported digests alone. Enhancement provenance does not replace the post-edit Venue Fidelity evidence requirement.
 
-For generative output, a fidelity verifier must state whether source/reference identity was preserved and whether architecture drift, scene invention or logo reconstruction was detected. Any positive drift signal is a hard failure.
+This prevents valid registry metadata from being paired with substituted media bytes while still allowing faithful enhancement. A source/master identity mismatch, enhancement-output substitution, wrong policy/mode, fidelity-evidence replay or missing post-edit Venue Fidelity evidence fails closed.
+
+For generative output, evidence is additionally reference-set-bound and output-review-bound. A generative candidate without output-specific human review fails with `FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING` even if the exception and reference set were valid before generation.
 
 ## Deterministic composition
 
-`LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It produces an output SHA-256 and `DeterministicRenderManifest`. In enhancement mode the manifest also persists `CreativeEnhancementProvenance`.
+`LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It computes the SHA-256 of the exact candidate bytes before Venue Fidelity evaluation, preventing a caller from attaching evidence for a different candidate. It produces a final output SHA-256 and `DeterministicRenderManifest`. In enhancement mode the manifest also persists `CreativeEnhancementProvenance`; the Venue Fidelity gate evidence persisted in the manifest contains the candidate/source hash and verifier/review context.
 
 `LocalStoryComposer` is not an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. If the Story uses a verified enhancement, its `masterSha256` remains the original real master SHA while the enhancement output SHA remains in the provenance record. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
 
-`LocalThumbnailComposer` is the only final thumbnail-render path defined by this V1. It requires `TOCA_THUMBNAIL_V1`, delegates visual composition to `LocalCreativeComposer`, therefore inherits real-master byte binding, official-logo-only composition and all three Creative Truth gates, and self-verifies the resulting render manifest/output SHA through `assertVideoThumbnailCreativeTruth()`. The older R20/R29 capability `video.thumbnail.generate` is explicitly a **non-final render-intent manifest**; it cannot be treated as approved thumbnail image bytes.
+`LocalThumbnailComposer` is the only final thumbnail-render path defined by this V1. It requires `TOCA_THUMBNAIL_V1`, delegates visual composition to `LocalCreativeComposer`, therefore inherits real-master byte binding, output-bound fidelity evidence, official-logo-only composition and all three Creative Truth gates, and self-verifies the resulting render manifest/output SHA through `assertVideoThumbnailCreativeTruth()`. The older R20/R29 capability `video.thumbnail.generate` is explicitly a **non-final render-intent manifest**; it cannot be treated as approved thumbnail image bytes.
 
 `LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable. `REAL_PLUS_ENHANCEMENT` is intentionally rejected by the current video composer with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master; the composer must not emit a misleading READY artifact that the publication manifest would later reject.
 
@@ -117,7 +132,7 @@ The final asset is immutable from approval to publication. `CreativeTruthPublica
 - one or more exact asset locators such as `MEDIA_URL`, provider image/video IDs/hashes or a Drive file ID;
 - `exactAssetBinding=true`.
 
-Final R20/R29 Reel/Story export is also behind this boundary. `VideoExportManifest` now requires `finalAssetSha256` plus a valid `CreativeTruthPublicationBinding`; `validateExportManifest()` rejects the export when the binding is malformed or when its `outputSha256` differs from the final exported asset SHA-256. Thus the internal export layer cannot convert a quality/approval-only video manifest into a Creative Truth bypass.
+Final R20/R29 Reel/Story export is also behind this boundary. `VideoExportManifest` requires `finalAssetSha256` plus a valid `CreativeTruthPublicationBinding`; `validateExportManifest()` rejects the export when the binding is malformed or when its `outputSha256` differs from the final exported asset SHA-256. Thus the internal export layer cannot convert a quality/approval-only video manifest into a Creative Truth bypass.
 
 Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs being published. Meta Ads validates the provider creative locator before its controlled write path. Publication or ad creation cannot silently substitute or rebuild a creative.
 
@@ -154,6 +169,8 @@ The policy fails closed with explicit codes, including:
 - `FAILED_ARCHITECTURE_DRIFT`
 - `FAILED_UNAPPROVED_GENERATIVE_EXCEPTION`
 - `FAILED_GENERATIVE_REFERENCE_MISSING`
+- `FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING`
+- `FAILED_FIDELITY_EVIDENCE_BINDING`
 - `FAILED_STANDARD_NOT_RESOLVED`
 - `FAILED_LINEAGE_MISSING`
 - `FAILED_ENHANCEMENT_PROVENANCE`
@@ -165,7 +182,7 @@ Additional fail-closed execution reasons include exact master-byte mismatches, m
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT ONLY: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> POST-EDIT VENUE FIDELITY] -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> BIND FIDELITY EVIDENCE TO MASTER + CANDIDATE SHA] -> [GENERATIVE_EXCEPTION: GENERATE FROM VERIFIED REFERENCES -> BIND EVIDENCE TO CANDIDATE SHA + ACTIVE REFERENCES -> POST-GENERATION HUMAN REVIEW] -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> FINAL OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
