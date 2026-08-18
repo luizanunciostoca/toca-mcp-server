@@ -20,6 +20,8 @@ export const creativeTruthFailureCodeSchema = z.enum([
   'FAILED_ARCHITECTURE_DRIFT',
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
   'FAILED_GENERATIVE_REFERENCE_MISSING',
+  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
+  'FAILED_FIDELITY_EVIDENCE_BINDING',
   'FAILED_STANDARD_NOT_RESOLVED',
   'FAILED_LINEAGE_MISSING',
   'FAILED_ENHANCEMENT_PROVENANCE',
@@ -230,14 +232,25 @@ export const generativeExceptionApprovalSchema = z.object({
   createdAt: z.string().min(1),
 });
 
+export const fidelityVerificationMethodSchema = z.enum([
+  'DETERMINISTIC_DIFF',
+  'MULTIMODAL_REVIEW',
+  'HUMAN_REVIEW',
+  'MULTIMODAL_PLUS_HUMAN',
+]);
+
 export const fidelityEvidenceSchema = z.object({
   verifier: z.string().min(1),
+  verificationMethod: fidelityVerificationMethodSchema,
+  candidateSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
   sourceIdentityPreserved: z.boolean(),
   architectureDriftDetected: z.boolean(),
   sceneInventionDetected: z.boolean(),
   logoReconstructionDetected: z.boolean(),
   referenceSetId: z.string().min(1).optional(),
   referenceAssetIds: z.array(z.string().min(1)).default([]),
+  reviewRef: z.string().min(1).optional(),
   notes: z.array(z.string().min(1)).default([]),
 });
 
@@ -319,6 +332,7 @@ export type VideoShot = z.infer<typeof videoShotSchema>;
 export type VenueReference = z.infer<typeof venueReferenceSchema>;
 export type CreativeStandard = z.infer<typeof creativeStandardSchema>;
 export type GenerativeExceptionApproval = z.infer<typeof generativeExceptionApprovalSchema>;
+export type FidelityVerificationMethod = z.infer<typeof fidelityVerificationMethodSchema>;
 export type FidelityEvidence = z.infer<typeof fidelityEvidenceSchema>;
 export type CreativeEnhancementProvenance = z.infer<typeof creativeEnhancementProvenanceSchema>;
 export type CreativeTruthGateResult = z.infer<typeof creativeTruthGateResultSchema>;
