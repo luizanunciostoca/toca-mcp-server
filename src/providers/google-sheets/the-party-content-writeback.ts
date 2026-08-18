@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   deterministicRenderManifestSchema,
   type DeterministicRenderManifest,
@@ -18,7 +19,6 @@ import {
 } from './the-party-content-orchestration.js';
 
 const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BX2000';
-const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const TRANSVERSAL_THUMBNAIL_STANDARD_ID = 'TOCA_THUMBNAIL_V1';
 const MINIMALIST_NEUTRAL = 'MINIMALIST_NEUTRAL';
 const REQUIRED_SNAPSHOT_COLUMNS = [
@@ -41,7 +41,7 @@ const REQUIRED_SNAPSHOT_COLUMNS = [
 export interface ThePartyFinalCreativeTruthWritebackInput {
   readonly contentItemId: string;
   readonly manifest: unknown;
-  readonly observedOutputSha256: string;
+  readonly outputBytes: Uint8Array;
 }
 
 export interface ThePartyFinalCreativeTruthWritebackResult {
@@ -83,12 +83,11 @@ export class GoogleSheetsThePartyContentWriteback {
   ): Promise<ThePartyFinalCreativeTruthWritebackResult> {
     const contentItemId = input.contentItemId.trim();
     if (!contentItemId) deny('THE_PARTY_WRITEBACK_CONTENT_ITEM_REQUIRED');
-
-    const observedOutputSha256 = input.observedOutputSha256.trim().toLowerCase();
-    if (!SHA256_PATTERN.test(observedOutputSha256)) {
-      deny('THE_PARTY_WRITEBACK_OUTPUT_SHA256_INVALID');
+    if (input.outputBytes.byteLength === 0) {
+      deny('THE_PARTY_WRITEBACK_OUTPUT_BYTES_REQUIRED');
     }
 
+    const observedOutputSha256 = createHash('sha256').update(input.outputBytes).digest('hex');
     const parsed = deterministicRenderManifestSchema.safeParse(input.manifest);
     if (!parsed.success) deny('THE_PARTY_WRITEBACK_MANIFEST_INVALID');
     const ready = assertCreativeReadyForPublication(parsed.data);
@@ -129,13 +128,20 @@ export class GoogleSheetsThePartyContentWriteback {
 
     const snapshot = await this.readContentRow(contentItemId);
     assertSnapshotMatchesRecord(snapshot, revalidated);
+
+    const preWrite = await this.orchestration.get(contentItemId);
+    if (recordFingerprint(preWrite) !== recordFingerprint(revalidated)) {
+      conflict('THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK');
+    }
+    assertSnapshotMatchesRecord(snapshot, preWrite);
+    validateManifestAgainstRecord(preWrite, ready, observedOutputSha256);
+
     const updates = buildWritebackUpdates(
       snapshot,
-      revalidated,
+      preWrite,
       manifestContext,
       observedOutputSha256,
     );
-
     await this.writer.updateRanges(THE_PARTY_CONTENT_REGISTRY_DRIVE_ID, updates);
 
     let readback: ThePartyContentOrchestrationRecord;
@@ -148,7 +154,7 @@ export class GoogleSheetsThePartyContentWriteback {
         false,
       );
     }
-    assertWritebackReadback(readback, revalidated, manifestContext, observedOutputSha256);
+    assertWritebackReadback(readback, preWrite, manifestContext, observedOutputSha256);
 
     return buildResult('WRITTEN', readback, manifestContext, observedOutputSha256);
   }
