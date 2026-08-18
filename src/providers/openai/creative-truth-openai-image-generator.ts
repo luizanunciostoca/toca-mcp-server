@@ -40,6 +40,8 @@ export interface CreativeTruthGenerativeImageResult {
   readonly referenceSha256s: readonly string[];
   readonly policyId: typeof TOCA_CREATIVE_TRUTH_POLICY_ID;
   readonly referenceSetId: typeof TOCA_VENUE_REFERENCE_SET_ID;
+  readonly exceptionId: string;
+  readonly approvalRef: string;
   readonly creativeMode: 'GENERATIVE_EXCEPTION';
   readonly provider: 'OPENAI_IMAGE_GENERATION';
   readonly generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES';
@@ -55,7 +57,10 @@ export interface CreativeTruthOpenAiImageGeneratorOptions {
   readonly apiKeyReference: SecretReference;
   readonly registry: Pick<
     GoogleSheetsCreativeTruthRegistry,
-    'assertCanonicalPolicy' | 'getReferenceSet' | 'getVenueAssetBySourceAssetId'
+    | 'assertCanonicalPolicy'
+    | 'getApprovedGenerativeException'
+    | 'getReferenceSet'
+    | 'getVenueAssetBySourceAssetId'
   >;
   readonly fetchImpl?: typeof fetch;
   readonly responseModel?: string;
@@ -86,6 +91,7 @@ export class CreativeTruthOpenAiImageGenerator {
   ): Promise<CreativeTruthGenerativeImageResult> {
     const suppliedReferences = validateRequest(request);
     await this.options.registry.assertCanonicalPolicy();
+    const approval = await resolveCanonicalApproval(request, this.options.registry);
     const references = await resolveCanonicalReferenceBytes(
       suppliedReferences,
       this.options.registry,
@@ -108,7 +114,7 @@ export class CreativeTruthOpenAiImageGenerator {
             content: [
               {
                 type: 'input_text',
-                text: buildCreativeTruthGenerationPolicy(request.approval, references),
+                text: buildCreativeTruthGenerationPolicy(approval, references),
               },
             ],
           },
@@ -185,6 +191,8 @@ export class CreativeTruthOpenAiImageGenerator {
       referenceSha256s,
       policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
       referenceSetId: TOCA_VENUE_REFERENCE_SET_ID,
+      exceptionId: approval.exceptionId,
+      approvalRef: approval.approvalRef,
       creativeMode: 'GENERATIVE_EXCEPTION',
       provider: 'OPENAI_IMAGE_GENERATION',
       generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES',
@@ -261,6 +269,72 @@ function validateRequest(
   }
 
   return references;
+}
+
+async function resolveCanonicalApproval(
+  request: CreativeTruthGenerativeImageRequest,
+  registry: Pick<GoogleSheetsCreativeTruthRegistry, 'getApprovedGenerativeException'>,
+): Promise<GenerativeExceptionApproval> {
+  const canonical = await registry.getApprovedGenerativeException(request.contentItemId);
+  if (!canonical || canonical.status !== 'APPROVED') {
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
+  }
+  if (!sameApprovalIdentity(canonical, request.approval)) {
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH',
+      false,
+    );
+  }
+
+  const nowTimestamp = Date.parse(request.nowIso ?? new Date().toISOString());
+  if (!Number.isFinite(nowTimestamp)) {
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
+  }
+  if (canonical.expiresAt) {
+    const expiresTimestamp = Date.parse(canonical.expiresAt);
+    if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) {
+      throw new ExecutionError(
+        'APPROVAL_REQUIRED',
+        'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+        false,
+      );
+    }
+  }
+  if (request.references.length < Math.max(3, canonical.minReferenceCount)) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
+  }
+  return canonical;
+}
+
+function sameApprovalIdentity(
+  canonical: GenerativeExceptionApproval,
+  supplied: GenerativeExceptionApproval,
+): boolean {
+  return (
+    canonical.exceptionId === supplied.exceptionId &&
+    canonical.contentItemId === supplied.contentItemId &&
+    canonical.requestedBy === supplied.requestedBy &&
+    canonical.approvedBy === supplied.approvedBy &&
+    canonical.approvalRef === supplied.approvalRef &&
+    canonical.reason === supplied.reason &&
+    canonical.referenceSetId === supplied.referenceSetId &&
+    canonical.minReferenceCount === supplied.minReferenceCount &&
+    canonical.allowArchitecturalInvention === supplied.allowArchitecturalInvention &&
+    canonical.allowEnvironmentDrift === supplied.allowEnvironmentDrift &&
+    canonical.allowAiLogoGeneration === supplied.allowAiLogoGeneration &&
+    canonical.status === supplied.status &&
+    canonical.expiresAt === supplied.expiresAt &&
+    canonical.createdAt === supplied.createdAt
+  );
 }
 
 async function resolveCanonicalReferenceBytes(
