@@ -76,6 +76,9 @@ const enhancementProvenance: CreativeEnhancementProvenance = {
 
 const fidelityEvidence: FidelityEvidence = {
   verifier: 'POST_EDIT_VENUE_FIDELITY_V1',
+  verificationMethod: 'MULTIMODAL_REVIEW',
+  candidateSha256: enhancedSha256,
+  sourceSha256: masterSha256,
   sourceIdentityPreserved: true,
   architectureDriftDetected: false,
   sceneInventionDetected: false,
