@@ -10,11 +10,9 @@ const args = parseArgs(process.argv.slice(2));
 const prompt = await resolvePrompt(args);
 const secrets = new EnvironmentSecretResolver(process.env);
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
-const driveTokenEnvKey =
-  process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+const driveTokenEnvKey = process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = requiredEnv('OPENAI_API_KEY_ENV_KEY');
 const responseModel = process.env.OPENAI_CREATIVE_RESPONSE_MODEL?.trim();
-const imageModel = process.env.OPENAI_CREATIVE_IMAGE_MODEL?.trim();
 
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
@@ -29,7 +27,6 @@ const generator = new CreativeTruthOperationScopedImageGenerator({
   apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
   registry,
   ...(responseModel ? { responseModel } : {}),
-  ...(imageModel ? { imageModel } : {}),
 });
 const service = new ControlledOperationScopedStaticImageGenerationService({
   registry,
@@ -62,7 +59,7 @@ await writeFile(
       provider: result.provider,
       generationMode: result.generationMode,
       responseModel: result.responseModel,
-      imageModel: result.imageModel,
+      imageToolModelSelection: result.imageToolModelSelection,
       outputContentType: result.outputContentType,
       outputSizeBytes: result.outputBytes.byteLength,
       outputPath: args.output,
@@ -90,7 +87,7 @@ process.stdout.write(
     exceptionId: result.exceptionId,
     approvalRef: result.approvalRef,
     responseModel: result.responseModel,
-    imageModel: result.imageModel,
+    imageToolModelSelection: result.imageToolModelSelection,
     requiresPostGenerationHumanReview: true,
     requiresVenueFidelityGate: true,
     readyForFinalComposition: false,
@@ -123,7 +120,6 @@ function parseArgs(argv: readonly string[]): CliArgs {
     if (!key?.startsWith('--') || !value) throw new Error('IMAGE_GENERATE_ARGS_INVALID');
     values.set(key.slice(2), value);
   }
-
   const contentItemId = required(values, 'content-item-id');
   const output = required(values, 'output');
   const prompt = values.get('prompt')?.trim();
@@ -133,10 +129,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   }
   const manifest = values.get('manifest')?.trim() || `${output}.manifest.json`;
   const nowIso = values.get('now-iso')?.trim();
-  if (nowIso && !Number.isFinite(Date.parse(nowIso))) {
-    throw new Error('IMAGE_GENERATE_NOW_ISO_INVALID');
-  }
-
+  if (nowIso && !Number.isFinite(Date.parse(nowIso))) throw new Error('IMAGE_GENERATE_NOW_ISO_INVALID');
   return {
     contentItemId,
     ...(prompt ? { prompt } : {}),
