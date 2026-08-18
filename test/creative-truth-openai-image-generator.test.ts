@@ -396,7 +396,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
         tools: readonly Record<string, unknown>[];
         tool_choice: Record<string, unknown>;
       };
-      expect(body.model).toBe('gpt-5');
+      expect(body.model).toBe('gpt-5.6-sol');
       expect(body.input[0]?.role).toBe('developer');
       const policyText = String(body.input[0]?.content[0]?.text ?? '');
       expect(policyText).toContain('TOCA_CREATIVE_TRUTH_POLICY_V1');
@@ -416,7 +416,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
         expect.objectContaining({
           type: 'image_generation',
           action: 'generate',
-          model: 'gpt-image-1',
+          model: 'gpt-image-2',
           input_fidelity: 'high',
           quality: 'high',
           output_format: 'jpeg',
@@ -458,6 +458,8 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
     expect(result.requiresPostGenerationHumanReview).toBe(true);
     expect(result.requiresVenueFidelityGate).toBe(true);
     expect(result.readyForFinalComposition).toBe(false);
+    expect(result.responseModel).toBe('gpt-5.6-sol');
+    expect(result.imageModel).toBe('gpt-image-2');
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
