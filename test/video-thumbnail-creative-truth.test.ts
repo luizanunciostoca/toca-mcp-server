@@ -29,11 +29,52 @@ function manifest(
   };
 }
 
+function thePartyManifest(): DeterministicRenderManifest {
+  return manifest({
+    brandAssetIds: ['BRAND-THE-PARTY-WHITE-V1'],
+    gates: [
+      { gate: 'BRAND_INTEGRITY', status: 'PASSED', failureCodes: [], evidence: {} },
+      { gate: 'VENUE_FIDELITY', status: 'PASSED', failureCodes: [], evidence: {} },
+      {
+        gate: 'QUALITY',
+        status: 'PASSED',
+        failureCodes: [],
+        evidence: {
+          visualStandardApplied: 'THE_PARTY_HYBRID_MINIMALIST_V1',
+          thePartyEnvironment: 'MINIMALIST_NEUTRAL',
+        },
+      },
+    ],
+  });
+}
+
 describe('video thumbnail Creative Truth binding', () => {
   it('accepts the exact final thumbnail artifact only under TOCA_THUMBNAIL_V1 and passed gates', () => {
     expect(() =>
       assertVideoThumbnailCreativeTruth('content-thumbnail-1', manifest(), outputSha256),
     ).not.toThrow();
+  });
+
+  it('accepts a transversal thumbnail only when its inherited The Party visual family matches', () => {
+    expect(() =>
+      assertVideoThumbnailCreativeTruth(
+        'content-thumbnail-1',
+        thePartyManifest(),
+        outputSha256,
+        'THE_PARTY_HYBRID_MINIMALIST_V1',
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects substitution of the inherited The Party visual family', () => {
+    expect(() =>
+      assertVideoThumbnailCreativeTruth(
+        'content-thumbnail-1',
+        thePartyManifest(),
+        outputSha256,
+        'THE_PARTY_HYBRID_NETWORKS_V1',
+      ),
+    ).toThrow('R29_VIDEO_THUMBNAIL_VISUAL_STANDARD_MISMATCH');
   });
 
   it('rejects a passed manifest from a different Creative Truth standard', () => {
