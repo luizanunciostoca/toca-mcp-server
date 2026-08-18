@@ -76,6 +76,7 @@ export const creativeTruthPolicySchema = z.object({
     enhancementProvenanceRequired: z.literal(true),
     videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE'),
     videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED'),
+    videoGenerativeException: z.literal('UNSUPPORTED_V1'),
     exactApprovedAssetMustBePublished: z.literal(true),
     failClosed: z.literal(true),
   }),
