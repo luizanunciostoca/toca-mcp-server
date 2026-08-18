@@ -3,15 +3,18 @@ import { ExecutionError } from '../core/errors.js';
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
   type BrandAsset,
+  type CreativeAssetLocator,
   type CreativeMode,
   type CreativeStandard,
   type CreativeTruthFailureCode,
   type CreativeTruthGateResult,
+  type CreativeTruthPublicationBinding,
   type DeterministicRenderManifest,
   type FidelityEvidence,
   type GenerativeExceptionApproval,
   type VenueAsset,
   type VenueReference,
+  creativeAssetLocatorSchema,
   deterministicRenderManifestSchema,
 } from '../contracts/creative-truth.js';
 
@@ -110,11 +113,7 @@ export function evaluateQualityGate(
   passed: boolean,
   evidence: Readonly<Record<string, unknown>> = {},
 ): CreativeTruthGateResult {
-  return gateResult(
-    'QUALITY',
-    passed ? [] : ['FAILED_QUALITY_GATE'],
-    evidence,
-  );
+  return gateResult('QUALITY', passed ? [] : ['FAILED_QUALITY_GATE'], evidence);
 }
 
 export function requireGatePassed(result: CreativeTruthGateResult): void {
@@ -154,6 +153,28 @@ export function assertCreativeReadyForPublication(
     throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_PUBLICATION_BLOCKED', false);
   }
   return parsed;
+}
+
+export function buildCreativeTruthPublicationBinding(
+  manifest: DeterministicRenderManifest,
+  assetLocators: readonly CreativeAssetLocator[],
+): CreativeTruthPublicationBinding {
+  const ready = assertCreativeReadyForPublication(manifest);
+  const parsedLocators = assetLocators.map((locator) => creativeAssetLocatorSchema.parse(locator));
+  if (parsedLocators.length === 0) {
+    throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_ASSET_LOCATOR_REQUIRED', false);
+  }
+  return {
+    policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+    standardId: ready.standardId,
+    creativeId: ready.creativeId,
+    outputSha256: ready.outputSha256,
+    brandIntegrityStatus: 'PASSED',
+    venueFidelityStatus: 'PASSED',
+    qualityGateStatus: 'PASSED',
+    assetLocators: parsedLocators,
+    exactAssetBinding: true,
+  };
 }
 
 export function buildTocaImageEditPrompt(
@@ -198,7 +219,10 @@ function validateGenerativeException(
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
     return;
   }
-  if (approval.expiresAt && Date.parse(approval.expiresAt) <= Date.parse(input.nowIso ?? new Date().toISOString())) {
+  if (
+    approval.expiresAt &&
+    Date.parse(approval.expiresAt) <= Date.parse(input.nowIso ?? new Date().toISOString())
+  ) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
   if (
