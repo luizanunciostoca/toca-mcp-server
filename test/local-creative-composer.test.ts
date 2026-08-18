@@ -60,6 +60,8 @@ const cleanFidelityEvidence: FidelityEvidence = {
 };
 
 const enhancementProvenance: CreativeEnhancementProvenance = {
+  policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+  creativeMode: 'REAL_PLUS_ENHANCEMENT',
   editorProvider: 'OPENAI_IMAGE_EDIT',
   sourceAssetId: venue.masterAssetId!,
   sourceDriveFileId: venue.masterDriveFileId!,
@@ -147,6 +149,7 @@ describe('LocalCreativeComposer', () => {
       'BRAND-TOCA-WHITE-V1',
       'BRAND-MORRO-WHITE-V1',
     ]);
+    expect(result.manifest.enhancementProvenance).toBeUndefined();
     expect(result.manifest.gates.map((gate) => gate.status)).toEqual([
       'PASSED',
       'PASSED',
@@ -183,6 +186,7 @@ describe('LocalCreativeComposer', () => {
     expect(result.manifest.creativeMode).toBe('REAL_PLUS_ENHANCEMENT');
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-0244-V1']);
+    expect(result.manifest.enhancementProvenance).toEqual(enhancementProvenance);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
   });
 
@@ -231,9 +235,30 @@ describe('LocalCreativeComposer', () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
-  it('rejects enhancement provenance that points to a different source master', async () => {
+  it('rejects enhancement provenance from another mode or master', async () => {
     const runner = vi.fn();
     const composer = new LocalCreativeComposer(runner);
+
+    const invalidMode = {
+      ...enhancementProvenance,
+      creativeMode: 'REAL_COMPOSITE',
+    } as unknown as CreativeEnhancementProvenance;
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-ENHANCED-WRONG-MODE',
+        creativeId: 'CREATIVE-ENHANCED-WRONG-MODE',
+        standard,
+        creativeMode: 'REAL_PLUS_ENHANCEMENT',
+        venueAsset: venue,
+        sourceImageBytes: enhancedBytes,
+        sourceContentType: 'image/jpeg',
+        enhancementProvenance: invalidMode,
+        fidelityEvidence: cleanFidelityEvidence,
+        canvas: '1080x1350',
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [tocaBrandInput()],
+      }),
+    ).rejects.toThrow('FAILED_ENHANCEMENT_PROVENANCE');
 
     await expect(
       composer.compose({
