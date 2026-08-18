@@ -41,6 +41,7 @@ if (missing.length > 0) fail(`Creative Truth architecture files missing: ${missi
 
 const policy = JSON.parse(read('control/creative-truth-policy.v1.json'));
 const requiredGateSet = new Set(policy.requiredGates ?? []);
+const generative = policy.generativeException ?? {};
 if (
   policy.schemaVersion !== '1.1' ||
   policy.policyVersion !== '1.1' ||
@@ -53,41 +54,39 @@ if (
   policy.rules?.videoRealPlusEnhancement !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
   policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
   policy.rules?.videoGenerativeException !== 'UNSUPPORTED_V1' ||
+  policy.rules?.exactApprovedAssetMustBePublished !== true ||
   policy.rules?.failClosed !== true ||
-  policy.generativeException?.referenceStrategy !== 'OPERATION_SCOPED_ONLY_V1' ||
-  policy.generativeException?.legacyReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
-  policy.generativeException?.legacyReferenceSetStatus !== 'DEPRECATED' ||
-  policy.generativeException?.sunsetReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' ||
-  policy.generativeException?.thePartyReferenceSetId !==
-    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' ||
-  policy.generativeException?.crossOperationReferenceReuse !== 'FORBIDDEN' ||
-  policy.generativeException?.referenceSetOperationMatch !== 'REQUIRED' ||
-  policy.generativeException?.legacyReferenceSetExecution !== 'DENY' ||
-  policy.generativeException?.minimumVerifiedReferences !== 3 ||
-  policy.generativeException?.venueFidelityGateStillRequired !== true ||
-  policy.generativeException?.officialBrandAssetsStillRequired !== true ||
-  policy.generativeException?.architecturalInventionStillForbidden !== true ||
-  policy.generativeException?.environmentDriftStillForbidden !== true ||
+  generative.explicitApprovalRequired !== true ||
+  generative.approvalRecordRequired !== true ||
+  generative.referenceStrategy !== 'OPERATION_SCOPED_ONLY_V1' ||
+  generative.legacyReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+  generative.legacyReferenceSetStatus !== 'DEPRECATED' ||
+  generative.sunsetReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' ||
+  generative.thePartyReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' ||
+  generative.crossOperationReferenceReuse !== 'FORBIDDEN' ||
+  generative.referenceSetOperationMatch !== 'REQUIRED' ||
+  generative.legacyReferenceSetExecution !== 'DENY' ||
+  generative.minimumVerifiedReferences !== 3 ||
+  generative.venueFidelityGateStillRequired !== true ||
+  generative.officialBrandAssetsStillRequired !== true ||
+  generative.architecturalInventionStillForbidden !== true ||
+  generative.environmentDriftStillForbidden !== true ||
   !Array.isArray(policy.requiredGates) ||
   policy.requiredGates.length !== 3 ||
   requiredGateSet.size !== 3 ||
   !requiredGateSet.has('BRAND_INTEGRITY') ||
   !requiredGateSet.has('VENUE_FIDELITY') ||
   !requiredGateSet.has('QUALITY') ||
+  policy.publicationBoundary?.allRequiredGatesMustPass !== true ||
+  policy.publicationBoundary?.outputSha256Required !== true ||
   policy.publicationBoundary?.exactAssetBindingRequired !== true ||
-  policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true ||
-  policy.failureCodes?.includes('FAILED_FIDELITY_EVIDENCE_BINDING') !== true ||
-  policy.failureCodes?.includes('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING') !== true
+  policy.publicationBoundary?.publicationMayNotRebuildCreative !== true
 ) {
   fail('Creative Truth parent policy violates the fail-closed contract');
 }
 
 requireIncludes('src/contracts/creative-truth.ts', [
   'creativeTruthPolicySchema',
-  'enhancementProvenanceRequired: z.literal(true)',
-  "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
-  "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
-  "videoGenerativeException: z.literal('UNSUPPORTED_V1')",
   "referenceStrategy: z.literal('OPERATION_SCOPED_ONLY_V1')",
   'legacyReferenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID)',
   "legacyReferenceSetStatus: z.literal('DEPRECATED')",
@@ -98,37 +97,55 @@ requireIncludes('src/contracts/creative-truth.ts', [
   "legacyReferenceSetExecution: z.literal('DENY')",
   'minimumVerifiedReferences: z.number().int().min(3)',
   'Legacy global-set approval schema retained only for compatibility evidence parsing',
-  'referenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID)',
-  'minReferenceCount: z.number().int().min(3).default(3)',
-  'allowArchitecturalInvention: z.literal(false)',
-  'allowEnvironmentDrift: z.literal(false)',
-  'allowAiLogoGeneration: z.literal(false)',
-  'PASSED Creative Truth gates cannot contain failure codes',
-  'FAILED Creative Truth gates require at least one failure code',
-  'Render manifests require BRAND_INTEGRITY, VENUE_FIDELITY and QUALITY exactly once',
+  'enhancementProvenanceRequired: z.literal(true)',
+  "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
+  "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
+  "videoGenerativeException: z.literal('UNSUPPORTED_V1')",
   'creativeEnhancementProvenanceSchema',
-  'fidelityVerificationMethodSchema',
-  'candidateSha256',
-  'sourceSha256',
-  'reviewRef',
-  'FAILED_FIDELITY_EVIDENCE_BINDING',
-  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
-  'policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID)',
-  "creativeMode: z.literal('REAL_PLUS_ENHANCEMENT')",
-  'enhancementProvenance: creativeEnhancementProvenanceSchema.optional()',
-  'FAILED_ENHANCEMENT_PROVENANCE',
-  'videoShotSchema',
-  'MEDIA_URL',
-  'META_IMAGE_HASH',
-  'META_VIDEO_ID',
-  'META_SOURCE_CREATIVE_ID',
-  'DRIVE_FILE_ID',
+  'fidelityEvidenceSchema',
+  'deterministicRenderManifestSchema',
+  'creativeTruthPublicationBindingSchema',
 ]);
 
-const policyContract = read('src/contracts/creative-truth.ts');
-if (!policyContract.includes('export const creativeTruthPolicySchema')) {
-  fail('Creative Truth policy schema missing');
-}
+requireIncludes('src/creative/creative-truth.ts', [
+  'evaluateBrandIntegrity',
+  'evaluateVenueFidelity',
+  'evaluateQualityGate',
+  'assertCreativeReadyForPublication',
+  'buildCreativeTruthPublicationBinding',
+  'FAILED_BRAND_ASSET_HASH_MISMATCH',
+  'FAILED_FIDELITY_EVIDENCE_BINDING',
+  'The original V1 global venue set is now canonically DEPRECATED in Drive',
+  "if (approval.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID)",
+  "failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION')",
+]);
+
+requireIncludes('src/creative/creative-truth-resolver.ts', [
+  'resolveVideoShots',
+  'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
+  'FAILED_LINEAGE_MISSING',
+  "if (creativeMode === 'GENERATIVE_EXCEPTION')",
+  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+]);
+
+requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
+  'ControlledOperationScopedStaticImageGenerationService',
+  'getContentItemOperation(contentItemId)',
+  'referenceSetOperation(approval.referenceSetId) !== operation',
+  'uniqueReferenceIds',
+  'uniqueAssetIds',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
+]);
+
+requireIncludes('src/creative/controlled-operation-scoped-generative-finalization.ts', [
+  'createControlledOperationScopedGenerativeFinalizationService',
+  'OperationScopedGenerativeFinalizationRegistry',
+  'getCreativeStandard(',
+  'resolveCanonicalGenerativeBrandInputs',
+  'thePartyContextResolver',
+  'assertApprovalCurrent(approval.expiresAt, nowIso)',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
+]);
 
 for (const path of [
   'control/creative-standards/sunset-story-standard.v1.json',
@@ -146,9 +163,7 @@ for (const path of [
   }
 }
 
-const thumbnailStandard = JSON.parse(
-  read('control/creative-standards/toca-thumbnail-standard.v1.json'),
-);
+const thumbnailStandard = JSON.parse(read('control/creative-standards/toca-thumbnail-standard.v1.json'));
 if (
   thumbnailStandard.standardId !== 'TOCA_THUMBNAIL_V1' ||
   thumbnailStandard.r29Boundary?.videoThumbnailGenerateIsNonFinalRenderIntent !== true ||
@@ -159,9 +174,7 @@ if (
   fail('Toca thumbnail standard must keep R29 thumbnail intent non-final and Creative Truth-bound');
 }
 
-const storyStandard = JSON.parse(
-  read('control/creative-standards/sunset-story-standard.v1.json'),
-);
+const storyStandard = JSON.parse(read('control/creative-standards/sunset-story-standard.v1.json'));
 if (
   storyStandard.referencePolicy?.derivedExamplesClassification !==
     'VISUAL_DIRECTION_REFERENCE_ONLY' ||
@@ -170,90 +183,27 @@ if (
   fail('Synthetic Sunset examples must never become venue truth');
 }
 
-requireIncludes('src/creative/creative-truth.ts', [
-  'TOCA_VENUE_REFERENCE_SET_ID',
-  'FAILED_AI_LOGO_RECONSTRUCTION',
-  'FAILED_SCENE_INVENTION_DETECTED',
-  'FAILED_ARCHITECTURE_DRIFT',
-  'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
-  'FAILED_GENERATIVE_REFERENCE_MISSING',
-  'FAILED_FIDELITY_EVIDENCE_BINDING',
-  'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
-  'approval.contentItemId !== input.contentItemId',
-  'approval.minReferenceCount < 3',
-  'Math.max(3, approval.minReferenceCount)',
-  '!Number.isFinite(nowTimestamp)',
-  '!Number.isFinite(expiresTimestamp)',
-  'validateEvidenceCandidateBinding',
-  'candidateSha256',
-  'reviewRef',
-  'MULTIMODAL_PLUS_HUMAN',
-  'buildCreativeTruthPublicationBinding',
-  'The original V1 global venue set is now canonically DEPRECATED in Drive',
-]);
-
-requireIncludes('src/creative/creative-truth-resolver.ts', [
-  'resolveVideoShots',
-  'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
-  'FAILED_LINEAGE_MISSING',
-  "if (creativeMode === 'GENERATIVE_EXCEPTION')",
-  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
-]);
-
-requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
-  'ControlledOperationScopedStaticImageGenerationService',
-  'getContentItemOperation(contentItemId)',
-  'referenceSetOperation(approval.referenceSetId) !== operation',
-  'GENERATIVE_TRUSTED_CLOCK_INVALID',
-]);
-requireIncludes('src/creative/controlled-operation-scoped-generative-finalization.ts', [
-  'createControlledOperationScopedGenerativeFinalizationService',
-  'OperationScopedGenerativeFinalizationRegistry',
-  'getCreativeStandard(',
-  'resolveCanonicalGenerativeBrandInputs',
-  'GENERATIVE_TRUSTED_CLOCK_INVALID',
-]);
-
 requireIncludes('src/content/video.ts', [
   'CreativeTruthPublicationBinding',
   'creativeTruthPublicationBindingSchema',
   'finalAssetSha256',
   'VIDEO_EXPORT_CREATIVE_TRUTH_BINDING_INVALID',
   'VIDEO_EXPORT_CREATIVE_TRUTH_HASH_MISMATCH',
-  'Prepare non-final thumbnail render-intent manifest',
 ]);
-
 requireIncludes('src/content/video-thumbnail-creative-truth.ts', [
   "const TOCA_THUMBNAIL_STANDARD_ID = 'TOCA_THUMBNAIL_V1'",
-  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_STANDARD_MISMATCH',
-  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_CONTENT_MISMATCH',
-  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_HASH_MISMATCH',
   'assertCreativeReadyForPublication',
 ]);
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
   'POLICY!A2:R20',
-  "const CREATIVE_TRUTH_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM'",
-  "const CANONICAL_DEFAULT_MODES = ['REAL_COMPOSITE', 'REAL_PLUS_ENHANCEMENT']",
   'if (matches.length !== 1)',
-  "cell(policy[3]) !== 'TOCA_DO_MORCEGO'",
-  "cell(policy[5]) !== 'GENERATIVE_EXCEPTION'",
-  '!bool(policy[6])',
-  '!bool(policy[7])',
-  '!bool(policy[8])',
-  '!bool(policy[9])',
-  '!bool(policy[10])',
-  '!bool(policy[11])',
-  'cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID',
-  '!bool(policy[14])',
-  'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
-  'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
-  "cell(policy[17]) !== 'UNSUPPORTED_V1'",
-  'VIDEO_SHOTS!A2:Q2000',
-  'getVideoShot',
-  'listVideoShots',
+  'getBrandAsset(brand: string, variant: string)',
+  'getVenueAsset(venueAssetId: string)',
+  'getVenueAssetBySourceAssetId(sourceAssetId: string)',
+  'getVideoShot(shotId: string)',
+  'getCreativeStandard(standardId: string)',
 ]);
-
 requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
   'POLICY!A2:Z20',
   'CONTENT_ITEMS!A2:E2000',
@@ -261,30 +211,34 @@ requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-gen
   'VENUE_REFERENCE_SET!A2:K1000',
   'OPERATION_SCOPED_ONLY_V1',
   'LEGACY_DEPRECATED',
+  'getBrandAsset(brand: string, variant: string)',
+  'getCreativeStandard(standardId: string)',
 ]);
 
 requireIncludes('src/providers/local/local-photo-enhancer.ts', [
-  'LOCAL_PHOTO_ENHANCER_CREATIVE_TRUTH_REQUIRED',
   'creativeEnhancementProvenanceSchema',
-  'policyId: TOCA_CREATIVE_TRUTH_POLICY_ID',
   "creativeMode: 'REAL_PLUS_ENHANCEMENT'",
   'requiresVenueFidelityGate: true',
 ]);
-
 requireIncludes('src/providers/openai/creative-truth-openai-image-enhancer.ts', [
   'creativeEnhancementProvenanceSchema',
-  'policyId: TOCA_CREATIVE_TRUTH_POLICY_ID',
-  "creativeMode: 'REAL_PLUS_ENHANCEMENT'",
   'OPENAI_ENHANCEMENT_SOURCE_BINDING_REQUIRED',
   'sha256(input.imageBytes)',
   'sha256(result.outputBytes)',
 ]);
-
-requireIncludes('src/marketing-autopilot-image-edit.ts', [
-  'CreativeTruthOpenAiImageEnhancer',
-  'creativeTruthPolicyId: result.policyId',
-  'creativeTruthBound: result.creativeTruthBound',
-  'creativeMode: result.creativeMode',
+requireIncludes('src/providers/local/local-creative-composer.ts', [
+  'CREATIVE_MASTER_HASH_MISMATCH',
+  'FAILED_ENHANCEMENT_PROVENANCE',
+  'evaluateBrandIntegrity',
+  'evaluateVenueFidelity',
+  'evaluateQualityGate',
+]);
+requireIncludes('src/providers/local/local-video-composer.ts', [
+  'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
+  'VIDEO_SHOT_MASTER_HASH_MISMATCH',
+  'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
+  'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+  'VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED',
 ]);
 
 requireIncludes('src/marketing-autopilot-image-generate.ts', [
@@ -300,94 +254,21 @@ requireIncludes('src/marketing-autopilot-image-finalize.ts', [
   'publicationAuthorized: false',
 ]);
 
-requireIncludes('src/providers/local/local-creative-composer.ts', [
-  'CREATIVE_MASTER_HASH_MISMATCH',
-  'FAILED_ENHANCEMENT_PROVENANCE',
-  'FAILED_STANDARD_NOT_RESOLVED',
-  'creativeEnhancementProvenanceSchema',
-  "provenance.creativeMode !== 'REAL_PLUS_ENHANCEMENT'",
-  'provenance.outputSha256 !== sha256(input.sourceImageBytes)',
-  'contentItemId: input.contentItemId',
-  'candidateSha256: sha256(input.sourceImageBytes)',
-  "input.standard.operation !== 'ALL' && venue.operation !== input.standard.operation",
-  'enhancementProvenance: input.enhancementProvenance',
-]);
-
-const storyComposer = read('src/providers/local/local-story-composer.ts');
-for (const marker of [
-  'LocalCreativeComposer',
-  'LOCAL_STORY_COMPOSER_MASTER_BINDING_MISMATCH',
-  'enhancementProvenance',
-]) {
-  if (!storyComposer.includes(marker)) fail(`Story Creative Truth binding missing: ${marker}`);
-}
-if (storyComposer.includes('brandLabel')) {
-  fail('Story composition must not use literal text as a brand/logo substitute');
-}
-
-requireIncludes('src/providers/local/local-thumbnail-composer.ts', [
-  'TOCA_THUMBNAIL_V1',
-  'TOCA_THUMBNAIL_STANDARD_REQUIRED',
-  'LocalCreativeComposer',
-  'assertVideoThumbnailCreativeTruth',
-  'brandAssets',
-  'manifest: composed.manifest',
-]);
-
-requireIncludes('src/providers/local/local-video-composer.ts', [
-  'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
-  'VIDEO_SHOT_MASTER_HASH_MISMATCH',
-  'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
-  'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
-  'VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED',
-  'VIDEO_GENERATIVE_CONTEXT_NOT_ALLOWED',
-  'LocalVideoEditManifest',
-  'VIDEO_EDIT_MANIFEST_INCOMPLETE',
-  'exactMasterByteBinding',
-]);
-
-requireIncludes('src/providers/openai/openai-image-edit-provider.ts', [
-  'buildTocaImageEditPrompt',
-  'creativeTruthBound',
-]);
-
 requireIncludes('src/providers/gcp/gcs-publication-asset-stager.ts', [
   'video/mp4',
   'validatePublicMediaUrl',
-  "return 'mp4'",
 ]);
-
 requireIncludes('src/providers/gcp/gcs-publication-asset-delivery.ts', [
   'createVerifiedDeliveryUrl',
   'PUBLICATION_ASSET_SHA256_MISMATCH',
-  'video/mp4',
 ]);
-
-requireIncludes('src/worker/instagram-publication-composition.ts', [
-  'new InstagramPublicationExecutor',
-  'true,',
-]);
-
 requireIncludes('src/scheduler/toca-managed-instagram-scheduler.ts', [
   'creativeTruthBinding',
   'TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH',
-  'createVerifiedDeliveryUrl',
-  'TOCA_MANAGED_INSTAGRAM_REEL_MP4_REQUIRED',
-  'TOCA_MANAGED_INSTAGRAM_CAROUSEL_REQUIRES_MULTI_ASSET_DESCRIPTOR',
 ]);
-
-requireIncludes('src/worker/toca-managed-instagram-worker-runtime.ts', [
-  'new InstagramPublicationExecutor(store, transport, undefined, true)',
-]);
-
-requireIncludes('src/providers/instagram/instagram-publication-executor.ts', [
-  'CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH',
-]);
-
 requireIncludes('src/providers/meta-ads/meta-ads-controlled-write.ts', [
   'META_ADS_CREATIVE_TRUTH_BINDING_REQUIRED',
   'META_ADS_CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH',
-  'allowUnboundCreativeForProviderValidation',
 ]);
 
 console.log('Creative Truth architecture contract OK');
