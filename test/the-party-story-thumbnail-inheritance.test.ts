@@ -227,4 +227,26 @@ describe('The Party thumbnail visual-family inheritance', () => {
     ).rejects.toThrow('THE_PARTY_ENVIRONMENT_REQUIRED');
     expect(commandRunner).not.toHaveBeenCalled();
   });
+
+  it('cannot omit the official hero brand when the venue and visual standard are The Party', async () => {
+    const commandRunner = vi.fn();
+    const composer = new LocalThumbnailComposer(commandRunner);
+
+    await expect(
+      composer.compose({
+        thumbnailCreativeId: 'TP-THUMB-NO-HERO-BRAND',
+        contentItemId: 'CONTENT-TP-THUMB-NO-HERO-BRAND',
+        standard: thumbnailStandard,
+        visualStandard: minimalistStandard,
+        creativeMode: 'REAL_COMPOSITE',
+        venueAsset: venue,
+        imageBytes,
+        contentType: 'image/jpeg',
+        canvas: '1080x1920',
+        requiredBrands: [],
+        brandAssets: [],
+      }),
+    ).rejects.toThrow('FAILED_BRAND_ASSET_MISSING');
+    expect(commandRunner).not.toHaveBeenCalled();
+  });
 });
