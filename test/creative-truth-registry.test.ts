@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { GoogleSheetsCreativeTruthRegistry } from '../src/providers/google-sheets/creative-truth-registry.js';
 import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/media-assets.js';
 
+const CANONICAL_PLAN_DRIVE_ID = '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM';
+
 function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])[]>>) {
   const readRange = vi.fn(
     async (_spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]> =>
@@ -31,11 +33,11 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
     'GENERATIVE_EXCEPTION',
     true,
     true,
+    false,
+    false,
     true,
     true,
-    true,
-    true,
-    'plan-drive-id',
+    CANONICAL_PLAN_DRIVE_ID,
     '2026-08-18T00:00:00-03:00',
     true,
     'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
@@ -46,7 +48,7 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
 }
 
 describe('GoogleSheetsCreativeTruthRegistry', () => {
-  it('accepts only the canonical active policy with enhancement provenance and video fail-closed flags', async () => {
+  it('accepts only the complete canonical policy row', async () => {
     const { client, readRange } = clientFor({
       'POLICY!A2:Q20': [canonicalPolicyRow()],
     });
@@ -56,12 +58,26 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:Q20');
   });
 
-  it('rejects policy drift that disables enhancement provenance or video fail-closed behavior', async () => {
-    for (const row of [
+  it('rejects policy drift across identity, modes, venue/brand truth, generation and provenance controls', async () => {
+    const driftedRows = [
+      canonicalPolicyRow({ 2: 'SUSPENDED' }),
+      canonicalPolicyRow({ 3: 'OTHER_BRAND' }),
+      canonicalPolicyRow({ 4: 'REAL_COMPOSITE' }),
+      canonicalPolicyRow({ 4: 'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT|UNSAFE_EXTRA_MODE' }),
+      canonicalPolicyRow({ 5: 'UNCONTROLLED_GENERATION' }),
+      canonicalPolicyRow({ 6: false }),
+      canonicalPolicyRow({ 7: false }),
+      canonicalPolicyRow({ 8: true }),
+      canonicalPolicyRow({ 9: true }),
+      canonicalPolicyRow({ 10: false }),
+      canonicalPolicyRow({ 11: false }),
+      canonicalPolicyRow({ 12: 'wrong-plan-drive-id' }),
       canonicalPolicyRow({ 14: false }),
       canonicalPolicyRow({ 15: 'ENABLED_WITHOUT_PROVENANCE' }),
       canonicalPolicyRow({ 16: '' }),
-    ]) {
+    ];
+
+    for (const row of driftedRows) {
       const { client } = clientFor({ 'POLICY!A2:Q20': [row] });
       const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
       await expect(registry.assertCanonicalPolicy()).rejects.toThrow(
