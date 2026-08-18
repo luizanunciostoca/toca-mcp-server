@@ -10,6 +10,7 @@ import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-dri
 import { GoogleDriveCreativeVideoSourceLoader } from './providers/google-drive/creative-video-source-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
+import { GoogleSheetsPhotoToVideoParentPolicyGuard } from './providers/google-sheets/photo-to-video-policy-guard.js';
 import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
 
 const args = parseArgs(process.argv.slice(2));
@@ -22,6 +23,7 @@ const artifactBucket = requiredEnv('INSTAGRAM_PUBLICATION_ASSET_BUCKET');
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
+const policyGuard = new GoogleSheetsPhotoToVideoParentPolicyGuard(sheets);
 const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
 const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
 const artifactStore = new GcsPhotoToVideoArtifactStore({
@@ -37,6 +39,7 @@ const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
   accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
 });
 const service = new ControlledPhotoToVideoFinalizationService({
+  policyGuard,
   registry,
   writeback,
   artifactStore,
@@ -63,6 +66,7 @@ process.stdout.write(
     finalArtifactRef: finalManifest.finalArtifactRef,
     exactAssetBinding: true,
     readyForPrepare: true,
+    canonicalParentPolicyChecked: true,
     canonicalFinalWriteback: true,
     durableArtifactReadback: true,
     sourceAndBrandRevalidated: true,
