@@ -33,8 +33,8 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
     'GENERATIVE_EXCEPTION',
     true,
     true,
-    false,
-    false,
+    true,
+    true,
     true,
     true,
     CANONICAL_PLAN_DRIVE_ID,
@@ -58,7 +58,7 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:Q20');
   });
 
-  it('rejects policy drift across identity, modes, venue/brand truth, generation and provenance controls', async () => {
+  it('rejects policy drift across identity, modes, gates, canonical plan and provenance controls', async () => {
     const driftedRows = [
       canonicalPolicyRow({ 2: 'SUSPENDED' }),
       canonicalPolicyRow({ 3: 'OTHER_BRAND' }),
@@ -67,8 +67,8 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
       canonicalPolicyRow({ 5: 'UNCONTROLLED_GENERATION' }),
       canonicalPolicyRow({ 6: false }),
       canonicalPolicyRow({ 7: false }),
-      canonicalPolicyRow({ 8: true }),
-      canonicalPolicyRow({ 9: true }),
+      canonicalPolicyRow({ 8: false }),
+      canonicalPolicyRow({ 9: false }),
       canonicalPolicyRow({ 10: false }),
       canonicalPolicyRow({ 11: false }),
       canonicalPolicyRow({ 12: 'wrong-plan-drive-id' }),
