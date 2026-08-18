@@ -31,6 +31,9 @@ function validEvidence() {
     venueFidelityGate: 'PASSED' as const,
     promotionStatus: 'APPROVED_FOR_MARKETING' as const,
     targetFolderClass: '07_PRONTOS_PARA_MARKETING' as const,
+    promotionReviewedBy: 'AG-01+AG-07',
+    promotionReviewedAt: '2026-08-18T17:00:00-03:00',
+    promotionDecisionReason: 'SOURCE_OUTPUT_REVIEW_AND_ALL_GATES_PASS',
   };
 }
 
@@ -41,6 +44,7 @@ describe('assertMarketingMasterPromotion', () => {
       status: 'MARKETING_READY',
       targetFolderClass: '07_PRONTOS_PARA_MARKETING',
       promotionGuardVersion: 'master-promotion-guard-v1',
+      promotionReviewedBy: 'AG-01+AG-07',
     });
   });
 
@@ -53,12 +57,21 @@ describe('assertMarketingMasterPromotion', () => {
     ).toThrow('MASTER_PROMOTION_BLOCKED_DETAIL_CONFIDENCE');
   });
 
-  it('blocks a sub-4K master', () => {
+  it('blocks a sub-4K master with a technical-spec error', () => {
     expect(() =>
       assertMarketingMasterPromotion({
         ...validEvidence(),
         outputLongEdgePixels: 3000,
       }),
+    ).toThrow('MASTER_PROMOTION_BLOCKED_TECH_SPEC');
+  });
+
+  it('blocks missing review identity as incomplete canonical metadata', () => {
+    const { promotionReviewedBy: _promotionReviewedBy, ...invalid } = validEvidence();
+    expect(() =>
+      assertMarketingMasterPromotion(
+        invalid as unknown as Parameters<typeof assertMarketingMasterPromotion>[0],
+      ),
     ).toThrow('MASTER_PROMOTION_BLOCKED_MISSING_CANONICAL_METADATA');
   });
 
