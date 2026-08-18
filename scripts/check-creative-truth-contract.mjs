@@ -12,6 +12,7 @@ const required = [
   'src/providers/google-sheets/creative-truth-registry.ts',
   'src/providers/local/local-creative-composer.ts',
   'src/providers/local/local-video-composer.ts',
+  'src/providers/meta-ads/meta-ads-controlled-write.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
 ];
 
@@ -62,6 +63,19 @@ if (
   process.exit(1);
 }
 
+const contracts = readFileSync('src/contracts/creative-truth.ts', 'utf8');
+for (const locator of [
+  'MEDIA_URL',
+  'META_IMAGE_HASH',
+  'META_VIDEO_ID',
+  'META_SOURCE_CREATIVE_ID',
+]) {
+  if (!contracts.includes(locator)) {
+    console.error(`Creative Truth asset locator missing: ${locator}`);
+    process.exit(1);
+  }
+}
+
 const creativeTruth = readFileSync('src/creative/creative-truth.ts', 'utf8');
 for (const marker of [
   'FAILED_AI_LOGO_RECONSTRUCTION',
@@ -69,9 +83,10 @@ for (const marker of [
   'FAILED_ARCHITECTURE_DRIFT',
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
   'FAILED_GENERATIVE_REFERENCE_MISSING',
+  'buildCreativeTruthPublicationBinding',
 ]) {
   if (!creativeTruth.includes(marker)) {
-    console.error(`Creative Truth runtime missing hard failure: ${marker}`);
+    console.error(`Creative Truth runtime missing hard requirement: ${marker}`);
     process.exit(1);
   }
 }
@@ -88,6 +103,25 @@ const publicationComposition = readFileSync(
 );
 if (!publicationComposition.includes('new InstagramPublicationExecutor') || !publicationComposition.includes('true,')) {
   console.error('Production Instagram publication must require Creative Truth binding');
+  process.exit(1);
+}
+
+const instagramExecutor = readFileSync(
+  'src/providers/instagram/instagram-publication-executor.ts',
+  'utf8',
+);
+if (!instagramExecutor.includes('CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH')) {
+  console.error('Instagram publication must bind the exact approved media URL');
+  process.exit(1);
+}
+
+const metaAdsWrite = readFileSync('src/providers/meta-ads/meta-ads-controlled-write.ts', 'utf8');
+if (
+  !metaAdsWrite.includes('META_ADS_CREATIVE_TRUTH_BINDING_REQUIRED') ||
+  !metaAdsWrite.includes('META_ADS_CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH') ||
+  !metaAdsWrite.includes('allowUnboundCreativeForProviderValidation')
+) {
+  console.error('Meta Ads creative writes must enforce Creative Truth except explicit provider validation');
   process.exit(1);
 }
 
