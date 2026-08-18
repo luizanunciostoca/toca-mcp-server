@@ -12,12 +12,14 @@ import type { PhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-vi
 import type { CreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import type { CreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
 import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
+import type { PhotoToVideoParentPolicyGuard } from '../providers/google-sheets/photo-to-video-policy-guard.js';
 import type {
   PhotoToVideoRegistry,
   ResolvedPhotoToVideoContext,
 } from '../providers/google-sheets/photo-to-video-registry.js';
 
 export interface ControlledPhotoToVideoFinalizationOptions {
+  readonly policyGuard: PhotoToVideoParentPolicyGuard;
   readonly registry: PhotoToVideoRegistry;
   readonly writeback: PhotoToVideoContentWriteback;
   readonly artifactStore: PhotoToVideoArtifactStore;
@@ -74,6 +76,7 @@ export class ControlledPhotoToVideoFinalizationService {
       );
     }
 
+    await this.options.policyGuard.assertCanonical(candidate.routeType);
     const current = await this.options.registry.resolve(
       candidate.contentItemId,
       candidate.routeType,
