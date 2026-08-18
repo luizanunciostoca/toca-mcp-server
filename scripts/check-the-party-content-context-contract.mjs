@@ -33,7 +33,7 @@ requireIncludes(providerPath, [
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
   'THE_PARTY_ENVIRONMENT_REQUIRED',
   'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
-  'THE_PARTY_EDITION_ENVIRONMENT_CONFLICT',
+  'THE_PARTY_CONTENT_EDITION_ENVIRONMENT_CONFLICT',
 ]);
 
 requireIncludes(cliPath, [
@@ -53,7 +53,10 @@ if (
   packageJson.scripts?.['dev:marketing-autopilot-the-party-context'] !==
     'tsx src/marketing-autopilot-the-party-context.ts' ||
   packageJson.scripts?.['start:marketing-autopilot-the-party-context'] !==
-    'node dist/src/marketing-autopilot-the-party-context.js'
+    'node dist/src/marketing-autopilot-the-party-context.js' ||
+  !packageJson.scripts?.['architecture:check']?.includes(
+    'node scripts/check-the-party-content-context-contract.mjs',
+  )
 ) {
   fail('The Party content-context executable/package binding drift detected');
 }
@@ -65,6 +68,7 @@ requireIncludes(testPath, [
   'THE_PARTY_EDITION_CONTEXT_NOT_FOUND',
   'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
   'THE_PARTY_CONTENT_HERO_BRAND_MISMATCH',
+  'THE_PARTY_CONTENT_EDITION_ENVIRONMENT_CONFLICT',
 ]);
 
 console.log('The Party content-context executable contract OK');
