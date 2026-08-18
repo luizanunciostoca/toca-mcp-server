@@ -55,13 +55,18 @@ const venue: VenueAsset = {
   status: 'ACTIVE_APPROVED',
 };
 
+const candidateSha256 = 'c'.repeat(64);
 const cleanEvidence: FidelityEvidence = {
   verifier: 'TEST_VERIFIER',
+  verificationMethod: 'MULTIMODAL_PLUS_HUMAN',
+  candidateSha256,
+  sourceSha256: venue.masterSha256,
   sourceIdentityPreserved: true,
   architectureDriftDetected: false,
   sceneInventionDetected: false,
   logoReconstructionDetected: false,
   referenceAssetIds: [],
+  reviewRef: 'review-output-candidate-c',
   notes: [],
 };
 
@@ -120,6 +125,7 @@ describe('Creative Truth gates', () => {
     const gate = evaluateVenueFidelity({
       creativeMode: 'REAL_PLUS_ENHANCEMENT',
       venueAsset: venue,
+      candidateSha256,
       evidence: { ...cleanEvidence, architectureDriftDetected: true },
     });
 
@@ -127,9 +133,34 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toContain('FAILED_ARCHITECTURE_DRIFT');
   });
 
+  it('rejects enhancement fidelity evidence that belongs to different candidate bytes', () => {
+    const gate = evaluateVenueFidelity({
+      creativeMode: 'REAL_PLUS_ENHANCEMENT',
+      venueAsset: venue,
+      candidateSha256: 'd'.repeat(64),
+      evidence: cleanEvidence,
+    });
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_FIDELITY_EVIDENCE_BINDING');
+  });
+
+  it('rejects enhancement fidelity evidence that is bound to another real master', () => {
+    const gate = evaluateVenueFidelity({
+      creativeMode: 'REAL_PLUS_ENHANCEMENT',
+      venueAsset: venue,
+      candidateSha256,
+      evidence: { ...cleanEvidence, sourceSha256: 'd'.repeat(64) },
+    });
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_FIDELITY_EVIDENCE_BINDING');
+  });
+
   it('rejects generative creation without explicit approval', () => {
     const gate = evaluateVenueFidelity({
       creativeMode: 'GENERATIVE_EXCEPTION',
+      candidateSha256,
       evidence: cleanEvidence,
     });
 
@@ -143,8 +174,10 @@ describe('Creative Truth gates', () => {
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references: [reference('REF-1', 'SUN-0001')],
+      candidateSha256,
       evidence: {
         ...cleanEvidence,
+        sourceSha256: undefined,
         referenceSetId: approval.referenceSetId,
         referenceAssetIds: ['SUN-0001'],
       },
@@ -166,8 +199,10 @@ describe('Creative Truth gates', () => {
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
+      candidateSha256,
       evidence: {
         ...cleanEvidence,
+        sourceSha256: undefined,
         referenceSetId: approval.referenceSetId,
         referenceAssetIds: references.map((item) => item.assetId),
         architectureDriftDetected: true,
@@ -181,7 +216,7 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toContain('FAILED_SCENE_INVENTION_DETECTED');
   });
 
-  it('passes a controlled generative exception only with enough verified references and no drift', () => {
+  it('rejects a generative output before output-specific human review even with enough real references', () => {
     const approval = approvedException();
     const references = [
       reference('REF-1', 'SUN-0001'),
@@ -192,8 +227,37 @@ describe('Creative Truth gates', () => {
       creativeMode: 'GENERATIVE_EXCEPTION',
       generativeException: approval,
       references,
+      candidateSha256,
       evidence: {
         ...cleanEvidence,
+        sourceSha256: undefined,
+        verificationMethod: 'MULTIMODAL_REVIEW',
+        reviewRef: undefined,
+        referenceSetId: approval.referenceSetId,
+        referenceAssetIds: references.map((item) => item.assetId),
+      },
+      nowIso: '2026-08-17T22:00:00-03:00',
+    });
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING');
+  });
+
+  it('passes a controlled generative exception only with enough verified references, exact output evidence, human review and no drift', () => {
+    const approval = approvedException();
+    const references = [
+      reference('REF-1', 'SUN-0001'),
+      reference('REF-2', 'SUN-0004'),
+      reference('REF-3', 'SUN-0009'),
+    ];
+    const gate = evaluateVenueFidelity({
+      creativeMode: 'GENERATIVE_EXCEPTION',
+      generativeException: approval,
+      references,
+      candidateSha256,
+      evidence: {
+        ...cleanEvidence,
+        sourceSha256: undefined,
         referenceSetId: approval.referenceSetId,
         referenceAssetIds: references.map((item) => item.assetId),
       },
