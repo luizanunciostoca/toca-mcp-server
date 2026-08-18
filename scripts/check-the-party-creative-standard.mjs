@@ -174,6 +174,9 @@ requireIncludes('src/providers/local/local-story-composer.ts', [
 requireIncludes('src/providers/local/local-thumbnail-composer.ts', [
   'visualStandard?: CreativeStandard',
   'partyEnvironment?: ThePartyEnvironment',
+  "input.venueAsset?.operation === 'THE_PARTY'",
+  "input.requiredBrands.includes('THE_PARTY')",
+  'FAILED_BRAND_ASSET_MISSING',
   'THE_PARTY_THUMBNAIL_VISUAL_STANDARD_REQUIRED',
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
@@ -195,6 +198,16 @@ requireIncludes('src/providers/local/local-video-composer.ts', [
   'THE_PARTY_ENVIRONMENT_REQUIRED',
   'visualStandardApplied: input.standard.standardId',
   'VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED',
+]);
+
+requireIncludes('test/the-party-story-thumbnail-inheritance.test.ts', [
+  'CONTENT-TP-THUMB-NO-HERO-BRAND',
+  'FAILED_BRAND_ASSET_MISSING',
+]);
+
+requireIncludes('test/video-thumbnail-creative-truth.test.ts', [
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+  'R29_VIDEO_THUMBNAIL_VISUAL_STANDARD_MISMATCH',
 ]);
 
 requireIncludes(docsPath, [
