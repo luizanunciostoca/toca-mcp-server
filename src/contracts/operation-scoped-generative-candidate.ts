@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import {
+  referenceSetOperation,
   tocaGenerativeOperationSchema,
   tocaGenerativeVenueReferenceSetIdSchema,
 } from './creative-truth-generative-reference-sets.js';
@@ -35,6 +36,13 @@ export const operationScopedGenerativeCandidateManifestSchema = z
     publicationEligible: z.literal(false),
   })
   .superRefine((manifest, context) => {
+    if (referenceSetOperation(manifest.referenceSetId) !== manifest.operation) {
+      context.addIssue({
+        code: 'custom',
+        path: ['referenceSetId'],
+        message: 'GENERATIVE_CANDIDATE_REFERENCE_SET_OPERATION_MISMATCH',
+      });
+    }
     if (manifest.referenceAssetIds.length !== manifest.referenceSha256s.length) {
       context.addIssue({
         code: 'custom',
@@ -47,6 +55,13 @@ export const operationScopedGenerativeCandidateManifestSchema = z
         code: 'custom',
         path: ['referenceAssetIds'],
         message: 'GENERATIVE_CANDIDATE_REFERENCE_LINEAGE_DUPLICATE',
+      });
+    }
+    if (new Set(manifest.referenceSha256s).size !== manifest.referenceSha256s.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['referenceSha256s'],
+        message: 'GENERATIVE_CANDIDATE_REFERENCE_HASH_DUPLICATE',
       });
     }
   });
