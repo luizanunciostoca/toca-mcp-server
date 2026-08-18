@@ -57,6 +57,7 @@ for (const marker of [
   "semanticAlterationDetected: false",
   "restorationConfidence: 'REVIEW_REQUIRED'",
   "promotionEligible: false",
+  "'-despeckle'",
   "'3840x3840'",
   "'98'",
 ]) {
