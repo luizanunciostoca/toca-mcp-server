@@ -5,6 +5,7 @@ import {
   type PhotoToVideoRouteType,
 } from './contracts/photo-to-video.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { GcsPhotoToVideoArtifactStore } from './providers/gcp/gcs-photo-to-video-artifact-store.js';
 import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-drive/creative-truth-brand-asset-loader.js';
 import { GoogleDriveCreativeVideoSourceLoader } from './providers/google-drive/creative-video-source-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
@@ -21,11 +22,17 @@ const driveTokenEnvKey =
   process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = process.env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
 const openAiVideoModel = parseVideoModel(process.env.OPENAI_VIDEO_MODEL?.trim());
+const gcpProjectId = requiredEnv('GCP_PROJECT_ID');
+const artifactBucket = requiredEnv('INSTAGRAM_PUBLICATION_ASSET_BUCKET');
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
 const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
 const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
+const artifactStore = new GcsPhotoToVideoArtifactStore({
+  projectId: gcpProjectId,
+  bucketName: artifactBucket,
+});
 const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
   secretResolver: secrets,
   accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
@@ -37,6 +44,7 @@ const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
 const service = new ControlledPhotoToVideoGenerationService({
   registry,
   writeback,
+  artifactStore,
   sourceLoader,
   brandLoader,
   photoMotionComposer: new LocalPhotoMotionVideoComposer(),
@@ -66,11 +74,14 @@ process.stdout.write(
     sourceAssetId: result.manifest.sourceAssetId,
     sourceSha256: result.manifest.sourceSha256,
     outputSha256: result.manifest.outputSha256,
+    artifactRef: result.manifest.artifactRef,
+    artifactObjectName: result.manifest.artifactObjectName,
     provider: result.manifest.provider,
     providerJobId: result.manifest.providerJobId ?? null,
     outputPath: args.output,
     manifestPath: args.manifest,
     canonicalCandidateWriteback: true,
+    durableArtifactPersisted: true,
     requiresPostGenerationHumanReview: true,
     publicationEligible: false,
   })}\n`,
