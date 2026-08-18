@@ -40,6 +40,30 @@ export class GcsPublicationAssetDelivery {
     return url;
   }
 
+  async createVerifiedDeliveryUrl(objectName: string, expectedSha256: string): Promise<string> {
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256)) {
+      throw new Error('PUBLICATION_ASSET_EXPECTED_SHA256_INVALID');
+    }
+    const url = await this.createDeliveryUrl(objectName);
+    const response = await this.fetchImpl(url, { method: 'GET', redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`PUBLICATION_ASSET_VERIFICATION_FETCH_FAILED:${response.status}`);
+    }
+    const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
+    if (!contentType?.startsWith('image/')) {
+      throw new Error(
+        `PUBLICATION_ASSET_VERIFICATION_CONTENT_TYPE_INVALID:${contentType ?? 'missing'}`,
+      );
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0) throw new Error('PUBLICATION_ASSET_VERIFICATION_EMPTY');
+    const observedSha256 = createHash('sha256').update(bytes).digest('hex');
+    if (observedSha256 !== expectedSha256) {
+      throw new Error('PUBLICATION_ASSET_SHA256_MISMATCH');
+    }
+    return url;
+  }
+
   private async fetchRuntimeIdentity(): Promise<RuntimeIdentity> {
     const [tokenResponse, emailResponse] = await Promise.all([
       this.fetchImpl(
