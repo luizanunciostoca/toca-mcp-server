@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import type { BrandAsset, CreativeStandard, VenueAsset } from '../src/contracts/creative-truth.js';
@@ -19,6 +20,9 @@ const standard: CreativeStandard = {
   venueFidelityGateRequired: true,
 };
 
+const masterBytes = Uint8Array.from([1, 2, 3, 4]);
+const masterSha256 = createHash('sha256').update(masterBytes).digest('hex');
+
 const venue: VenueAsset = {
   venueAssetId: 'VENUE-SUN-0244',
   sourceAssetId: 'SUN-0244',
@@ -26,7 +30,7 @@ const venue: VenueAsset = {
   masterAssetId: 'MM-SUN-0244-V1',
   masterDriveFileId: 'master-drive',
   sourceSha256: 'a'.repeat(64),
-  masterSha256: 'b'.repeat(64),
+  masterSha256,
   operation: 'SUNSET',
   locationSignature: 'ambiente_toca',
   dominantSubject: 'lifestyle',
@@ -68,7 +72,7 @@ describe('LocalCreativeComposer', () => {
       standard,
       creativeMode: 'REAL_COMPOSITE',
       venueAsset: venue,
-      sourceImageBytes: Uint8Array.from([1, 2, 3, 4]),
+      sourceImageBytes: masterBytes,
       sourceContentType: 'image/jpeg',
       canvas: '1080x1350',
       headline: 'Pôr do sol na Toca',
@@ -111,6 +115,36 @@ describe('LocalCreativeComposer', () => {
     expect(commandArgs.join(' ')).not.toContain('MORRO DIGITAL LOGO');
   });
 
+  it('fails before rendering when the supplied bytes are not the registered master', async () => {
+    const runner = vi.fn();
+    const composer = new LocalCreativeComposer(runner);
+    const toca = brand('BRAND-TOCA-WHITE-V1', 'TOCA_DO_MORCEGO', 'drive-toca');
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-HASH-MISMATCH',
+        creativeId: 'CREATIVE-HASH-MISMATCH',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        venueAsset: venue,
+        sourceImageBytes: Uint8Array.from([9, 9, 9]),
+        sourceContentType: 'image/jpeg',
+        canvas: '1080x1350',
+        headline: 'Sunset',
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [
+          {
+            registry: toca,
+            bytes: Uint8Array.from([10, 11, 12]),
+            contentType: 'image/png',
+            driveFileId: toca.driveFileId,
+          },
+        ],
+      }),
+    ).rejects.toThrow('CREATIVE_MASTER_HASH_MISMATCH');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it('fails before rendering when a logo is AI-generated', async () => {
     const runner = vi.fn();
     const composer = new LocalCreativeComposer(runner);
@@ -123,7 +157,7 @@ describe('LocalCreativeComposer', () => {
         standard,
         creativeMode: 'REAL_COMPOSITE',
         venueAsset: venue,
-        sourceImageBytes: Uint8Array.from([1, 2, 3]),
+        sourceImageBytes: masterBytes,
         sourceContentType: 'image/jpeg',
         canvas: '1080x1350',
         headline: 'Sunset',
