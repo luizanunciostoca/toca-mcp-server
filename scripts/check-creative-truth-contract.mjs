@@ -29,6 +29,7 @@ const requiredFiles = [
   'src/scheduler/toca-managed-instagram-scheduler.ts',
   'src/marketing-autopilot-image-generate.ts',
   'src/marketing-autopilot-image-finalize.ts',
+  'test/creative-truth-resolver.test.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
 ];
 
@@ -205,6 +206,14 @@ function assertRuntimeMarkers() {
     "cell(policy[34]) !== 'FAIL_CLOSED_NO_FINAL_ASSET'",
     "cell(policy[35]) !== 'ENFORCED'",
   ]);
+  requireIncludes('test/creative-truth-resolver.test.ts', [
+    "range === 'POLICY!A2:AK20'",
+    "'1.3'",
+    'VENUE_VERIFIED_LEGACY_MASTER_REVALIDATION_REQUIRED',
+    'does not auto-select a legacy venue whose master is no longer MARKETING_READY',
+    'blocks an explicitly requested legacy venue until a v2 master is promoted',
+  ]);
+  requireExcludes('test/creative-truth-resolver.test.ts', ['POLICY!A2:R20']);
   requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
     'ControlledOperationScopedStaticImageGenerationService',
     'getContentItemOperation(contentItemId)',
@@ -311,6 +320,13 @@ function requireIncludes(path, markers) {
   const content = read(path);
   for (const marker of markers) {
     if (!content.includes(marker)) fail(`Creative Truth contract missing in ${path}: ${marker}`);
+  }
+}
+
+function requireExcludes(path, markers) {
+  const content = read(path);
+  for (const marker of markers) {
+    if (content.includes(marker)) fail(`Creative Truth legacy drift found in ${path}: ${marker}`);
   }
 }
 
