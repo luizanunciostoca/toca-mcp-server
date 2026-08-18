@@ -15,6 +15,11 @@ import {
   type OfficialBrandAssetInput,
   type ThePartyEnvironment,
 } from './local-creative-composer.js';
+import {
+  LocalSunsetStoryRenderer,
+  SUNSET_STORY_STANDARD_ID,
+  type SunsetStoryTemplateClass,
+} from './local-sunset-story-renderer.js';
 
 const THE_PARTY_STORY_STANDARD_IDS = new Set([
   'THE_PARTY_HYBRID_NETWORKS_V1',
@@ -33,7 +38,10 @@ export interface LocalStoryComposeInput {
   readonly enhancementProvenance?: CreativeEnhancementProvenance;
   readonly templateId: StoryTemplateId;
   readonly message?: string;
+  readonly supportCopy?: string;
   readonly cta?: string;
+  readonly functionalInfo?: string;
+  readonly sunsetTemplateClass?: SunsetStoryTemplateClass;
   readonly standard: CreativeStandard;
   readonly creativeMode: CreativeMode;
   readonly venueAsset?: VenueAsset;
@@ -69,6 +77,7 @@ export type LocalStoryComposerCommandRunner = LocalCreativeComposerCommandRunner
 
 export class LocalStoryComposer {
   private readonly composer: LocalCreativeComposer;
+  private readonly sunsetRenderer: LocalSunsetStoryRenderer;
 
   constructor(
     commandRunner?: LocalStoryComposerCommandRunner,
@@ -77,34 +86,66 @@ export class LocalStoryComposer {
     this.composer = commandRunner
       ? new LocalCreativeComposer(commandRunner, binary)
       : new LocalCreativeComposer(undefined, binary);
+    this.sunsetRenderer = commandRunner
+      ? new LocalSunsetStoryRenderer(commandRunner, binary)
+      : new LocalSunsetStoryRenderer(undefined, binary);
   }
 
   async compose(input: LocalStoryComposeInput): Promise<LocalStoryComposeResult> {
     validateInput(input);
     assertStoryLineage(input);
 
-    const composed = await this.composer.compose({
-      contentItemId: input.contentItemId,
-      creativeId: input.storyCreativeId,
-      standard: input.standard,
-      creativeMode: input.creativeMode,
-      ...(input.venueAsset ? { venueAsset: input.venueAsset } : {}),
-      sourceImageBytes: input.imageBytes,
-      sourceContentType: input.contentType,
-      ...(input.enhancementProvenance
-        ? { enhancementProvenance: input.enhancementProvenance }
-        : {}),
-      canvas: '1080x1920',
-      ...(input.templateId === 'PHOTO_ONLY' ? {} : { headline: input.message!.trim() }),
-      ...(input.templateId !== 'PHOTO_ONLY' && input.cta?.trim() ? { cta: input.cta.trim() } : {}),
-      ...(input.partyEnvironment ? { partyEnvironment: input.partyEnvironment } : {}),
-      requiredBrands: input.requiredBrands,
-      brandAssets: input.brandAssets,
-      ...(input.generativeException ? { generativeException: input.generativeException } : {}),
-      ...(input.references ? { references: input.references } : {}),
-      ...(input.fidelityEvidence ? { fidelityEvidence: input.fidelityEvidence } : {}),
-      ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-    });
+    const composed =
+      input.standard.standardId === SUNSET_STORY_STANDARD_ID
+        ? await this.sunsetRenderer.compose({
+            contentItemId: input.contentItemId,
+            creativeId: input.storyCreativeId,
+            standard: input.standard,
+            creativeMode: input.creativeMode,
+            venueAsset: input.venueAsset!,
+            sourceImageBytes: input.imageBytes,
+            sourceContentType: input.contentType,
+            ...(input.enhancementProvenance
+              ? { enhancementProvenance: input.enhancementProvenance }
+              : {}),
+            templateClass: resolveSunsetTemplateClass(input),
+            ...(input.templateId === 'PHOTO_ONLY' ? {} : { headline: input.message!.trim() }),
+            ...(input.supportCopy?.trim() ? { supportCopy: input.supportCopy.trim() } : {}),
+            ...(input.cta?.trim() ? { cta: input.cta.trim() } : {}),
+            ...(input.functionalInfo?.trim()
+              ? { functionalInfo: input.functionalInfo.trim() }
+              : {}),
+            requiredBrands: input.requiredBrands,
+            brandAssets: input.brandAssets,
+            ...(input.fidelityEvidence ? { fidelityEvidence: input.fidelityEvidence } : {}),
+            ...(input.createdAt ? { createdAt: input.createdAt } : {}),
+          })
+        : await this.composer.compose({
+            contentItemId: input.contentItemId,
+            creativeId: input.storyCreativeId,
+            standard: input.standard,
+            creativeMode: input.creativeMode,
+            ...(input.venueAsset ? { venueAsset: input.venueAsset } : {}),
+            sourceImageBytes: input.imageBytes,
+            sourceContentType: input.contentType,
+            ...(input.enhancementProvenance
+              ? { enhancementProvenance: input.enhancementProvenance }
+              : {}),
+            canvas: '1080x1920',
+            ...(input.templateId === 'PHOTO_ONLY' ? {} : { headline: input.message!.trim() }),
+            ...(input.supportCopy?.trim() ? { supportCopy: input.supportCopy.trim() } : {}),
+            ...(input.cta?.trim() ? { cta: input.cta.trim() } : {}),
+            ...(input.functionalInfo?.trim()
+              ? { functionalInfo: input.functionalInfo.trim() }
+              : {}),
+            ...(input.partyEnvironment ? { partyEnvironment: input.partyEnvironment } : {}),
+            requiredBrands: input.requiredBrands,
+            brandAssets: input.brandAssets,
+            ...(input.generativeException ? { generativeException: input.generativeException } : {}),
+            ...(input.references ? { references: input.references } : {}),
+            ...(input.fidelityEvidence ? { fidelityEvidence: input.fidelityEvidence } : {}),
+            ...(input.createdAt ? { createdAt: input.createdAt } : {}),
+          });
 
     const realMasterSha256 =
       input.creativeMode === 'GENERATIVE_EXCEPTION' ? undefined : input.venueAsset?.masterSha256;
@@ -158,7 +199,11 @@ function validateInput(input: LocalStoryComposeInput): void {
   if (input.templateId !== 'PHOTO_ONLY' && !input.message?.trim()) {
     throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_MESSAGE_REQUIRED', false);
   }
-  if ((input.message?.trim().length ?? 0) > 90 || (input.cta?.trim().length ?? 0) > 60) {
+  if (
+    (input.message?.trim().length ?? 0) > 90 ||
+    (input.supportCopy?.trim().length ?? 0) > 160 ||
+    (input.cta?.trim().length ?? 0) > 60
+  ) {
     throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_TEXT_TOO_LONG', false);
   }
 }
@@ -178,6 +223,12 @@ function assertStoryLineage(input: LocalStoryComposeInput): void {
       false,
     );
   }
+}
+
+function resolveSunsetTemplateClass(input: LocalStoryComposeInput): SunsetStoryTemplateClass {
+  if (input.sunsetTemplateClass) return input.sunsetTemplateClass;
+  if (input.templateId === 'EVENT_CTA' && input.functionalInfo?.trim()) return 'SUNSET_INFO_HOURS';
+  return 'SUNSET_VIEW_SCENERY';
 }
 
 function isThePartyStoryStandard(standard: CreativeStandard): boolean {
