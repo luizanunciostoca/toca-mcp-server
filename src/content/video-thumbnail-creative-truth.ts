@@ -8,6 +8,7 @@ export function assertVideoThumbnailCreativeTruth(
   contentItemId: string,
   manifest: unknown,
   outputSha256: string,
+  expectedVisualStandardId?: string,
 ): void {
   const normalizedContentItemId = contentItemId.trim();
   if (!normalizedContentItemId) {
@@ -34,5 +35,12 @@ export function assertVideoThumbnailCreativeTruth(
   }
   if (ready.outputSha256.toLowerCase() !== normalizedOutputSha256) {
     throw new Error('R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_HASH_MISMATCH');
+  }
+
+  if (expectedVisualStandardId?.trim()) {
+    const qualityGate = ready.gates.find((gate) => gate.gate === 'QUALITY');
+    if (qualityGate?.evidence.visualStandardApplied !== expectedVisualStandardId.trim()) {
+      throw new Error('R29_VIDEO_THUMBNAIL_VISUAL_STANDARD_MISMATCH');
+    }
   }
 }
