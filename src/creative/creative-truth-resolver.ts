@@ -11,6 +11,13 @@ import {
 import { ExecutionError } from '../core/errors.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../providers/google-sheets/creative-truth-registry.js';
 import { assertCreativeStandard, resolveCreativeMode } from './creative-truth.js';
+import {
+  THE_PARTY_HYBRID_NETWORKS_STANDARD_ID,
+  isThePartyVisualStandardId,
+  resolveThePartyVisualFamily,
+  type ThePartyCreativeIntent,
+  type ThePartyEnvironment,
+} from './the-party-visual-family-resolver.js';
 
 const APPROVED_VIDEO_RIGHTS = new Set([
   'APPROVED',
@@ -20,19 +27,16 @@ const APPROVED_VIDEO_RIGHTS = new Set([
   'RIGHTS_CLEARED',
 ]);
 
-const THE_PARTY_STANDARD_IDS = new Set([
-  'THE_PARTY_HYBRID_NETWORKS_V1',
-  'THE_PARTY_HYBRID_MINIMALIST_V1',
-]);
-
 export interface CreativeTruthResolutionRequest {
   readonly contentItemId: string;
-  readonly standardId: string;
+  readonly standardId?: string;
   readonly operation: string;
   readonly requestedMode?: CreativeMode;
   readonly venueAssetId?: string;
   readonly requiredBrands: readonly string[];
   readonly brandVariant?: string;
+  readonly thePartyIntent?: ThePartyCreativeIntent;
+  readonly thePartyEnvironment?: ThePartyEnvironment;
 }
 
 export interface CreativeTruthResolution {
@@ -43,6 +47,7 @@ export interface CreativeTruthResolution {
   readonly brandAssets: readonly BrandAsset[];
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references: readonly VenueReference[];
+  readonly thePartyEnvironment?: ThePartyEnvironment;
 }
 
 export interface CreativeTruthVideoShotResolutionRequest {
@@ -61,20 +66,28 @@ export class CreativeTruthResolver {
 
   async resolve(request: CreativeTruthResolutionRequest): Promise<CreativeTruthResolution> {
     await this.registry.assertCanonicalPolicy();
+    const requestedStandardId = resolveRequestedStandardId(request);
     const standard = assertCreativeStandard(
-      await this.registry.getCreativeStandard(request.standardId),
+      await this.registry.getCreativeStandard(requestedStandardId),
     );
     if (standard.operation !== request.operation && standard.operation !== 'ALL') {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
     }
     if (
       request.operation === 'THE_PARTY' &&
-      (!THE_PARTY_STANDARD_IDS.has(standard.standardId) || standard.operation !== 'THE_PARTY')
+      (!isThePartyVisualStandardId(standard.standardId) || standard.operation !== 'THE_PARTY')
     ) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
     }
     if (request.operation === 'THE_PARTY' && !request.requiredBrands.includes('THE_PARTY')) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
+    }
+    if (
+      request.operation === 'THE_PARTY' &&
+      standard.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID &&
+      !request.thePartyEnvironment
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
     }
 
     const creativeMode = resolveCreativeMode(request.requestedMode);
@@ -82,6 +95,10 @@ export class CreativeTruthResolver {
       request.requiredBrands,
       request.brandVariant ?? 'WHITE',
     );
+    const partyContext =
+      request.operation === 'THE_PARTY' && request.thePartyEnvironment
+        ? { thePartyEnvironment: request.thePartyEnvironment }
+        : {};
 
     if (creativeMode === 'GENERATIVE_EXCEPTION') {
       const generativeException = await this.registry.getApprovedGenerativeException(
@@ -123,6 +140,7 @@ export class CreativeTruthResolver {
         brandAssets,
         generativeException,
         references: verified,
+        ...partyContext,
       };
     }
 
@@ -153,6 +171,7 @@ export class CreativeTruthResolver {
       venueAsset,
       brandAssets,
       references: [],
+      ...partyContext,
     };
   }
 
@@ -234,4 +253,23 @@ export class CreativeTruthResolver {
         Boolean(asset.masterAssetId && asset.masterDriveFileId && asset.masterSha256),
     );
   }
+}
+
+function resolveRequestedStandardId(request: CreativeTruthResolutionRequest): string {
+  const explicit = request.standardId?.trim();
+  if (request.operation !== 'THE_PARTY') {
+    if (!explicit) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    return explicit;
+  }
+
+  if (explicit) return explicit;
+  if (!request.thePartyIntent) {
+    throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_VISUAL_INTENT_REQUIRED', false);
+  }
+  return resolveThePartyVisualFamily({
+    intent: request.thePartyIntent,
+    ...(request.thePartyEnvironment ? { environment: request.thePartyEnvironment } : {}),
+  }).standardId;
 }
