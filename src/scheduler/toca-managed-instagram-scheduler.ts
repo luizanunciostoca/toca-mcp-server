@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
+import {
+  creativeTruthPublicationBindingSchema,
+  type CreativeTruthPublicationBinding,
+} from '../contracts/creative-truth.js';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
 import type { InstagramPublicationReconciler } from '../providers/instagram/instagram-publication-reconciler.js';
@@ -27,6 +31,7 @@ export const tocaManagedInstagramApprovalDescriptorSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
   }),
+  creativeTruthBinding: creativeTruthPublicationBindingSchema,
   caption: z.string().optional(),
   correlationId: z.string().min(1),
   publicationIdempotencyKey: z.string().min(1),
@@ -49,7 +54,7 @@ export type TocaManagedInstagramSchedulePayload = z.infer<
 >;
 
 export interface PublicationAssetDeliveryProvider {
-  createDeliveryUrl(objectName: string): Promise<string>;
+  createVerifiedDeliveryUrl(objectName: string, expectedSha256: string): Promise<string>;
 }
 
 export class TocaManagedInstagramScheduler {
@@ -128,13 +133,17 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
     const schedule = parseTocaManagedInstagramSchedulePayload(payload);
     assertApprovedTocaManagedDescriptor(schedule);
 
-    const mediaUrl = await this.delivery.createDeliveryUrl(schedule.asset.objectName);
+    const mediaUrl = await this.delivery.createVerifiedDeliveryUrl(
+      schedule.asset.objectName,
+      schedule.asset.sha256,
+    );
     const request: InstagramPublishRequest = {
       account: schedule.account,
       mediaType: schedule.mediaType,
       mediaUrls: [mediaUrl],
       correlationId: schedule.correlationId,
       idempotencyKey: schedule.publicationIdempotencyKey,
+      creativeTruthBinding: bindRuntimeDeliveryUrl(schedule.creativeTruthBinding, mediaUrl),
       ...(schedule.caption !== undefined ? { caption: schedule.caption } : {}),
     };
 
@@ -185,11 +194,27 @@ export function assertApprovedTocaManagedDescriptor(
   ) {
     throw new Error('TOCA_MANAGED_INSTAGRAM_PREAPPROVAL_REQUIRED');
   }
+  if (payload.creativeTruthBinding.outputSha256 !== payload.asset.sha256) {
+    throw new Error('TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH');
+  }
 
   const actual = hashTocaManagedInstagramApprovalDescriptor(payload);
   if (actual !== payload.approval.approvedDescriptorSha256) {
     throw new Error('TOCA_MANAGED_INSTAGRAM_APPROVAL_MISMATCH');
   }
+}
+
+function bindRuntimeDeliveryUrl(
+  binding: CreativeTruthPublicationBinding,
+  mediaUrl: string,
+): CreativeTruthPublicationBinding {
+  return creativeTruthPublicationBindingSchema.parse({
+    ...binding,
+    assetLocators: [
+      ...binding.assetLocators.filter((locator) => locator.kind !== 'MEDIA_URL'),
+      { kind: 'MEDIA_URL', value: mediaUrl },
+    ],
+  });
 }
 
 function assertManagedJob(job: ScheduledJob): void {
