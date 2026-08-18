@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { ControlledStaticImageGenerationService } from './creative/controlled-static-image-generation.js';
+import { ControlledOperationScopedStaticImageGenerationService } from './creative/controlled-operation-scoped-static-image-generation.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { GoogleDriveCreativeTruthReferenceLoader } from './providers/google-drive/creative-truth-reference-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
-import { GoogleSheetsCreativeTruthRegistry } from './providers/google-sheets/creative-truth-registry.js';
-import { CreativeTruthOpenAiImageGenerator } from './providers/openai/creative-truth-openai-image-generator.js';
+import { GoogleSheetsOperationScopedGenerativeRegistry } from './providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
+import { CreativeTruthOperationScopedImageGenerator } from './providers/openai/creative-truth-operation-scoped-image-generator.js';
 
 const args = parseArgs(process.argv.slice(2));
 const prompt = await resolvePrompt(args);
@@ -14,22 +14,24 @@ const driveTokenEnvKey =
   process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = requiredEnv('OPENAI_API_KEY_ENV_KEY');
 const responseModel = process.env.OPENAI_CREATIVE_RESPONSE_MODEL?.trim();
+const imageModel = process.env.OPENAI_CREATIVE_IMAGE_MODEL?.trim();
 
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
-const registry = new GoogleSheetsCreativeTruthRegistry(sheets);
+const registry = new GoogleSheetsOperationScopedGenerativeRegistry(sheets);
 const referenceLoader = new GoogleDriveCreativeTruthReferenceLoader({
   secretResolver: secrets,
   accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
 });
-const generator = new CreativeTruthOpenAiImageGenerator({
+const generator = new CreativeTruthOperationScopedImageGenerator({
   secretResolver: secrets,
   apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
   registry,
   ...(responseModel ? { responseModel } : {}),
+  ...(imageModel ? { imageModel } : {}),
 });
-const service = new ControlledStaticImageGenerationService({
+const service = new ControlledOperationScopedStaticImageGenerationService({
   registry,
   referenceLoader,
   generator,
@@ -50,6 +52,7 @@ await writeFile(
       contentItemId: args.contentItemId,
       creativeMode: result.creativeMode,
       policyId: result.policyId,
+      operation: result.operation,
       referenceSetId: result.referenceSetId,
       exceptionId: result.exceptionId,
       approvalRef: result.approvalRef,
@@ -59,7 +62,7 @@ await writeFile(
       provider: result.provider,
       generationMode: result.generationMode,
       responseModel: result.responseModel,
-      imageToolModelSelection: result.imageToolModelSelection,
+      imageModel: result.imageModel,
       outputContentType: result.outputContentType,
       outputSizeBytes: result.outputBytes.byteLength,
       outputPath: args.output,
@@ -78,6 +81,8 @@ process.stdout.write(
   `${JSON.stringify({
     status: 'GENERATED_REVIEW_REQUIRED',
     contentItemId: args.contentItemId,
+    operation: result.operation,
+    referenceSetId: result.referenceSetId,
     candidateSha256: result.candidateSha256,
     outputPath: args.output,
     manifestPath: args.manifest,
@@ -85,7 +90,7 @@ process.stdout.write(
     exceptionId: result.exceptionId,
     approvalRef: result.approvalRef,
     responseModel: result.responseModel,
-    imageToolModelSelection: result.imageToolModelSelection,
+    imageModel: result.imageModel,
     requiresPostGenerationHumanReview: true,
     requiresVenueFidelityGate: true,
     readyForFinalComposition: false,
