@@ -49,5 +49,8 @@ export const masterPromotionEvidenceSchema = photoRestorationEvidenceSchema.exte
   venueFidelityGate: z.literal('PASSED'),
   promotionStatus: z.literal('APPROVED_FOR_MARKETING'),
   targetFolderClass: z.literal('07_PRONTOS_PARA_MARKETING'),
+  promotionReviewedBy: z.string().min(1),
+  promotionReviewedAt: z.string().min(1),
+  promotionDecisionReason: z.string().min(1),
 });
 export type MasterPromotionEvidence = z.infer<typeof masterPromotionEvidenceSchema>;
