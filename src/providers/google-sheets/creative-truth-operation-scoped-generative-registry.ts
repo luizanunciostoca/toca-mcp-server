@@ -27,6 +27,7 @@ const POLICY_RANGE = 'POLICY!A2:Z20';
 const REFERENCE_SET_RANGE = 'VENUE_REFERENCE_SET!A2:K1000';
 const GENERATIVE_EXCEPTIONS_RANGE = 'GENERATIVE_EXCEPTIONS!A2:O1000';
 const CONTENT_OPERATION_RANGE = 'CONTENT_ITEMS!A2:E2000';
+const CONTENT_CREATIVE_CONTEXT_RANGE = 'CONTENT_ITEMS!A1:BX2000';
 const MIN_ACTIVE_OPERATION_REFERENCES = 3;
 
 export interface OperationScopedGenerativeRegistry {
@@ -97,6 +98,29 @@ export class GoogleSheetsOperationScopedGenerativeRegistry
     const operation = cell(matches[0]![4]);
     if (operation === 'SUNSET' || operation === 'THE_PARTY') return operation;
     deny('FAILED_GENERATIVE_CONTENT_OPERATION_UNSUPPORTED');
+  }
+
+  async getContentItemCreativeStandardId(contentItemId: string): Promise<string | undefined> {
+    const normalizedContentItemId = contentItemId.trim();
+    if (!normalizedContentItemId) return undefined;
+
+    const rows = await this.client.readRange(
+      this.contentSpreadsheetId,
+      CONTENT_CREATIVE_CONTEXT_RANGE,
+    );
+    if (rows.length === 0) deny('FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID');
+    const headers = buildHeaderIndex(rows[0] ?? []);
+    const contentItemIndex = headers.get('content_item_id');
+    const standardIndex = headers.get('creative_standard_id');
+    if (contentItemIndex === undefined || standardIndex === undefined) {
+      deny('FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID');
+    }
+    const matches = rows
+      .slice(1)
+      .filter((row) => cell(row[contentItemIndex]) === normalizedContentItemId);
+    if (matches.length === 0) return undefined;
+    if (matches.length !== 1) deny('FAILED_GENERATIVE_CONTENT_STANDARD_AMBIGUOUS');
+    return cell(matches[0]![standardIndex]) || undefined;
   }
 
   async getApprovedGenerativeException(
@@ -211,6 +235,17 @@ function assertReferenceSetScope(
   if (activeCount < MIN_ACTIVE_OPERATION_REFERENCES) {
     deny('FAILED_GENERATIVE_REFERENCE_MISSING');
   }
+}
+
+function buildHeaderIndex(row: readonly unknown[]): ReadonlyMap<string, number> {
+  const index = new Map<string, number>();
+  for (const [column, value] of row.entries()) {
+    const header = cell(value).toLowerCase();
+    if (!header) continue;
+    if (index.has(header)) deny('FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID');
+    index.set(header, column);
+  }
+  return index;
 }
 
 function cell(value: unknown): string {
