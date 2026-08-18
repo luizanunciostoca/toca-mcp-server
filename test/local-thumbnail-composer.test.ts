@@ -6,6 +6,8 @@ import { LocalThumbnailComposer } from '../src/providers/local/local-thumbnail-c
 
 const imageBytes = Uint8Array.from([1, 2, 3, 4]);
 const imageSha256 = createHash('sha256').update(imageBytes).digest('hex');
+const brandBytes = Uint8Array.from([10, 11, 12]);
+const brandSha256 = createHash('sha256').update(brandBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'TOCA_THUMBNAIL_V1',
@@ -47,10 +49,20 @@ const toca: BrandAsset = {
   driveFileId: 'drive-toca-logo',
   fileName: 'toca.png',
   contentType: 'image/png',
-  integrityMode: 'DRIVE_FILE_ID_PINNED',
+  integrityMode: 'SHA256_PINNED',
+  sha256: brandSha256,
   status: 'ACTIVE_APPROVED',
   aiReconstructionAllowed: false,
 };
+
+function brandInput() {
+  return {
+    registry: toca,
+    bytes: brandBytes,
+    contentType: 'image/png' as const,
+    driveFileId: toca.driveFileId,
+  };
+}
 
 function runner() {
   return vi.fn(async (_command: string, args: readonly string[]) => {
@@ -75,14 +87,7 @@ describe('LocalThumbnailComposer', () => {
       canvas: '1080x1920',
       headline: 'Celebrar a Vida.',
       requiredBrands: ['TOCA_DO_MORCEGO'],
-      brandAssets: [
-        {
-          registry: toca,
-          bytes: Uint8Array.from([10, 11, 12]),
-          contentType: 'image/png',
-          driveFileId: toca.driveFileId,
-        },
-      ],
+      brandAssets: [brandInput()],
     });
 
     expect(result.readyForReview).toBe(true);
@@ -109,14 +114,7 @@ describe('LocalThumbnailComposer', () => {
         contentType: 'image/jpeg',
         canvas: '1080x1920',
         requiredBrands: ['TOCA_DO_MORCEGO'],
-        brandAssets: [
-          {
-            registry: toca,
-            bytes: Uint8Array.from([10, 11, 12]),
-            contentType: 'image/png',
-            driveFileId: toca.driveFileId,
-          },
-        ],
+        brandAssets: [brandInput()],
       }),
     ).rejects.toThrow('TOCA_THUMBNAIL_STANDARD_REQUIRED');
     expect(commandRunner).not.toHaveBeenCalled();
