@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "policyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
-  "policyVersion": "1.0",
+  "policyVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "brandScope": "TOCA_DO_MORCEGO",
@@ -34,11 +34,23 @@
       "sceneContinuationFidelityGateRequired": true
     }
   },
+  "reviewBoundary": {
+    "durableCandidateArtifactRequired": true,
+    "candidateArtifactSha256Required": true,
+    "artifactReadbackRequiredBeforeFinalization": true,
+    "sourceImageComparedRequired": true,
+    "durableEvidenceRefRequired": true,
+    "architectureDriftMustBeFalse": true,
+    "environmentDriftMustBeFalse": true,
+    "aiLogoReconstructionDetectedMustBeFalse": true
+  },
   "publicationBoundary": {
     "exactFinalAssetSha256Required": true,
+    "durableFinalArtifactRefRequired": true,
     "publicationMayNotRebuildCreative": true,
     "prepareMayNotRebuildCreative": true,
-    "publicationAuthorizedByGeneration": false
+    "publicationAuthorizedByGeneration": false,
+    "publicationAuthorizedByFinalization": false
   },
   "fullSyntheticVenueVideoWithoutSourceImage": "UNSUPPORTED_V1",
   "futureProductOnboarding": "REGISTRY_DRIVEN_NO_RUNTIME_CODE_CHANGE"
