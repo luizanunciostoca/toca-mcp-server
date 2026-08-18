@@ -30,7 +30,17 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+const THE_PARTY_HYBRID_NETWORKS_STANDARD_ID = 'THE_PARTY_HYBRID_NETWORKS_V1';
+const THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID = 'THE_PARTY_HYBRID_MINIMALIST_V1';
+const THE_PARTY_FOOTER_ORDER = [
+  'TOCA_DO_MORCEGO',
+  'CORONA',
+  'RED_BULL',
+  'MORRO_DIGITAL',
+] as const;
+
 export type CreativeCanvas = '1080x1350' | '1080x1080' | '1080x1920';
+export type ThePartyEnvironment = 'INTERNATIONAL' | 'NATIONAL';
 
 export interface OfficialBrandAssetInput {
   readonly registry: BrandAsset;
@@ -54,6 +64,7 @@ export interface LocalCreativeComposeInput {
   readonly supportCopy?: string;
   readonly cta?: string;
   readonly functionalInfo?: string;
+  readonly partyEnvironment?: ThePartyEnvironment;
   readonly requiredBrands: readonly string[];
   readonly brandAssets: readonly OfficialBrandAssetInput[];
   readonly generativeException?: GenerativeExceptionApproval;
@@ -137,6 +148,10 @@ export class LocalCreativeComposer {
         deterministicComposition: true,
         sourceMasterHashVerified: input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
         enhancementProvenanceVerified: input.creativeMode === 'REAL_PLUS_ENHANCEMENT',
+        visualStandardApplied: input.standard.standardId,
+        ...(isThePartyStandard(input.standard.standardId)
+          ? { thePartyEnvironment: input.partyEnvironment ?? 'MINIMALIST_NEUTRAL' }
+          : {}),
       });
       requireGatePassed(qualityGate);
 
@@ -198,6 +213,21 @@ function buildImageMagickArgs(
   outputPath: string,
   logoPaths: ReadonlyMap<string, string>,
 ): string[] {
+  if (input.standard.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID) {
+    return buildThePartyArgs(input, sourcePath, outputPath, logoPaths, 'NETWORKS');
+  }
+  if (input.standard.standardId === THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID) {
+    return buildThePartyArgs(input, sourcePath, outputPath, logoPaths, 'MINIMALIST');
+  }
+  return buildDefaultArgs(input, sourcePath, outputPath, logoPaths);
+}
+
+function buildDefaultArgs(
+  input: LocalCreativeComposeInput,
+  sourcePath: string,
+  outputPath: string,
+  logoPaths: ReadonlyMap<string, string>,
+): string[] {
   const [width, height] = input.canvas.split('x');
   const w = Number(width);
   const h = Number(height);
@@ -228,103 +258,350 @@ function buildImageMagickArgs(
     `rectangle 0,${footerTop} ${w},${h}`,
   ];
 
-  if (input.headline?.trim()) {
+  pushHeadline(args, input, side, Math.round(h * 0.12), textWidth, h, 'white');
+  pushSupport(args, input, side, Math.round(h * 0.41), w, h, 'white');
+  pushCta(args, input, side, Math.round(h * 0.56), w, 'white', 'rgba(0,0,0,0.22)');
+  pushFunctionalInfo(args, input, side, Math.round(h * 0.65), w, h);
+  pushFooterBrands(args, input, logoPaths, THE_PARTY_FOOTER_ORDER, side, w, footerTop, footerHeight);
+
+  args.push('-quality', '95', '-define', 'jpeg:dct-method=float', outputPath);
+  return args;
+}
+
+function buildThePartyArgs(
+  input: LocalCreativeComposeInput,
+  sourcePath: string,
+  outputPath: string,
+  logoPaths: ReadonlyMap<string, string>,
+  family: 'NETWORKS' | 'MINIMALIST',
+): string[] {
+  const [width, height] = input.canvas.split('x');
+  const w = Number(width);
+  const h = Number(height);
+  const side = Math.round(w * 0.08);
+  const footerHeight = Math.round(h * 0.12);
+  const footerTop = h - footerHeight;
+  const isStory = input.canvas === '1080x1920';
+  const heroLogoWidth = Math.round(w * (isStory ? 0.42 : 0.34));
+  const heroLogoTop = Math.round(h * (isStory ? 0.045 : 0.035));
+  const textTop = Math.round(h * (isStory ? 0.27 : 0.23));
+  const accent = resolvePartyAccent(input.partyEnvironment, family);
+  const backgroundOverlay = family === 'MINIMALIST' ? 'rgba(7,7,9,0.34)' : 'rgba(7,7,9,0.22)';
+  const footerOverlay = family === 'MINIMALIST' ? 'rgba(7,7,9,0.82)' : 'rgba(7,7,9,0.76)';
+  const supportBox = family === 'MINIMALIST' ? 'rgba(247,244,239,0.90)' : 'rgba(7,7,9,0.62)';
+  const supportText = family === 'MINIMALIST' ? '#070709' : '#F7F4EF';
+  const textWidth = Math.round(w * (family === 'MINIMALIST' ? 0.70 : 0.76));
+
+  const args: string[] = [
+    sourcePath,
+    '-auto-orient',
+    '-colorspace',
+    'sRGB',
+    '-filter',
+    'Lanczos',
+    '-resize',
+    `${w}x${h}^`,
+    '-gravity',
+    'center',
+    '-extent',
+    `${w}x${h}`,
+    '-fill',
+    backgroundOverlay,
+    '-draw',
+    `rectangle 0,0 ${w},${h}`,
+  ];
+
+  if (family === 'NETWORKS') {
+    args.push(
+      '-fill',
+      accent.overlay,
+      '-draw',
+      `rectangle 0,0 ${Math.round(w * 0.018)},${h}`,
+      '-fill',
+      accent.glow,
+      '-draw',
+      `rectangle 0,0 ${w},${Math.round(h * 0.035)}`,
+    );
+  }
+
+  const heroLogo = input.brandAssets.find((entry) => entry.registry.brand === 'THE_PARTY');
+  const heroLogoPath = heroLogo ? logoPaths.get(heroLogo.registry.brandAssetId) : undefined;
+  if (heroLogoPath) {
     args.push(
       '(',
-      '-size',
-      `${textWidth}x${Math.round(h * 0.26)}`,
-      '-background',
-      'none',
-      '-font',
-      'DejaVu-Serif',
-      '-fill',
-      'white',
-      '-pointsize',
-      input.canvas === '1080x1080' ? '62' : '72',
-      `caption:${input.headline.trim()}`,
+      heroLogoPath,
+      '-resize',
+      `${heroLogoWidth}x>`,
       ')',
       '-gravity',
-      'northwest',
+      'north',
       '-geometry',
-      `+${side}+${Math.round(h * 0.12)}`,
+      `+0+${heroLogoTop}`,
       '-composite',
     );
   }
 
-  if (input.supportCopy?.trim()) {
+  if (input.functionalInfo?.trim()) {
+    const infoWidth = Math.round(w * (family === 'MINIMALIST' ? 0.34 : 0.40));
+    const infoHeight = Math.round(h * 0.045);
+    const infoLeft = Math.round((w - infoWidth) / 2);
+    const infoTop = Math.round(h * (isStory ? 0.19 : 0.16));
     args.push(
+      '-stroke',
+      accent.line,
+      '-strokewidth',
+      '2',
+      '-fill',
+      'rgba(7,7,9,0.64)',
+      '-draw',
+      `roundrectangle ${infoLeft},${infoTop} ${infoLeft + infoWidth},${infoTop + infoHeight} 8,8`,
+      '-stroke',
+      'none',
+      '-fill',
+      '#F7F4EF',
+      '-font',
+      'DejaVu-Sans',
+      '-pointsize',
+      isStory ? '30' : '26',
+      '-gravity',
+      'north',
+      '-annotate',
+      `+0+${infoTop + Math.round(infoHeight * 0.70)}`,
+      input.functionalInfo.trim(),
+    );
+  }
+
+  pushHeadline(args, input, side, textTop, textWidth, h, '#F7F4EF');
+
+  if (input.supportCopy?.trim()) {
+    const supportTop = Math.round(h * (isStory ? 0.53 : 0.50));
+    const boxWidth = Math.round(w * (family === 'MINIMALIST' ? 0.68 : 0.74));
+    const boxHeight = Math.round(h * (family === 'MINIMALIST' ? 0.105 : 0.12));
+    args.push(
+      '-fill',
+      supportBox,
+      '-draw',
+      `roundrectangle ${side},${supportTop} ${side + boxWidth},${supportTop + boxHeight} 8,8`,
       '(',
       '-size',
-      `${Math.round(w * 0.68)}x${Math.round(h * 0.12)}`,
+      `${boxWidth - 48}x${boxHeight - 20}`,
       '-background',
       'none',
       '-font',
       'DejaVu-Sans',
       '-fill',
-      'white',
+      supportText,
       '-pointsize',
-      '34',
+      isStory ? '31' : '27',
       `caption:${input.supportCopy.trim()}`,
       ')',
       '-gravity',
       'northwest',
       '-geometry',
-      `+${side}+${Math.round(h * 0.41)}`,
+      `+${side + 24}+${supportTop + 12}`,
       '-composite',
     );
   }
 
-  if (input.cta?.trim()) {
-    const ctaTop = Math.round(h * 0.56);
-    args.push(
-      '-stroke',
-      'white',
-      '-strokewidth',
-      '2',
-      '-fill',
-      'rgba(0,0,0,0.22)',
-      '-draw',
-      `roundrectangle ${side},${ctaTop} ${Math.round(w * 0.67)},${ctaTop + 86} 8,8`,
-      '-stroke',
-      'none',
-      '-fill',
-      'white',
-      '-font',
-      'DejaVu-Sans',
-      '-pointsize',
-      '34',
-      '-gravity',
-      'northwest',
-      '-annotate',
-      `+${side + 28}+${ctaTop + 54}`,
-      input.cta.trim(),
-    );
-  }
+  pushCta(
+    args,
+    input,
+    side,
+    Math.round(h * (isStory ? 0.69 : 0.67)),
+    w,
+    accent.line,
+    'rgba(7,7,9,0.54)',
+  );
 
-  if (input.functionalInfo?.trim()) {
-    args.push(
-      '-fill',
-      'rgba(0,0,0,0.48)',
-      '-draw',
-      `roundrectangle ${side},${Math.round(h * 0.65)} ${Math.round(w * 0.58)},${Math.round(h * 0.65) + 74} 8,8`,
-      '-fill',
-      'white',
-      '-font',
-      'DejaVu-Sans',
-      '-pointsize',
-      '30',
-      '-gravity',
-      'northwest',
-      '-annotate',
-      `+${side + 24}+${Math.round(h * 0.65) + 48}`,
-      input.functionalInfo.trim(),
-    );
-  }
+  args.push(
+    '-fill',
+    footerOverlay,
+    '-draw',
+    `rectangle 0,${footerTop} ${w},${h}`,
+  );
+  pushFooterBrands(
+    args,
+    input,
+    logoPaths,
+    THE_PARTY_FOOTER_ORDER,
+    side,
+    w,
+    footerTop,
+    footerHeight,
+  );
 
-  const footerBrands = input.requiredBrands
+  args.push('-quality', '95', '-define', 'jpeg:dct-method=float', outputPath);
+  return args;
+}
+
+function resolvePartyAccent(
+  environment: ThePartyEnvironment | undefined,
+  family: 'NETWORKS' | 'MINIMALIST',
+): { readonly line: string; readonly overlay: string; readonly glow: string } {
+  if (family === 'MINIMALIST') {
+    return {
+      line: '#C7AA75',
+      overlay: 'rgba(199,170,117,0.72)',
+      glow: 'rgba(199,170,117,0.22)',
+    };
+  }
+  if (environment === 'INTERNATIONAL') {
+    return {
+      line: '#8F5AB7',
+      overlay: 'rgba(76,53,83,0.82)',
+      glow: 'rgba(143,90,183,0.28)',
+    };
+  }
+  return {
+    line: '#C7AA75',
+    overlay: 'rgba(161,72,22,0.82)',
+    glow: 'rgba(199,170,117,0.26)',
+  };
+}
+
+function pushHeadline(
+  args: string[],
+  input: LocalCreativeComposeInput,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  fill: string,
+): void {
+  if (!input.headline?.trim()) return;
+  args.push(
+    '(',
+    '-size',
+    `${width}x${Math.round(height * 0.24)}`,
+    '-background',
+    'none',
+    '-font',
+    'DejaVu-Serif',
+    '-fill',
+    fill,
+    '-pointsize',
+    input.canvas === '1080x1080' ? '62' : '72',
+    `caption:${input.headline.trim()}`,
+    ')',
+    '-gravity',
+    'northwest',
+    '-geometry',
+    `+${left}+${top}`,
+    '-composite',
+  );
+}
+
+function pushSupport(
+  args: string[],
+  input: LocalCreativeComposeInput,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  fill: string,
+): void {
+  if (!input.supportCopy?.trim()) return;
+  args.push(
+    '(',
+    '-size',
+    `${Math.round(width * 0.68)}x${Math.round(height * 0.12)}`,
+    '-background',
+    'none',
+    '-font',
+    'DejaVu-Sans',
+    '-fill',
+    fill,
+    '-pointsize',
+    '34',
+    `caption:${input.supportCopy.trim()}`,
+    ')',
+    '-gravity',
+    'northwest',
+    '-geometry',
+    `+${left}+${top}`,
+    '-composite',
+  );
+}
+
+function pushCta(
+  args: string[],
+  input: LocalCreativeComposeInput,
+  left: number,
+  top: number,
+  width: number,
+  stroke: string,
+  fill: string,
+): void {
+  if (!input.cta?.trim()) return;
+  const right = Math.round(width * 0.67);
+  args.push(
+    '-stroke',
+    stroke,
+    '-strokewidth',
+    '2',
+    '-fill',
+    fill,
+    '-draw',
+    `roundrectangle ${left},${top} ${right},${top + 86} 8,8`,
+    '-stroke',
+    'none',
+    '-fill',
+    '#F7F4EF',
+    '-font',
+    'DejaVu-Sans',
+    '-pointsize',
+    '34',
+    '-gravity',
+    'northwest',
+    '-annotate',
+    `+${left + 28}+${top + 54}`,
+    input.cta.trim(),
+  );
+}
+
+function pushFunctionalInfo(
+  args: string[],
+  input: LocalCreativeComposeInput,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): void {
+  if (!input.functionalInfo?.trim()) return;
+  args.push(
+    '-fill',
+    'rgba(0,0,0,0.48)',
+    '-draw',
+    `roundrectangle ${left},${top} ${Math.round(width * 0.58)},${top + 74} 8,8`,
+    '-fill',
+    'white',
+    '-font',
+    'DejaVu-Sans',
+    '-pointsize',
+    '30',
+    '-gravity',
+    'northwest',
+    '-annotate',
+    `+${left + 24}+${top + Math.round(height * 0.025)}`,
+    input.functionalInfo.trim(),
+  );
+}
+
+function pushFooterBrands(
+  args: string[],
+  input: LocalCreativeComposeInput,
+  logoPaths: ReadonlyMap<string, string>,
+  canonicalOrder: readonly string[],
+  side: number,
+  width: number,
+  footerTop: number,
+  footerHeight: number,
+): void {
+  const footerBrands = canonicalOrder
     .map((brand) => input.brandAssets.find((entry) => entry.registry.brand === brand))
     .filter((entry): entry is OfficialBrandAssetInput => entry !== undefined);
-  const slotWidth = Math.floor((w - side * 2) / Math.max(footerBrands.length, 1));
+  if (footerBrands.length === 0) return;
+  const slotWidth = Math.floor((width - side * 2) / footerBrands.length);
   for (const [index, entry] of footerBrands.entries()) {
     const logoPath = logoPaths.get(entry.registry.brandAssetId);
     if (!logoPath) continue;
@@ -343,9 +620,6 @@ function buildImageMagickArgs(
       '-composite',
     );
   }
-
-  args.push('-quality', '95', '-define', 'jpeg:dct-method=float', outputPath);
-  return args;
 }
 
 function validateInput(input: LocalCreativeComposeInput): void {
@@ -386,6 +660,17 @@ function validateInput(input: LocalCreativeComposeInput): void {
   }
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
+  }
+  if (isThePartyStandard(input.standard.standardId)) {
+    if (input.standard.operation !== 'THE_PARTY' || !input.requiredBrands.includes('THE_PARTY')) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    if (
+      input.standard.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID &&
+      !input.partyEnvironment
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
+    }
   }
 }
 
@@ -433,6 +718,13 @@ function assertRealAssetBinding(input: LocalCreativeComposeInput): void {
       false,
     );
   }
+}
+
+function isThePartyStandard(standardId: string): boolean {
+  return (
+    standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID ||
+    standardId === THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID
+  );
 }
 
 function sourceAssetIdsFor(input: LocalCreativeComposeInput): string[] {
