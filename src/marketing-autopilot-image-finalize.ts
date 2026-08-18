@@ -1,9 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { operationScopedGenerativeCandidateManifestSchema } from './contracts/operation-scoped-generative-candidate.js';
-import { fidelityEvidenceSchema, type BrandAsset } from './contracts/creative-truth.js';
+import { fidelityEvidenceSchema } from './contracts/creative-truth.js';
 import { ControlledOperationScopedGenerativeFinalizationService } from './creative/controlled-operation-scoped-generative-finalization.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
-import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-drive/creative-truth-brand-asset-loader.js';
+import {
+  GoogleDriveCreativeTruthBrandAssetLoader,
+  type LoadedCreativeTruthBrandAsset,
+} from './providers/google-drive/creative-truth-brand-asset-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { GoogleSheetsOperationScopedGenerativeRegistry } from './providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import { GoogleSheetsThePartyContentOrchestration } from './providers/google-sheets/the-party-content-orchestration.js';
@@ -49,7 +52,7 @@ const requiredBrands = resolveRequiredBrands(
   candidateManifest.operation,
   args.additionalBrands,
 );
-const brandAssets = [];
+const brandAssets: LoadedCreativeTruthBrandAsset[] = [];
 for (const brand of requiredBrands) {
   const canonicalBrand = await registry.getBrandAsset(brand, args.brandVariant);
   if (!canonicalBrand) throw new Error(`IMAGE_FINALIZE_BRAND_NOT_FOUND:${brand}`);
