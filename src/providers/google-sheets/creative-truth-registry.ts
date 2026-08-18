@@ -4,11 +4,13 @@ import {
   brandAssetSchema,
   creativeStandardSchema,
   generativeExceptionApprovalSchema,
+  videoShotSchema,
   venueAssetSchema,
   venueReferenceSchema,
   type BrandAsset,
   type CreativeStandard,
   type GenerativeExceptionApproval,
+  type VideoShot,
   type VenueAsset,
   type VenueReference,
   type CreativeTruthGateResult,
@@ -83,6 +85,20 @@ export class GoogleSheetsCreativeTruthRegistry {
     const rows = await this.client.readRange(this.spreadsheetId, 'VENUE_VISUALS!A2:P2000');
     const row = rows.find((candidate) => cell(candidate[0]) === venueAssetId);
     return row ? parseVenueAsset(row) : undefined;
+  }
+
+  async listVideoShots(operation?: string): Promise<readonly VideoShot[]> {
+    const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
+    return rows
+      .filter((row) => !operation || cell(row[7]) === operation)
+      .filter((row) => cell(row[15]) !== 'REVOKED')
+      .map(parseVideoShot);
+  }
+
+  async getVideoShot(shotId: string): Promise<VideoShot | undefined> {
+    const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
+    const row = rows.find((candidate) => cell(candidate[0]) === shotId);
+    return row ? parseVideoShot(row) : undefined;
   }
 
   async getReferenceSet(referenceSetId: string): Promise<readonly VenueReference[]> {
@@ -197,6 +213,33 @@ function parseVenueAsset(row: readonly unknown[]): VenueAsset {
     generativeReferenceAllowed: bool(row[12]),
     protectedElements: list(row[13]),
     status: cell(row[14]),
+  });
+}
+
+function parseVideoShot(row: readonly unknown[]): VideoShot {
+  const masterAssetId = cell(row[3]);
+  const masterDriveFileId = cell(row[4]);
+  const sourceSha256 = cell(row[5]);
+  const masterSha256 = cell(row[6]);
+  const duration = cell(row[10]);
+  return videoShotSchema.parse({
+    shotId: cell(row[0]),
+    sourceAssetId: cell(row[1]),
+    sourceDriveFileId: cell(row[2]),
+    ...(masterAssetId ? { masterAssetId } : {}),
+    ...(masterDriveFileId ? { masterDriveFileId } : {}),
+    ...(sourceSha256 ? { sourceSha256 } : {}),
+    ...(masterSha256 ? { masterSha256 } : {}),
+    operation: cell(row[7]),
+    locationSignature: cell(row[8]),
+    shotClass: cell(row[9]),
+    ...(duration ? { durationMs: integer(row[10], 0) } : {}),
+    orientation: cell(row[11]),
+    venueVerified: bool(row[12]),
+    marketingReady: bool(row[13]),
+    rightsStatus: cell(row[14]),
+    status: cell(row[15]),
+    notes: cell(row[16]),
   });
 }
 
