@@ -98,6 +98,14 @@ for (const marker of [
   }
 }
 
+const resolver = readFileSync('src/creative/creative-truth-resolver.ts', 'utf8');
+for (const marker of ['resolveVideoShots', 'VIDEO_SHOT_RIGHTS_NOT_CLEARED', 'FAILED_LINEAGE_MISSING']) {
+  if (!resolver.includes(marker)) {
+    console.error(`Creative Truth resolver missing canonical video resolution: ${marker}`);
+    process.exit(1);
+  }
+}
+
 const registry = readFileSync('src/providers/google-sheets/creative-truth-registry.ts', 'utf8');
 if (
   !registry.includes('VIDEO_SHOTS!A2:Q2000') ||
