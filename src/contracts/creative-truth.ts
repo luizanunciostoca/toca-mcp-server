@@ -33,6 +33,11 @@ export const creativeTruthFailureCodeSchema = z.enum([
   'FAILED_VENUE_FIDELITY_GATE',
   'FAILED_BRAND_INTEGRITY_GATE',
   'FAILED_QUALITY_GATE',
+  'VIDEO_SOURCE_RIGHTS_NOT_CLEARED',
+  'VIDEO_LIKENESS_CONSENT_REQUIRED',
+  'VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED',
+  'VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH',
+  'SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED',
 ]);
 
 export const creativeTruthGateNameSchema = z.enum([
@@ -55,9 +60,9 @@ export const creativeAssetLocatorSchema = z.object({
 });
 
 export const creativeTruthPolicySchema = z.object({
-  schemaVersion: z.string().min(1),
+  schemaVersion: z.literal('1.3'),
   policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
-  policyVersion: z.string().min(1),
+  policyVersion: z.literal('1.3'),
   status: z.literal('ACTIVE_CANONICAL'),
   brandScope: z.literal('TOCA_DO_MORCEGO'),
   validatedAt: z.string().min(1),
@@ -81,7 +86,10 @@ export const creativeTruthPolicySchema = z.object({
     enhancementProvenanceRequired: z.literal(true),
     videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE'),
     videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED'),
-    videoGenerativeException: z.literal('UNSUPPORTED_V1'),
+    videoPhotoMotion: z.literal('ACTIVE_V1'),
+    videoGenerativeException: z.literal('SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1'),
+    fullSyntheticVenueVideo: z.literal('UNSUPPORTED_V1'),
+    photoToVideoPolicyId: z.literal('TOCA_PHOTO_TO_VIDEO_POLICY_V1'),
     exactApprovedAssetMustBePublished: z.literal(true),
     failClosed: z.literal(true),
   }),
@@ -101,6 +109,20 @@ export const creativeTruthPolicySchema = z.object({
     officialBrandAssetsStillRequired: z.literal(true),
     architecturalInventionStillForbidden: z.literal(true),
     environmentDriftStillForbidden: z.literal(true),
+  }),
+  photoToVideo: z.object({
+    policyId: z.literal('TOCA_PHOTO_TO_VIDEO_POLICY_V1'),
+    realPhotoToMotionVideo: z.literal('ACTIVE_V1'),
+    generativeSceneContinuationVideo: z.literal('EXPLICIT_APPROVAL_AND_RIGHTS_REQUIRED'),
+    canonicalSourcePhotoRequired: z.literal(true),
+    canonicalSourceSha256Required: z.literal(true),
+    marketingReadyMasterRequired: z.literal(true),
+    rightsEvidenceRequired: z.literal(true),
+    likenessConsentRequiredWhenPeoplePresentForSceneContinuation: z.literal(true),
+    postGenerationHumanReviewRequired: z.literal(true),
+    sceneContinuationFidelityGateRequired: z.literal(true),
+    fullSyntheticVenueVideoWithoutCanonicalSourcePhoto: z.literal('UNSUPPORTED_V1'),
+    publicationAuthorizedByGeneration: z.literal(false),
   }),
   requiredGates: z
     .array(creativeTruthGateNameSchema)

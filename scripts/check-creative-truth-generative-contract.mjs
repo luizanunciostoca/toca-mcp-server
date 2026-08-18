@@ -21,6 +21,7 @@ for (const path of requiredFiles) {
 }
 
 requireIncludes('control/creative-truth-policy.v1.json', [
+  '"policyVersion": "1.3"',
   '"generativeMode": "GENERATIVE_EXCEPTION"',
   '"referenceStrategy": "OPERATION_SCOPED_ONLY_V1"',
   '"legacyReferenceSetStatus": "DEPRECATED"',
@@ -171,17 +172,13 @@ console.log('Creative Truth static generative contract OK');
 function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (!content.includes(marker)) {
-      fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
-    }
+    if (!content.includes(marker)) fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
   }
 }
 function forbidIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (content.includes(marker)) {
-      fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
-    }
+    if (content.includes(marker)) fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
   }
 }
 function fail(message) {
