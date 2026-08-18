@@ -63,8 +63,8 @@ export class GoogleSheetsCreativeTruthRegistry {
       cell(policy[5]) !== 'GENERATIVE_EXCEPTION' ||
       !bool(policy[6]) ||
       !bool(policy[7]) ||
-      bool(policy[8]) ||
-      bool(policy[9]) ||
+      !bool(policy[8]) ||
+      !bool(policy[9]) ||
       !bool(policy[10]) ||
       !bool(policy[11]) ||
       cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID ||
