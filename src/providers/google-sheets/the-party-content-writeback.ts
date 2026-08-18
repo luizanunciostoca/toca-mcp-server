@@ -21,11 +21,16 @@ const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BX2000';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const TRANSVERSAL_THUMBNAIL_STANDARD_ID = 'TOCA_THUMBNAIL_V1';
 const MINIMALIST_NEUTRAL = 'MINIMALIST_NEUTRAL';
-
-const WRITEBACK_COLUMNS = [
+const REQUIRED_SNAPSHOT_COLUMNS = [
+  'content_item_id',
+  'edition_id',
+  'the_party_intent',
   'the_party_environment',
+  'creative_standard_id',
   'visual_standard_status',
+  'hero_brand_asset_id',
   'venue_asset_id',
+  'creative_truth_policy_id',
   'brand_integrity_status',
   'venue_fidelity_status',
   'quality_gate_status',
@@ -63,7 +68,7 @@ interface ValidatedManifestContext {
 
 export class GoogleSheetsThePartyContentWriteback {
   private readonly orchestration: GoogleSheetsThePartyContentOrchestration;
-  private readonly writer?: SpreadsheetValuesBatchWriter;
+  private readonly writer: SpreadsheetValuesBatchWriter | undefined;
 
   constructor(
     private readonly client: SpreadsheetValuesClient,
@@ -87,7 +92,6 @@ export class GoogleSheetsThePartyContentWriteback {
     const parsed = deterministicRenderManifestSchema.safeParse(input.manifest);
     if (!parsed.success) deny('THE_PARTY_WRITEBACK_MANIFEST_INVALID');
     const ready = assertCreativeReadyForPublication(parsed.data);
-
     if (ready.contentItemId !== contentItemId) {
       deny('THE_PARTY_WRITEBACK_CONTENT_ITEM_MISMATCH');
     }
@@ -125,13 +129,13 @@ export class GoogleSheetsThePartyContentWriteback {
 
     const snapshot = await this.readContentRow(contentItemId);
     assertSnapshotMatchesRecord(snapshot, revalidated);
-
     const updates = buildWritebackUpdates(
       snapshot,
       revalidated,
       manifestContext,
       observedOutputSha256,
     );
+
     await this.writer.updateRanges(THE_PARTY_CONTENT_REGISTRY_DRIVE_ID, updates);
 
     let readback: ThePartyContentOrchestrationRecord;
@@ -157,11 +161,10 @@ export class GoogleSheetsThePartyContentWriteback {
     if (rows.length === 0) conflict('THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK');
 
     const headers = buildHeaderIndex(rows[0] ?? []);
-    for (const column of ['content_item_id', 'edition_id', 'the_party_intent', 'creative_standard_id',
-      'visual_standard_status', 'hero_brand_asset_id', 'venue_asset_id', 'creative_truth_policy_id',
-      'brand_integrity_status', 'venue_fidelity_status', 'quality_gate_status', 'exact_asset_binding',
-      'output_sha256', 'the_party_environment']) {
-      if (!headers.has(column)) conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${column}`);
+    for (const column of REQUIRED_SNAPSHOT_COLUMNS) {
+      if (!headers.has(column)) {
+        conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${column}`);
+      }
     }
 
     const contentItemColumn = headers.get('content_item_id')!;
@@ -412,7 +415,9 @@ function buildHeaderIndex(row: readonly unknown[]): ReadonlyMap<string, number> 
   row.forEach((entry, column) => {
     const header = cell(entry);
     if (!header) return;
-    if (index.has(header)) conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${header}`);
+    if (index.has(header)) {
+      conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${header}`);
+    }
     index.set(header, column);
   });
   return index;
@@ -420,7 +425,9 @@ function buildHeaderIndex(row: readonly unknown[]): ReadonlyMap<string, number> 
 
 function valueAt(snapshot: ContentRowSnapshot, column: string): string {
   const index = snapshot.headers.get(column);
-  if (index === undefined) conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${column}`);
+  if (index === undefined) {
+    conflict(`THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK:${column}`);
+  }
   return cell(snapshot.row[index]);
 }
 
@@ -447,7 +454,8 @@ function parseBoolean(value: string): boolean {
 
 function asBatchWriter(client: SpreadsheetValuesClient): SpreadsheetValuesBatchWriter | undefined {
   const candidate = client as SpreadsheetValuesClient & Partial<SpreadsheetValuesBatchWriter>;
-  return typeof candidate.updateRanges === 'function' ? candidate : undefined;
+  if (typeof candidate.updateRanges !== 'function') return undefined;
+  return { updateRanges: candidate.updateRanges.bind(client) };
 }
 
 function cell(value: unknown): string {
