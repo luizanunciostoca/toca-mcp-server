@@ -24,7 +24,10 @@ import {
   requireGatePassed,
   sha256,
 } from '../../creative/creative-truth.js';
-import type { OfficialBrandAssetInput } from './local-creative-composer.js';
+import type {
+  OfficialBrandAssetInput,
+  ThePartyEnvironment,
+} from './local-creative-composer.js';
 
 const execFileAsync = promisify(execFile);
 const APPROVED_RIGHTS_STATUSES = new Set([
@@ -34,6 +37,14 @@ const APPROVED_RIGHTS_STATUSES = new Set([
   'CLEARED',
   'RIGHTS_CLEARED',
 ]);
+const THE_PARTY_HYBRID_NETWORKS_STANDARD_ID = 'THE_PARTY_HYBRID_NETWORKS_V1';
+const THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID = 'THE_PARTY_HYBRID_MINIMALIST_V1';
+const THE_PARTY_FOOTER_ORDER = [
+  'TOCA_DO_MORCEGO',
+  'CORONA',
+  'RED_BULL',
+  'MORRO_DIGITAL',
+] as const;
 
 export interface VerifiedVideoShotInput {
   readonly shotId: string;
@@ -51,6 +62,7 @@ export interface LocalVideoComposeInput {
   readonly shots: readonly VerifiedVideoShotInput[];
   readonly requiredBrands: readonly string[];
   readonly brandAssets: readonly OfficialBrandAssetInput[];
+  readonly partyEnvironment?: ThePartyEnvironment;
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references?: readonly VenueReference[];
   readonly createdAt?: string;
@@ -168,7 +180,7 @@ export class LocalVideoComposer {
 
       await this.commandRunner(
         this.binary,
-        buildFfmpegArgs(concatPath, outputPath, logoPaths),
+        buildFfmpegArgs(input, concatPath, outputPath, logoPaths),
       );
       const outputBytes = await readFile(outputPath);
       const qualityGate = evaluateQualityGate(isMp4(outputBytes), {
@@ -178,6 +190,10 @@ export class LocalVideoComposer {
         sourceShotCount: input.shots.length,
         editManifestShotCount: editManifest.shots.length,
         registeredShotHashesVerified: true,
+        visualStandardApplied: input.standard.standardId,
+        ...(isThePartyStandard(input.standard.standardId)
+          ? { thePartyEnvironment: input.partyEnvironment ?? 'MINIMALIST_NEUTRAL' }
+          : {}),
       });
       requireGatePassed(qualityGate);
 
@@ -234,6 +250,7 @@ export class LocalVideoComposer {
 }
 
 function buildFfmpegArgs(
+  input: LocalVideoComposeInput,
   concatPath: string,
   outputPath: string,
   logoPaths: readonly string[],
@@ -241,17 +258,53 @@ function buildFfmpegArgs(
   const args: string[] = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath];
   for (const logoPath of logoPaths) args.push('-loop', '1', '-i', logoPath);
 
-  let chain = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base]';
+  const theParty = isThePartyStandard(input.standard.standardId);
+  const minimalist = input.standard.standardId === THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID;
+  const accent =
+    input.partyEnvironment === 'INTERNATIONAL' ? '0x4C3553@0.82' : '0xA14816@0.82';
+  let chain =
+    '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920' +
+    (theParty ? ',drawbox=x=0:y=0:w=iw:h=ih:color=black@0.20:t=fill' : '') +
+    (theParty && !minimalist
+      ? `,drawbox=x=0:y=0:w=18:h=ih:color=${accent}:t=fill`
+      : '') +
+    '[base]';
   let previous = 'base';
-  const logoCount = Math.max(logoPaths.length, 1);
-  const slotWidth = Math.floor(900 / logoCount);
-  for (const [index] of logoPaths.entries()) {
-    const logoLabel = `logo${index}`;
-    const outputLabel = `v${index}`;
-    const x = 90 + index * slotWidth + Math.floor(slotWidth * 0.1);
-    chain += `;[${index + 1}:v]scale=${Math.floor(slotWidth * 0.72)}:-1[${logoLabel}]`;
-    chain += `;[${previous}][${logoLabel}]overlay=${x}:1740:format=auto[${outputLabel}]`;
-    previous = outputLabel;
+
+  if (theParty) {
+    const heroIndex = input.brandAssets.findIndex((entry) => entry.registry.brand === 'THE_PARTY');
+    if (heroIndex >= 0) {
+      const heroLabel = 'partyhero';
+      const outputLabel = 'partybase';
+      chain += `;[${heroIndex + 1}:v]scale=420:-1[${heroLabel}]`;
+      chain += `;[${previous}][${heroLabel}]overlay=(W-w)/2:70:format=auto[${outputLabel}]`;
+      previous = outputLabel;
+    }
+
+    const footerEntries = THE_PARTY_FOOTER_ORDER.flatMap((brand) => {
+      const index = input.brandAssets.findIndex((entry) => entry.registry.brand === brand);
+      return index >= 0 ? [{ brand, index }] : [];
+    });
+    const slotWidth = Math.floor(900 / Math.max(footerEntries.length, 1));
+    for (const [slot, entry] of footerEntries.entries()) {
+      const logoLabel = `partyfooter${slot}`;
+      const outputLabel = `partyfooterout${slot}`;
+      const x = 90 + slot * slotWidth + Math.floor(slotWidth * 0.1);
+      chain += `;[${entry.index + 1}:v]scale=${Math.floor(slotWidth * 0.72)}:-1[${logoLabel}]`;
+      chain += `;[${previous}][${logoLabel}]overlay=${x}:1740:format=auto[${outputLabel}]`;
+      previous = outputLabel;
+    }
+  } else {
+    const logoCount = Math.max(logoPaths.length, 1);
+    const slotWidth = Math.floor(900 / logoCount);
+    for (const [index] of logoPaths.entries()) {
+      const logoLabel = `logo${index}`;
+      const outputLabel = `v${index}`;
+      const x = 90 + index * slotWidth + Math.floor(slotWidth * 0.1);
+      chain += `;[${index + 1}:v]scale=${Math.floor(slotWidth * 0.72)}:-1[${logoLabel}]`;
+      chain += `;[${previous}][${logoLabel}]overlay=${x}:1740:format=auto[${outputLabel}]`;
+      previous = outputLabel;
+    }
   }
 
   args.push(
@@ -307,6 +360,17 @@ function validateInput(input: LocalVideoComposeInput): void {
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
   }
+  if (isThePartyStandard(input.standard.standardId)) {
+    if (input.standard.operation !== 'THE_PARTY' || !input.requiredBrands.includes('THE_PARTY')) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    if (
+      input.standard.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID &&
+      !input.partyEnvironment
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
+    }
+  }
 }
 
 function assertRegisteredShotBindings(input: LocalVideoComposeInput): void {
@@ -325,10 +389,7 @@ function assertRegisteredShotBindings(input: LocalVideoComposeInput): void {
     ) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
     }
-    if (
-      input.standard.operation !== 'ALL' &&
-      registry.operation !== input.standard.operation
-    ) {
+    if (input.standard.operation !== 'ALL' && registry.operation !== input.standard.operation) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
     }
     if (!APPROVED_RIGHTS_STATUSES.has(registry.rightsStatus.trim().toUpperCase())) {
@@ -391,6 +452,13 @@ function videoShotAsVenueAsset(shot: VideoShot): VenueAsset {
     protectedElements: [],
     status: shot.status,
   };
+}
+
+function isThePartyStandard(standardId: string): boolean {
+  return (
+    standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID ||
+    standardId === THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID
+  );
 }
 
 function sourceAssetIdsFor(input: LocalVideoComposeInput): string[] {
