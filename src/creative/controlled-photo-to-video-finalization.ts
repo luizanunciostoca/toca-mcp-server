@@ -8,17 +8,18 @@ import {
   type PhotoToVideoReviewEvidence,
 } from '../contracts/photo-to-video.js';
 import { ExecutionError } from '../core/errors.js';
+import type { PhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-video-artifact-store.js';
 import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
 import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
 
 export interface ControlledPhotoToVideoFinalizationOptions {
   readonly registry: PhotoToVideoRegistry;
   readonly writeback: PhotoToVideoContentWriteback;
+  readonly artifactStore: PhotoToVideoArtifactStore;
   readonly now?: () => Date;
 }
 
 export interface ControlledPhotoToVideoFinalizationRequest {
-  readonly outputBytes: Uint8Array;
   readonly candidateManifest: PhotoToVideoCandidateManifest;
   readonly reviewEvidence: PhotoToVideoReviewEvidence;
 }
@@ -35,8 +36,12 @@ export class ControlledPhotoToVideoFinalizationService {
   ): Promise<PhotoToVideoFinalManifest> {
     const candidate = photoToVideoCandidateManifestSchema.parse(request.candidateManifest);
     const review = photoToVideoReviewEvidenceSchema.parse(request.reviewEvidence);
-    const outputSha256 = sha256(request.outputBytes);
-    if (!isMp4(request.outputBytes) || outputSha256 !== candidate.outputSha256.toLowerCase()) {
+    const outputBytes = await this.options.artifactStore.loadExact(
+      candidate.artifactRef,
+      candidate.outputSha256,
+    );
+    const outputSha256 = sha256(outputBytes);
+    if (!isMp4(outputBytes) || outputSha256 !== candidate.outputSha256.toLowerCase()) {
       throw new ExecutionError(
         'SOURCE_IMAGE_BINDING_FAILURE',
         'PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH',
@@ -116,6 +121,7 @@ export class ControlledPhotoToVideoFinalizationService {
       candidate,
       review,
       finalAssetSha256: outputSha256,
+      finalArtifactRef: candidate.artifactRef,
       exactAssetBinding: true,
       readyForPrepare: true,
       publicationAuthorized: false,
@@ -150,6 +156,7 @@ export class ControlledPhotoToVideoFinalizationService {
       standardId: candidate.standardId,
       candidateSha256: candidate.outputSha256,
       finalAssetSha256: outputSha256,
+      finalArtifactRef: candidate.artifactRef,
       outputEvidenceId,
     });
 
