@@ -38,9 +38,11 @@ Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The ap
 - `VENUE_VISUALS`: real Toca source/master lineage and protected physical elements.
 - `VENUE_REFERENCE_SET`: verified spatial references used by generative exceptions.
 - `CREATIVE_STANDARDS`: Story, Feed, Ads and Video standard bindings.
-- `VIDEO_SHOTS`: truth-bound video shot metadata.
+- `VIDEO_SHOTS`: truth-bound real video takes, including source/master lineage, SHA-256, venue verification, marketing readiness and rights status.
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
+
+`VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. The shot ID must resolve to an `ACTIVE_APPROVED` record, venue and marketing checks must be true, rights must be explicitly cleared, and the supplied bytes must match the registered master SHA-256.
 
 ## Brand integrity
 
@@ -48,7 +50,7 @@ A logo is never generated, repaired, approximated or redrawn by an image model. 
 
 The deterministic image/video composers receive the official logo bytes separately from the photographic/video source and overlay those files after creative generation or enhancement.
 
-## Venue fidelity
+## Venue fidelity and byte identity
 
 Final real-media output requires:
 
@@ -56,7 +58,10 @@ Final real-media output requires:
 2. `marketingReady=true` for final photographic/video composition;
 3. source/master lineage;
 4. master Drive file ID;
-5. master SHA-256 when a marketing master exists.
+5. master SHA-256;
+6. exact equality between the SHA-256 of the bytes actually rendered and the registered master SHA-256.
+
+This prevents valid registry metadata from being paired with substituted media bytes. A source/master identity mismatch fails before ImageMagick or FFmpeg runs.
 
 For enhancement or generative output, a fidelity verifier must state whether source identity was preserved and whether architecture drift, scene invention or logo reconstruction was detected. Any positive drift signal is a hard failure.
 
@@ -64,7 +69,9 @@ For enhancement or generative output, a fidelity verifier must state whether sou
 
 `LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It produces an output SHA-256 and `DeterministicRenderManifest`.
 
-`LocalVideoComposer` assembles verified shots with FFmpeg, overlays official logo files and produces the same manifest semantics for video.
+`LocalStoryComposer` is no longer an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
+
+`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
 
@@ -79,9 +86,10 @@ The final asset is immutable from approval to publication. `CreativeTruthPublica
 - Brand Integrity PASS;
 - Venue Fidelity PASS;
 - Quality PASS;
+- one or more exact asset locators such as `MEDIA_URL`, provider image/video IDs/hashes or a Drive file ID;
 - `exactAssetBinding=true`.
 
-The production Instagram publication composition now requires this binding. Publication cannot silently rebuild a creative.
+Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs being published. Meta Ads validates the provider creative locator before its controlled write path. Publication or ad creation cannot silently substitute or rebuild a creative.
 
 ## Failure codes
 
@@ -101,9 +109,11 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings and video rights that are not explicitly cleared.
+
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET/REFERENCES -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> APPROVAL -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
