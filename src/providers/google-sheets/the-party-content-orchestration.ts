@@ -18,7 +18,7 @@ export const THE_PARTY_CONTENT_ORCHESTRATION_CONTRACT_ID =
 export const THE_PARTY_HERO_BRAND = 'THE_PARTY' as const;
 export const THE_PARTY_HERO_BRAND_ASSET_ID = 'BRAND-THE-PARTY-WHITE-V1' as const;
 
-const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BW2000';
+const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BX2000';
 const EDITIONS_RANGE = 'EDITIONS!A1:P2000';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 
@@ -65,6 +65,9 @@ const REQUIRED_EDITION_COLUMNS = [
   'visual_family_policy',
   'the_party_environment',
   'environment_status',
+  'environment_decision_source',
+  'environment_decision_at',
+  'environment_decision_by',
 ] as const;
 
 export type ThePartyVisualStandardStatus =
@@ -73,7 +76,36 @@ export type ThePartyVisualStandardStatus =
   | 'CREATIVE_TRUTH_PENDING'
   | 'CREATIVE_TRUTH_PASSED';
 
+export type ThePartyEnvironmentDecisionStatus =
+  | 'PENDING_DECISION'
+  | 'DECIDED'
+  | 'NOT_REQUIRED';
+
+export type ThePartyEnvironmentSource = 'CONTENT_ITEM' | 'EDITION_CONTEXT';
+
 export interface ThePartyContentOrchestrationRecord {
+  readonly contentItemId: string;
+  readonly operation: 'THE_PARTY';
+  readonly editionId: string;
+  readonly intent: ThePartyCreativeIntent;
+  readonly environment?: ThePartyEnvironment;
+  readonly environmentSource?: ThePartyEnvironmentSource;
+  readonly editionEnvironmentStatus: ThePartyEnvironmentDecisionStatus;
+  readonly standardId: ThePartyVisualStandardId;
+  readonly standardVersion: '1.0';
+  readonly visualStandardStatus: ThePartyVisualStandardStatus;
+  readonly persistedVisualStandardStatus: ThePartyVisualStandardStatus;
+  readonly heroBrandAssetId: typeof THE_PARTY_HERO_BRAND_ASSET_ID;
+  readonly venueAssetId?: string;
+  readonly creativeTruthPolicyId: typeof TOCA_CREATIVE_TRUTH_POLICY_ID;
+  readonly brandIntegrityStatus: string;
+  readonly venueFidelityStatus: string;
+  readonly qualityGateStatus: string;
+  readonly exactAssetBinding?: boolean;
+  readonly outputSha256?: string;
+}
+
+interface ParsedContentRecord {
   readonly contentItemId: string;
   readonly operation: 'THE_PARTY';
   readonly editionId: string;
@@ -90,6 +122,15 @@ export interface ThePartyContentOrchestrationRecord {
   readonly qualityGateStatus: string;
   readonly exactAssetBinding?: boolean;
   readonly outputSha256?: string;
+}
+
+interface EditionContextRecord {
+  readonly editionId: string;
+  readonly environment?: ThePartyEnvironment;
+  readonly status: ThePartyEnvironmentDecisionStatus;
+  readonly decisionSource?: string;
+  readonly decisionAt?: string;
+  readonly decisionBy?: string;
 }
 
 export interface ThePartyCreativeTruthResolutionInput {
@@ -134,12 +175,21 @@ export class GoogleSheetsThePartyContentOrchestration {
       deny('THE_PARTY_CONTENT_ITEM_ID_REQUIRED');
     }
 
-    const rows = await this.client.readRange(this.spreadsheetId, this.range);
-    if (rows.length === 0) {
+    const [contentRows, editionRows] = await Promise.all([
+      this.client.readRange(this.spreadsheetId, this.range),
+      this.client.readRange(this.editionSpreadsheetId, this.editionRange),
+    ]);
+    if (contentRows.length === 0) {
       deny('THE_PARTY_CONTENT_ORCHESTRATION_SCHEMA_INVALID');
     }
+    if (editionRows.length === 0) {
+      deny('THE_PARTY_EDITION_CONTEXT_SCHEMA_INVALID');
+    }
 
-    const headers = buildHeaderIndex(rows[0] ?? []);
+    const headers = buildHeaderIndex(
+      contentRows[0] ?? [],
+      'THE_PARTY_CONTENT_ORCHESTRATION_DUPLICATE_COLUMN',
+    );
     for (const required of REQUIRED_COLUMNS) {
       if (!headers.has(required)) {
         deny(`THE_PARTY_CONTENT_ORCHESTRATION_COLUMN_MISSING:${required}`);
@@ -147,7 +197,7 @@ export class GoogleSheetsThePartyContentOrchestration {
     }
 
     const contentItemIndex = headers.get('content_item_id')!;
-    const matches = rows
+    const matches = contentRows
       .slice(1)
       .filter((row) => cell(row[contentItemIndex]) === normalizedContentItemId);
     if (matches.length === 0) {
@@ -157,7 +207,9 @@ export class GoogleSheetsThePartyContentOrchestration {
       deny('THE_PARTY_CONTENT_ITEM_DUPLICATE');
     }
 
-    return parseAndValidateRecord(matches[0]!, headers);
+    const contentRecord = parseAndValidateRecord(matches[0]!, headers);
+    const editionRecord = findAndValidateEditionContext(contentRecord.editionId, editionRows);
+    return reconcileEditionContext(contentRecord, editionRecord);
   }
 
   async buildCreativeTruthResolutionInput(
@@ -169,12 +221,10 @@ export class GoogleSheetsThePartyContentOrchestration {
     } = {},
   ): Promise<ThePartyCreativeTruthResolutionInput> {
     const record = await this.get(contentItemId);
-    let environment = record.environment;
-
-    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !environment) {
-      environment = await this.resolveEditionEnvironment(record.editionId);
+    if (record.visualStandardStatus === 'BLOCKED_NEEDS_ENVIRONMENT') {
+      deny('THE_PARTY_ENVIRONMENT_REQUIRED');
     }
-    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !environment) {
+    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !record.environment) {
       deny('THE_PARTY_ENVIRONMENT_REQUIRED');
     }
 
@@ -192,46 +242,15 @@ export class GoogleSheetsThePartyContentOrchestration {
       requiredBrands,
       ...(options.brandVariant?.trim() ? { brandVariant: options.brandVariant.trim() } : {}),
       thePartyIntent: record.intent,
-      ...(environment ? { thePartyEnvironment: environment } : {}),
+      ...(record.environment ? { thePartyEnvironment: record.environment } : {}),
     };
-  }
-
-  private async resolveEditionEnvironment(editionId: string): Promise<ThePartyEnvironment> {
-    const rows = await this.client.readRange(this.editionSpreadsheetId, this.editionRange);
-    if (rows.length === 0) deny('THE_PARTY_EDITION_CONTEXT_SCHEMA_INVALID');
-
-    const headers = buildHeaderIndex(rows[0] ?? []);
-    for (const required of REQUIRED_EDITION_COLUMNS) {
-      if (!headers.has(required)) {
-        deny(`THE_PARTY_EDITION_CONTEXT_COLUMN_MISSING:${required}`);
-      }
-    }
-
-    const editionIdIndex = headers.get('edition_id')!;
-    const matches = rows.slice(1).filter((row) => cell(row[editionIdIndex]) === editionId);
-    if (matches.length === 0) deny('THE_PARTY_EDITION_CONTEXT_NOT_FOUND');
-    if (matches.length !== 1) deny('THE_PARTY_EDITION_CONTEXT_DUPLICATE');
-
-    const row = matches[0]!;
-    const value = (name: (typeof REQUIRED_EDITION_COLUMNS)[number]) =>
-      cell(row[headers.get(name)!]);
-    if (value('visual_family_policy') !== 'RESOLVE_BY_INTENT') {
-      deny('THE_PARTY_EDITION_VISUAL_FAMILY_POLICY_MISMATCH');
-    }
-    if (value('environment_status') !== 'DECIDED') {
-      deny('THE_PARTY_ENVIRONMENT_REQUIRED');
-    }
-
-    const environment = value('the_party_environment');
-    if (!environment) deny('THE_PARTY_EDITION_DECISION_MISSING_ENVIRONMENT');
-    return parseEnvironment(environment);
   }
 }
 
 function parseAndValidateRecord(
   row: readonly unknown[],
   headers: ReadonlyMap<string, number>,
-): ThePartyContentOrchestrationRecord {
+): ParsedContentRecord {
   const value = (name: (typeof REQUIRED_COLUMNS)[number]) => cell(row[headers.get(name)!]);
   const contentItemId = value('content_item_id');
   if (!contentItemId) deny('THE_PARTY_CONTENT_ITEM_ID_REQUIRED');
@@ -322,6 +341,104 @@ function parseAndValidateRecord(
   };
 }
 
+function findAndValidateEditionContext(
+  editionId: string,
+  rows: readonly (readonly unknown[])[],
+): EditionContextRecord {
+  const headers = buildHeaderIndex(
+    rows[0] ?? [],
+    'THE_PARTY_EDITION_CONTEXT_DUPLICATE_COLUMN',
+  );
+  for (const required of REQUIRED_EDITION_COLUMNS) {
+    if (!headers.has(required)) {
+      deny(`THE_PARTY_EDITION_CONTEXT_COLUMN_MISSING:${required}`);
+    }
+  }
+
+  const editionIdIndex = headers.get('edition_id')!;
+  const matches = rows.slice(1).filter((row) => cell(row[editionIdIndex]) === editionId);
+  if (matches.length === 0) deny('THE_PARTY_EDITION_CONTEXT_NOT_FOUND');
+  if (matches.length !== 1) deny('THE_PARTY_EDITION_CONTEXT_DUPLICATE');
+
+  const row = matches[0]!;
+  const value = (name: (typeof REQUIRED_EDITION_COLUMNS)[number]) =>
+    cell(row[headers.get(name)!]);
+  if (value('visual_family_policy') !== 'RESOLVE_BY_INTENT') {
+    deny('THE_PARTY_EDITION_VISUAL_FAMILY_POLICY_MISMATCH');
+  }
+
+  const status = parseEnvironmentDecisionStatus(value('environment_status'));
+  const rawEnvironment = value('the_party_environment');
+  const environment = rawEnvironment ? parseEnvironment(rawEnvironment) : undefined;
+  const decisionSource = value('environment_decision_source') || undefined;
+  const decisionAt = value('environment_decision_at') || undefined;
+  const decisionBy = value('environment_decision_by') || undefined;
+
+  if (status === 'DECIDED') {
+    if (!environment || !decisionSource || !decisionAt || !decisionBy) {
+      deny('THE_PARTY_EDITION_ENVIRONMENT_DECISION_EVIDENCE_REQUIRED');
+    }
+    if (!Number.isFinite(Date.parse(decisionAt))) {
+      deny('THE_PARTY_EDITION_ENVIRONMENT_DECISION_AT_INVALID');
+    }
+  } else if (environment) {
+    deny('THE_PARTY_EDITION_ENVIRONMENT_PRESENT_WITHOUT_DECISION');
+  }
+
+  return {
+    editionId,
+    ...(environment ? { environment } : {}),
+    status,
+    ...(decisionSource ? { decisionSource } : {}),
+    ...(decisionAt ? { decisionAt } : {}),
+    ...(decisionBy ? { decisionBy } : {}),
+  };
+}
+
+function reconcileEditionContext(
+  content: ParsedContentRecord,
+  edition: EditionContextRecord,
+): ThePartyContentOrchestrationRecord {
+  const persistedVisualStandardStatus = content.visualStandardStatus;
+
+  if (content.standardId === THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID) {
+    return {
+      ...content,
+      editionEnvironmentStatus: edition.status,
+      persistedVisualStandardStatus,
+    };
+  }
+
+  if (content.environment) {
+    if (edition.status === 'DECIDED' && edition.environment !== content.environment) {
+      deny('THE_PARTY_CONTENT_EDITION_ENVIRONMENT_CONFLICT');
+    }
+    return {
+      ...content,
+      environmentSource: 'CONTENT_ITEM',
+      editionEnvironmentStatus: edition.status,
+      persistedVisualStandardStatus,
+    };
+  }
+
+  if (edition.status === 'DECIDED' && edition.environment) {
+    return {
+      ...content,
+      environment: edition.environment,
+      environmentSource: 'EDITION_CONTEXT',
+      editionEnvironmentStatus: edition.status,
+      visualStandardStatus: 'RESOLVED',
+      persistedVisualStandardStatus,
+    };
+  }
+
+  return {
+    ...content,
+    editionEnvironmentStatus: edition.status,
+    persistedVisualStandardStatus,
+  };
+}
+
 function expectedStandardForIntent(intent: ThePartyCreativeIntent): ThePartyVisualStandardId {
   if (NETWORKS_INTENTS.has(intent)) return THE_PARTY_HYBRID_NETWORKS_STANDARD_ID;
   if (MINIMALIST_INTENTS.has(intent)) return THE_PARTY_HYBRID_MINIMALIST_STANDARD_ID;
@@ -337,6 +454,13 @@ function parseIntent(value: string): ThePartyCreativeIntent {
 function parseEnvironment(value: string): ThePartyEnvironment {
   if (value === 'INTERNATIONAL' || value === 'NATIONAL') return value;
   deny('THE_PARTY_CONTENT_ENVIRONMENT_INVALID');
+}
+
+function parseEnvironmentDecisionStatus(value: string): ThePartyEnvironmentDecisionStatus {
+  if (value === 'PENDING_DECISION' || value === 'DECIDED' || value === 'NOT_REQUIRED') {
+    return value;
+  }
+  deny('THE_PARTY_EDITION_ENVIRONMENT_STATUS_INVALID');
 }
 
 function parseStandardId(value: string): ThePartyVisualStandardId {
@@ -367,12 +491,15 @@ function parseBoolean(value: string): boolean {
   deny('THE_PARTY_CONTENT_EXACT_BINDING_INVALID');
 }
 
-function buildHeaderIndex(row: readonly unknown[]): ReadonlyMap<string, number> {
+function buildHeaderIndex(
+  row: readonly unknown[],
+  duplicateErrorPrefix: string,
+): ReadonlyMap<string, number> {
   const index = new Map<string, number>();
   row.forEach((entry, column) => {
     const header = cell(entry);
     if (!header) return;
-    if (index.has(header)) deny(`THE_PARTY_CONTENT_ORCHESTRATION_DUPLICATE_COLUMN:${header}`);
+    if (index.has(header)) deny(`${duplicateErrorPrefix}:${header}`);
     index.set(header, column);
   });
   return index;
