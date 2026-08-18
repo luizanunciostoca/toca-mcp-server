@@ -5,7 +5,7 @@
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
-    "operation": "ALL_TOCA_OPERATIONS",
+    "operation": "ALL",
     "channel": "ALL",
     "format": ["VIDEO", "REEL"]
   },
@@ -26,6 +26,7 @@
     "officialLogoOverlayOnly": true,
     "aiLogoReconstructionForbidden": true,
     "exactOutputHashRequired": true,
+    "providerAssetLocatorRequiredBeforePublication": true,
     "publicationMayNotReencodeOrRebuildWithoutNewManifest": true
   },
   "generativeException": {
@@ -45,7 +46,8 @@
       "ARCHITECTURE_DRIFT",
       "SCENE_INVENTION",
       "MISSING_OUTPUT_HASH",
-      "MISSING_EXACT_ASSET_BINDING"
+      "MISSING_EXACT_ASSET_BINDING",
+      "MISSING_PROVIDER_ASSET_LOCATOR"
     ]
   }
 }
