@@ -112,6 +112,15 @@ export class GoogleSheetsCreativeTruthRegistry {
     return row ? parseVenueAsset(row) : undefined;
   }
 
+  async getVenueAssetBySourceAssetId(sourceAssetId: string): Promise<VenueAsset | undefined> {
+    const normalizedSourceAssetId = sourceAssetId.trim();
+    if (!normalizedSourceAssetId) return undefined;
+    const rows = await this.client.readRange(this.spreadsheetId, 'VENUE_VISUALS!A2:P2000');
+    const matches = rows.filter((candidate) => cell(candidate[1]) === normalizedSourceAssetId);
+    if (matches.length !== 1) return undefined;
+    return parseVenueAsset(matches[0]!);
+  }
+
   async listVideoShots(operation?: string): Promise<readonly VideoShot[]> {
     const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
     return rows
