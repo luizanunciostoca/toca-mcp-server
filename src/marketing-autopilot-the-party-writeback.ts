@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
@@ -7,7 +6,6 @@ import { GoogleSheetsThePartyContentWriteback } from './providers/google-sheets/
 const args = parseArgs(process.argv.slice(2));
 const manifest = JSON.parse(await readFile(args.manifest, 'utf8')) as unknown;
 const outputBytes = await readFile(args.output);
-const observedOutputSha256 = createHash('sha256').update(outputBytes).digest('hex');
 
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
 const secrets = new EnvironmentSecretResolver(process.env);
@@ -19,7 +17,7 @@ const writeback = new GoogleSheetsThePartyContentWriteback(sheets);
 const result = await writeback.writeFinalCreativeTruthEvidence({
   contentItemId: args.contentItemId,
   manifest,
-  observedOutputSha256,
+  outputBytes,
 });
 
 process.stdout.write(
