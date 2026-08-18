@@ -25,6 +25,7 @@
     "enhancementProvenanceRequired": true,
     "videoRealPlusEnhancement": "FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE",
     "videoEnhancementFailure": "VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED",
+    "videoGenerativeException": "UNSUPPORTED_V1",
     "exactApprovedAssetMustBePublished": true,
     "failClosed": true
   },
