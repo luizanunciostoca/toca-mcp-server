@@ -183,10 +183,11 @@ export class GoogleSheetsCreativeTruthRegistry {
       this.spreadsheetId,
       'GENERATIVE_EXCEPTIONS!A2:N1000',
     );
-    const row = rows.find(
+    const matches = rows.filter(
       (candidate) => cell(candidate[1]) === contentItemId && cell(candidate[11]) === 'APPROVED',
     );
-    if (!row) return undefined;
+    if (matches.length !== 1) return undefined;
+    const row = matches[0]!;
     const expiresAt = cell(row[12]);
     return generativeExceptionApprovalSchema.parse({
       exceptionId: cell(row[0]),
