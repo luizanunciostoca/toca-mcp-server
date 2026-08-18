@@ -81,6 +81,8 @@ for (const marker of [
   'LocalSunsetStoryRenderer',
   'input.standard.standardId === SUNSET_STORY_STANDARD_ID',
   'resolveSunsetTemplateClass(input)',
+  'SUNSET_STORY_TEMPLATE_CLASSES.has(input.sunsetTemplateClass)',
+  "throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED'",
 ]) {
   if (!storyComposer.includes(marker)) {
     fail(`Story routing can bypass dedicated Sunset renderer: ${marker}`);
@@ -91,6 +93,7 @@ for (const marker of [
   'fails closed when any mandatory Sunset sponsor asset is absent',
   'fails closed when the caller omits a mandatory brand from requiredBrands',
   'rejects stale Sunset Story standard versions instead of silently rendering them',
+  'rejects unknown Sunset template classes before invoking the renderer',
   "standardVersion: '1.2'",
 ]) {
   if (!tests.includes(marker)) {
