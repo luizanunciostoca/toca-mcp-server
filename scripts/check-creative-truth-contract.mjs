@@ -37,7 +37,8 @@ if (
   policy.rules?.architecturalInventionAllowed !== false ||
   policy.rules?.environmentDriftAllowed !== false ||
   policy.rules?.failClosed !== true ||
-  policy.publicationBoundary?.exactAssetBindingRequired !== true
+  policy.publicationBoundary?.exactAssetBindingRequired !== true ||
+  policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true
 ) {
   fail('Creative Truth parent policy violates the fail-closed contract');
 }
@@ -153,6 +154,7 @@ requireIncludes('src/providers/local/local-video-composer.ts', [
   'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
   'VIDEO_SHOT_MASTER_HASH_MISMATCH',
   'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
+  'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
   'LocalVideoEditManifest',
   'VIDEO_EDIT_MANIFEST_INCOMPLETE',
   'exactMasterByteBinding',
