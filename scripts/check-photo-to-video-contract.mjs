@@ -17,6 +17,7 @@ const requiredFiles = [
   'test/photo-to-video-contract.test.ts',
   'test/controlled-photo-to-video-generation.test.ts',
   'test/controlled-photo-to-video-finalization.test.ts',
+  'test/gcs-photo-to-video-artifact-store.test.ts',
   'test/photo-to-video-content-writeback.test.ts',
   'test/openai-scene-continuation-video-provider.test.ts',
   'docs/architecture/photo-to-video-routes-v1.md',
@@ -35,6 +36,9 @@ requireIncludes('control/photo-to-video-policy.v1.json', [
   'fullSyntheticVenueVideoWithoutSourceImage',
   'durableCandidateArtifactRequired',
   'artifactReadbackRequiredBeforeFinalization',
+  'sourceImageComparedRequired',
+  'durableEvidenceRefRequired',
+  'durableFinalArtifactRefRequired',
   'UNSUPPORTED_V1',
 ]);
 
@@ -47,6 +51,14 @@ requireIncludes('src/contracts/photo-to-video.ts', [
   'validatedAt: z.string().trim().min(1)',
   'artifactRef:',
   'artifactObjectName:',
+  'PHOTO_TO_VIDEO_ARTIFACT_REF_OBJECT_MISMATCH',
+  'thePartyEditionId:',
+  'thePartyIntent:',
+  'thePartyEnvironment:',
+  'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_REQUIRED',
+  'heroBrandAssetId:',
+  'heroBrandDriveFileId:',
+  'heroBrandSha256:',
   'finalArtifactRef:',
   'sourceImageCompared: z.literal(true)',
   'architectureDriftDetected: z.literal(false)',
@@ -98,6 +110,7 @@ requireIncludes('src/providers/gcp/gcs-photo-to-video-artifact-store.ts', [
   'GcsPublicationAssetDelivery',
   'PHOTO_TO_VIDEO_ARTIFACT_STAGE_HASH_MISMATCH',
   'PHOTO_TO_VIDEO_ARTIFACT_READBACK_HASH_MISMATCH',
+  'PHOTO_TO_VIDEO_ARTIFACT_REF_BUCKET_MISMATCH',
   'loadExact',
 ]);
 
@@ -116,6 +129,7 @@ requireIncludes('src/providers/openai/openai-scene-continuation-video-provider.t
   '/content',
   'sora-2-pro',
   'approval.sourceAssetId !== request.sourceAssetId',
+  'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID',
   'Do not generate, redraw, repair or hallucinate any logo',
   'requiresSceneContinuationFidelityGate: true',
 ]);
@@ -128,8 +142,12 @@ requireIncludes('src/providers/local/local-photo-to-video-brand-composer.ts', [
 
 requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
   'ControlledPhotoToVideoGenerationService',
+  'const createdAt = trustedNow(this.now)',
   'registry.resolve(request.contentItemId, request.routeType)',
   'brandLoader.load',
+  'heroBrandSha256',
+  'thePartyEditionId:',
+  'thePartyIntent:',
   'artifactStore.store',
   'candidateArtifactRef: manifest.artifactRef',
   'writeback.writeCandidate',
@@ -139,6 +157,13 @@ requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
 
 requireIncludes('src/creative/controlled-photo-to-video-finalization.ts', [
   'ControlledPhotoToVideoFinalizationService',
+  'assertReviewTime(',
+  'PHOTO_TO_VIDEO_REVIEW_TIME_INVALID',
+  'assertPartyContext(',
+  'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED',
+  'sourceLoader.load',
+  'brandLoader.load',
+  'PHOTO_TO_VIDEO_HERO_BRAND_CONTEXT_CHANGED',
   'artifactStore.loadExact',
   'PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH',
   'PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH',
@@ -162,6 +187,8 @@ requireIncludes('src/marketing-autopilot-video-finalize.ts', [
   'ControlledPhotoToVideoFinalizationService',
   'GoogleSheetsPhotoToVideoContentWriteback',
   'GcsPhotoToVideoArtifactStore',
+  'GoogleDriveCreativeVideoSourceLoader',
+  'GoogleDriveCreativeTruthBrandAssetLoader',
   'VIDEO_FINALIZE_CALLER_TIME_FORBIDDEN',
   'VIDEO_FINALIZE_CALLER_OUTPUT_FORBIDDEN',
   'publicationAuthorized: false',
@@ -172,11 +199,19 @@ requireIncludes('test/controlled-photo-to-video-generation.test.ts', [
   'candidateArtifactRef: artifactRef',
   'invocationCallOrder',
   'does not write GENERATED_REVIEW_REQUIRED state when durable artifact persistence fails',
+  'fails before canonical/provider work when the trusted clock is invalid',
 ]);
 requireIncludes('test/controlled-photo-to-video-finalization.test.ts', [
-  'finalizes only the durable exact reviewed bytes',
+  'finalizes only the durable exact reviewed bytes after source and official brand revalidation',
+  'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED',
+  'PHOTO_TO_VIDEO_REVIEW_TIME_INVALID',
   'loadExact',
   'finalArtifactRef',
+]);
+requireIncludes('test/gcs-photo-to-video-artifact-store.test.ts', [
+  'stages exact candidate bytes then performs full-SHA durable readback',
+  'PHOTO_TO_VIDEO_ARTIFACT_READBACK_HASH_MISMATCH',
+  'PHOTO_TO_VIDEO_ARTIFACT_REF_BUCKET_MISMATCH',
 ]);
 requireIncludes('test/photo-to-video-content-writeback.test.ts', [
   'video_candidate_artifact_ref',
@@ -186,10 +221,13 @@ requireIncludes('test/photo-to-video-content-writeback.test.ts', [
 requireIncludes('test/photo-to-video-contract.test.ts', [
   'explicit source-to-output evidence',
   'durable evidence reference',
+  'disagreement between artifactRef and artifactObjectName',
+  'The Party Hybrid Networks',
 ]);
 requireIncludes('test/openai-scene-continuation-video-provider.test.ts', [
   'input_reference',
   'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
+  'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID',
 ]);
 
 requireIncludes('package.json', [
