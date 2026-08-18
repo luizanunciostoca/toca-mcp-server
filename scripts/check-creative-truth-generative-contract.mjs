@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 const requiredFiles = [
   'src/providers/openai/creative-truth-openai-image-generator.ts',
   'test/creative-truth-openai-image-generator.test.ts',
+  'test/creative-truth-registry.test.ts',
 ];
 
 for (const path of requiredFiles) {
@@ -78,7 +79,8 @@ requireIncludes('src/creative/creative-truth.ts', [
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
   'getApprovedGenerativeException',
   'getVenueAssetBySourceAssetId',
-  'matches.length !== 1',
+  'const matches = rows.filter(',
+  'if (matches.length !== 1) return undefined',
 ]);
 
 requireIncludes('test/creative-truth-openai-image-generator.test.ts', [
@@ -99,6 +101,11 @@ requireIncludes('test/creative-truth-openai-image-generator.test.ts', [
   'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
   'requiresPostGenerationHumanReview',
   'readyForFinalComposition',
+]);
+
+requireIncludes('test/creative-truth-registry.test.ts', [
+  'resolves a venue source asset only when canonical identity is unique',
+  'resolves exactly one approved generative exception and rejects approval ambiguity',
 ]);
 
 console.log('Creative Truth static generative contract OK');
