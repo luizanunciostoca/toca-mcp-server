@@ -36,6 +36,9 @@ if (
   policy.rules?.aiLogoReconstructionAllowed !== false ||
   policy.rules?.architecturalInventionAllowed !== false ||
   policy.rules?.environmentDriftAllowed !== false ||
+  policy.rules?.enhancementProvenanceRequired !== true ||
+  policy.rules?.videoRealPlusEnhancement !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
+  policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
   policy.rules?.failClosed !== true ||
   policy.publicationBoundary?.exactAssetBindingRequired !== true ||
   policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true
@@ -71,6 +74,9 @@ if (
 
 requireIncludes('src/contracts/creative-truth.ts', [
   'creativeTruthPolicySchema',
+  'enhancementProvenanceRequired: z.literal(true)',
+  "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
+  "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
   'creativeEnhancementProvenanceSchema',
   'policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID)',
   "creativeMode: z.literal('REAL_PLUS_ENHANCEMENT')",
@@ -100,6 +106,9 @@ requireIncludes('src/creative/creative-truth-resolver.ts', [
 ]);
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
+  'POLICY!A2:Q20',
+  'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
+  'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
   'VIDEO_SHOTS!A2:Q2000',
   'getVideoShot',
   'listVideoShots',
