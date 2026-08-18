@@ -9,12 +9,14 @@ import type { PhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-vi
 import type { CreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import type { CreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
 import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
+import type { PhotoToVideoParentPolicyGuard } from '../providers/google-sheets/photo-to-video-policy-guard.js';
 import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
 import type { LocalPhotoMotionVideoComposer } from '../providers/local/local-photo-motion-video-composer.js';
 import type { LocalPhotoToVideoBrandComposer } from '../providers/local/local-photo-to-video-brand-composer.js';
 import type { OpenAiSceneContinuationVideoProvider } from '../providers/openai/openai-scene-continuation-video-provider.js';
 
 export interface ControlledPhotoToVideoGenerationOptions {
+  readonly policyGuard: PhotoToVideoParentPolicyGuard;
   readonly registry: PhotoToVideoRegistry;
   readonly writeback: PhotoToVideoContentWriteback;
   readonly artifactStore: PhotoToVideoArtifactStore;
@@ -61,6 +63,7 @@ export class ControlledPhotoToVideoGenerationService {
       );
     }
     const createdAt = trustedNow(this.now);
+    await this.options.policyGuard.assertCanonical(request.routeType);
 
     const resolved = await this.options.registry.resolve(request.contentItemId, request.routeType);
     const masterDriveFileId = resolved.venueAsset.masterDriveFileId;
