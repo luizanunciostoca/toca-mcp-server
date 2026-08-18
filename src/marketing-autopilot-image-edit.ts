@@ -34,7 +34,35 @@ process.stdout.write(
     editMode: result.editMode,
     editorProvider: result.editorProvider,
     pipelineVersion: 'pipelineVersion' in result ? result.pipelineVersion : undefined,
+    restorationPolicyId:
+      'restorationPolicyId' in result ? result.restorationPolicyId : undefined,
+    restorationProfile:
+      'restorationProfile' in result ? result.restorationProfile : undefined,
     requestedScale: 'requestedScale' in result ? result.requestedScale : undefined,
+    outputLongEdgePixels:
+      'outputLongEdgePixels' in result ? result.outputLongEdgePixels : undefined,
+    stillMasterFormat: 'stillMasterFormat' in result ? result.stillMasterFormat : undefined,
+    proResApplicability:
+      'proResApplicability' in result ? result.proResApplicability : undefined,
+    identityLock: 'identityLock' in result ? result.identityLock : undefined,
+    compositionLock: 'compositionLock' in result ? result.compositionLock : undefined,
+    structureLock: 'structureLock' in result ? result.structureLock : undefined,
+    backgroundLock: 'backgroundLock' in result ? result.backgroundLock : undefined,
+    generativeDetailSynthesisUsed:
+      'generativeDetailSynthesisUsed' in result ? result.generativeDetailSynthesisUsed : undefined,
+    semanticAlterationDetected:
+      'semanticAlterationDetected' in result ? result.semanticAlterationDetected : undefined,
+    restorationConfidence:
+      'restorationConfidence' in result ? result.restorationConfidence : undefined,
+    textDetailConfidence:
+      'textDetailConfidence' in result ? result.textDetailConfidence : undefined,
+    iconDetailConfidence:
+      'iconDetailConfidence' in result ? result.iconDetailConfidence : undefined,
+    microDetailConfidence:
+      'microDetailConfidence' in result ? result.microDetailConfidence : undefined,
+    reviewRequiredReason:
+      'reviewRequiredReason' in result ? result.reviewRequiredReason : undefined,
+    promotionEligible: 'promotionEligible' in result ? result.promotionEligible : undefined,
     inputFidelity: 'inputFidelity' in result ? result.inputFidelity : undefined,
     requestedQuality: 'requestedQuality' in result ? result.requestedQuality : undefined,
     requestedSize: 'requestedSize' in result ? result.requestedSize : undefined,
