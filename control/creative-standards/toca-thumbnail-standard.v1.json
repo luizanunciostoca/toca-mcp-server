@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "TOCA_THUMBNAIL_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "ALL",
+    "channel": "ALL",
+    "format": "THUMBNAIL"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+  },
+  "canvases": [
+    { "width": 1080, "height": 1920, "aspectRatio": "9:16" },
+    { "width": 1080, "height": 1350, "aspectRatio": "4:5" },
+    { "width": 1080, "height": 1080, "aspectRatio": "1:1" }
+  ],
+  "creativeTruth": {
+    "realVenueVerifiedAssetRequiredByDefault": true,
+    "marketingReadyMasterRequired": true,
+    "generativeExceptionRequiresExplicitApproval": true,
+    "syntheticVenueReplacementForbiddenByDefault": true,
+    "architectureInventionForbidden": true,
+    "environmentDriftForbidden": true,
+    "officialBrandAssetsOnly": true,
+    "aiLogoReconstructionForbidden": true,
+    "deterministicTextAndBrandCompositionRequired": true
+  },
+  "r29Boundary": {
+    "videoThumbnailGenerateIsNonFinalRenderIntent": true,
+    "finalThumbnailBytesMustComeFromCreativeTruthComposer": true,
+    "finalThumbnailRequiresRenderManifest": true,
+    "finalThumbnailRequiresOutputSha256": true,
+    "finalThumbnailRequiresBrandIntegrityPass": true,
+    "finalThumbnailRequiresVenueFidelityPass": true,
+    "finalThumbnailRequiresQualityPass": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true,
+    "rejectOn": [
+      "AI_RECREATED_LOGO",
+      "UNVERIFIED_VENUE",
+      "SYNTHETIC_VENUE_REPLACEMENT",
+      "ARCHITECTURE_DRIFT",
+      "ASSET_LINEAGE_MISSING",
+      "TEXT_ILLEGIBLE",
+      "WRONG_DIMENSIONS"
+    ]
+  },
+  "referencePolicy": {
+    "syntheticExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
+    "neverVenueEvidence": true
+  }
+}
