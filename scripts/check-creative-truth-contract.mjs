@@ -56,6 +56,7 @@ console.log('Creative Truth canonical contract + drift guard OK');
 function assertPolicyV13(value) {
   const requiredGates = new Set(value.requiredGates ?? []);
   const generative = value.generativeException ?? {};
+  const photoToVideo = value.photoToVideo ?? {};
   if (
     value.schemaVersion !== '1.3' ||
     value.policyVersion !== '1.3' ||
@@ -72,7 +73,10 @@ function assertPolicyV13(value) {
     value.rules?.enhancementProvenanceRequired !== true ||
     value.rules?.videoRealPlusEnhancement !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
     value.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
-    value.rules?.videoGenerativeException !== 'UNSUPPORTED_V1' ||
+    value.rules?.videoPhotoMotion !== 'ACTIVE_V1' ||
+    value.rules?.videoGenerativeException !== 'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1' ||
+    value.rules?.fullSyntheticVenueVideo !== 'UNSUPPORTED_V1' ||
+    value.rules?.photoToVideoPolicyId !== 'TOCA_PHOTO_TO_VIDEO_POLICY_V1' ||
     value.rules?.exactApprovedAssetMustBePublished !== true ||
     value.rules?.failClosed !== true ||
     generative.explicitApprovalRequired !== true ||
@@ -86,6 +90,18 @@ function assertPolicyV13(value) {
     generative.crossOperationReferenceReuse !== 'FORBIDDEN' ||
     generative.referenceSetOperationMatch !== 'REQUIRED' ||
     generative.minimumVerifiedReferences < 3 ||
+    photoToVideo.policyId !== 'TOCA_PHOTO_TO_VIDEO_POLICY_V1' ||
+    photoToVideo.realPhotoToMotionVideo !== 'ACTIVE_V1' ||
+    photoToVideo.generativeSceneContinuationVideo !== 'EXPLICIT_APPROVAL_AND_RIGHTS_REQUIRED' ||
+    photoToVideo.canonicalSourcePhotoRequired !== true ||
+    photoToVideo.canonicalSourceSha256Required !== true ||
+    photoToVideo.marketingReadyMasterRequired !== true ||
+    photoToVideo.rightsEvidenceRequired !== true ||
+    photoToVideo.likenessConsentRequiredWhenPeoplePresentForSceneContinuation !== true ||
+    photoToVideo.postGenerationHumanReviewRequired !== true ||
+    photoToVideo.sceneContinuationFidelityGateRequired !== true ||
+    photoToVideo.fullSyntheticVenueVideoWithoutCanonicalSourcePhoto !== 'UNSUPPORTED_V1' ||
+    photoToVideo.publicationAuthorizedByGeneration !== false ||
     requiredGates.size !== 3 ||
     !requiredGates.has('BRAND_INTEGRITY') ||
     !requiredGates.has('VENUE_FIDELITY') ||
@@ -162,11 +178,17 @@ function assertStandards(values) {
 
 function assertRuntimeMarkers() {
   requireIncludes('src/contracts/creative-truth.ts', [
+    "schemaVersion: z.literal('1.3')",
+    "policyVersion: z.literal('1.3')",
     "referenceStrategy: z.literal('OPERATION_SCOPED_ONLY_V1')",
     "legacyReferenceSetStatus: z.literal('DEPRECATED')",
     "legacyReferenceSetExecution: z.literal('DENY')",
     "crossOperationReferenceReuse: z.literal('FORBIDDEN')",
     "referenceSetOperationMatch: z.literal('REQUIRED')",
+    "videoPhotoMotion: z.literal('ACTIVE_V1')",
+    "videoGenerativeException: z.literal('SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1')",
+    "photoToVideoPolicyId: z.literal('TOCA_PHOTO_TO_VIDEO_POLICY_V1')",
+    'photoToVideo: z.object({',
     'creativeEnhancementProvenanceSchema',
     'deterministicRenderManifestSchema',
     'creativeTruthPublicationBindingSchema',
@@ -174,6 +196,11 @@ function assertRuntimeMarkers() {
   requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
     "MINIMUM_CREATIVE_TRUTH_POLICY_VERSION = '1.3'",
     'POLICY!A2:AK20',
+    "cell(policy[17]) !== 'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1'",
+    "cell(policy[18]) !== 'OPERATION_SCOPED_ONLY_V1'",
+    "cell(policy[26]) !== 'UNSUPPORTED_V1'",
+    "cell(policy[27]) !== 'TOCA_PHOTO_TO_VIDEO_POLICY_V1'",
+    "cell(policy[28]) !== 'ACTIVE_V1'",
     "cell(policy[29]) !== 'DENY'",
     "cell(policy[34]) !== 'FAIL_CLOSED_NO_FINAL_ASSET'",
     "cell(policy[35]) !== 'ENFORCED'",
