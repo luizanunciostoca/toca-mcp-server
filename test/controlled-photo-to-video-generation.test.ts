@@ -119,8 +119,9 @@ function resolved(): ResolvedPhotoToVideoContext {
 
 function dependencies(storeFailure = false) {
   const writeCandidate = vi.fn(async () => undefined);
+  const resolve = vi.fn(async () => resolved());
   const registry: PhotoToVideoRegistry = {
-    resolve: async () => resolved(),
+    resolve,
     getBrandAsset: async () => brand,
     recordFinalOutput: async () => undefined,
   };
@@ -186,6 +187,7 @@ function dependencies(storeFailure = false) {
     photoMotionComposer,
     sceneContinuationProvider,
     brandComposer,
+    resolve,
     store,
     writeCandidate,
   };
@@ -206,6 +208,9 @@ describe('ControlledPhotoToVideoGenerationService', () => {
 
     expect(result.manifest.artifactRef).toBe(artifactRef);
     expect(result.manifest.outputSha256).toBe(brandedSha256);
+    expect(result.manifest.heroBrandAssetId).toBe(brand.brandAssetId);
+    expect(result.manifest.heroBrandDriveFileId).toBe(brand.driveFileId);
+    expect(result.manifest.heroBrandSha256).toBe(brand.sha256);
     expect(result.manifest.publicationEligible).toBe(false);
     expect(deps.store).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -235,6 +240,24 @@ describe('ControlledPhotoToVideoGenerationService', () => {
         routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
       }),
     ).rejects.toThrow('artifact store unavailable');
+    expect(deps.writeCandidate).not.toHaveBeenCalled();
+  });
+
+  it('fails before canonical/provider work when the trusted clock is invalid', async () => {
+    const deps = dependencies();
+    const service = new ControlledPhotoToVideoGenerationService({
+      ...deps,
+      now: () => new Date(Number.NaN),
+    });
+
+    await expect(
+      service.generate({
+        contentItemId: 'CONTENT-1',
+        routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
+      }),
+    ).rejects.toThrow('PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID');
+    expect(deps.resolve).not.toHaveBeenCalled();
+    expect(deps.store).not.toHaveBeenCalled();
     expect(deps.writeCandidate).not.toHaveBeenCalled();
   });
 });
