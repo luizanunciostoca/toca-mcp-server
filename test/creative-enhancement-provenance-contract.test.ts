@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { creativeEnhancementProvenanceSchema } from '../src/contracts/creative-truth.js';
 
 const valid = {
+  policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+  creativeMode: 'REAL_PLUS_ENHANCEMENT',
   editorProvider: 'OPENAI_IMAGE_EDIT',
   sourceAssetId: 'MM-SUN-0244-V1',
   sourceDriveFileId: 'master-drive',
@@ -13,8 +15,17 @@ const valid = {
 } as const;
 
 describe('Creative enhancement provenance contract', () => {
-  it('accepts a provenance record that binds an enhancement to one exact real master and output', () => {
+  it('accepts a provenance record that binds one exact master/output to the canonical policy mode', () => {
     expect(creativeEnhancementProvenanceSchema.parse(valid)).toEqual(valid);
+  });
+
+  it('rejects provenance from another policy or creative mode', () => {
+    expect(() =>
+      creativeEnhancementProvenanceSchema.parse({ ...valid, policyId: 'OTHER_POLICY' }),
+    ).toThrow();
+    expect(() =>
+      creativeEnhancementProvenanceSchema.parse({ ...valid, creativeMode: 'REAL_COMPOSITE' }),
+    ).toThrow();
   });
 
   it('rejects an enhancement that is not Creative Truth bound', () => {
