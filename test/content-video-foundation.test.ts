@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CreativeTruthPublicationBinding } from '../src/contracts/creative-truth.js';
 import {
   assertContentItemStateTransition,
   planContentRepurpose,
@@ -71,6 +72,47 @@ const timeline: VideoTimeline = {
   ],
   evidence: ['timeline:deterministic'],
 };
+
+function creativeTruthBinding(outputSha256: string): CreativeTruthPublicationBinding {
+  return {
+    policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    standardId: 'TOCA_VIDEO_V1',
+    creativeId: 'asset-derived',
+    outputSha256,
+    brandIntegrityStatus: 'PASSED',
+    venueFidelityStatus: 'PASSED',
+    qualityGateStatus: 'PASSED',
+    assetLocators: [{ kind: 'DRIVE_FILE_ID', value: 'drive-final-video' }],
+    exactAssetBinding: true,
+  };
+}
+
+function exportManifest() {
+  const quality = validateVideoQuality([
+    { gate: 'rights', status: 'PASS', issues: [], evidence: ['rights:ok'] },
+    { gate: 'accessibility', status: 'PASS', issues: [], evidence: ['a11y:ok'] },
+    { gate: 'safe-area', status: 'PASS', issues: [], evidence: ['safe-area:ok'] },
+  ]);
+  const finalAssetSha256 = 'a'.repeat(64);
+  return {
+    exportId: 'export-1',
+    outputType: 'REEL' as const,
+    contentItemId: 'content-1',
+    versionId: 'version-root',
+    lineageRootVersionId: 'version-root',
+    sourceAssetIds: ['asset-original'],
+    derivedAssetId: 'asset-derived',
+    artifactRef: 'drive:artifact',
+    width: 1080,
+    height: 1920,
+    durationMs: 15_000,
+    approvalRef: 'approval:123',
+    quality,
+    finalAssetSha256,
+    creativeTruthBinding: creativeTruthBinding(finalAssetSha256),
+    evidence: ['export:readback'],
+  };
+}
 
 describe('R20/R29 video and content foundation', () => {
   it('preserves original -> derivation lineage across repurposed destinations', () => {
@@ -213,31 +255,23 @@ describe('R20/R29 video and content foundation', () => {
     ).toBe('FAIL');
   });
 
-  it('aggregates hard quality gates and blocks export until approval and quality pass', () => {
-    const quality = validateVideoQuality([
-      { gate: 'rights', status: 'PASS', issues: [], evidence: ['rights:ok'] },
-      { gate: 'accessibility', status: 'PASS', issues: [], evidence: ['a11y:ok'] },
-      { gate: 'safe-area', status: 'PASS', issues: [], evidence: ['safe-area:ok'] },
-    ]);
-    expect(quality.status).toBe('PASS');
+  it('binds final video export to the exact Creative Truth approved asset hash', () => {
+    expect(() => validateExportManifest(exportManifest())).not.toThrow();
     expect(() =>
       validateExportManifest({
-        exportId: 'export-1',
-        outputType: 'REEL',
-        contentItemId: 'content-1',
-        versionId: 'version-root',
-        lineageRootVersionId: 'version-root',
-        sourceAssetIds: ['asset-original'],
-        derivedAssetId: 'asset-derived',
-        artifactRef: 'drive:artifact',
-        width: 1080,
-        height: 1920,
-        durationMs: 15_000,
-        approvalRef: 'approval:123',
-        quality,
-        evidence: ['export:readback'],
+        ...exportManifest(),
+        creativeTruthBinding: creativeTruthBinding('b'.repeat(64)),
       }),
-    ).not.toThrow();
+    ).toThrow('VIDEO_EXPORT_CREATIVE_TRUTH_HASH_MISMATCH');
+    expect(() =>
+      validateExportManifest({
+        ...exportManifest(),
+        creativeTruthBinding: {
+          ...creativeTruthBinding('a'.repeat(64)),
+          exactAssetBinding: false,
+        } as unknown as CreativeTruthPublicationBinding,
+      }),
+    ).toThrow('VIDEO_EXPORT_CREATIVE_TRUTH_BINDING_INVALID');
   });
 
   it('reuses the durable workflow engine and approval gate without a publishing step', () => {
@@ -259,6 +293,8 @@ describe('R20/R29 video and content foundation', () => {
     expect(blueprint.routeId).toBe('R20');
     expect(capabilityIds).toContain('approval.verify');
     expect(capabilityIds).toContain('video.export.reel');
+    expect(capabilityIds).toContain('video.thumbnail.generate');
+    expect(blueprint.steps.find((step) => step.stepId === 'thumbnail')?.name).toContain('non-final');
     expect(capabilityIds).not.toContain('content_item.publish');
     expect(capabilityIds).not.toContain('instagram.publish.reel');
   });
