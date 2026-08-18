@@ -72,7 +72,10 @@ export interface PhotoToVideoOutputEvidenceRecord {
 }
 
 export interface PhotoToVideoRegistry {
-  resolve(contentItemId: string, routeType: PhotoToVideoRouteType): Promise<ResolvedPhotoToVideoContext>;
+  resolve(
+    contentItemId: string,
+    routeType: PhotoToVideoRouteType,
+  ): Promise<ResolvedPhotoToVideoContext>;
   getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
   recordFinalOutput(record: PhotoToVideoOutputEvidenceRecord): Promise<void>;
 }
@@ -85,6 +88,7 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     private readonly client: SpreadsheetValuesClient,
     private readonly creativeTruthSpreadsheetId = PHOTO_TO_VIDEO_CREATIVE_TRUTH_REGISTRY_ID,
     private readonly contentSpreadsheetId = PHOTO_TO_VIDEO_CONTENT_REGISTRY_ID,
+    private readonly now: () => Date = () => new Date(),
   ) {
     this.base = new GoogleSheetsCreativeTruthRegistry(client, {
       spreadsheetId: creativeTruthSpreadsheetId,
@@ -118,6 +122,7 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     assertRights(rights, routeType);
     assertSourceAsset(venueAsset, content);
 
+    let effectiveContent = content;
     if (content.operation === 'THE_PARTY') {
       const partyContext = await this.party.get(content.contentItemId);
       if (partyContext.standardId !== content.inheritedVisualStandardId) {
@@ -126,16 +131,16 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
       if (partyContext.visualStandardStatus === 'BLOCKED_NEEDS_ENVIRONMENT') {
         deny('THE_PARTY_ENVIRONMENT_REQUIRED');
       }
-      content.thePartyContext = partyContext;
+      effectiveContent = { ...content, thePartyContext: partyContext };
     }
 
     let approval: SceneContinuationApproval | undefined;
     if (routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO') {
-      approval = await this.resolveApproval(content, venueAsset, rights);
+      approval = await this.resolveApproval(effectiveContent, venueAsset, rights);
     }
 
     return {
-      content,
+      content: effectiveContent,
       productPolicy,
       standard,
       venueAsset,
@@ -149,23 +154,40 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
   }
 
   async recordFinalOutput(record: PhotoToVideoOutputEvidenceRecord): Promise<void> {
-    const rows = await this.client.readRange(this.creativeTruthSpreadsheetId, VIDEO_OUTPUTS_RANGE);
+    const rows = await this.client.readRange(
+      this.creativeTruthSpreadsheetId,
+      VIDEO_OUTPUTS_RANGE,
+    );
     const headers = headersFor(rows, 'VIDEO_OUTPUTS_SCHEMA_INVALID');
-    const contentIndex = requireHeader(headers, 'content_item_id', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
+    const contentIndex = requireHeader(
+      headers,
+      'content_item_id',
+      'VIDEO_OUTPUTS_SCHEMA_INVALID',
+    );
     const routeIndex = requireHeader(headers, 'route_type', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
     const shaIndex = requireHeader(headers, 'output_sha256', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
     const statusIndex = requireHeader(headers, 'status', 'VIDEO_OUTPUTS_SCHEMA_INVALID');
-    const matches = rows.slice(1).filter(
-      (row) =>
-        cell(row[contentIndex]) === record.contentItemId &&
-        cell(row[routeIndex]) === record.routeType &&
-        cell(row[statusIndex]) === 'VIDEO_CREATIVE_TRUTH_PASSED',
-    );
-    if (matches.some((row) => cell(row[shaIndex]).toLowerCase() === record.outputSha256.toLowerCase())) {
+    const matches = rows
+      .slice(1)
+      .filter(
+        (row) =>
+          cell(row[contentIndex]) === record.contentItemId &&
+          cell(row[routeIndex]) === record.routeType &&
+          cell(row[statusIndex]) === 'VIDEO_CREATIVE_TRUTH_PASSED',
+      );
+    if (
+      matches.some(
+        (row) => cell(row[shaIndex]).toLowerCase() === record.outputSha256.toLowerCase(),
+      )
+    ) {
       return;
     }
     if (matches.length > 0) {
-      throw new ExecutionError('STATE_CONFLICT', 'VIDEO_OUTPUT_DIFFERENT_FINAL_ASSET_ALREADY_RECORDED', false);
+      throw new ExecutionError(
+        'STATE_CONFLICT',
+        'VIDEO_OUTPUT_DIFFERENT_FINAL_ASSET_ALREADY_RECORDED',
+        false,
+      );
     }
     await this.client.appendRow(this.creativeTruthSpreadsheetId, 'VIDEO_OUTPUTS!A:Q', [
       record.outputId,
@@ -193,9 +215,19 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     if (!normalized) deny('PHOTO_TO_VIDEO_CONTENT_ITEM_ID_REQUIRED');
     const rows = await this.client.readRange(this.contentSpreadsheetId, CONTENT_RANGE);
     const headers = headersFor(rows, 'PHOTO_TO_VIDEO_CONTENT_SCHEMA_INVALID');
-    const idIndex = requireHeader(headers, 'content_item_id', 'PHOTO_TO_VIDEO_CONTENT_SCHEMA_INVALID');
+    const idIndex = requireHeader(
+      headers,
+      'content_item_id',
+      'PHOTO_TO_VIDEO_CONTENT_SCHEMA_INVALID',
+    );
     const matches = rows.slice(1).filter((row) => cell(row[idIndex]) === normalized);
-    if (matches.length !== 1) deny(matches.length === 0 ? 'PHOTO_TO_VIDEO_CONTENT_ITEM_NOT_FOUND' : 'PHOTO_TO_VIDEO_CONTENT_ITEM_AMBIGUOUS');
+    if (matches.length !== 1) {
+      deny(
+        matches.length === 0
+          ? 'PHOTO_TO_VIDEO_CONTENT_ITEM_NOT_FOUND'
+          : 'PHOTO_TO_VIDEO_CONTENT_ITEM_AMBIGUOUS',
+      );
+    }
     const row = matches[0]!;
     const value = (name: string) => {
       const index = headers.get(name);
@@ -220,12 +252,24 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     };
   }
 
-  private async resolveProductPolicy(productId: string, operation: string): Promise<ProductVideoPolicy> {
-    const rows = await this.client.readRange(this.creativeTruthSpreadsheetId, PRODUCT_POLICIES_RANGE);
+  private async resolveProductPolicy(
+    productId: string,
+    operation: string,
+  ): Promise<ProductVideoPolicy> {
+    const rows = await this.client.readRange(
+      this.creativeTruthSpreadsheetId,
+      PRODUCT_POLICIES_RANGE,
+    );
     const headers = headersFor(rows, 'PRODUCT_VISUAL_POLICIES_SCHEMA_INVALID');
     const parsed = rows.slice(1).flatMap((row) => {
       const raw = objectFromRow(row, headers);
-      if (raw.product_id !== productId || raw.operation !== operation || raw.status !== 'ACTIVE') return [];
+      if (
+        raw.product_id !== productId ||
+        raw.operation !== operation ||
+        raw.status !== 'ACTIVE'
+      ) {
+        return [];
+      }
       const result = productVideoPolicySchema.safeParse({
         productId: raw.product_id,
         operation: raw.operation,
@@ -247,7 +291,10 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     content: PhotoToVideoContentContext,
     routeType: PhotoToVideoRouteType,
   ): Promise<PhotoToVideoStandard> {
-    const rows = await this.client.readRange(this.creativeTruthSpreadsheetId, VIDEO_STANDARDS_RANGE);
+    const rows = await this.client.readRange(
+      this.creativeTruthSpreadsheetId,
+      VIDEO_STANDARDS_RANGE,
+    );
     const headers = headersFor(rows, 'VIDEO_CREATIVE_STANDARDS_SCHEMA_INVALID');
     const matches = rows.slice(1).flatMap((row) => {
       const raw = objectFromRow(row, headers);
@@ -257,7 +304,9 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
         raw.output_type !== content.outputType ||
         raw.route_type !== routeType ||
         raw.status !== 'ACTIVE_CANONICAL'
-      ) return [];
+      ) {
+        return [];
+      }
       const parsed = photoToVideoStandardSchema.safeParse({
         standardId: raw.standard_id,
         version: raw.version,
@@ -286,12 +335,21 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     return venue;
   }
 
-  private async resolveRights(sourceAssetId: string, operation: string): Promise<PhotoToVideoSourceRights> {
+  private async resolveRights(
+    sourceAssetId: string,
+    operation: string,
+  ): Promise<PhotoToVideoSourceRights> {
     const rows = await this.client.readRange(this.creativeTruthSpreadsheetId, VIDEO_RIGHTS_RANGE);
     const headers = headersFor(rows, 'VIDEO_SOURCE_RIGHTS_SCHEMA_INVALID');
     const matches = rows.slice(1).flatMap((row) => {
       const raw = objectFromRow(row, headers);
-      if (raw.source_asset_id !== sourceAssetId || raw.operation !== operation || raw.status !== 'ACTIVE') return [];
+      if (
+        raw.source_asset_id !== sourceAssetId ||
+        raw.operation !== operation ||
+        raw.status !== 'ACTIVE'
+      ) {
+        return [];
+      }
       const parsed = photoToVideoSourceRightsSchema.safeParse({
         sourceAssetId: raw.source_asset_id,
         operation: raw.operation,
@@ -314,7 +372,10 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
     venueAsset: VenueAsset,
     rights: PhotoToVideoSourceRights,
   ): Promise<SceneContinuationApproval> {
-    const rows = await this.client.readRange(this.creativeTruthSpreadsheetId, VIDEO_EXCEPTIONS_RANGE);
+    const rows = await this.client.readRange(
+      this.creativeTruthSpreadsheetId,
+      VIDEO_EXCEPTIONS_RANGE,
+    );
     const headers = headersFor(rows, 'VIDEO_GENERATIVE_EXCEPTIONS_SCHEMA_INVALID');
     const matches = rows.slice(1).flatMap((row) => {
       const raw = objectFromRow(row, headers);
@@ -341,7 +402,11 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
       return parsed.success ? [parsed.data] : [];
     });
     if (matches.length !== 1) {
-      throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED', false);
+      throw new ExecutionError(
+        'APPROVAL_REQUIRED',
+        'VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED',
+        false,
+      );
     }
     const approval = matches[0]!;
     const masterSha = venueAsset.masterSha256?.toLowerCase();
@@ -353,14 +418,24 @@ export class GoogleSheetsPhotoToVideoRegistry implements PhotoToVideoRegistry {
       approval.sourceSha256.toLowerCase() !== masterSha ||
       approval.allowArchitecturalInvention ||
       approval.allowAiLogoGeneration ||
-      (rights.containsPeople && (!approval.peopleConsentConfirmed || rights.likenessConsentStatus !== 'CONFIRMED'))
+      (rights.containsPeople &&
+        (!approval.peopleConsentConfirmed || rights.likenessConsentStatus !== 'CONFIRMED'))
     ) {
-      throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH', false);
+      throw new ExecutionError(
+        'APPROVAL_REQUIRED',
+        'VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH',
+        false,
+      );
     }
     if (approval.expiresAt) {
       const expiry = Date.parse(approval.expiresAt);
-      if (!Number.isFinite(expiry) || Date.now() >= expiry) {
-        throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_EXPIRED', false);
+      const current = trustedNowMillis(this.now);
+      if (!Number.isFinite(expiry) || current >= expiry) {
+        throw new ExecutionError(
+          'APPROVAL_REQUIRED',
+          'VIDEO_SCENE_CONTINUATION_APPROVAL_EXPIRED',
+          false,
+        );
       }
     }
     return approval;
@@ -404,7 +479,10 @@ function normalizeOutputType(value: string): PhotoToVideoOutputType {
   deny('PHOTO_TO_VIDEO_OUTPUT_TYPE_UNSUPPORTED');
 }
 
-function headersFor(rows: readonly (readonly unknown[])[], error: string): ReadonlyMap<string, number> {
+function headersFor(
+  rows: readonly (readonly unknown[])[],
+  error: string,
+): ReadonlyMap<string, number> {
   if (rows.length === 0) deny(error);
   const map = new Map<string, number>();
   for (const [index, value] of (rows[0] ?? []).entries()) {
@@ -416,13 +494,20 @@ function headersFor(rows: readonly (readonly unknown[])[], error: string): Reado
   return map;
 }
 
-function requireHeader(headers: ReadonlyMap<string, number>, name: string, error: string): number {
+function requireHeader(
+  headers: ReadonlyMap<string, number>,
+  name: string,
+  error: string,
+): number {
   const index = headers.get(name);
   if (index === undefined) deny(`${error}:${name}`);
   return index;
 }
 
-function objectFromRow(row: readonly unknown[], headers: ReadonlyMap<string, number>): Record<string, string> {
+function objectFromRow(
+  row: readonly unknown[],
+  headers: ReadonlyMap<string, number>,
+): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [name, index] of headers.entries()) result[name] = cell(row[index]);
   return result;
@@ -431,7 +516,13 @@ function objectFromRow(row: readonly unknown[], headers: ReadonlyMap<string, num
 function cell(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value.trim();
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value).trim();
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return String(value).trim();
+  }
   throw new Error(`Unsupported spreadsheet value type: ${typeof value}`);
 }
 
@@ -445,7 +536,18 @@ function integer(value: unknown): number {
 }
 
 function splitPipe(value: unknown): string[] {
-  return cell(value).split('|').map((item) => item.trim()).filter(Boolean);
+  return cell(value)
+    .split('|')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function trustedNowMillis(now: () => Date): number {
+  const value = now();
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+    throw new ExecutionError('POLICY_DENIED', 'PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID', false);
+  }
+  return value.getTime();
 }
 
 function deny(message: string): never {
