@@ -4,11 +4,15 @@ import {
   type OperationScopedGenerativeExceptionApproval,
   type TocaGenerativeOperation,
 } from '../contracts/creative-truth-generative-reference-sets.js';
-import type {
-  CreativeTruthGateResult,
-  FidelityEvidence,
-  VenueReference,
+import {
+  fidelityEvidenceSchema,
+  venueReferenceSchema,
+  type CreativeTruthGateResult,
+  type FidelityEvidence,
+  type VenueReference,
 } from '../contracts/creative-truth.js';
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export interface OperationScopedGenerativeFidelityInput {
   readonly contentItemId: string;
@@ -23,12 +27,36 @@ export interface OperationScopedGenerativeFidelityInput {
 export function evaluateOperationScopedGenerativeFidelity(
   input: OperationScopedGenerativeFidelityInput,
 ): CreativeTruthGateResult {
-  const evidence = input.evidence;
+  if (!SHA256_PATTERN.test(input.candidateSha256)) {
+    return failed('FAILED_FIDELITY_EVIDENCE_BINDING', {
+      reason: 'CANDIDATE_SHA_INVALID',
+    });
+  }
+
   const parsedApproval = operationScopedGenerativeExceptionApprovalSchema.safeParse(input.approval);
   if (!parsedApproval.success) {
     return failed('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', {
       reason: 'OPERATION_SCOPED_APPROVAL_INVALID',
     });
+  }
+
+  const parsedReferences = input.references.map((reference) => venueReferenceSchema.safeParse(reference));
+  if (parsedReferences.some((parsed) => !parsed.success)) {
+    return failed('FAILED_GENERATIVE_REFERENCE_MISSING', {
+      reason: 'MALFORMED_REFERENCE_EVIDENCE',
+    });
+  }
+  const references = parsedReferences.map((parsed) => parsed.data);
+
+  let evidence: FidelityEvidence | undefined;
+  if (input.evidence) {
+    const parsedEvidence = fidelityEvidenceSchema.safeParse(input.evidence);
+    if (!parsedEvidence.success) {
+      return failed('FAILED_FIDELITY_EVIDENCE_BINDING', {
+        reason: 'MALFORMED_FIDELITY_EVIDENCE',
+      });
+    }
+    evidence = parsedEvidence.data;
   }
 
   const approval = parsedApproval.data;
@@ -65,7 +93,7 @@ export function evaluateOperationScopedGenerativeFidelity(
     }
   }
 
-  const eligible = input.references.filter(
+  const eligible = references.filter(
     (reference) =>
       reference.referenceSetId === approval.referenceSetId &&
       reference.status === 'ACTIVE' &&
@@ -74,8 +102,13 @@ export function evaluateOperationScopedGenerativeFidelity(
   );
   const eligibleIds = eligible.map((reference) => reference.assetId);
   const uniqueEligibleIds = new Set(eligibleIds);
+  const uniqueReferenceIds = new Set(eligible.map((reference) => reference.referenceId));
   const minimum = Math.max(3, approval.minReferenceCount);
-  if (eligible.length < minimum || uniqueEligibleIds.size !== eligible.length) {
+  if (
+    eligible.length < minimum ||
+    uniqueEligibleIds.size !== eligible.length ||
+    uniqueReferenceIds.size !== eligible.length
+  ) {
     return failed('FAILED_GENERATIVE_REFERENCE_MISSING', {
       referenceSetId: approval.referenceSetId,
       requiredMinimum: minimum,
