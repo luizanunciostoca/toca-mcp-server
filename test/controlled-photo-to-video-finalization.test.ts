@@ -1,26 +1,22 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { BrandAsset } from '../src/contracts/creative-truth.js';
-import { ControlledPhotoToVideoFinalizationService } from '../src/creative/controlled-photo-to-video-finalization.js';
 import type {
   PhotoToVideoCandidateManifest,
   PhotoToVideoReviewEvidence,
 } from '../src/contracts/photo-to-video.js';
+import { ControlledPhotoToVideoFinalizationService } from '../src/creative/controlled-photo-to-video-finalization.js';
 import type { PhotoToVideoArtifactStore } from '../src/providers/gcp/gcs-photo-to-video-artifact-store.js';
-import type {
-  CreativeTruthBrandAssetLoader,
-  LoadedCreativeTruthBrandAsset,
-} from '../src/providers/google-drive/creative-truth-brand-asset-loader.js';
+import type { CreativeTruthBrandAssetLoader } from '../src/providers/google-drive/creative-truth-brand-asset-loader.js';
 import type { CreativeVideoSourceLoader } from '../src/providers/google-drive/creative-video-source-loader.js';
 import type { PhotoToVideoContentWriteback } from '../src/providers/google-sheets/photo-to-video-content-writeback.js';
+import type { PhotoToVideoParentPolicyGuard } from '../src/providers/google-sheets/photo-to-video-policy-guard.js';
 import type {
   PhotoToVideoRegistry,
   ResolvedPhotoToVideoContext,
 } from '../src/providers/google-sheets/photo-to-video-registry.js';
 
-const outputBytes = Uint8Array.from([
-  0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0,
-]);
+const outputBytes = Uint8Array.from([0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0]);
 const outputSha256 = createHash('sha256').update(outputBytes).digest('hex');
 const sourceSha256 = 'a'.repeat(64);
 const heroBrandSha256 = 'd'.repeat(64);
@@ -29,28 +25,18 @@ const artifactRef =
 const artifactObjectName =
   'instagram/photo-motion-review-v1/photo-video-1234567890abcdef12345678-aaaaaaaaaaaaaaaa.mp4';
 
-function tocaBrand(): BrandAsset {
+function brand(party = false): BrandAsset {
   return {
-    brandAssetId: 'BRAND-TOCA-WHITE-V1',
-    brand: 'TOCA_DO_MORCEGO',
+    brandAssetId: party ? 'BRAND-THE-PARTY-WHITE-V1' : 'BRAND-TOCA-WHITE-V1',
+    brand: party ? 'THE_PARTY' : 'TOCA_DO_MORCEGO',
     variant: 'WHITE',
-    driveFileId: 'brand-drive',
-    fileName: 'TOCA_WHITE.png',
+    driveFileId: party ? 'party-brand-drive' : 'brand-drive',
+    fileName: party ? 'THE_PARTY_WHITE.png' : 'TOCA_WHITE.png',
     contentType: 'image/png',
     integrityMode: 'SHA256_PINNED',
     sha256: heroBrandSha256,
     status: 'ACTIVE_APPROVED',
     aiReconstructionAllowed: false,
-  };
-}
-
-function partyBrand(): BrandAsset {
-  return {
-    ...tocaBrand(),
-    brandAssetId: 'BRAND-THE-PARTY-WHITE-V1',
-    brand: 'THE_PARTY',
-    driveFileId: 'party-brand-drive',
-    fileName: 'THE_PARTY_WHITE.png',
   };
 }
 
@@ -174,28 +160,24 @@ function partyResolved(environment: 'INTERNATIONAL' | 'NATIONAL'): ResolvedPhoto
       masterAssetId: 'MM-TP-0130-V1',
       operation: 'THE_PARTY',
     },
-    rights: {
-      ...base.rights,
-      sourceAssetId: 'TP-0130',
-      operation: 'THE_PARTY',
-    },
+    rights: { ...base.rights, sourceAssetId: 'TP-0130', operation: 'THE_PARTY' },
   };
 }
 
-function candidate(): PhotoToVideoCandidateManifest {
+function candidate(party = false): PhotoToVideoCandidateManifest {
   return {
     schemaVersion: 1,
     status: 'GENERATED_REVIEW_REQUIRED',
     policyId: 'TOCA_PHOTO_TO_VIDEO_POLICY_V1',
-    contentItemId: 'CONTENT-1',
-    productId: 'SUNSET',
-    operation: 'SUNSET',
+    contentItemId: party ? 'TP-CONTENT-1' : 'CONTENT-1',
+    productId: party ? 'THE_PARTY' : 'SUNSET',
+    operation: party ? 'THE_PARTY' : 'SUNSET',
     outputType: 'REEL',
     routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
-    standardId: 'SUNSET_REEL_PHOTO_MOTION_V1',
+    standardId: party ? 'THE_PARTY_REEL_PHOTO_MOTION_V1' : 'SUNSET_REEL_PHOTO_MOTION_V1',
     standardVersion: '1.0',
-    inheritedVisualStandardId: 'SUNSET_FEED_V1',
-    sourceAssetId: 'SUN-0244',
+    inheritedVisualStandardId: party ? 'THE_PARTY_HYBRID_NETWORKS_V1' : 'SUNSET_FEED_V1',
+    sourceAssetId: party ? 'TP-0130' : 'SUN-0244',
     sourceDriveFileId: 'master-drive',
     sourceSha256,
     providerCandidateSha256: 'c'.repeat(64),
@@ -206,33 +188,22 @@ function candidate(): PhotoToVideoCandidateManifest {
     size: '720x1280',
     seconds: 8,
     provider: 'LOCAL_FFMPEG',
-    heroBrandAssetId: 'BRAND-TOCA-WHITE-V1',
-    heroBrandDriveFileId: 'brand-drive',
+    ...(party
+      ? {
+          thePartyEditionId: 'TP-EDITION-1',
+          thePartyIntent: 'EVENT',
+          thePartyEnvironment: 'INTERNATIONAL' as const,
+        }
+      : {}),
+    heroBrandAssetId: party ? 'BRAND-THE-PARTY-WHITE-V1' : 'BRAND-TOCA-WHITE-V1',
+    heroBrandDriveFileId: party ? 'party-brand-drive' : 'brand-drive',
     heroBrandSha256,
-    brandAssetIds: ['BRAND-TOCA-WHITE-V1'],
+    brandAssetIds: [party ? 'BRAND-THE-PARTY-WHITE-V1' : 'BRAND-TOCA-WHITE-V1'],
     exactAssetBinding: true,
     requiresPostGenerationHumanReview: true,
     requiresSceneContinuationFidelityGate: false,
     publicationEligible: false,
     createdAt: '2026-08-18T07:00:00.000Z',
-  };
-}
-
-function partyCandidate(): PhotoToVideoCandidateManifest {
-  return {
-    ...candidate(),
-    contentItemId: 'TP-CONTENT-1',
-    productId: 'THE_PARTY',
-    operation: 'THE_PARTY',
-    standardId: 'THE_PARTY_REEL_PHOTO_MOTION_V1',
-    inheritedVisualStandardId: 'THE_PARTY_HYBRID_NETWORKS_V1',
-    sourceAssetId: 'TP-0130',
-    thePartyEditionId: 'TP-EDITION-1',
-    thePartyIntent: 'EVENT',
-    thePartyEnvironment: 'INTERNATIONAL',
-    heroBrandAssetId: 'BRAND-THE-PARTY-WHITE-V1',
-    heroBrandDriveFileId: 'party-brand-drive',
-    brandAssetIds: ['BRAND-THE-PARTY-WHITE-V1'],
   };
 }
 
@@ -255,27 +226,40 @@ function review(): PhotoToVideoReviewEvidence {
   };
 }
 
-function registry(current = resolved()) {
+function dependencies(current = resolved(), policyFailure?: string) {
+  const assertCanonical = vi.fn(async () => {
+    if (policyFailure) throw new Error(policyFailure);
+  });
+  const resolve = vi.fn(async () => current);
   const recordFinalOutput = vi.fn(async () => undefined);
-  const brand = current.content.operation === 'THE_PARTY' ? partyBrand() : tocaBrand();
-  const value: PhotoToVideoRegistry = {
-    resolve: async () => current,
-    getBrandAsset: async () => brand,
+  const writeFinal = vi.fn(async () => undefined);
+  const loadExact = vi.fn(async () => outputBytes);
+  const sourceLoad = vi.fn(async () => ({
+    bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+    contentType: 'image/jpeg' as const,
+    driveFileId: 'master-drive',
+    sha256: sourceSha256,
+  }));
+  const currentBrand = brand(current.content.operation === 'THE_PARTY');
+  const brandLoad = vi.fn(async () => ({
+    registry: currentBrand,
+    bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    contentType: 'image/png' as const,
+    driveFileId: currentBrand.driveFileId,
+    aiGenerated: false as const,
+  }));
+
+  const policyGuard: PhotoToVideoParentPolicyGuard = { assertCanonical };
+  const registry: PhotoToVideoRegistry = {
+    resolve,
+    getBrandAsset: async () => currentBrand,
     recordFinalOutput,
   };
-  return { value, recordFinalOutput };
-}
-
-function writeback() {
-  const writeCandidate = vi.fn(async () => undefined);
-  const writeFinal = vi.fn(async () => undefined);
-  const value: PhotoToVideoContentWriteback = { writeCandidate, writeFinal };
-  return { value, writeCandidate, writeFinal };
-}
-
-function artifactStore(bytes = outputBytes) {
-  const loadExact = vi.fn(async () => bytes);
-  const value: PhotoToVideoArtifactStore = {
+  const writeback: PhotoToVideoContentWriteback = {
+    writeCandidate: async () => undefined,
+    writeFinal,
+  };
+  const artifactStore: PhotoToVideoArtifactStore = {
     loadExact,
     store: async () => ({
       artifactRef,
@@ -285,127 +269,89 @@ function artifactStore(bytes = outputBytes) {
       contentType: 'video/mp4',
     }),
   };
-  return { value, loadExact };
-}
-
-function sourceLoader() {
-  const load = vi.fn(async () => ({
-    bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
-    contentType: 'image/jpeg' as const,
-    driveFileId: 'master-drive',
-    sha256: sourceSha256,
-  }));
-  return { value: { load } satisfies CreativeVideoSourceLoader, load };
-}
-
-function brandLoader(brand = tocaBrand()) {
-  const loaded: LoadedCreativeTruthBrandAsset = {
-    registry: brand,
-    bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    contentType: 'image/png',
-    driveFileId: brand.driveFileId,
-    aiGenerated: false,
+  const sourceLoader: CreativeVideoSourceLoader = { load: sourceLoad };
+  const brandLoader: CreativeTruthBrandAssetLoader = { load: brandLoad };
+  return {
+    options: { policyGuard, registry, writeback, artifactStore, sourceLoader, brandLoader },
+    assertCanonical,
+    resolve,
+    recordFinalOutput,
+    writeFinal,
+    loadExact,
+    sourceLoad,
+    brandLoad,
   };
-  const load = vi.fn(async () => loaded);
-  return { value: { load } satisfies CreativeTruthBrandAssetLoader, load };
 }
 
 describe('ControlledPhotoToVideoFinalizationService', () => {
-  it('finalizes only the durable exact reviewed bytes after source and official brand revalidation', async () => {
-    const fake = registry();
-    const state = writeback();
-    const artifacts = artifactStore();
-    const source = sourceLoader();
-    const brand = brandLoader();
+  it('finalizes only durable exact reviewed bytes after policy source and official brand revalidation', async () => {
+    const deps = dependencies();
     const service = new ControlledPhotoToVideoFinalizationService({
-      registry: fake.value,
-      writeback: state.value,
-      artifactStore: artifacts.value,
-      sourceLoader: source.value,
-      brandLoader: brand.value,
+      ...deps.options,
       now: () => new Date('2026-08-18T08:00:00.000Z'),
     });
-    const result = await service.finalize({
-      candidateManifest: candidate(),
-      reviewEvidence: review(),
-    });
-    expect(result.status).toBe('VIDEO_CREATIVE_TRUTH_PASSED');
-    expect(result.publicationAuthorized).toBe(false);
-    expect(result.readyForPrepare).toBe(true);
-    expect(result.finalArtifactRef).toBe(artifactRef);
-    expect(source.load).toHaveBeenCalledWith({
+    const result = await service.finalize({ candidateManifest: candidate(), reviewEvidence: review() });
+
+    expect(deps.assertCanonical).toHaveBeenCalledWith('REAL_PHOTO_TO_MOTION_VIDEO');
+    expect(deps.assertCanonical.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.resolve.mock.invocationCallOrder[0]!,
+    );
+    expect(deps.sourceLoad).toHaveBeenCalledWith({
       driveFileId: 'master-drive',
       expectedSha256: sourceSha256,
     });
-    expect(brand.load).toHaveBeenCalledTimes(1);
-    expect(artifacts.loadExact).toHaveBeenCalledWith(artifactRef, outputSha256);
-    expect(fake.recordFinalOutput).toHaveBeenCalledTimes(1);
-    expect(state.writeFinal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        contentItemId: 'CONTENT-1',
-        candidateSha256: outputSha256,
-        finalAssetSha256: outputSha256,
-        finalArtifactRef: artifactRef,
-      }),
+    expect(deps.brandLoad).toHaveBeenCalledTimes(1);
+    expect(deps.loadExact).toHaveBeenCalledWith(artifactRef, outputSha256);
+    expect(result.finalArtifactRef).toBe(artifactRef);
+    expect(result.publicationAuthorized).toBe(false);
+    expect(deps.recordFinalOutput).toHaveBeenCalledTimes(1);
+    expect(deps.writeFinal).toHaveBeenCalledWith(
+      expect.objectContaining({ finalAssetSha256: outputSha256, finalArtifactRef: artifactRef }),
     );
+  });
+
+  it('fails closed when the canonical parent policy is no longer valid', async () => {
+    const deps = dependencies(resolved(), 'PHOTO_TO_VIDEO_PARENT_POLICY_DRIFT');
+    const service = new ControlledPhotoToVideoFinalizationService({
+      ...deps.options,
+      now: () => new Date('2026-08-18T08:00:00.000Z'),
+    });
+    await expect(
+      service.finalize({ candidateManifest: candidate(), reviewEvidence: review() }),
+    ).rejects.toThrow('PHOTO_TO_VIDEO_PARENT_POLICY_DRIFT');
+    expect(deps.resolve).not.toHaveBeenCalled();
+    expect(deps.loadExact).not.toHaveBeenCalled();
   });
 
   it('fails closed when canonical standard changes after generation', async () => {
     const base = resolved();
-    const changed: ResolvedPhotoToVideoContext = {
+    const deps = dependencies({
       ...base,
       standard: { ...base.standard, standardId: 'SUNSET_REEL_PHOTO_MOTION_V2' },
-    };
-    const fake = registry(changed);
-    const state = writeback();
-    const artifacts = artifactStore();
-    const service = new ControlledPhotoToVideoFinalizationService({
-      registry: fake.value,
-      writeback: state.value,
-      artifactStore: artifacts.value,
-      sourceLoader: sourceLoader().value,
-      brandLoader: brandLoader().value,
     });
+    const service = new ControlledPhotoToVideoFinalizationService(deps.options);
     await expect(
-      service.finalize({
-        candidateManifest: candidate(),
-        reviewEvidence: review(),
-      }),
+      service.finalize({ candidateManifest: candidate(), reviewEvidence: review() }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED');
-    expect(fake.recordFinalOutput).not.toHaveBeenCalled();
-    expect(state.writeFinal).not.toHaveBeenCalled();
+    expect(deps.writeFinal).not.toHaveBeenCalled();
   });
 
   it('fails closed when The Party edition environment changes after generation', async () => {
-    const fake = registry(partyResolved('NATIONAL'));
-    const state = writeback();
+    const deps = dependencies(partyResolved('NATIONAL'));
     const service = new ControlledPhotoToVideoFinalizationService({
-      registry: fake.value,
-      writeback: state.value,
-      artifactStore: artifactStore().value,
-      sourceLoader: sourceLoader().value,
-      brandLoader: brandLoader(partyBrand()).value,
+      ...deps.options,
       now: () => new Date('2026-08-18T08:00:00.000Z'),
     });
     await expect(
-      service.finalize({
-        candidateManifest: partyCandidate(),
-        reviewEvidence: review(),
-      }),
+      service.finalize({ candidateManifest: candidate(true), reviewEvidence: review() }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED');
-    expect(state.writeFinal).not.toHaveBeenCalled();
+    expect(deps.writeFinal).not.toHaveBeenCalled();
   });
 
-  it('rejects review evidence timestamped before candidate generation', async () => {
-    const fake = registry();
-    const state = writeback();
-    const source = sourceLoader();
+  it('rejects review evidence timestamped before candidate generation before policy/provider reads', async () => {
+    const deps = dependencies();
     const service = new ControlledPhotoToVideoFinalizationService({
-      registry: fake.value,
-      writeback: state.value,
-      artifactStore: artifactStore().value,
-      sourceLoader: source.value,
-      brandLoader: brandLoader().value,
+      ...deps.options,
       now: () => new Date('2026-08-18T08:00:00.000Z'),
     });
     await expect(
@@ -414,7 +360,8 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
         reviewEvidence: { ...review(), reviewedAt: '2026-08-18T06:59:59.000Z' },
       }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_REVIEW_TIME_INVALID');
-    expect(source.load).not.toHaveBeenCalled();
-    expect(state.writeFinal).not.toHaveBeenCalled();
+    expect(deps.assertCanonical).not.toHaveBeenCalled();
+    expect(deps.sourceLoad).not.toHaveBeenCalled();
+    expect(deps.loadExact).not.toHaveBeenCalled();
   });
 });
