@@ -6,7 +6,7 @@ Status: active canonical integration contract on the Creative Truth branch.
 
 Make the official **The Party — Sistema Híbrido + Minimalista** identity mandatory for every final creative with `operation=THE_PARTY`, while preserving the parent `TOCA_CREATIVE_TRUTH_POLICY_V1` boundaries.
 
-The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The active canonical manual is `THE_PARTY — MANUAL_CANONICO_DE_IDENTIDADE_VISUAL_v1.2` (`1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU`). The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with a pinned SHA-256.
+The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The active canonical manual is `THE_PARTY — MANUAL_CANONICO_DE_IDENTIDADE_VISUAL_v1.2` (`1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU`). The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with pinned SHA-256 `feb5a7db499640de9904432411d47f2c319e19129c09752f2c1402ae8ceff948`.
 
 Repository mirrors exist only to make this contract deterministic, testable and auditable. Drive remains the business/visual source of truth. Prior Night Editorial / Campaign Impact manuals remain preserved in `09_IDENTIDADE_VISUAL/99_SUPERSEDED` only as history and must not be auto-selected.
 
@@ -18,6 +18,33 @@ Every final creative with `operation=THE_PARTY` must resolve exactly one The Par
 - `THE_PARTY_HYBRID_MINIMALIST_V1` — Family 02, **Identidade Visual Híbrida Minimalista**.
 
 A generic `ALL` standard may not replace a The Party-specific visual standard for a final The Party creative. Generic video/thumbnail standards may still provide cross-cutting transport/export constraints, but the visual identity must remain bound to one of the two The Party standards above.
+
+## Automatic family resolution
+
+The canonical runtime helper is `src/creative/the-party-visual-family-resolver.ts`. When a The Party request does not provide a standard explicitly, `CreativeTruthResolver` resolves the family deterministically from an approved intent instead of guessing from free-form copy.
+
+`THE_PARTY_HYBRID_NETWORKS_V1` is selected for:
+
+- `HIGH_IMPACT_CAMPAIGN`;
+- `LINEUP`;
+- `EVENT`;
+- `ACTIVATION`;
+- `SOCIAL_PROMOTION`;
+- `IMMERSIVE_ANNOUNCEMENT`.
+
+This family additionally requires explicit `INTERNATIONAL` or `NATIONAL` environment. Missing environment fails closed with `THE_PARTY_ENVIRONMENT_REQUIRED`.
+
+`THE_PARTY_HYBRID_MINIMALIST_V1` is selected for:
+
+- `INSTITUTIONAL_COMMUNICATION`;
+- `ELEGANT_AD`;
+- `INVITATION`;
+- `HIGHLIGHT_COVER`;
+- `LANDING_PAGE`;
+- `WEBSITE`;
+- `PEOPLE_FIRST_CONVERSION`.
+
+A request with neither explicit standard nor recognized The Party intent fails closed with `THE_PARTY_VISUAL_INTENT_REQUIRED`.
 
 ## Family 01 — Hybrid Networks
 
@@ -56,6 +83,18 @@ The system must not invent a stage, bar, terrace, architecture, furniture, view,
 
 Full synthetic video generation remains unsupported in V1.
 
+## Initial real-photo golden set
+
+The canonical `VENUE_VISUALS` registry now contains a small The Party golden set whose masters are byte-identical copies preserved in `06_MIDIA/02_THE_PARTY/07_PRONTOS_PARA_MARKETING`. They are `ACTIVE_APPROVED`, `VENUE_VERIFIED=true`, `MARKETING_READY=true`, and `GENERATIVE_REFERENCE_ALLOWED=false`.
+
+- `VENUE-TP-0130` → `MM-TP-0130-V1` (`1o0Y7K3e5VbPeCPzI35tq4St9w7J3Avnk`): crowd / peak-night floor, SHA-256 `ef92beddf5d56c18639992ff79631e24706c48daf878cf7a752412d924d5ca71`.
+- `VENUE-TP-0087` → `MM-TP-0087-V1` (`1EFGhtSWfv5G6PGmK5P8ZlJ_FX-9G_6Kn`): friends + drink / people-first, SHA-256 `f02b570987134e150a98d56bb12ecf141efee6c364571017bd92bacb8871fd55`.
+- `VENUE-TP-0071` → `MM-TP-0071-V1` (`1IOnDnGpRvzzwr4DLQfJbjCroqtYoRUMv`): DJ performance, SHA-256 `d4bdb6462f4963c97a84fe21ba76682d03b3f121eea5b2e4b2d7b4bef8cf7f6d`.
+- `VENUE-TP-0048` → `MM-TP-0048-V1` (`1TX_VOw1XmamFzwDmKLnyiw8pOrGWcnkS`): real Toca entrance / institutional context, SHA-256 `1c8e62431be258cce8f77af7336b7c8a6cab0ef0c1fd82ba19d21aaa30fd3c01`. Existing physical venue marks are protected factual elements and may not be rewritten.
+- `VENUE-TP-0113` → `MM-TP-0113-V1` (`1c-oqyVCSx852FgkRPMhEixAu1JV3NjBe`): real warm-red floor energy, SHA-256 `619e51c15bb2c75b5fc51a7684686c8f82d106e7b349d44a79dbf676644e7135`.
+
+This set removes the previous static-render blocker where `selectVenueAsset('THE_PARTY')` had no eligible marketing-ready asset.
+
 ## Multi-format application
 
 - Story: 1080×1920 / 9:16, protected safe area, quick hierarchy, hero mark and clear CTA.
@@ -66,11 +105,17 @@ Full synthetic video generation remains unsupported in V1.
 
 ## Runtime enforcement
 
-The Creative Truth resolver must reject `operation=THE_PARTY` when the resolved `standardId` is not The Party-specific. This prevents `TOCA_VIDEO_V1`, `TOCA_THUMBNAIL_V1` or another transversal standard from silently becoming the final visual identity.
+The Creative Truth resolver rejects `operation=THE_PARTY` when the resolved `standardId` is not The Party-specific. This prevents `TOCA_VIDEO_V1`, `TOCA_THUMBNAIL_V1` or another transversal standard from silently becoming the final visual identity.
+
+The same resolver can now omit `standardId` for The Party only when `thePartyIntent` is supplied. It resolves the approved family and carries `thePartyEnvironment` forward for Hybrid Networks. It still requires the official `THE_PARTY` hero brand.
 
 The deterministic image composer applies The Party family-specific layout treatment while preserving real venue bytes, official asset insertion, lineage and exact output hashing. The Party hero logo is separated from the institutional footer.
 
 The deterministic real-video compositor applies the same selected family to approved `VIDEO_SHOTS`, keeps the hero mark separate from the institutional footer, and preserves the V1 prohibition on full synthetic venue video.
+
+## Video readiness boundary
+
+The visual-family implementation exists for real video, but final Reel/video output remains fail-closed until a requested take exists in `VIDEO_SHOTS` with `ACTIVE_APPROVED`, `VENUE_VERIFIED`, `MARKETING_READY`, master lineage/hash and explicitly cleared rights. The official The Party video classification standard forbids inferring image, music, artist or commercial-use rights from a file's presence in Drive. No synthetic-video fallback is allowed.
 
 ## Publication boundary
 
