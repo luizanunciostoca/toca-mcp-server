@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type {
   BrandAsset,
+  CreativeEnhancementProvenance,
   CreativeMode,
   CreativeStandard,
   DeterministicRenderManifest,
@@ -13,7 +14,10 @@ import type {
   VenueAsset,
   VenueReference,
 } from '../../contracts/creative-truth.js';
-import { TOCA_CREATIVE_TRUTH_POLICY_ID } from '../../contracts/creative-truth.js';
+import {
+  TOCA_CREATIVE_TRUTH_POLICY_ID,
+  creativeEnhancementProvenanceSchema,
+} from '../../contracts/creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
 import {
   assertCreativeStandard,
@@ -44,6 +48,7 @@ export interface LocalCreativeComposeInput {
   readonly venueAsset?: VenueAsset;
   readonly sourceImageBytes: Uint8Array;
   readonly sourceContentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  readonly enhancementProvenance?: CreativeEnhancementProvenance;
   readonly canvas: CreativeCanvas;
   readonly headline?: string;
   readonly supportCopy?: string;
@@ -129,6 +134,7 @@ export class LocalCreativeComposer {
         outputContentType: 'image/jpeg',
         deterministicComposition: true,
         sourceMasterHashVerified: input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
+        enhancementProvenanceVerified: input.creativeMode === 'REAL_PLUS_ENHANCEMENT',
       });
       requireGatePassed(qualityGate);
 
@@ -351,6 +357,13 @@ function validateInput(input: LocalCreativeComposeInput): void {
   if (input.creativeMode !== 'GENERATIVE_EXCEPTION' && !input.venueAsset) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
   }
+  if (input.creativeMode === 'REAL_PLUS_ENHANCEMENT' && !input.enhancementProvenance) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'FAILED_ENHANCEMENT_PROVENANCE',
+      false,
+    );
+  }
   if (
     input.creativeMode === 'GENERATIVE_EXCEPTION' &&
     (!input.generativeException || (input.references?.length ?? 0) === 0)
@@ -370,14 +383,40 @@ function validateInput(input: LocalCreativeComposeInput): void {
 
 function assertRealAssetBinding(input: LocalCreativeComposeInput): void {
   if (input.creativeMode === 'GENERATIVE_EXCEPTION') return;
-  const expectedMasterSha256 = input.venueAsset?.masterSha256;
-  if (!expectedMasterSha256) {
+  const venue = input.venueAsset;
+  if (!venue?.masterAssetId || !venue.masterDriveFileId || !venue.masterSha256) {
     throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'FAILED_LINEAGE_MISSING', false);
   }
-  if (sha256(input.sourceImageBytes) !== expectedMasterSha256) {
+
+  if (input.creativeMode === 'REAL_COMPOSITE') {
+    if (sha256(input.sourceImageBytes) !== venue.masterSha256) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'CREATIVE_MASTER_HASH_MISMATCH',
+        false,
+      );
+    }
+    return;
+  }
+
+  const parsed = creativeEnhancementProvenanceSchema.safeParse(input.enhancementProvenance);
+  if (!parsed.success) {
     throw new ExecutionError(
       'SOURCE_IMAGE_BINDING_FAILURE',
-      'CREATIVE_MASTER_HASH_MISMATCH',
+      'FAILED_ENHANCEMENT_PROVENANCE',
+      false,
+    );
+  }
+  const provenance = parsed.data;
+  if (
+    provenance.sourceAssetId !== venue.masterAssetId ||
+    provenance.sourceDriveFileId !== venue.masterDriveFileId ||
+    provenance.sourceSha256 !== venue.masterSha256 ||
+    provenance.outputSha256 !== sha256(input.sourceImageBytes)
+  ) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'FAILED_ENHANCEMENT_PROVENANCE',
       false,
     );
   }
