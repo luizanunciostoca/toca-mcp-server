@@ -46,6 +46,53 @@ export const creativeAssetLocatorSchema = z.object({
   value: z.string().trim().min(1),
 });
 
+export const creativeTruthPolicySchema = z.object({
+  schemaVersion: z.string().min(1),
+  policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
+  policyVersion: z.string().min(1),
+  status: z.literal('ACTIVE_CANONICAL'),
+  brandScope: z.literal('TOCA_DO_MORCEGO'),
+  validatedAt: z.string().min(1),
+  sourceOfTruth: z.object({
+    provider: z.literal('GOOGLE_DRIVE'),
+    implementationPlanDriveId: z.string().min(1),
+    registrySpreadsheetId: z.literal(CREATIVE_TRUTH_REGISTRY_DRIVE_ID),
+  }),
+  defaultCreativeModes: z.array(creativeModeSchema).min(1),
+  generativeMode: z.literal('GENERATIVE_EXCEPTION'),
+  rules: z.object({
+    realVenueAssetRequiredByDefault: z.literal(true),
+    marketingReadyMasterRequiredForFinalPhotoCreative: z.literal(true),
+    officialBrandAssetsOnly: z.literal(true),
+    aiLogoReconstructionAllowed: z.literal(false),
+    syntheticVenueReplacementAllowedByDefault: z.literal(false),
+    architecturalInventionAllowed: z.literal(false),
+    environmentDriftAllowed: z.literal(false),
+    deterministicTextAndBrandCompositionRequired: z.literal(true),
+    assetLineageRequired: z.literal(true),
+    exactApprovedAssetMustBePublished: z.literal(true),
+    failClosed: z.literal(true),
+  }),
+  generativeException: z.object({
+    explicitApprovalRequired: z.literal(true),
+    approvalRecordRequired: z.literal(true),
+    venueReferenceSetRequired: z.literal(TOCA_VENUE_REFERENCE_SET_ID),
+    minimumVerifiedReferences: z.number().int().min(1),
+    venueFidelityGateStillRequired: z.literal(true),
+    officialBrandAssetsStillRequired: z.literal(true),
+    architecturalInventionStillForbidden: z.literal(true),
+    environmentDriftStillForbidden: z.literal(true),
+  }),
+  requiredGates: z.array(creativeTruthGateNameSchema).min(3),
+  publicationBoundary: z.object({
+    allRequiredGatesMustPass: z.literal(true),
+    outputSha256Required: z.literal(true),
+    exactAssetBindingRequired: z.literal(true),
+    publicationMayNotRebuildCreative: z.literal(true),
+  }),
+  failureCodes: z.array(creativeTruthFailureCodeSchema).min(1),
+});
+
 export const brandAssetSchema = z
   .object({
     brandAssetId: z.string().min(1),
@@ -96,6 +143,39 @@ export const venueAssetSchema = z
         code: 'custom',
         path: ['marketingReady'],
         message: 'MARKETING_READY venue assets require master lineage and master SHA-256',
+      });
+    }
+  });
+
+export const videoShotSchema = z
+  .object({
+    shotId: z.string().min(1),
+    sourceAssetId: z.string().min(1),
+    sourceDriveFileId: z.string().min(1),
+    masterAssetId: z.string().min(1).optional(),
+    masterDriveFileId: z.string().min(1).optional(),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    masterSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    operation: z.string().min(1),
+    locationSignature: z.string().min(1),
+    shotClass: z.string().min(1),
+    durationMs: z.number().int().positive().optional(),
+    orientation: z.string().min(1),
+    venueVerified: z.boolean(),
+    marketingReady: z.boolean(),
+    rightsStatus: z.string().min(1),
+    status: z.enum(['ACTIVE_APPROVED', 'VENUE_VERIFIED_SOURCE', 'REVOKED']),
+    notes: z.string().default(''),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.marketingReady &&
+      (!value.masterAssetId || !value.masterDriveFileId || !value.masterSha256)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['marketingReady'],
+        message: 'MARKETING_READY video shots require master lineage and master SHA-256',
       });
     }
   });
@@ -197,8 +277,10 @@ export type CreativeTruthFailureCode = z.infer<typeof creativeTruthFailureCodeSc
 export type CreativeTruthGateName = z.infer<typeof creativeTruthGateNameSchema>;
 export type CreativeAssetLocatorKind = z.infer<typeof creativeAssetLocatorKindSchema>;
 export type CreativeAssetLocator = z.infer<typeof creativeAssetLocatorSchema>;
+export type CreativeTruthPolicy = z.infer<typeof creativeTruthPolicySchema>;
 export type BrandAsset = z.infer<typeof brandAssetSchema>;
 export type VenueAsset = z.infer<typeof venueAssetSchema>;
+export type VideoShot = z.infer<typeof videoShotSchema>;
 export type VenueReference = z.infer<typeof venueReferenceSchema>;
 export type CreativeStandard = z.infer<typeof creativeStandardSchema>;
 export type GenerativeExceptionApproval = z.infer<typeof generativeExceptionApprovalSchema>;
