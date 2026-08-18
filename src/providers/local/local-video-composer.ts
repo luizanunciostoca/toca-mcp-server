@@ -29,7 +29,7 @@ const execFileAsync = promisify(execFile);
 
 export interface VerifiedVideoShotInput {
   readonly shotId: string;
-  readonly venueAsset: VenueAsset;
+  readonly venueAsset?: VenueAsset;
   readonly videoBytes: Uint8Array;
   readonly contentType: 'video/mp4' | 'video/quicktime' | 'video/webm';
   readonly fidelityEvidence?: FidelityEvidence;
@@ -88,7 +88,7 @@ export class LocalVideoComposer {
     const shotVenueGates = input.shots.map((shot) =>
       evaluateVenueFidelity({
         creativeMode: input.creativeMode,
-        venueAsset: shot.venueAsset,
+        ...(shot.venueAsset ? { venueAsset: shot.venueAsset } : {}),
         ...(input.generativeException ? { generativeException: input.generativeException } : {}),
         ...(input.references ? { references: input.references } : {}),
         ...(shot.fidelityEvidence ? { evidence: shot.fidelityEvidence } : {}),
@@ -102,7 +102,10 @@ export class LocalVideoComposer {
       failureCodes: [],
       evidence: {
         shotIds: input.shots.map((shot) => shot.shotId),
-        venueAssetIds: input.shots.map((shot) => shot.venueAsset.venueAssetId),
+        venueAssetIds: input.shots.flatMap((shot) =>
+          shot.venueAsset ? [shot.venueAsset.venueAssetId] : [],
+        ),
+        referenceAssetIds: (input.references ?? []).map((reference) => reference.assetId),
         allShotsVerified: true,
       },
     };
@@ -152,9 +155,9 @@ export class LocalVideoComposer {
         policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
         standardId: input.standard.standardId,
         creativeMode: input.creativeMode,
-        sourceAssetIds: input.shots.map((shot) => shot.venueAsset.sourceAssetId),
+        sourceAssetIds: sourceAssetIdsFor(input),
         masterAssetIds: input.shots.flatMap((shot) =>
-          shot.venueAsset.masterAssetId ? [shot.venueAsset.masterAssetId] : [],
+          shot.venueAsset?.masterAssetId ? [shot.venueAsset.masterAssetId] : [],
         ),
         brandAssetIds: input.brandAssets.map((entry) => entry.registry.brandAssetId),
         outputSha256,
@@ -251,9 +254,33 @@ function validateInput(input: LocalVideoComposeInput): void {
   if (input.shots.some((shot) => !shot.shotId.trim() || shot.videoBytes.byteLength === 0)) {
     throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'VIDEO_SHOT_BYTES_REQUIRED', false);
   }
+  if (
+    input.creativeMode !== 'GENERATIVE_EXCEPTION' &&
+    input.shots.some((shot) => !shot.venueAsset)
+  ) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
+  }
+  if (
+    input.creativeMode === 'GENERATIVE_EXCEPTION' &&
+    (!input.generativeException || (input.references?.length ?? 0) === 0)
+  ) {
+    throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
+  }
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
   }
+}
+
+function sourceAssetIdsFor(input: LocalVideoComposeInput): string[] {
+  const realSourceIds = input.shots.flatMap((shot) =>
+    shot.venueAsset ? [shot.venueAsset.sourceAssetId] : [],
+  );
+  if (realSourceIds.length > 0) return [...new Set(realSourceIds)];
+  const referenceIds = [...new Set((input.references ?? []).map((reference) => reference.assetId))];
+  if (referenceIds.length === 0) {
+    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'FAILED_LINEAGE_MISSING', false);
+  }
+  return referenceIds;
 }
 
 async function defaultCommandRunner(command: string, args: readonly string[]): Promise<void> {
