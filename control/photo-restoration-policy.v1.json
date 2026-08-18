@@ -20,6 +20,9 @@
   "promotionGuardVersion": "master-promotion-guard-v1",
   "autoPromotionBeforeReview": false,
   "marketingReadyOnlyAfterGuard": true,
+  "promotionReviewerIdentityRequired": true,
+  "promotionReviewTimestampRequired": true,
+  "promotionDecisionReasonRequired": true,
   "sourceOfTruth": {
     "driveRegistryId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
     "sheet": "PHOTO_RESTORATION_POLICY"
