@@ -6,6 +6,7 @@ import {
 } from './contracts/photo-to-video.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
+import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
 import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
 
 const args = parseArgs(process.argv.slice(2));
@@ -15,7 +16,8 @@ const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
 const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
-const service = new ControlledPhotoToVideoFinalizationService({ registry });
+const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
+const service = new ControlledPhotoToVideoFinalizationService({ registry, writeback });
 const outputBytes = new Uint8Array(await readFile(args.output));
 const candidateManifest = photoToVideoCandidateManifestSchema.parse(
   JSON.parse(await readFile(args.manifest, 'utf8')),
@@ -37,6 +39,7 @@ process.stdout.write(
     finalAssetSha256: finalManifest.finalAssetSha256,
     exactAssetBinding: true,
     readyForPrepare: true,
+    canonicalFinalWriteback: true,
     publicationAuthorized: false,
     finalManifestPath: args.finalManifest,
   })}\n`,
