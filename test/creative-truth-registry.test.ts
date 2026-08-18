@@ -26,7 +26,7 @@ function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])
 function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
   const row: unknown[] = [
     'TOCA_CREATIVE_TRUTH_POLICY_V1',
-    '1.0',
+    '1.3',
     'ACTIVE_CANONICAL',
     'TOCA_DO_MORCEGO',
     'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
@@ -38,11 +38,30 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): r
     true,
     true,
     CANONICAL_PLAN_DRIVE_ID,
-    '2026-08-18T00:00:00-03:00',
+    '2026-08-18T13:58:00-03:00',
     true,
     'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
     'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+    'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+    'OPERATION_SCOPED_ONLY_V1',
+    'TOCA_VENUE_REFERENCE_SET_V1',
+    'DEPRECATED',
+    'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+    'FORBIDDEN',
+    'REQUIRED',
+    'DENY',
     'UNSUPPORTED_V1',
+    'TOCA_PHOTO_TO_VIDEO_POLICY_V1',
+    'ACTIVE_V1',
+    'DENY',
+    'NON_FINAL_BACKGROUND_CANDIDATE_ONLY',
+    true,
+    'DENY',
+    'DENY',
+    'FAIL_CLOSED_NO_FINAL_ASSET',
+    'ENFORCED',
+    'FAILED_DIRECT_GENERATIVE_FINALIZATION',
   ];
   for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
   return row;
@@ -93,18 +112,19 @@ function approvedExceptionRow(overrides: Partial<Record<number, unknown>> = {}):
 }
 
 describe('GoogleSheetsCreativeTruthRegistry', () => {
-  it('accepts only the complete canonical policy row', async () => {
+  it('accepts only the complete canonical v1.3 policy row', async () => {
     const { client, readRange } = clientFor({
-      'POLICY!A2:R20': [canonicalPolicyRow()],
+      'POLICY!A2:AK20': [canonicalPolicyRow()],
     });
     const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
 
     await expect(registry.assertCanonicalPolicy()).resolves.toBeUndefined();
-    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:R20');
+    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:AK20');
   });
 
-  it('rejects policy drift across identity, modes, gates, canonical plan and provenance controls', async () => {
+  it('rejects policy drift across identity, modes, provenance, generative topology, video and routing controls', async () => {
     const driftedRows = [
+      canonicalPolicyRow({ 1: '1.2' }),
       canonicalPolicyRow({ 2: 'SUSPENDED' }),
       canonicalPolicyRow({ 3: 'OTHER_BRAND' }),
       canonicalPolicyRow({ 4: 'REAL_COMPOSITE' }),
@@ -120,11 +140,29 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
       canonicalPolicyRow({ 14: false }),
       canonicalPolicyRow({ 15: 'ENABLED_WITHOUT_PROVENANCE' }),
       canonicalPolicyRow({ 16: '' }),
-      canonicalPolicyRow({ 17: 'ENABLED_UNCONTROLLED' }),
+      canonicalPolicyRow({ 17: 'UNCONTROLLED_FULL_VIDEO' }),
+      canonicalPolicyRow({ 18: 'GLOBAL_REFERENCE_SET' }),
+      canonicalPolicyRow({ 20: 'ACTIVE' }),
+      canonicalPolicyRow({ 21: 'WRONG_SUNSET_SET' }),
+      canonicalPolicyRow({ 22: 'WRONG_PARTY_SET' }),
+      canonicalPolicyRow({ 23: 'ALLOWED' }),
+      canonicalPolicyRow({ 24: 'OPTIONAL' }),
+      canonicalPolicyRow({ 25: 'ALLOW' }),
+      canonicalPolicyRow({ 26: 'SUPPORTED' }),
+      canonicalPolicyRow({ 27: 'WRONG_VIDEO_POLICY' }),
+      canonicalPolicyRow({ 28: 'DISABLED' }),
+      canonicalPolicyRow({ 29: 'ALLOW' }),
+      canonicalPolicyRow({ 30: 'FINAL_CREATIVE' }),
+      canonicalPolicyRow({ 31: false }),
+      canonicalPolicyRow({ 32: 'ALLOW' }),
+      canonicalPolicyRow({ 33: 'ALLOW' }),
+      canonicalPolicyRow({ 34: 'FALLBACK_GENERATIVE' }),
+      canonicalPolicyRow({ 35: 'DISABLED' }),
+      canonicalPolicyRow({ 36: 'OTHER_FAILURE' }),
     ];
 
     for (const row of driftedRows) {
-      const { client } = clientFor({ 'POLICY!A2:R20': [row] });
+      const { client } = clientFor({ 'POLICY!A2:AK20': [row] });
       const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
       await expect(registry.assertCanonicalPolicy()).rejects.toThrow(
         'TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE',
@@ -195,7 +233,7 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     await expect(ambiguousRegistry.getVenueAssetBySourceAssetId('SUN-0244')).resolves.toBeUndefined();
   });
 
-  it('resolves exactly one approved generative exception and rejects approval ambiguity', async () => {
+  it('resolves exactly one approved legacy generative exception only for compatibility parsing', async () => {
     const uniqueClient = clientFor({
       'GENERATIVE_EXCEPTIONS!A2:N1000': [approvedExceptionRow()],
     });
