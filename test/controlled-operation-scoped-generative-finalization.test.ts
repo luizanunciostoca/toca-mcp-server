@@ -1,15 +1,16 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { OperationScopedGenerativeExceptionApproval } from '../src/contracts/creative-truth-generative-reference-sets.js';
 import type {
-  BrandAsset,
   CreativeStandard,
   FidelityEvidence,
+  VenueAsset,
   VenueReference,
 } from '../src/contracts/creative-truth.js';
 import {
   ControlledOperationScopedGenerativeFinalizationService,
-  type ControlledOperationScopedGenerativeFinalizationInput,
-} from '../src/providers/local/controlled-operation-scoped-generative-finalization.js';
+  type ControlledOperationScopedGenerativeFinalizationRequest,
+} from '../src/creative/controlled-operation-scoped-generative-finalization.js';
 import type { OperationScopedGenerativeRegistry } from '../src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import type {
   LocalOperationScopedGenerativeComposeInput,
@@ -50,7 +51,27 @@ function reference(index: number, overrides: Partial<VenueReference> = {}): Venu
   };
 }
 
+function venue(index: number, overrides: Partial<VenueAsset> = {}): VenueAsset {
+  return {
+    venueAssetId: `VENUE-SUN-${index}`,
+    sourceAssetId: `SUN-${index}`,
+    sourceDriveFileId: `drive-${index}`,
+    sourceSha256: String(index).repeat(64),
+    operation: 'SUNSET',
+    locationSignature: 'ambiente_toca',
+    dominantSubject: 'venue_reference',
+    venueVerified: true,
+    marketingReady: false,
+    generativeReferenceAllowed: true,
+    protectedElements: ['DECK', 'HORIZONTE'],
+    status: 'VENUE_VERIFIED_SOURCE',
+    ...overrides,
+  };
+}
+
 const references = [reference(3), reference(1), reference(2)];
+const candidateBytes = Uint8Array.from([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
+const candidateSha256 = createHash('sha256').update(candidateBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'SUNSET_FEED_V1',
@@ -68,64 +89,75 @@ const standard: CreativeStandard = {
   venueFidelityGateRequired: true,
 };
 
-const candidateBytes = Uint8Array.from([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
-const evidence: FidelityEvidence = {
-  verifier: 'HUMAN_CREATIVE_TRUTH_REVIEWER',
-  verificationMethod: 'MULTIMODAL_PLUS_HUMAN',
-  candidateSha256: 'a'.repeat(64),
-  sourceIdentityPreserved: true,
-  architectureDriftDetected: false,
-  sceneInventionDetected: false,
-  logoReconstructionDetected: false,
-  referenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
-  referenceAssetIds: ['SUN-1', 'SUN-2', 'SUN-3'],
-  reviewRef: 'review:content-sun-1:candidate',
-  notes: [],
-};
-
-const brand: BrandAsset = {
-  brandAssetId: 'BRAND-TOCA-WHITE-V1',
-  brand: 'TOCA_DO_MORCEGO',
-  variant: 'WHITE',
-  driveFileId: 'drive-toca',
-  fileName: 'TOCA.png',
-  contentType: 'image/png',
-  integrityMode: 'SHA256_PINNED',
-  sha256: 'b'.repeat(64),
-  status: 'ACTIVE_APPROVED',
-  aiReconstructionAllowed: false,
-};
-
-function request(): ControlledOperationScopedGenerativeFinalizationInput {
+function candidateManifest() {
   return {
+    status: 'GENERATED_REVIEW_REQUIRED' as const,
     contentItemId: 'CONTENT-SUN-1',
-    creativeId: 'CREATIVE-SUN-FINAL-1',
-    standard,
-    fidelityEvidence: evidence,
-    candidateImageBytes: candidateBytes,
-    candidateContentType: 'image/jpeg',
-    canvas: '1080x1350',
-    requiredBrands: ['TOCA_DO_MORCEGO'],
-    brandAssets: [
-      {
-        registry: brand,
-        bytes: Uint8Array.from([1, 2, 3]),
-        contentType: 'image/png',
-        driveFileId: brand.driveFileId,
-      },
-    ],
-    createdAt: '2026-08-18T04:00:00Z',
+    creativeMode: 'GENERATIVE_EXCEPTION' as const,
+    policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const,
+    operation: 'SUNSET' as const,
+    referenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const,
+    exceptionId: approval.exceptionId,
+    approvalRef: approval.approvalRef,
+    candidateSha256,
+    referenceAssetIds: ['SUN-1', 'SUN-2', 'SUN-3'],
+    referenceSha256s: ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)],
+    provider: 'OPENAI_IMAGE_GENERATION' as const,
+    generationMode: 'FULL_STATIC_IMAGE_WITH_OPERATION_SCOPED_VERIFIED_REFERENCES' as const,
+    responseModel: 'gpt-5.6',
+    imageToolModelSelection: 'RESPONSES_TOOL_MANAGED' as const,
+    outputContentType: 'image/jpeg' as const,
+    outputSizeBytes: candidateBytes.byteLength,
+    requiresPostGenerationHumanReview: true as const,
+    requiresVenueFidelityGate: true as const,
+    readyForFinalComposition: false as const,
+    publicationEligible: false as const,
   };
 }
 
-function registry(options: {
-  operation?: 'SUNSET' | 'THE_PARTY' | undefined;
-  canonicalApproval?: OperationScopedGenerativeExceptionApproval | undefined;
-  canonicalReferences?: readonly VenueReference[];
-} = {}): OperationScopedGenerativeRegistry {
-  const operation = Object.prototype.hasOwnProperty.call(options, 'operation')
-    ? options.operation
-    : 'SUNSET';
+function fidelityEvidence(): FidelityEvidence {
+  return {
+    verifier: 'HUMAN_CREATIVE_TRUTH_REVIEWER',
+    verificationMethod: 'MULTIMODAL_PLUS_HUMAN',
+    candidateSha256,
+    sourceIdentityPreserved: true,
+    architectureDriftDetected: false,
+    sceneInventionDetected: false,
+    logoReconstructionDetected: false,
+    referenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    referenceAssetIds: ['SUN-1', 'SUN-2', 'SUN-3'],
+    reviewRef: 'review:content-sun-1:candidate',
+    notes: [],
+  };
+}
+
+function request(
+  overrides: Partial<ControlledOperationScopedGenerativeFinalizationRequest> = {},
+): ControlledOperationScopedGenerativeFinalizationRequest {
+  return {
+    candidateManifest: candidateManifest(),
+    candidateImageBytes: candidateBytes,
+    candidateContentType: 'image/jpeg',
+    creativeId: 'CREATIVE-SUN-FINAL-1',
+    standard,
+    fidelityEvidence: fidelityEvidence(),
+    canvas: '1080x1350',
+    requiredBrands: ['TOCA_DO_MORCEGO'],
+    brandAssets: [],
+    nowIso: '2026-08-18T04:00:00Z',
+    ...overrides,
+  };
+}
+
+function registry(
+  options: {
+    readonly operation?: 'SUNSET' | 'THE_PARTY';
+    readonly canonicalApproval?: OperationScopedGenerativeExceptionApproval | undefined;
+    readonly canonicalReferences?: readonly VenueReference[];
+    readonly venueOverride?: (assetId: string) => VenueAsset | undefined;
+  } = {},
+): OperationScopedGenerativeRegistry {
+  const operation = options.operation ?? 'SUNSET';
   const canonicalApproval = Object.prototype.hasOwnProperty.call(options, 'canonicalApproval')
     ? options.canonicalApproval
     : approval;
@@ -134,7 +166,11 @@ function registry(options: {
     getContentItemOperation: vi.fn(async () => operation),
     getApprovedGenerativeException: vi.fn(async () => canonicalApproval),
     getReferenceSet: vi.fn(async () => options.canonicalReferences ?? references),
-    getVenueAssetBySourceAssetId: vi.fn(async () => undefined),
+    getVenueAssetBySourceAssetId: vi.fn(async (assetId) => {
+      if (options.venueOverride) return options.venueOverride(assetId);
+      const index = Number.parseInt(assetId.replace('SUN-', ''), 10);
+      return Number.isFinite(index) ? venue(index) : undefined;
+    }),
   };
 }
 
@@ -152,7 +188,7 @@ function successfulResult(): LocalOperationScopedGenerativeComposeResult {
       creativeMode: 'GENERATIVE_EXCEPTION',
       sourceAssetIds: ['SUN-1', 'SUN-2', 'SUN-3'],
       masterAssetIds: [],
-      brandAssetIds: ['BRAND-TOCA-WHITE-V1'],
+      brandAssetIds: [],
       outputSha256: 'c'.repeat(64),
       outputDimensions: '1080x1350',
       exactAssetBinding: true,
@@ -169,27 +205,24 @@ function successfulResult(): LocalOperationScopedGenerativeComposeResult {
   };
 }
 
-describe('ControlledOperationScopedGenerativeFinalizationService', () => {
-  it('resolves approval and references canonically and overwrites caller-forged context', async () => {
-    const compose = vi.fn(
-      async (_input: LocalOperationScopedGenerativeComposeInput) => successfulResult(),
-    );
-    const service = new ControlledOperationScopedGenerativeFinalizationService({
-      registry: registry(),
+function serviceWith(
+  canonicalRegistry: OperationScopedGenerativeRegistry,
+  compose = vi.fn(async (_input: LocalOperationScopedGenerativeComposeInput) => successfulResult()),
+) {
+  return {
+    compose,
+    service: new ControlledOperationScopedGenerativeFinalizationService({
+      registry: canonicalRegistry,
       composer: { compose },
-    });
-    const forged = {
-      ...request(),
-      approval: { ...approval, operation: 'THE_PARTY' },
-      references: [
-        reference(99, {
-          referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
-          assetId: 'TP-FAKE',
-        }),
-      ],
-    } as unknown as ControlledOperationScopedGenerativeFinalizationInput;
+    }),
+  };
+}
 
-    await service.finalize(forged);
+describe('ControlledOperationScopedGenerativeFinalizationService', () => {
+  it('revalidates candidate, approval, reference identity and source hashes before final render', async () => {
+    const { service, compose } = serviceWith(registry());
+
+    await service.finalize(request());
 
     expect(compose).toHaveBeenCalledOnce();
     const canonicalInput = compose.mock.calls[0]![0];
@@ -199,46 +232,71 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
       'REF-SUN-2',
       'REF-SUN-3',
     ]);
+    expect(canonicalInput.createdAt).toBe('2026-08-18T04:00:00Z');
   });
 
-  it('fails closed when canonical content operation is unavailable', async () => {
-    const compose = vi.fn();
-    const service = new ControlledOperationScopedGenerativeFinalizationService({
-      registry: registry({ operation: undefined }),
-      composer: { compose },
-    });
+  it('rejects candidate hash substitution before canonical state or composer access', async () => {
+    const canonicalRegistry = registry();
+    const { service, compose } = serviceWith(canonicalRegistry);
+
+    await expect(
+      service.finalize(
+        request({
+          candidateImageBytes: Uint8Array.from([0xff, 0xd8, 9, 9, 9, 0xff, 0xd9]),
+        }),
+      ),
+    ).rejects.toThrow('GENERATIVE_FINALIZATION_CANDIDATE_HASH_MISMATCH');
+    expect(canonicalRegistry.assertCanonicalPolicy).not.toHaveBeenCalled();
+    expect(compose).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when CONTENT_ITEMS operation changes after candidate generation', async () => {
+    const { service, compose } = serviceWith(registry({ operation: 'THE_PARTY' }));
 
     await expect(service.finalize(request())).rejects.toThrow(
-      'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
+      'FAILED_GENERATIVE_CONTENT_OPERATION_MISMATCH',
     );
     expect(compose).not.toHaveBeenCalled();
   });
 
-  it('fails closed when canonical approval operation conflicts with CONTENT_ITEMS', async () => {
-    const compose = vi.fn();
-    const service = new ControlledOperationScopedGenerativeFinalizationService({
-      registry: registry({
+  it('fails closed when the canonical approval no longer matches the generated candidate manifest', async () => {
+    const { service, compose } = serviceWith(
+      registry({
         canonicalApproval: {
           ...approval,
-          operation: 'THE_PARTY',
-          referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+          exceptionId: 'GEN-SUN-REVISED',
+          approvalRef: 'approval:gen-sun-revised',
         },
       }),
-      composer: { compose },
-    });
+    );
 
     await expect(service.finalize(request())).rejects.toThrow(
-      'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
+      'GENERATIVE_FINALIZATION_APPROVAL_BINDING_MISMATCH',
     );
     expect(compose).not.toHaveBeenCalled();
   });
 
-  it('fails closed when canonical required references are insufficient', async () => {
-    const compose = vi.fn();
-    const service = new ControlledOperationScopedGenerativeFinalizationService({
-      registry: registry({ canonicalReferences: [reference(1), reference(2)] }),
-      composer: { compose },
-    });
+  it('fails closed when the current canonical reference source hash differs from generation lineage', async () => {
+    const { service, compose } = serviceWith(
+      registry({
+        venueOverride: (assetId) => {
+          const index = Number.parseInt(assetId.replace('SUN-', ''), 10);
+          if (!Number.isFinite(index)) return undefined;
+          return venue(index, index === 2 ? { sourceSha256: 'f'.repeat(64) } : {});
+        },
+      }),
+    );
+
+    await expect(service.finalize(request())).rejects.toThrow(
+      'GENERATIVE_FINALIZATION_REFERENCE_HASH_MISMATCH',
+    );
+    expect(compose).not.toHaveBeenCalled();
+  });
+
+  it('honors the approved minimum reference count immediately before finalization', async () => {
+    const { service, compose } = serviceWith(
+      registry({ canonicalApproval: { ...approval, minReferenceCount: 4 } }),
+    );
 
     await expect(service.finalize(request())).rejects.toThrow(
       'FAILED_GENERATIVE_REFERENCE_MISSING',
@@ -247,12 +305,10 @@ describe('ControlledOperationScopedGenerativeFinalizationService', () => {
   });
 
   it('fails closed on duplicate canonical reference identity', async () => {
-    const compose = vi.fn();
-    const duplicate = reference(2, { referenceId: 'REF-SUN-1', assetId: 'SUN-1' });
-    const service = new ControlledOperationScopedGenerativeFinalizationService({
-      registry: registry({ canonicalReferences: [reference(1), duplicate, reference(3)] }),
-      composer: { compose },
-    });
+    const duplicateReferenceId = reference(2, { referenceId: 'REF-SUN-1' });
+    const { service, compose } = serviceWith(
+      registry({ canonicalReferences: [reference(1), duplicateReferenceId, reference(3)] }),
+    );
 
     await expect(service.finalize(request())).rejects.toThrow(
       'FAILED_GENERATIVE_REFERENCE_MISSING',
