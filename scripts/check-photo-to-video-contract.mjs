@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 const requiredFiles = [
   'control/photo-to-video-policy.v1.json',
   'src/contracts/photo-to-video.ts',
+  'src/providers/google-sheets/photo-to-video-policy-guard.ts',
   'src/providers/google-sheets/photo-to-video-registry.ts',
   'src/providers/google-sheets/photo-to-video-content-writeback.ts',
   'src/providers/google-drive/creative-video-source-loader.ts',
@@ -14,6 +15,7 @@ const requiredFiles = [
   'src/creative/controlled-photo-to-video-finalization.ts',
   'src/marketing-autopilot-video-generate.ts',
   'src/marketing-autopilot-video-finalize.ts',
+  'test/photo-to-video-policy-guard.test.ts',
   'test/photo-to-video-contract.test.ts',
   'test/controlled-photo-to-video-generation.test.ts',
   'test/controlled-photo-to-video-finalization.test.ts',
@@ -36,6 +38,9 @@ requireIncludes('control/photo-to-video-policy.v1.json', [
   'fullSyntheticVenueVideoWithoutSourceImage',
   'durableCandidateArtifactRequired',
   'artifactReadbackRequiredBeforeFinalization',
+  'canonicalSourceDriveBytesRevalidatedAtFinalization',
+  'officialHeroBrandDriveBytesRevalidatedAtFinalization',
+  'thePartyEditionIntentEnvironmentBoundInCandidate',
   'sourceImageComparedRequired',
   'durableEvidenceRefRequired',
   'durableFinalArtifactRefRequired',
@@ -66,6 +71,19 @@ requireIncludes('src/contracts/photo-to-video.ts', [
   'aiLogoReconstructionDetected: z.literal(false)',
   "publicationEligible: z.literal(false)",
   "publicationAuthorized: z.literal(false)",
+]);
+
+requireIncludes('src/providers/google-sheets/photo-to-video-policy-guard.ts', [
+  "const PARENT_POLICY_RANGE = 'POLICY!A1:AC20'",
+  "const PARENT_POLICY_ID = 'TOCA_CREATIVE_TRUTH_POLICY_V1'",
+  'TOCA_PHOTO_TO_VIDEO_POLICY_ID',
+  'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+  "policy.full_synthetic_venue_video !== 'UNSUPPORTED_V1'",
+  "policy.video_photo_motion !== 'ACTIVE_V1'",
+  'PHOTO_TO_VIDEO_PARENT_POLICY_NOT_RESOLVED',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_SCHEMA_INVALID',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_DRIFT',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_ROUTE_DISABLED',
 ]);
 
 requireIncludes('src/providers/google-sheets/photo-to-video-registry.ts', [
@@ -143,6 +161,7 @@ requireIncludes('src/providers/local/local-photo-to-video-brand-composer.ts', [
 requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
   'ControlledPhotoToVideoGenerationService',
   'const createdAt = trustedNow(this.now)',
+  'policyGuard.assertCanonical(request.routeType)',
   'registry.resolve(request.contentItemId, request.routeType)',
   'brandLoader.load',
   'heroBrandSha256',
@@ -159,6 +178,7 @@ requireIncludes('src/creative/controlled-photo-to-video-finalization.ts', [
   'ControlledPhotoToVideoFinalizationService',
   'assertReviewTime(',
   'PHOTO_TO_VIDEO_REVIEW_TIME_INVALID',
+  'policyGuard.assertCanonical(candidate.routeType)',
   'assertPartyContext(',
   'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED',
   'sourceLoader.load',
@@ -176,6 +196,7 @@ requireIncludes('src/creative/controlled-photo-to-video-finalization.ts', [
 ]);
 
 requireIncludes('src/marketing-autopilot-video-generate.ts', [
+  'GoogleSheetsPhotoToVideoParentPolicyGuard',
   'GoogleSheetsPhotoToVideoRegistry',
   'GoogleSheetsPhotoToVideoContentWriteback',
   'GcsPhotoToVideoArtifactStore',
@@ -185,6 +206,7 @@ requireIncludes('src/marketing-autopilot-video-generate.ts', [
 ]);
 requireIncludes('src/marketing-autopilot-video-finalize.ts', [
   'ControlledPhotoToVideoFinalizationService',
+  'GoogleSheetsPhotoToVideoParentPolicyGuard',
   'GoogleSheetsPhotoToVideoContentWriteback',
   'GcsPhotoToVideoArtifactStore',
   'GoogleDriveCreativeVideoSourceLoader',
@@ -194,15 +216,24 @@ requireIncludes('src/marketing-autopilot-video-finalize.ts', [
   'publicationAuthorized: false',
 ]);
 
+requireIncludes('test/photo-to-video-policy-guard.test.ts', [
+  'accepts both governed routes only under the exact canonical parent policy row',
+  'POLICY!A1:AC20',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_ROUTE_DISABLED',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_DRIFT',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_NOT_RESOLVED',
+  'PHOTO_TO_VIDEO_PARENT_POLICY_SCHEMA_INVALID:photo_to_video_policy_id',
+]);
 requireIncludes('test/controlled-photo-to-video-generation.test.ts', [
   'persists exact candidate bytes before marking the content item review-required',
   'candidateArtifactRef: artifactRef',
   'invocationCallOrder',
   'does not write GENERATED_REVIEW_REQUIRED state when durable artifact persistence fails',
-  'fails before canonical/provider work when the trusted clock is invalid',
+  'fails before policy/canonical/provider work when the trusted clock is invalid',
 ]);
 requireIncludes('test/controlled-photo-to-video-finalization.test.ts', [
-  'finalizes only the durable exact reviewed bytes after source and official brand revalidation',
+  'finalizes only durable exact reviewed bytes after policy source and official brand revalidation',
+  'canonical parent policy is no longer valid',
   'PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED',
   'PHOTO_TO_VIDEO_REVIEW_TIME_INVALID',
   'loadExact',
@@ -228,6 +259,13 @@ requireIncludes('test/openai-scene-continuation-video-provider.test.ts', [
   'input_reference',
   'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
   'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID',
+]);
+
+requireIncludes('docs/architecture/photo-to-video-routes-v1.md', [
+  'Canonical parent policy gate',
+  'GoogleSheetsPhotoToVideoParentPolicyGuard',
+  'POLICY!A1:AC20',
+  'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
 ]);
 
 requireIncludes('package.json', [
