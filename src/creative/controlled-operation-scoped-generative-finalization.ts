@@ -45,6 +45,14 @@ export interface ControlledOperationScopedGenerativeFinalizationDependencies {
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
 }
 
+/**
+ * Canonical finalization boundary for full-static GENERATIVE_EXCEPTION outputs.
+ *
+ * The generated candidate manifest is immutable lineage evidence, never execution authority.
+ * Immediately before deterministic composition this service re-hashes the candidate bytes,
+ * re-resolves CONTENT_ITEMS.operation, the approved exception, operation-scoped reference set,
+ * VENUE_VISUALS identity and source hashes, and only then delegates to the local compositor.
+ */
 export class ControlledOperationScopedGenerativeFinalizationService {
   constructor(
     private readonly dependencies: ControlledOperationScopedGenerativeFinalizationDependencies,
@@ -78,7 +86,7 @@ export class ControlledOperationScopedGenerativeFinalizationService {
     const approval = await this.dependencies.registry.getApprovedGenerativeException(
       manifest.contentItemId,
     );
-    if (!approval) {
+    if (!approval || approval.status !== 'APPROVED') {
       throw new ExecutionError(
         'APPROVAL_REQUIRED',
         'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
@@ -100,7 +108,10 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       );
     }
 
-    const references = await this.resolveCanonicalGenerationReferences(approval.referenceSetId);
+    const references = await this.resolveCanonicalGenerationReferences(
+      approval.referenceSetId,
+      approval.minReferenceCount,
+    );
     await this.assertGenerationLineageStillCanonical(manifest, references, operation);
 
     return this.dependencies.composer.compose({
@@ -127,6 +138,7 @@ export class ControlledOperationScopedGenerativeFinalizationService {
 
   private async resolveCanonicalGenerationReferences(
     referenceSetId: OperationScopedGenerativeCandidateManifest['referenceSetId'],
+    approvedMinimum: number,
   ): Promise<readonly VenueReference[]> {
     const references = await this.dependencies.registry.getReferenceSet(referenceSetId);
     const eligible = references
@@ -138,12 +150,15 @@ export class ControlledOperationScopedGenerativeFinalizationService {
           reference.requiredForGenerativeException,
       )
       .sort((left, right) => left.referenceId.localeCompare(right.referenceId));
-    if (eligible.length < 3 || new Set(eligible.map((entry) => entry.assetId)).size !== eligible.length) {
-      throw new ExecutionError(
-        'POLICY_DENIED',
-        'FAILED_GENERATIVE_REFERENCE_MISSING',
-        false,
-      );
+    const uniqueReferenceIds = new Set(eligible.map((reference) => reference.referenceId));
+    const uniqueAssetIds = new Set(eligible.map((reference) => reference.assetId));
+    const minimum = Math.max(3, approvedMinimum);
+    if (
+      eligible.length < minimum ||
+      uniqueReferenceIds.size !== eligible.length ||
+      uniqueAssetIds.size !== eligible.length
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
     }
     return eligible;
   }
