@@ -62,6 +62,8 @@ const toca: BrandAsset = {
 };
 
 const enhancementProvenance: CreativeEnhancementProvenance = {
+  policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+  creativeMode: 'REAL_PLUS_ENHANCEMENT',
   editorProvider: 'OPENAI_IMAGE_EDIT',
   sourceAssetId: venue.masterAssetId!,
   sourceDriveFileId: venue.masterDriveFileId!,
@@ -157,10 +159,11 @@ describe('LocalStoryComposer', () => {
     });
     expect(result.manifest.standardId).toBe('SUNSET_STORY_V1');
     expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
+    expect(result.manifest.enhancementProvenance).toBeUndefined();
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
   });
 
-  it('keeps the original master SHA as Story lineage when the rendered source is a verified enhancement', async () => {
+  it('keeps the original master SHA and enhancement chain when Story renders a verified enhancement', async () => {
     const runner = successfulRunner();
     const composer = new LocalStoryComposer(runner, 'convert');
 
@@ -180,6 +183,7 @@ describe('LocalStoryComposer', () => {
     expect(result.masterSha256).not.toBe(enhancedSha256);
     expect(result.manifest.creativeMode).toBe('REAL_PLUS_ENHANCEMENT');
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-STORY-V1']);
+    expect(result.manifest.enhancementProvenance).toEqual(enhancementProvenance);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
   });
 
