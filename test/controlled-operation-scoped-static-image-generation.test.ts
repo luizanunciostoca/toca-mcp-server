@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { OperationScopedGenerativeExceptionApproval } from '../src/contracts/creative-truth-generative-reference-sets.js';
+import type {
+  OperationScopedGenerativeExceptionApproval,
+  TocaGenerativeOperation,
+} from '../src/contracts/creative-truth-generative-reference-sets.js';
 import type { VenueAsset, VenueReference } from '../src/contracts/creative-truth.js';
 import { ControlledOperationScopedStaticImageGenerationService } from '../src/creative/controlled-operation-scoped-static-image-generation.js';
 import type { CreativeTruthVenueReferenceLoader } from '../src/providers/google-drive/creative-truth-reference-loader.js';
@@ -85,9 +88,14 @@ function resultFor(
   };
 }
 
-function setup(references: readonly VenueReference[]) {
+function setup(
+  references: readonly VenueReference[],
+  contentOperation: TocaGenerativeOperation | undefined = 'SUNSET',
+  approvalValue: OperationScopedGenerativeExceptionApproval = approval,
+) {
   const assertCanonicalPolicy = vi.fn(async (): Promise<void> => undefined);
-  const getApprovedGenerativeException = vi.fn(async () => approval);
+  const getContentItemOperation = vi.fn(async () => contentOperation);
+  const getApprovedGenerativeException = vi.fn(async () => approvalValue);
   const getReferenceSet = vi.fn(async () => references);
   const getVenueAssetBySourceAssetId = vi.fn(async (assetId: string) => {
     const matched = references.find((entry) => entry.assetId === assetId);
@@ -95,6 +103,7 @@ function setup(references: readonly VenueReference[]) {
   });
   const registry: OperationScopedGenerativeRegistry = {
     assertCanonicalPolicy,
+    getContentItemOperation,
     getApprovedGenerativeException,
     getReferenceSet,
     getVenueAssetBySourceAssetId,
@@ -122,6 +131,7 @@ function setup(references: readonly VenueReference[]) {
   return {
     service,
     assertCanonicalPolicy,
+    getContentItemOperation,
     getApprovedGenerativeException,
     getReferenceSet,
     load,
@@ -141,6 +151,7 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
     });
 
     expect(deps.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(deps.getContentItemOperation).toHaveBeenCalledWith('CONTENT-SUN-1');
     expect(deps.getApprovedGenerativeException).toHaveBeenCalledWith('CONTENT-SUN-1');
     expect(deps.getReferenceSet).toHaveBeenCalledWith(
       'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
@@ -160,6 +171,34 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
     expect(result.operation).toBe('SUNSET');
     expect(result.readyForFinalComposition).toBe(false);
+  });
+
+  it('fails before approval/reference loading when canonical content operation is missing', async () => {
+    const deps = setup([reference(1), reference(2), reference(3)], undefined);
+
+    await expect(
+      deps.service.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate image',
+        nowIso: '2026-08-18T04:00:00Z',
+      }),
+    ).rejects.toThrow('FAILED_GENERATIVE_CONTENT_OPERATION_MISSING');
+    expect(deps.getApprovedGenerativeException).not.toHaveBeenCalled();
+    expect(deps.load).not.toHaveBeenCalled();
+  });
+
+  it('rejects an approval/reference set that conflicts with the canonical content operation', async () => {
+    const deps = setup([reference(1), reference(2), reference(3)], 'THE_PARTY');
+
+    await expect(
+      deps.service.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate image',
+        nowIso: '2026-08-18T04:00:00Z',
+      }),
+    ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH');
+    expect(deps.getReferenceSet).not.toHaveBeenCalled();
+    expect(deps.load).not.toHaveBeenCalled();
   });
 
   it('fails before reference download when the active scoped set does not contain three required references', async () => {
