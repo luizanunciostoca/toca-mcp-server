@@ -40,13 +40,16 @@ export function evaluateOperationScopedGenerativeFidelity(
     });
   }
 
-  const parsedReferences = input.references.map((reference) => venueReferenceSchema.safeParse(reference));
-  if (parsedReferences.some((parsed) => !parsed.success)) {
-    return failed('FAILED_GENERATIVE_REFERENCE_MISSING', {
-      reason: 'MALFORMED_REFERENCE_EVIDENCE',
-    });
+  const references: VenueReference[] = [];
+  for (const reference of input.references) {
+    const parsedReference = venueReferenceSchema.safeParse(reference);
+    if (!parsedReference.success) {
+      return failed('FAILED_GENERATIVE_REFERENCE_MISSING', {
+        reason: 'MALFORMED_REFERENCE_EVIDENCE',
+      });
+    }
+    references.push(parsedReference.data);
   }
-  const references = parsedReferences.map((parsed) => parsed.data);
 
   let evidence: FidelityEvidence | undefined;
   if (input.evidence) {
