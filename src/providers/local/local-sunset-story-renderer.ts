@@ -54,107 +54,54 @@ export type SunsetStoryTemplateClass =
   | 'SUNSET_INFO_HOURS';
 
 interface SunsetStoryLayout {
-  readonly headlineLeft: number;
-  readonly headlineTop: number;
-  readonly headlineWidth: number;
-  readonly headlineHeight: number;
-  readonly headlinePointSize: number;
-  readonly supportLeft: number;
-  readonly supportTop: number;
-  readonly supportWidth: number;
-  readonly supportHeight: number;
-  readonly ctaLeft: number;
-  readonly ctaTop: number;
-  readonly ctaWidth: number;
+  readonly headline: readonly [left: number, top: number, width: number, height: number, pointSize: number];
+  readonly support: readonly [left: number, top: number, width: number, height: number];
+  readonly cta: readonly [left: number, top: number, width: number];
   readonly functionalInfoTop: number;
 }
 
 const LAYOUTS: Readonly<Record<SunsetStoryTemplateClass, SunsetStoryLayout>> = {
   SUNSET_HERO_LIFESTYLE: {
-    headlineLeft: 74,
-    headlineTop: 250,
-    headlineWidth: 910,
-    headlineHeight: 390,
-    headlinePointSize: 108,
-    supportLeft: 74,
-    supportTop: 720,
-    supportWidth: 500,
-    supportHeight: 150,
-    ctaLeft: 74,
-    ctaTop: 920,
-    ctaWidth: 430,
+    headline: [74, 250, 910, 390, 108],
+    support: [74, 720, 500, 150],
+    cta: [74, 920, 430],
     functionalInfoTop: 130,
   },
   SUNSET_VIEW_SCENERY: {
-    headlineLeft: 90,
-    headlineTop: 500,
-    headlineWidth: 900,
-    headlineHeight: 410,
-    headlinePointSize: 112,
-    supportLeft: 90,
-    supportTop: 930,
-    supportWidth: 620,
-    supportHeight: 150,
-    ctaLeft: 90,
-    ctaTop: 1110,
-    ctaWidth: 430,
+    headline: [90, 500, 900, 410, 112],
+    support: [90, 930, 620, 150],
+    cta: [90, 1110, 430],
     functionalInfoTop: 180,
   },
   SUNSET_SOCIAL_EXPERIENCE: {
-    headlineLeft: 90,
-    headlineTop: 1010,
-    headlineWidth: 860,
-    headlineHeight: 330,
-    headlinePointSize: 96,
-    supportLeft: 70,
-    supportTop: 250,
-    supportWidth: 620,
-    supportHeight: 160,
-    ctaLeft: 300,
-    ctaTop: 900,
-    ctaWidth: 480,
+    headline: [90, 1010, 860, 330, 96],
+    support: [70, 250, 620, 160],
+    cta: [300, 900, 480],
     functionalInfoTop: 150,
   },
   SUNSET_DRINKS_EXPERIENCE: {
-    headlineLeft: 90,
-    headlineTop: 1080,
-    headlineWidth: 900,
-    headlineHeight: 330,
-    headlinePointSize: 92,
-    supportLeft: 90,
-    supportTop: 900,
-    supportWidth: 620,
-    supportHeight: 145,
-    ctaLeft: 260,
-    ctaTop: 1410,
-    ctaWidth: 560,
+    headline: [90, 1080, 900, 330, 92],
+    support: [90, 900, 620, 145],
+    cta: [260, 1410, 560],
     functionalInfoTop: 150,
   },
   SUNSET_INFO_HOURS: {
-    headlineLeft: 60,
-    headlineTop: 315,
-    headlineWidth: 960,
-    headlineHeight: 520,
-    headlinePointSize: 138,
-    supportLeft: 90,
-    supportTop: 930,
-    supportWidth: 640,
-    supportHeight: 150,
-    ctaLeft: 250,
-    ctaTop: 1240,
-    ctaWidth: 580,
+    headline: [60, 315, 960, 520, 138],
+    support: [90, 930, 640, 150],
+    cta: [250, 1240, 580],
     functionalInfoTop: 140,
   },
 };
 
 const CANVAS_WIDTH = 1080;
 const CANVAS_HEIGHT = 1920;
-const SAFE_SIDE = 90;
+const SIDE_MARGIN = 90;
 const FOOTER_TOP = 1680;
 const FOOTER_BOTTOM = 1830;
 const FOOTER_SLOT_WIDTH = 225;
 const FOOTER_SLOT_HEIGHT = 118;
 const FOOTER_SLOT_TOP = 1700;
+const FOOTER_SLOT_LEFTS = [45, 270, 495, 720] as const;
 const HEADLINE_FONT = 'DejaVu-Serif';
 const SANS_FONT = 'DejaVu-Sans';
 
@@ -240,8 +187,7 @@ export class LocalSunsetStoryRenderer {
         buildSunsetStoryArgs(input, sourcePath, outputPath, logoPaths),
       );
       const outputBytes = await readFile(outputPath);
-      const validOutput = outputBytes.byteLength > 0 && isJpeg(outputBytes);
-      const qualityGate = evaluateQualityGate(validOutput, {
+      const qualityGate = evaluateQualityGate(outputBytes.byteLength > 0 && isJpeg(outputBytes), {
         dimensions: '1080x1920',
         outputContentType: 'image/jpeg',
         deterministicComposition: true,
@@ -251,6 +197,7 @@ export class LocalSunsetStoryRenderer {
         templateClass: input.templateClass,
         headlineFont: HEADLINE_FONT,
         supportFont: SANS_FONT,
+        sideMarginPx: SIDE_MARGIN,
         requiredBrandOrder: [...SUNSET_STORY_REQUIRED_BRANDS],
         requiredBrandAssetIds: [...SUNSET_STORY_REQUIRED_BRAND_ASSET_IDS],
         brandFooterTopPx: FOOTER_TOP,
@@ -262,7 +209,6 @@ export class LocalSunsetStoryRenderer {
       requireGatePassed(qualityGate);
 
       const outputSha256 = sha256(outputBytes);
-      const createdAt = input.createdAt ?? new Date().toISOString();
       const manifest: DeterministicRenderManifest = {
         contentItemId: input.contentItemId,
         creativeId: input.creativeId,
@@ -279,7 +225,7 @@ export class LocalSunsetStoryRenderer {
         outputDimensions: '1080x1920',
         exactAssetBinding: true,
         gates: [brandGate, venueGate, qualityGate],
-        createdAt,
+        createdAt: input.createdAt ?? new Date().toISOString(),
       };
 
       return {
@@ -348,7 +294,6 @@ export function buildSunsetStoryArgs(
   pushSupportCopy(args, input, layout);
   pushCta(args, input, layout);
   pushMandatoryFooter(args, logoPaths);
-
   args.push('-quality', '95', '-define', 'jpeg:dct-method=float', outputPath);
   return args;
 }
@@ -393,10 +338,11 @@ function pushHeadline(
   layout: SunsetStoryLayout,
 ): void {
   if (!input.headline?.trim()) return;
+  const [left, top, width, height, pointSize] = layout.headline;
   args.push(
     '(',
     '-size',
-    `${layout.headlineWidth}x${layout.headlineHeight}`,
+    `${width}x${height}`,
     '-background',
     'none',
     '-font',
@@ -404,7 +350,7 @@ function pushHeadline(
     '-fill',
     '#FFFFFF',
     '-pointsize',
-    String(layout.headlinePointSize),
+    String(pointSize),
     '-gravity',
     input.templateClass === 'SUNSET_INFO_HOURS' ? 'center' : 'northwest',
     `caption:${input.headline.trim()}`,
@@ -412,7 +358,7 @@ function pushHeadline(
     '-gravity',
     'northwest',
     '-geometry',
-    `+${layout.headlineLeft}+${layout.headlineTop}`,
+    `+${left}+${top}`,
     '-composite',
   );
 }
@@ -423,16 +369,15 @@ function pushSupportCopy(
   layout: SunsetStoryLayout,
 ): void {
   if (!input.supportCopy?.trim()) return;
-  const boxRight = layout.supportLeft + layout.supportWidth;
-  const boxBottom = layout.supportTop + layout.supportHeight;
+  const [left, top, width, height] = layout.support;
   args.push(
     '-fill',
     'rgba(255,255,255,0.88)',
     '-draw',
-    `rectangle ${layout.supportLeft},${layout.supportTop} ${boxRight},${boxBottom}`,
+    `rectangle ${left},${top} ${left + width},${top + height}`,
     '(',
     '-size',
-    `${layout.supportWidth - 44}x${layout.supportHeight - 26}`,
+    `${width - 44}x${height - 26}`,
     '-background',
     'none',
     '-font',
@@ -446,7 +391,7 @@ function pushSupportCopy(
     '-gravity',
     'northwest',
     '-geometry',
-    `+${layout.supportLeft + 22}+${layout.supportTop + 13}`,
+    `+${left + 22}+${top + 13}`,
     '-composite',
   );
 }
@@ -457,7 +402,7 @@ function pushCta(
   layout: SunsetStoryLayout,
 ): void {
   if (!input.cta?.trim()) return;
-  const height = 82;
+  const [left, top, width] = layout.cta;
   args.push(
     '-stroke',
     '#FFFFFF',
@@ -466,7 +411,7 @@ function pushCta(
     '-fill',
     'rgba(0,0,0,0.16)',
     '-draw',
-    `rectangle ${layout.ctaLeft},${layout.ctaTop} ${layout.ctaLeft + layout.ctaWidth},${layout.ctaTop + height}`,
+    `rectangle ${left},${top} ${left + width},${top + 82}`,
     '-stroke',
     'none',
     '-fill',
@@ -478,7 +423,7 @@ function pushCta(
     '-gravity',
     'northwest',
     '-annotate',
-    `+${layout.ctaLeft + 28}+${layout.ctaTop + 53}`,
+    `+${left + 28}+${top + 53}`,
     input.cta.trim(),
   );
 }
@@ -487,7 +432,6 @@ function pushMandatoryFooter(
   args: string[],
   logoPaths: ReadonlyMap<string, string>,
 ): void {
-  const slotLefts = [45, 270, 495, 720] as const;
   const maxSizes = [
     [135, 112],
     [180, 92],
@@ -516,7 +460,7 @@ function pushMandatoryFooter(
       '-gravity',
       'northwest',
       '-geometry',
-      `+${slotLefts[index]}+${FOOTER_SLOT_TOP}`,
+      `+${FOOTER_SLOT_LEFTS[index]}+${FOOTER_SLOT_TOP}`,
       '-composite',
     );
   }
@@ -533,9 +477,6 @@ function validateInput(input: LocalSunsetStoryComposeInput): void {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
   }
   if (input.creativeMode === 'GENERATIVE_EXCEPTION') {
-    throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
-  }
-  if (!LAYOUTS[input.templateClass]) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
   }
   if (input.sourceImageBytes.byteLength === 0) {
