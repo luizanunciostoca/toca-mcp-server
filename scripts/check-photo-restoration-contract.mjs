@@ -4,6 +4,8 @@ const policy = JSON.parse(read('control/photo-restoration-policy.v1.json'));
 const contract = read('src/contracts/photo-restoration.ts');
 const enhancer = read('src/providers/local/local-photo-enhancer.ts');
 const guard = read('src/providers/google-sheets/master-promotion-guard.ts');
+const promoteCli = read('src/marketing-autopilot-master-promote.ts');
+const packageJson = JSON.parse(read('package.json'));
 
 if (
   policy.policyId !== 'TOCA_PHOTO_RESTORATION_POLICY_V1' ||
@@ -67,6 +69,26 @@ for (const marker of [
   "targetFolderClass: '07_PRONTOS_PARA_MARKETING'",
 ]) {
   if (!guard.includes(marker)) fail(`Master promotion guard invariant missing: ${marker}`);
+}
+
+for (const marker of [
+  'masterPromotionEvidenceSchema.parse',
+  'assertMarketingMasterPromotion',
+  "promotionStatus: 'APPROVED_FOR_MARKETING'",
+  'physicalDriveWriteAuthorizedByThisCommand: false',
+  'UPLOAD_OR_MOVE_EXACT_MASTER_BYTES_TO_CANONICAL_07_FOLDER_AND_WRITE_BACK',
+]) {
+  if (!promoteCli.includes(marker)) fail(`Controlled master promotion CLI invariant missing: ${marker}`);
+}
+
+if (
+  packageJson.scripts?.['dev:marketing-autopilot-master-promote'] !==
+    'tsx src/marketing-autopilot-master-promote.ts' ||
+  packageJson.scripts?.['start:marketing-autopilot-master-promote'] !==
+    'node dist/src/marketing-autopilot-master-promote.js' ||
+  !packageJson.scripts?.['architecture:check']?.includes('check-photo-restoration-contract.mjs')
+) {
+  fail('Package scripts no longer expose or guard the controlled master promotion path');
 }
 
 console.log('Photo restoration and master promotion contract OK');
