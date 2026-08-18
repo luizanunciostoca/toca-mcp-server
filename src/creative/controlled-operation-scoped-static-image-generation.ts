@@ -19,29 +19,30 @@ import type {
 export interface ControlledOperationScopedGenerationRequest {
   readonly contentItemId: string;
   readonly prompt: string;
-  readonly nowIso?: string;
 }
 
 export interface ControlledOperationScopedGenerationDependencies {
   readonly registry: OperationScopedGenerativeRegistry;
   readonly referenceLoader: CreativeTruthVenueReferenceLoader;
   readonly generator: Pick<CreativeTruthOperationScopedImageGenerator, 'generate'>;
+  readonly now?: () => string;
 }
 
 export class ControlledOperationScopedStaticImageGenerationService {
-  constructor(private readonly dependencies: ControlledOperationScopedGenerationDependencies) {}
+  private readonly now: () => string;
+
+  constructor(private readonly dependencies: ControlledOperationScopedGenerationDependencies) {
+    this.now = dependencies.now ?? (() => new Date().toISOString());
+  }
 
   async generate(
     request: ControlledOperationScopedGenerationRequest,
   ): Promise<OperationScopedGenerativeImageResult> {
     validateRequest(request);
+    const nowIso = trustedNowIso(this.now);
     await this.dependencies.registry.assertCanonicalPolicy();
     const operation = await this.resolveContentOperation(request.contentItemId);
-    const approval = await this.resolveApproval(
-      request.contentItemId,
-      operation,
-      request.nowIso,
-    );
+    const approval = await this.resolveApproval(request.contentItemId, operation, nowIso);
     const references = await this.resolveRequiredReferences(approval);
     const loaded = await this.loadReferences(references);
 
@@ -50,7 +51,7 @@ export class ControlledOperationScopedStaticImageGenerationService {
       prompt: request.prompt.trim(),
       approval,
       references: loaded,
-      ...(request.nowIso ? { nowIso: request.nowIso } : {}),
+      nowIso,
     });
   }
 
@@ -69,7 +70,7 @@ export class ControlledOperationScopedStaticImageGenerationService {
   private async resolveApproval(
     contentItemId: string,
     operation: TocaGenerativeOperation,
-    nowIso?: string,
+    nowIso: string,
   ): Promise<OperationScopedGenerativeExceptionApproval> {
     const approval = await this.dependencies.registry.getApprovedGenerativeException(contentItemId);
     if (
@@ -98,7 +99,7 @@ export class ControlledOperationScopedStaticImageGenerationService {
       );
     }
 
-    const nowTimestamp = Date.parse(nowIso ?? new Date().toISOString());
+    const nowTimestamp = Date.parse(nowIso);
     if (!Number.isFinite(nowTimestamp)) {
       throw new ExecutionError(
         'APPROVAL_REQUIRED',
@@ -130,9 +131,11 @@ export class ControlledOperationScopedStaticImageGenerationService {
         reference.venueVerified &&
         reference.requiredForGenerativeException,
     );
+    const uniqueReferenceIds = new Set(eligible.map((reference) => reference.referenceId));
     const uniqueAssetIds = new Set(eligible.map((reference) => reference.assetId));
     if (
       eligible.length < Math.max(3, approval.minReferenceCount) ||
+      uniqueReferenceIds.size !== eligible.length ||
       uniqueAssetIds.size !== eligible.length
     ) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
@@ -158,4 +161,16 @@ function validateRequest(request: ControlledOperationScopedGenerationRequest): v
   if (!request.contentItemId.trim() || !request.prompt.trim()) {
     throw new ExecutionError('POLICY_DENIED', 'GENERATIVE_IMAGE_REQUEST_INVALID', false);
   }
+}
+
+function trustedNowIso(now: () => string): string {
+  const value = now();
+  if (!Number.isFinite(Date.parse(value))) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'GENERATIVE_TRUSTED_CLOCK_INVALID',
+      false,
+    );
+  }
+  return value;
 }
