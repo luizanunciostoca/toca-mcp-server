@@ -101,6 +101,7 @@ export class LocalCreativeComposer {
     requireGatePassed(brandGate);
 
     const venueGate = evaluateVenueFidelity({
+      contentItemId: input.contentItemId,
       creativeMode: input.creativeMode,
       ...(input.venueAsset ? { venueAsset: input.venueAsset } : {}),
       ...(input.generativeException ? { generativeException: input.generativeException } : {}),
@@ -393,6 +394,9 @@ function assertRealAssetBinding(input: LocalCreativeComposeInput): void {
   const venue = input.venueAsset;
   if (!venue?.masterAssetId || !venue.masterDriveFileId || !venue.masterSha256) {
     throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'FAILED_LINEAGE_MISSING', false);
+  }
+  if (input.standard.operation !== 'ALL' && venue.operation !== input.standard.operation) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
   }
 
   if (input.creativeMode === 'REAL_COMPOSITE') {
