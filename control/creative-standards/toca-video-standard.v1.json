@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "standardId": "TOCA_VIDEO_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
@@ -11,7 +11,13 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "venueTruthStrategy": "VIDEO_SHOTS_OPERATION_SCOPED_REAL_MEDIA",
+    "operationScopedVenueReferenceSets": {
+      "SUNSET": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+      "THE_PARTY": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
+    },
+    "legacyVenueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1",
+    "legacyVenueReferenceSetStatus": "DEPRECATED"
   },
   "defaultMode": "REAL_COMPOSITE",
   "shotRules": {
@@ -19,6 +25,7 @@
     "venueVerifiedRequired": true,
     "marketingReadyRequiredForFinalOutput": true,
     "sourceAndMasterLineageRequired": true,
+    "operationMatchRequired": true,
     "syntheticVenueReplacementForbidden": true
   },
   "composition": {
@@ -30,11 +37,10 @@
     "publicationMayNotReencodeOrRebuildWithoutNewManifest": true
   },
   "generativeException": {
-    "explicitApprovalRequired": true,
-    "verifiedVenueReferenceSetRequired": true,
-    "architectureInventionForbidden": true,
-    "environmentDriftForbidden": true,
-    "venueFidelityGateRequired": true
+    "status": "UNSUPPORTED_V1",
+    "fullGenerativeVideoAllowed": false,
+    "fallbackToStaticGenerativeContractForbidden": true,
+    "futureImplementationRequiresTemporalShotLevelTruthContract": true
   },
   "qualityGate": {
     "failClosed": true,
@@ -42,9 +48,11 @@
     "rejectOn": [
       "UNVERIFIED_SHOT",
       "MISSING_SHOT_LINEAGE",
+      "VIDEO_OPERATION_MISMATCH",
       "AI_RECREATED_LOGO",
       "ARCHITECTURE_DRIFT",
       "SCENE_INVENTION",
+      "GENERATIVE_VIDEO_UNSUPPORTED",
       "MISSING_OUTPUT_HASH",
       "MISSING_EXACT_ASSET_BINDING",
       "MISSING_PROVIDER_ASSET_LOCATOR"
