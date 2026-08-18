@@ -3,8 +3,17 @@ import { GoogleSheetsCreativeTruthRegistry } from '../src/providers/google-sheet
 import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/media-assets.js';
 
 function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])[]>>) {
-  const readRange = vi.fn(async (_spreadsheetId: string, range: string) => ranges[range] ?? []);
-  const appendRow = vi.fn(async () => undefined);
+  const readRange = vi.fn(
+    async (_spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]> =>
+      ranges[range] ?? [],
+  );
+  const appendRow = vi.fn(
+    async (
+      _spreadsheetId: string,
+      _range: string,
+      _values: readonly unknown[],
+    ): Promise<void> => undefined,
+  );
   return {
     client: { readRange, appendRow } satisfies SpreadsheetValuesClient,
     readRange,
