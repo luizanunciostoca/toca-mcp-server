@@ -19,6 +19,8 @@
     "dev:marketing-autopilot-image-edit": "tsx src/marketing-autopilot-image-edit.ts",
     "dev:marketing-autopilot-image-generate": "tsx src/marketing-autopilot-image-generate.ts",
     "dev:marketing-autopilot-image-finalize": "tsx src/marketing-autopilot-image-finalize.ts",
+    "dev:marketing-autopilot-video-generate": "tsx src/marketing-autopilot-video-generate.ts",
+    "dev:marketing-autopilot-video-finalize": "tsx src/marketing-autopilot-video-finalize.ts",
     "dev:marketing-autopilot-the-party-context": "tsx src/marketing-autopilot-the-party-context.ts",
     "dev:marketing-autopilot-the-party-writeback": "tsx src/marketing-autopilot-the-party-writeback.ts",
     "start": "node dist/src/index.js",
@@ -31,6 +33,8 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "start:marketing-autopilot-image-generate": "node dist/src/marketing-autopilot-image-generate.js",
     "start:marketing-autopilot-image-finalize": "node dist/src/marketing-autopilot-image-finalize.js",
+    "start:marketing-autopilot-video-generate": "node dist/src/marketing-autopilot-video-generate.js",
+    "start:marketing-autopilot-video-finalize": "node dist/src/marketing-autopilot-video-finalize.js",
     "start:marketing-autopilot-the-party-context": "node dist/src/marketing-autopilot-the-party-context.js",
     "start:marketing-autopilot-the-party-writeback": "node dist/src/marketing-autopilot-the-party-writeback.js",
     "migrate": "tsx scripts/migrate.ts",
@@ -40,7 +44,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-creative-truth-brand-integrity-contract.mjs && node scripts/check-creative-truth-generative-contract.mjs && node scripts/check-operation-scoped-generative-truth.mjs && node scripts/check-the-party-creative-standard.mjs && node scripts/check-the-party-content-context-contract.mjs && node scripts/check-the-party-writeback-contract.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-creative-truth-brand-integrity-contract.mjs && node scripts/check-creative-truth-generative-contract.mjs && node scripts/check-operation-scoped-generative-truth.mjs && node scripts/check-the-party-creative-standard.mjs && node scripts/check-the-party-content-context-contract.mjs && node scripts/check-the-party-writeback-contract.mjs && node scripts/check-photo-to-video-contract.mjs",
     "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
