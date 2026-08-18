@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { TOCA_CREATIVE_TRUTH_POLICY_ID } from './contracts/creative-truth.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { LocalPhotoEnhancer } from './providers/local/local-photo-enhancer.js';
 import { OpenAiImageEditProvider } from './providers/openai/openai-image-edit-provider.js';
@@ -37,6 +38,9 @@ process.stdout.write(
     outputContentType: result.outputContentType,
     outputSizeBytes: result.outputBytes.byteLength,
     outputPath: args.output,
+    creativeTruthPolicyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+    creativeMode: 'REAL_PLUS_ENHANCEMENT',
+    venueFidelityGateRequired: true,
   })}\n`,
 );
 
@@ -54,6 +58,11 @@ async function editWithOpenAi(args: CliArgs, sourceBytes: Uint8Array) {
     sourceDriveFileId: args.sourceDriveFileId,
     imageBytes: sourceBytes,
     contentType: args.contentType,
+    creativeTruth: {
+      brandScope: 'TOCA_DO_MORCEGO',
+      policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
+      creativeMode: 'REAL_PLUS_ENHANCEMENT',
+    },
   });
 }
 
