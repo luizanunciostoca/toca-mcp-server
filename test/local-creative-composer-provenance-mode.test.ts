@@ -5,6 +5,8 @@ import { LocalCreativeComposer } from '../src/providers/local/local-creative-com
 
 const masterBytes = Uint8Array.from([1, 2, 3, 4]);
 const masterSha256 = createHash('sha256').update(masterBytes).digest('hex');
+const brandBytes = Uint8Array.from([9, 9, 9]);
+const brandSha256 = createHash('sha256').update(brandBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'SUNSET_FEED_V1',
@@ -46,7 +48,8 @@ const toca: BrandAsset = {
   driveFileId: 'drive-logo',
   fileName: 'toca.png',
   contentType: 'image/png',
-  integrityMode: 'DRIVE_FILE_ID_PINNED',
+  integrityMode: 'SHA256_PINNED',
+  sha256: brandSha256,
   status: 'ACTIVE_APPROVED',
   aiReconstructionAllowed: false,
 };
@@ -67,7 +70,7 @@ const enhancementProvenance = {
 function brandInput() {
   return {
     registry: toca,
-    bytes: Uint8Array.from([9, 9, 9]),
+    bytes: brandBytes,
     contentType: 'image/png' as const,
     driveFileId: toca.driveFileId,
   };
