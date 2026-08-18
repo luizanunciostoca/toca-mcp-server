@@ -3,6 +3,23 @@
 Parent policy: `TOCA_CREATIVE_TRUTH_POLICY_V1`  
 Video policy: `TOCA_PHOTO_TO_VIDEO_POLICY_V1`
 
+## Canonical parent policy gate
+
+The repository child policy is not sufficient authority by itself. `GoogleSheetsPhotoToVideoParentPolicyGuard` re-reads the canonical Creative Truth `POLICY!A1:AC20` range from Google Drive/Sheets before both generation and finalization.
+
+The guard requires exactly one `TOCA_CREATIVE_TRUTH_POLICY_V1` row with `status=ACTIVE_CANONICAL` and verifies the parent/child binding plus the safety invariants used by this runtime:
+
+- `brand_scope=TOCA_DO_MORCEGO`;
+- official logos only;
+- Venue Fidelity, Brand Integrity and Quality gates enabled;
+- `fail_closed=TRUE`;
+- `photo_to_video_policy_id=TOCA_PHOTO_TO_VIDEO_POLICY_V1`;
+- `full_synthetic_venue_video=UNSUPPORTED_V1`;
+- `video_photo_motion=ACTIVE_V1` for `REAL_PHOTO_TO_MOTION_VIDEO`;
+- `video_generative_exception=SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1` for `GENERATIVE_SCENE_CONTINUATION_VIDEO`.
+
+Missing/ambiguous policy rows, schema drift, parent/child policy drift or route disablement fail closed before provider work. This prevents a stale repo mirror or caller from enabling a route that the canonical Drive policy no longer permits.
+
 ## Routes
 
 ### `REAL_PHOTO_TO_MOTION_VIDEO`
@@ -35,7 +52,7 @@ Generation validates its trusted clock before canonical/provider work. The OpenA
 
 ## Generation pipeline
 
-`CONTENT_ITEMS` → product/operation/output resolution → product policy → video standard → real venue master → rights/likeness → exact Drive download/hash → route execution → deterministic official hero-brand overlay → durable exact candidate artifact → `GENERATED_REVIEW_REQUIRED`.
+`CONTENT_ITEMS` → canonical parent policy gate → product/operation/output resolution → product policy → video standard → real venue master → rights/likeness → exact Drive download/hash → route execution → deterministic official hero-brand overlay → durable exact candidate artifact → `GENERATED_REVIEW_REQUIRED`.
 
 Route 1 provider: `LOCAL_FFMPEG`.  
 Route 2 provider: `OPENAI_VIDEO_API`.
@@ -78,13 +95,14 @@ The exact durable generated branded MP4 is reviewed. Review evidence must bind t
 `ControlledPhotoToVideoFinalizationService` does not trust caller-supplied video bytes. Before accepting the output, it:
 
 1. validates review chronology against trusted time;
-2. re-resolves canonical content/product/standard/source/rights/approval state;
-3. re-resolves The Party edition/intent/environment when applicable;
-4. downloads the canonical source master from Drive again and revalidates its exact SHA-256;
-5. re-resolves the official hero brand record and downloads the logo from Drive again, verifying asset ID, Drive ID and pinned SHA-256;
-6. loads the candidate from `artifactRef` through `PhotoToVideoArtifactStore.loadExact` and re-hashes the complete MP4.
+2. re-runs the canonical parent policy gate for the candidate route;
+3. re-resolves canonical content/product/standard/source/rights/approval state;
+4. re-resolves The Party edition/intent/environment when applicable;
+5. downloads the canonical source master from Drive again and revalidates its exact SHA-256;
+6. re-resolves the official hero brand record and downloads the logo from Drive again, verifying asset ID, Drive ID and pinned SHA-256;
+7. loads the candidate from `artifactRef` through `PhotoToVideoArtifactStore.loadExact` and re-hashes the complete MP4.
 
-Context drift, source bytes/hash drift, hero-brand registry/Drive drift, The Party context drift, standard drift, artifact drift, review chronology drift or approval drift fail closed.
+Policy drift, context drift, source bytes/hash drift, hero-brand registry/Drive drift, The Party context drift, standard drift, artifact drift, review chronology drift or approval drift fail closed.
 
 Successful finalization writes an idempotent `VIDEO_OUTPUTS` evidence row and writes back `video_final_asset_sha256`, `video_final_artifact_ref`, `video_review_status=VIDEO_CREATIVE_TRUTH_PASSED` and `video_output_evidence_id` to `CONTENT_ITEMS`. The final manifest returns `VIDEO_CREATIVE_TRUTH_PASSED`, `exactAssetBinding=true`, `readyForPrepare=true`, `publicationAuthorized=false`.
 
@@ -107,6 +125,7 @@ The candidate and final artifact ref are intentionally identical in V1 because f
 
 Creative Truth registry tabs used by this contract:
 
+- `POLICY`
 - `PRODUCT_VISUAL_POLICIES`
 - `VIDEO_CREATIVE_STANDARDS`
 - `VIDEO_SOURCE_RIGHTS`
@@ -129,10 +148,12 @@ The canonical Drive registry currently keeps video source rights blocked/unverif
 
 ## Architecture/tests
 
-`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the governed route files, durable artifact store, canonical writeback, trusted-clock, provider, source/brand revalidation, The Party binding and negative tests.
+`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the canonical parent policy guard, governed route files, durable artifact store, canonical writeback, trusted-clock, provider, source/brand revalidation, The Party binding and negative tests.
 
 Tests cover at least:
 
+- exact canonical parent policy acceptance and fail-closed policy drift/route disablement/ambiguity/schema errors;
+- parent policy check before content/provider work;
 - durable artifact persistence before review-state writeback;
 - no writeback when artifact persistence fails;
 - real GCS adapter contract with exact full-SHA readback and configured-bucket binding using mocked provider I/O;
@@ -150,6 +171,10 @@ Tests cover at least:
 
 Representative errors include:
 
+- `PHOTO_TO_VIDEO_PARENT_POLICY_NOT_RESOLVED`
+- `PHOTO_TO_VIDEO_PARENT_POLICY_SCHEMA_INVALID`
+- `PHOTO_TO_VIDEO_PARENT_POLICY_DRIFT`
+- `PHOTO_TO_VIDEO_PARENT_POLICY_ROUTE_DISABLED`
 - `PHOTO_TO_VIDEO_MARKETING_READY_SOURCE_REQUIRED`
 - `VIDEO_SOURCE_RIGHTS_NOT_CLEARED`
 - `VIDEO_SOURCE_USE_NOT_APPROVED`
