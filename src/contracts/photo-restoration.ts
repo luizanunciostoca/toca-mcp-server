@@ -34,7 +34,7 @@ export const photoRestorationEvidenceSchema = z.object({
   textDetailConfidence: restorationConfidenceSchema,
   iconDetailConfidence: restorationConfidenceSchema,
   microDetailConfidence: restorationConfidenceSchema,
-  outputLongEdgePixels: z.number().int().min(3840),
+  outputLongEdgePixels: z.number().int().positive(),
   stillMasterFormat: stillMasterFormatSchema,
   proResApplicability: z.literal('VIDEO_ONLY_NOT_APPLICABLE_TO_STILL'),
   reviewRequiredReason: z.string().optional(),
