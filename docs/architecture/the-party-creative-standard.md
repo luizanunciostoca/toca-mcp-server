@@ -132,11 +132,29 @@ The content registry carries 14 explicit The Party/Creative Truth columns after 
 - `exact_asset_binding`;
 - `output_sha256`.
 
-`edition_id` is the join key. For Hybrid Networks, `the_party_environment` may be propagated from the edition registry only when `environment_status=DECIDED`. `PENDING_DECISION` keeps dependent items at `BLOCKED_NEEDS_ENVIRONMENT`. A registered item-specific brief may provide an explicit environment, but the runtime may never infer it from artist/line-up, photo/video appearance, dominant color/light, language/copy, previous edition, audience origin or aesthetic preference.
+`edition_id` is the join key. For Hybrid Networks, `the_party_environment` may be propagated from the edition registry only when `environment_status=DECIDED` and the decision has `environment_decision_source`, `environment_decision_at` and `environment_decision_by`. `PENDING_DECISION` keeps dependent items at `BLOCKED_NEEDS_ENVIRONMENT`. A registered item-specific brief may provide an explicit environment, but the runtime may never infer it from artist/line-up, photo/video appearance, dominant color/light, language/copy, previous edition, audience origin or aesthetic preference.
 
 Environment decisions are scoped to the same `edition_id`; they must never cross to another Saturday/edition. A later environment change requires review of creatives that are not yet approved. An already approved exact final creative must not be silently recomposed because edition context changed.
 
 Planning may resolve intent and standard in advance, but it may not fabricate gate success. Gate fields start `PENDING`; `exact_asset_binding` and `output_sha256` remain unset until the exact final bytes have passed the Creative Truth pipeline. `RESOLVED` therefore means only that visual-family context is complete; it never means ready, approved, scheduled or publishable.
+
+The runtime reader is `GoogleSheetsThePartyContentOrchestration`. It reconciles `CONTENT_ITEMS` with only the matching `EDITIONS.edition_id`, resolves a decided edition environment without mutating Drive, and produces the exact `CreativeTruthResolver` input. A blocked Networks item remains blocked when edition context is still pending.
+
+Final exact evidence is written back only by `GoogleSheetsThePartyContentWriteback.writeFinalCreativeTruthEvidence`. The method accepts the observed final SHA-256 plus the deterministic Creative Truth manifest and fails closed unless all of the following hold:
+
+- `assertCreativeReadyForPublication` accepts the manifest and all three Creative Truth gates are `PASSED`;
+- manifest `contentItemId` and `outputSha256` match the exact observed final bytes;
+- `BRAND-THE-PARTY-WHITE-V1` is present in the manifest;
+- `QUALITY.visualStandardApplied` exactly matches the content item's resolved The Party standard;
+- a Hybrid Networks output carries the exact same `INTERNATIONAL`/`NATIONAL` value resolved for that edition/item;
+- real-composite/enhancement outputs retain master lineage and Venue Fidelity identifies the exact venue asset;
+- a transversal `TOCA_THUMBNAIL_V1` manifest is accepted only when its inherited The Party family remains bound in QUALITY evidence.
+
+Immediately before write-back, the content/edition state is re-read and fingerprinted. A changed intent, edition, environment, standard, hero asset, venue binding, gate state or prior output causes `THE_PARTY_CONTENT_CHANGED_BEFORE_WRITEBACK` instead of a silent write. The writer uses one Google Sheets `values:batchUpdate` request with `RAW` values and dynamic header/row resolution; it does not hardcode spreadsheet column letters.
+
+On a successful finalization it writes only verified facts: `visual_standard_status=CREATIVE_TRUTH_PASSED`, the three gate fields as `PASS`, `exact_asset_binding=true` and the exact `output_sha256`. If a same-edition environment was formally `DECIDED` and the content row was still blank, that decided value is propagated to the item. If automatic real-venue selection produced an exact Venue Fidelity binding and `venue_asset_id` was blank, that exact venue ID is persisted as well. Provider readback is mandatory after the batch write.
+
+Write-back is idempotent for the same already-approved exact output. An attempt to replace an already-approved different SHA fails with `THE_PARTY_APPROVED_CREATIVE_REVISION_REQUIRED`; no silent overwrite is allowed. A connected client without governed batch-write capability fails with `THE_PARTY_CONTENT_WRITEBACK_UNAVAILABLE`.
 
 The active rolling The Party slots in the Drive registry were preclassified according to this contract and linked to their corresponding future `edition_id`. Minimalist people-first/informational items can be visually resolved without an environment. Hybrid Networks slots remain intentionally blocked until the edition or an explicit item brief records `INTERNATIONAL` or `NATIONAL`. This is expected fail-closed behavior, not a missing implementation.
 
@@ -164,4 +182,4 @@ The visual-family implementation exists for real video, but final Reel/video out
 
 ## Publication boundary
 
-Visual compliance does not authorize publication. Approval, Policy Engine, provider permissions and exact-asset publication binding remain unchanged. Publication must consume the exact approved final bytes and must not rebuild the creative.
+Visual compliance and successful registry write-back do not authorize publication. Approval, Policy Engine, provider permissions and exact-asset publication binding remain unchanged. Publication must consume the exact approved final bytes and must not rebuild the creative.
