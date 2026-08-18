@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "standardId": "TOCA_THUMBNAIL_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
@@ -11,7 +11,13 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "generativeReferenceStrategy": "OPERATION_SCOPED_ONLY_V1",
+    "operationScopedVenueReferenceSets": {
+      "SUNSET": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+      "THE_PARTY": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
+    },
+    "legacyVenueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1",
+    "legacyVenueReferenceSetStatus": "DEPRECATED"
   },
   "canvases": [
     { "width": 1080, "height": 1920, "aspectRatio": "9:16" },
@@ -22,6 +28,8 @@
     "realVenueVerifiedAssetRequiredByDefault": true,
     "marketingReadyMasterRequired": true,
     "generativeExceptionRequiresExplicitApproval": true,
+    "generativeExceptionRequiresCanonicalContentOperation": true,
+    "crossOperationReferenceReuseForbidden": true,
     "syntheticVenueReplacementForbiddenByDefault": true,
     "architectureInventionForbidden": true,
     "environmentDriftForbidden": true,
@@ -46,6 +54,7 @@
       "UNVERIFIED_VENUE",
       "SYNTHETIC_VENUE_REPLACEMENT",
       "ARCHITECTURE_DRIFT",
+      "CROSS_OPERATION_REFERENCE_REUSE",
       "ASSET_LINEAGE_MISSING",
       "TEXT_ILLEGIBLE",
       "WRONG_DIMENSIONS"
