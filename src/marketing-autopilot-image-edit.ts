@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { TOCA_CREATIVE_TRUTH_POLICY_ID } from './contracts/creative-truth.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { LocalPhotoEnhancer } from './providers/local/local-photo-enhancer.js';
+import { CreativeTruthOpenAiImageEnhancer } from './providers/openai/creative-truth-openai-image-enhancer.js';
 import { OpenAiImageEditProvider } from './providers/openai/openai-image-edit-provider.js';
 
 const args = parseArgs(process.argv.slice(2));
@@ -42,14 +43,10 @@ process.stdout.write(
     outputContentType: result.outputContentType,
     outputSizeBytes: result.outputBytes.byteLength,
     outputPath: args.output,
-    creativeTruthPolicyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
-    creativeTruthBound:
-      'creativeTruthBound' in result ? result.creativeTruthBound === true : false,
-    creativeMode: 'REAL_PLUS_ENHANCEMENT',
-    requiresVenueFidelityGate:
-      'requiresVenueFidelityGate' in result
-        ? result.requiresVenueFidelityGate === true
-        : true,
+    creativeTruthPolicyId: result.policyId,
+    creativeTruthBound: result.creativeTruthBound,
+    creativeMode: result.creativeMode,
+    requiresVenueFidelityGate: result.requiresVenueFidelityGate,
     venueFidelityGateRequired: true,
   })}\n`,
 );
@@ -62,17 +59,13 @@ async function editWithOpenAi(args: CliArgs, sourceBytes: Uint8Array) {
     secretResolver: new EnvironmentSecretResolver(process.env),
     apiKeyReference: { provider: 'env', key: apiKeyEnvKey },
   });
+  const enhancer = new CreativeTruthOpenAiImageEnhancer(provider);
 
-  return provider.edit({
+  return enhancer.enhance({
     sourceAssetId: args.sourceAssetId,
     sourceDriveFileId: args.sourceDriveFileId,
     imageBytes: sourceBytes,
     contentType: args.contentType,
-    creativeTruth: {
-      brandScope: 'TOCA_DO_MORCEGO',
-      policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
-      creativeMode: 'REAL_PLUS_ENHANCEMENT',
-    },
   });
 }
 
