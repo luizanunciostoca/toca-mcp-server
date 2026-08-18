@@ -11,6 +11,7 @@ const required = [
   'src/creative/creative-truth-resolver.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
   'src/providers/local/local-creative-composer.ts',
+  'src/providers/local/local-story-composer.ts',
   'src/providers/local/local-video-composer.ts',
   'src/providers/meta-ads/meta-ads-controlled-write.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
@@ -64,14 +65,17 @@ if (
 }
 
 const contracts = readFileSync('src/contracts/creative-truth.ts', 'utf8');
-for (const locator of [
+for (const marker of [
+  'creativeTruthPolicySchema',
+  'videoShotSchema',
   'MEDIA_URL',
   'META_IMAGE_HASH',
   'META_VIDEO_ID',
   'META_SOURCE_CREATIVE_ID',
+  'DRIVE_FILE_ID',
 ]) {
-  if (!contracts.includes(locator)) {
-    console.error(`Creative Truth asset locator missing: ${locator}`);
+  if (!contracts.includes(marker)) {
+    console.error(`Creative Truth contract missing: ${marker}`);
     process.exit(1);
   }
 }
@@ -87,6 +91,44 @@ for (const marker of [
 ]) {
   if (!creativeTruth.includes(marker)) {
     console.error(`Creative Truth runtime missing hard requirement: ${marker}`);
+    process.exit(1);
+  }
+}
+
+const registry = readFileSync('src/providers/google-sheets/creative-truth-registry.ts', 'utf8');
+if (
+  !registry.includes('VIDEO_SHOTS!A2:Q2000') ||
+  !registry.includes('getVideoShot') ||
+  !registry.includes('listVideoShots')
+) {
+  console.error('VIDEO_SHOTS must be a first-class Creative Truth registry');
+  process.exit(1);
+}
+
+const localCreative = readFileSync('src/providers/local/local-creative-composer.ts', 'utf8');
+if (!localCreative.includes('CREATIVE_MASTER_HASH_MISMATCH')) {
+  console.error('Static creative bytes must match the verified marketing-ready master hash');
+  process.exit(1);
+}
+
+const localStory = readFileSync('src/providers/local/local-story-composer.ts', 'utf8');
+if (
+  !localStory.includes('LocalCreativeComposer') ||
+  !localStory.includes('LOCAL_STORY_COMPOSER_MASTER_BINDING_MISMATCH') ||
+  localStory.includes('brandLabel')
+) {
+  console.error('Story composition must use Creative Truth and official logo files only');
+  process.exit(1);
+}
+
+const localVideo = readFileSync('src/providers/local/local-video-composer.ts', 'utf8');
+for (const marker of [
+  'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED',
+  'VIDEO_SHOT_MASTER_HASH_MISMATCH',
+  'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
+]) {
+  if (!localVideo.includes(marker)) {
+    console.error(`Video Creative Truth binding missing: ${marker}`);
     process.exit(1);
   }
 }
