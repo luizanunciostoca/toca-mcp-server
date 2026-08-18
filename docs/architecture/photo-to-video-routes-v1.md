@@ -21,11 +21,17 @@ The runtime is registry-driven. `PRODUCT_VISUAL_POLICIES` and `VIDEO_CREATIVE_ST
 
 The Party keeps its existing edition/environment/visual-family authority. `GoogleSheetsThePartyContentOrchestration` is re-read before generation/finalization. Hybrid Networks remains blocked without canonical environment resolution.
 
+For The Party, the candidate itself binds `edition_id`, creative intent and canonical environment (when applicable). Finalization compares those values against a fresh orchestration read, so a later edition/intent/environment change cannot silently approve bytes generated for another context.
+
 ## Rights and likeness
 
 `VIDEO_SOURCE_RIGHTS` is mandatory for both routes. Rights are never inferred from Drive location, filename, prior publication or MARKETING_READY status. Accepted rights states are `OWNED`, `LICENSED`, `CLEARED` and `RIGHTS_CLEARED`, and an ACTIVE rights record must include durable `evidence_ref` plus `validated_at`.
 
 For generative scene continuation when people are present, `likeness_consent_status=CONFIRMED` plus `people_consent_confirmed=TRUE` in the explicit exception is mandatory. Otherwise generation fails closed before the provider call.
+
+## Trusted clock boundary
+
+Generation validates its trusted clock before canonical/provider work. The OpenAI provider independently validates its own trusted clock before resolving the API secret or issuing network access. Finalization uses one trusted finalization timestamp and requires `candidate.createdAt <= review.reviewedAt <= finalizedAt`. Caller-supplied `now` values are not accepted by the production CLIs.
 
 ## Generation pipeline
 
@@ -43,14 +49,15 @@ The branded candidate MP4 must be persisted before review state is written. `Gcs
 The immutable candidate manifest stores:
 
 - `outputSha256`;
-- `artifactRef` (`gcs://...`);
-- `artifactObjectName`;
-- source/master SHA-256;
+- `artifactRef` (`gcs://...`) and matching `artifactObjectName`;
+- source/master SHA-256 and Drive identity;
 - provider identity/job when applicable;
 - route, standard, operation and product identity;
+- official hero brand asset ID, Drive file ID and SHA-256;
+- The Party edition/intent/environment binding when applicable;
 - `publicationEligible=false`.
 
-`CONTENT_ITEMS` persists the same identity in `video_candidate_sha256` and `video_candidate_artifact_ref`. If durable artifact persistence fails, the runtime must not write `GENERATED_REVIEW_REQUIRED`.
+The schema rejects disagreement between `artifactRef` and `artifactObjectName`. `CONTENT_ITEMS` persists the same candidate identity in `video_candidate_sha256` and `video_candidate_artifact_ref`. If durable artifact persistence fails, the runtime must not write `GENERATED_REVIEW_REQUIRED`.
 
 ## Review/finalization
 
@@ -68,7 +75,16 @@ The exact durable generated branded MP4 is reviewed. Review evidence must bind t
 - Scene Continuation Fidelity PASS for Route 2;
 - `NOT_APPLICABLE` for Scene Continuation Fidelity on Route 1.
 
-`ControlledPhotoToVideoFinalizationService` does not trust caller-supplied video bytes. It loads the candidate from `artifactRef` through `PhotoToVideoArtifactStore.loadExact`, re-hashes the complete MP4, then re-resolves the canonical content/product/standard/source/rights/approval state immediately before finalization. Context drift, source hash drift, standard drift, artifact drift or approval drift fail closed.
+`ControlledPhotoToVideoFinalizationService` does not trust caller-supplied video bytes. Before accepting the output, it:
+
+1. validates review chronology against trusted time;
+2. re-resolves canonical content/product/standard/source/rights/approval state;
+3. re-resolves The Party edition/intent/environment when applicable;
+4. downloads the canonical source master from Drive again and revalidates its exact SHA-256;
+5. re-resolves the official hero brand record and downloads the logo from Drive again, verifying asset ID, Drive ID and pinned SHA-256;
+6. loads the candidate from `artifactRef` through `PhotoToVideoArtifactStore.loadExact` and re-hashes the complete MP4.
+
+Context drift, source bytes/hash drift, hero-brand registry/Drive drift, The Party context drift, standard drift, artifact drift, review chronology drift or approval drift fail closed.
 
 Successful finalization writes an idempotent `VIDEO_OUTPUTS` evidence row and writes back `video_final_asset_sha256`, `video_final_artifact_ref`, `video_review_status=VIDEO_CREATIVE_TRUTH_PASSED` and `video_output_evidence_id` to `CONTENT_ITEMS`. The final manifest returns `VIDEO_CREATIVE_TRUTH_PASSED`, `exactAssetBinding=true`, `readyForPrepare=true`, `publicationAuthorized=false`.
 
@@ -113,16 +129,21 @@ The canonical Drive registry currently keeps video source rights blocked/unverif
 
 ## Architecture/tests
 
-`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the governed route files, durable artifact store, canonical writeback, provider boundary and negative tests.
+`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the governed route files, durable artifact store, canonical writeback, trusted-clock, provider, source/brand revalidation, The Party binding and negative tests.
 
 Tests cover at least:
 
 - durable artifact persistence before review-state writeback;
 - no writeback when artifact persistence fails;
+- real GCS adapter contract with exact full-SHA readback and configured-bucket binding using mocked provider I/O;
 - exact artifact readback before finalization;
 - candidate/final artifact binding in `CONTENT_ITEMS`;
 - required source-to-output review evidence;
-- explicit approval/source SHA binding before OpenAI provider access;
+- final source and official hero-brand revalidation;
+- The Party context drift after generation;
+- invalid/out-of-order trusted review time;
+- explicit approval/source asset/SHA binding before OpenAI provider access;
+- invalid provider clock before secret/network access;
 - deterministic real-photo motion path.
 
 ## Fail-closed errors
@@ -137,12 +158,18 @@ Representative errors include:
 - `VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH`
 - `VIDEO_SCENE_CONTINUATION_APPROVAL_EXPIRED`
 - `PHOTO_TO_VIDEO_THE_PARTY_STANDARD_MISMATCH`
+- `PHOTO_TO_VIDEO_THE_PARTY_CONTEXT_CHANGED`
+- `PHOTO_TO_VIDEO_HERO_BRAND_CONTEXT_CHANGED`
+- `PHOTO_TO_VIDEO_REVIEW_TIME_INVALID`
+- `PHOTO_TO_VIDEO_ARTIFACT_REF_OBJECT_MISMATCH`
 - `PHOTO_TO_VIDEO_ARTIFACT_INPUT_HASH_MISMATCH`
 - `PHOTO_TO_VIDEO_ARTIFACT_STAGE_HASH_MISMATCH`
 - `PHOTO_TO_VIDEO_ARTIFACT_READBACK_HASH_MISMATCH`
+- `PHOTO_TO_VIDEO_ARTIFACT_REF_BUCKET_MISMATCH`
 - `PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH`
 - `PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH`
 - `SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED`
 - `PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED`
+- `OPENAI_VIDEO_TRUSTED_CLOCK_INVALID`
 
 No error automatically falls back from Route 2 to unrestricted generation or from either route to a different product/operation.
