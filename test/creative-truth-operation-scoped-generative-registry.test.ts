@@ -74,14 +74,14 @@ function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): u
 }
 
 function referenceRow(
-  referenceId: string,
   referenceSetId: string,
+  referenceId: string,
   operationScope: 'SUNSET' | 'THE_PARTY' | 'LEGACY_DEPRECATED',
   status = 'ACTIVE',
 ): readonly unknown[] {
   return [
-    referenceId,
     referenceSetId,
+    referenceId,
     `ASSET-${referenceId}`,
     `drive-${referenceId}`,
     'VENUE_REFERENCE',
@@ -97,17 +97,17 @@ function referenceRow(
 function canonicalReferenceRows(): readonly (readonly unknown[])[] {
   return [
     referenceRow(
-      'LEGACY-1',
       'TOCA_VENUE_REFERENCE_SET_V1',
+      'LEGACY-1',
       'LEGACY_DEPRECATED',
       'DEPRECATED',
     ),
-    referenceRow('SUN-1', 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUNSET'),
-    referenceRow('SUN-2', 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUNSET'),
-    referenceRow('SUN-3', 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUNSET'),
-    referenceRow('TP-1', 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'THE_PARTY'),
-    referenceRow('TP-2', 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'THE_PARTY'),
-    referenceRow('TP-3', 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'THE_PARTY'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUN-1', 'SUNSET'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUN-2', 'SUNSET'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_SUNSET_V1', 'SUN-3', 'SUNSET'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'TP-1', 'THE_PARTY'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'TP-2', 'THE_PARTY'),
+    referenceRow('TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1', 'TP-3', 'THE_PARTY'),
   ];
 }
 
@@ -230,7 +230,7 @@ describe('GoogleSheetsOperationScopedGenerativeRegistry', () => {
   it('fails closed when The Party reference rows claim Sunset operation scope', async () => {
     const rows = canonicalReferenceRows().map((row) => [...row]);
     const partyRow = rows.find(
-      (row) => row[1] === 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+      (row) => row[0] === 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
     );
     if (!partyRow) throw new Error('fixture missing The Party reference');
     partyRow[10] = 'SUNSET';
@@ -245,7 +245,7 @@ describe('GoogleSheetsOperationScopedGenerativeRegistry', () => {
   });
 
   it('fails closed when an active operation-scoped set has fewer than three active references', async () => {
-    const rows = canonicalReferenceRows().filter((row) => row[0] !== 'TP-3');
+    const rows = canonicalReferenceRows().filter((row) => row[1] !== 'TP-3');
     const { client } = clientFor(policyRanges(canonicalPolicyRow(), rows));
     const registry = new GoogleSheetsOperationScopedGenerativeRegistry(client, {
       spreadsheetId: 'sheet',
