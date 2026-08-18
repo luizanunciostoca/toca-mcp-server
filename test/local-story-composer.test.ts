@@ -12,6 +12,7 @@ import { LocalStoryComposer } from '../src/providers/local/local-story-composer.
 import {
   SUNSET_STORY_REQUIRED_BRAND_ASSET_IDS,
   SUNSET_STORY_REQUIRED_BRANDS,
+  type SunsetStoryTemplateClass,
 } from '../src/providers/local/local-sunset-story-renderer.js';
 
 const masterBytes = Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]);
@@ -253,6 +254,21 @@ describe('LocalStoryComposer — SUNSET_STORY_V1 dedicated renderer', () => {
         ...realBase(),
         standard: { ...standard, version: '1.1' },
         templateId: 'EDITORIAL_TEXT',
+        message: 'Hoje tem um pôr do sol inesquecível',
+      }),
+    ).rejects.toThrow('FAILED_STANDARD_NOT_RESOLVED');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown Sunset template classes before invoking the renderer', async () => {
+    const runner = successfulRunner();
+    const composer = new LocalStoryComposer(runner, 'convert');
+
+    await expect(
+      composer.compose({
+        ...realBase(),
+        templateId: 'EDITORIAL_TEXT',
+        sunsetTemplateClass: 'SUNSET_UNKNOWN_TEMPLATE' as unknown as SunsetStoryTemplateClass,
         message: 'Hoje tem um pôr do sol inesquecível',
       }),
     ).rejects.toThrow('FAILED_STANDARD_NOT_RESOLVED');
