@@ -25,7 +25,10 @@ if (
   policy.promotionFolderClass !== '07_PRONTOS_PARA_MARKETING' ||
   policy.promotionGuardVersion !== 'master-promotion-guard-v1' ||
   policy.autoPromotionBeforeReview !== false ||
-  policy.marketingReadyOnlyAfterGuard !== true
+  policy.marketingReadyOnlyAfterGuard !== true ||
+  policy.promotionReviewerIdentityRequired !== true ||
+  policy.promotionReviewTimestampRequired !== true ||
+  policy.promotionDecisionReasonRequired !== true
 ) {
   fail('Photo restoration policy mirror drifted from the canonical source-faithful contract');
 }
@@ -35,6 +38,9 @@ for (const marker of [
   'SOURCE_FAITHFUL_CINEMATIC_RESTORATION_V1',
   'master-promotion-guard-v1',
   "proResApplicability: z.literal('VIDEO_ONLY_NOT_APPLICABLE_TO_STILL')",
+  'promotionReviewedBy: z.string().min(1)',
+  'promotionReviewedAt: z.string().min(1)',
+  'promotionDecisionReason: z.string().min(1)',
 ]) {
   if (!contract.includes(marker)) fail(`Photo restoration contract missing: ${marker}`);
 }
@@ -67,6 +73,9 @@ for (const marker of [
   'MASTER_PROMOTION_BLOCKED_TECH_SPEC',
   "status: 'MARKETING_READY'",
   "targetFolderClass: '07_PRONTOS_PARA_MARKETING'",
+  'promotionReviewedBy: value.promotionReviewedBy',
+  'promotionReviewedAt: value.promotionReviewedAt',
+  'promotionDecisionReason: value.promotionDecisionReason',
 ]) {
   if (!guard.includes(marker)) fail(`Master promotion guard invariant missing: ${marker}`);
 }
