@@ -1,10 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { ControlledPhotoToVideoGenerationService } from './creative/controlled-photo-to-video-generation.js';
-import { photoToVideoRouteTypeSchema, type PhotoToVideoRouteType } from './contracts/photo-to-video.js';
+import {
+  photoToVideoRouteTypeSchema,
+  type PhotoToVideoRouteType,
+} from './contracts/photo-to-video.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-drive/creative-truth-brand-asset-loader.js';
 import { GoogleDriveCreativeVideoSourceLoader } from './providers/google-drive/creative-video-source-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
+import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
 import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
 import { LocalPhotoMotionVideoComposer } from './providers/local/local-photo-motion-video-composer.js';
 import { LocalPhotoToVideoBrandComposer } from './providers/local/local-photo-to-video-brand-composer.js';
@@ -13,13 +17,15 @@ import { OpenAiSceneContinuationVideoProvider } from './providers/openai/openai-
 const args = parseArgs(process.argv.slice(2));
 const secrets = new EnvironmentSecretResolver(process.env);
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
-const driveTokenEnvKey = process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+const driveTokenEnvKey =
+  process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const openAiApiKeyEnvKey = process.env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
 const openAiVideoModel = parseVideoModel(process.env.OPENAI_VIDEO_MODEL?.trim());
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
 const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
+const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
 const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
   secretResolver: secrets,
   accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
@@ -30,6 +36,7 @@ const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
 });
 const service = new ControlledPhotoToVideoGenerationService({
   registry,
+  writeback,
   sourceLoader,
   brandLoader,
   photoMotionComposer: new LocalPhotoMotionVideoComposer(),
@@ -63,6 +70,7 @@ process.stdout.write(
     providerJobId: result.manifest.providerJobId ?? null,
     outputPath: args.output,
     manifestPath: args.manifest,
+    canonicalCandidateWriteback: true,
     requiresPostGenerationHumanReview: true,
     publicationEligible: false,
   })}\n`,
@@ -80,7 +88,9 @@ interface CliArgs {
 async function resolveCreativeDirection(args: CliArgs): Promise<string | undefined> {
   if (args.routeType === 'REAL_PHOTO_TO_MOTION_VIDEO') return undefined;
   if (args.creativeDirection) return args.creativeDirection;
-  if (!args.creativeDirectionFile) throw new Error('VIDEO_GENERATE_CREATIVE_DIRECTION_REQUIRED');
+  if (!args.creativeDirectionFile) {
+    throw new Error('VIDEO_GENERATE_CREATIVE_DIRECTION_REQUIRED');
+  }
   const value = (await readFile(args.creativeDirectionFile, 'utf8')).trim();
   if (!value) throw new Error('VIDEO_GENERATE_CREATIVE_DIRECTION_EMPTY');
   return value;
