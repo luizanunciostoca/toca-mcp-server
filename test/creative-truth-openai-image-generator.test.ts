@@ -376,7 +376,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
     });
   });
 
-  it('sends the exact canonical verified reference images under a higher-priority Creative Truth policy', async () => {
+  it('sends exact canonical references through the current Responses image-tool contract', async () => {
     const references = [reference(1), reference(2), reference(3)];
     const canonical = canonicalRegistry(references);
     const output = Uint8Array.from([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9]);
@@ -396,7 +396,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
         tools: readonly Record<string, unknown>[];
         tool_choice: Record<string, unknown>;
       };
-      expect(body.model).toBe('gpt-5.6-sol');
+      expect(body.model).toBe('gpt-5.6');
       expect(body.input[0]?.role).toBe('developer');
       const policyText = String(body.input[0]?.content[0]?.text ?? '');
       expect(policyText).toContain('TOCA_CREATIVE_TRUTH_POLICY_V1');
@@ -416,12 +416,14 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
         expect.objectContaining({
           type: 'image_generation',
           action: 'generate',
-          model: 'gpt-image-2',
-          input_fidelity: 'high',
           quality: 'high',
+          size: '1024x1536',
           output_format: 'jpeg',
+          output_compression: 100,
         }),
       ]);
+      expect(body.tools[0]).not.toHaveProperty('model');
+      expect(body.tools[0]).not.toHaveProperty('input_fidelity');
       expect(body.tool_choice).toEqual({ type: 'image_generation' });
 
       return new Response(
@@ -458,8 +460,8 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
     expect(result.requiresPostGenerationHumanReview).toBe(true);
     expect(result.requiresVenueFidelityGate).toBe(true);
     expect(result.readyForFinalComposition).toBe(false);
-    expect(result.responseModel).toBe('gpt-5.6-sol');
-    expect(result.imageModel).toBe('gpt-image-2');
+    expect(result.responseModel).toBe('gpt-5.6');
+    expect(result.imageToolModelSelection).toBe('RESPONSES_TOOL_MANAGED');
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
