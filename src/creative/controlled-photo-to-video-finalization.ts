@@ -140,6 +140,9 @@ export class ControlledPhotoToVideoFinalizationService {
       sceneContinuationFidelity: review.sceneContinuationFidelity,
       status: 'VIDEO_CREATIVE_TRUTH_PASSED',
       finalizedAt,
+      reviewMethod: review.reviewMethod,
+      reviewEvidenceRef: review.evidenceRef,
+      sourceImageCompared: review.sourceImageCompared,
     });
     await this.options.writeback.writeFinal({
       contentItemId: candidate.contentItemId,
