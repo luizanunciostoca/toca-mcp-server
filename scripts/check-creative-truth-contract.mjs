@@ -34,6 +34,7 @@ const missing = requiredFiles.filter((path) => !existsSync(path));
 if (missing.length > 0) fail(`Creative Truth architecture files missing: ${missing.join(', ')}`);
 
 const policy = JSON.parse(read('control/creative-truth-policy.v1.json'));
+const requiredGateSet = new Set(policy.requiredGates ?? []);
 if (
   policy.policyId !== 'TOCA_CREATIVE_TRUTH_POLICY_V1' ||
   policy.status !== 'ACTIVE_CANONICAL' ||
@@ -44,6 +45,16 @@ if (
   policy.rules?.videoRealPlusEnhancement !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
   policy.rules?.videoEnhancementFailure !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
   policy.rules?.failClosed !== true ||
+  policy.generativeException?.venueReferenceSetRequired !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+  policy.generativeException?.minimumVerifiedReferences !== 3 ||
+  policy.generativeException?.architecturalInventionStillForbidden !== true ||
+  policy.generativeException?.environmentDriftStillForbidden !== true ||
+  !Array.isArray(policy.requiredGates) ||
+  policy.requiredGates.length !== 3 ||
+  requiredGateSet.size !== 3 ||
+  !requiredGateSet.has('BRAND_INTEGRITY') ||
+  !requiredGateSet.has('VENUE_FIDELITY') ||
+  !requiredGateSet.has('QUALITY') ||
   policy.publicationBoundary?.exactAssetBindingRequired !== true ||
   policy.failureCodes?.includes('FAILED_ENHANCEMENT_PROVENANCE') !== true ||
   policy.failureCodes?.includes('FAILED_FIDELITY_EVIDENCE_BINDING') !== true ||
@@ -57,6 +68,15 @@ requireIncludes('src/contracts/creative-truth.ts', [
   'enhancementProvenanceRequired: z.literal(true)',
   "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
   "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
+  'minimumVerifiedReferences: z.number().int().min(3)',
+  'referenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID)',
+  'minReferenceCount: z.number().int().min(3).default(3)',
+  'allowArchitecturalInvention: z.literal(false)',
+  'allowEnvironmentDrift: z.literal(false)',
+  'allowAiLogoGeneration: z.literal(false)',
+  'PASSED Creative Truth gates cannot contain failure codes',
+  'FAILED Creative Truth gates require at least one failure code',
+  'Render manifests require BRAND_INTEGRITY, VENUE_FIDELITY and QUALITY exactly once',
   'creativeEnhancementProvenanceSchema',
   'fidelityVerificationMethodSchema',
   'candidateSha256',
@@ -122,6 +142,7 @@ if (
 }
 
 requireIncludes('src/creative/creative-truth.ts', [
+  'TOCA_VENUE_REFERENCE_SET_ID',
   'FAILED_AI_LOGO_RECONSTRUCTION',
   'FAILED_SCENE_INVENTION_DETECTED',
   'FAILED_ARCHITECTURE_DRIFT',
@@ -130,6 +151,10 @@ requireIncludes('src/creative/creative-truth.ts', [
   'FAILED_FIDELITY_EVIDENCE_BINDING',
   'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
   'approval.contentItemId !== input.contentItemId',
+  'approval.minReferenceCount < 3',
+  'Math.max(3, approval.minReferenceCount)',
+  '!Number.isFinite(nowTimestamp)',
+  '!Number.isFinite(expiresTimestamp)',
   'validateEvidenceCandidateBinding',
   'candidateSha256',
   'reviewRef',
