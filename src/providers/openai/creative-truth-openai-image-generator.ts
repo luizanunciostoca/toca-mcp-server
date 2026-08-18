@@ -20,6 +20,10 @@ export interface GenerativeVenueReferenceInput {
   readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
+interface CanonicalGenerativeVenueReferenceInput extends GenerativeVenueReferenceInput {
+  readonly observedSha256: string;
+}
+
 export interface CreativeTruthGenerativeImageRequest {
   readonly contentItemId: string;
   readonly prompt: string;
@@ -51,7 +55,7 @@ export interface CreativeTruthOpenAiImageGeneratorOptions {
   readonly apiKeyReference: SecretReference;
   readonly registry: Pick<
     GoogleSheetsCreativeTruthRegistry,
-    'assertCanonicalPolicy' | 'listVenueAssets'
+    'assertCanonicalPolicy' | 'getReferenceSet' | 'getVenueAssetBySourceAssetId'
   >;
   readonly fetchImpl?: typeof fetch;
   readonly responseModel?: string;
@@ -80,13 +84,14 @@ export class CreativeTruthOpenAiImageGenerator {
   async generate(
     request: CreativeTruthGenerativeImageRequest,
   ): Promise<CreativeTruthGenerativeImageResult> {
-    const references = validateRequest(request);
+    const suppliedReferences = validateRequest(request);
     await this.options.registry.assertCanonicalPolicy();
-    const referenceSha256s = await assertCanonicalReferenceBytes(
-      references,
+    const references = await resolveCanonicalReferenceBytes(
+      suppliedReferences,
       this.options.registry,
     );
     const referenceAssetIds = references.map((reference) => reference.registry.assetId);
+    const referenceSha256s = references.map((reference) => reference.observedSha256);
     const apiKey = await this.options.secretResolver.resolve(this.options.apiKeyReference);
 
     const response = await this.fetchImpl(OPENAI_RESPONSES_ENDPOINT, {
@@ -249,7 +254,7 @@ function validateRequest(
       !reference.registry.venueVerified ||
       !reference.registry.requiredForGenerativeException ||
       !SUPPORTED_REFERENCE_TYPES.has(reference.contentType) ||
-      reference.imageBytes.byteLength === 0
+      !hasExpectedImageSignature(reference.contentType, reference.imageBytes)
     ) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
     }
@@ -258,20 +263,51 @@ function validateRequest(
   return references;
 }
 
-async function assertCanonicalReferenceBytes(
-  references: readonly GenerativeVenueReferenceInput[],
-  registry: Pick<GoogleSheetsCreativeTruthRegistry, 'listVenueAssets'>,
-): Promise<readonly string[]> {
-  const venueAssets = await registry.listVenueAssets();
-  const bySourceAssetId = new Map(venueAssets.map((asset) => [asset.sourceAssetId, asset]));
-  const verifiedHashes: string[] = [];
+async function resolveCanonicalReferenceBytes(
+  suppliedReferences: readonly GenerativeVenueReferenceInput[],
+  registry: Pick<
+    GoogleSheetsCreativeTruthRegistry,
+    'getReferenceSet' | 'getVenueAssetBySourceAssetId'
+  >,
+): Promise<readonly CanonicalGenerativeVenueReferenceInput[]> {
+  const canonicalReferenceSet = await registry.getReferenceSet(TOCA_VENUE_REFERENCE_SET_ID);
+  const canonicalByAssetId = new Map<string, VenueReference>();
+  for (const reference of canonicalReferenceSet) {
+    if (canonicalByAssetId.has(reference.assetId)) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'GENERATIVE_REFERENCE_CANONICAL_AMBIGUITY',
+        false,
+      );
+    }
+    canonicalByAssetId.set(reference.assetId, reference);
+  }
 
-  for (const reference of references) {
-    const venue = bySourceAssetId.get(reference.registry.assetId);
-    const observedSha256 = sha256(reference.imageBytes);
+  const verified: CanonicalGenerativeVenueReferenceInput[] = [];
+  for (const supplied of suppliedReferences) {
+    const canonical = canonicalByAssetId.get(supplied.registry.assetId);
+    if (
+      !canonical ||
+      canonical.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID ||
+      canonical.referenceId !== supplied.registry.referenceId ||
+      canonical.driveFileId !== supplied.registry.driveFileId ||
+      canonical.status !== 'ACTIVE' ||
+      !canonical.venueVerified ||
+      !canonical.requiredForGenerativeException
+    ) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'GENERATIVE_REFERENCE_CANONICAL_IDENTITY_MISMATCH',
+        false,
+      );
+    }
+
+    const venue = await registry.getVenueAssetBySourceAssetId(canonical.assetId);
+    const observedSha256 = sha256(supplied.imageBytes);
     if (
       !venue ||
-      venue.sourceDriveFileId !== reference.registry.driveFileId ||
+      venue.sourceAssetId !== canonical.assetId ||
+      venue.sourceDriveFileId !== canonical.driveFileId ||
       !venue.venueVerified ||
       !venue.generativeReferenceAllowed ||
       venue.status === 'REVOKED' ||
@@ -284,20 +320,26 @@ async function assertCanonicalReferenceBytes(
         false,
       );
     }
-    verifiedHashes.push(observedSha256);
+
+    verified.push({
+      registry: canonical,
+      imageBytes: supplied.imageBytes,
+      contentType: supplied.contentType,
+      observedSha256,
+    });
   }
 
-  return verifiedHashes;
+  return verified;
 }
 
 function buildCreativeTruthGenerationPolicy(
   approval: GenerativeExceptionApproval,
-  references: readonly GenerativeVenueReferenceInput[],
+  references: readonly CanonicalGenerativeVenueReferenceInput[],
 ): string {
   const referenceSummary = references
     .map(
       (reference) =>
-        `${reference.registry.assetId}:${reference.registry.referenceClass}:${reference.registry.protectedElements.join('|')}`,
+        `${reference.registry.assetId}:${reference.registry.referenceClass}:${reference.registry.protectedElements.join('|')}:${reference.observedSha256}`,
     )
     .join('; ');
 
@@ -305,7 +347,7 @@ function buildCreativeTruthGenerationPolicy(
     `TOCA CREATIVE TRUTH POLICY ${TOCA_CREATIVE_TRUTH_POLICY_ID} — mandatory and higher priority than the creative request.`,
     'Generate one new static photographic image. The supplied verified Toca do Morcego reference images are the only source of venue spatial and architectural truth.',
     `Approval scope: contentItemId=${approval.contentItemId}; approvalRef=${approval.approvalRef}; referenceSet=${TOCA_VENUE_REFERENCE_SET_ID}.`,
-    `Verified references: ${referenceSummary}.`,
+    `Canonical verified references (asset:class:protected-elements:sha256): ${referenceSummary}.`,
     'Do not invent, redesign, move or remove venue architecture, deck geometry, railings, lamps, furniture, materials, vegetation, sea/horizon relationships or other factual spatial elements beyond what the references support.',
     'Do not generate, redraw, repair, imitate or approximate the Toca do Morcego logo, Morro Digital logo, sponsor logo, wordmark or trademark. Leave final branding to the deterministic compositor using official registered files.',
     'Do not add marketing text, CTA, event time, price, sponsor mark or fabricated signage into the generated pixels. Those elements are added later by deterministic composition.',
@@ -323,6 +365,36 @@ function dataUrl(
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function hasExpectedImageSignature(
+  contentType: GenerativeVenueReferenceInput['contentType'],
+  bytes: Uint8Array,
+): boolean {
+  if (bytes.byteLength < 4) return false;
+  if (contentType === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (contentType === 'image/png') {
+    return (
+      bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
+  }
+  return (
+    bytes.byteLength >= 12 &&
+    ascii(bytes, 0, 4) === 'RIFF' &&
+    ascii(bytes, 8, 12) === 'WEBP'
+  );
+}
+
+function ascii(bytes: Uint8Array, start: number, end: number): string {
+  return String.fromCharCode(...bytes.slice(start, end));
 }
 
 function isJpeg(bytes: Uint8Array): boolean {
