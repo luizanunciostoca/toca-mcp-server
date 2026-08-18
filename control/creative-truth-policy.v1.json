@@ -4,7 +4,7 @@
   "policyVersion": "1.0",
   "status": "ACTIVE_CANONICAL",
   "brandScope": "TOCA_DO_MORCEGO",
-  "validatedAt": "2026-08-17",
+  "validatedAt": "2026-08-18",
   "sourceOfTruth": {
     "provider": "GOOGLE_DRIVE",
     "implementationPlanDriveId": "1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM",
@@ -22,6 +22,9 @@
     "environmentDriftAllowed": false,
     "deterministicTextAndBrandCompositionRequired": true,
     "assetLineageRequired": true,
+    "enhancementProvenanceRequired": true,
+    "videoRealPlusEnhancement": "FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE",
+    "videoEnhancementFailure": "VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED",
     "exactApprovedAssetMustBePublished": true,
     "failClosed": true
   },
