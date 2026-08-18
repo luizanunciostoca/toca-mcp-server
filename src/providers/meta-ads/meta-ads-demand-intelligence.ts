@@ -20,6 +20,16 @@ export const MORRO_DE_SAO_PAULO_TARGETING_SPEC = {
   },
 } as const;
 
+export const MORRO_DEMAND_WEIGHTS = {
+  audienceLevel: 0.1,
+  trend24h: 0.05,
+  trend7d: 0.05,
+  performance: 0.35,
+  calendarEvent: 0.2,
+  seasonality: 0.15,
+  capacity: 0.1,
+} as const;
+
 export interface MetaAdsGeoAudienceSample {
   readonly tenantId: string;
   readonly adAccountId: string;
@@ -118,6 +128,7 @@ export interface MorroBudgetRecommendInput extends MorroDemandEvaluateInput {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_CONTEXT_SCORE = 50;
 
 export class MetaAdsDemandIntelligenceService {
@@ -136,7 +147,7 @@ export class MetaAdsDemandIntelligenceService {
   }
 
   async inspectMorroAudience(input: MorroAudienceInspectInput): Promise<MorroAudienceSignal> {
-    const observedAt = normalizeTimestamp(input.observedAt ?? new Date().toISOString());
+    const observedAt = normalizeTimestamp(input.observedAt ?? currentHourlyObservationTimestamp());
     const estimate = await this.provider.getDeliveryEstimate(input.account, {
       optimizationGoal: input.optimizationGoal ?? 'REACH',
       targetingSpec: MORRO_DE_SAO_PAULO_TARGETING_SPEC,
@@ -167,7 +178,7 @@ export class MetaAdsDemandIntelligenceService {
         })
       : [];
     const prior = history.filter((item) => Date.parse(item.observedAt) < Date.parse(observedAt));
-    const baseline24h = nearestTo(prior, Date.parse(observedAt) - DAY_MS, 18 * 60 * 60 * 1000);
+    const baseline24h = nearestTo(prior, Date.parse(observedAt) - DAY_MS, 18 * HOUR_MS);
     const baseline7d = nearestTo(prior, Date.parse(observedAt) - 7 * DAY_MS, 2 * DAY_MS);
     const recentSevenDayMidpoints = prior
       .filter((item) => Date.parse(item.observedAt) >= Date.parse(observedAt) - 7 * DAY_MS)
@@ -287,13 +298,13 @@ export function calculateMorroDemandIndex(
     capacity,
   };
   const weighted =
-    audienceLevel * 0.25 +
-    trend24h * 0.15 +
-    trend7d * 0.1 +
-    performance * 0.25 +
-    calendarEvent * 0.1 +
-    seasonality * 0.1 +
-    capacity * 0.05;
+    audienceLevel * MORRO_DEMAND_WEIGHTS.audienceLevel +
+    trend24h * MORRO_DEMAND_WEIGHTS.trend24h +
+    trend7d * MORRO_DEMAND_WEIGHTS.trend7d +
+    performance * MORRO_DEMAND_WEIGHTS.performance +
+    calendarEvent * MORRO_DEMAND_WEIGHTS.calendarEvent +
+    seasonality * MORRO_DEMAND_WEIGHTS.seasonality +
+    capacity * MORRO_DEMAND_WEIGHTS.capacity;
   const result = Math.round(clamp(weighted, 0, 100));
 
   return {
@@ -393,6 +404,11 @@ function midpointOf(lowerBound: number, upperBound: number): number {
 function percentChange(current: number, baseline: number): number {
   if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline <= 0) return 0;
   return ((current - baseline) / baseline) * 100;
+}
+
+function currentHourlyObservationTimestamp(): string {
+  const now = Date.now();
+  return new Date(Math.floor(now / HOUR_MS) * HOUR_MS).toISOString();
 }
 
 function normalizeTimestamp(value: string): string {
