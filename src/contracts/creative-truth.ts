@@ -239,6 +239,8 @@ export const fidelityEvidenceSchema = z.object({
 });
 
 export const creativeEnhancementProvenanceSchema = z.object({
+  policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
+  creativeMode: z.literal('REAL_PLUS_ENHANCEMENT'),
   editorProvider: z.string().min(1),
   sourceAssetId: z.string().min(1),
   sourceDriveFileId: z.string().min(1),
@@ -268,21 +270,39 @@ export const creativeTruthPublicationBindingSchema = z.object({
   exactAssetBinding: z.literal(true),
 });
 
-export const deterministicRenderManifestSchema = z.object({
-  contentItemId: z.string().min(1),
-  creativeId: z.string().min(1),
-  policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
-  standardId: z.string().min(1),
-  creativeMode: creativeModeSchema,
-  sourceAssetIds: z.array(z.string().min(1)).min(1),
-  masterAssetIds: z.array(z.string().min(1)).default([]),
-  brandAssetIds: z.array(z.string().min(1)).default([]),
-  outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
-  outputDimensions: z.string().regex(/^\d+x\d+$/),
-  exactAssetBinding: z.literal(true),
-  gates: z.array(creativeTruthGateResultSchema).min(3),
-  createdAt: z.string().min(1),
-});
+export const deterministicRenderManifestSchema = z
+  .object({
+    contentItemId: z.string().min(1),
+    creativeId: z.string().min(1),
+    policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
+    standardId: z.string().min(1),
+    creativeMode: creativeModeSchema,
+    sourceAssetIds: z.array(z.string().min(1)).min(1),
+    masterAssetIds: z.array(z.string().min(1)).default([]),
+    brandAssetIds: z.array(z.string().min(1)).default([]),
+    enhancementProvenance: creativeEnhancementProvenanceSchema.optional(),
+    outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    outputDimensions: z.string().regex(/^\d+x\d+$/),
+    exactAssetBinding: z.literal(true),
+    gates: z.array(creativeTruthGateResultSchema).min(3),
+    createdAt: z.string().min(1),
+  })
+  .superRefine((value, ctx) => {
+    if (value.creativeMode === 'REAL_PLUS_ENHANCEMENT' && !value.enhancementProvenance) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enhancementProvenance'],
+        message: 'REAL_PLUS_ENHANCEMENT manifests require enhancement provenance',
+      });
+    }
+    if (value.creativeMode !== 'REAL_PLUS_ENHANCEMENT' && value.enhancementProvenance) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enhancementProvenance'],
+        message: 'Enhancement provenance is only valid for REAL_PLUS_ENHANCEMENT',
+      });
+    }
+  });
 
 export type CreativeMode = z.infer<typeof creativeModeSchema>;
 export type CreativeTruthFailureCode = z.infer<typeof creativeTruthFailureCodeSchema>;
