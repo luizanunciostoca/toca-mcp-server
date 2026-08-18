@@ -39,8 +39,6 @@ export interface OperationScopedGenerativeRegistry {
     referenceSetId: TocaGenerativeVenueReferenceSetId,
   ): Promise<readonly VenueReference[]>;
   getVenueAssetBySourceAssetId(sourceAssetId: string): Promise<VenueAsset | undefined>;
-  getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
-  getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined>;
 }
 
 export interface OperationScopedGenerativeRegistryConfig {
