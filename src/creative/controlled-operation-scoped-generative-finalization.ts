@@ -9,10 +9,7 @@ import type {
   FidelityEvidence,
   VenueReference,
 } from '../contracts/creative-truth.js';
-import {
-  resolveCanonicalGenerativeBrandInputs,
-  type CanonicalBrandAssetRegistry,
-} from './canonical-generative-brand-binding.js';
+import { resolveCanonicalGenerativeBrandInputs } from './canonical-generative-brand-binding.js';
 import { ExecutionError } from '../core/errors.js';
 import type { OperationScopedGenerativeRegistry } from '../providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import type {
@@ -25,11 +22,17 @@ import type {
   ThePartyEnvironment,
 } from '../providers/local/local-creative-composer.js';
 
+const THE_PARTY_VISUAL_STANDARDS = new Set([
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+]);
+
 export interface ControlledOperationScopedGenerativeFinalizationRequest {
   readonly candidateManifest: unknown;
   readonly candidateImageBytes: Uint8Array;
   readonly candidateContentType: 'image/jpeg' | 'image/png' | 'image/webp';
   readonly creativeId: string;
+  /** Caller supplies only the requested identity; every field is replaced by canonical registry readback. */
   readonly standard: CreativeStandard;
   readonly visualStandard?: CreativeStandard;
   readonly fidelityEvidence: FidelityEvidence;
@@ -40,14 +43,14 @@ export interface ControlledOperationScopedGenerativeFinalizationRequest {
   readonly functionalInfo?: string;
   readonly partyEnvironment?: ThePartyEnvironment;
   readonly requiredBrands: readonly string[];
+  /** Bytes/observed locator are input evidence; registry metadata is replaced canonically before gates run. */
   readonly brandAssets: readonly OfficialBrandAssetInput[];
-  readonly nowIso?: string;
 }
 
 export interface ControlledOperationScopedGenerativeFinalizationDependencies {
   readonly registry: OperationScopedGenerativeRegistry;
-  readonly brandRegistry: CanonicalBrandAssetRegistry;
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
+  readonly now?: () => string;
 }
 
 /**
@@ -56,19 +59,24 @@ export interface ControlledOperationScopedGenerativeFinalizationDependencies {
  * The generated candidate manifest is immutable lineage evidence, never execution authority.
  * Immediately before deterministic composition this service re-hashes the candidate bytes,
  * re-resolves CONTENT_ITEMS.operation, the approved exception, operation-scoped reference set,
- * VENUE_VISUALS identity/source hashes and official BRAND_ASSETS metadata. Only canonical
- * approval, references and brand records are delegated to the deterministic compositor.
+ * VENUE_VISUALS identity/source hashes, CREATIVE_STANDARDS and official BRAND_ASSETS metadata.
+ * Approval expiry is evaluated against an injected trusted clock, never caller-provided time.
  */
 export class ControlledOperationScopedGenerativeFinalizationService {
+  private readonly now: () => string;
+
   constructor(
     private readonly dependencies: ControlledOperationScopedGenerativeFinalizationDependencies,
-  ) {}
+  ) {
+    this.now = dependencies.now ?? (() => new Date().toISOString());
+  }
 
   async finalize(
     request: ControlledOperationScopedGenerativeFinalizationRequest,
   ): Promise<LocalOperationScopedGenerativeComposeResult> {
     const manifest = parseCandidateManifest(request.candidateManifest);
     assertCandidateBytes(manifest, request.candidateImageBytes, request.candidateContentType);
+    const nowIso = trustedNowIso(this.now);
 
     await this.dependencies.registry.assertCanonicalPolicy();
     const operation = await this.dependencies.registry.getContentItemOperation(
@@ -113,17 +121,24 @@ export class ControlledOperationScopedGenerativeFinalizationService {
         false,
       );
     }
+    assertApprovalCurrent(approval.expiresAt, nowIso);
 
     const references = await this.resolveCanonicalGenerationReferences(
       approval.referenceSetId,
       approval.minReferenceCount,
     );
     await this.assertGenerationLineageStillCanonical(manifest, references, operation);
+
+    const standards = await this.resolveCanonicalStandards(
+      request.standard.standardId,
+      request.visualStandard?.standardId,
+      operation,
+    );
     const canonicalBrandAssets = await resolveCanonicalGenerativeBrandInputs(
-      this.dependencies.brandRegistry,
+      this.dependencies.registry,
       {
-        outputStandard: request.standard,
-        ...(request.visualStandard ? { visualStandard: request.visualStandard } : {}),
+        outputStandard: standards.outputStandard,
+        ...(standards.visualStandard ? { visualStandard: standards.visualStandard } : {}),
         requiredBrands: request.requiredBrands,
         suppliedBrandAssets: request.brandAssets,
         ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
@@ -133,8 +148,8 @@ export class ControlledOperationScopedGenerativeFinalizationService {
     return this.dependencies.composer.compose({
       contentItemId: manifest.contentItemId,
       creativeId: request.creativeId,
-      standard: request.standard,
-      ...(request.visualStandard ? { visualStandard: request.visualStandard } : {}),
+      standard: standards.outputStandard,
+      ...(standards.visualStandard ? { visualStandard: standards.visualStandard } : {}),
       approval,
       references,
       fidelityEvidence: request.fidelityEvidence,
@@ -148,8 +163,53 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
       requiredBrands: request.requiredBrands,
       brandAssets: canonicalBrandAssets,
-      ...(request.nowIso ? { createdAt: request.nowIso } : {}),
+      createdAt: nowIso,
     });
+  }
+
+  private async resolveCanonicalStandards(
+    outputStandardId: string,
+    visualStandardId: string | undefined,
+    operation: 'SUNSET' | 'THE_PARTY',
+  ): Promise<{ readonly outputStandard: CreativeStandard; readonly visualStandard?: CreativeStandard }> {
+    const normalizedOutputId = outputStandardId.trim();
+    if (!normalizedOutputId) denyStandard();
+    const outputStandard = await this.dependencies.registry.getCreativeStandard(normalizedOutputId);
+    if (
+      !outputStandard ||
+      outputStandard.status !== 'ACTIVE_CANONICAL' ||
+      outputStandard.parentPolicyId !== 'TOCA_CREATIVE_TRUTH_POLICY_V1' ||
+      (outputStandard.operation !== 'ALL' && outputStandard.operation !== operation)
+    ) {
+      denyStandard();
+    }
+
+    if (outputStandard.operation !== 'ALL') {
+      if (operation === 'THE_PARTY' && !THE_PARTY_VISUAL_STANDARDS.has(outputStandard.standardId)) {
+        denyStandard();
+      }
+      return { outputStandard };
+    }
+
+    const normalizedVisualId = visualStandardId?.trim();
+    if (!normalizedVisualId) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_OPERATION_SCOPED_VISUAL_STANDARD_REQUIRED',
+        false,
+      );
+    }
+    const visualStandard = await this.dependencies.registry.getCreativeStandard(normalizedVisualId);
+    if (
+      !visualStandard ||
+      visualStandard.status !== 'ACTIVE_CANONICAL' ||
+      visualStandard.parentPolicyId !== 'TOCA_CREATIVE_TRUTH_POLICY_V1' ||
+      visualStandard.operation !== operation ||
+      (operation === 'THE_PARTY' && !THE_PARTY_VISUAL_STANDARDS.has(visualStandard.standardId))
+    ) {
+      denyStandard();
+    }
+    return { outputStandard, visualStandard };
   }
 
   private async resolveCanonicalGenerationReferences(
@@ -264,6 +324,31 @@ function assertCandidateBytes(
       false,
     );
   }
+}
+
+function assertApprovalCurrent(expiresAt: string | undefined, nowIso: string): void {
+  if (!expiresAt) return;
+  const expiresTimestamp = Date.parse(expiresAt);
+  const nowTimestamp = Date.parse(nowIso);
+  if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) {
+    throw new ExecutionError(
+      'APPROVAL_REQUIRED',
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+      false,
+    );
+  }
+}
+
+function trustedNowIso(now: () => string): string {
+  const value = now();
+  if (!Number.isFinite(Date.parse(value))) {
+    throw new ExecutionError('POLICY_DENIED', 'GENERATIVE_TRUSTED_CLOCK_INVALID', false);
+  }
+  return value;
+}
+
+function denyStandard(): never {
+  throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
 }
 
 function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
