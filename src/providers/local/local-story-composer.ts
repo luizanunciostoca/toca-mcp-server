@@ -13,7 +13,13 @@ import {
   LocalCreativeComposer,
   type LocalCreativeComposerCommandRunner,
   type OfficialBrandAssetInput,
+  type ThePartyEnvironment,
 } from './local-creative-composer.js';
+
+const THE_PARTY_STORY_STANDARD_IDS = new Set([
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+]);
 
 export type StoryTemplateId = 'PHOTO_ONLY' | 'EDITORIAL_TEXT' | 'EVENT_CTA';
 
@@ -31,6 +37,7 @@ export interface LocalStoryComposeInput {
   readonly standard: CreativeStandard;
   readonly creativeMode: CreativeMode;
   readonly venueAsset?: VenueAsset;
+  readonly partyEnvironment?: ThePartyEnvironment;
   readonly requiredBrands: readonly string[];
   readonly brandAssets: readonly OfficialBrandAssetInput[];
   readonly generativeException?: GenerativeExceptionApproval;
@@ -90,6 +97,7 @@ export class LocalStoryComposer {
       canvas: '1080x1920',
       ...(input.templateId === 'PHOTO_ONLY' ? {} : { headline: input.message!.trim() }),
       ...(input.templateId !== 'PHOTO_ONLY' && input.cta?.trim() ? { cta: input.cta.trim() } : {}),
+      ...(input.partyEnvironment ? { partyEnvironment: input.partyEnvironment } : {}),
       requiredBrands: input.requiredBrands,
       brandAssets: input.brandAssets,
       ...(input.generativeException ? { generativeException: input.generativeException } : {}),
@@ -136,8 +144,16 @@ function validateInput(input: LocalStoryComposeInput): void {
       false,
     );
   }
-  if (!input.standard.format.toUpperCase().includes('STOR')) {
+  const thePartyStoryStandard = isThePartyStoryStandard(input.standard);
+  if (!input.standard.format.toUpperCase().includes('STOR') && !thePartyStoryStandard) {
     throw new ExecutionError('POLICY_DENIED', 'LOCAL_STORY_STANDARD_REQUIRED', false);
+  }
+  if (
+    thePartyStoryStandard &&
+    input.standard.standardId === 'THE_PARTY_HYBRID_NETWORKS_V1' &&
+    !input.partyEnvironment
+  ) {
+    throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
   }
   if (input.templateId !== 'PHOTO_ONLY' && !input.message?.trim()) {
     throw new ExecutionError('QUALITY_GATE_FAILED', 'LOCAL_STORY_COMPOSER_MESSAGE_REQUIRED', false);
@@ -162,4 +178,8 @@ function assertStoryLineage(input: LocalStoryComposeInput): void {
       false,
     );
   }
+}
+
+function isThePartyStoryStandard(standard: CreativeStandard): boolean {
+  return standard.operation === 'THE_PARTY' && THE_PARTY_STORY_STANDARD_IDS.has(standard.standardId);
 }
