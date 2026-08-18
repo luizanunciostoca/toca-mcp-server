@@ -20,6 +20,17 @@ function payload(overrides: Partial<TocaManagedInstagramSchedulePayload> = {}) {
       sha256: 'a'.repeat(64),
       contentType: 'image/jpeg',
     },
+    creativeTruthBinding: {
+      policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+      standardId: 'SUNSET_FEED_V1',
+      creativeId: 'CREATIVE-SUN-0001-V1',
+      outputSha256: 'a'.repeat(64),
+      brandIntegrityStatus: 'PASSED',
+      venueFidelityStatus: 'PASSED',
+      qualityGateStatus: 'PASSED',
+      assetLocators: [{ kind: 'DRIVE_FILE_ID', value: 'drive-final-creative' }],
+      exactAssetBinding: true,
+    },
     caption: 'Legenda final.',
     correlationId: 'corr-1',
     publicationIdempotencyKey: 'publish-1',
@@ -40,7 +51,7 @@ function payload(overrides: Partial<TocaManagedInstagramSchedulePayload> = {}) {
 }
 
 describe('TOCA-managed Instagram scheduler', () => {
-  it('persists a scheduled publication without calling Meta', async () => {
+  it('persists a scheduled publication with Creative Truth without calling Meta', async () => {
     const scheduler = new InMemoryScheduler();
     const managed = new TocaManagedInstagramScheduler(scheduler, () => 'job-1');
     const job = await managed.schedule(payload());
@@ -49,6 +60,7 @@ describe('TOCA-managed Instagram scheduler', () => {
     expect(job.status).toBe('SCHEDULED');
     expect(job.toolName).toBe('internal.instagram.publication.toca-managed.execute');
     expect(job.runAt).toBe('2026-08-14T09:00:00-03:00');
+    expect(job.payload.creativeTruthBinding.outputSha256).toBe(job.payload.asset.sha256);
   });
 
   it('rejects a changed schedule when the approved descriptor hash is stale', () => {
@@ -58,6 +70,23 @@ describe('TOCA-managed Instagram scheduler', () => {
     const changed = { ...approved, scheduledFor: '2026-08-14T10:00:00-03:00' };
 
     expect(() => managed.schedule(changed)).toThrow('TOCA_MANAGED_INSTAGRAM_APPROVAL_MISMATCH');
+  });
+
+  it('rejects scheduling when the approved asset hash differs from Creative Truth output', () => {
+    const scheduler = new InMemoryScheduler();
+    const managed = new TocaManagedInstagramScheduler(scheduler);
+    const mismatched = payload({
+      asset: {
+        assetId: 'MM-SUN-0001-V1',
+        objectName: 'instagram/corr/MM-SUN-0001-V1-aabbccddeeff0011.jpg',
+        sha256: 'b'.repeat(64),
+        contentType: 'image/jpeg',
+      },
+    });
+
+    expect(() => managed.schedule(mismatched)).toThrow(
+      'TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH',
+    );
   });
 
   it('reschedule cancels the old immutable job and creates a new one', async () => {
