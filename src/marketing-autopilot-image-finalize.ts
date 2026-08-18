@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { operationScopedGenerativeCandidateManifestSchema } from './contracts/operation-scoped-generative-candidate.js';
 import { fidelityEvidenceSchema } from './contracts/creative-truth.js';
-import { ControlledOperationScopedGenerativeFinalizationService } from './creative/controlled-operation-scoped-generative-finalization.js';
+import { createControlledOperationScopedGenerativeFinalizationService } from './creative/controlled-operation-scoped-generative-finalization.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import {
   GoogleDriveCreativeTruthBrandAssetLoader,
@@ -10,7 +10,6 @@ import {
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { GoogleSheetsOperationScopedGenerativeRegistry } from './providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import { GoogleSheetsThePartyContentOrchestration } from './providers/google-sheets/the-party-content-orchestration.js';
-import { LocalOperationScopedGenerativeComposer } from './providers/local/local-operation-scoped-generative-composer.js';
 
 const args = parseArgs(process.argv.slice(2));
 const candidateManifest = operationScopedGenerativeCandidateManifestSchema.parse(
@@ -59,10 +58,7 @@ for (const brand of requiredBrands) {
   brandAssets.push(await brandLoader.load(canonicalBrand));
 }
 
-const finalizer = new ControlledOperationScopedGenerativeFinalizationService({
-  registry,
-  composer: new LocalOperationScopedGenerativeComposer(),
-});
+const finalizer = createControlledOperationScopedGenerativeFinalizationService(registry);
 const result = await finalizer.finalize({
   candidateManifest,
   candidateImageBytes,
