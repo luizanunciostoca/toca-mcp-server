@@ -13,6 +13,7 @@ import {
   type OperationScopedGenerativeFinalizationRegistry,
   type OperationScopedGenerativeThePartyContextResolver,
 } from '../src/creative/controlled-operation-scoped-generative-finalization.js';
+import type { LocalOperationScopedGenerativeComposeInput } from '../src/providers/local/local-operation-scoped-generative-composer.js';
 
 const candidateBytes = Uint8Array.from([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
 const candidateSha256 = createHash('sha256').update(candidateBytes).digest('hex');
@@ -185,7 +186,7 @@ function request() {
 
 function composer() {
   return {
-    compose: vi.fn(async (input) => ({
+    compose: vi.fn(async (input: LocalOperationScopedGenerativeComposeInput) => ({
       outputBytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
       outputContentType: 'image/jpeg' as const,
       outputSha256: 'f'.repeat(64),
@@ -203,9 +204,24 @@ function composer() {
         outputDimensions: input.canvas,
         exactAssetBinding: true as const,
         gates: [
-          { gate: 'BRAND_INTEGRITY' as const, status: 'PASSED' as const, failureCodes: [], evidence: {} },
-          { gate: 'VENUE_FIDELITY' as const, status: 'PASSED' as const, failureCodes: [], evidence: {} },
-          { gate: 'QUALITY' as const, status: 'PASSED' as const, failureCodes: [], evidence: {} },
+          {
+            gate: 'BRAND_INTEGRITY' as const,
+            status: 'PASSED' as const,
+            failureCodes: [],
+            evidence: {},
+          },
+          {
+            gate: 'VENUE_FIDELITY' as const,
+            status: 'PASSED' as const,
+            failureCodes: [],
+            evidence: {},
+          },
+          {
+            gate: 'QUALITY' as const,
+            status: 'PASSED' as const,
+            failureCodes: [],
+            evidence: {},
+          },
         ],
         createdAt: input.createdAt ?? '2026-08-18T04:00:00Z',
       },
