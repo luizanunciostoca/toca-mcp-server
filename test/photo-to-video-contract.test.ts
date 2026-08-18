@@ -65,15 +65,40 @@ describe('photo-to-video contracts', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('requires exact PASS review bindings', () => {
+  it('requires exact PASS review bindings and explicit source-to-output evidence', () => {
     expect(
       photoToVideoReviewEvidenceSchema.safeParse({
         candidateSha256: 'a'.repeat(64),
         reviewer: 'LUIZ',
         reviewedAt: '2026-08-18T08:00:00.000Z',
+        reviewMethod: 'MULTIMODAL_PLUS_HUMAN',
+        evidenceRef: 'EVIDENCE-1',
+        sourceImageCompared: true,
+        architectureDriftDetected: false,
+        environmentDriftDetected: false,
+        aiLogoReconstructionDetected: false,
         venueFidelity: 'PASS',
         brandIntegrity: 'PASS',
         quality: 'FAIL',
+        sceneContinuationFidelity: 'PASS',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a review without durable evidence reference', () => {
+    expect(
+      photoToVideoReviewEvidenceSchema.safeParse({
+        candidateSha256: 'a'.repeat(64),
+        reviewer: 'LUIZ',
+        reviewedAt: '2026-08-18T08:00:00.000Z',
+        reviewMethod: 'HUMAN',
+        sourceImageCompared: true,
+        architectureDriftDetected: false,
+        environmentDriftDetected: false,
+        aiLogoReconstructionDetected: false,
+        venueFidelity: 'PASS',
+        brandIntegrity: 'PASS',
+        quality: 'PASS',
         sceneContinuationFidelity: 'PASS',
       }).success,
     ).toBe(false);
