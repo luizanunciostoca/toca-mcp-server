@@ -7,7 +7,12 @@ const envSchema = z.object({
   INSTAGRAM_PUBLICATION_ASSET_ID: z.string().min(1),
   INSTAGRAM_PUBLICATION_CORRELATION_ID: z.string().min(1),
   INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH: z.string().min(1),
-  INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE: z.enum([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'video/mp4',
+  ]),
 });
 
 const env = envSchema.parse(process.env);
