@@ -14,7 +14,7 @@ function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])
 function policyRow(): readonly unknown[] {
   return [
     'TOCA_CREATIVE_TRUTH_POLICY_V1',
-    '1.0',
+    '1.3',
     'ACTIVE_CANONICAL',
     'TOCA_DO_MORCEGO',
     'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
@@ -26,21 +26,41 @@ function policyRow(): readonly unknown[] {
     true,
     true,
     '1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM',
-    '2026-08-18T00:00:00-03:00',
+    '2026-08-18T13:58:00-03:00',
     true,
     'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
     'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+    'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+    'OPERATION_SCOPED_ONLY_V1',
+    'TOCA_VENUE_REFERENCE_SET_V1',
+    'DEPRECATED',
+    'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+    'FORBIDDEN',
+    'REQUIRED',
+    'DENY',
     'UNSUPPORTED_V1',
+    'TOCA_PHOTO_TO_VIDEO_POLICY_V1',
+    'ACTIVE_V1',
+    'DENY',
+    'NON_FINAL_BACKGROUND_CANDIDATE_ONLY',
+    true,
+    'DENY',
+    'DENY',
+    'FAIL_CLOSED_NO_FINAL_ASSET',
+    'ENFORCED',
+    'FAILED_DIRECT_GENERATIVE_FINALIZATION',
   ];
 }
 
 describe('GoogleSheetsCreativeTruthRegistry canonical identity ambiguity', () => {
-  it('rejects duplicate canonical policy identities', async () => {
-    const { client } = clientFor({ 'POLICY!A2:R20': [policyRow(), policyRow()] });
+  it('rejects duplicate canonical v1.3 policy identities', async () => {
+    const { client, readRange } = clientFor({ 'POLICY!A2:AK20': [policyRow(), policyRow()] });
     const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
     await expect(registry.assertCanonicalPolicy()).rejects.toThrow(
       'TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE',
     );
+    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:AK20');
   });
 
   it('returns no brand when brand plus variant identity is ambiguous', async () => {
