@@ -134,9 +134,15 @@ export class LocalThumbnailComposer {
 
 function resolveRenderStandard(input: LocalThumbnailComposeInput): CreativeStandard {
   const visualStandard = input.visualStandard;
-  const isTheParty = input.requiredBrands.includes('THE_PARTY');
+  const isTheParty =
+    input.venueAsset?.operation === 'THE_PARTY' ||
+    visualStandard?.operation === 'THE_PARTY' ||
+    input.requiredBrands.includes('THE_PARTY');
 
   if (isTheParty) {
+    if (!input.requiredBrands.includes('THE_PARTY')) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
+    }
     if (
       !visualStandard ||
       visualStandard.operation !== 'THE_PARTY' ||
