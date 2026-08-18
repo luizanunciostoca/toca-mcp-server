@@ -64,7 +64,7 @@ requireIncludes(writebackPath, [
   'writeFinalCreativeTruthEvidence',
   'deterministicRenderManifestSchema.safeParse',
   'assertCreativeReadyForPublication',
-  'BRAND-THE-PARTY-WHITE-V1',
+  'THE_PARTY_HERO_BRAND_ASSET_ID',
   'THE_PARTY_WRITEBACK_VISUAL_STANDARD_MISMATCH',
   'THE_PARTY_WRITEBACK_ENVIRONMENT_MISMATCH',
   'THE_PARTY_WRITEBACK_VENUE_ASSET_MISMATCH',
