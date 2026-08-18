@@ -21,6 +21,7 @@ for (const path of requiredFiles) {
 }
 
 requireIncludes('control/creative-truth-policy.v1.json', [
+  '"policyVersion": "1.3"',
   '"generativeMode": "GENERATIVE_EXCEPTION"',
   '"referenceStrategy": "OPERATION_SCOPED_ONLY_V1"',
   '"legacyReferenceSetStatus": "DEPRECATED"',
@@ -29,7 +30,9 @@ requireIncludes('control/creative-truth-policy.v1.json', [
   '"crossOperationReferenceReuse": "FORBIDDEN"',
   '"referenceSetOperationMatch": "REQUIRED"',
   '"legacyReferenceSetExecution": "DENY"',
-  '"videoGenerativeException": "UNSUPPORTED_V1"',
+  '"videoGenerativeException": "SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1"',
+  '"fullSyntheticVenueVideo": "UNSUPPORTED_V1"',
+  '"photoToVideoPolicyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1"',
 ]);
 
 requireIncludes('src/creative/creative-truth-resolver.ts', [
