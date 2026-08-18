@@ -35,6 +35,8 @@ for (const standard of [networks, minimalist]) {
   if (
     standard.sourceOfTruth?.driveDocumentId !==
       '1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk' ||
+    standard.sourceOfTruth?.canonicalManualDriveId !==
+      '1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU' ||
     standard.sourceOfTruth?.canonicalReferenceImageDriveId !==
       '1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD' ||
     standard.sourceOfTruth?.officialHeroLogoDriveId !==
