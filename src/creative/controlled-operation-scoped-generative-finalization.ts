@@ -33,6 +33,7 @@ export interface OperationScopedGenerativeFinalizationRegistry
   extends OperationScopedGenerativeRegistry {
   getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
   getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined>;
+  getContentItemCreativeStandardId(contentItemId: string): Promise<string | undefined>;
 }
 
 export interface OperationScopedGenerativeThePartyContext {
@@ -99,10 +100,10 @@ export function createControlledOperationScopedGenerativeFinalizationService(
  *
  * The generated candidate manifest is immutable lineage evidence, never execution authority.
  * Immediately before deterministic composition this service re-hashes the candidate bytes,
- * re-resolves CONTENT_ITEMS.operation, the approved exception, operation-scoped reference set,
- * VENUE_VISUALS identity/source hashes, CREATIVE_STANDARDS and official BRAND_ASSETS metadata.
- * The Party visual standard/environment is also resolved from canonical content/edition context.
- * Approval expiry is evaluated against an injected trusted clock, never caller-provided time.
+ * re-resolves CONTENT_ITEMS.operation + creative_standard_id, the approved exception,
+ * operation-scoped reference set, VENUE_VISUALS identity/source hashes, CREATIVE_STANDARDS
+ * and official BRAND_ASSETS metadata. The Party visual standard/environment is also resolved
+ * from canonical content/edition context. Approval expiry uses an injected trusted clock.
  */
 export class ControlledOperationScopedGenerativeFinalizationService {
   private readonly now: () => string;
@@ -175,6 +176,11 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       request.standard.standardId,
       request.visualStandard?.standardId,
       operation,
+    );
+    await this.assertCanonicalContentStandard(
+      manifest.contentItemId,
+      standards.outputStandard,
+      standards.visualStandard,
     );
     const partyEnvironment = await this.resolveCanonicalThePartyEnvironment(
       manifest.contentItemId,
@@ -258,6 +264,31 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       denyStandard();
     }
     return { outputStandard, visualStandard };
+  }
+
+  private async assertCanonicalContentStandard(
+    contentItemId: string,
+    outputStandard: CreativeStandard,
+    visualStandard: CreativeStandard | undefined,
+  ): Promise<void> {
+    const canonicalStandardId = await this.dependencies.registry.getContentItemCreativeStandardId(
+      contentItemId,
+    );
+    if (!canonicalStandardId) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_FINALIZATION_CONTENT_STANDARD_REQUIRED',
+        false,
+      );
+    }
+    const effectiveStandard = outputStandard.operation === 'ALL' ? visualStandard : outputStandard;
+    if (!effectiveStandard || canonicalStandardId !== effectiveStandard.standardId) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_FINALIZATION_CONTENT_STANDARD_MISMATCH',
+        false,
+      );
+    }
   }
 
   private async resolveCanonicalThePartyEnvironment(
