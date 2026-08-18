@@ -4,11 +4,14 @@ import { OpenAiSceneContinuationVideoProvider } from '../src/providers/openai/op
 
 const sourceBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
 const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex');
-const videoBytes = Uint8Array.from([0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0]);
+const videoBytes = Uint8Array.from([
+  0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0,
+]);
 
 function request() {
   return {
     contentItemId: 'CONTENT-1',
+    sourceAssetId: 'SUN-0244',
     operation: 'SUNSET',
     productId: 'SUNSET',
     inheritedVisualStandardId: 'SUNSET_FEED_V1',
@@ -53,14 +56,19 @@ describe('OpenAiSceneContinuationVideoProvider', () => {
         expect(form.get('seconds')).toBe('8');
         expect(form.get('size')).toBe('720x1280');
         expect(form.get('input_reference')).toBeInstanceOf(Blob);
-        expect(String(form.get('prompt'))).toContain('Do not reveal or invent unseen architecture');
+        expect(String(form.get('prompt'))).toContain(
+          'Do not reveal or invent unseen architecture',
+        );
         return Response.json({ id: 'video_123', status: 'queued', model: 'sora-2' });
       }
       if (url === 'https://api.openai.com/v1/videos/video_123') {
         return Response.json({ id: 'video_123', status: 'completed', model: 'sora-2' });
       }
       if (url === 'https://api.openai.com/v1/videos/video_123/content') {
-        return new Response(videoBytes, { status: 200, headers: { 'content-type': 'video/mp4' } });
+        return new Response(Uint8Array.from(videoBytes).buffer as ArrayBuffer, {
+          status: 200,
+          headers: { 'content-type': 'video/mp4' },
+        });
       }
       throw new Error(`unexpected request ${url}`);
     });
@@ -93,6 +101,20 @@ describe('OpenAiSceneContinuationVideoProvider', () => {
         ...invalid,
         approval: { ...invalid.approval, sourceSha256: 'a'.repeat(64) },
       }),
+    ).rejects.toThrow('VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller source asset identity not covered by the approval', async () => {
+    const fetchImpl = vi.fn();
+    const provider = new OpenAiSceneContinuationVideoProvider({
+      secretResolver: { resolve: async () => 'sk-test' },
+      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => new Date('2026-08-18T07:00:00.000Z'),
+    });
+    await expect(
+      provider.generate({ ...request(), sourceAssetId: 'SUN-OTHER' }),
     ).rejects.toThrow('VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
