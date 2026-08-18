@@ -2,16 +2,20 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const controlledFinalizerPath =
-  'src/providers/local/controlled-operation-scoped-generative-finalization.ts';
+  'src/creative/controlled-operation-scoped-generative-finalization.ts';
 const primitiveFinalizerPath = 'src/providers/local/local-operation-scoped-generative-composer.ts';
+const supersededFinalizerPath =
+  'src/providers/local/controlled-operation-scoped-generative-finalization.ts';
+const candidateManifestPath = 'src/contracts/operation-scoped-generative-candidate.ts';
 const required = [
   'src/contracts/creative-truth-generative-reference-sets.ts',
+  candidateManifestPath,
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
   'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
   'src/creative/controlled-operation-scoped-static-image-generation.ts',
   'src/creative/operation-scoped-generative-fidelity.ts',
-  primitiveFinalizerPath,
   controlledFinalizerPath,
+  primitiveFinalizerPath,
   'src/marketing-autopilot-image-generate.ts',
   'test/creative-truth-operation-scoped-reference-sets.test.ts',
   'test/creative-truth-operation-scoped-generative-registry.test.ts',
@@ -24,6 +28,9 @@ const required = [
 for (const path of required) {
   if (!existsSync(path)) fail(`Operation-scoped Creative Truth file missing: ${path}`);
 }
+if (existsSync(supersededFinalizerPath)) {
+  fail(`Superseded parallel generative finalizer must not exist: ${supersededFinalizerPath}`);
+}
 
 requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
@@ -35,6 +42,21 @@ requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   'operation: tocaGenerativeOperationSchema',
   'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
   'referenceSetOperation(approval.referenceSetId) !== approval.operation',
+]);
+
+requireIncludes(candidateManifestPath, [
+  'operationScopedGenerativeCandidateManifestSchema',
+  "status: z.literal('GENERATED_REVIEW_REQUIRED')",
+  "creativeMode: z.literal('GENERATIVE_EXCEPTION')",
+  'candidateSha256',
+  'referenceAssetIds',
+  'referenceSha256s',
+  "provider: z.literal('OPENAI_IMAGE_GENERATION')",
+  "imageToolModelSelection: z.literal('RESPONSES_TOOL_MANAGED')",
+  "readyForFinalComposition: z.literal(false)",
+  "publicationEligible: z.literal(false)",
+  'GENERATIVE_CANDIDATE_REFERENCE_LINEAGE_LENGTH_MISMATCH',
+  'GENERATIVE_CANDIDATE_REFERENCE_LINEAGE_DUPLICATE',
 ]);
 
 requireIncludes(
@@ -79,6 +101,7 @@ requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-gene
   'const expectedOperation = approval.operation',
   'canonical.referenceSetId !== approval.referenceSetId',
   'venue.operation !== expectedOperation',
+  'referenceSha256s: references.map((reference) => reference.observedSha256)',
   'Do not borrow venue facts from another Toca operation',
   'readyForFinalComposition: false',
   'requiresPostGenerationHumanReview: true',
@@ -98,6 +121,27 @@ requireIncludes('src/creative/operation-scoped-generative-fidelity.ts', [
   'crossOperationReferenceReuse: false',
 ]);
 
+requireIncludes(controlledFinalizerPath, [
+  'ControlledOperationScopedGenerativeFinalizationService',
+  'operationScopedGenerativeCandidateManifestSchema',
+  'assertCandidateBytes',
+  'getContentItemOperation(',
+  'getApprovedGenerativeException(',
+  'approval.exceptionId !== manifest.exceptionId',
+  'approval.approvalRef !== manifest.approvalRef',
+  'referenceSetOperation(approval.referenceSetId) !== operation',
+  'approval.minReferenceCount',
+  'getReferenceSet(referenceSetId)',
+  'uniqueReferenceIds',
+  'uniqueAssetIds',
+  'getVenueAssetBySourceAssetId(reference.assetId)',
+  'venue.sourceSha256.toLowerCase()',
+  'GENERATIVE_FINALIZATION_CANDIDATE_HASH_MISMATCH',
+  'GENERATIVE_FINALIZATION_APPROVAL_BINDING_MISMATCH',
+  'GENERATIVE_FINALIZATION_REFERENCE_IDENTITY_MISMATCH',
+  'GENERATIVE_FINALIZATION_REFERENCE_HASH_MISMATCH',
+]);
+
 requireIncludes(primitiveFinalizerPath, [
   'LocalOperationScopedGenerativeComposer',
   'evaluateOperationScopedGenerativeFidelity',
@@ -111,24 +155,8 @@ requireIncludes(primitiveFinalizerPath, [
   'GENERATIVE_OPERATION_SCOPED_VISUAL_STANDARD_REQUIRED',
 ]);
 
-requireIncludes(controlledFinalizerPath, [
-  'ControlledOperationScopedGenerativeFinalizationService',
-  "Omit<",
-  "'approval' | 'references'",
-  'registry.assertCanonicalPolicy()',
-  'registry.getContentItemOperation(contentItemId)',
-  'registry.getApprovedGenerativeException(contentItemId)',
-  'referenceSetOperation(approval.referenceSetId) !== operation',
-  'registry.getReferenceSet(',
-  'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
-  'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
-  'FAILED_GENERATIVE_REFERENCE_MISSING',
-  'approval,',
-  'references:',
-]);
-
-// The raw ImageMagick finalizer is a rendering primitive, not an execution authority.
-// Any production source importing it directly would bypass canonical CONTENT_ITEMS/approval/reference readback.
+// The raw ImageMagick compositor is a rendering primitive, never an execution authority.
+// Production source code may import it only through the canonical controlled finalization boundary.
 assertNoDirectPrimitiveFinalizerImports('src', controlledFinalizerPath);
 
 // Legacy global-set fidelity may remain as compatibility surface, but it must never pass finalization.
@@ -142,6 +170,8 @@ requireIncludes('src/marketing-autopilot-image-generate.ts', [
   'GoogleSheetsOperationScopedGenerativeRegistry',
   'ControlledOperationScopedStaticImageGenerationService',
   'CreativeTruthOperationScopedImageGenerator',
+  'candidateSha256: result.candidateSha256',
+  'referenceSha256s: result.referenceSha256s',
   'operation: result.operation',
   'referenceSetId: result.referenceSetId',
   'publicationEligible: false',
@@ -215,10 +245,12 @@ requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
 ]);
 requireIncludes('test/controlled-operation-scoped-generative-finalization.test.ts', [
-  'resolves approval and references canonically and overwrites caller-forged context',
-  'canonical content operation is unavailable',
-  'canonical approval operation conflicts with CONTENT_ITEMS',
-  'canonical required references are insufficient',
+  'revalidates candidate, approval, reference identity and source hashes before final render',
+  'candidate hash substitution before canonical state or composer access',
+  'CONTENT_ITEMS operation changes after candidate generation',
+  'canonical approval no longer matches the generated candidate manifest',
+  'current canonical reference source hash differs from generation lineage',
+  'approved minimum reference count immediately before finalization',
   'duplicate canonical reference identity',
 ]);
 
