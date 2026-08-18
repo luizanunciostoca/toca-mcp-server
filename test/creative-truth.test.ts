@@ -113,13 +113,12 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_HASH_MISMATCH');
   });
 
-  it('rejects a Drive-ID-only logo because mutable file identity is insufficient for final branding', () => {
+  it('rejects DRIVE_FILE_ID_PINNED mode even if a digest happens to be present', () => {
     const gate = evaluateBrandIntegrity(['MORRO_DIGITAL'], [
       {
         asset: {
           ...morroLogo,
           integrityMode: 'DRIVE_FILE_ID_PINNED',
-          sha256: undefined,
         },
         observedDriveFileId: morroLogo.driveFileId,
         observedSha256: morroLogo.sha256,
