@@ -9,6 +9,10 @@ import type {
   FidelityEvidence,
   VenueReference,
 } from '../contracts/creative-truth.js';
+import {
+  resolveCanonicalGenerativeBrandInputs,
+  type CanonicalBrandAssetRegistry,
+} from './canonical-generative-brand-binding.js';
 import { ExecutionError } from '../core/errors.js';
 import type { OperationScopedGenerativeRegistry } from '../providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
 import type {
@@ -42,6 +46,7 @@ export interface ControlledOperationScopedGenerativeFinalizationRequest {
 
 export interface ControlledOperationScopedGenerativeFinalizationDependencies {
   readonly registry: OperationScopedGenerativeRegistry;
+  readonly brandRegistry: CanonicalBrandAssetRegistry;
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
 }
 
@@ -51,7 +56,8 @@ export interface ControlledOperationScopedGenerativeFinalizationDependencies {
  * The generated candidate manifest is immutable lineage evidence, never execution authority.
  * Immediately before deterministic composition this service re-hashes the candidate bytes,
  * re-resolves CONTENT_ITEMS.operation, the approved exception, operation-scoped reference set,
- * VENUE_VISUALS identity and source hashes, and only then delegates to the local compositor.
+ * VENUE_VISUALS identity/source hashes and official BRAND_ASSETS metadata. Only canonical
+ * approval, references and brand records are delegated to the deterministic compositor.
  */
 export class ControlledOperationScopedGenerativeFinalizationService {
   constructor(
@@ -113,6 +119,16 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       approval.minReferenceCount,
     );
     await this.assertGenerationLineageStillCanonical(manifest, references, operation);
+    const canonicalBrandAssets = await resolveCanonicalGenerativeBrandInputs(
+      this.dependencies.brandRegistry,
+      {
+        outputStandard: request.standard,
+        ...(request.visualStandard ? { visualStandard: request.visualStandard } : {}),
+        requiredBrands: request.requiredBrands,
+        suppliedBrandAssets: request.brandAssets,
+        ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
+      },
+    );
 
     return this.dependencies.composer.compose({
       contentItemId: manifest.contentItemId,
@@ -131,7 +147,7 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       ...(request.functionalInfo ? { functionalInfo: request.functionalInfo } : {}),
       ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
       requiredBrands: request.requiredBrands,
-      brandAssets: request.brandAssets,
+      brandAssets: canonicalBrandAssets,
       ...(request.nowIso ? { createdAt: request.nowIso } : {}),
     });
   }
