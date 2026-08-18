@@ -10,7 +10,7 @@ Repository implementation mirror for the canonical Google Drive policy and regis
 - Venue reference set: `TOCA_VENUE_REFERENCE_SET_V1`
 - Canonical Drive enhancement-provenance, thumbnail/R20-R29 and output-bound fidelity addenda synchronized on `2026-08-18`.
 
-Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime `assertCanonicalPolicy()` reads the canonical `POLICY!A2:Q20` row and fails closed if enhancement provenance or the video fail-closed flags drift.
+Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime `assertCanonicalPolicy()` reads the canonical `POLICY!A2:R20` row and fails closed if enhancement provenance or the video fail-closed flags drift.
 
 ## Non-negotiable rule
 
@@ -30,7 +30,7 @@ Uses a verified real master and allows fidelity-preserving enhancement only. Enh
 
 ### `GENERATIVE_EXCEPTION`
 
-Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to `TOCA_VENUE_REFERENCE_SET_V1`, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled.
+Only allowed for **static image creation in V1** with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The approval must bind the content item to `TOCA_VENUE_REFERENCE_SET_V1`, require enough verified references, and keep architecture invention, environment drift and AI logo generation disabled.
 
 Approval of the **intent to generate** is not approval of the generated pixels. Before a generative candidate can pass Venue Fidelity, its evidence must:
 
@@ -41,7 +41,7 @@ Approval of the **intent to generate** is not approval of the generated pixels. 
 - include an output-specific `reviewRef`;
 - use `HUMAN_REVIEW` or `MULTIMODAL_PLUS_HUMAN` as the verification method.
 
-Therefore a generated Toca image cannot become final merely because a pre-generation exception existed. The actual generated output must be reviewed and bound to its own hash.
+Therefore a generated Toca image cannot become final merely because a pre-generation exception existed. The actual generated output must be reviewed and bound to its own hash. Full generative video is intentionally unsupported in V1 and fails closed rather than synthesizing Toca footage without a dedicated temporal/shot-level truth contract.
 
 ## Canonical registries
 
@@ -56,7 +56,7 @@ Therefore a generated Toca image cannot become final merely because a pre-genera
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
 
-The canonical `POLICY` row additionally declares `ENHANCEMENT_PROVENANCE_REQUIRED=TRUE`, `VIDEO_REAL_PLUS_ENHANCEMENT=FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE`, and `VIDEO_ENHANCEMENT_FAILURE=VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED`.
+The canonical `POLICY` row additionally declares `ENHANCEMENT_PROVENANCE_REQUIRED=TRUE`, `VIDEO_REAL_PLUS_ENHANCEMENT=FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE`, `VIDEO_ENHANCEMENT_FAILURE=VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED`, and `VIDEO_GENERATIVE_EXCEPTION=UNSUPPORTED_V1`.
 
 `VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. `CreativeTruthResolver.resolveVideoShots()` resolves requested shot IDs from the canonical registry first. The shot must be `ACTIVE_APPROVED`, venue verified, marketing ready, bound to source/master lineage, carry an approved master SHA-256 and have rights explicitly cleared. The supplied bytes must then match that registered master SHA-256 before FFmpeg is allowed to run.
 
@@ -114,7 +114,7 @@ For generative output, evidence is additionally reference-set-bound and output-r
 
 `LocalThumbnailComposer` is the only final thumbnail-render path defined by this V1. It requires `TOCA_THUMBNAIL_V1`, delegates visual composition to `LocalCreativeComposer`, therefore inherits real-master byte binding, output-bound fidelity evidence, official-logo-only composition and all three Creative Truth gates, and self-verifies the resulting render manifest/output SHA through `assertVideoThumbnailCreativeTruth()`. The older R20/R29 capability `video.thumbnail.generate` is explicitly a **non-final render-intent manifest**; it cannot be treated as approved thumbnail image bytes.
 
-`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable. `REAL_PLUS_ENHANCEMENT` is intentionally rejected by the current video composer with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master; the composer must not emit a misleading READY artifact that the publication manifest would later reject.
+`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `REAL_PLUS_ENHANCEMENT` is intentionally rejected with `VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED` until a shot/segment-level provenance contract can bind every transformed input to its real master. `GENERATIVE_EXCEPTION` video is also intentionally rejected in V1 with `VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED`; the user-authorized generative exception in this version applies to full static images only. Supplying generative references/approval context to the real-video path is rejected rather than silently changing semantics.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
 
@@ -178,11 +178,11 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, incomplete video edit lineage, invalid final thumbnail render manifests, final video export Creative Truth hash mismatch, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, unsupported video enhancement provenance, unsupported full-generative video, unexpected generative context on the real-video path, incomplete video edit lineage, invalid final thumbnail render manifests, final video export Creative Truth hash mismatch, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> BIND FIDELITY EVIDENCE TO MASTER + CANDIDATE SHA] -> [GENERATIVE_EXCEPTION: GENERATE FROM VERIFIED REFERENCES -> BIND EVIDENCE TO CANDIDATE SHA + ACTIVE REFERENCES -> POST-GENERATION HUMAN REVIEW] -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> FINAL OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [STATIC REAL_PLUS_ENHANCEMENT: FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> BIND FIDELITY EVIDENCE TO MASTER + CANDIDATE SHA] -> [STATIC GENERATIVE_EXCEPTION ONLY: GENERATE FROM VERIFIED REFERENCES -> BIND EVIDENCE TO CANDIDATE SHA + ACTIVE REFERENCES -> POST-GENERATION HUMAN REVIEW] -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> FINAL OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
