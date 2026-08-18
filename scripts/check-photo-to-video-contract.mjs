@@ -4,6 +4,7 @@ const requiredFiles = [
   'control/photo-to-video-policy.v1.json',
   'src/contracts/photo-to-video.ts',
   'src/providers/google-sheets/photo-to-video-registry.ts',
+  'src/providers/google-sheets/photo-to-video-content-writeback.ts',
   'src/providers/google-drive/creative-video-source-loader.ts',
   'src/providers/local/local-photo-motion-video-composer.ts',
   'src/providers/local/local-photo-to-video-brand-composer.ts',
@@ -45,9 +46,21 @@ requireIncludes('src/providers/google-sheets/photo-to-video-registry.ts', [
   'VIDEO_GENERATIVE_EXCEPTIONS!A1:Q1000',
   'VIDEO_OUTPUTS!A1:Q5000',
   'GoogleSheetsThePartyContentOrchestration',
+  'effectiveContent = { ...content, thePartyContext: partyContext }',
   'VIDEO_LIKENESS_CONSENT_REQUIRED',
   'VIDEO_SCENE_CONTINUATION_APPROVAL_BINDING_MISMATCH',
+  'PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID',
   'recordFinalOutput',
+]);
+
+requireIncludes('src/providers/google-sheets/photo-to-video-content-writeback.ts', [
+  'GoogleSheetsPhotoToVideoContentWriteback',
+  'video_candidate_sha256',
+  'video_final_asset_sha256',
+  'video_output_evidence_id',
+  'VIDEO_DIFFERENT_CANDIDATE_ALREADY_RECORDED',
+  'VIDEO_CONTENT_CANDIDATE_BINDING_CHANGED',
+  'VIDEO_CREATIVE_TRUTH_PASSED',
 ]);
 
 requireIncludes('src/providers/google-drive/creative-video-source-loader.ts', [
@@ -65,7 +78,7 @@ requireIncludes('src/providers/local/local-photo-motion-video-composer.ts', [
 
 requireIncludes('src/providers/openai/openai-scene-continuation-video-provider.ts', [
   "const OPENAI_VIDEOS_ENDPOINT = 'https://api.openai.com/v1/videos'",
-  "form.set('input_reference'",
+  "'input_reference'",
   "form.set('seconds'",
   "form.set('size'",
   '/content',
@@ -84,6 +97,7 @@ requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
   'ControlledPhotoToVideoGenerationService',
   'registry.resolve(request.contentItemId, request.routeType)',
   'brandLoader.load',
+  'writeback.writeCandidate',
   'publicationEligible: false',
   'PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID',
 ]);
@@ -94,18 +108,21 @@ requireIncludes('src/creative/controlled-photo-to-video-finalization.ts', [
   'PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH',
   'SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED',
   'PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED',
+  'writeback.writeFinal',
   'publicationAuthorized: false',
   'recordFinalOutput',
 ]);
 
 requireIncludes('src/marketing-autopilot-video-generate.ts', [
   'GoogleSheetsPhotoToVideoRegistry',
+  'GoogleSheetsPhotoToVideoContentWriteback',
   'OpenAiSceneContinuationVideoProvider',
   'LocalPhotoMotionVideoComposer',
   'VIDEO_GENERATE_CALLER_TIME_FORBIDDEN',
 ]);
 requireIncludes('src/marketing-autopilot-video-finalize.ts', [
   'ControlledPhotoToVideoFinalizationService',
+  'GoogleSheetsPhotoToVideoContentWriteback',
   'VIDEO_FINALIZE_CALLER_TIME_FORBIDDEN',
   'publicationAuthorized: false',
 ]);
@@ -121,7 +138,9 @@ console.log('Photo-to-video governed routes contract OK');
 function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (!content.includes(marker)) fail(`Photo-to-video contract missing in ${path}: ${marker}`);
+    if (!content.includes(marker)) {
+      fail(`Photo-to-video contract missing in ${path}: ${marker}`);
+    }
   }
 }
 
