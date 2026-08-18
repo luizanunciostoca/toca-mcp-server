@@ -23,8 +23,9 @@ import type {
   ThePartyEnvironment,
 } from '../providers/local/local-creative-composer.js';
 
+const THE_PARTY_NETWORKS_STANDARD_ID = 'THE_PARTY_HYBRID_NETWORKS_V1';
 const THE_PARTY_VISUAL_STANDARDS = new Set([
-  'THE_PARTY_HYBRID_NETWORKS_V1',
+  THE_PARTY_NETWORKS_STANDARD_ID,
   'THE_PARTY_HYBRID_MINIMALIST_V1',
 ]);
 
@@ -32,6 +33,16 @@ export interface OperationScopedGenerativeFinalizationRegistry
   extends OperationScopedGenerativeRegistry {
   getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
   getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined>;
+}
+
+export interface OperationScopedGenerativeThePartyContext {
+  readonly standardId: string;
+  readonly visualStandardStatus: string;
+  readonly environment?: ThePartyEnvironment;
+}
+
+export interface OperationScopedGenerativeThePartyContextResolver {
+  get(contentItemId: string): Promise<OperationScopedGenerativeThePartyContext>;
 }
 
 export interface ControlledOperationScopedGenerativeFinalizationRequest {
@@ -48,7 +59,6 @@ export interface ControlledOperationScopedGenerativeFinalizationRequest {
   readonly supportCopy?: string;
   readonly cta?: string;
   readonly functionalInfo?: string;
-  readonly partyEnvironment?: ThePartyEnvironment;
   readonly requiredBrands: readonly string[];
   /** Bytes/observed locator are input evidence; registry metadata is replaced canonically before gates run. */
   readonly brandAssets: readonly OfficialBrandAssetInput[];
@@ -57,10 +67,12 @@ export interface ControlledOperationScopedGenerativeFinalizationRequest {
 export interface ControlledOperationScopedGenerativeFinalizationDependencies {
   readonly registry: OperationScopedGenerativeFinalizationRegistry;
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
+  readonly thePartyContextResolver?: OperationScopedGenerativeThePartyContextResolver;
   readonly now?: () => string;
 }
 
 export interface ControlledOperationScopedGenerativeFinalizationFactoryOptions {
+  readonly thePartyContextResolver?: OperationScopedGenerativeThePartyContextResolver;
   readonly now?: () => string;
 }
 
@@ -75,6 +87,9 @@ export function createControlledOperationScopedGenerativeFinalizationService(
   return new ControlledOperationScopedGenerativeFinalizationService({
     registry,
     composer: new LocalOperationScopedGenerativeComposer(),
+    ...(options.thePartyContextResolver
+      ? { thePartyContextResolver: options.thePartyContextResolver }
+      : {}),
     ...(options.now ? { now: options.now } : {}),
   });
 }
@@ -86,6 +101,7 @@ export function createControlledOperationScopedGenerativeFinalizationService(
  * Immediately before deterministic composition this service re-hashes the candidate bytes,
  * re-resolves CONTENT_ITEMS.operation, the approved exception, operation-scoped reference set,
  * VENUE_VISUALS identity/source hashes, CREATIVE_STANDARDS and official BRAND_ASSETS metadata.
+ * The Party visual standard/environment is also resolved from canonical content/edition context.
  * Approval expiry is evaluated against an injected trusted clock, never caller-provided time.
  */
 export class ControlledOperationScopedGenerativeFinalizationService {
@@ -160,6 +176,12 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       request.visualStandard?.standardId,
       operation,
     );
+    const partyEnvironment = await this.resolveCanonicalThePartyEnvironment(
+      manifest.contentItemId,
+      operation,
+      standards.outputStandard,
+      standards.visualStandard,
+    );
     const canonicalBrandAssets = await resolveCanonicalGenerativeBrandInputs(
       this.dependencies.registry,
       {
@@ -167,7 +189,7 @@ export class ControlledOperationScopedGenerativeFinalizationService {
         ...(standards.visualStandard ? { visualStandard: standards.visualStandard } : {}),
         requiredBrands: request.requiredBrands,
         suppliedBrandAssets: request.brandAssets,
-        ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
+        ...(partyEnvironment ? { partyEnvironment } : {}),
       },
     );
 
@@ -186,7 +208,7 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       ...(request.supportCopy ? { supportCopy: request.supportCopy } : {}),
       ...(request.cta ? { cta: request.cta } : {}),
       ...(request.functionalInfo ? { functionalInfo: request.functionalInfo } : {}),
-      ...(request.partyEnvironment ? { partyEnvironment: request.partyEnvironment } : {}),
+      ...(partyEnvironment ? { partyEnvironment } : {}),
       requiredBrands: request.requiredBrands,
       brandAssets: canonicalBrandAssets,
       createdAt: nowIso,
@@ -236,6 +258,39 @@ export class ControlledOperationScopedGenerativeFinalizationService {
       denyStandard();
     }
     return { outputStandard, visualStandard };
+  }
+
+  private async resolveCanonicalThePartyEnvironment(
+    contentItemId: string,
+    operation: 'SUNSET' | 'THE_PARTY',
+    outputStandard: CreativeStandard,
+    visualStandard: CreativeStandard | undefined,
+  ): Promise<ThePartyEnvironment | undefined> {
+    if (operation !== 'THE_PARTY') return undefined;
+    const resolver = this.dependencies.thePartyContextResolver;
+    if (!resolver) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_FINALIZATION_THE_PARTY_CONTEXT_REQUIRED',
+        false,
+      );
+    }
+    const context = await resolver.get(contentItemId);
+    const effectiveStandard = outputStandard.operation === 'ALL' ? visualStandard : outputStandard;
+    if (!effectiveStandard || context.standardId !== effectiveStandard.standardId) {
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'GENERATIVE_FINALIZATION_THE_PARTY_STANDARD_CONTEXT_MISMATCH',
+        false,
+      );
+    }
+    if (effectiveStandard.standardId === THE_PARTY_NETWORKS_STANDARD_ID) {
+      if (!context.environment || context.visualStandardStatus === 'BLOCKED_NEEDS_ENVIRONMENT') {
+        throw new ExecutionError('POLICY_DENIED', 'THE_PARTY_ENVIRONMENT_REQUIRED', false);
+      }
+      return context.environment;
+    }
+    return undefined;
   }
 
   private async resolveCanonicalGenerationReferences(
