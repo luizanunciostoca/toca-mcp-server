@@ -36,7 +36,7 @@ export function createTocaManagedInstagramRuntimeHandlers(
 
   const store = new PostgresPublicationExecutionStore(pool);
   const transport = new MetaInstagramPublicationTransport(createMetaPublicationApiClient(config));
-  const executor = new InstagramPublicationExecutor(store, transport);
+  const executor = new InstagramPublicationExecutor(store, transport, undefined, true);
   const reconciler = new InstagramPublicationReconciler(store, transport);
   const delivery = new GcsPublicationAssetDelivery({
     projectId: config.GCP_PROJECT_ID,
