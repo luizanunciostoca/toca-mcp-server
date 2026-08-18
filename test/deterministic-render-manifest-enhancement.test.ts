@@ -45,6 +45,11 @@ describe('Deterministic render manifest enhancement lineage', () => {
     expect(parsed.outputSha256).toBe('c'.repeat(64));
   });
 
+  it('rejects REAL_PLUS_ENHANCEMENT when provenance is missing', () => {
+    const { enhancementProvenance: _removed, ...withoutProvenance } = manifest();
+    expect(() => deterministicRenderManifestSchema.parse(withoutProvenance)).toThrow();
+  });
+
   it('rejects an embedded enhancement record from another creative mode', () => {
     expect(() =>
       deterministicRenderManifestSchema.parse({
@@ -53,6 +58,15 @@ describe('Deterministic render manifest enhancement lineage', () => {
           ...enhancementProvenance,
           creativeMode: 'REAL_COMPOSITE',
         },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects enhancement provenance attached to a non-enhancement manifest', () => {
+    expect(() =>
+      deterministicRenderManifestSchema.parse({
+        ...manifest(),
+        creativeMode: 'REAL_COMPOSITE',
       }),
     ).toThrow();
   });
