@@ -8,6 +8,7 @@ Repository implementation mirror for the canonical Google Drive policy and regis
 - Canonical implementation plan: Drive `1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM`
 - Canonical operational registry: Drive/Sheets `1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU`
 - Venue reference set: `TOCA_VENUE_REFERENCE_SET_V1`
+- Canonical Drive enhancement-provenance addendum synchronized on `2026-08-18`; `POLICY` now records `ENHANCEMENT_PROVENANCE_REQUIRED=true` and the fail-closed video boundary.
 
 Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI.
 
@@ -41,6 +42,8 @@ Only allowed with an explicit approval record in `GENERATIVE_EXCEPTIONS`. The ap
 - `VIDEO_SHOTS`: truth-bound real video takes, including source/master lineage, SHA-256, venue verification, marketing readiness and rights status.
 - `GENERATIVE_EXCEPTIONS`: explicit approvals only; empty means no exception exists.
 - `GATE_LOG`: durable evidence of Brand, Venue and Quality gates.
+
+The canonical `POLICY` row additionally declares `ENHANCEMENT_PROVENANCE_REQUIRED=TRUE`, `VIDEO_REAL_PLUS_ENHANCEMENT=FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE`, and `VIDEO_ENHANCEMENT_FAILURE=VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED`.
 
 `VIDEO_SHOTS` is fail-closed. A real video take cannot enter `LocalVideoComposer` merely because bytes were supplied. `CreativeTruthResolver.resolveVideoShots()` resolves requested shot IDs from the canonical registry first. The shot must be `ACTIVE_APPROVED`, venue verified, marketing ready, bound to source/master lineage, carry an approved master SHA-256 and have rights explicitly cleared. The supplied bytes must then match that registered master SHA-256 before FFmpeg is allowed to run.
 
