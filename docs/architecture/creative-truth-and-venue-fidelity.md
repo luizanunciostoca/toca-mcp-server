@@ -19,11 +19,11 @@ AI does not define what Toca do Morcego looks like. Real verified media and offi
 
 ### `REAL_COMPOSITE`
 
-Default for final image and video creatives. Uses a `VENUE_VERIFIED` / `MARKETING_READY` source or master and deterministic text/logo composition.
+Default for final image and video creatives. Uses a `VENUE_VERIFIED` / `MARKETING_READY` source or master and deterministic text/logo composition. The bytes entering deterministic composition must equal the registered master SHA-256.
 
 ### `REAL_PLUS_ENHANCEMENT`
 
-Uses a verified real source and allows fidelity-preserving enhancement only. A post-edit Venue Fidelity evidence record is mandatory.
+Uses a verified real master and allows fidelity-preserving enhancement only. Enhanced bytes are expected to differ from the original master, therefore the system does **not** pretend they are the master. Instead it requires an immutable enhancement provenance record plus a post-edit Venue Fidelity PASS.
 
 ### `GENERATIVE_EXCEPTION`
 
@@ -61,17 +61,38 @@ Final real-media output requires:
 3. source/master lineage;
 4. master Drive file ID;
 5. master SHA-256;
-6. exact equality between the SHA-256 of the bytes actually rendered and the registered master SHA-256.
+6. exact byte binding appropriate to the creative mode.
 
-This prevents valid registry metadata from being paired with substituted media bytes. A source/master identity mismatch fails before ImageMagick or FFmpeg runs.
+For `REAL_COMPOSITE`, the SHA-256 of the media bytes entering composition must equal the registered master SHA-256.
 
-For enhancement or generative output, a fidelity verifier must state whether source identity was preserved and whether architecture drift, scene invention or logo reconstruction was detected. Any positive drift signal is a hard failure.
+For `REAL_PLUS_ENHANCEMENT`, the system requires a `CreativeEnhancementProvenance` record containing:
+
+- `policyId=TOCA_CREATIVE_TRUTH_POLICY_V1`;
+- `creativeMode=REAL_PLUS_ENHANCEMENT`;
+- editor provider;
+- original master asset ID;
+- original master Drive file ID;
+- original master SHA-256;
+- enhanced output SHA-256;
+- `sourceImageBound=true`;
+- `creativeTruthBound=true`;
+- `requiresVenueFidelityGate=true`.
+
+The provenance must point to the exact registered master and its `outputSha256` must equal the bytes actually entering deterministic composition. The final `DeterministicRenderManifest` persists this provenance, creating an auditable chain:
+
+`REGISTERED REAL MASTER SHA -> ENHANCEMENT OUTPUT SHA -> POST-EDIT VENUE FIDELITY PASS -> FINAL CREATIVE SHA`.
+
+Both the local ImageMagick enhancer and the OpenAI enhancement adapter emit this same policy-pinned provenance contract. The OpenAI adapter independently rehashes the supplied original bytes and returned enhanced bytes instead of trusting provider-reported digests alone.
+
+This prevents valid registry metadata from being paired with substituted media bytes while still allowing faithful enhancement. A source/master identity mismatch, enhancement-output substitution, wrong policy/mode or missing post-edit Venue Fidelity evidence fails closed.
+
+For generative output, a fidelity verifier must state whether source/reference identity was preserved and whether architecture drift, scene invention or logo reconstruction was detected. Any positive drift signal is a hard failure.
 
 ## Deterministic composition
 
-`LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It produces an output SHA-256 and `DeterministicRenderManifest`.
+`LocalCreativeComposer` composes 4:5, 1:1 and 9:16 static creatives from a bound source image, controlled typography, CTA, functional information and official logos. It produces an output SHA-256 and `DeterministicRenderManifest`. In enhancement mode the manifest also persists `CreativeEnhancementProvenance`.
 
-`LocalStoryComposer` is no longer an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
+`LocalStoryComposer` is not an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. If the Story uses a verified enhancement, its `masterSha256` remains the original real master SHA while the enhancement output SHA remains in the provenance record. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
 
 `LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable.
 
@@ -128,6 +149,7 @@ The policy fails closed with explicit codes, including:
 - `FAILED_GENERATIVE_REFERENCE_MISSING`
 - `FAILED_STANDARD_NOT_RESOLVED`
 - `FAILED_LINEAGE_MISSING`
+- `FAILED_ENHANCEMENT_PROVENANCE`
 - `FAILED_VENUE_FIDELITY_GATE`
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
@@ -136,8 +158,8 @@ Additional fail-closed execution reasons include exact master-byte mismatches, m
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY REAL MASTER BYTE HASH -> [OPTIONAL FAITHFUL ENHANCEMENT -> VERIFY ENHANCEMENT PROVENANCE -> POST-EDIT VENUE FIDELITY] -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
-No automatic provider mutation is performed merely by resolving or rendering a creative. Existing approval and provider-write boundaries remain in force. Creative Truth is an additional prerequisite, not a replacement for approval, idempotency, budget or provider policies.
+No automatic provider mutation is performed merely by resolving, enhancing or rendering a creative. Existing approval and provider-write boundaries remain in force. Creative Truth is an additional prerequisite, not a replacement for approval, idempotency, budget or provider policies.
