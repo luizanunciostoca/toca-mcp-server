@@ -83,13 +83,23 @@ export const creativeTruthPolicySchema = z.object({
     explicitApprovalRequired: z.literal(true),
     approvalRecordRequired: z.literal(true),
     venueReferenceSetRequired: z.literal(TOCA_VENUE_REFERENCE_SET_ID),
-    minimumVerifiedReferences: z.number().int().min(1),
+    minimumVerifiedReferences: z.number().int().min(3),
     venueFidelityGateStillRequired: z.literal(true),
     officialBrandAssetsStillRequired: z.literal(true),
     architecturalInventionStillForbidden: z.literal(true),
     environmentDriftStillForbidden: z.literal(true),
   }),
-  requiredGates: z.array(creativeTruthGateNameSchema).min(3),
+  requiredGates: z
+    .array(creativeTruthGateNameSchema)
+    .length(3)
+    .superRefine((gates, ctx) => {
+      if (new Set(gates).size !== 3) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Creative Truth policy must require each canonical gate exactly once',
+        });
+      }
+    }),
   publicationBoundary: z.object({
     allRequiredGatesMustPass: z.literal(true),
     outputSha256Required: z.literal(true),
@@ -222,14 +232,22 @@ export const generativeExceptionApprovalSchema = z.object({
   approvedBy: z.string().min(1),
   approvalRef: z.string().min(1),
   reason: z.string().min(1),
-  referenceSetId: z.string().min(1),
-  minReferenceCount: z.number().int().min(1).default(3),
-  allowArchitecturalInvention: z.boolean(),
-  allowEnvironmentDrift: z.boolean(),
-  allowAiLogoGeneration: z.boolean(),
+  referenceSetId: z.literal(TOCA_VENUE_REFERENCE_SET_ID),
+  minReferenceCount: z.number().int().min(3).default(3),
+  allowArchitecturalInvention: z.literal(false),
+  allowEnvironmentDrift: z.literal(false),
+  allowAiLogoGeneration: z.literal(false),
   status: z.enum(['APPROVED', 'REVOKED', 'EXPIRED']),
-  expiresAt: z.string().min(1).optional(),
-  createdAt: z.string().min(1),
+  expiresAt: z
+    .string()
+    .min(1)
+    .refine((value) => Number.isFinite(Date.parse(value)), {
+      message: 'expiresAt must be a parseable timestamp',
+    })
+    .optional(),
+  createdAt: z.string().min(1).refine((value) => Number.isFinite(Date.parse(value)), {
+    message: 'createdAt must be a parseable timestamp',
+  }),
 });
 
 export const fidelityVerificationMethodSchema = z.enum([
@@ -267,12 +285,29 @@ export const creativeEnhancementProvenanceSchema = z.object({
   requiresVenueFidelityGate: z.literal(true),
 });
 
-export const creativeTruthGateResultSchema = z.object({
-  gate: creativeTruthGateNameSchema,
-  status: z.enum(['PASSED', 'FAILED']),
-  failureCodes: z.array(creativeTruthFailureCodeSchema).default([]),
-  evidence: z.record(z.string(), z.unknown()).default({}),
-});
+export const creativeTruthGateResultSchema = z
+  .object({
+    gate: creativeTruthGateNameSchema,
+    status: z.enum(['PASSED', 'FAILED']),
+    failureCodes: z.array(creativeTruthFailureCodeSchema).default([]),
+    evidence: z.record(z.string(), z.unknown()).default({}),
+  })
+  .superRefine((value, ctx) => {
+    if (value.status === 'PASSED' && value.failureCodes.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failureCodes'],
+        message: 'PASSED Creative Truth gates cannot contain failure codes',
+      });
+    }
+    if (value.status === 'FAILED' && value.failureCodes.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['failureCodes'],
+        message: 'FAILED Creative Truth gates require at least one failure code',
+      });
+    }
+  });
 
 export const creativeTruthPublicationBindingSchema = z.object({
   policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID),
@@ -300,10 +335,17 @@ export const deterministicRenderManifestSchema = z
     outputSha256: z.string().regex(/^[a-f0-9]{64}$/i),
     outputDimensions: z.string().regex(/^\d+x\d+$/),
     exactAssetBinding: z.literal(true),
-    gates: z.array(creativeTruthGateResultSchema).min(3),
+    gates: z.array(creativeTruthGateResultSchema).length(3),
     createdAt: z.string().min(1),
   })
   .superRefine((value, ctx) => {
+    if (new Set(value.gates.map((gate) => gate.gate)).size !== 3) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['gates'],
+        message: 'Render manifests require BRAND_INTEGRITY, VENUE_FIDELITY and QUALITY exactly once',
+      });
+    }
     if (value.creativeMode === 'REAL_PLUS_ENHANCEMENT' && !value.enhancementProvenance) {
       ctx.addIssue({
         code: 'custom',
