@@ -110,8 +110,6 @@ function setup(
     getApprovedGenerativeException,
     getReferenceSet,
     getVenueAssetBySourceAssetId,
-    getBrandAsset: vi.fn(async () => undefined),
-    getCreativeStandard: vi.fn(async () => undefined),
   };
 
   const load = vi.fn(async (entry: VenueReference) => ({
