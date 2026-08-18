@@ -6,9 +6,9 @@ Status: active canonical integration contract on the Creative Truth branch.
 
 Make the official **The Party — Sistema Híbrido + Minimalista** identity mandatory for every final creative with `operation=THE_PARTY`, while preserving the parent `TOCA_CREATIVE_TRUTH_POLICY_V1` boundaries.
 
-The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with a pinned SHA-256.
+The visual source of truth is Google Drive document `THE_PARTY — 02_IDENTIDADE_VISUAL_DO_PRODUTO` (`1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk`), including its canonical v1.2 addendum. The active canonical manual is `THE_PARTY — MANUAL_CANONICO_DE_IDENTIDADE_VISUAL_v1.2` (`1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU`). The user-supplied official visual reference is Drive file `1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD`. The official The Party hero logo is Drive file `1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF` and is registered with a pinned SHA-256.
 
-Repository mirrors exist only to make this contract deterministic, testable and auditable. Drive remains the business/visual source of truth.
+Repository mirrors exist only to make this contract deterministic, testable and auditable. Drive remains the business/visual source of truth. Prior Night Editorial / Campaign Impact manuals remain preserved in `09_IDENTIDADE_VISUAL/99_SUPERSEDED` only as history and must not be auto-selected.
 
 ## Mandatory standards
 
@@ -69,6 +69,8 @@ Full synthetic video generation remains unsupported in V1.
 The Creative Truth resolver must reject `operation=THE_PARTY` when the resolved `standardId` is not The Party-specific. This prevents `TOCA_VIDEO_V1`, `TOCA_THUMBNAIL_V1` or another transversal standard from silently becoming the final visual identity.
 
 The deterministic image composer applies The Party family-specific layout treatment while preserving real venue bytes, official asset insertion, lineage and exact output hashing. The Party hero logo is separated from the institutional footer.
+
+The deterministic real-video compositor applies the same selected family to approved `VIDEO_SHOTS`, keeps the hero mark separate from the institutional footer, and preserves the V1 prohibition on full synthetic venue video.
 
 ## Publication boundary
 
