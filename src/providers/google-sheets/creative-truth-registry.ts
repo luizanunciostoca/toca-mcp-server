@@ -279,7 +279,7 @@ function parseVideoShot(row: readonly unknown[]): VideoShot {
     ...(masterSha256 ? { masterSha256 } : {}),
     operation: cell(row[7]),
     locationSignature: cell(row[8]),
-    dominantSubject: cell(row[9]),
+    shotClass: cell(row[9]),
     ...(duration ? { durationMs: integer(row[10], 0) } : {}),
     orientation: cell(row[11]),
     venueVerified: bool(row[12]),
