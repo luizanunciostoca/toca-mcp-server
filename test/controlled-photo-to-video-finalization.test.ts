@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ControlledPhotoToVideoFinalizationService } from '../src/creative/controlled-photo-to-video-finalization.js';
-import type { PhotoToVideoCandidateManifest } from '../src/contracts/photo-to-video.js';
+import type {
+  PhotoToVideoCandidateManifest,
+  PhotoToVideoReviewEvidence,
+} from '../src/contracts/photo-to-video.js';
 import type { PhotoToVideoContentWriteback } from '../src/providers/google-sheets/photo-to-video-content-writeback.js';
 import type {
   PhotoToVideoRegistry,
@@ -113,6 +116,25 @@ function candidate(): PhotoToVideoCandidateManifest {
   };
 }
 
+function review(): PhotoToVideoReviewEvidence {
+  return {
+    candidateSha256: outputSha256,
+    reviewer: 'LUIZ',
+    reviewedAt: '2026-08-18T07:30:00.000Z',
+    reviewMethod: 'MULTIMODAL_PLUS_HUMAN',
+    evidenceRef: 'EVIDENCE-VIDEO-REVIEW-1',
+    sourceImageCompared: true,
+    architectureDriftDetected: false,
+    environmentDriftDetected: false,
+    aiLogoReconstructionDetected: false,
+    venueFidelity: 'PASS',
+    brandIntegrity: 'PASS',
+    quality: 'PASS',
+    sceneContinuationFidelity: 'NOT_APPLICABLE',
+    notes: '',
+  };
+}
+
 function registry(current = resolved()) {
   const recordFinalOutput = vi.fn(async () => undefined);
   const value: PhotoToVideoRegistry = {
@@ -142,16 +164,7 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
     const result = await service.finalize({
       outputBytes,
       candidateManifest: candidate(),
-      reviewEvidence: {
-        candidateSha256: outputSha256,
-        reviewer: 'LUIZ',
-        reviewedAt: '2026-08-18T07:30:00.000Z',
-        venueFidelity: 'PASS',
-        brandIntegrity: 'PASS',
-        quality: 'PASS',
-        sceneContinuationFidelity: 'NOT_APPLICABLE',
-        notes: '',
-      },
+      reviewEvidence: review(),
     });
     expect(result.status).toBe('VIDEO_CREATIVE_TRUTH_PASSED');
     expect(result.publicationAuthorized).toBe(false);
@@ -182,16 +195,7 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
       service.finalize({
         outputBytes,
         candidateManifest: candidate(),
-        reviewEvidence: {
-          candidateSha256: outputSha256,
-          reviewer: 'LUIZ',
-          reviewedAt: '2026-08-18T07:30:00.000Z',
-          venueFidelity: 'PASS',
-          brandIntegrity: 'PASS',
-          quality: 'PASS',
-          sceneContinuationFidelity: 'NOT_APPLICABLE',
-          notes: '',
-        },
+        reviewEvidence: review(),
       }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED');
     expect(fake.recordFinalOutput).not.toHaveBeenCalled();
