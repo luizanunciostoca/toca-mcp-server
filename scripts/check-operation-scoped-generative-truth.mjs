@@ -1,24 +1,32 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+const controlledGenerationPath =
+  'src/creative/controlled-operation-scoped-static-image-generation.ts';
 const controlledFinalizerPath =
   'src/creative/controlled-operation-scoped-generative-finalization.ts';
 const primitiveFinalizerPath = 'src/providers/local/local-operation-scoped-generative-composer.ts';
+const providerGeneratorPath =
+  'src/providers/openai/creative-truth-operation-scoped-image-generator.ts';
+const operatorGeneratePath = 'src/marketing-autopilot-image-generate.ts';
 const supersededFinalizerPath =
   'src/providers/local/controlled-operation-scoped-generative-finalization.ts';
 const candidateManifestPath = 'src/contracts/operation-scoped-generative-candidate.ts';
 const canonicalBrandBindingPath = 'src/creative/canonical-generative-brand-binding.ts';
+const baseRegistryPath = 'src/providers/google-sheets/creative-truth-registry.ts';
 const required = [
   'src/contracts/creative-truth-generative-reference-sets.ts',
   candidateManifestPath,
   canonicalBrandBindingPath,
+  baseRegistryPath,
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
-  'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
-  'src/creative/controlled-operation-scoped-static-image-generation.ts',
+  providerGeneratorPath,
+  controlledGenerationPath,
   'src/creative/operation-scoped-generative-fidelity.ts',
   controlledFinalizerPath,
   primitiveFinalizerPath,
-  'src/marketing-autopilot-image-generate.ts',
+  operatorGeneratePath,
+  'src/creative/creative-truth-resolver.ts',
   'test/creative-truth-operation-scoped-reference-sets.test.ts',
   'test/creative-truth-operation-scoped-generative-registry.test.ts',
   'test/controlled-operation-scoped-static-image-generation.test.ts',
@@ -27,6 +35,8 @@ const required = [
   'test/canonical-generative-brand-binding.test.ts',
   'test/local-operation-scoped-generative-composer.test.ts',
   'test/controlled-operation-scoped-generative-finalization.test.ts',
+  'test/creative-truth-resolver.test.ts',
+  'test/creative-truth-registry-ambiguity.test.ts',
 ];
 for (const path of required) {
   if (!existsSync(path)) fail(`Operation-scoped Creative Truth file missing: ${path}`);
@@ -40,9 +50,7 @@ requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
   "LEGACY_TOCA_VENUE_REFERENCE_SET_ID = 'TOCA_VENUE_REFERENCE_SET_V1'",
   "tocaGenerativeOperationSchema = z.enum(['SUNSET', 'THE_PARTY'])",
-  'tocaGenerativeVenueReferenceSetIdSchema',
   'operationScopedGenerativeExceptionApprovalSchema',
-  'operation: tocaGenerativeOperationSchema',
   'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
   'referenceSetOperation(approval.referenceSetId) !== approval.operation',
 ]);
@@ -66,7 +74,7 @@ requireIncludes(canonicalBrandBindingPath, [
   'resolveCanonicalGenerativeBrandInputs',
   'getBrandAsset(brand: string, variant: string)',
   'suppliedByBrand.size !== uniqueRequiredBrands.size',
-  'canonical.status !== \'ACTIVE_APPROVED\'',
+  "canonical.status !== 'ACTIVE_APPROVED'",
   "canonical.integrityMode !== 'SHA256_PINNED'",
   'canonical.aiReconstructionAllowed !== false',
   "canonical.brandAssetId !== 'BRAND-THE-PARTY-WHITE-V1'",
@@ -92,20 +100,28 @@ requireIncludes(
     'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
     'FAILED_GENERATIVE_REFERENCE_MISSING',
     'operation: cell(row[14])',
+    'getBrandAsset(brand: string, variant: string)',
+    'getCreativeStandard(standardId: string)',
   ],
 );
 
-requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
+requireIncludes(controlledGenerationPath, [
+  'readonly now?: () => string',
+  'this.now = dependencies.now ?? (() => new Date().toISOString())',
+  'const nowIso = trustedNowIso(this.now)',
   'getContentItemOperation(contentItemId)',
   'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
   'approval.operation !== operation',
   'referenceSetOperation(approval.referenceSetId) !== operation',
   'getReferenceSet(approval.referenceSetId)',
-  'reference.referenceSetId === approval.referenceSetId',
-  'requiredForGenerativeException',
+  'uniqueReferenceIds',
+  'uniqueAssetIds',
+  'nowIso,',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
 ]);
+requireExcludes(controlledGenerationPath, ['readonly nowIso?: string']);
 
-requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-generator.ts', [
+requireIncludes(providerGeneratorPath, [
   "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6'",
   "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
   'referenceSetOperation(approval.referenceSetId) !== approval.operation',
@@ -143,26 +159,36 @@ requireIncludes('src/creative/operation-scoped-generative-fidelity.ts', [
 
 requireIncludes(controlledFinalizerPath, [
   'ControlledOperationScopedGenerativeFinalizationService',
+  'OperationScopedGenerativeFinalizationRegistry',
   'operationScopedGenerativeCandidateManifestSchema',
   'assertCandidateBytes',
+  'const nowIso = trustedNowIso(this.now)',
   'getContentItemOperation(',
   'getApprovedGenerativeException(',
   'approval.exceptionId !== manifest.exceptionId',
   'approval.approvalRef !== manifest.approvalRef',
   'referenceSetOperation(approval.referenceSetId) !== operation',
-  'approval.minReferenceCount',
+  'assertApprovalCurrent(approval.expiresAt, nowIso)',
   'getReferenceSet(referenceSetId)',
   'uniqueReferenceIds',
   'uniqueAssetIds',
   'getVenueAssetBySourceAssetId(reference.assetId)',
   'venue.sourceSha256.toLowerCase()',
+  'getCreativeStandard(normalizedOutputId)',
+  'getCreativeStandard(normalizedVisualId)',
   'resolveCanonicalGenerativeBrandInputs',
-  'this.dependencies.brandRegistry',
+  'this.dependencies.registry',
   'brandAssets: canonicalBrandAssets',
+  'createdAt: nowIso',
+  'GENERATIVE_TRUSTED_CLOCK_INVALID',
   'GENERATIVE_FINALIZATION_CANDIDATE_HASH_MISMATCH',
   'GENERATIVE_FINALIZATION_APPROVAL_BINDING_MISMATCH',
   'GENERATIVE_FINALIZATION_REFERENCE_IDENTITY_MISMATCH',
   'GENERATIVE_FINALIZATION_REFERENCE_HASH_MISMATCH',
+]);
+requireExcludes(controlledFinalizerPath, [
+  'readonly nowIso?: string',
+  'this.dependencies.brandRegistry',
 ]);
 
 requireIncludes(primitiveFinalizerPath, [
@@ -178,9 +204,19 @@ requireIncludes(primitiveFinalizerPath, [
   'GENERATIVE_OPERATION_SCOPED_VISUAL_STANDARD_REQUIRED',
 ]);
 
-// The raw ImageMagick compositor is a rendering primitive, never an execution authority.
-// Production source code may import it only through the canonical controlled finalization boundary.
+// Provider and compositor primitives are wiring/rendering dependencies, never alternate execution authorities.
 assertNoDirectPrimitiveFinalizerImports('src', controlledFinalizerPath);
+assertNoDirectProviderGeneratorImports('src', [controlledGenerationPath, operatorGeneratePath]);
+
+requireIncludes('src/creative/creative-truth-resolver.ts', [
+  "if (creativeMode === 'GENERATIVE_EXCEPTION')",
+  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+  'ControlledOperationScopedStaticImageGenerationService',
+]);
+requireIncludes('test/creative-truth-resolver.test.ts', [
+  'legacy global-set reads cannot bypass operation-scoped generation',
+  'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
+]);
 
 // Legacy global-set fidelity may remain as compatibility surface, but it must never pass finalization.
 requireIncludes('src/creative/creative-truth.ts', [
@@ -189,7 +225,23 @@ requireIncludes('src/creative/creative-truth.ts', [
   "failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION')",
 ]);
 
-requireIncludes('src/marketing-autopilot-image-generate.ts', [
+requireIncludes(baseRegistryPath, [
+  'const matches = rows.filter((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID)',
+  'if (matches.length !== 1)',
+  "const matches = rows.filter(\n      (candidate) => cell(candidate[1]) === brand && cell(candidate[2]) === variant,",
+  "const matches = rows.filter((candidate) => cell(candidate[0]) === standardId)",
+  "const matches = rows.filter((candidate) => cell(candidate[0]) === venueAssetId)",
+  "const matches = rows.filter((candidate) => cell(candidate[0]) === shotId)",
+]);
+requireIncludes('test/creative-truth-registry-ambiguity.test.ts', [
+  'rejects duplicate canonical policy identities',
+  'brand plus variant identity is ambiguous',
+  'creative standard when standard identity is ambiguous',
+  'venue when venue asset identity is ambiguous',
+  'video shot when shot identity is ambiguous',
+]);
+
+requireIncludes(operatorGeneratePath, [
   'GoogleSheetsOperationScopedGenerativeRegistry',
   'ControlledOperationScopedStaticImageGenerationService',
   'CreativeTruthOperationScopedImageGenerator',
@@ -198,6 +250,7 @@ requireIncludes('src/marketing-autopilot-image-generate.ts', [
   'operation: result.operation',
   'referenceSetId: result.referenceSetId',
   'publicationEligible: false',
+  'IMAGE_GENERATE_CALLER_TIME_FORBIDDEN',
 ]);
 
 for (const path of [
@@ -246,6 +299,8 @@ requireIncludes('test/controlled-operation-scoped-static-image-generation.test.t
   'canonical content operation is missing',
   'conflicts with the canonical content operation',
   'does not accept a cross-operation reference row',
+  'cannot backdate an expired approval because the clock is an injected trusted dependency',
+  'trusted clock itself is invalid',
 ]);
 requireIncludes('test/creative-truth-operation-scoped-image-generator.test.ts', [
   'canonical content operation is missing',
@@ -274,16 +329,18 @@ requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
 ]);
 requireIncludes('test/controlled-operation-scoped-generative-finalization.test.ts', [
-  'official brand metadata before final render',
+  'source hashes, standard and brands before final render',
   'candidate hash substitution before canonical state or composer access',
   'CONTENT_ITEMS operation changes after candidate generation',
   'canonical approval no longer matches the generated candidate manifest',
   'current canonical reference source hash differs from generation lineage',
   'approved minimum reference count immediately before finalization',
   'duplicate canonical reference identity',
-  'caller-forged brand registry metadata with the canonical BRAND_ASSETS record',
-  'required official brand has no canonical BRAND_ASSETS record',
-  'unrequired extra brand asset',
+  'caller-forged standard metadata with canonical CREATIVE_STANDARDS readback',
+  'caller-forged brand registry metadata with canonical BRAND_ASSETS readback',
+  'canonical standard does not exist',
+  'expired approval against trusted service time',
+  'trusted finalization clock is invalid',
 ]);
 
 console.log('Operation-scoped generative Creative Truth contract OK');
@@ -296,6 +353,17 @@ function assertNoDirectPrimitiveFinalizerImports(root, allowedPath) {
       fail(
         `Operation-scoped generative primitive finalizer imported outside controlled boundary: ${path}`,
       );
+    }
+  }
+}
+
+function assertNoDirectProviderGeneratorImports(root, allowedPaths) {
+  const allowed = new Set(allowedPaths);
+  for (const path of walk(root)) {
+    if (!path.endsWith('.ts') || path === providerGeneratorPath || allowed.has(path)) continue;
+    const content = readFileSync(path, 'utf8');
+    if (content.includes('creative-truth-operation-scoped-image-generator.js')) {
+      fail(`Operation-scoped image provider imported outside controlled generation boundary: ${path}`);
     }
   }
 }
@@ -314,6 +382,13 @@ function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
     if (!content.includes(marker)) fail(`Missing marker in ${path}: ${marker}`);
+  }
+}
+
+function requireExcludes(path, markers) {
+  const content = readFileSync(path, 'utf8');
+  for (const marker of markers) {
+    if (content.includes(marker)) fail(`Forbidden marker in ${path}: ${marker}`);
   }
 }
 
