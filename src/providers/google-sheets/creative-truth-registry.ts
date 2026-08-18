@@ -48,7 +48,7 @@ export class GoogleSheetsCreativeTruthRegistry {
   }
 
   async assertCanonicalPolicy(): Promise<void> {
-    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:Q20');
+    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:R20');
     const policy = rows.find((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
     const defaultModes = policy ? list(policy[4]) : [];
     const defaultModesCanonical =
@@ -70,7 +70,8 @@ export class GoogleSheetsCreativeTruthRegistry {
       cell(policy[12]) !== CREATIVE_TRUTH_PLAN_DRIVE_ID ||
       !bool(policy[14]) ||
       cell(policy[15]) !== 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE' ||
-      cell(policy[16]) !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED'
+      cell(policy[16]) !== 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED' ||
+      cell(policy[17]) !== 'UNSUPPORTED_V1'
     ) {
       throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE');
     }
