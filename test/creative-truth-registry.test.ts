@@ -21,7 +21,55 @@ function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])
   };
 }
 
+function canonicalPolicyRow(overrides: Partial<Record<number, unknown>> = {}): readonly unknown[] {
+  const row: unknown[] = [
+    'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    '1.0',
+    'ACTIVE_CANONICAL',
+    'TOCA_DO_MORCEGO',
+    'REAL_COMPOSITE|REAL_PLUS_ENHANCEMENT',
+    'GENERATIVE_EXCEPTION',
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    'plan-drive-id',
+    '2026-08-18T00:00:00-03:00',
+    true,
+    'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
+    'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+  ];
+  for (const [key, value] of Object.entries(overrides)) row[Number(key)] = value;
+  return row;
+}
+
 describe('GoogleSheetsCreativeTruthRegistry', () => {
+  it('accepts only the canonical active policy with enhancement provenance and video fail-closed flags', async () => {
+    const { client, readRange } = clientFor({
+      'POLICY!A2:Q20': [canonicalPolicyRow()],
+    });
+    const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
+
+    await expect(registry.assertCanonicalPolicy()).resolves.toBeUndefined();
+    expect(readRange).toHaveBeenCalledWith('sheet', 'POLICY!A2:Q20');
+  });
+
+  it('rejects policy drift that disables enhancement provenance or video fail-closed behavior', async () => {
+    for (const row of [
+      canonicalPolicyRow({ 14: false }),
+      canonicalPolicyRow({ 15: 'ENABLED_WITHOUT_PROVENANCE' }),
+      canonicalPolicyRow({ 16: '' }),
+    ]) {
+      const { client } = clientFor({ 'POLICY!A2:Q20': [row] });
+      const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
+      await expect(registry.assertCanonicalPolicy()).rejects.toThrow(
+        'TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE',
+      );
+    }
+  });
+
   it('reads official brand assets and marketing-ready venue lineage', async () => {
     const { client } = clientFor({
       'BRAND_ASSETS!A2:N1000': [
