@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 const requiredFiles = [
-  // Legacy compatibility implementation remains present but cannot be an execution authority.
   'src/providers/openai/creative-truth-openai-image-generator.ts',
   'src/creative/controlled-static-image-generation.ts',
   'src/providers/google-drive/creative-truth-reference-loader.ts',
@@ -37,7 +36,7 @@ requireIncludes('control/creative-truth-policy.v1.json', [
   '"videoGenerativeException": "UNSUPPORTED_V1"',
 ]);
 
-// Legacy global-set implementation is compatibility code only and may never become final content.
+// Legacy global-set implementation remains only for compatibility and can never be an execution authority.
 requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts', [
   "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6'",
   "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
@@ -56,7 +55,6 @@ requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   'operationScopedGenerativeExceptionApprovalSchema',
   'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
 ]);
-
 requireIncludes('src/contracts/operation-scoped-generative-candidate.ts', [
   'operationScopedGenerativeCandidateManifestSchema',
   "status: z.literal('GENERATED_REVIEW_REQUIRED')",
@@ -93,9 +91,12 @@ forbidIncludes('src/providers/openai/creative-truth-operation-scoped-image-gener
 requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
   'GoogleSheetsOperationScopedGenerativeRegistry',
   'operationScopedGenerativeExceptionApprovalSchema.safeParse',
-  'getContentItemOperation',
   "const CONTENT_OPERATION_RANGE = 'CONTENT_ITEMS!A2:E2000'",
-  'if (matches.length !== 1) return undefined',
+  "const CONTENT_CREATIVE_CONTEXT_RANGE = 'CONTENT_ITEMS!A1:BX2000'",
+  'getContentItemOperation',
+  'getContentItemCreativeStandardId',
+  "headers.get('creative_standard_id')",
+  'FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID',
   'getCreativeStandard(standardId: string)',
   'getBrandAsset(brand: string, variant: string)',
 ]);
@@ -121,6 +122,10 @@ requireIncludes('src/creative/controlled-operation-scoped-generative-finalizatio
   'getContentItemOperation(',
   'getApprovedGenerativeException(',
   'getCreativeStandard(',
+  'assertCanonicalContentStandard(',
+  'getContentItemCreativeStandardId(',
+  'GENERATIVE_FINALIZATION_CONTENT_STANDARD_REQUIRED',
+  'GENERATIVE_FINALIZATION_CONTENT_STANDARD_MISMATCH',
   'resolveCanonicalGenerativeBrandInputs',
   'thePartyContextResolver',
   'assertApprovalCurrent(approval.expiresAt, nowIso)',
@@ -158,6 +163,12 @@ requireIncludes('src/providers/google-drive/creative-truth-reference-loader.ts',
   "url.searchParams.set('alt', 'media')",
   'metadata.capabilities?.canDownload !== true',
   'GENERATIVE_REFERENCE_DRIVE_BYTES_INVALID',
+]);
+
+requireIncludes('docs/architecture/controlled-static-image-generation.md', [
+  'CONTENT_ITEMS',
+  'creative_standard_id',
+  'operation-scoped',
 ]);
 
 requireIncludes('package.json', [
