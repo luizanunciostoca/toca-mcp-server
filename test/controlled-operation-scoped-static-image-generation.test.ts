@@ -17,6 +17,7 @@ const approval: OperationScopedGenerativeExceptionApproval = {
   approvalRef: 'approval:gen-sun-1',
   reason: 'Explicit controlled Sunset generation',
   referenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+  operation: 'SUNSET',
   minReferenceCount: 3,
   allowArchitecturalInvention: false,
   allowEnvironmentDrift: false,
@@ -59,7 +60,9 @@ function venue(referenceValue: VenueReference): VenueAsset {
   };
 }
 
-function resultFor(request: OperationScopedGenerativeImageRequest): OperationScopedGenerativeImageResult {
+function resultFor(
+  request: OperationScopedGenerativeImageRequest,
+): OperationScopedGenerativeImageResult {
   return {
     outputBytes: Uint8Array.from([0xff, 0xd8, 1, 0xff, 0xd9]),
     outputContentType: 'image/jpeg',
@@ -99,17 +102,31 @@ function setup(references: readonly VenueReference[]) {
 
   const load = vi.fn(async (entry: VenueReference) => ({
     registry: entry,
-    imageBytes: Uint8Array.from([0xff, 0xd8, Number(entry.assetId.split('-')[1] ?? 1), 0xff]),
+    imageBytes: Uint8Array.from([
+      0xff,
+      0xd8,
+      Number(entry.assetId.split('-')[1] ?? 1),
+      0xff,
+    ]),
     contentType: 'image/jpeg' as const,
   }));
   const referenceLoader: CreativeTruthVenueReferenceLoader = { load };
-  const generate = vi.fn(async (request: OperationScopedGenerativeImageRequest) => resultFor(request));
+  const generate = vi.fn(async (request: OperationScopedGenerativeImageRequest) =>
+    resultFor(request),
+  );
   const service = new ControlledOperationScopedStaticImageGenerationService({
     registry,
     referenceLoader,
     generator: { generate },
   });
-  return { service, assertCanonicalPolicy, getApprovedGenerativeException, getReferenceSet, load, generate };
+  return {
+    service,
+    assertCanonicalPolicy,
+    getApprovedGenerativeException,
+    getReferenceSet,
+    load,
+    generate,
+  };
 }
 
 describe('ControlledOperationScopedStaticImageGenerationService', () => {
@@ -125,7 +142,9 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
 
     expect(deps.assertCanonicalPolicy).toHaveBeenCalledOnce();
     expect(deps.getApprovedGenerativeException).toHaveBeenCalledWith('CONTENT-SUN-1');
-    expect(deps.getReferenceSet).toHaveBeenCalledWith('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
+    expect(deps.getReferenceSet).toHaveBeenCalledWith(
+      'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    );
     expect(deps.load.mock.calls.map((call) => call[0].referenceId)).toEqual([
       'REF-SUN-1',
       'REF-SUN-2',
@@ -139,11 +158,16 @@ describe('ControlledOperationScopedStaticImageGenerationService', () => {
       }),
     );
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
+    expect(result.operation).toBe('SUNSET');
     expect(result.readyForFinalComposition).toBe(false);
   });
 
   it('fails before reference download when the active scoped set does not contain three required references', async () => {
-    const deps = setup([reference(1), reference(2), reference(3, { requiredForGenerativeException: false })]);
+    const deps = setup([
+      reference(1),
+      reference(2),
+      reference(3, { requiredForGenerativeException: false }),
+    ]);
 
     await expect(
       deps.service.generate({
