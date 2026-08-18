@@ -10,10 +10,13 @@ const required = [
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
+  'src/providers/gcp/gcs-publication-asset-delivery.ts',
   'src/providers/local/local-creative-composer.ts',
   'src/providers/local/local-story-composer.ts',
   'src/providers/local/local-video-composer.ts',
   'src/providers/meta-ads/meta-ads-controlled-write.ts',
+  'src/scheduler/toca-managed-instagram-scheduler.ts',
+  'src/worker/toca-managed-instagram-worker-runtime.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
 ];
 
@@ -145,6 +148,39 @@ const publicationComposition = readFileSync(
 );
 if (!publicationComposition.includes('new InstagramPublicationExecutor') || !publicationComposition.includes('true,')) {
   console.error('Production Instagram publication must require Creative Truth binding');
+  process.exit(1);
+}
+
+const managedScheduler = readFileSync(
+  'src/scheduler/toca-managed-instagram-scheduler.ts',
+  'utf8',
+);
+for (const marker of [
+  'creativeTruthBinding',
+  'TOCA_MANAGED_INSTAGRAM_CREATIVE_TRUTH_HASH_MISMATCH',
+  'createVerifiedDeliveryUrl',
+]) {
+  if (!managedScheduler.includes(marker)) {
+    console.error(`TOCA-managed publication Creative Truth boundary missing: ${marker}`);
+    process.exit(1);
+  }
+}
+
+const managedRuntime = readFileSync(
+  'src/worker/toca-managed-instagram-worker-runtime.ts',
+  'utf8',
+);
+if (!managedRuntime.includes('new InstagramPublicationExecutor(store, transport, undefined, true)')) {
+  console.error('TOCA-managed Instagram runtime must require Creative Truth binding');
+  process.exit(1);
+}
+
+const gcsDelivery = readFileSync('src/providers/gcp/gcs-publication-asset-delivery.ts', 'utf8');
+if (
+  !gcsDelivery.includes('createVerifiedDeliveryUrl') ||
+  !gcsDelivery.includes('PUBLICATION_ASSET_SHA256_MISMATCH')
+) {
+  console.error('GCS delivery must verify exact approved creative bytes before publication');
   process.exit(1);
 }
 
