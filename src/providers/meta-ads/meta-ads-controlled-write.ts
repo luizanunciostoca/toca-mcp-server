@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  creativeTruthPublicationBindingSchema,
+  type CreativeTruthPublicationBinding,
+} from '../../contracts/creative-truth.js';
 import type {
   MetaAdAccountRef,
   MetaAdDraft,
@@ -27,6 +31,11 @@ export interface MetaAdsWriteGuardrails {
   readonly approvedRequestSha256: string;
   readonly allowedObjectives?: readonly string[];
   readonly allowedOptimizationGoals?: readonly string[];
+  /**
+   * Provider smoke may deliberately clone a pre-existing Meta creative to validate the provider
+   * control plane. This is not a marketing creative-production path and must be opted in explicitly.
+   */
+  readonly allowUnboundCreativeForProviderValidation?: boolean;
 }
 
 export interface ControlledCreativePlan {
@@ -34,6 +43,8 @@ export interface ControlledCreativePlan {
   readonly pageId: string;
   readonly instagramActorId?: string;
   readonly objectStorySpec: Readonly<Record<string, unknown>>;
+  readonly providerSourceCreativeId?: string;
+  readonly creativeTruthBinding?: CreativeTruthPublicationBinding;
 }
 
 export interface ControlledAdPlan {
@@ -134,7 +145,14 @@ export class MetaAdsControlledWriteService {
 
     const creativeIds: string[] = [];
     for (const creativePlan of plan.creatives) {
-      const creativeDraft: MetaCreativeDraft = { ...creativePlan };
+      const creativeDraft: MetaCreativeDraft = {
+        name: creativePlan.name,
+        pageId: creativePlan.pageId,
+        ...(creativePlan.instagramActorId
+          ? { instagramActorId: creativePlan.instagramActorId }
+          : {}),
+        objectStorySpec: creativePlan.objectStorySpec,
+      };
       const creative = await this.provider.createCreative(plan.account, creativeDraft);
       creativeIds.push(creative.id);
     }
@@ -196,6 +214,7 @@ export class MetaAdsControlledWriteService {
         creative.instagramActorId !== this.guardrails.allowedInstagramActorId
       )
         throw new Error('META_ADS_INSTAGRAM_ACTOR_NOT_ALLOWED');
+      this.assertCreativeTruth(creative);
     }
     for (const ad of plan.ads) {
       if (
@@ -204,6 +223,33 @@ export class MetaAdsControlledWriteService {
         ad.creativeIndex >= plan.creatives.length
       )
         throw new Error('META_ADS_CREATIVE_INDEX_INVALID');
+    }
+  }
+
+  private assertCreativeTruth(creative: ControlledCreativePlan): void {
+    if (!creative.creativeTruthBinding) {
+      if (this.guardrails.allowUnboundCreativeForProviderValidation === true) return;
+      throw new Error('META_ADS_CREATIVE_TRUTH_BINDING_REQUIRED');
+    }
+    const parsed = creativeTruthPublicationBindingSchema.safeParse(creative.creativeTruthBinding);
+    if (!parsed.success) throw new Error('META_ADS_CREATIVE_TRUTH_BINDING_INVALID');
+
+    const providerLocators = extractMetaCreativeLocators(
+      creative.objectStorySpec,
+      creative.providerSourceCreativeId,
+    );
+    if (providerLocators.size === 0) {
+      throw new Error('META_ADS_CREATIVE_PROVIDER_ASSET_IDENTITY_REQUIRED');
+    }
+    const approvedLocators = new Set(
+      parsed.data.assetLocators
+        .filter((locator) =>
+          ['META_IMAGE_HASH', 'META_VIDEO_ID', 'META_SOURCE_CREATIVE_ID'].includes(locator.kind),
+        )
+        .map((locator) => `${locator.kind}:${locator.value}`),
+    );
+    if (![...providerLocators].some((locator) => approvedLocators.has(locator))) {
+      throw new Error('META_ADS_CREATIVE_TRUTH_ASSET_LOCATOR_MISMATCH');
     }
   }
 
@@ -287,6 +333,42 @@ export class MetaAdsControlledWriteService {
 
 export function requestSha256(plan: ControlledCreatePausedPlan): string {
   return createHash('sha256').update(stableStringify(plan)).digest('hex');
+}
+
+function extractMetaCreativeLocators(
+  objectStorySpec: Readonly<Record<string, unknown>>,
+  providerSourceCreativeId?: string,
+): Set<string> {
+  const values = new Set<string>();
+  if (providerSourceCreativeId?.trim()) {
+    values.add(`META_SOURCE_CREATIVE_ID:${providerSourceCreativeId.trim()}`);
+  }
+  walk(objectStorySpec, (key, value) => {
+    const scalar = scalarString(value);
+    if (!scalar) return;
+    if (key === 'image_hash') values.add(`META_IMAGE_HASH:${scalar}`);
+    if (key === 'video_id') values.add(`META_VIDEO_ID:${scalar}`);
+  });
+  return values;
+}
+
+function walk(
+  value: unknown,
+  visit: (key: string, value: unknown) => void,
+  parentKey = '',
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) walk(item, visit, parentKey);
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    if (parentKey) visit(parentKey, value);
+    return;
+  }
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (child && typeof child === 'object') walk(child, visit, key);
+    else visit(key, child);
+  }
 }
 
 function stableStringify(value: unknown): string {
