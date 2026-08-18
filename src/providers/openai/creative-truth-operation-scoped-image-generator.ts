@@ -246,7 +246,17 @@ async function resolveCanonicalApproval(
   request: OperationScopedGenerativeImageRequest,
   registry: OperationScopedGenerativeRegistry,
 ): Promise<OperationScopedGenerativeExceptionApproval> {
-  const canonical = await registry.getApprovedGenerativeException(request.contentItemId);
+  const [canonical, contentOperation] = await Promise.all([
+    registry.getApprovedGenerativeException(request.contentItemId),
+    registry.getContentItemOperation(request.contentItemId),
+  ]);
+  if (!contentOperation) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
+      false,
+    );
+  }
   if (!canonical || !sameApprovalIdentity(canonical, request.approval)) {
     throw new ExecutionError(
       'APPROVAL_REQUIRED',
@@ -256,7 +266,10 @@ async function resolveCanonicalApproval(
       false,
     );
   }
-  if (referenceSetOperation(canonical.referenceSetId) !== canonical.operation) {
+  if (
+    canonical.operation !== contentOperation ||
+    referenceSetOperation(canonical.referenceSetId) !== contentOperation
+  ) {
     throw new ExecutionError(
       'POLICY_DENIED',
       'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
