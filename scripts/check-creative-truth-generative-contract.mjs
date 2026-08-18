@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const requiredFiles = [
   'src/providers/openai/creative-truth-openai-image-generator.ts',
+  'src/providers/google-drive/creative-truth-reference-loader.ts',
+  'src/creative/controlled-static-image-generation.ts',
+  'src/marketing-autopilot-image-generate.ts',
   'test/creative-truth-openai-image-generator.test.ts',
+  'test/creative-truth-reference-loader.test.ts',
+  'test/controlled-static-image-generation.test.ts',
   'test/creative-truth-registry.test.ts',
 ];
 
@@ -70,6 +75,48 @@ requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts',
   'candidateSha256: sha256(outputBytes)',
 ]);
 
+requireIncludes('src/providers/google-drive/creative-truth-reference-loader.ts', [
+  'GoogleDriveCreativeTruthReferenceLoader',
+  "const DEFAULT_GOOGLE_DRIVE_BASE_URL = 'https://www.googleapis.com/drive/v3'",
+  "url.searchParams.set('fields', 'id,name,mimeType,size,capabilities(canDownload)')",
+  "url.searchParams.set('alt', 'media')",
+  "url.searchParams.set('supportsAllDrives', 'true')",
+  'metadata.capabilities?.canDownload !== true',
+  'GENERATIVE_REFERENCE_DRIVE_METADATA_REJECTED',
+  'GENERATIVE_REFERENCE_DRIVE_BYTES_INVALID',
+  "'SOURCE_IMAGE_FETCH_BLOCK'",
+]);
+
+requireIncludes('src/creative/controlled-static-image-generation.ts', [
+  'ControlledStaticImageGenerationService',
+  'getApprovedGenerativeException',
+  'getReferenceSet',
+  'referenceLoader.load(reference)',
+  "reference.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID",
+  'uniqueAssetIds.size !== eligible.length',
+  'left.referenceId.localeCompare(right.referenceId)',
+  'this.dependencies.generator.generate',
+]);
+
+requireIncludes('src/marketing-autopilot-image-generate.ts', [
+  'ControlledStaticImageGenerationService',
+  'GoogleDriveCreativeTruthReferenceLoader',
+  'CreativeTruthOpenAiImageGenerator',
+  "requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY')",
+  'GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY',
+  "requiredEnv('OPENAI_API_KEY_ENV_KEY')",
+  'OPENAI_CREATIVE_RESPONSE_MODEL',
+  'OPENAI_CREATIVE_IMAGE_MODEL',
+  "status: 'GENERATED_REVIEW_REQUIRED'",
+  'publicationEligible: false',
+  'readyForFinalComposition: result.readyForFinalComposition',
+]);
+
+requireIncludes('package.json', [
+  '"dev:marketing-autopilot-image-generate": "tsx src/marketing-autopilot-image-generate.ts"',
+  '"start:marketing-autopilot-image-generate": "node dist/src/marketing-autopilot-image-generate.js"',
+]);
+
 requireIncludes('src/creative/creative-truth.ts', [
   'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
   'validateEvidenceCandidateBinding',
@@ -101,6 +148,20 @@ requireIncludes('test/creative-truth-openai-image-generator.test.ts', [
   'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
   'requiresPostGenerationHumanReview',
   'readyForFinalComposition',
+]);
+
+requireIncludes('test/creative-truth-reference-loader.test.ts', [
+  'downloads only a canonical downloadable image blob and preserves reference identity',
+  'fails closed when Drive metadata says the reference cannot be downloaded',
+  'fails closed when downloaded bytes do not match the canonical MIME signature',
+  'classifies forbidden Drive access as a source fetch block instead of retrying generation',
+]);
+
+requireIncludes('test/controlled-static-image-generation.test.ts', [
+  'loads canonical approved references deterministically before invoking the generator',
+  'fails closed when no canonical approved exception exists',
+  'fails closed when canonical references are insufficient or duplicated',
+  'rejects expired canonical approval before any reference download',
 ]);
 
 requireIncludes('test/creative-truth-registry.test.ts', [
