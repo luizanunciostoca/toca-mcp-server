@@ -10,6 +10,15 @@ export interface SpreadsheetValuesClient {
   appendRow(spreadsheetId: string, range: string, values: readonly unknown[]): Promise<void>;
 }
 
+export interface SpreadsheetRangeUpdate {
+  readonly range: string;
+  readonly values: readonly (readonly unknown[])[];
+}
+
+export interface SpreadsheetValuesBatchWriter {
+  updateRanges(spreadsheetId: string, updates: readonly SpreadsheetRangeUpdate[]): Promise<void>;
+}
+
 export interface MediaAssetSheetsConfig {
   readonly spreadsheetId: string;
   readonly intelligenceSheet?: string;
