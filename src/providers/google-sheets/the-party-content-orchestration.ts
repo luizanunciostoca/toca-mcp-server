@@ -11,12 +11,15 @@ import type { SpreadsheetValuesClient } from './media-assets.js';
 
 export const THE_PARTY_CONTENT_REGISTRY_DRIVE_ID =
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw' as const;
+export const THE_PARTY_EDITION_REGISTRY_DRIVE_ID =
+  '1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw' as const;
 export const THE_PARTY_CONTENT_ORCHESTRATION_CONTRACT_ID =
   'THE_PARTY_CONTENT_ORCHESTRATION_V1' as const;
 export const THE_PARTY_HERO_BRAND = 'THE_PARTY' as const;
 export const THE_PARTY_HERO_BRAND_ASSET_ID = 'BRAND-THE-PARTY-WHITE-V1' as const;
 
 const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BW2000';
+const EDITIONS_RANGE = 'EDITIONS!A1:P2000';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 
 const NETWORKS_INTENTS = new Set<ThePartyCreativeIntent>([
@@ -41,6 +44,7 @@ const MINIMALIST_INTENTS = new Set<ThePartyCreativeIntent>([
 const REQUIRED_COLUMNS = [
   'content_item_id',
   'operation',
+  'edition_id',
   'the_party_intent',
   'the_party_environment',
   'creative_standard_id',
@@ -56,6 +60,13 @@ const REQUIRED_COLUMNS = [
   'output_sha256',
 ] as const;
 
+const REQUIRED_EDITION_COLUMNS = [
+  'edition_id',
+  'visual_family_policy',
+  'the_party_environment',
+  'environment_status',
+] as const;
+
 export type ThePartyVisualStandardStatus =
   | 'RESOLVED'
   | 'BLOCKED_NEEDS_ENVIRONMENT'
@@ -65,6 +76,7 @@ export type ThePartyVisualStandardStatus =
 export interface ThePartyContentOrchestrationRecord {
   readonly contentItemId: string;
   readonly operation: 'THE_PARTY';
+  readonly editionId: string;
   readonly intent: ThePartyCreativeIntent;
   readonly environment?: ThePartyEnvironment;
   readonly standardId: ThePartyVisualStandardId;
@@ -95,11 +107,15 @@ export interface ThePartyCreativeTruthResolutionInput {
 export interface ThePartyContentOrchestrationConfig {
   readonly spreadsheetId?: string;
   readonly range?: string;
+  readonly editionSpreadsheetId?: string;
+  readonly editionRange?: string;
 }
 
 export class GoogleSheetsThePartyContentOrchestration {
   private readonly spreadsheetId: string;
   private readonly range: string;
+  private readonly editionSpreadsheetId: string;
+  private readonly editionRange: string;
 
   constructor(
     private readonly client: SpreadsheetValuesClient,
@@ -107,6 +123,9 @@ export class GoogleSheetsThePartyContentOrchestration {
   ) {
     this.spreadsheetId = config.spreadsheetId ?? THE_PARTY_CONTENT_REGISTRY_DRIVE_ID;
     this.range = config.range ?? CONTENT_ITEMS_RANGE;
+    this.editionSpreadsheetId =
+      config.editionSpreadsheetId ?? THE_PARTY_EDITION_REGISTRY_DRIVE_ID;
+    this.editionRange = config.editionRange ?? EDITIONS_RANGE;
   }
 
   async get(contentItemId: string): Promise<ThePartyContentOrchestrationRecord> {
@@ -150,10 +169,12 @@ export class GoogleSheetsThePartyContentOrchestration {
     } = {},
   ): Promise<ThePartyCreativeTruthResolutionInput> {
     const record = await this.get(contentItemId);
-    if (record.visualStandardStatus === 'BLOCKED_NEEDS_ENVIRONMENT') {
-      deny('THE_PARTY_ENVIRONMENT_REQUIRED');
+    let environment = record.environment;
+
+    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !environment) {
+      environment = await this.resolveEditionEnvironment(record.editionId);
     }
-    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !record.environment) {
+    if (record.standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID && !environment) {
       deny('THE_PARTY_ENVIRONMENT_REQUIRED');
     }
 
@@ -171,8 +192,39 @@ export class GoogleSheetsThePartyContentOrchestration {
       requiredBrands,
       ...(options.brandVariant?.trim() ? { brandVariant: options.brandVariant.trim() } : {}),
       thePartyIntent: record.intent,
-      ...(record.environment ? { thePartyEnvironment: record.environment } : {}),
+      ...(environment ? { thePartyEnvironment: environment } : {}),
     };
+  }
+
+  private async resolveEditionEnvironment(editionId: string): Promise<ThePartyEnvironment> {
+    const rows = await this.client.readRange(this.editionSpreadsheetId, this.editionRange);
+    if (rows.length === 0) deny('THE_PARTY_EDITION_CONTEXT_SCHEMA_INVALID');
+
+    const headers = buildHeaderIndex(rows[0] ?? []);
+    for (const required of REQUIRED_EDITION_COLUMNS) {
+      if (!headers.has(required)) {
+        deny(`THE_PARTY_EDITION_CONTEXT_COLUMN_MISSING:${required}`);
+      }
+    }
+
+    const editionIdIndex = headers.get('edition_id')!;
+    const matches = rows.slice(1).filter((row) => cell(row[editionIdIndex]) === editionId);
+    if (matches.length === 0) deny('THE_PARTY_EDITION_CONTEXT_NOT_FOUND');
+    if (matches.length !== 1) deny('THE_PARTY_EDITION_CONTEXT_DUPLICATE');
+
+    const row = matches[0]!;
+    const value = (name: (typeof REQUIRED_EDITION_COLUMNS)[number]) =>
+      cell(row[headers.get(name)!]);
+    if (value('visual_family_policy') !== 'RESOLVE_BY_INTENT') {
+      deny('THE_PARTY_EDITION_VISUAL_FAMILY_POLICY_MISMATCH');
+    }
+    if (value('environment_status') !== 'DECIDED') {
+      deny('THE_PARTY_ENVIRONMENT_REQUIRED');
+    }
+
+    const environment = value('the_party_environment');
+    if (!environment) deny('THE_PARTY_EDITION_DECISION_MISSING_ENVIRONMENT');
+    return parseEnvironment(environment);
   }
 }
 
@@ -184,6 +236,9 @@ function parseAndValidateRecord(
   const contentItemId = value('content_item_id');
   if (!contentItemId) deny('THE_PARTY_CONTENT_ITEM_ID_REQUIRED');
   if (value('operation') !== 'THE_PARTY') deny('THE_PARTY_CONTENT_OPERATION_MISMATCH');
+
+  const editionId = value('edition_id');
+  if (!editionId) deny('THE_PARTY_CONTENT_EDITION_ID_REQUIRED');
 
   const intent = parseIntent(value('the_party_intent'));
   const rawEnvironment = value('the_party_environment');
@@ -250,6 +305,7 @@ function parseAndValidateRecord(
   return {
     contentItemId,
     operation: 'THE_PARTY',
+    editionId,
     intent,
     ...(environment ? { environment } : {}),
     standardId,
