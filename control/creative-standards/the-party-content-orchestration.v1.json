@@ -10,7 +10,8 @@
     "editionRegistryDriveId": "1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw",
     "editionRegistrySheet": "EDITIONS",
     "canonicalManualDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
-    "creativeTruthRegistryDriveId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU"
+    "creativeTruthRegistryDriveId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
   },
   "requiredColumns": [
     "edition_id",
@@ -79,6 +80,13 @@
     ],
     "missingStatus": "BLOCKED_NEEDS_ENVIRONMENT",
     "failureCode": "THE_PARTY_ENVIRONMENT_REQUIRED"
+  },
+  "generativeTruth": {
+    "referenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1",
+    "legacyGlobalReferenceSetForbidden": true,
+    "crossOperationReferenceFallbackForbidden": true,
+    "explicitExceptionApprovalRequired": true,
+    "postGenerationHumanReviewRequired": true
   },
   "brandPolicy": {
     "heroBrand": "THE_PARTY",
