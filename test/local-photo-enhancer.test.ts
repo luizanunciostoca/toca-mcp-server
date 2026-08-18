@@ -16,7 +16,7 @@ function boundInput() {
 }
 
 describe('LocalPhotoEnhancer', () => {
-  it('binds the exact source bytes and returns Creative Truth enhancement provenance', async () => {
+  it('binds the exact source bytes and returns policy-pinned Creative Truth enhancement provenance', async () => {
     const runner = vi.fn(async (_command: string, args: readonly string[]) => {
       const outputPath = args.at(-1);
       if (!outputPath) throw new Error('missing output path');
@@ -27,6 +27,8 @@ describe('LocalPhotoEnhancer', () => {
     const result = await enhancer.enhance(boundInput());
 
     expect(result).toMatchObject({
+      policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+      creativeMode: 'REAL_PLUS_ENHANCEMENT',
       sourceAssetId: 'MM-SUN-0211-V1',
       sourceDriveFileId: 'drive-file-0211',
       sourceImageBound: true,
@@ -69,6 +71,18 @@ describe('LocalPhotoEnhancer', () => {
         policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
         creativeMode: 'REAL_COMPOSITE',
       },
+    } as unknown as Parameters<LocalPhotoEnhancer['enhance']>[0];
+
+    await expect(enhancer.enhance(invalid)).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Creative Truth binding is missing at runtime', async () => {
+    const runner = vi.fn();
+    const enhancer = new LocalPhotoEnhancer(runner);
+    const invalid = {
+      ...boundInput(),
+      creativeTruth: undefined,
     } as unknown as Parameters<LocalPhotoEnhancer['enhance']>[0];
 
     await expect(enhancer.enhance(invalid)).rejects.toMatchObject({ code: 'POLICY_DENIED' });
