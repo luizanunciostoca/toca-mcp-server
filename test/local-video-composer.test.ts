@@ -122,6 +122,31 @@ describe('LocalVideoComposer', () => {
     expect(commandArgs.join(' ')).toContain('logo-0');
   });
 
+  it('fails closed on REAL_PLUS_ENHANCEMENT until video has shot-level enhancement provenance', async () => {
+    const runner = vi.fn();
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-ENHANCED',
+        creativeId: 'CREATIVE-VIDEO-ENHANCED',
+        standard,
+        creativeMode: 'REAL_PLUS_ENHANCEMENT',
+        shots: [
+          {
+            shotId: shotRegistry.shotId,
+            registry: shotRegistry,
+            videoBytes,
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [brandInput()],
+      }),
+    ).rejects.toThrow('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it('rejects real video bytes that are not bound to a VIDEO_SHOTS record', async () => {
     const runner = vi.fn();
     const composer = new LocalVideoComposer(runner);
