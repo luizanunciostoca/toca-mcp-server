@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "SUNSET_FEED_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "SINGLE_IMAGE"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+  },
+  "canvases": [
+    { "width": 1080, "height": 1350, "aspectRatio": "4:5", "priority": 1 },
+    { "width": 1080, "height": 1080, "aspectRatio": "1:1", "priority": 2 }
+  ],
+  "palette": {
+    "sunGlow": "#FFC84A",
+    "sunsetOrange": "#FF7A00",
+    "deepOrange": "#E65A00",
+    "amber": "#C9792B",
+    "deepBrown": "#3A1C0F",
+    "white": "#FFFFFF",
+    "translucentBlack": "rgba(0,0,0,0.48)"
+  },
+  "visualEssence": ["SOLAR", "PREMIUM", "EDITORIAL", "SOCIAL", "SENSORIAL", "REAL"],
+  "photography": {
+    "realVenueVerifiedAssetRequired": true,
+    "marketingReadyMasterRequired": true,
+    "preferredThemes": [
+      "PEOPLE_GOLDEN_HOUR",
+      "SEA_VIEW",
+      "DECK_AND_ENVIRONMENT",
+      "SOCIAL_EXPERIENCE",
+      "DRINKS"
+    ],
+    "syntheticVenueReplacementForbidden": true
+  },
+  "typography": {
+    "headline": "ELEGANT_EDITORIAL_SERIF",
+    "support": "CLEAN_GEOMETRIC_SANS",
+    "cta": "CLEAN_SANS_MEDIUM",
+    "functionalInfo": "CLEAN_SANS_SEMIBOLD",
+    "maxFontFamilies": 2
+  },
+  "composition": {
+    "maxPrimaryHeadline": 1,
+    "maxSupportCopy": 1,
+    "maxPrimaryCta": 1,
+    "maxFunctionalInfo": 1,
+    "officialBrandFooter": true,
+    "brandFooterOrderDefault": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
+    "partnerLogosOnlyWhenCampaignRequires": true,
+    "deterministicBrandInsertion": true
+  },
+  "templateClasses": [
+    "SUNSET_FEED_HERO_LIFESTYLE",
+    "SUNSET_FEED_VIEW_SCENERY",
+    "SUNSET_FEED_SOCIAL_EXPERIENCE",
+    "SUNSET_FEED_DRINKS_EXPERIENCE",
+    "SUNSET_FEED_INFO"
+  ],
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true,
+    "rejectOn": [
+      "AI_RECREATED_LOGO",
+      "UNVERIFIED_VENUE",
+      "SYNTHETIC_VENUE_REPLACEMENT",
+      "ARCHITECTURE_DRIFT",
+      "ASSET_LINEAGE_MISSING",
+      "TEXT_ILLEGIBLE",
+      "EXCESSIVE_TEXT",
+      "WRONG_DIMENSIONS"
+    ]
+  },
+  "referencePolicy": {
+    "syntheticExamplesMayTeach": ["PALETTE", "TYPOGRAPHY_HIERARCHY", "LAYOUT", "CTA_STYLE"],
+    "syntheticExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
+    "syntheticExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY"
+  }
+}
