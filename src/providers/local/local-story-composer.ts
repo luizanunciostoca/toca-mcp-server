@@ -1,4 +1,5 @@
 import type {
+  CreativeEnhancementProvenance,
   CreativeMode,
   CreativeStandard,
   DeterministicRenderManifest,
@@ -8,7 +9,6 @@ import type {
   VenueReference,
 } from '../../contracts/creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
-import { sha256 } from '../../creative/creative-truth.js';
 import {
   LocalCreativeComposer,
   type LocalCreativeComposerCommandRunner,
@@ -24,6 +24,7 @@ export interface LocalStoryComposeInput {
   readonly masterDriveFileId?: string;
   readonly imageBytes: Uint8Array;
   readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  readonly enhancementProvenance?: CreativeEnhancementProvenance;
   readonly templateId: StoryTemplateId;
   readonly message?: string;
   readonly cta?: string;
@@ -83,6 +84,9 @@ export class LocalStoryComposer {
       ...(input.venueAsset ? { venueAsset: input.venueAsset } : {}),
       sourceImageBytes: input.imageBytes,
       sourceContentType: input.contentType,
+      ...(input.enhancementProvenance
+        ? { enhancementProvenance: input.enhancementProvenance }
+        : {}),
       canvas: '1080x1920',
       ...(input.templateId === 'PHOTO_ONLY' ? {} : { headline: input.message!.trim() }),
       ...(input.templateId !== 'PHOTO_ONLY' && input.cta?.trim() ? { cta: input.cta.trim() } : {}),
@@ -94,13 +98,14 @@ export class LocalStoryComposer {
       ...(input.createdAt ? { createdAt: input.createdAt } : {}),
     });
 
-    const realMaster = input.creativeMode === 'GENERATIVE_EXCEPTION' ? undefined : sha256(input.imageBytes);
+    const realMasterSha256 =
+      input.creativeMode === 'GENERATIVE_EXCEPTION' ? undefined : input.venueAsset?.masterSha256;
     return {
       storyCreativeId: input.storyCreativeId,
       contentItemId: input.contentItemId,
       ...(input.masterAssetId ? { masterAssetId: input.masterAssetId } : {}),
       ...(input.masterDriveFileId ? { masterDriveFileId: input.masterDriveFileId } : {}),
-      ...(realMaster ? { masterSha256: realMaster } : {}),
+      ...(realMasterSha256 ? { masterSha256: realMasterSha256 } : {}),
       outputSha256: composed.outputSha256,
       sourceImageBound: true,
       editorProvider: 'LOCAL_IMAGEMAGICK',
