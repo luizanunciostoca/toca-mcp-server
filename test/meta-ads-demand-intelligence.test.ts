@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MetaApiClient } from '../src/providers/meta/meta-api-client.js';
 import {
+  MORRO_DEMAND_WEIGHTS,
   MORRO_DE_SAO_PAULO_GEO_KEY,
   MORRO_DE_SAO_PAULO_TARGETING_SPEC,
   MetaAdsDemandIntelligenceService,
@@ -79,6 +80,21 @@ describe('Meta Ads Morro demand intelligence', () => {
         targeting_spec: JSON.stringify(MORRO_DE_SAO_PAULO_TARGETING_SPEC),
       }),
     );
+  });
+
+  it('keeps Meta audience estimates secondary and normalizes all demand weights to 100%', () => {
+    const metaAudienceWeight =
+      MORRO_DEMAND_WEIGHTS.audienceLevel +
+      MORRO_DEMAND_WEIGHTS.trend24h +
+      MORRO_DEMAND_WEIGHTS.trend7d;
+    const totalWeight = Object.values(MORRO_DEMAND_WEIGHTS).reduce(
+      (total, weight) => total + weight,
+      0,
+    );
+
+    expect(totalWeight).toBeCloseTo(1, 10);
+    expect(metaAudienceWeight).toBeCloseTo(0.2, 10);
+    expect(MORRO_DEMAND_WEIGHTS.performance).toBeGreaterThan(metaAudienceWeight);
   });
 
   it('calculates a deterministic 0-100 demand index from audience, trends and operating context', () => {
@@ -162,6 +178,43 @@ describe('Meta Ads Morro demand intelligence', () => {
     expect(recommendation.guardrail).toEqual({ decision: 'ALLOW' });
     expect(recommendation.writeExecuted).toBe(false);
     expect(history.samples).toHaveLength(5);
+  });
+
+  it('caps budget adaptation at 10% until the audience signal has enough history', async () => {
+    const get = vi.fn().mockResolvedValue({
+      data: [
+        {
+          estimate_mau_lower_bound: 19_000,
+          estimate_mau_upper_bound: 21_000,
+          estimate_ready: true,
+        },
+      ],
+    });
+    const provider = new MetaAdsReadProvider({ get } as unknown as MetaApiClient);
+    const service = new MetaAdsDemandIntelligenceService(provider, new MemoryGeoAudienceHistoryStore(), {
+      tenantId: 'toca-do-morcego',
+      budgetPolicy: {
+        currency: 'BRL',
+        maxDailyBudgetMinor: 100_000,
+        maxLifetimeBudgetMinor: 500_000,
+        maxSingleIncreasePercent: 20,
+      },
+    });
+
+    const recommendation = await service.recommendMorroBudget({
+      account: { adAccountId: '123', currency: 'BRL' },
+      observedAt: '2026-08-18T04:00:00.000Z',
+      currentBudgetMinor: 10_000,
+      performanceScore: 100,
+      calendarEventScore: 100,
+      seasonalityScore: 100,
+      capacityScore: 100,
+    });
+
+    expect(recommendation.demandIndex.confidence).toBeLessThan(0.6);
+    expect(recommendation.recommendedChangePercent).toBe(10);
+    expect(recommendation.rationale).toContain('change_capped_by_low_signal_confidence');
+    expect(recommendation.writeExecuted).toBe(false);
   });
 
   it('blocks scaling when campaign performance is weak even if demand is high', async () => {
