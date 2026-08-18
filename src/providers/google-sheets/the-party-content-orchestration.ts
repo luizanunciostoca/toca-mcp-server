@@ -13,6 +13,7 @@ export const THE_PARTY_CONTENT_REGISTRY_DRIVE_ID =
   '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw' as const;
 export const THE_PARTY_CONTENT_ORCHESTRATION_CONTRACT_ID =
   'THE_PARTY_CONTENT_ORCHESTRATION_V1' as const;
+export const THE_PARTY_HERO_BRAND = 'THE_PARTY' as const;
 export const THE_PARTY_HERO_BRAND_ASSET_ID = 'BRAND-THE-PARTY-WHITE-V1' as const;
 
 const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BW2000';
@@ -157,7 +158,7 @@ export class GoogleSheetsThePartyContentOrchestration {
     }
 
     const requiredBrands = uniqueBrands([
-      THE_PARTY_HERO_BRAND_ASSET_ID.replace(/^BRAND-/, '').replace(/-WHITE-V1$/, ''),
+      THE_PARTY_HERO_BRAND,
       ...(options.requiredBrands ?? []),
     ]);
 
