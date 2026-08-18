@@ -60,6 +60,7 @@ export class ControlledPhotoToVideoGenerationService {
         false,
       );
     }
+    const createdAt = trustedNow(this.now);
 
     const resolved = await this.options.registry.resolve(request.contentItemId, request.routeType);
     const masterDriveFileId = resolved.venueAsset.masterDriveFileId;
@@ -136,6 +137,14 @@ export class ControlledPhotoToVideoGenerationService {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
     }
     const heroBrand = await this.options.brandLoader.load(brandAsset);
+    const heroBrandSha256 = heroBrand.registry.sha256?.toLowerCase();
+    if (!heroBrandSha256) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'PHOTO_TO_VIDEO_HERO_BRAND_SHA256_REQUIRED',
+        false,
+      );
+    }
     const branded = await this.options.brandComposer.compose({
       candidateBytes: providerCandidate.outputBytes,
       candidateSha256: providerCandidate.outputSha256,
@@ -157,7 +166,6 @@ export class ControlledPhotoToVideoGenerationService {
       );
     }
 
-    const createdAt = trustedNow(this.now);
     const manifest = photoToVideoCandidateManifestSchema.parse({
       schemaVersion: 1,
       status: 'GENERATED_REVIEW_REQUIRED',
@@ -189,6 +197,18 @@ export class ControlledPhotoToVideoGenerationService {
             approvalRef: resolved.approval?.approvalRef,
           }
         : {}),
+      ...(resolved.content.thePartyContext
+        ? {
+            thePartyEditionId: resolved.content.thePartyContext.editionId,
+            thePartyIntent: resolved.content.thePartyContext.intent,
+            ...(resolved.content.thePartyContext.environment
+              ? { thePartyEnvironment: resolved.content.thePartyContext.environment }
+              : {}),
+          }
+        : {}),
+      heroBrandAssetId: heroBrand.registry.brandAssetId,
+      heroBrandDriveFileId: heroBrand.driveFileId,
+      heroBrandSha256,
       brandAssetIds: branded.brandAssetIds,
       exactAssetBinding: true,
       requiresPostGenerationHumanReview: true,
