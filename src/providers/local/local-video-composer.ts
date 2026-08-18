@@ -11,6 +11,7 @@ import {
   type DeterministicRenderManifest,
   type FidelityEvidence,
   type GenerativeExceptionApproval,
+  type VideoShot,
   type VenueAsset,
   type VenueReference,
 } from '../../contracts/creative-truth.js';
@@ -26,10 +27,17 @@ import {
 import type { OfficialBrandAssetInput } from './local-creative-composer.js';
 
 const execFileAsync = promisify(execFile);
+const APPROVED_RIGHTS_STATUSES = new Set([
+  'APPROVED',
+  'OWNED',
+  'LICENSED',
+  'CLEARED',
+  'RIGHTS_CLEARED',
+]);
 
 export interface VerifiedVideoShotInput {
   readonly shotId: string;
-  readonly venueAsset?: VenueAsset;
+  readonly registry?: VideoShot;
   readonly videoBytes: Uint8Array;
   readonly contentType: 'video/mp4' | 'video/quicktime' | 'video/webm';
   readonly fidelityEvidence?: FidelityEvidence;
@@ -73,6 +81,7 @@ export class LocalVideoComposer {
   async compose(input: LocalVideoComposeInput): Promise<LocalVideoComposeResult> {
     validateInput(input);
     assertCreativeStandard(input.standard);
+    assertRegisteredShotBindings(input);
 
     const brandGate = evaluateBrandIntegrity(
       input.requiredBrands,
@@ -88,7 +97,7 @@ export class LocalVideoComposer {
     const shotVenueGates = input.shots.map((shot) =>
       evaluateVenueFidelity({
         creativeMode: input.creativeMode,
-        ...(shot.venueAsset ? { venueAsset: shot.venueAsset } : {}),
+        ...(shot.registry ? { venueAsset: videoShotAsVenueAsset(shot.registry) } : {}),
         ...(input.generativeException ? { generativeException: input.generativeException } : {}),
         ...(input.references ? { references: input.references } : {}),
         ...(shot.fidelityEvidence ? { evidence: shot.fidelityEvidence } : {}),
@@ -102,11 +111,13 @@ export class LocalVideoComposer {
       failureCodes: [],
       evidence: {
         shotIds: input.shots.map((shot) => shot.shotId),
-        venueAssetIds: input.shots.flatMap((shot) =>
-          shot.venueAsset ? [shot.venueAsset.venueAssetId] : [],
+        registeredShotIds: input.shots.flatMap((shot) =>
+          shot.registry ? [shot.registry.shotId] : [],
         ),
         referenceAssetIds: (input.references ?? []).map((reference) => reference.assetId),
         allShotsVerified: true,
+        exactMasterByteBinding:
+          input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
       },
     };
 
@@ -136,7 +147,7 @@ export class LocalVideoComposer {
 
       await this.commandRunner(
         this.binary,
-        buildFfmpegArgs(input, concatPath, outputPath, logoPaths),
+        buildFfmpegArgs(concatPath, outputPath, logoPaths),
       );
       const outputBytes = await readFile(outputPath);
       const qualityGate = evaluateQualityGate(isMp4(outputBytes), {
@@ -144,6 +155,8 @@ export class LocalVideoComposer {
         outputContentType: 'video/mp4',
         deterministicComposition: true,
         sourceShotCount: input.shots.length,
+        registeredShotHashesVerified:
+          input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
       });
       requireGatePassed(qualityGate);
 
@@ -157,7 +170,7 @@ export class LocalVideoComposer {
         creativeMode: input.creativeMode,
         sourceAssetIds: sourceAssetIdsFor(input),
         masterAssetIds: input.shots.flatMap((shot) =>
-          shot.venueAsset?.masterAssetId ? [shot.venueAsset.masterAssetId] : [],
+          shot.registry?.masterAssetId ? [shot.registry.masterAssetId] : [],
         ),
         brandAssetIds: input.brandAssets.map((entry) => entry.registry.brandAssetId),
         outputSha256,
@@ -199,7 +212,6 @@ export class LocalVideoComposer {
 }
 
 function buildFfmpegArgs(
-  input: LocalVideoComposeInput,
   concatPath: string,
   outputPath: string,
   logoPaths: readonly string[],
@@ -256,9 +268,9 @@ function validateInput(input: LocalVideoComposeInput): void {
   }
   if (
     input.creativeMode !== 'GENERATIVE_EXCEPTION' &&
-    input.shots.some((shot) => !shot.venueAsset)
+    input.shots.some((shot) => !shot.registry)
   ) {
-    throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
+    throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED', false);
   }
   if (
     input.creativeMode === 'GENERATIVE_EXCEPTION' &&
@@ -271,9 +283,65 @@ function validateInput(input: LocalVideoComposeInput): void {
   }
 }
 
+function assertRegisteredShotBindings(input: LocalVideoComposeInput): void {
+  if (input.creativeMode === 'GENERATIVE_EXCEPTION') return;
+  for (const shot of input.shots) {
+    const registry = shot.registry;
+    if (!registry || registry.shotId !== shot.shotId) {
+      throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_REGISTRY_BINDING_REQUIRED', false);
+    }
+    if (
+      registry.status !== 'ACTIVE_APPROVED' ||
+      !registry.venueVerified ||
+      !registry.marketingReady ||
+      !registry.masterAssetId ||
+      !registry.masterDriveFileId ||
+      !registry.masterSha256
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
+    }
+    if (
+      input.standard.operation !== 'ALL' &&
+      registry.operation !== input.standard.operation
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
+    }
+    if (!APPROVED_RIGHTS_STATUSES.has(registry.rightsStatus.trim().toUpperCase())) {
+      throw new ExecutionError('POLICY_DENIED', 'VIDEO_SHOT_RIGHTS_NOT_CLEARED', false);
+    }
+    if (sha256(shot.videoBytes) !== registry.masterSha256) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'VIDEO_SHOT_MASTER_HASH_MISMATCH',
+        false,
+      );
+    }
+  }
+}
+
+function videoShotAsVenueAsset(shot: VideoShot): VenueAsset {
+  return {
+    venueAssetId: `VIDEO_SHOT:${shot.shotId}`,
+    sourceAssetId: shot.sourceAssetId,
+    sourceDriveFileId: shot.sourceDriveFileId,
+    ...(shot.masterAssetId ? { masterAssetId: shot.masterAssetId } : {}),
+    ...(shot.masterDriveFileId ? { masterDriveFileId: shot.masterDriveFileId } : {}),
+    ...(shot.sourceSha256 ? { sourceSha256: shot.sourceSha256 } : {}),
+    ...(shot.masterSha256 ? { masterSha256: shot.masterSha256 } : {}),
+    operation: shot.operation,
+    locationSignature: shot.locationSignature,
+    dominantSubject: shot.shotClass,
+    venueVerified: shot.venueVerified,
+    marketingReady: shot.marketingReady,
+    generativeReferenceAllowed: false,
+    protectedElements: [],
+    status: shot.status,
+  };
+}
+
 function sourceAssetIdsFor(input: LocalVideoComposeInput): string[] {
   const realSourceIds = input.shots.flatMap((shot) =>
-    shot.venueAsset ? [shot.venueAsset.sourceAssetId] : [],
+    shot.registry ? [shot.registry.sourceAssetId] : [],
   );
   if (realSourceIds.length > 0) return [...new Set(realSourceIds)];
   const referenceIds = [...new Set((input.references ?? []).map((reference) => reference.assetId))];
