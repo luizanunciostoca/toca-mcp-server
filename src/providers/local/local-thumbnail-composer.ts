@@ -8,6 +8,7 @@ import type {
   VenueAsset,
   VenueReference,
 } from '../../contracts/creative-truth.js';
+import { assertVideoThumbnailCreativeTruth } from '../../content/video-thumbnail-creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
 import {
   LocalCreativeComposer,
@@ -91,6 +92,12 @@ export class LocalThumbnailComposer {
       ...(input.fidelityEvidence ? { fidelityEvidence: input.fidelityEvidence } : {}),
       ...(input.createdAt ? { createdAt: input.createdAt } : {}),
     });
+
+    assertVideoThumbnailCreativeTruth(
+      input.contentItemId,
+      composed.manifest,
+      composed.outputSha256,
+    );
 
     return {
       thumbnailCreativeId: input.thumbnailCreativeId,
