@@ -93,7 +93,7 @@ function approvedPayload(): TocaManagedInstagramSchedulePayload {
 }
 
 describe('TOCA-managed Instagram Creative Truth handoff', () => {
-  it('verifies object bytes by approved hash and binds the runtime delivery URL before Meta', async () => {
+  it('verifies object bytes, MIME and approved hash before binding the runtime URL for Meta', async () => {
     const deliveryUrl = 'https://storage.googleapis.com/bucket/creative.jpg?signature=runtime';
     const createVerifiedDeliveryUrl = vi.fn(() => Promise.resolve(deliveryUrl));
     const transport = new CapturingTransport();
@@ -114,6 +114,7 @@ describe('TOCA-managed Instagram Creative Truth handoff', () => {
     expect(createVerifiedDeliveryUrl).toHaveBeenCalledWith(
       payload.asset.objectName,
       payload.asset.sha256,
+      payload.asset.contentType,
     );
     expect(transport.request?.mediaUrls).toEqual([deliveryUrl]);
     expect(transport.request?.creativeTruthBinding?.outputSha256).toBe(payload.asset.sha256);
