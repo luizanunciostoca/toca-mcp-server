@@ -66,22 +66,21 @@ function sourceSha256(referenceInput: GenerativeVenueReferenceInput): string {
 }
 
 function canonicalVenueAsset(
-  canonicalReference: VenueReference,
-  sourceBytes: Uint8Array,
+  input: GenerativeVenueReferenceInput,
   overrides: Partial<VenueAsset> = {},
 ): VenueAsset {
   return {
-    venueAssetId: `VENUE-${canonicalReference.assetId}`,
-    sourceAssetId: canonicalReference.assetId,
-    sourceDriveFileId: canonicalReference.driveFileId,
-    sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
+    venueAssetId: `VENUE-${input.registry.assetId}`,
+    sourceAssetId: input.registry.assetId,
+    sourceDriveFileId: input.registry.driveFileId,
+    sourceSha256: sourceSha256(input),
     operation: 'SUNSET',
     locationSignature: 'verified-reference',
     dominantSubject: 'venue-truth',
     venueVerified: true,
     marketingReady: false,
     generativeReferenceAllowed: true,
-    protectedElements: [...canonicalReference.protectedElements],
+    protectedElements: [...input.registry.protectedElements],
     status: 'VENUE_VERIFIED_SOURCE',
     ...overrides,
   };
@@ -89,35 +88,36 @@ function canonicalVenueAsset(
 
 type RegistryBoundary = Pick<
   GoogleSheetsCreativeTruthRegistry,
-  'assertCanonicalPolicy' | 'getReferenceSet' | 'getVenueAssetBySourceAssetId'
+  | 'assertCanonicalPolicy'
+  | 'getApprovedGenerativeException'
+  | 'getReferenceSet'
+  | 'getVenueAssetBySourceAssetId'
 >;
 
 function canonicalRegistry(
   expectedInputs: readonly GenerativeVenueReferenceInput[] = [reference(1), reference(2), reference(3)],
   options: {
+    readonly canonicalApproval?: GenerativeExceptionApproval | null;
     readonly canonicalReferences?: readonly VenueReference[];
     readonly venueOverrides?: Readonly<Record<string, Partial<VenueAsset>>>;
   } = {},
 ): RegistryBoundary {
-  const canonicalReferences = options.canonicalReferences ?? expectedInputs.map((item) => item.registry);
-  const inputByAssetId = new Map(expectedInputs.map((item) => [item.registry.assetId, item]));
+  const canonicalApproval =
+    options.canonicalApproval === undefined ? approval : options.canonicalApproval;
+  const canonicalReferences =
+    options.canonicalReferences ?? expectedInputs.map((item) => item.registry);
   const venueByAssetId = new Map(
-    canonicalReferences.map((canonicalReference) => {
-      const source = inputByAssetId.get(canonicalReference.assetId);
-      if (!source) throw new Error(`Missing expected bytes for ${canonicalReference.assetId}`);
-      return [
-        canonicalReference.assetId,
-        canonicalVenueAsset(
-          canonicalReference,
-          source.imageBytes,
-          options.venueOverrides?.[canonicalReference.assetId],
-        ),
-      ] as const;
-    }),
+    expectedInputs.map((input) => [
+      input.registry.assetId,
+      canonicalVenueAsset(input, options.venueOverrides?.[input.registry.assetId]),
+    ] as const),
   );
 
   return {
     assertCanonicalPolicy: vi.fn(async () => undefined),
+    getApprovedGenerativeException: vi.fn(async (contentItemId: string) =>
+      canonicalApproval?.contentItemId === contentItemId ? canonicalApproval : undefined,
+    ),
     getReferenceSet: vi.fn(async () => canonicalReferences),
     getVenueAssetBySourceAssetId: vi.fn(async (assetId: string) => venueByAssetId.get(assetId)),
   };
@@ -152,26 +152,52 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
   it('fails closed before canonical/provider access when approval belongs to another content item', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const canonical = canonicalRegistry();
-    const generator = generatorWith(canonical, fetchImpl);
 
     await expect(
-      generator.generate(
-        request({
-          approval: { ...approval, contentItemId: 'OTHER-CONTENT' },
-        }),
+      generatorWith(canonical, fetchImpl).generate(
+        request({ approval: { ...approval, contentItemId: 'OTHER-CONTENT' } }),
       ),
     ).rejects.toThrow('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
     expect(canonical.assertCanonicalPolicy).not.toHaveBeenCalled();
+    expect(canonical.getApprovedGenerativeException).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the canonical exception approval is missing', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry(undefined, { canonicalApproval: null });
+
+    await expect(generatorWith(canonical, fetchImpl).generate(request())).rejects.toThrow(
+      'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
+    );
+    expect(canonical.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(canonical.getApprovedGenerativeException).toHaveBeenCalledWith('CONTENT-GEN-1');
+    expect(canonical.getReferenceSet).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller approval that differs from the canonical approval record', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry();
+
+    await expect(
+      generatorWith(canonical, fetchImpl).generate(
+        request({ approval: { ...approval, approvalRef: 'caller-forged-approval-ref' } }),
+      ),
+    ).rejects.toThrow('GENERATIVE_APPROVAL_CANONICAL_IDENTITY_MISMATCH');
+    expect(canonical.getApprovedGenerativeException).toHaveBeenCalledWith('CONTENT-GEN-1');
+    expect(canonical.getReferenceSet).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('fails closed when fewer than three verified venue references are supplied', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const canonical = canonicalRegistry();
-    const generator = generatorWith(canonical, fetchImpl);
 
     await expect(
-      generator.generate(request({ references: [reference(1), reference(2)] })),
+      generatorWith(canonical, fetchImpl).generate(
+        request({ references: [reference(1), reference(2)] }),
+      ),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_MISSING');
     expect(canonical.assertCanonicalPolicy).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -229,59 +255,62 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
 
   it('rejects caller metadata that does not match the canonical reference identity', async () => {
     const expected = [reference(1), reference(2), reference(3)];
-    const fetchImpl = vi.fn<typeof fetch>();
-    const canonical = canonicalRegistry(expected);
-    const generator = generatorWith(canonical, fetchImpl);
     const supplied = [
       expected[0]!,
       expected[1]!,
       reference(3, {
-        registry: registryReference(3, { referenceId: 'FAKE-REF-ID', driveFileId: 'fake-drive-id' }),
+        registry: registryReference(3, {
+          referenceId: 'FAKE-REF-ID',
+          driveFileId: 'fake-drive-id',
+        }),
       }),
     ];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry(expected);
 
-    await expect(generator.generate(request({ references: supplied }))).rejects.toThrow(
-      'GENERATIVE_REFERENCE_CANONICAL_IDENTITY_MISMATCH',
-    );
+    await expect(
+      generatorWith(canonical, fetchImpl).generate(request({ references: supplied })),
+    ).rejects.toThrow('GENERATIVE_REFERENCE_CANONICAL_IDENTITY_MISMATCH');
     expect(canonical.getReferenceSet).toHaveBeenCalledWith('TOCA_VENUE_REFERENCE_SET_V1');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('rejects reference bytes that do not equal the source SHA pinned in canonical VENUE_VISUALS', async () => {
     const expected = [reference(1), reference(2), reference(3)];
-    const fetchImpl = vi.fn<typeof fetch>();
-    const canonical = canonicalRegistry(expected);
-    const generator = generatorWith(canonical, fetchImpl);
     const substituted = [
       expected[0]!,
       expected[1]!,
       reference(3, { imageBytes: Uint8Array.from([0xff, 0xd8, 99, 0xff, 0xd9]) }),
     ];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry(expected);
 
-    await expect(generator.generate(request({ references: substituted }))).rejects.toThrow(
-      'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
-    );
+    await expect(
+      generatorWith(canonical, fetchImpl).generate(request({ references: substituted })),
+    ).rejects.toThrow('GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH');
     expect(canonical.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(canonical.getApprovedGenerativeException).toHaveBeenCalledOnce();
     expect(canonical.getVenueAssetBySourceAssetId).toHaveBeenCalledWith('SUN-GEN-3');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('rejects canonical reference assets without an immutable source SHA or with mismatched Drive identity', async () => {
+  it('rejects canonical reference assets with mismatched source SHA or Drive identity', async () => {
     const expected = [reference(1), reference(2), reference(3)];
     const fetchImpl = vi.fn<typeof fetch>();
-    const missingHash = canonicalRegistry(expected, {
-      venueOverrides: { 'SUN-GEN-2': { sourceSha256: undefined } },
+
+    const wrongHash = canonicalRegistry(expected, {
+      venueOverrides: { 'SUN-GEN-2': { sourceSha256: 'f'.repeat(64) } },
     });
-    await expect(generatorWith(missingHash, fetchImpl).generate(request({ references: expected }))).rejects.toThrow(
-      'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
-    );
+    await expect(
+      generatorWith(wrongHash, fetchImpl).generate(request({ references: expected })),
+    ).rejects.toThrow('GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH');
 
     const wrongDrive = canonicalRegistry(expected, {
       venueOverrides: { 'SUN-GEN-2': { sourceDriveFileId: 'different-drive-file' } },
     });
-    await expect(generatorWith(wrongDrive, fetchImpl).generate(request({ references: expected }))).rejects.toThrow(
-      'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
-    );
+    await expect(
+      generatorWith(wrongDrive, fetchImpl).generate(request({ references: expected })),
+    ).rejects.toThrow('GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -340,7 +369,11 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
 
     await expect(
       generatorWith(canonical, fetchImpl).generate(request({ references: tamperedMetadata })),
-    ).resolves.toMatchObject({ readyForFinalComposition: false });
+    ).resolves.toMatchObject({
+      exceptionId: approval.exceptionId,
+      approvalRef: approval.approvalRef,
+      readyForFinalComposition: false,
+    });
   });
 
   it('sends the exact canonical verified reference images under a higher-priority Creative Truth policy', async () => {
@@ -367,6 +400,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
       expect(body.input[0]?.role).toBe('developer');
       const policyText = String(body.input[0]?.content[0]?.text ?? '');
       expect(policyText).toContain('TOCA_CREATIVE_TRUTH_POLICY_V1');
+      expect(policyText).toContain(`approvalRef=${approval.approvalRef}`);
       expect(policyText).toContain('only source of venue spatial and architectural truth');
       expect(policyText).toContain('Do not generate, redraw, repair, imitate or approximate');
       expect(policyText).toContain('NOT approved final creative');
@@ -404,10 +438,10 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
       );
     });
 
-    const generator = generatorWith(canonical, fetchImpl);
-    const result = await generator.generate(request({ references }));
+    const result = await generatorWith(canonical, fetchImpl).generate(request({ references }));
 
     expect(canonical.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(canonical.getApprovedGenerativeException).toHaveBeenCalledWith('CONTENT-GEN-1');
     expect(canonical.getReferenceSet).toHaveBeenCalledOnce();
     expect(canonical.getVenueAssetBySourceAssetId).toHaveBeenCalledTimes(3);
     expect(result.outputBytes).toEqual(output);
@@ -417,6 +451,8 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
     expect(result.referenceSha256s).toEqual(references.map(sourceSha256));
     expect(result.policyId).toBe('TOCA_CREATIVE_TRUTH_POLICY_V1');
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_V1');
+    expect(result.exceptionId).toBe(approval.exceptionId);
+    expect(result.approvalRef).toBe(approval.approvalRef);
     expect(result.creativeMode).toBe('GENERATIVE_EXCEPTION');
     expect(result.generationMode).toBe('FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES');
     expect(result.requiresPostGenerationHumanReview).toBe(true);
@@ -427,8 +463,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
 
   it('rejects missing or non-JPEG generated output instead of treating it as reviewable', async () => {
     const references = [reference(1), reference(2), reference(3)];
-    const canonical = canonicalRegistry(references);
-    const missingGenerator = generatorWith(canonical, () =>
+    const missingGenerator = generatorWith(canonicalRegistry(references), () =>
       Promise.resolve(
         new Response(JSON.stringify({ output: [] }), {
           status: 200,
