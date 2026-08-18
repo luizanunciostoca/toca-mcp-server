@@ -78,15 +78,24 @@ requireIncludes(familyResolverPath, [
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
   'THE_PARTY_ENVIRONMENT_REQUIRED',
+  'resolveThePartyVenueAssetPreferences',
+  'VENUE-TP-0130',
+  'VENUE-TP-0087',
+  'VENUE-TP-0071',
+  'VENUE-TP-0048',
+  'VENUE-TP-0113',
 ]);
 
 requireIncludes('src/creative/creative-truth-resolver.ts', [
   'resolveThePartyVisualFamily',
+  'resolveThePartyVenueAssetPreferences',
   'thePartyIntent?: ThePartyCreativeIntent',
   'thePartyEnvironment?: ThePartyEnvironment',
   "request.operation === 'THE_PARTY'",
   "request.requiredBrands.includes('THE_PARTY')",
   'THE_PARTY_VISUAL_INTENT_REQUIRED',
+  'THE_PARTY_STANDARD_INTENT_MISMATCH',
+  'preferredAssetIds',
 ]);
 
 requireIncludes('src/providers/local/local-creative-composer.ts', [
@@ -115,8 +124,16 @@ requireIncludes('src/providers/local/local-video-composer.ts', [
 requireIncludes(docsPath, [
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
+  '1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU',
+  '1c9DXMrl2emY8qgYrGN9oY0MbHBifod4I',
+  '1Bz0pqHaHp_I06M2jiu-_WL0t1ik2LS0T',
   '1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD',
   '1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF',
+  'VENUE-TP-0130',
+  'VENUE-TP-0087',
+  'VENUE-TP-0071',
+  'VENUE-TP-0048',
+  'VENUE-TP-0113',
   'TOCA_DO_MORCEGO` → `CORONA` → `RED_BULL` → `MORRO_DIGITAL',
 ]);
 
