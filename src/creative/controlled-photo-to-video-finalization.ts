@@ -1,0 +1,133 @@
+import { createHash } from 'node:crypto';
+import {
+  photoToVideoCandidateManifestSchema,
+  photoToVideoFinalManifestSchema,
+  photoToVideoReviewEvidenceSchema,
+  type PhotoToVideoCandidateManifest,
+  type PhotoToVideoFinalManifest,
+  type PhotoToVideoReviewEvidence,
+} from '../contracts/photo-to-video.js';
+import { ExecutionError } from '../core/errors.js';
+import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
+
+export interface ControlledPhotoToVideoFinalizationOptions {
+  readonly registry: PhotoToVideoRegistry;
+  readonly now?: () => Date;
+}
+
+export interface ControlledPhotoToVideoFinalizationRequest {
+  readonly outputBytes: Uint8Array;
+  readonly candidateManifest: PhotoToVideoCandidateManifest;
+  readonly reviewEvidence: PhotoToVideoReviewEvidence;
+}
+
+export class ControlledPhotoToVideoFinalizationService {
+  private readonly now: () => Date;
+
+  constructor(private readonly options: ControlledPhotoToVideoFinalizationOptions) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  async finalize(
+    request: ControlledPhotoToVideoFinalizationRequest,
+  ): Promise<PhotoToVideoFinalManifest> {
+    const candidate = photoToVideoCandidateManifestSchema.parse(request.candidateManifest);
+    const review = photoToVideoReviewEvidenceSchema.parse(request.reviewEvidence);
+    const outputSha256 = sha256(request.outputBytes);
+    if (!isMp4(request.outputBytes) || outputSha256 !== candidate.outputSha256.toLowerCase()) {
+      throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'PHOTO_TO_VIDEO_FINAL_ASSET_HASH_MISMATCH', false);
+    }
+    if (review.candidateSha256.toLowerCase() !== outputSha256) {
+      throw new ExecutionError('FIDELITY_GATE_FAILED', 'PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH', false);
+    }
+    if (
+      candidate.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO' &&
+      review.sceneContinuationFidelity !== 'PASS'
+    ) {
+      throw new ExecutionError('FIDELITY_GATE_FAILED', 'SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED', false);
+    }
+    if (
+      candidate.routeType === 'REAL_PHOTO_TO_MOTION_VIDEO' &&
+      review.sceneContinuationFidelity !== 'NOT_APPLICABLE'
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'PHOTO_MOTION_SCENE_CONTINUATION_REVIEW_INVALID', false);
+    }
+
+    const current = await this.options.registry.resolve(candidate.contentItemId, candidate.routeType);
+    if (
+      current.content.productId !== candidate.productId ||
+      current.content.operation !== candidate.operation ||
+      current.content.outputType !== candidate.outputType ||
+      current.content.inheritedVisualStandardId !== candidate.inheritedVisualStandardId ||
+      current.content.sourceAssetId !== candidate.sourceAssetId ||
+      current.standard.standardId !== candidate.standardId ||
+      current.standard.version !== candidate.standardVersion ||
+      current.standard.size !== candidate.size ||
+      current.standard.seconds !== candidate.seconds ||
+      current.venueAsset.masterDriveFileId !== candidate.sourceDriveFileId ||
+      current.venueAsset.masterSha256?.toLowerCase() !== candidate.sourceSha256.toLowerCase()
+    ) {
+      throw new ExecutionError('STATE_CONFLICT', 'PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED', false);
+    }
+    if (candidate.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO') {
+      if (
+        !current.approval ||
+        current.approval.exceptionId !== candidate.exceptionId ||
+        current.approval.approvalRef !== candidate.approvalRef
+      ) {
+        throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_CHANGED', false);
+      }
+    }
+
+    const finalizedAt = trustedNow(this.now);
+    const finalManifest = photoToVideoFinalManifestSchema.parse({
+      schemaVersion: 1,
+      status: 'VIDEO_CREATIVE_TRUTH_PASSED',
+      candidate,
+      review,
+      finalAssetSha256: outputSha256,
+      exactAssetBinding: true,
+      readyForPrepare: true,
+      publicationAuthorized: false,
+      finalizedAt,
+    });
+
+    await this.options.registry.recordFinalOutput({
+      outputId: `VIDEO-${candidate.contentItemId}-${outputSha256.slice(0, 16)}`,
+      contentItemId: candidate.contentItemId,
+      productId: candidate.productId,
+      operation: candidate.operation,
+      routeType: candidate.routeType,
+      standardId: candidate.standardId,
+      sourceAssetId: candidate.sourceAssetId,
+      sourceSha256: candidate.sourceSha256,
+      outputSha256,
+      reviewer: review.reviewer,
+      reviewedAt: review.reviewedAt,
+      venueFidelity: review.venueFidelity,
+      brandIntegrity: review.brandIntegrity,
+      quality: review.quality,
+      sceneContinuationFidelity: review.sceneContinuationFidelity,
+      status: 'VIDEO_CREATIVE_TRUTH_PASSED',
+      finalizedAt,
+    });
+
+    return finalManifest;
+  }
+}
+
+function trustedNow(now: () => Date): string {
+  const value = now();
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+    throw new ExecutionError('POLICY_DENIED', 'PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID', false);
+  }
+  return value.toISOString();
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function isMp4(bytes: Uint8Array): boolean {
+  return bytes.byteLength >= 12 && String.fromCharCode(...bytes.slice(4, 8)) === 'ftyp';
+}
