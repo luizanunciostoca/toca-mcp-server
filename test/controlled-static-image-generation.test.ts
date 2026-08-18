@@ -71,8 +71,8 @@ function dependencies(options: {
       requiresPostGenerationHumanReview: true as const,
       requiresVenueFidelityGate: true as const,
       readyForFinalComposition: false as const,
-      responseModel: 'gpt-5.6-sol',
-      imageModel: 'gpt-image-2',
+      responseModel: 'gpt-5.6',
+      imageToolModelSelection: 'RESPONSES_TOOL_MANAGED' as const,
     }),
   );
   return {
