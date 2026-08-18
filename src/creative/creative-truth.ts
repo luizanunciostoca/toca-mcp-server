@@ -16,6 +16,7 @@ import {
   type VenueReference,
   creativeAssetLocatorSchema,
   deterministicRenderManifestSchema,
+  fidelityEvidenceSchema,
 } from '../contracts/creative-truth.js';
 
 export interface ResolvedBrandAsset {
@@ -26,6 +27,7 @@ export interface ResolvedBrandAsset {
 }
 
 export interface VenueFidelityInput {
+  readonly contentItemId?: string;
   readonly creativeMode: CreativeMode;
   readonly venueAsset?: VenueAsset;
   readonly generativeException?: GenerativeExceptionApproval;
@@ -75,10 +77,10 @@ export function evaluateBrandIntegrity(
 
 export function evaluateVenueFidelity(input: VenueFidelityInput): CreativeTruthGateResult {
   const failures = new Set<CreativeTruthFailureCode>();
-  const evidence = input.evidence;
+  const evidence = parseFidelityEvidence(input.evidence, failures);
 
   if (input.creativeMode === 'GENERATIVE_EXCEPTION') {
-    validateGenerativeException(input, failures);
+    validateGenerativeException(input, evidence, failures);
   } else {
     const venue = input.venueAsset;
     if (!venue || !venue.venueVerified || venue.status === 'REVOKED') {
@@ -112,11 +114,11 @@ export function evaluateVenueFidelity(input: VenueFidelityInput): CreativeTruthG
     evidenceCandidateSha256: evidence?.candidateSha256 ?? null,
     sourceSha256: evidence?.sourceSha256 ?? null,
     referenceSetId:
-      input.generativeException?.referenceSetId ?? input.evidence?.referenceSetId ?? null,
+      input.generativeException?.referenceSetId ?? evidence?.referenceSetId ?? null,
     referenceAssetIds: (input.references ?? []).map((reference) => reference.assetId),
-    verifier: input.evidence?.verifier ?? 'DETERMINISTIC_SOURCE_BINDING',
-    verificationMethod: input.evidence?.verificationMethod ?? null,
-    reviewRef: input.evidence?.reviewRef ?? null,
+    verifier: evidence?.verifier ?? 'DETERMINISTIC_SOURCE_BINDING',
+    verificationMethod: evidence?.verificationMethod ?? null,
+    reviewRef: evidence?.reviewRef ?? null,
   });
 }
 
@@ -224,12 +226,16 @@ export function sha256(bytes: Uint8Array): string {
 
 function validateGenerativeException(
   input: VenueFidelityInput,
+  evidence: FidelityEvidence | undefined,
   failures: Set<CreativeTruthFailureCode>,
 ): void {
   const approval = input.generativeException;
   if (!approval || approval.status !== 'APPROVED') {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
     return;
+  }
+  if (!input.contentItemId || approval.contentItemId !== input.contentItemId) {
+    failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
   if (
     approval.expiresAt &&
@@ -249,13 +255,13 @@ function validateGenerativeException(
     (reference) =>
       reference.status === 'ACTIVE' &&
       reference.venueVerified &&
+      reference.requiredForGenerativeException &&
       reference.referenceSetId === approval.referenceSetId,
   );
   if (activeReferences.length < approval.minReferenceCount) {
     failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
   }
 
-  const evidence = input.evidence;
   if (
     !evidence ||
     evidence.referenceSetId !== approval.referenceSetId ||
@@ -284,6 +290,19 @@ function validateGenerativeException(
   }
 
   addVisualDriftFailures(evidence, failures);
+}
+
+function parseFidelityEvidence(
+  evidence: FidelityEvidence | undefined,
+  failures: Set<CreativeTruthFailureCode>,
+): FidelityEvidence | undefined {
+  if (!evidence) return undefined;
+  const parsed = fidelityEvidenceSchema.safeParse(evidence);
+  if (!parsed.success) {
+    failures.add('FAILED_FIDELITY_EVIDENCE_BINDING');
+    return undefined;
+  }
+  return parsed.data;
 }
 
 function validateEvidenceCandidateBinding(
