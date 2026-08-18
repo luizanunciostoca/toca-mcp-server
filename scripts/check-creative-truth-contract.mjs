@@ -11,6 +11,7 @@ const requiredFiles = [
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
   'src/content/video.ts',
+  'src/content/video-thumbnail-creative-truth.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
   'src/providers/gcp/gcs-publication-asset-stager.ts',
   'src/providers/gcp/gcs-publication-asset-delivery.ts',
@@ -134,6 +135,14 @@ requireIncludes('src/content/video.ts', [
   'VIDEO_EXPORT_CREATIVE_TRUTH_BINDING_INVALID',
   'VIDEO_EXPORT_CREATIVE_TRUTH_HASH_MISMATCH',
   'Prepare non-final thumbnail render-intent manifest',
+]);
+
+requireIncludes('src/content/video-thumbnail-creative-truth.ts', [
+  "const TOCA_THUMBNAIL_STANDARD_ID = 'TOCA_THUMBNAIL_V1'",
+  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_STANDARD_MISMATCH',
+  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_CONTENT_MISMATCH',
+  'R29_VIDEO_THUMBNAIL_CREATIVE_TRUTH_HASH_MISMATCH',
+  'assertCreativeReadyForPublication',
 ]);
 
 requireIncludes('src/providers/google-sheets/creative-truth-registry.ts', [
