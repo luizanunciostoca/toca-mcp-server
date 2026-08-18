@@ -79,6 +79,7 @@ export class LocalPhotoEnhancer {
         '-auto-orient',
         '-colorspace',
         'sRGB',
+        '-despeckle',
         '-filter',
         'Lanczos',
         '-resize',
