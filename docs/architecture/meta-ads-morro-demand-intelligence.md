@@ -6,6 +6,8 @@ Status: IMPLEMENTED (runtime-bound, provider validation pending)
 
 Use Meta Marketing API audience delivery estimates as one aggregate demand signal for paid-media planning in Morro de São Paulo. The signal is explicitly an audience estimate/proxy and MUST NOT be described as an exact count of devices or people physically present in Morro.
 
+The provider fields used by this implementation are MAU estimate bounds. They are not treated as a real-time footfall sensor. For that reason, Meta audience level and trend signals account for only 20% of the final demand index; campaign performance, calendar/event context, seasonality and operational capacity remain the dominant inputs.
+
 ## Canonical geography
 
 The implementation reuses the Meta Ads geography already used by TOCA OS campaign planning:
@@ -43,6 +45,8 @@ For each ready estimate, the runtime records:
 - targeting spec;
 - observation timestamp.
 
+Automatic observations are bucketed to the UTC hour. Multiple demand capabilities executed in the same hourly planning cycle therefore reuse the same durable observation key instead of generating near-duplicate samples. An explicit `observedAt` remains available for deterministic tests and controlled backfills.
+
 `PostgresMetaAdsGeoAudienceStore` provides idempotent append semantics for the same `(tenant, account, geo, observed_at)` tuple and chronological readback.
 
 ## Morro Demand Index
@@ -53,15 +57,17 @@ Weights:
 
 | Signal | Weight |
 | --- | ---: |
-| Audience level vs. 7-day median | 25% |
-| Audience trend vs. ~24h baseline | 15% |
-| Audience trend vs. ~7d baseline | 10% |
-| Paid-media performance score | 25% |
-| Calendar/event score | 10% |
-| Seasonality score | 10% |
-| Operational capacity score | 5% |
+| Audience level vs. 7-day median | 10% |
+| Audience-estimate trend vs. ~24h baseline | 5% |
+| Audience-estimate trend vs. ~7d baseline | 5% |
+| Paid-media performance score | 35% |
+| Calendar/event score | 20% |
+| Seasonality score | 15% |
+| Operational capacity score | 10% |
 
 Missing contextual scores are neutral (`50`). Until enough audience history exists, missing audience baselines are also neutral. Signal confidence starts at `0.4` for a ready provider estimate and increases as history, 24h baseline, and 7d baseline become available.
+
+The 24h/7d values represent changes in Meta's modeled audience estimate, not measured changes in physical footfall.
 
 Bands:
 
@@ -104,7 +110,7 @@ The implementation binds these existing canonical R08 capability IDs to the TOCA
 
 ### `meta_ads.audience.inspect`
 
-Reads the Meta audience estimate for canonical Morro targeting, records a ready observation when PostgreSQL is available, and returns current bounds, midpoint, history count, 24h/7d trends and confidence.
+Reads the Meta audience estimate for canonical Morro targeting, records a ready hourly observation when PostgreSQL is available, and returns current bounds, midpoint, history count, 24h/7d estimate trends and confidence.
 
 ### `meta_ads.opportunity.detect`
 
@@ -112,7 +118,7 @@ Calculates the Morro Demand Index using the audience signal plus optional perfor
 
 ### `meta_ads.budget.recommend`
 
-Calculates a guarded daily-budget recommendation from the demand index and current budget. It does not modify campaigns or budgets.
+Calculates a guarded daily-budget recommendation from the demand index and current budget. It also returns the full demand-index evidence and does not modify campaigns or budgets.
 
 All three are READ-only and require Meta `ads_read` access.
 
@@ -120,15 +126,15 @@ All three are READ-only and require Meta `ads_read` access.
 
 A paid-media planning cycle should:
 
-1. collect current Meta audience estimate;
-2. collect campaign performance context from Meta Insights;
-3. resolve calendar/event, seasonality and operational-capacity context;
-4. execute `meta_ads.opportunity.detect`;
-5. execute `meta_ads.budget.recommend` for active planning targets;
-6. include the recommendation and evidence in the campaign plan;
+1. collect campaign performance context from Meta Insights;
+2. resolve calendar/event, seasonality and operational-capacity context;
+3. execute `meta_ads.audience.inspect` when an explicit audience diagnostic is needed;
+4. execute `meta_ads.opportunity.detect` when an index-only diagnostic is needed; or
+5. execute `meta_ads.budget.recommend` directly when a guarded budget recommendation is needed, because its output already contains the full demand index and audience evidence;
+6. include the resulting recommendation/evidence in the campaign plan;
 7. route any actual financial change through the existing approval/guardrail/write/readback workflow.
 
-A high audience estimate alone is never sufficient to scale spend. Weak campaign performance or low operational capacity prevents positive scaling.
+A high Meta audience estimate alone is never sufficient to scale spend. Weak campaign performance or low operational capacity prevents positive scaling.
 
 ## Production-validation gate
 
