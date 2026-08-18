@@ -5,6 +5,7 @@ import {
   photoToVideoReviewEvidenceSchema,
 } from './contracts/photo-to-video.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { GcsPhotoToVideoArtifactStore } from './providers/gcp/gcs-photo-to-video-artifact-store.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
 import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
@@ -12,13 +13,22 @@ import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/phot
 const args = parseArgs(process.argv.slice(2));
 const secrets = new EnvironmentSecretResolver(process.env);
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
+const gcpProjectId = requiredEnv('GCP_PROJECT_ID');
+const artifactBucket = requiredEnv('INSTAGRAM_PUBLICATION_ASSET_BUCKET');
 const sheets = new GoogleSheetsRestClient(secrets, {
   tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
 });
 const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
 const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
-const service = new ControlledPhotoToVideoFinalizationService({ registry, writeback });
-const outputBytes = new Uint8Array(await readFile(args.output));
+const artifactStore = new GcsPhotoToVideoArtifactStore({
+  projectId: gcpProjectId,
+  bucketName: artifactBucket,
+});
+const service = new ControlledPhotoToVideoFinalizationService({
+  registry,
+  writeback,
+  artifactStore,
+});
 const candidateManifest = photoToVideoCandidateManifestSchema.parse(
   JSON.parse(await readFile(args.manifest, 'utf8')),
 );
@@ -26,7 +36,6 @@ const reviewEvidence = photoToVideoReviewEvidenceSchema.parse(
   JSON.parse(await readFile(args.review, 'utf8')),
 );
 const finalManifest = await service.finalize({
-  outputBytes,
   candidateManifest,
   reviewEvidence,
 });
@@ -37,16 +46,17 @@ process.stdout.write(
     contentItemId: finalManifest.candidate.contentItemId,
     routeType: finalManifest.candidate.routeType,
     finalAssetSha256: finalManifest.finalAssetSha256,
+    finalArtifactRef: finalManifest.finalArtifactRef,
     exactAssetBinding: true,
     readyForPrepare: true,
     canonicalFinalWriteback: true,
+    durableArtifactReadback: true,
     publicationAuthorized: false,
     finalManifestPath: args.finalManifest,
   })}\n`,
 );
 
 interface CliArgs {
-  readonly output: string;
   readonly manifest: string;
   readonly review: string;
   readonly finalManifest: string;
@@ -61,12 +71,12 @@ function parseArgs(argv: readonly string[]): CliArgs {
     values.set(key.slice(2), value);
   }
   if (values.has('now-iso')) throw new Error('VIDEO_FINALIZE_CALLER_TIME_FORBIDDEN');
-  const output = required(values, 'output');
+  if (values.has('output')) throw new Error('VIDEO_FINALIZE_CALLER_OUTPUT_FORBIDDEN');
+  const manifest = required(values, 'manifest');
   return {
-    output,
-    manifest: required(values, 'manifest'),
+    manifest,
     review: required(values, 'review'),
-    finalManifest: values.get('final-manifest')?.trim() || `${output}.final.json`,
+    finalManifest: values.get('final-manifest')?.trim() || `${manifest}.final.json`,
   };
 }
 
