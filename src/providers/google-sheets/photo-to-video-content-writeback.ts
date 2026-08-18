@@ -6,7 +6,7 @@ import type {
 } from './media-assets.js';
 import { PHOTO_TO_VIDEO_CONTENT_REGISTRY_ID } from './photo-to-video-registry.js';
 
-const CONTENT_RANGE = 'CONTENT_ITEMS!A1:CF2000';
+const CONTENT_RANGE = 'CONTENT_ITEMS!A1:CH2000';
 
 export interface PhotoToVideoCandidateWriteback {
   readonly contentItemId: string;
@@ -14,6 +14,7 @@ export interface PhotoToVideoCandidateWriteback {
   readonly routeType: PhotoToVideoRouteType;
   readonly standardId: string;
   readonly candidateSha256: string;
+  readonly candidateArtifactRef: string;
   readonly providerJobId?: string;
 }
 
@@ -23,6 +24,7 @@ export interface PhotoToVideoFinalWriteback {
   readonly standardId: string;
   readonly candidateSha256: string;
   readonly finalAssetSha256: string;
+  readonly finalArtifactRef: string;
   readonly outputEvidenceId: string;
 }
 
@@ -39,6 +41,7 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
 
   async writeCandidate(record: PhotoToVideoCandidateWriteback): Promise<void> {
     assertSha(record.candidateSha256, 'VIDEO_CANDIDATE_SHA256_INVALID');
+    assertArtifactRef(record.candidateArtifactRef, 'VIDEO_CANDIDATE_ARTIFACT_REF_INVALID');
     const current = await this.resolveRow(record.contentItemId);
     const existingFinalSha = current.value('video_final_asset_sha256');
     if (existingFinalSha) {
@@ -57,6 +60,7 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
       current.value('video_route_type') === record.routeType &&
       current.value('video_standard_id') === record.standardId &&
       current.value('video_provider_job_id') === (record.providerJobId ?? '') &&
+      current.value('video_candidate_artifact_ref') === record.candidateArtifactRef &&
       current.value('video_review_status') === 'GENERATED_REVIEW_REQUIRED'
     ) {
       return;
@@ -67,6 +71,7 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
       update(current, 'video_standard_id', record.standardId),
       update(current, 'video_candidate_sha256', record.candidateSha256),
       update(current, 'video_provider_job_id', record.providerJobId ?? ''),
+      update(current, 'video_candidate_artifact_ref', record.candidateArtifactRef),
       update(current, 'video_review_status', 'GENERATED_REVIEW_REQUIRED'),
     ]);
   }
@@ -74,6 +79,7 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
   async writeFinal(record: PhotoToVideoFinalWriteback): Promise<void> {
     assertSha(record.candidateSha256, 'VIDEO_CANDIDATE_SHA256_INVALID');
     assertSha(record.finalAssetSha256, 'VIDEO_FINAL_ASSET_SHA256_INVALID');
+    assertArtifactRef(record.finalArtifactRef, 'VIDEO_FINAL_ARTIFACT_REF_INVALID');
     if (!record.outputEvidenceId.trim()) {
       throw new ExecutionError('STATE_CONFLICT', 'VIDEO_OUTPUT_EVIDENCE_ID_REQUIRED', false);
     }
@@ -81,16 +87,19 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
     if (
       current.value('video_route_type') !== record.routeType ||
       current.value('video_standard_id') !== record.standardId ||
-      current.value('video_candidate_sha256').toLowerCase() !== record.candidateSha256.toLowerCase()
+      current.value('video_candidate_sha256').toLowerCase() !== record.candidateSha256.toLowerCase() ||
+      current.value('video_candidate_artifact_ref') !== record.finalArtifactRef
     ) {
       throw new ExecutionError('STATE_CONFLICT', 'VIDEO_CONTENT_CANDIDATE_BINDING_CHANGED', false);
     }
     const existingFinalSha = current.value('video_final_asset_sha256');
     const existingEvidenceId = current.value('video_output_evidence_id');
+    const existingFinalArtifact = current.value('video_final_artifact_ref');
     if (existingFinalSha) {
       if (
         existingFinalSha.toLowerCase() === record.finalAssetSha256.toLowerCase() &&
         existingEvidenceId === record.outputEvidenceId &&
+        existingFinalArtifact === record.finalArtifactRef &&
         current.value('video_review_status') === 'VIDEO_CREATIVE_TRUTH_PASSED'
       ) {
         return;
@@ -99,6 +108,7 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
     }
     await this.client.updateRanges(this.spreadsheetId, [
       update(current, 'video_final_asset_sha256', record.finalAssetSha256),
+      update(current, 'video_final_artifact_ref', record.finalArtifactRef),
       update(current, 'video_review_status', 'VIDEO_CREATIVE_TRUTH_PASSED'),
       update(current, 'video_output_evidence_id', record.outputEvidenceId),
     ]);
@@ -127,7 +137,9 @@ export class GoogleSheetsPhotoToVideoContentWriteback implements PhotoToVideoCon
       'video_standard_id',
       'video_candidate_sha256',
       'video_provider_job_id',
+      'video_candidate_artifact_ref',
       'video_final_asset_sha256',
+      'video_final_artifact_ref',
       'video_review_status',
       'video_output_evidence_id',
     ]) {
@@ -204,7 +216,15 @@ function columnName(zeroBasedIndex: number): string {
 }
 
 function assertSha(value: string, error: string): void {
-  if (!/^[a-f0-9]{64}$/i.test(value)) throw new ExecutionError('STATE_CONFLICT', error, false);
+  if (!/^[a-f0-9]{64}$/i.test(value)) {
+    throw new ExecutionError('STATE_CONFLICT', error, false);
+  }
+}
+
+function assertArtifactRef(value: string, error: string): void {
+  if (!/^gcs:\/\/[^/]+\/instagram\/.+/.test(value)) {
+    throw new ExecutionError('STATE_CONFLICT', error, false);
+  }
 }
 
 function cell(value: unknown): string {
