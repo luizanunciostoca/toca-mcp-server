@@ -81,9 +81,9 @@ export const photoToVideoSourceRightsSchema = z.object({
   containsPeople: z.boolean(),
   likenessConsentStatus: likenessConsentStatusSchema,
   approvedUses: z.array(z.string().trim().min(1)),
-  evidenceRef: z.string().trim().min(1).optional(),
+  evidenceRef: z.string().trim().min(1),
   status: z.enum(['ACTIVE', 'BLOCKED', 'REVOKED']),
-  validatedAt: z.string().trim().min(1).optional(),
+  validatedAt: z.string().trim().min(1),
 });
 export type PhotoToVideoSourceRights = z.infer<typeof photoToVideoSourceRightsSchema>;
 
