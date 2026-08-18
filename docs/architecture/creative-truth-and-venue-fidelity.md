@@ -10,7 +10,7 @@ Repository implementation mirror for the canonical Google Drive policy and regis
 - Venue reference set: `TOCA_VENUE_REFERENCE_SET_V1`
 - Canonical Drive enhancement-provenance addendum synchronized on `2026-08-18`; `POLICY` now records `ENHANCEMENT_PROVENANCE_REQUIRED=true` and the fail-closed video boundary.
 
-Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI.
+Google Drive is the business source of truth. Repository JSON files are deterministic mirrors used by code review, local execution and CI. Runtime `assertCanonicalPolicy()` reads the canonical `POLICY!A2:Q20` row and fails closed if enhancement provenance or the video fail-closed flags drift.
 
 ## Non-negotiable rule
 
