@@ -29,7 +29,9 @@ requireIncludes('control/creative-truth-policy.v1.json', [
   '"crossOperationReferenceReuse": "FORBIDDEN"',
   '"referenceSetOperationMatch": "REQUIRED"',
   '"legacyReferenceSetExecution": "DENY"',
-  '"videoGenerativeException": "UNSUPPORTED_V1"',
+  '"videoGenerativeException": "SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1"',
+  '"fullSyntheticVenueVideo": "UNSUPPORTED_V1"',
+  '"photoToVideoPolicyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1"',
 ]);
 
 requireIncludes('src/creative/creative-truth-resolver.ts', [
@@ -169,13 +171,17 @@ console.log('Creative Truth static generative contract OK');
 function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (!content.includes(marker)) fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
+    if (!content.includes(marker)) {
+      fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
+    }
   }
 }
 function forbidIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (content.includes(marker)) fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
+    if (content.includes(marker)) {
+      fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
+    }
   }
 }
 function fail(message) {
