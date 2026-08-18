@@ -6,7 +6,7 @@ import {
 } from '../src/contracts/photo-to-video.js';
 
 describe('photo-to-video contracts', () => {
-  it('accepts an exact-bound scene continuation candidate that remains non-publishable', () => {
+  it('accepts an exact-bound durable scene continuation candidate that remains non-publishable', () => {
     const parsed = photoToVideoCandidateManifestSchema.parse({
       schemaVersion: 1,
       status: 'GENERATED_REVIEW_REQUIRED',
@@ -24,6 +24,10 @@ describe('photo-to-video contracts', () => {
       sourceSha256: 'a'.repeat(64),
       providerCandidateSha256: 'b'.repeat(64),
       outputSha256: 'c'.repeat(64),
+      artifactRef:
+        'gcs://toca-bucket/instagram/scene-continuation-review-v1/photo-video-1234567890abcdef12345678-cccccccccccccccc.mp4',
+      artifactObjectName:
+        'instagram/scene-continuation-review-v1/photo-video-1234567890abcdef12345678-cccccccccccccccc.mp4',
       outputContentType: 'video/mp4',
       size: '720x1280',
       seconds: 8,
@@ -41,6 +45,7 @@ describe('photo-to-video contracts', () => {
     });
     expect(parsed.publicationEligible).toBe(false);
     expect(parsed.requiresSceneContinuationFidelityGate).toBe(true);
+    expect(parsed.artifactRef).toMatch(/^gcs:/);
   });
 
   it('rejects scene continuation approval that permits architectural invention', () => {
