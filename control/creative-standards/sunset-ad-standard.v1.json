@@ -11,7 +11,7 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1"
   },
   "canvases": [
     { "width": 1080, "height": 1350, "aspectRatio": "4:5" },
