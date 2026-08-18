@@ -119,6 +119,7 @@ function resolved(): ResolvedPhotoToVideoContext {
 
 function dependencies(storeFailure = false) {
   const writeCandidate = vi.fn(async () => undefined);
+  const assertCanonical = vi.fn(async () => undefined);
   const resolve = vi.fn(async () => resolved());
   const registry: PhotoToVideoRegistry = {
     resolve,
@@ -179,6 +180,7 @@ function dependencies(storeFailure = false) {
     }),
   } as unknown as LocalPhotoToVideoBrandComposer;
   return {
+    policyGuard: { assertCanonical },
     registry,
     sourceLoader,
     brandLoader,
@@ -187,6 +189,7 @@ function dependencies(storeFailure = false) {
     photoMotionComposer,
     sceneContinuationProvider,
     brandComposer,
+    assertCanonical,
     resolve,
     store,
     writeCandidate,
@@ -206,6 +209,10 @@ describe('ControlledPhotoToVideoGenerationService', () => {
       routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
     });
 
+    expect(deps.assertCanonical).toHaveBeenCalledWith('REAL_PHOTO_TO_MOTION_VIDEO');
+    expect(deps.assertCanonical.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.resolve.mock.invocationCallOrder[0]!,
+    );
     expect(result.manifest.artifactRef).toBe(artifactRef);
     expect(result.manifest.outputSha256).toBe(brandedSha256);
     expect(result.manifest.heroBrandAssetId).toBe(brand.brandAssetId);
@@ -243,7 +250,7 @@ describe('ControlledPhotoToVideoGenerationService', () => {
     expect(deps.writeCandidate).not.toHaveBeenCalled();
   });
 
-  it('fails before canonical/provider work when the trusted clock is invalid', async () => {
+  it('fails before policy/canonical/provider work when the trusted clock is invalid', async () => {
     const deps = dependencies();
     const service = new ControlledPhotoToVideoGenerationService({
       ...deps,
@@ -256,6 +263,7 @@ describe('ControlledPhotoToVideoGenerationService', () => {
         routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
       }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_TRUSTED_CLOCK_INVALID');
+    expect(deps.assertCanonical).not.toHaveBeenCalled();
     expect(deps.resolve).not.toHaveBeenCalled();
     expect(deps.store).not.toHaveBeenCalled();
     expect(deps.writeCandidate).not.toHaveBeenCalled();
