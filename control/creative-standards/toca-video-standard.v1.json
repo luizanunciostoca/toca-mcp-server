@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "TOCA_VIDEO_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "ALL_TOCA_OPERATIONS",
+    "channel": "ALL",
+    "format": ["VIDEO", "REEL"]
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+  },
+  "defaultMode": "REAL_COMPOSITE",
+  "shotRules": {
+    "videoShotRegistryRequired": true,
+    "venueVerifiedRequired": true,
+    "marketingReadyRequiredForFinalOutput": true,
+    "sourceAndMasterLineageRequired": true,
+    "syntheticVenueReplacementForbidden": true
+  },
+  "composition": {
+    "deterministicEditManifestRequired": true,
+    "officialLogoOverlayOnly": true,
+    "aiLogoReconstructionForbidden": true,
+    "exactOutputHashRequired": true,
+    "publicationMayNotReencodeOrRebuildWithoutNewManifest": true
+  },
+  "generativeException": {
+    "explicitApprovalRequired": true,
+    "verifiedVenueReferenceSetRequired": true,
+    "architectureInventionForbidden": true,
+    "environmentDriftForbidden": true,
+    "venueFidelityGateRequired": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true,
+    "rejectOn": [
+      "UNVERIFIED_SHOT",
+      "MISSING_SHOT_LINEAGE",
+      "AI_RECREATED_LOGO",
+      "ARCHITECTURE_DRIFT",
+      "SCENE_INVENTION",
+      "MISSING_OUTPUT_HASH",
+      "MISSING_EXACT_ASSET_BINDING"
+    ]
+  }
+}
