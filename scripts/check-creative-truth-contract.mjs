@@ -129,6 +129,7 @@ requireIncludes('src/creative/creative-truth.ts', [
   'FAILED_GENERATIVE_REFERENCE_MISSING',
   'FAILED_FIDELITY_EVIDENCE_BINDING',
   'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
+  'approval.contentItemId !== input.contentItemId',
   'validateEvidenceCandidateBinding',
   'candidateSha256',
   'reviewRef',
@@ -207,10 +208,13 @@ requireIncludes('src/marketing-autopilot-image-edit.ts', [
 requireIncludes('src/providers/local/local-creative-composer.ts', [
   'CREATIVE_MASTER_HASH_MISMATCH',
   'FAILED_ENHANCEMENT_PROVENANCE',
+  'FAILED_STANDARD_NOT_RESOLVED',
   'creativeEnhancementProvenanceSchema',
   "provenance.creativeMode !== 'REAL_PLUS_ENHANCEMENT'",
   'provenance.outputSha256 !== sha256(input.sourceImageBytes)',
+  'contentItemId: input.contentItemId',
   'candidateSha256: sha256(input.sourceImageBytes)',
+  "input.standard.operation !== 'ALL' && venue.operation !== input.standard.operation",
   'enhancementProvenance: input.enhancementProvenance',
 ]);
 
@@ -240,6 +244,8 @@ requireIncludes('src/providers/local/local-video-composer.ts', [
   'VIDEO_SHOT_MASTER_HASH_MISMATCH',
   'VIDEO_SHOT_RIGHTS_NOT_CLEARED',
   'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+  'VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED',
+  'VIDEO_GENERATIVE_CONTEXT_NOT_ALLOWED',
   'LocalVideoEditManifest',
   'VIDEO_EDIT_MANIFEST_INCOMPLETE',
   'exactMasterByteBinding',
