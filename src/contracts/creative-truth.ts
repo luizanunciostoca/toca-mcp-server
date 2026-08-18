@@ -33,6 +33,19 @@ export const creativeTruthGateNameSchema = z.enum([
   'QUALITY',
 ]);
 
+export const creativeAssetLocatorKindSchema = z.enum([
+  'MEDIA_URL',
+  'META_IMAGE_HASH',
+  'META_VIDEO_ID',
+  'META_SOURCE_CREATIVE_ID',
+  'DRIVE_FILE_ID',
+]);
+
+export const creativeAssetLocatorSchema = z.object({
+  kind: creativeAssetLocatorKindSchema,
+  value: z.string().trim().min(1),
+});
+
 export const brandAssetSchema = z
   .object({
     brandAssetId: z.string().min(1),
@@ -159,6 +172,7 @@ export const creativeTruthPublicationBindingSchema = z.object({
   brandIntegrityStatus: z.literal('PASSED'),
   venueFidelityStatus: z.literal('PASSED'),
   qualityGateStatus: z.literal('PASSED'),
+  assetLocators: z.array(creativeAssetLocatorSchema).min(1),
   exactAssetBinding: z.literal(true),
 });
 
@@ -181,6 +195,8 @@ export const deterministicRenderManifestSchema = z.object({
 export type CreativeMode = z.infer<typeof creativeModeSchema>;
 export type CreativeTruthFailureCode = z.infer<typeof creativeTruthFailureCodeSchema>;
 export type CreativeTruthGateName = z.infer<typeof creativeTruthGateNameSchema>;
+export type CreativeAssetLocatorKind = z.infer<typeof creativeAssetLocatorKindSchema>;
+export type CreativeAssetLocator = z.infer<typeof creativeAssetLocatorSchema>;
 export type BrandAsset = z.infer<typeof brandAssetSchema>;
 export type VenueAsset = z.infer<typeof venueAssetSchema>;
 export type VenueReference = z.infer<typeof venueReferenceSchema>;
