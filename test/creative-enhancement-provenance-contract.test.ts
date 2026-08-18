@@ -18,9 +18,9 @@ const valid = {
 } as const;
 
 const policy = {
-  schemaVersion: '1.0',
+  schemaVersion: '1.1',
   policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-  policyVersion: '1.0',
+  policyVersion: '1.1',
   status: 'ACTIVE_CANONICAL',
   brandScope: 'TOCA_DO_MORCEGO',
   validatedAt: '2026-08-18',
@@ -44,13 +44,21 @@ const policy = {
     enhancementProvenanceRequired: true,
     videoRealPlusEnhancement: 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
     videoEnhancementFailure: 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+    videoGenerativeException: 'UNSUPPORTED_V1',
     exactApprovedAssetMustBePublished: true,
     failClosed: true,
   },
   generativeException: {
     explicitApprovalRequired: true,
     approvalRecordRequired: true,
-    venueReferenceSetRequired: 'TOCA_VENUE_REFERENCE_SET_V1',
+    referenceStrategy: 'OPERATION_SCOPED_ONLY_V1',
+    legacyReferenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
+    legacyReferenceSetStatus: 'DEPRECATED',
+    sunsetReferenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+    thePartyReferenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+    crossOperationReferenceReuse: 'FORBIDDEN',
+    referenceSetOperationMatch: 'REQUIRED',
+    legacyReferenceSetExecution: 'DENY',
     minimumVerifiedReferences: 3,
     venueFidelityGateStillRequired: true,
     officialBrandAssetsStillRequired: true,
@@ -73,6 +81,8 @@ const policy = {
     'FAILED_ARCHITECTURE_DRIFT',
     'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
     'FAILED_GENERATIVE_REFERENCE_MISSING',
+    'FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING',
+    'FAILED_FIDELITY_EVIDENCE_BINDING',
     'FAILED_STANDARD_NOT_RESOLVED',
     'FAILED_LINEAGE_MISSING',
     'FAILED_ENHANCEMENT_PROVENANCE',
@@ -83,11 +93,20 @@ const policy = {
 };
 
 describe('Creative enhancement provenance contract', () => {
-  it('accepts the canonical policy only with enhancement provenance and video fail-closed flags', () => {
-    expect(creativeTruthPolicySchema.parse(policy).rules).toMatchObject({
+  it('accepts the canonical policy only with enhancement provenance, video fail-closed flags and operation-scoped generative truth', () => {
+    const parsed = creativeTruthPolicySchema.parse(policy);
+    expect(parsed.rules).toMatchObject({
       enhancementProvenanceRequired: true,
       videoRealPlusEnhancement: 'FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE',
       videoEnhancementFailure: 'VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED',
+      videoGenerativeException: 'UNSUPPORTED_V1',
+    });
+    expect(parsed.generativeException).toMatchObject({
+      referenceStrategy: 'OPERATION_SCOPED_ONLY_V1',
+      legacyReferenceSetStatus: 'DEPRECATED',
+      crossOperationReferenceReuse: 'FORBIDDEN',
+      referenceSetOperationMatch: 'REQUIRED',
+      legacyReferenceSetExecution: 'DENY',
     });
   });
 
@@ -96,6 +115,18 @@ describe('Creative enhancement provenance contract', () => {
       creativeTruthPolicySchema.parse({
         ...policy,
         rules: { ...policy.rules, enhancementProvenanceRequired: false },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects canonical policy drift that re-enables the deprecated global generative set', () => {
+    expect(() =>
+      creativeTruthPolicySchema.parse({
+        ...policy,
+        generativeException: {
+          ...policy.generativeException,
+          legacyReferenceSetExecution: 'ALLOW',
+        },
       }),
     ).toThrow();
   });
