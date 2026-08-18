@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ExecutionError } from '../core/errors.js';
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
+  TOCA_VENUE_REFERENCE_SET_ID,
   type BrandAsset,
   type CreativeAssetLocator,
   type CreativeMode,
@@ -238,10 +239,21 @@ function validateGenerativeException(
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
   if (
-    approval.expiresAt &&
-    Date.parse(approval.expiresAt) <= Date.parse(input.nowIso ?? new Date().toISOString())
+    approval.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID ||
+    approval.minReferenceCount < 3
   ) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+  }
+
+  const nowTimestamp = Date.parse(input.nowIso ?? new Date().toISOString());
+  if (!Number.isFinite(nowTimestamp)) {
+    failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+  }
+  if (approval.expiresAt) {
+    const expiresTimestamp = Date.parse(approval.expiresAt);
+    if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) {
+      failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+    }
   }
   if (
     approval.allowArchitecturalInvention ||
@@ -251,19 +263,22 @@ function validateGenerativeException(
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
 
+  const requiredReferenceCount = Math.max(3, approval.minReferenceCount);
   const activeReferences = (input.references ?? []).filter(
     (reference) =>
       reference.status === 'ACTIVE' &&
       reference.venueVerified &&
       reference.requiredForGenerativeException &&
+      reference.referenceSetId === TOCA_VENUE_REFERENCE_SET_ID &&
       reference.referenceSetId === approval.referenceSetId,
   );
-  if (activeReferences.length < approval.minReferenceCount) {
+  if (activeReferences.length < requiredReferenceCount) {
     failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
   }
 
   if (
     !evidence ||
+    evidence.referenceSetId !== TOCA_VENUE_REFERENCE_SET_ID ||
     evidence.referenceSetId !== approval.referenceSetId ||
     !evidence.sourceIdentityPreserved
   ) {
@@ -276,7 +291,7 @@ function validateGenerativeException(
       activeReferenceIds.has(assetId),
     );
     if (
-      evidencedActiveReferenceCount < approval.minReferenceCount ||
+      evidencedActiveReferenceCount < requiredReferenceCount ||
       !allEvidenceReferencesAreActive
     ) {
       failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
