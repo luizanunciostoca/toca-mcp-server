@@ -10,8 +10,8 @@ import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../google-sheets/creative-truth-registry.js';
 
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
-const DEFAULT_RESPONSE_MODEL = 'gpt-5';
-const DEFAULT_IMAGE_MODEL = 'gpt-image-1';
+const DEFAULT_RESPONSE_MODEL = 'gpt-5.6-sol';
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 const SUPPORTED_REFERENCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export interface GenerativeVenueReferenceInput {
