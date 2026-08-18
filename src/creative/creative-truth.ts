@@ -47,11 +47,21 @@ export function evaluateBrandIntegrity(
   resolvedAssets: readonly ResolvedBrandAsset[],
 ): CreativeTruthGateResult {
   const failures = new Set<CreativeTruthFailureCode>();
-  const byBrand = new Map(resolvedAssets.map((entry) => [entry.asset.brand, entry]));
+  const assetsByBrand = new Map<string, ResolvedBrandAsset[]>();
+  for (const resolved of resolvedAssets) {
+    const group = assetsByBrand.get(resolved.asset.brand) ?? [];
+    group.push(resolved);
+    assetsByBrand.set(resolved.asset.brand, group);
+  }
 
-  for (const brand of requiredBrands) {
-    const resolved = byBrand.get(brand);
-    if (!resolved || resolved.asset.status !== 'ACTIVE_APPROVED') {
+  for (const brand of new Set(requiredBrands)) {
+    const candidates = assetsByBrand.get(brand) ?? [];
+    if (candidates.length !== 1) {
+      failures.add('FAILED_BRAND_ASSET_MISSING');
+      continue;
+    }
+    const resolved = candidates[0]!;
+    if (resolved.asset.status !== 'ACTIVE_APPROVED') {
       failures.add('FAILED_BRAND_ASSET_MISSING');
       continue;
     }
@@ -62,17 +72,24 @@ export function evaluateBrandIntegrity(
       failures.add('FAILED_BRAND_ASSET_MISSING');
     }
     if (
-      resolved.asset.integrityMode === 'SHA256_PINNED' &&
-      resolved.asset.sha256 !== resolved.observedSha256
+      resolved.asset.integrityMode !== 'SHA256_PINNED' ||
+      !resolved.asset.sha256 ||
+      !resolved.observedSha256 ||
+      resolved.asset.sha256.toLowerCase() !== resolved.observedSha256.toLowerCase()
     ) {
       failures.add('FAILED_BRAND_ASSET_HASH_MISMATCH');
     }
+  }
+
+  if (new Set(requiredBrands).size !== requiredBrands.length) {
+    failures.add('FAILED_BRAND_ASSET_MISSING');
   }
 
   return gateResult('BRAND_INTEGRITY', failures, {
     requiredBrands: [...requiredBrands],
     resolvedBrandAssetIds: resolvedAssets.map(({ asset }) => asset.brandAssetId),
     officialDriveFileIds: resolvedAssets.map(({ asset }) => asset.driveFileId),
+    sha256PinnedOnly: true,
   });
 }
 
