@@ -5,6 +5,8 @@ import type {
   SpreadsheetValuesClient,
 } from '../src/providers/google-sheets/media-assets.js';
 
+const artifactRef =
+  'gcs://toca-bucket/instagram/photo-motion-review-v1/photo-video-1234567890abcdef12345678-aaaaaaaaaaaaaaaa.mp4';
 const headers = [
   'content_item_id',
   'video_product_id',
@@ -12,7 +14,9 @@ const headers = [
   'video_standard_id',
   'video_candidate_sha256',
   'video_provider_job_id',
+  'video_candidate_artifact_ref',
   'video_final_asset_sha256',
+  'video_final_artifact_ref',
   'video_review_status',
   'video_output_evidence_id',
 ];
@@ -28,8 +32,8 @@ function client(row: readonly unknown[]) {
 }
 
 describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
-  it('writes candidate identity without granting publication state', async () => {
-    const fake = client(['CONTENT-1', '', '', '', '', '', '', '', '']);
+  it('writes candidate identity and durable artifact without granting publication state', async () => {
+    const fake = client(['CONTENT-1', '', '', '', '', '', '', '', '', '', '']);
     const writeback = new GoogleSheetsPhotoToVideoContentWriteback(fake.value, 'content-sheet');
     await writeback.writeCandidate({
       contentItemId: 'CONTENT-1',
@@ -37,6 +41,7 @@ describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
       routeType: 'GENERATIVE_SCENE_CONTINUATION_VIDEO',
       standardId: 'SUNSET_REEL_SCENE_CONTINUATION_V1',
       candidateSha256: 'a'.repeat(64),
+      candidateArtifactRef: artifactRef,
       providerJobId: 'video_123',
     });
     expect(fake.updateRanges).toHaveBeenCalledTimes(1);
@@ -45,6 +50,7 @@ describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
       expect.arrayContaining([
         expect.objectContaining({ values: [['GENERATED_REVIEW_REQUIRED']] }),
         expect.objectContaining({ values: [['video_123']] }),
+        expect.objectContaining({ values: [[artifactRef]] }),
       ]),
     );
   });
@@ -56,6 +62,8 @@ describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
       'REAL_PHOTO_TO_MOTION_VIDEO',
       'SUNSET_REEL_PHOTO_MOTION_V1',
       'a'.repeat(64),
+      '',
+      artifactRef,
       '',
       '',
       'GENERATED_REVIEW_REQUIRED',
@@ -69,18 +77,21 @@ describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
         routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
         standardId: 'SUNSET_REEL_PHOTO_MOTION_V1',
         candidateSha256: 'b'.repeat(64),
+        candidateArtifactRef: artifactRef,
       }),
     ).rejects.toThrow('VIDEO_DIFFERENT_CANDIDATE_ALREADY_RECORDED');
     expect(fake.updateRanges).not.toHaveBeenCalled();
   });
 
-  it('requires final writeback to match the recorded candidate exactly', async () => {
+  it('requires final writeback to match the recorded candidate and artifact exactly', async () => {
     const fake = client([
       'CONTENT-1',
       'SUNSET',
       'REAL_PHOTO_TO_MOTION_VIDEO',
       'SUNSET_REEL_PHOTO_MOTION_V1',
       'a'.repeat(64),
+      '',
+      artifactRef,
       '',
       '',
       'GENERATED_REVIEW_REQUIRED',
@@ -94,6 +105,7 @@ describe('GoogleSheetsPhotoToVideoContentWriteback', () => {
         standardId: 'SUNSET_REEL_PHOTO_MOTION_V1',
         candidateSha256: 'b'.repeat(64),
         finalAssetSha256: 'b'.repeat(64),
+        finalArtifactRef: artifactRef,
         outputEvidenceId: 'VIDEO-1',
       }),
     ).rejects.toThrow('VIDEO_CONTENT_CANDIDATE_BINDING_CHANGED');
