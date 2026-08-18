@@ -1,9 +1,14 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  TOCA_CREATIVE_TRUTH_POLICY_ID,
+  creativeEnhancementProvenanceSchema,
+  type CreativeEnhancementProvenance,
+} from '../../contracts/creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
 
 const execFileAsync = promisify(execFile);
@@ -13,14 +18,13 @@ export interface LocalPhotoEnhanceInput {
   readonly sourceDriveFileId: string;
   readonly imageBytes: Uint8Array;
   readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  readonly creativeTruth: {
+    readonly policyId: typeof TOCA_CREATIVE_TRUTH_POLICY_ID;
+    readonly creativeMode: 'REAL_PLUS_ENHANCEMENT';
+  };
 }
 
-export interface LocalPhotoEnhanceResult {
-  readonly sourceAssetId: string;
-  readonly sourceDriveFileId: string;
-  readonly sourceSha256: string;
-  readonly outputSha256: string;
-  readonly sourceImageBound: true;
+export interface LocalPhotoEnhanceResult extends CreativeEnhancementProvenance {
   readonly editMode: 'ENHANCE_EXISTING_IMAGE';
   readonly editorProvider: 'LOCAL_IMAGEMAGICK';
   readonly pipelineVersion: 'local-photo-enhancer-v1';
@@ -76,12 +80,19 @@ export class LocalPhotoEnhancer {
         );
       }
 
-      return {
+      const provenance = creativeEnhancementProvenanceSchema.parse({
         sourceAssetId: input.sourceAssetId,
         sourceDriveFileId: input.sourceDriveFileId,
         sourceSha256: sha256(input.imageBytes),
         outputSha256: sha256(outputBytes),
         sourceImageBound: true,
+        editorProvider: 'LOCAL_IMAGEMAGICK',
+        creativeTruthBound: true,
+        requiresVenueFidelityGate: true,
+      });
+
+      return {
+        ...provenance,
         editMode: 'ENHANCE_EXISTING_IMAGE',
         editorProvider: 'LOCAL_IMAGEMAGICK',
         pipelineVersion: 'local-photo-enhancer-v1',
@@ -126,6 +137,16 @@ function validateInput(input: LocalPhotoEnhanceInput): void {
     throw new ExecutionError(
       'SOURCE_IMAGE_BINDING_FAILURE',
       'LOCAL_PHOTO_ENHANCER_SOURCE_BYTES_REQUIRED',
+      false,
+    );
+  }
+  if (
+    input.creativeTruth.policyId !== TOCA_CREATIVE_TRUTH_POLICY_ID ||
+    input.creativeTruth.creativeMode !== 'REAL_PLUS_ENHANCEMENT'
+  ) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'LOCAL_PHOTO_ENHANCER_CREATIVE_TRUTH_REQUIRED',
       false,
     );
   }
