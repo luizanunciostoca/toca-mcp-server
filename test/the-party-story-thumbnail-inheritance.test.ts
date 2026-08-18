@@ -96,7 +96,9 @@ function runner() {
   });
 }
 
-function qualityEvidence(result: { manifest: { gates: readonly { gate: string; evidence: Record<string, unknown> }[] } }) {
+function qualityEvidence(result: {
+  manifest: { gates: readonly { gate: string; evidence: Record<string, unknown> }[] };
+}) {
   return result.manifest.gates.find((gate) => gate.gate === 'QUALITY')?.evidence;
 }
 
@@ -108,8 +110,8 @@ describe('The Party Story visual-family inheritance', () => {
     const result = await composer.compose({
       storyCreativeId: 'TP-STORY-001',
       contentItemId: 'CONTENT-TP-STORY-001',
-      masterAssetId: venue.masterAssetId,
-      masterDriveFileId: venue.masterDriveFileId,
+      masterAssetId: venue.masterAssetId!,
+      masterDriveFileId: venue.masterDriveFileId!,
       imageBytes,
       contentType: 'image/jpeg',
       templateId: 'EVENT_CTA',
@@ -139,8 +141,8 @@ describe('The Party Story visual-family inheritance', () => {
       composer.compose({
         storyCreativeId: 'TP-STORY-NO-ENV',
         contentItemId: 'CONTENT-TP-STORY-NO-ENV',
-        masterAssetId: venue.masterAssetId,
-        masterDriveFileId: venue.masterDriveFileId,
+        masterAssetId: venue.masterAssetId!,
+        masterDriveFileId: venue.masterDriveFileId!,
         imageBytes,
         contentType: 'image/jpeg',
         templateId: 'PHOTO_ONLY',
