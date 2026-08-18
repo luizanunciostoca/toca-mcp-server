@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "standardId": "SUNSET_STORY_V1",
-  "standardVersion": "1.1",
+  "standardVersion": "1.2",
   "status": "ACTIVE_CANONICAL",
   "validatedAt": "2026-08-18",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
@@ -33,6 +33,26 @@
     "brandFooterTopPx": 1680,
     "brandFooterBottomPx": 1830,
     "bottomBreathingRoomMinimumPx": 70
+  },
+  "rendererContract": {
+    "rendererId": "LOCAL_SUNSET_STORY_RENDERER_V1",
+    "implementationPath": "src/providers/local/local-sunset-story-renderer.ts",
+    "dedicatedRendererRequired": true,
+    "genericRendererFallbackAllowed": false,
+    "canvas": "1080x1920",
+    "outputMimeType": "image/jpeg",
+    "jpegQuality": 95,
+    "sourceFit": "COVER_CENTER",
+    "backgroundOverlay": "rgba(0,0,0,0.10)",
+    "footerContrastOverlay": "rgba(0,0,0,0.46)",
+    "footerContrastOverlayTopPx": 1600,
+    "runtimeTypographyProfile": {
+      "headlineFont": "DejaVu-Serif",
+      "supportFont": "DejaVu-Sans",
+      "ctaFont": "DejaVu-Sans",
+      "functionalInfoFont": "DejaVu-Sans",
+      "note": "Pinned deterministic runtime profile. Typography remains governed by the visual classes below; replacing these runtime fonts requires a new standard version and visual regression approval."
+    }
   },
   "visualEssence": [
     "SOLAR",
@@ -68,24 +88,30 @@
   "typography": {
     "headline": {
       "familyClass": "ELEGANT_EDITORIAL_SERIF",
+      "runtimeFont": "DejaVu-Serif",
       "defaultColor": "#FFFFFF",
       "maxLines": 3
     },
     "support": {
       "familyClass": "CLEAN_GEOMETRIC_SANS",
+      "runtimeFont": "DejaVu-Sans",
       "weight": "REGULAR_OR_MEDIUM",
-      "maxLines": 3
+      "maxLines": 3,
+      "container": "TRANSLUCENT_WHITE_RECTANGLE",
+      "textColor": "#3A1C0F"
     },
     "cta": {
       "familyClass": "CLEAN_SANS",
+      "runtimeFont": "DejaVu-Sans",
       "weight": "MEDIUM_OR_SEMIBOLD",
       "container": "THIN_WHITE_OUTLINE",
       "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
     },
     "time": {
       "familyClass": "CLEAN_SANS",
+      "runtimeFont": "DejaVu-Sans",
       "weight": "BOLD_OR_SEMIBOLD",
-      "preferredContainer": "DISCREET_RECTANGULAR_STRIP"
+      "preferredContainer": "SUNSET_ORANGE_RECTANGULAR_STRIP"
     },
     "maxFontFamilies": 2,
     "scriptUsage": "EXCEPTIONAL_ONLY"
@@ -97,38 +123,78 @@
     "deepOrange": "#E65A00",
     "softGold": "#F2C17A",
     "deepBrown": "#3A1C0F",
-    "translucentBlackRange": "rgba(0,0,0,0.50)-rgba(0,0,0,0.65)"
+    "translucentBlackRange": "rgba(0,0,0,0.10)-rgba(0,0,0,0.46)"
+  },
+  "layoutSystem": {
+    "footer": {
+      "topPx": 1680,
+      "bottomPx": 1830,
+      "slotTopPx": 1700,
+      "slotWidthPx": 225,
+      "slotHeightPx": 118,
+      "slotLeftPx": [45, 270, 495, 720]
+    },
+    "templatePresets": {
+      "SUNSET_HERO_LIFESTYLE": {
+        "headline": { "leftPx": 74, "topPx": 250, "widthPx": 910, "heightPx": 390, "pointSize": 108 },
+        "support": { "leftPx": 74, "topPx": 720, "widthPx": 500, "heightPx": 150, "pointSize": 32 },
+        "cta": { "leftPx": 74, "topPx": 920, "widthPx": 430, "heightPx": 82, "pointSize": 34 },
+        "functionalInfo": { "topPx": 130, "heightPx": 72, "pointSize": 34 }
+      },
+      "SUNSET_VIEW_SCENERY": {
+        "headline": { "leftPx": 90, "topPx": 500, "widthPx": 900, "heightPx": 410, "pointSize": 112 },
+        "support": { "leftPx": 90, "topPx": 930, "widthPx": 620, "heightPx": 150, "pointSize": 32 },
+        "cta": { "leftPx": 90, "topPx": 1110, "widthPx": 430, "heightPx": 82, "pointSize": 34 },
+        "functionalInfo": { "topPx": 180, "heightPx": 72, "pointSize": 34 }
+      },
+      "SUNSET_SOCIAL_EXPERIENCE": {
+        "headline": { "leftPx": 90, "topPx": 1010, "widthPx": 860, "heightPx": 330, "pointSize": 96 },
+        "support": { "leftPx": 70, "topPx": 250, "widthPx": 620, "heightPx": 160, "pointSize": 32 },
+        "cta": { "leftPx": 300, "topPx": 900, "widthPx": 480, "heightPx": 82, "pointSize": 34 },
+        "functionalInfo": { "topPx": 150, "heightPx": 72, "pointSize": 34 }
+      },
+      "SUNSET_DRINKS_EXPERIENCE": {
+        "headline": { "leftPx": 90, "topPx": 1080, "widthPx": 900, "heightPx": 330, "pointSize": 92 },
+        "support": { "leftPx": 90, "topPx": 900, "widthPx": 620, "heightPx": 145, "pointSize": 32 },
+        "cta": { "leftPx": 260, "topPx": 1410, "widthPx": 560, "heightPx": 82, "pointSize": 34 },
+        "functionalInfo": { "topPx": 150, "heightPx": 72, "pointSize": 34 }
+      },
+      "SUNSET_INFO_HOURS": {
+        "headline": { "leftPx": 60, "topPx": 315, "widthPx": 960, "heightPx": 520, "pointSize": 138 },
+        "support": { "leftPx": 90, "topPx": 930, "widthPx": 640, "heightPx": 150, "pointSize": 32 },
+        "cta": { "leftPx": 250, "topPx": 1240, "widthPx": 580, "heightPx": 82, "pointSize": 34 },
+        "functionalInfo": { "topPx": 140, "heightPx": 72, "pointSize": 34 }
+      }
+    }
   },
   "templateClasses": [
-    {
-      "id": "SUNSET_HERO_LIFESTYLE",
-      "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR"
-    },
-    {
-      "id": "SUNSET_VIEW_SCENERY",
-      "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE"
-    },
-    {
-      "id": "SUNSET_SOCIAL_EXPERIENCE",
-      "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY"
-    },
-    {
-      "id": "SUNSET_DRINKS_EXPERIENCE",
-      "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL"
-    },
-    {
-      "id": "SUNSET_INFO_HOURS",
-      "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS"
-    }
+    { "id": "SUNSET_HERO_LIFESTYLE", "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR" },
+    { "id": "SUNSET_VIEW_SCENERY", "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE" },
+    { "id": "SUNSET_SOCIAL_EXPERIENCE", "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY" },
+    { "id": "SUNSET_DRINKS_EXPERIENCE", "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL" },
+    { "id": "SUNSET_INFO_HOURS", "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS" }
   ],
   "brandFooter": {
     "required": true,
-    "orderDefault": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
-    "partnerLogosOnlyWhenCampaignRequires": true,
+    "allFourRequired": true,
+    "orderFixed": true,
+    "requiredBrands": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
+    "requiredBrandAssetIds": [
+      "BRAND-TOCA-WHITE-V1",
+      "BRAND-CORONA-WHITE-V1",
+      "BRAND-REDBULL-WHITE-V1",
+      "BRAND-MORRO-WHITE-V1"
+    ],
     "preferredColor": "#FFFFFF",
     "logoSource": "OFFICIAL_DRIVE_ASSETS_ONLY",
     "deterministicInsertionRequired": true,
-    "forbidAiLogoReconstruction": true
+    "forbidAiLogoReconstruction": true,
+    "visualWeightProfile": {
+      "BRAND-TOCA-WHITE-V1": { "maxWidthPx": 135, "maxHeightPx": 112 },
+      "BRAND-CORONA-WHITE-V1": { "maxWidthPx": 180, "maxHeightPx": 92 },
+      "BRAND-REDBULL-WHITE-V1": { "maxWidthPx": 180, "maxHeightPx": 92 },
+      "BRAND-MORRO-WHITE-V1": { "maxWidthPx": 170, "maxHeightPx": 86 }
+    }
   },
   "creativeTruth": {
     "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
@@ -143,7 +209,8 @@
   "toolRouting": {
     "directImageGenerationFinalization": "DENY",
     "imageGenerationRole": "GENERATIVE_EXCEPTION_CANDIDATE_ONLY",
-    "finalizer": "DETERMINISTIC_COMPOSER",
+    "finalizer": "LOCAL_SUNSET_STORY_RENDERER_V1",
+    "genericFinalizerAllowed": false,
     "officialBrandAssetByteBindingRequired": true,
     "modelRenderedLogoAllowed": false,
     "modelRenderedMarketingTextAllowed": false,
@@ -166,7 +233,10 @@
       "EXCESSIVE_TEXT",
       "MULTIPLE_PRIMARY_CTAS",
       "REQUIRED_LOGOS_MISSING_OR_MISALIGNED",
+      "REQUIRED_LOGO_ORDER_MISMATCH",
+      "REQUIRED_LOGO_ASSET_ID_MISMATCH",
       "AI_RECREATED_LOGO",
+      "GENERIC_RENDERER_USED_FOR_SUNSET_STORY",
       "DIRECT_IMAGE_GENERATION_USED_AS_FINALIZER",
       "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET",
       "ARCHITECTURE_DRIFT",
@@ -177,12 +247,15 @@
   },
   "productionFlow": [
     "RESOLVE_CREATIVE_TRUTH_POLICY",
-    "RESOLVE_STANDARD",
+    "RESOLVE_STANDARD_SUNSET_STORY_V1_2",
     "SELECT_TEMPLATE_CLASS",
     "SELECT_VENUE_VERIFIED_MARKETING_READY_MASTER",
-    "COMPOSE_1080X1920",
+    "LOAD_FOUR_REQUIRED_OFFICIAL_BRAND_ASSETS",
+    "VERIFY_BRAND_DRIVE_IDS_AND_SHA256",
+    "ROUTE_LOCAL_SUNSET_STORY_RENDERER_V1",
+    "COMPOSE_1080X1920_FROM_FIXED_GRID",
     "APPLY_COPY_AND_CTA",
-    "INSERT_OFFICIAL_LOGOS_DETERMINISTICALLY",
+    "INSERT_FOUR_OFFICIAL_LOGOS_IN_FIXED_ORDER",
     "BRAND_INTEGRITY_GATE",
     "VENUE_FIDELITY_GATE",
     "QUALITY_GATE_SUNSET",
@@ -196,12 +269,7 @@
     "originalReferencesAreVisualStyleReferences": true,
     "derivedExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
     "derivedExamplesMayTeach": ["PALETTE", "TYPOGRAPHY", "LAYOUT", "CTA_STYLE"],
-    "derivedExamplesMayNotTeach": [
-      "VENUE_GEOMETRY",
-      "ARCHITECTURE",
-      "FURNITURE",
-      "SPATIAL_FACTS"
-    ],
+    "derivedExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
     "venueTruthComesOnlyFromVenueRegistry": true
   },
   "referenceFiles": {
