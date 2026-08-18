@@ -85,6 +85,16 @@ requireIncludes('src/providers/local/local-creative-composer.ts', [
   "entry.registry.brand === 'THE_PARTY'",
 ]);
 
+requireIncludes('src/providers/local/local-video-composer.ts', [
+  'THE_PARTY_HYBRID_NETWORKS_V1',
+  'THE_PARTY_HYBRID_MINIMALIST_V1',
+  "entry.registry.brand === 'THE_PARTY'",
+  'THE_PARTY_FOOTER_ORDER',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
+  'visualStandardApplied: input.standard.standardId',
+  'VIDEO_GENERATIVE_EXCEPTION_UNSUPPORTED',
+]);
+
 requireIncludes(docsPath, [
   'THE_PARTY_HYBRID_NETWORKS_V1',
   'THE_PARTY_HYBRID_MINIMALIST_V1',
