@@ -14,6 +14,8 @@ const masterBytes = Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]);
 const masterSha256 = createHash('sha256').update(masterBytes).digest('hex');
 const enhancedBytes = Buffer.from([0xff, 0xd8, 0x02, 0xff, 0xd9]);
 const enhancedSha256 = createHash('sha256').update(enhancedBytes).digest('hex');
+const brandBytes = Uint8Array.from([10, 11, 12]);
+const brandSha256 = createHash('sha256').update(brandBytes).digest('hex');
 
 const standard: CreativeStandard = {
   standardId: 'SUNSET_STORY_V1',
@@ -56,7 +58,8 @@ const toca: BrandAsset = {
   driveFileId: 'drive-toca-logo',
   fileName: 'toca.png',
   contentType: 'image/png',
-  integrityMode: 'DRIVE_FILE_ID_PINNED',
+  integrityMode: 'SHA256_PINNED',
+  sha256: brandSha256,
   status: 'ACTIVE_APPROVED',
   aiReconstructionAllowed: false,
 };
@@ -90,7 +93,7 @@ const fidelityEvidence: FidelityEvidence = {
 function brandInput() {
   return {
     registry: toca,
-    bytes: Uint8Array.from([10, 11, 12]),
+    bytes: brandBytes,
     contentType: 'image/png' as const,
     driveFileId: toca.driveFileId,
   };
