@@ -116,10 +116,7 @@ describe('Creative Truth gates', () => {
   it('rejects DRIVE_FILE_ID_PINNED mode even if a digest happens to be present', () => {
     const gate = evaluateBrandIntegrity(['MORRO_DIGITAL'], [
       {
-        asset: {
-          ...morroLogo,
-          integrityMode: 'DRIVE_FILE_ID_PINNED',
-        },
+        asset: { ...morroLogo, integrityMode: 'DRIVE_FILE_ID_PINNED' },
         observedDriveFileId: morroLogo.driveFileId,
         observedSha256: morroLogo.sha256,
       },
@@ -229,7 +226,7 @@ describe('Creative Truth gates', () => {
     expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 
-  it('rejects an approved generative exception when venue references are insufficient', () => {
+  it('rejects an approved legacy generative exception even when venue references are insufficient', () => {
     const approval = approvedException();
     const gate = evaluateVenueFidelity({
       contentItemId: 'CONTENT-001',
@@ -242,10 +239,10 @@ describe('Creative Truth gates', () => {
     });
 
     expect(gate.status).toBe('FAILED');
-    expect(gate.failureCodes).toContain('FAILED_GENERATIVE_REFERENCE_MISSING');
+    expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 
-  it('still rejects environment/architecture drift after a generative exception has enough real references', () => {
+  it('rejects the deprecated global reference-set finalization even when evidence also shows drift', () => {
     const approval = approvedException();
     const references = [
       reference('REF-1', 'SUN-0001'),
@@ -270,11 +267,10 @@ describe('Creative Truth gates', () => {
     });
 
     expect(gate.status).toBe('FAILED');
-    expect(gate.failureCodes).toContain('FAILED_ARCHITECTURE_DRIFT');
-    expect(gate.failureCodes).toContain('FAILED_SCENE_INVENTION_DETECTED');
+    expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 
-  it('rejects a generative output before output-specific human review even with enough real references', () => {
+  it('rejects the deprecated global reference-set finalization before output-specific review can matter', () => {
     const approval = approvedException();
     const references = [
       reference('REF-1', 'SUN-0001'),
@@ -304,10 +300,10 @@ describe('Creative Truth gates', () => {
     });
 
     expect(gate.status).toBe('FAILED');
-    expect(gate.failureCodes).toContain('FAILED_GENERATIVE_OUTPUT_REVIEW_MISSING');
+    expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 
-  it('passes a controlled generative exception only with enough verified references, exact output evidence, human review and no drift', () => {
+  it('never passes the deprecated global reference set at the final Venue Fidelity boundary', () => {
     const approval = approvedException();
     const references = [
       reference('REF-1', 'SUN-0001'),
@@ -327,8 +323,8 @@ describe('Creative Truth gates', () => {
       nowIso: '2026-08-17T22:00:00-03:00',
     });
 
-    expect(gate.status).toBe('PASSED');
-    expect(gate.failureCodes).toEqual([]);
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   });
 });
 
