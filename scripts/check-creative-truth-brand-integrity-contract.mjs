@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
 
+const contracts = read('src/contracts/creative-truth.ts');
 const creativeTruth = read('src/creative/creative-truth.ts');
 const composer = read('src/providers/local/local-creative-composer.ts');
 const policy = JSON.parse(read('control/creative-truth-policy.v1.json'));
+
+if (!contracts.includes("videoGenerativeException: z.literal('UNSUPPORTED_V1')")) {
+  fail('Creative Truth schema must lock full-generative video as UNSUPPORTED_V1');
+}
 
 for (const marker of [
   'const assetsByBrand = new Map<string, ResolvedBrandAsset[]>()',
@@ -33,9 +38,10 @@ if (
   policy.rules?.officialBrandAssetsOnly !== true ||
   policy.rules?.aiLogoReconstructionAllowed !== false ||
   policy.rules?.deterministicTextAndBrandCompositionRequired !== true ||
+  policy.rules?.videoGenerativeException !== 'UNSUPPORTED_V1' ||
   policy.rules?.failClosed !== true
 ) {
-  fail('Creative Truth policy mirror does not preserve official-logo-only fail-closed composition');
+  fail('Creative Truth policy mirror does not preserve canonical fail-closed brand/video controls');
 }
 
 console.log('Creative Truth exact official-logo integrity contract OK');
