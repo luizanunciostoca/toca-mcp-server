@@ -24,6 +24,19 @@ const morroLogo: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
+const coronaLogo: BrandAsset = {
+  brandAssetId: 'BRAND-CORONA-WHITE-V1',
+  brand: 'CORONA',
+  variant: 'WHITE',
+  driveFileId: 'drive-corona-white',
+  fileName: 'CORONA_LOGO_BRANCO.png',
+  contentType: 'image/png',
+  integrityMode: 'SHA256_PINNED',
+  sha256: 'c'.repeat(64),
+  status: 'ACTIVE_APPROVED',
+  aiReconstructionAllowed: false,
+};
+
 const venue: VenueAsset = {
   venueAssetId: 'VENUE-SUN-0244',
   sourceAssetId: 'SUN-0244',
@@ -65,6 +78,32 @@ describe('Creative Truth gates', () => {
     expect(gate.status).toBe('FAILED');
     expect(gate.failureCodes).toContain('FAILED_AI_LOGO_RECONSTRUCTION');
     expect(() => requireGatePassed(gate)).toThrow('FAILED_AI_LOGO_RECONSTRUCTION');
+  });
+
+  it('rejects an unapproved partner asset even when a file with the expected brand is supplied', () => {
+    const gate = evaluateBrandIntegrity(['CORONA'], [
+      {
+        asset: { ...coronaLogo, status: 'REVOKED' },
+        observedDriveFileId: coronaLogo.driveFileId,
+        observedSha256: coronaLogo.sha256,
+      },
+    ]);
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_MISSING');
+  });
+
+  it('rejects a pinned official partner file whose bytes do not match the registered SHA-256', () => {
+    const gate = evaluateBrandIntegrity(['CORONA'], [
+      {
+        asset: coronaLogo,
+        observedDriveFileId: coronaLogo.driveFileId,
+        observedSha256: 'd'.repeat(64),
+      },
+    ]);
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_BRAND_ASSET_HASH_MISMATCH');
   });
 
   it('rejects unverified or non-marketing-ready venue assets by default', () => {
@@ -114,6 +153,32 @@ describe('Creative Truth gates', () => {
 
     expect(gate.status).toBe('FAILED');
     expect(gate.failureCodes).toContain('FAILED_GENERATIVE_REFERENCE_MISSING');
+  });
+
+  it('still rejects environment/architecture drift after a generative exception has enough real references', () => {
+    const approval = approvedException();
+    const references = [
+      reference('REF-1', 'SUN-0001'),
+      reference('REF-2', 'SUN-0004'),
+      reference('REF-3', 'SUN-0009'),
+    ];
+    const gate = evaluateVenueFidelity({
+      creativeMode: 'GENERATIVE_EXCEPTION',
+      generativeException: approval,
+      references,
+      evidence: {
+        ...cleanEvidence,
+        referenceSetId: approval.referenceSetId,
+        referenceAssetIds: references.map((item) => item.assetId),
+        architectureDriftDetected: true,
+        sceneInventionDetected: true,
+      },
+      nowIso: '2026-08-17T22:00:00-03:00',
+    });
+
+    expect(gate.status).toBe('FAILED');
+    expect(gate.failureCodes).toContain('FAILED_ARCHITECTURE_DRIFT');
+    expect(gate.failureCodes).toContain('FAILED_SCENE_INVENTION_DETECTED');
   });
 
   it('passes a controlled generative exception only with enough verified references and no drift', () => {
