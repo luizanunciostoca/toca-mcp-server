@@ -4,6 +4,7 @@ import type {
   VenueReference,
 } from '../src/contracts/creative-truth.js';
 import { ControlledStaticImageGenerationService } from '../src/creative/controlled-static-image-generation.js';
+import type { CreativeTruthOpenAiImageGenerator } from '../src/providers/openai/creative-truth-openai-image-generator.js';
 
 const approval: GenerativeExceptionApproval = {
   exceptionId: 'GEN-STATIC-1',
@@ -53,25 +54,27 @@ function dependencies(options: {
     imageBytes: Uint8Array.from([0xff, 0xd8, Number(entry.assetId.split('-')[1] ?? 1), 0xff]),
     contentType: 'image/jpeg' as const,
   }));
-  const generate = vi.fn(async (request: any) => ({
-    outputBytes: Uint8Array.from([0xff, 0xd8, 1, 0xff, 0xd9]),
-    outputContentType: 'image/jpeg' as const,
-    candidateSha256: 'a'.repeat(64),
-    referenceAssetIds: request.references.map((entry: any) => entry.registry.assetId),
-    referenceSha256s: ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)],
-    policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const,
-    referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1' as const,
-    exceptionId: canonicalApproval.exceptionId,
-    approvalRef: canonicalApproval.approvalRef,
-    creativeMode: 'GENERATIVE_EXCEPTION' as const,
-    provider: 'OPENAI_IMAGE_GENERATION' as const,
-    generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES' as const,
-    requiresPostGenerationHumanReview: true as const,
-    requiresVenueFidelityGate: true as const,
-    readyForFinalComposition: false as const,
-    responseModel: 'gpt-5.6-sol',
-    imageModel: 'gpt-image-2',
-  }));
+  const generate = vi.fn(
+    async (request: Parameters<CreativeTruthOpenAiImageGenerator['generate']>[0]) => ({
+      outputBytes: Uint8Array.from([0xff, 0xd8, 1, 0xff, 0xd9]),
+      outputContentType: 'image/jpeg' as const,
+      candidateSha256: 'a'.repeat(64),
+      referenceAssetIds: request.references.map((entry) => entry.registry.assetId),
+      referenceSha256s: ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)],
+      policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const,
+      referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1' as const,
+      exceptionId: canonicalApproval.exceptionId,
+      approvalRef: canonicalApproval.approvalRef,
+      creativeMode: 'GENERATIVE_EXCEPTION' as const,
+      provider: 'OPENAI_IMAGE_GENERATION' as const,
+      generationMode: 'FULL_STATIC_IMAGE_WITH_VERIFIED_REFERENCES' as const,
+      requiresPostGenerationHumanReview: true as const,
+      requiresVenueFidelityGate: true as const,
+      readyForFinalComposition: false as const,
+      responseModel: 'gpt-5.6-sol',
+      imageModel: 'gpt-image-2',
+    }),
+  );
   return {
     service: new ControlledStaticImageGenerationService({
       registry: { getApprovedGenerativeException, getReferenceSet },
