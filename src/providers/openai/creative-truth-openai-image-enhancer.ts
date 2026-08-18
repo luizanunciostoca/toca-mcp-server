@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
   creativeEnhancementProvenanceSchema,
@@ -46,7 +47,7 @@ export class CreativeTruthOpenAiImageEnhancer {
       },
     });
 
-    const provenance = creativeEnhancementProvenanceSchema.parse({
+    const parsed = creativeEnhancementProvenanceSchema.safeParse({
       policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
       creativeMode: 'REAL_PLUS_ENHANCEMENT',
       editorProvider: result.editorProvider,
@@ -58,7 +59,32 @@ export class CreativeTruthOpenAiImageEnhancer {
       creativeTruthBound: result.creativeTruthBound,
       requiresVenueFidelityGate: result.requiresVenueFidelityGate,
     });
+    if (!parsed.success) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'FAILED_ENHANCEMENT_PROVENANCE',
+        false,
+      );
+    }
+
+    const provenance = parsed.data;
+    if (
+      provenance.sourceAssetId !== input.sourceAssetId ||
+      provenance.sourceDriveFileId !== input.sourceDriveFileId ||
+      provenance.sourceSha256 !== sha256(input.imageBytes) ||
+      provenance.outputSha256 !== sha256(result.outputBytes)
+    ) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'FAILED_ENHANCEMENT_PROVENANCE',
+        false,
+      );
+    }
 
     return { ...result, ...provenance };
   }
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
 }
