@@ -41,7 +41,7 @@ export interface LocalCreativeComposeInput {
   readonly creativeId: string;
   readonly standard: CreativeStandard;
   readonly creativeMode: CreativeMode;
-  readonly venueAsset: VenueAsset;
+  readonly venueAsset?: VenueAsset;
   readonly sourceImageBytes: Uint8Array;
   readonly sourceContentType: 'image/jpeg' | 'image/png' | 'image/webp';
   readonly canvas: CreativeCanvas;
@@ -96,7 +96,7 @@ export class LocalCreativeComposer {
 
     const venueGate = evaluateVenueFidelity({
       creativeMode: input.creativeMode,
-      venueAsset: input.venueAsset,
+      ...(input.venueAsset ? { venueAsset: input.venueAsset } : {}),
       ...(input.generativeException ? { generativeException: input.generativeException } : {}),
       ...(input.references ? { references: input.references } : {}),
       ...(input.fidelityEvidence ? { evidence: input.fidelityEvidence } : {}),
@@ -138,8 +138,8 @@ export class LocalCreativeComposer {
         policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
         standardId: input.standard.standardId,
         creativeMode: input.creativeMode,
-        sourceAssetIds: [input.venueAsset.sourceAssetId],
-        masterAssetIds: input.venueAsset.masterAssetId ? [input.venueAsset.masterAssetId] : [],
+        sourceAssetIds: sourceAssetIdsFor(input),
+        masterAssetIds: input.venueAsset?.masterAssetId ? [input.venueAsset.masterAssetId] : [],
         brandAssetIds: input.brandAssets.map((entry) => entry.registry.brandAssetId),
         outputSha256,
         outputDimensions: input.canvas,
@@ -344,6 +344,15 @@ function validateInput(input: LocalCreativeComposeInput): void {
       false,
     );
   }
+  if (input.creativeMode !== 'GENERATIVE_EXCEPTION' && !input.venueAsset) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
+  }
+  if (
+    input.creativeMode === 'GENERATIVE_EXCEPTION' &&
+    (!input.generativeException || (input.references?.length ?? 0) === 0)
+  ) {
+    throw new ExecutionError('APPROVAL_REQUIRED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
+  }
   if (!input.headline.trim() || input.headline.trim().length > 90) {
     throw new ExecutionError('QUALITY_GATE_FAILED', 'CREATIVE_HEADLINE_INVALID', false);
   }
@@ -353,6 +362,15 @@ function validateInput(input: LocalCreativeComposeInput): void {
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
   }
+}
+
+function sourceAssetIdsFor(input: LocalCreativeComposeInput): string[] {
+  if (input.venueAsset) return [input.venueAsset.sourceAssetId];
+  const referenceIds = [...new Set((input.references ?? []).map((reference) => reference.assetId))];
+  if (referenceIds.length === 0) {
+    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'FAILED_LINEAGE_MISSING', false);
+  }
+  return referenceIds;
 }
 
 async function defaultCommandRunner(command: string, args: readonly string[]): Promise<void> {
