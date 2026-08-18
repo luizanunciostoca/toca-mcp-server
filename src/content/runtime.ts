@@ -20,6 +20,7 @@ import {
   type RightsCheck,
 } from './content-item.js';
 import { VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET } from './capability-ids.js';
+import { assertVideoThumbnailCreativeTruth } from './video-thumbnail-creative-truth.js';
 import {
   validateAudioNormalization,
   validateDuration,
@@ -561,9 +562,15 @@ function validateVideoWritePayload(capabilityId: string, input: VideoContentRunt
       break;
     }
     case 'video.caption.embed':
-    case 'video.thumbnail.generate':
       if (Object.keys(input.payload).length === 0)
         throw new Error('R29_VIDEO_ARTIFACT_PAYLOAD_REQUIRED');
+      break;
+    case 'video.thumbnail.generate':
+      assertVideoThumbnailCreativeTruth(
+        input.content_item_id,
+        input.payload.creative_truth_manifest,
+        payloadText(input, 'output_sha256'),
+      );
       break;
     default:
       throw new Error(`R29_VIDEO_RUNTIME_UNHANDLED:${capabilityId}`);
