@@ -124,8 +124,15 @@ if (
   orchestration.editionContext?.joinKey !== 'edition_id' ||
   orchestration.editionContext?.visualFamilyPolicy !== 'RESOLVE_BY_INTENT' ||
   orchestration.editionContext?.environmentSource !== 'EDITION_CONTEXT_OR_EXPLICIT_BRIEF' ||
+  orchestration.editionContext?.effectiveEnvironmentResolutionOrder?.join('|') !==
+    'CONTENT_ITEM_EXPLICIT|EDITION_CONTEXT_DECIDED' ||
   orchestration.editionContext?.propagateEnvironmentOnlyWhenDecisionStatus !== 'DECIDED' ||
+  orchestration.editionContext?.decisionEvidenceRequiredWhenDecided?.join('|') !==
+    'environment_decision_source|environment_decision_at|environment_decision_by' ||
+  orchestration.editionContext?.derivedVisualStatusWhenEditionResolvesBlockedNetworks !==
+    'RESOLVED' ||
   orchestration.editionContext?.neverCrossEditionBoundary !== true ||
+  orchestration.editionContext?.rejectItemEditionEnvironmentConflict !== true ||
   orchestration.editionContext?.approvedCreativeMustNotBeSilentlyRecomposedAfterEnvironmentChange !==
     true ||
   orchestration.environmentPolicy?.requiredForStandard !== 'THE_PARTY_HYBRID_NETWORKS_V1' ||
