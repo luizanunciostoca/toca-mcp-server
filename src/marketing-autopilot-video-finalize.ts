@@ -6,6 +6,8 @@ import {
 } from './contracts/photo-to-video.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { GcsPhotoToVideoArtifactStore } from './providers/gcp/gcs-photo-to-video-artifact-store.js';
+import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-drive/creative-truth-brand-asset-loader.js';
+import { GoogleDriveCreativeVideoSourceLoader } from './providers/google-drive/creative-video-source-loader.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
 import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
@@ -13,6 +15,8 @@ import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/phot
 const args = parseArgs(process.argv.slice(2));
 const secrets = new EnvironmentSecretResolver(process.env);
 const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
+const driveTokenEnvKey =
+  process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
 const gcpProjectId = requiredEnv('GCP_PROJECT_ID');
 const artifactBucket = requiredEnv('INSTAGRAM_PUBLICATION_ASSET_BUCKET');
 const sheets = new GoogleSheetsRestClient(secrets, {
@@ -24,10 +28,20 @@ const artifactStore = new GcsPhotoToVideoArtifactStore({
   projectId: gcpProjectId,
   bucketName: artifactBucket,
 });
+const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
+  secretResolver: secrets,
+  accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
+});
+const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
+  secretResolver: secrets,
+  accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
+});
 const service = new ControlledPhotoToVideoFinalizationService({
   registry,
   writeback,
   artifactStore,
+  sourceLoader,
+  brandLoader,
 });
 const candidateManifest = photoToVideoCandidateManifestSchema.parse(
   JSON.parse(await readFile(args.manifest, 'utf8')),
@@ -51,6 +65,7 @@ process.stdout.write(
     readyForPrepare: true,
     canonicalFinalWriteback: true,
     durableArtifactReadback: true,
+    sourceAndBrandRevalidated: true,
     publicationAuthorized: false,
     finalManifestPath: args.finalManifest,
   })}\n`,
