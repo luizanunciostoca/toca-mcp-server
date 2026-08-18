@@ -111,10 +111,13 @@ This closes both parts of the prior static-render gap: The Party now has eligibl
 
 ## Content orchestration and write-back
 
-The machine-actionable bridge between editorial planning and Creative Truth is mirrored by `control/creative-standards/the-party-content-orchestration.v1.json`, contract ID `THE_PARTY_CONTENT_ORCHESTRATION_V1`. Its operational source is `TOCA_OS — MARKETING_AUTOPILOT_CONTENT_REGISTRY_v1.0` (`1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw`), sheet `CONTENT_ITEMS`.
+The machine-actionable bridge between editorial planning and Creative Truth is mirrored by `control/creative-standards/the-party-content-orchestration.v1.json`, contract ID `THE_PARTY_CONTENT_ORCHESTRATION_V1`.
 
-The content registry now carries 13 explicit The Party/Creative Truth columns after the existing publication fields:
+Its operational content source is `TOCA_OS — MARKETING_AUTOPILOT_CONTENT_REGISTRY_v1.0` (`1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw`), sheet `CONTENT_ITEMS`. Edition-scoped visual decisions come from `THE_PARTY — EDITION_CONTEXT_REGISTRY_v1.0` (`1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw`), sheet `EDITIONS`, stored under `04_PRODUTOS_E_EXPERIENCIAS/02_THE_PARTY/08_EDICOES`.
 
+The content registry carries 14 explicit The Party/Creative Truth columns after the existing publication fields:
+
+- `edition_id`;
 - `the_party_intent`;
 - `the_party_environment`;
 - `creative_standard_id`;
@@ -129,9 +132,13 @@ The content registry now carries 13 explicit The Party/Creative Truth columns af
 - `exact_asset_binding`;
 - `output_sha256`.
 
-Planning may resolve intent and standard in advance, but it may not fabricate gate success. Hybrid Networks items without an explicit environment remain `BLOCKED_NEEDS_ENVIRONMENT`. Gate fields start `PENDING`; `exact_asset_binding` and `output_sha256` remain unset until the exact final bytes have passed the Creative Truth pipeline. `RESOLVED` therefore means only that visual-family context is complete; it never means ready, approved, scheduled or publishable.
+`edition_id` is the join key. For Hybrid Networks, `the_party_environment` may be propagated from the edition registry only when `environment_status=DECIDED`. `PENDING_DECISION` keeps dependent items at `BLOCKED_NEEDS_ENVIRONMENT`. A registered item-specific brief may provide an explicit environment, but the runtime may never infer it from artist/line-up, photo/video appearance, dominant color/light, language/copy, previous edition, audience origin or aesthetic preference.
 
-The active rolling The Party slots in the Drive registry were preclassified according to this contract. Minimalist people-first/informational items can be visually resolved now; Hybrid Networks slots remain intentionally blocked until the edition/campaign is explicitly classified as `INTERNATIONAL` or `NATIONAL`. The runtime is not allowed to infer that value from artist, photo, dominant light, copy or prior creative.
+Environment decisions are scoped to the same `edition_id`; they must never cross to another Saturday/edition. A later environment change requires review of creatives that are not yet approved. An already approved exact final creative must not be silently recomposed because edition context changed.
+
+Planning may resolve intent and standard in advance, but it may not fabricate gate success. Gate fields start `PENDING`; `exact_asset_binding` and `output_sha256` remain unset until the exact final bytes have passed the Creative Truth pipeline. `RESOLVED` therefore means only that visual-family context is complete; it never means ready, approved, scheduled or publishable.
+
+The active rolling The Party slots in the Drive registry were preclassified according to this contract and linked to their corresponding future `edition_id`. Minimalist people-first/informational items can be visually resolved without an environment. Hybrid Networks slots remain intentionally blocked until the edition or an explicit item brief records `INTERNATIONAL` or `NATIONAL`. This is expected fail-closed behavior, not a missing implementation.
 
 ## Multi-format application
 
