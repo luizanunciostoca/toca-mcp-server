@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   GenerativeExceptionApproval,
+  VenueAsset,
   VenueReference,
 } from '../src/contracts/creative-truth.js';
 import type { SecretResolver } from '../src/core/secrets.js';
+import type { GoogleSheetsCreativeTruthRegistry } from '../src/providers/google-sheets/creative-truth-registry.js';
 import {
   CreativeTruthOpenAiImageGenerator,
   type GenerativeVenueReferenceInput,
@@ -31,7 +33,7 @@ const approval: GenerativeExceptionApproval = {
   createdAt: '2026-08-18T03:00:00Z',
 };
 
-function registry(index: number, overrides: Partial<VenueReference> = {}): VenueReference {
+function registryReference(index: number, overrides: Partial<VenueReference> = {}): VenueReference {
   return {
     referenceSetId: 'TOCA_VENUE_REFERENCE_SET_V1',
     referenceId: `REF-GEN-${index}`,
@@ -52,10 +54,50 @@ function reference(
   overrides: Partial<GenerativeVenueReferenceInput> = {},
 ): GenerativeVenueReferenceInput {
   return {
-    registry: registry(index),
+    registry: registryReference(index),
     imageBytes: Uint8Array.from([0xff, 0xd8, index, 0xff, 0xd9]),
     contentType: 'image/jpeg',
     ...overrides,
+  };
+}
+
+function sourceSha256(referenceInput: GenerativeVenueReferenceInput): string {
+  return createHash('sha256').update(referenceInput.imageBytes).digest('hex');
+}
+
+function canonicalVenueAsset(referenceInput: GenerativeVenueReferenceInput): VenueAsset {
+  return {
+    venueAssetId: `VENUE-${referenceInput.registry.assetId}`,
+    sourceAssetId: referenceInput.registry.assetId,
+    sourceDriveFileId: referenceInput.registry.driveFileId,
+    sourceSha256: sourceSha256(referenceInput),
+    operation: 'SUNSET',
+    locationSignature: 'verified-reference',
+    dominantSubject: 'venue-truth',
+    venueVerified: true,
+    marketingReady: false,
+    generativeReferenceAllowed: true,
+    protectedElements: [...referenceInput.registry.protectedElements],
+    status: 'VENUE_VERIFIED_SOURCE',
+  };
+}
+
+type RegistryBoundary = Pick<
+  GoogleSheetsCreativeTruthRegistry,
+  'assertCanonicalPolicy' | 'listVenueAssets'
+>;
+
+function canonicalRegistry(
+  references: readonly GenerativeVenueReferenceInput[] = [reference(1), reference(2), reference(3)],
+  venueOverrides: Readonly<Record<string, Partial<VenueAsset>>> = {},
+): RegistryBoundary {
+  const assets = references.map((referenceInput) => ({
+    ...canonicalVenueAsset(referenceInput),
+    ...(venueOverrides[referenceInput.registry.assetId] ?? {}),
+  }));
+  return {
+    assertCanonicalPolicy: vi.fn(async () => undefined),
+    listVenueAssets: vi.fn(async () => assets),
   };
 }
 
@@ -72,14 +114,23 @@ function request(
   };
 }
 
+function generatorWith(
+  registry: RegistryBoundary,
+  fetchImpl: typeof fetch = vi.fn<typeof fetch>(),
+): CreativeTruthOpenAiImageGenerator {
+  return new CreativeTruthOpenAiImageGenerator({
+    secretResolver,
+    apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
+    registry,
+    fetchImpl,
+  });
+}
+
 describe('CreativeTruthOpenAiImageGenerator', () => {
   it('fails closed before provider access when approval belongs to another content item', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
-    const generator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl,
-    });
+    const canonical = canonicalRegistry();
+    const generator = generatorWith(canonical, fetchImpl);
 
     await expect(
       generator.generate(
@@ -88,30 +139,26 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
         }),
       ),
     ).rejects.toThrow('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
+    expect(canonical.assertCanonicalPolicy).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('fails closed when fewer than three verified venue references are supplied', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
-    const generator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl,
-    });
+    const canonical = canonicalRegistry();
+    const generator = generatorWith(canonical, fetchImpl);
 
     await expect(
       generator.generate(request({ references: [reference(1), reference(2)] })),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_MISSING');
+    expect(canonical.assertCanonicalPolicy).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('fails closed on revoked, unverified, duplicate or empty reference evidence', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
-    const generator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl,
-    });
+    const canonical = canonicalRegistry();
+    const generator = generatorWith(canonical, fetchImpl);
 
     await expect(
       generator.generate(
@@ -119,7 +166,7 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
           references: [
             reference(1),
             reference(2),
-            reference(3, { registry: registry(3, { status: 'REVOKED' }) }),
+            reference(3, { registry: registryReference(3, { status: 'REVOKED' }) }),
           ],
         }),
       ),
@@ -136,14 +183,46 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
     await expect(
       generator.generate(
         request({
-          references: [reference(1), reference(2), reference(3, { registry: registry(1) })],
+          references: [reference(1), reference(2), reference(3, { registry: registryReference(1) })],
         }),
       ),
     ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_MISSING');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('sends the exact verified reference images under a higher-priority Creative Truth policy', async () => {
+  it('rejects reference bytes that do not equal the source SHA pinned in the canonical venue registry', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry(references, {
+      'SUN-GEN-3': { sourceSha256: 'f'.repeat(64) },
+    });
+    const generator = generatorWith(canonical, fetchImpl);
+
+    await expect(generator.generate(request({ references }))).rejects.toThrow(
+      'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
+    );
+    expect(canonical.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(canonical.listVenueAssets).toHaveBeenCalledOnce();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reference whose Drive identity differs from the canonical venue source', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const canonical = canonicalRegistry(references, {
+      'SUN-GEN-2': { sourceDriveFileId: 'different-drive-file' },
+    });
+    const generator = generatorWith(canonical, fetchImpl);
+
+    await expect(generator.generate(request({ references }))).rejects.toThrow(
+      'GENERATIVE_REFERENCE_SOURCE_HASH_MISMATCH',
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('sends the exact canonical verified reference images under a higher-priority Creative Truth policy', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const canonical = canonicalRegistry(references);
     const output = Uint8Array.from([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9]);
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe('https://api.openai.com/v1/responses');
@@ -201,18 +280,16 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
       );
     });
 
-    const generator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl,
-    });
-    const result = await generator.generate(request());
+    const generator = generatorWith(canonical, fetchImpl);
+    const result = await generator.generate(request({ references }));
 
+    expect(canonical.assertCanonicalPolicy).toHaveBeenCalledOnce();
+    expect(canonical.listVenueAssets).toHaveBeenCalledOnce();
     expect(result.outputBytes).toEqual(output);
     expect(result.outputContentType).toBe('image/jpeg');
     expect(result.candidateSha256).toBe(createHash('sha256').update(output).digest('hex'));
     expect(result.referenceAssetIds).toEqual(['SUN-GEN-1', 'SUN-GEN-2', 'SUN-GEN-3']);
-    expect(result.referenceSha256s).toHaveLength(3);
+    expect(result.referenceSha256s).toEqual(references.map(sourceSha256));
     expect(result.policyId).toBe('TOCA_CREATIVE_TRUTH_POLICY_V1');
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_V1');
     expect(result.creativeMode).toBe('GENERATIVE_EXCEPTION');
@@ -224,41 +301,37 @@ describe('CreativeTruthOpenAiImageGenerator', () => {
   });
 
   it('rejects missing or non-JPEG generated output instead of treating it as reviewable', async () => {
-    const missingGenerator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl: () =>
-        Promise.resolve(
-          new Response(JSON.stringify({ output: [] }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
-        ),
-    });
-    await expect(missingGenerator.generate(request())).rejects.toThrow(
+    const references = [reference(1), reference(2), reference(3)];
+    const canonical = canonicalRegistry(references);
+    const missingGenerator = generatorWith(canonical, () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ output: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    await expect(missingGenerator.generate(request({ references }))).rejects.toThrow(
       'OPENAI_CREATIVE_TRUTH_IMAGE_GENERATION_RESPONSE_MISSING_IMAGE',
     );
 
-    const invalidGenerator = new CreativeTruthOpenAiImageGenerator({
-      secretResolver,
-      apiKeyReference: { provider: 'env', key: 'OPENAI_API_KEY' },
-      fetchImpl: () =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              output: [
-                {
-                  type: 'image_generation_call',
-                  status: 'completed',
-                  result: Buffer.from(Uint8Array.from([1, 2, 3, 4])).toString('base64'),
-                },
-              ],
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
+    const invalidGenerator = generatorWith(canonicalRegistry(references), () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                type: 'image_generation_call',
+                status: 'completed',
+                result: Buffer.from(Uint8Array.from([1, 2, 3, 4])).toString('base64'),
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
         ),
-    });
-    await expect(invalidGenerator.generate(request())).rejects.toThrow(
+      ),
+    );
+    await expect(invalidGenerator.generate(request({ references }))).rejects.toThrow(
       'OPENAI_CREATIVE_TRUTH_IMAGE_GENERATION_RESPONSE_INVALID_JPEG',
     );
   });
