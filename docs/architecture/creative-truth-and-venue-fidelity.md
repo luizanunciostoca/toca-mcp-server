@@ -73,7 +73,7 @@ For enhancement or generative output, a fidelity verifier must state whether sou
 
 `LocalStoryComposer` is no longer an independent branding path. It delegates rendering to `LocalCreativeComposer`, requires a Story creative standard, binds the declared master ID and Drive file ID to the verified venue master, and uses official brand files. Literal text labels or AI-reconstructed logos are not a valid branding mechanism.
 
-`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable.
+`LocalVideoComposer` assembles only registry-bound verified shots with FFmpeg, validates cleared rights and exact registered master hashes, overlays official logo files and produces the same manifest semantics for video. It also emits a deterministic video edit manifest containing ordered shot IDs, source/master lineage, registered master SHA-256, expected source duration and the exact-master-byte-binding flag. `GENERATIVE_EXCEPTION` remains a separately approved, reference-bound path and does not make unregistered real footage acceptable.
 
 Synthetic visual examples may teach palette, typography hierarchy, CTA treatment and layout. They are classified as `VISUAL_DIRECTION_REFERENCE_ONLY` and must never be used as venue or architectural evidence.
 
@@ -95,17 +95,22 @@ Instagram verifies that the ordered `MEDIA_URL` locators are exactly the URLs be
 
 ### TOCA-managed Instagram scheduling
 
-The durable TOCA-managed scheduler carries the `CreativeTruthPublicationBinding` inside the immutable approval descriptor. The descriptor also contains the staged GCS object name and SHA-256. Scheduling is rejected when the approved asset SHA-256 differs from the Creative Truth `outputSha256`.
+The durable TOCA-managed scheduler carries the `CreativeTruthPublicationBinding` inside the immutable approval descriptor. The descriptor also contains the staged GCS object name, MIME type and SHA-256. Scheduling is rejected when the approved asset SHA-256 differs from the Creative Truth `outputSha256`.
+
+The managed single-asset path supports image posts, image/video Stories and MP4 Reels. A Reel descriptor must be `video/mp4`; MIME substitution is rejected. Carousel remains fail-closed in this single-asset descriptor until a dedicated multi-asset approval contract binds every child asset independently. Generic Instagram publication contracts may represent multiple URLs, but the managed scheduler must not pretend a singular approved object is a complete carousel.
 
 At execution time:
 
 1. `GcsPublicationAssetDelivery.createVerifiedDeliveryUrl()` signs the private object URL;
-2. the complete object is fetched and SHA-256 verified against the approved final creative hash;
-3. only after byte equality is proven is the current signed `MEDIA_URL` added to the runtime binding;
-4. the production `InstagramPublicationExecutor` is instantiated with Creative Truth enforcement enabled;
-5. the executor rejects any request whose exact runtime media URL is not in the binding.
+2. the staged object MIME must match the approved descriptor;
+3. the complete object is fetched and SHA-256 verified against the approved final creative hash;
+4. only after byte equality is proven is the current signed `MEDIA_URL` added to the runtime binding;
+5. the production `InstagramPublicationExecutor` is instantiated with Creative Truth enforcement enabled;
+6. the executor rejects any request whose exact runtime media URL is not in the binding.
 
-This allows a short-lived signed URL to be derived at execution time without weakening exact-asset approval: object identity, object name and final-byte SHA-256 are approved first, and the derived URL is accepted only after the private object is reverified.
+GCS staging accepts the exact final image types and `video/mp4`, creates deterministic object names from correlation ID + creative asset ID + SHA prefix, and validates the externally fetchable MIME before returning the object. This gives the Reel path the same exact-asset guarantee as static image publication.
+
+This allows a short-lived signed URL to be derived at execution time without weakening exact-asset approval: object identity, object name, MIME and final-byte SHA-256 are approved first, and the derived URL is accepted only after the private object is reverified.
 
 Legacy/manual publication preparation that does not supply a Creative Truth binding cannot cross the production executor boundary. It therefore fails closed rather than becoming an alternate publication bypass.
 
@@ -127,11 +132,11 @@ The policy fails closed with explicit codes, including:
 - `FAILED_BRAND_INTEGRITY_GATE`
 - `FAILED_QUALITY_GATE`
 
-Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, managed-schedule Creative Truth hash mismatch and GCS publication object SHA-256 mismatch.
+Additional fail-closed execution reasons include exact master-byte mismatches, missing `VIDEO_SHOTS` registry bindings, uncleared video rights, incomplete video edit lineage, managed-schedule Creative Truth hash mismatch, invalid Reel MIME and GCS publication object SHA-256/MIME mismatch.
 
 ## Operational flow
 
-`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED BYTE HASH -> EXACT-ASSET PUBLICATION`
+`BRIEF -> RESOLVE POLICY -> RESOLVE MODE -> RESOLVE STANDARD -> RESOLVE OFFICIAL BRAND ASSETS -> RESOLVE VERIFIED VENUE ASSET / VIDEO_SHOT / REFERENCES -> VERIFY MASTER BYTE HASH -> BUILD DETERMINISTIC EDIT/RENDER MANIFEST -> GENERATE/ENHANCE IF ALLOWED -> DETERMINISTIC COMPOSITION -> BRAND INTEGRITY -> VENUE FIDELITY -> QUALITY -> OUTPUT SHA-256 -> BUILD EXACT ASSET LOCATORS -> APPROVAL -> STAGE PRIVATE FINAL ASSET -> VERIFY STAGED MIME + BYTE HASH -> EXACT-ASSET PUBLICATION`
 
 ## Safety boundary
 
