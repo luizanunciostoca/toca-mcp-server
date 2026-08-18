@@ -56,11 +56,33 @@ export interface LocalVideoComposeInput {
   readonly createdAt?: string;
 }
 
+export interface LocalVideoEditManifestShot {
+  readonly order: number;
+  readonly shotId: string;
+  readonly sourceAssetId: string | null;
+  readonly masterAssetId: string | null;
+  readonly masterSha256: string | null;
+  readonly expectedDurationMs: number | null;
+  readonly registryBound: boolean;
+}
+
+export interface LocalVideoEditManifest {
+  readonly schemaVersion: 1;
+  readonly creativeId: string;
+  readonly standardId: string;
+  readonly creativeMode: CreativeMode;
+  readonly outputDimensions: '1080x1920';
+  readonly shots: readonly LocalVideoEditManifestShot[];
+  readonly referenceAssetIds: readonly string[];
+  readonly exactMasterByteBinding: boolean;
+}
+
 export interface LocalVideoComposeResult {
   readonly outputBytes: Uint8Array;
   readonly outputContentType: 'video/mp4';
   readonly outputSha256: string;
   readonly dimensions: '1080x1920';
+  readonly editManifest: LocalVideoEditManifest;
   readonly manifest: DeterministicRenderManifest;
   readonly provider: 'LOCAL_FFMPEG';
   readonly pipelineVersion: 'local-video-composer-v1';
@@ -82,6 +104,7 @@ export class LocalVideoComposer {
     validateInput(input);
     assertCreativeStandard(input.standard);
     assertRegisteredShotBindings(input);
+    const editManifest = buildVideoEditManifest(input);
 
     const brandGate = evaluateBrandIntegrity(
       input.requiredBrands,
@@ -155,6 +178,7 @@ export class LocalVideoComposer {
         outputContentType: 'video/mp4',
         deterministicComposition: true,
         sourceShotCount: input.shots.length,
+        editManifestShotCount: editManifest.shots.length,
         registeredShotHashesVerified:
           input.creativeMode === 'GENERATIVE_EXCEPTION' ? false : true,
       });
@@ -185,6 +209,7 @@ export class LocalVideoComposer {
         outputContentType: 'video/mp4',
         outputSha256,
         dimensions: '1080x1920',
+        editManifest,
         manifest,
         provider: 'LOCAL_FFMPEG',
         pipelineVersion: 'local-video-composer-v1',
@@ -317,6 +342,39 @@ function assertRegisteredShotBindings(input: LocalVideoComposeInput): void {
       );
     }
   }
+}
+
+function buildVideoEditManifest(input: LocalVideoComposeInput): LocalVideoEditManifest {
+  const referenceAssetIds = [...new Set((input.references ?? []).map((reference) => reference.assetId))];
+  const shots = input.shots.map((shot, index): LocalVideoEditManifestShot => ({
+    order: index + 1,
+    shotId: shot.shotId,
+    sourceAssetId: shot.registry?.sourceAssetId ?? null,
+    masterAssetId: shot.registry?.masterAssetId ?? null,
+    masterSha256: shot.registry?.masterSha256 ?? null,
+    expectedDurationMs: shot.registry?.durationMs ?? null,
+    registryBound: Boolean(shot.registry),
+  }));
+  const exactMasterByteBinding =
+    input.creativeMode !== 'GENERATIVE_EXCEPTION' &&
+    shots.every(
+      (shot) =>
+        shot.registryBound &&
+        Boolean(shot.sourceAssetId && shot.masterAssetId && shot.masterSha256),
+    );
+  if (input.creativeMode !== 'GENERATIVE_EXCEPTION' && !exactMasterByteBinding) {
+    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'VIDEO_EDIT_MANIFEST_INCOMPLETE', false);
+  }
+  return {
+    schemaVersion: 1,
+    creativeId: input.creativeId,
+    standardId: input.standard.standardId,
+    creativeMode: input.creativeMode,
+    outputDimensions: '1080x1920',
+    shots,
+    referenceAssetIds,
+    exactMasterByteBinding,
+  };
 }
 
 function videoShotAsVenueAsset(shot: VideoShot): VenueAsset {
