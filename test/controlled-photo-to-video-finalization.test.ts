@@ -2,12 +2,15 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ControlledPhotoToVideoFinalizationService } from '../src/creative/controlled-photo-to-video-finalization.js';
 import type { PhotoToVideoCandidateManifest } from '../src/contracts/photo-to-video.js';
+import type { PhotoToVideoContentWriteback } from '../src/providers/google-sheets/photo-to-video-content-writeback.js';
 import type {
   PhotoToVideoRegistry,
   ResolvedPhotoToVideoContext,
 } from '../src/providers/google-sheets/photo-to-video-registry.js';
 
-const outputBytes = Uint8Array.from([0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0]);
+const outputBytes = Uint8Array.from([
+  0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0,
+]);
 const outputSha256 = createHash('sha256').update(outputBytes).digest('hex');
 const sourceSha256 = 'a'.repeat(64);
 
@@ -120,11 +123,20 @@ function registry(current = resolved()) {
   return { value, recordFinalOutput };
 }
 
+function writeback() {
+  const writeCandidate = vi.fn(async () => undefined);
+  const writeFinal = vi.fn(async () => undefined);
+  const value: PhotoToVideoContentWriteback = { writeCandidate, writeFinal };
+  return { value, writeCandidate, writeFinal };
+}
+
 describe('ControlledPhotoToVideoFinalizationService', () => {
-  it('finalizes only the exact reviewed bytes and records idempotent evidence', async () => {
+  it('finalizes only the exact reviewed bytes and records evidence plus content state', async () => {
     const fake = registry();
+    const state = writeback();
     const service = new ControlledPhotoToVideoFinalizationService({
       registry: fake.value,
+      writeback: state.value,
       now: () => new Date('2026-08-18T08:00:00.000Z'),
     });
     const result = await service.finalize({
@@ -145,13 +157,27 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
     expect(result.publicationAuthorized).toBe(false);
     expect(result.readyForPrepare).toBe(true);
     expect(fake.recordFinalOutput).toHaveBeenCalledTimes(1);
+    expect(state.writeFinal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentItemId: 'CONTENT-1',
+        candidateSha256: outputSha256,
+        finalAssetSha256: outputSha256,
+      }),
+    );
   });
 
   it('fails closed when canonical standard changes after generation', async () => {
-    const changed = resolved();
-    changed.standard.standardId = 'SUNSET_REEL_PHOTO_MOTION_V2';
+    const base = resolved();
+    const changed: ResolvedPhotoToVideoContext = {
+      ...base,
+      standard: { ...base.standard, standardId: 'SUNSET_REEL_PHOTO_MOTION_V2' },
+    };
     const fake = registry(changed);
-    const service = new ControlledPhotoToVideoFinalizationService({ registry: fake.value });
+    const state = writeback();
+    const service = new ControlledPhotoToVideoFinalizationService({
+      registry: fake.value,
+      writeback: state.value,
+    });
     await expect(
       service.finalize({
         outputBytes,
@@ -169,5 +195,6 @@ describe('ControlledPhotoToVideoFinalizationService', () => {
       }),
     ).rejects.toThrow('PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED');
     expect(fake.recordFinalOutput).not.toHaveBeenCalled();
+    expect(state.writeFinal).not.toHaveBeenCalled();
   });
 });
