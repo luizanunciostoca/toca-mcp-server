@@ -7,10 +7,13 @@
     "provider": "GOOGLE_DRIVE",
     "contentRegistryDriveId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
     "sheet": "CONTENT_ITEMS",
+    "editionRegistryDriveId": "1YI0xfOaSiD6UfLx97M9pQBSHqFVnDMnh5tIH68VwLlw",
+    "editionRegistrySheet": "EDITIONS",
     "canonicalManualDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
     "creativeTruthRegistryDriveId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU"
   },
   "requiredColumns": [
+    "edition_id",
     "the_party_intent",
     "the_party_environment",
     "creative_standard_id",
@@ -25,6 +28,15 @@
     "exact_asset_binding",
     "output_sha256"
   ],
+  "editionContext": {
+    "joinKey": "edition_id",
+    "visualFamilyPolicy": "RESOLVE_BY_INTENT",
+    "environmentSource": "EDITION_CONTEXT_OR_EXPLICIT_BRIEF",
+    "environmentDecisionStatuses": ["PENDING_DECISION", "DECIDED", "NOT_REQUIRED"],
+    "propagateEnvironmentOnlyWhenDecisionStatus": "DECIDED",
+    "neverCrossEditionBoundary": true,
+    "approvedCreativeMustNotBeSilentlyRecomposedAfterEnvironmentChange": true
+  },
   "intentResolution": {
     "THE_PARTY_HYBRID_NETWORKS_V1": [
       "HIGH_IMPACT_CAMPAIGN",
@@ -48,6 +60,15 @@
     "requiredForStandard": "THE_PARTY_HYBRID_NETWORKS_V1",
     "allowed": ["INTERNATIONAL", "NATIONAL"],
     "mustNotBeInferred": true,
+    "forbiddenInferenceSources": [
+      "ARTIST_OR_LINEUP",
+      "PHOTO_OR_VIDEO_APPEARANCE",
+      "DOMINANT_COLOR_OR_LIGHT",
+      "LANGUAGE_OR_COPY",
+      "PREVIOUS_EDITION",
+      "AUDIENCE_ORIGIN",
+      "AESTHETIC_PREFERENCE"
+    ],
     "missingStatus": "BLOCKED_NEEDS_ENVIRONMENT",
     "failureCode": "THE_PARTY_ENVIRONMENT_REQUIRED"
   },
