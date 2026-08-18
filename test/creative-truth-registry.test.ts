@@ -88,7 +88,7 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     }
   });
 
-  it('reads official brand assets and marketing-ready venue lineage', async () => {
+  it('reads official hash-pinned brand assets and marketing-ready venue lineage', async () => {
     const { client } = clientFor({
       'BRAND_ASSETS!A2:N1000': [
         [
@@ -98,9 +98,9 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
           'drive-logo',
           'MORRO_DIGITAL_LOGO_BRANCO.png',
           'image/png',
-          'DRIVE_FILE_ID_PINNED',
-          '',
-          'PENDING_CAPTURE',
+          'SHA256_PINNED',
+          '8a97fcd3e5c91dea4b71e26e4b99bf8dcc5d242d07f6bac298767c45ee2b600e',
+          'VERIFIED_2026-08-17',
           'ACTIVE_APPROVED',
           'ALL',
           'DARK',
@@ -133,6 +133,10 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
 
     const logo = await registry.getBrandAsset('MORRO_DIGITAL', 'WHITE');
     expect(logo?.driveFileId).toBe('drive-logo');
+    expect(logo?.integrityMode).toBe('SHA256_PINNED');
+    expect(logo?.sha256).toBe(
+      '8a97fcd3e5c91dea4b71e26e4b99bf8dcc5d242d07f6bac298767c45ee2b600e',
+    );
     expect(logo?.aiReconstructionAllowed).toBe(false);
 
     const venue = await registry.getVenueAsset('VENUE-SUN-0244');
