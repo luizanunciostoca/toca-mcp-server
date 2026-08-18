@@ -7,6 +7,7 @@ import {
 import { ExecutionError } from '../core/errors.js';
 import type { CreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import type { CreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
+import type { PhotoToVideoContentWriteback } from '../providers/google-sheets/photo-to-video-content-writeback.js';
 import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
 import type { LocalPhotoMotionVideoComposer } from '../providers/local/local-photo-motion-video-composer.js';
 import type { LocalPhotoToVideoBrandComposer } from '../providers/local/local-photo-to-video-brand-composer.js';
@@ -14,6 +15,7 @@ import type { OpenAiSceneContinuationVideoProvider } from '../providers/openai/o
 
 export interface ControlledPhotoToVideoGenerationOptions {
   readonly registry: PhotoToVideoRegistry;
+  readonly writeback: PhotoToVideoContentWriteback;
   readonly sourceLoader: CreativeVideoSourceLoader;
   readonly brandLoader: CreativeTruthBrandAssetLoader;
   readonly photoMotionComposer: LocalPhotoMotionVideoComposer;
@@ -50,14 +52,22 @@ export class ControlledPhotoToVideoGenerationService {
       request.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO' &&
       !request.creativeDirection?.trim()
     ) {
-      throw new ExecutionError('POLICY_DENIED', 'SCENE_CONTINUATION_CREATIVE_DIRECTION_REQUIRED', false);
+      throw new ExecutionError(
+        'POLICY_DENIED',
+        'SCENE_CONTINUATION_CREATIVE_DIRECTION_REQUIRED',
+        false,
+      );
     }
 
     const resolved = await this.options.registry.resolve(request.contentItemId, request.routeType);
     const masterDriveFileId = resolved.venueAsset.masterDriveFileId;
     const masterSha256 = resolved.venueAsset.masterSha256;
     if (!masterDriveFileId || !masterSha256) {
-      throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'PHOTO_TO_VIDEO_MASTER_BINDING_REQUIRED', false);
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'PHOTO_TO_VIDEO_MASTER_BINDING_REQUIRED',
+        false,
+      );
     }
     const source = await this.options.sourceLoader.load({
       driveFileId: masterDriveFileId,
@@ -90,7 +100,11 @@ export class ControlledPhotoToVideoGenerationService {
     } else {
       const approval = resolved.approval;
       if (!approval) {
-        throw new ExecutionError('APPROVAL_REQUIRED', 'VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED', false);
+        throw new ExecutionError(
+          'APPROVAL_REQUIRED',
+          'VIDEO_SCENE_CONTINUATION_APPROVAL_REQUIRED',
+          false,
+        );
       }
       providerCandidate = await this.options.sceneContinuationProvider.generate({
         contentItemId: resolved.content.contentItemId,
@@ -163,6 +177,16 @@ export class ControlledPhotoToVideoGenerationService {
       publicationEligible: false,
       createdAt,
     });
+
+    await this.options.writeback.writeCandidate({
+      contentItemId: manifest.contentItemId,
+      productId: manifest.productId,
+      routeType: manifest.routeType,
+      standardId: manifest.standardId,
+      candidateSha256: manifest.outputSha256,
+      ...(manifest.providerJobId ? { providerJobId: manifest.providerJobId } : {}),
+    });
+
     return { outputBytes: branded.outputBytes, manifest };
   }
 }
