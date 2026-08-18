@@ -60,18 +60,21 @@ A Drive metadata error, unauthorized/forbidden download, source identity ambigui
 
 ## OpenAI binding
 
-Default provider binding:
+The executable provider follows the current Responses image-generation contract:
 
-- Responses orchestration model: `gpt-5.6-sol`;
-- image-generation model: `gpt-image-2`;
-- `input_fidelity=high`;
+- mainline Responses model: `gpt-5.6` by default;
+- tool: `image_generation` with `action=generate`;
+- GPT Image model selection is managed by the Responses image-generation tool rather than asserted by TOCA OS;
+- no `input_fidelity` override is sent by TOCA OS; current GPT Image 2 processing of image inputs is high-fidelity automatically;
 - `quality=high`;
 - `size=1024x1536`;
-- JPEG output.
+- JPEG output with compression `100`.
+
+This distinction is deliberate. `GPT-5.6 Sol` is the product/model tier name presented by OpenAI, while the current API request identifier used by the official examples is `gpt-5.6`. TOCA OS therefore persists the exact mainline API model ID and records image-tool model selection as `RESPONSES_TOOL_MANAGED` instead of pretending that the Responses tool exposed a guaranteed underlying GPT Image model identity.
 
 The prompt sent at developer priority is generated from canonical registry metadata. Caller-provided descriptive reference fields are not trusted as spatial truth. It explicitly prohibits architectural invention, venue redesign, synthetic logos, marketing text, CTA, price and fabricated signage. Official branding remains deterministic post-generation composition.
 
-Provider model overrides are explicit operator configuration only through `OPENAI_CREATIVE_RESPONSE_MODEL` and `OPENAI_CREATIVE_IMAGE_MODEL`; there is no automatic fallback to an older model or prompt-only generation path.
+The only model override exposed by this path is `OPENAI_CREATIVE_RESPONSE_MODEL`. There is no automatic fallback to an older mainline model, no caller-controlled GPT Image tool override, and no prompt-only generation path.
 
 ## CLI
 
@@ -93,7 +96,7 @@ Secret references:
 - `GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY` — optional environment-variable name containing a Drive OAuth token; when omitted, the Sheets token reference is reused and must therefore also have Drive download scope;
 - `OPENAI_API_KEY_ENV_KEY` — environment-variable name containing the OpenAI API key.
 
-The CLI writes the generated candidate and a manifest with `status=GENERATED_REVIEW_REQUIRED`, exact `candidateSha256`, approval/reference lineage, provider model IDs, `readyForFinalComposition=false` and `publicationEligible=false`.
+The CLI writes the generated candidate and a manifest with `status=GENERATED_REVIEW_REQUIRED`, exact `candidateSha256`, approval/reference lineage, the mainline Responses model ID, `imageToolModelSelection=RESPONSES_TOOL_MANAGED`, `readyForFinalComposition=false` and `publicationEligible=false`.
 
 ## What this does not do
 
