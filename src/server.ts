@@ -13,13 +13,15 @@ import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolv
 import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { PostgresEventRecordStore } from './persistence/postgres-event-record-store.js';
+import { PostgresMetaAdsGeoAudienceStore } from './persistence/postgres-meta-ads-geo-audience-store.js';
 import { PostgresWorkflowStore } from './persistence/postgres-workflow-store.js';
+import { createPostgresPool } from './persistence/postgres.js';
 import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
 import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
-import { createPostgresPool } from './persistence/postgres.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { MetaAdsControlledWriteService } from './providers/meta-ads/meta-ads-controlled-write.js';
+import { MetaAdsDemandIntelligenceService } from './providers/meta-ads/meta-ads-demand-intelligence.js';
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
@@ -90,6 +92,26 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     config.META_ADS_READ_ENABLED && config.META_ACCESS_TOKEN_ENV_KEY
       ? new MetaAdsReadProvider(createMetaClient())
       : undefined;
+  const metaAdsDemand = metaAdsRead
+    ? new MetaAdsDemandIntelligenceService(
+        metaAdsRead,
+        pool ? new PostgresMetaAdsGeoAudienceStore(pool) : undefined,
+        {
+          tenantId: TOCA_TENANT_ID,
+          maxRecommendationChangePercent: 20,
+          ...(config.META_ADS_ALLOWED_CURRENCY && config.META_ADS_MAX_DAILY_BUDGET_MINOR
+            ? {
+                budgetPolicy: {
+                  currency: config.META_ADS_ALLOWED_CURRENCY.toUpperCase(),
+                  maxDailyBudgetMinor: config.META_ADS_MAX_DAILY_BUDGET_MINOR,
+                  maxLifetimeBudgetMinor: Number.MAX_SAFE_INTEGER,
+                  maxSingleIncreasePercent: 20,
+                },
+              }
+            : {}),
+        },
+      )
+    : undefined;
 
   let metaAdsWrite: MetaAdsControlledWriteService | undefined;
   let metaAdsWriteProvider: MetaAdsControlledGraphProvider | undefined;
@@ -187,6 +209,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const runtimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
     ...(metaAdsRead ? { metaAdsRead } : {}),
+    ...(metaAdsDemand ? { metaAdsDemand } : {}),
     ...(metaAdsWrite ? { metaAdsWrite } : {}),
     ...(metaAdsWriteProvider ? { metaAdsWriteProvider } : {}),
     ...(googleAds ? { googleAds } : {}),
