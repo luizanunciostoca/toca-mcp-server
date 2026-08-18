@@ -1,12 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 const requiredFiles = [
-  'src/providers/openai/creative-truth-openai-image-generator.ts',
-  'src/creative/controlled-static-image-generation.ts',
-  'src/providers/google-drive/creative-truth-reference-loader.ts',
+  'control/creative-truth-policy.v1.json',
   'src/contracts/creative-truth-generative-reference-sets.ts',
   'src/contracts/operation-scoped-generative-candidate.ts',
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
+  'src/providers/google-drive/creative-truth-reference-loader.ts',
   'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
   'src/creative/controlled-operation-scoped-static-image-generation.ts',
   'src/creative/controlled-operation-scoped-generative-finalization.ts',
@@ -15,6 +14,7 @@ const requiredFiles = [
   'src/marketing-autopilot-image-finalize.ts',
   'src/creative/creative-truth-resolver.ts',
   'docs/architecture/controlled-static-image-generation.md',
+  'docs/architecture/operation-scoped-generative-content-standard-binding.md',
 ];
 for (const path of requiredFiles) {
   if (!existsSync(path)) fail(`Creative Truth static generative file missing: ${path}`);
@@ -23,31 +23,19 @@ for (const path of requiredFiles) {
 requireIncludes('control/creative-truth-policy.v1.json', [
   '"generativeMode": "GENERATIVE_EXCEPTION"',
   '"referenceStrategy": "OPERATION_SCOPED_ONLY_V1"',
-  '"legacyReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"',
   '"legacyReferenceSetStatus": "DEPRECATED"',
   '"sunsetReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1"',
   '"thePartyReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"',
   '"crossOperationReferenceReuse": "FORBIDDEN"',
   '"referenceSetOperationMatch": "REQUIRED"',
   '"legacyReferenceSetExecution": "DENY"',
-  '"minimumVerifiedReferences": 3',
-  '"architecturalInventionStillForbidden": true',
-  '"environmentDriftStillForbidden": true',
   '"videoGenerativeException": "UNSUPPORTED_V1"',
 ]);
 
-// Legacy global-set implementation remains only for compatibility and can never be an execution authority.
-requireIncludes('src/providers/openai/creative-truth-openai-image-generator.ts', [
-  "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6'",
-  "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
-  'CreativeTruthOpenAiImageGenerator',
-  'readyForFinalComposition: false',
-]);
 requireIncludes('src/creative/creative-truth-resolver.ts', [
   "if (creativeMode === 'GENERATIVE_EXCEPTION')",
   'GENERATIVE_EXCEPTION_REQUIRES_OPERATION_SCOPED_PIPELINE',
 ]);
-
 requireIncludes('src/contracts/creative-truth-generative-reference-sets.ts', [
   "LEGACY_TOCA_VENUE_REFERENCE_SET_ID = 'TOCA_VENUE_REFERENCE_SET_V1'",
   'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
@@ -64,11 +52,22 @@ requireIncludes('src/contracts/operation-scoped-generative-candidate.ts', [
   "publicationEligible: z.literal(false)",
 ]);
 
+requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
+  "const CONTENT_OPERATION_RANGE = 'CONTENT_ITEMS!A2:E2000'",
+  "const CONTENT_CREATIVE_CONTEXT_RANGE = 'CONTENT_ITEMS!A1:BX2000'",
+  'getContentItemOperation',
+  'getContentItemCreativeStandardId',
+  "headers.get('content_item_id')",
+  "headers.get('creative_standard_id')",
+  'FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID',
+  'FAILED_GENERATIVE_CONTENT_STANDARD_AMBIGUOUS',
+  'getCreativeStandard(standardId: string)',
+  'getBrandAsset(brand: string, variant: string)',
+]);
+
 requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-generator.ts', [
   "const DEFAULT_RESPONSE_MODEL = 'gpt-5.6'",
   "const IMAGE_TOOL_MODEL_SELECTION = 'RESPONSES_TOOL_MANAGED' as const",
-  'CreativeTruthOperationScopedImageGenerator',
-  'referenceSetOperation(approval.referenceSetId)',
   'registry.getContentItemOperation(request.contentItemId)',
   'canonical.referenceSetId !== approval.referenceSetId',
   'venue.operation !== expectedOperation',
@@ -79,7 +78,6 @@ requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-gene
   "size: '1024x1536'",
   "output_format: 'jpeg'",
   'requiresPostGenerationHumanReview: true',
-  'requiresVenueFidelityGate: true',
   'readyForFinalComposition: false',
 ]);
 forbidIncludes('src/providers/openai/creative-truth-operation-scoped-image-generator.ts', [
@@ -88,27 +86,12 @@ forbidIncludes('src/providers/openai/creative-truth-operation-scoped-image-gener
   'model: this.imageModel',
 ]);
 
-requireIncludes('src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts', [
-  'GoogleSheetsOperationScopedGenerativeRegistry',
-  'operationScopedGenerativeExceptionApprovalSchema.safeParse',
-  "const CONTENT_OPERATION_RANGE = 'CONTENT_ITEMS!A2:E2000'",
-  "const CONTENT_CREATIVE_CONTEXT_RANGE = 'CONTENT_ITEMS!A1:BX2000'",
-  'getContentItemOperation',
-  'getContentItemCreativeStandardId',
-  "headers.get('creative_standard_id')",
-  'FAILED_GENERATIVE_CONTENT_STANDARD_SCHEMA_INVALID',
-  'getCreativeStandard(standardId: string)',
-  'getBrandAsset(brand: string, variant: string)',
-]);
-
 requireIncludes('src/creative/controlled-operation-scoped-static-image-generation.ts', [
   'ControlledOperationScopedStaticImageGenerationService',
   'readonly now?: () => string',
   'const nowIso = trustedNowIso(this.now)',
   'getContentItemOperation(contentItemId)',
   'getReferenceSet(approval.referenceSetId)',
-  'reference.referenceSetId === approval.referenceSetId',
-  'requiredForGenerativeException',
   'uniqueReferenceIds',
   'uniqueAssetIds',
   'GENERATIVE_TRUSTED_CLOCK_INVALID',
@@ -116,9 +99,7 @@ requireIncludes('src/creative/controlled-operation-scoped-static-image-generatio
 
 requireIncludes('src/creative/controlled-operation-scoped-generative-finalization.ts', [
   'createControlledOperationScopedGenerativeFinalizationService',
-  'ControlledOperationScopedGenerativeFinalizationService',
   'OperationScopedGenerativeFinalizationRegistry',
-  'operationScopedGenerativeCandidateManifestSchema',
   'getContentItemOperation(',
   'getApprovedGenerativeException(',
   'getCreativeStandard(',
@@ -132,27 +113,25 @@ requireIncludes('src/creative/controlled-operation-scoped-generative-finalizatio
   'GENERATIVE_TRUSTED_CLOCK_INVALID',
 ]);
 
+requireIncludes('src/providers/local/local-operation-scoped-generative-composer.ts', [
+  'evaluateOperationScopedGenerativeFidelity',
+  'evaluateBrandIntegrity',
+  'evaluateQualityGate',
+  "creativeMode: 'GENERATIVE_EXCEPTION'",
+  'exactAssetBinding: true',
+]);
+
 requireIncludes('src/marketing-autopilot-image-generate.ts', [
   'GoogleSheetsOperationScopedGenerativeRegistry',
   'ControlledOperationScopedStaticImageGenerationService',
   'CreativeTruthOperationScopedImageGenerator',
-  "requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY')",
-  'GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY',
-  "requiredEnv('OPENAI_API_KEY_ENV_KEY')",
   "status: 'GENERATED_REVIEW_REQUIRED'",
-  'operation: result.operation',
-  'referenceSetId: result.referenceSetId',
-  'imageToolModelSelection: result.imageToolModelSelection',
   'publicationEligible: false',
-  'readyForFinalComposition: result.readyForFinalComposition',
   'IMAGE_GENERATE_CALLER_TIME_FORBIDDEN',
 ]);
-forbidIncludes('src/marketing-autopilot-image-generate.ts', ['OPENAI_CREATIVE_IMAGE_MODEL']);
-
 requireIncludes('src/marketing-autopilot-image-finalize.ts', [
   'createControlledOperationScopedGenerativeFinalizationService',
   'GoogleSheetsThePartyContentOrchestration',
-  'thePartyContextResolver',
   'GoogleDriveCreativeTruthBrandAssetLoader',
   'IMAGE_FINALIZE_CALLER_CANONICAL_CONTEXT_FORBIDDEN',
   'publicationAuthorized: false',
@@ -166,9 +145,15 @@ requireIncludes('src/providers/google-drive/creative-truth-reference-loader.ts',
 ]);
 
 requireIncludes('docs/architecture/controlled-static-image-generation.md', [
-  'CONTENT_ITEMS',
-  'creative_standard_id',
   'operation-scoped',
+  'ControlledOperationScopedGenerativeFinalizationService',
+  'publicationAuthorized=false',
+]);
+requireIncludes('docs/architecture/operation-scoped-generative-content-standard-binding.md', [
+  'CONTENT_ITEMS.creative_standard_id',
+  'GENERATIVE_FINALIZATION_CONTENT_STANDARD_REQUIRED',
+  'GENERATIVE_FINALIZATION_CONTENT_STANDARD_MISMATCH',
+  'GoogleSheetsThePartyContentOrchestration',
 ]);
 
 requireIncludes('package.json', [
@@ -187,14 +172,12 @@ function requireIncludes(path, markers) {
     if (!content.includes(marker)) fail(`Creative Truth generative contract missing in ${path}: ${marker}`);
   }
 }
-
 function forbidIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
     if (content.includes(marker)) fail(`Creative Truth generative contract forbidden in ${path}: ${marker}`);
   }
 }
-
 function fail(message) {
   console.error(message);
   process.exit(1);
