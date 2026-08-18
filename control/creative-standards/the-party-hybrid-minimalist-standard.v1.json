@@ -13,6 +13,7 @@
   "sourceOfTruth": {
     "provider": "GOOGLE_DRIVE",
     "driveDocumentId": "1yFY-1NXjWs1bKvRP3smRuRKWT6OR3WK-FkDcoLqAmPk",
+    "canonicalManualDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
     "canonicalReferenceImageDriveId": "1-xLSxr4qlKg-3OrI5hTPUpVvsAgqi2gD",
     "officialHeroLogoDriveId": "1V09F8w1BcgwzONnZk1ROpOJACuDF2dPF"
   },
