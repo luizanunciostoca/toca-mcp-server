@@ -7,9 +7,11 @@ const primitiveFinalizerPath = 'src/providers/local/local-operation-scoped-gener
 const supersededFinalizerPath =
   'src/providers/local/controlled-operation-scoped-generative-finalization.ts';
 const candidateManifestPath = 'src/contracts/operation-scoped-generative-candidate.ts';
+const canonicalBrandBindingPath = 'src/creative/canonical-generative-brand-binding.ts';
 const required = [
   'src/contracts/creative-truth-generative-reference-sets.ts',
   candidateManifestPath,
+  canonicalBrandBindingPath,
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
   'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
   'src/creative/controlled-operation-scoped-static-image-generation.ts',
@@ -22,6 +24,7 @@ const required = [
   'test/controlled-operation-scoped-static-image-generation.test.ts',
   'test/creative-truth-operation-scoped-image-generator.test.ts',
   'test/operation-scoped-generative-fidelity.test.ts',
+  'test/canonical-generative-brand-binding.test.ts',
   'test/local-operation-scoped-generative-composer.test.ts',
   'test/controlled-operation-scoped-generative-finalization.test.ts',
 ];
@@ -57,6 +60,18 @@ requireIncludes(candidateManifestPath, [
   "publicationEligible: z.literal(false)",
   'GENERATIVE_CANDIDATE_REFERENCE_LINEAGE_LENGTH_MISMATCH',
   'GENERATIVE_CANDIDATE_REFERENCE_LINEAGE_DUPLICATE',
+]);
+
+requireIncludes(canonicalBrandBindingPath, [
+  'resolveCanonicalGenerativeBrandInputs',
+  'getBrandAsset(brand: string, variant: string)',
+  'suppliedByBrand.size !== uniqueRequiredBrands.size',
+  'canonical.status !== \'ACTIVE_APPROVED\'',
+  "canonical.integrityMode !== 'SHA256_PINNED'",
+  'canonical.aiReconstructionAllowed !== false',
+  "canonical.brandAssetId !== 'BRAND-THE-PARTY-WHITE-V1'",
+  "visualStandard.standardId === THE_PARTY_NETWORKS && !partyEnvironment",
+  "SUNSET_STANDARDS.has(visualStandard.standardId) && !required.has('TOCA_DO_MORCEGO')",
 ]);
 
 requireIncludes(
@@ -109,6 +124,11 @@ requireIncludes('src/providers/openai/creative-truth-operation-scoped-image-gene
 
 requireIncludes('src/creative/operation-scoped-generative-fidelity.ts', [
   'evaluateOperationScopedGenerativeFidelity',
+  'fidelityEvidenceSchema.safeParse',
+  'venueReferenceSchema.safeParse',
+  'MALFORMED_FIDELITY_EVIDENCE',
+  'MALFORMED_REFERENCE_EVIDENCE',
+  'CANDIDATE_SHA_INVALID',
   'approval.operation !== input.operation',
   'referenceSetOperation(approval.referenceSetId)',
   'evidence.candidateSha256 !== input.candidateSha256',
@@ -136,6 +156,9 @@ requireIncludes(controlledFinalizerPath, [
   'uniqueAssetIds',
   'getVenueAssetBySourceAssetId(reference.assetId)',
   'venue.sourceSha256.toLowerCase()',
+  'resolveCanonicalGenerativeBrandInputs',
+  'this.dependencies.brandRegistry',
+  'brandAssets: canonicalBrandAssets',
   'GENERATIVE_FINALIZATION_CANDIDATE_HASH_MISMATCH',
   'GENERATIVE_FINALIZATION_APPROVAL_BINDING_MISMATCH',
   'GENERATIVE_FINALIZATION_REFERENCE_IDENTITY_MISMATCH',
@@ -238,6 +261,12 @@ requireIncludes('test/operation-scoped-generative-fidelity.test.ts', [
   'rejects evidence replayed against another generated candidate',
   'rejects output without human review',
 ]);
+requireIncludes('test/canonical-generative-brand-binding.test.ts', [
+  'replaces caller registry metadata with the exact canonical official BRAND_ASSETS record',
+  'requires Toca branding for Sunset standards and rejects unrequired extras',
+  'requires the official white The Party hero asset',
+  'requires an explicit environment for The Party networks',
+]);
 requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
   'renders only after exact scoped human-reviewed candidate evidence passes',
   'candidate hash substitution',
@@ -245,13 +274,16 @@ requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
 ]);
 requireIncludes('test/controlled-operation-scoped-generative-finalization.test.ts', [
-  'revalidates candidate, approval, reference identity and source hashes before final render',
+  'official brand metadata before final render',
   'candidate hash substitution before canonical state or composer access',
   'CONTENT_ITEMS operation changes after candidate generation',
   'canonical approval no longer matches the generated candidate manifest',
   'current canonical reference source hash differs from generation lineage',
   'approved minimum reference count immediately before finalization',
   'duplicate canonical reference identity',
+  'caller-forged brand registry metadata with the canonical BRAND_ASSETS record',
+  'required official brand has no canonical BRAND_ASSETS record',
+  'unrequired extra brand asset',
 ]);
 
 console.log('Operation-scoped generative Creative Truth contract OK');
