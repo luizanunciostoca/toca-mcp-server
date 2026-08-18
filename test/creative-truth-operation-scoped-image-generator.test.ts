@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { OperationScopedGenerativeExceptionApproval } from '../src/contracts/creative-truth-generative-reference-sets.js';
+import type {
+  OperationScopedGenerativeExceptionApproval,
+  TocaGenerativeOperation,
+} from '../src/contracts/creative-truth-generative-reference-sets.js';
 import type { VenueAsset, VenueReference } from '../src/contracts/creative-truth.js';
 import type { SecretResolver } from '../src/core/secrets.js';
 import type { OperationScopedGenerativeRegistry } from '../src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.js';
@@ -21,6 +24,7 @@ const approval: OperationScopedGenerativeExceptionApproval = {
   approvalRef: 'approval:gen-sun-1',
   reason: 'Explicit Sunset generation',
   referenceSetId: 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+  operation: 'SUNSET',
   minReferenceCount: 3,
   allowArchitecturalInvention: false,
   allowEnvironmentDrift: false,
@@ -49,7 +53,10 @@ function reference(index: number): OperationScopedGenerativeVenueReferenceInput 
   };
 }
 
-function venue(input: OperationScopedGenerativeVenueReferenceInput, operation = 'SUNSET'): VenueAsset {
+function venue(
+  input: OperationScopedGenerativeVenueReferenceInput,
+  operation = 'SUNSET',
+): VenueAsset {
   return {
     venueAssetId: `VENUE-${input.registry.assetId}`,
     sourceAssetId: input.registry.assetId,
@@ -69,12 +76,17 @@ function venue(input: OperationScopedGenerativeVenueReferenceInput, operation = 
 function registryFor(
   inputs: readonly OperationScopedGenerativeVenueReferenceInput[],
   venueOperation = 'SUNSET',
+  contentOperation: TocaGenerativeOperation | undefined = 'SUNSET',
+  canonicalApproval: OperationScopedGenerativeExceptionApproval = approval,
 ): OperationScopedGenerativeRegistry {
   const canonicalReferences: readonly VenueReference[] = inputs.map((entry) => entry.registry);
-  const venues = new Map(inputs.map((entry) => [entry.registry.assetId, venue(entry, venueOperation)]));
+  const venues = new Map(
+    inputs.map((entry) => [entry.registry.assetId, venue(entry, venueOperation)]),
+  );
   return {
     assertCanonicalPolicy: vi.fn(async (): Promise<void> => undefined),
-    getApprovedGenerativeException: vi.fn(async () => approval),
+    getContentItemOperation: vi.fn(async () => contentOperation),
+    getApprovedGenerativeException: vi.fn(async () => canonicalApproval),
     getReferenceSet: vi.fn(async () => canonicalReferences),
     getVenueAssetBySourceAssetId: vi.fn(async (assetId: string) => venues.get(assetId)),
   };
@@ -90,6 +102,64 @@ function generator(registry: OperationScopedGenerativeRegistry, fetchImpl: typeo
 }
 
 describe('CreativeTruthOperationScopedImageGenerator', () => {
+  it('rejects when canonical content operation is missing before provider access', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const subject = generator(registryFor(references, 'SUNSET', undefined), fetchImpl);
+
+    await expect(
+      subject.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate a faithful Sunset scene.',
+        approval,
+        references,
+        nowIso: '2026-08-18T04:00:00Z',
+      }),
+    ).rejects.toThrow('FAILED_GENERATIVE_CONTENT_OPERATION_MISSING');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects when canonical content operation conflicts with the approved reference set', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const subject = generator(registryFor(references, 'SUNSET', 'THE_PARTY'), fetchImpl);
+
+    await expect(
+      subject.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate a faithful Sunset scene.',
+        approval,
+        references,
+        nowIso: '2026-08-18T04:00:00Z',
+      }),
+    ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects an approval object whose operation does not match its own reference set', async () => {
+    const references = [reference(1), reference(2), reference(3)];
+    const fetchImpl = vi.fn<typeof fetch>();
+    const mismatchedApproval = {
+      ...approval,
+      operation: 'THE_PARTY' as const,
+    };
+    const subject = generator(
+      registryFor(references, 'SUNSET', 'SUNSET', mismatchedApproval),
+      fetchImpl,
+    );
+
+    await expect(
+      subject.generate({
+        contentItemId: 'CONTENT-SUN-1',
+        prompt: 'Generate image',
+        approval: mismatchedApproval,
+        references,
+        nowIso: '2026-08-18T04:00:00Z',
+      }),
+    ).rejects.toThrow('FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects a source whose VENUE_VISUALS operation does not match the approved reference set', async () => {
     const references = [reference(1), reference(2), reference(3)];
     const fetchImpl = vi.fn<typeof fetch>();
@@ -111,7 +181,10 @@ describe('CreativeTruthOperationScopedImageGenerator', () => {
     const references = [reference(1), reference(2), reference(3)];
     const crossed = references.map((entry) => ({
       ...entry,
-      registry: { ...entry.registry, referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' },
+      registry: {
+        ...entry.registry,
+        referenceSetId: 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+      },
     }));
     const fetchImpl = vi.fn<typeof fetch>();
     const subject = generator(registryFor(references), fetchImpl);
@@ -144,7 +217,9 @@ describe('CreativeTruthOperationScopedImageGenerator', () => {
       expect(policyText).toContain('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
       expect(policyText).toContain('Do not borrow venue facts from another Toca operation');
       expect(policyText).toContain('Do not generate, redraw, repair, imitate or approximate');
-      expect(body.input[1]?.content.filter((item) => item.type === 'input_image')).toHaveLength(3);
+      expect(
+        body.input[1]?.content.filter((item) => item.type === 'input_image'),
+      ).toHaveLength(3);
       expect(body.tools[0]).toMatchObject({
         type: 'image_generation',
         action: 'generate',
@@ -179,7 +254,9 @@ describe('CreativeTruthOperationScopedImageGenerator', () => {
     expect(result.operation).toBe('SUNSET');
     expect(result.referenceSetId).toBe('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
     expect(result.referenceAssetIds).toEqual(['SUN-1', 'SUN-2', 'SUN-3']);
-    expect(result.candidateSha256).toBe(createHash('sha256').update(output).digest('hex'));
+    expect(result.candidateSha256).toBe(
+      createHash('sha256').update(output).digest('hex'),
+    );
     expect(result.imageToolModelSelection).toBe('RESPONSES_TOOL_MANAGED');
     expect(result.requiresPostGenerationHumanReview).toBe(true);
     expect(result.readyForFinalComposition).toBe(false);
