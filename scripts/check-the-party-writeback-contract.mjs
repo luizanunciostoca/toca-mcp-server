@@ -2,18 +2,22 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const orchestrationPath = 'control/creative-standards/the-party-content-orchestration.v1.json';
 const writebackPath = 'src/providers/google-sheets/the-party-content-writeback.ts';
+const cliPath = 'src/marketing-autopilot-the-party-writeback.ts';
 const clientPath = 'src/providers/google-sheets/client.ts';
 const mediaAssetsPath = 'src/providers/google-sheets/media-assets.ts';
 const docsPath = 'docs/architecture/the-party-creative-standard.md';
+const packagePath = 'package.json';
 const writebackTestPath = 'test/the-party-content-writeback.test.ts';
 const sheetsTestPath = 'test/google-sheets-batch-update.test.ts';
 
 for (const path of [
   orchestrationPath,
   writebackPath,
+  cliPath,
   clientPath,
   mediaAssetsPath,
   docsPath,
+  packagePath,
   writebackTestPath,
   sheetsTestPath,
 ]) {
@@ -77,6 +81,30 @@ requireIncludes(writebackPath, [
   'updateRanges(THE_PARTY_CONTENT_REGISTRY_DRIVE_ID, updates)',
   'PROVIDER_READBACK_FAILED',
 ]);
+
+requireIncludes(cliPath, [
+  "createHash('sha256')",
+  "readFile(args.manifest, 'utf8')",
+  'GoogleSheetsRestClient',
+  'GoogleSheetsThePartyContentWriteback',
+  'writeFinalCreativeTruthEvidence',
+  'GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY',
+  'observedOutputSha256',
+  'publicationAuthorized: false',
+]);
+
+const packageJson = JSON.parse(read(packagePath));
+if (
+  packageJson.scripts?.['dev:marketing-autopilot-the-party-writeback'] !==
+    'tsx src/marketing-autopilot-the-party-writeback.ts' ||
+  packageJson.scripts?.['start:marketing-autopilot-the-party-writeback'] !==
+    'node dist/src/marketing-autopilot-the-party-writeback.js' ||
+  !packageJson.scripts?.['architecture:check']?.includes(
+    'node scripts/check-the-party-writeback-contract.mjs',
+  )
+) {
+  fail('The Party writeback executable/package binding drift detected');
+}
 
 requireIncludes(writebackTestPath, [
   'TOCA_THUMBNAIL_V1',
