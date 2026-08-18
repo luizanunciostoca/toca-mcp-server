@@ -1,12 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
+const controlledFinalizerPath =
+  'src/providers/local/controlled-operation-scoped-generative-finalization.ts';
+const primitiveFinalizerPath = 'src/providers/local/local-operation-scoped-generative-composer.ts';
 const required = [
   'src/contracts/creative-truth-generative-reference-sets.ts',
   'src/providers/google-sheets/creative-truth-operation-scoped-generative-registry.ts',
   'src/providers/openai/creative-truth-operation-scoped-image-generator.ts',
   'src/creative/controlled-operation-scoped-static-image-generation.ts',
   'src/creative/operation-scoped-generative-fidelity.ts',
-  'src/providers/local/local-operation-scoped-generative-composer.ts',
+  primitiveFinalizerPath,
+  controlledFinalizerPath,
   'src/marketing-autopilot-image-generate.ts',
   'test/creative-truth-operation-scoped-reference-sets.test.ts',
   'test/creative-truth-operation-scoped-generative-registry.test.ts',
@@ -14,6 +19,7 @@ const required = [
   'test/creative-truth-operation-scoped-image-generator.test.ts',
   'test/operation-scoped-generative-fidelity.test.ts',
   'test/local-operation-scoped-generative-composer.test.ts',
+  'test/controlled-operation-scoped-generative-finalization.test.ts',
 ];
 for (const path of required) {
   if (!existsSync(path)) fail(`Operation-scoped Creative Truth file missing: ${path}`);
@@ -92,7 +98,7 @@ requireIncludes('src/creative/operation-scoped-generative-fidelity.ts', [
   'crossOperationReferenceReuse: false',
 ]);
 
-requireIncludes('src/providers/local/local-operation-scoped-generative-composer.ts', [
+requireIncludes(primitiveFinalizerPath, [
   'LocalOperationScopedGenerativeComposer',
   'evaluateOperationScopedGenerativeFidelity',
   "creativeMode: 'GENERATIVE_EXCEPTION'",
@@ -104,6 +110,26 @@ requireIncludes('src/providers/local/local-operation-scoped-generative-composer.
   "pipelineVersion: 'local-operation-scoped-generative-composer-v1'",
   'GENERATIVE_OPERATION_SCOPED_VISUAL_STANDARD_REQUIRED',
 ]);
+
+requireIncludes(controlledFinalizerPath, [
+  'ControlledOperationScopedGenerativeFinalizationService',
+  "Omit<",
+  "'approval' | 'references'",
+  'registry.assertCanonicalPolicy()',
+  'registry.getContentItemOperation(contentItemId)',
+  'registry.getApprovedGenerativeException(contentItemId)',
+  'referenceSetOperation(approval.referenceSetId) !== operation',
+  'registry.getReferenceSet(',
+  'FAILED_GENERATIVE_CONTENT_OPERATION_MISSING',
+  'FAILED_GENERATIVE_REFERENCE_SET_OPERATION_MISMATCH',
+  'FAILED_GENERATIVE_REFERENCE_MISSING',
+  'approval,',
+  'references:',
+]);
+
+// The raw ImageMagick finalizer is a rendering primitive, not an execution authority.
+// Any production source importing it directly would bypass canonical CONTENT_ITEMS/approval/reference readback.
+assertNoDirectPrimitiveFinalizerImports('src', controlledFinalizerPath);
 
 // Legacy global-set fidelity may remain as compatibility surface, but it must never pass finalization.
 requireIncludes('src/creative/creative-truth.ts', [
@@ -188,8 +214,37 @@ requireIncludes('test/local-operation-scoped-generative-composer.test.ts', [
   'legacy generative finalization denial',
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
 ]);
+requireIncludes('test/controlled-operation-scoped-generative-finalization.test.ts', [
+  'resolves approval and references canonically and overwrites caller-forged context',
+  'canonical content operation is unavailable',
+  'canonical approval operation conflicts with CONTENT_ITEMS',
+  'canonical required references are insufficient',
+  'duplicate canonical reference identity',
+]);
 
 console.log('Operation-scoped generative Creative Truth contract OK');
+
+function assertNoDirectPrimitiveFinalizerImports(root, allowedPath) {
+  for (const path of walk(root)) {
+    if (!path.endsWith('.ts') || path === allowedPath || path === primitiveFinalizerPath) continue;
+    const content = readFileSync(path, 'utf8');
+    if (content.includes('local-operation-scoped-generative-composer.js')) {
+      fail(
+        `Operation-scoped generative primitive finalizer imported outside controlled boundary: ${path}`,
+      );
+    }
+  }
+}
+
+function walk(root) {
+  const files = [];
+  for (const entry of readdirSync(root)) {
+    const path = join(root, entry).replaceAll('\\', '/');
+    if (statSync(path).isDirectory()) files.push(...walk(path));
+    else files.push(path);
+  }
+  return files;
+}
 
 function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
