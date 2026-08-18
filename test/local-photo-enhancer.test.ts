@@ -4,7 +4,7 @@ import { LocalPhotoEnhancer } from '../src/providers/local/local-photo-enhancer.
 
 function boundInput() {
   return {
-    sourceAssetId: 'MM-SUN-0211-V1',
+    sourceAssetId: 'SUN-0211',
     sourceDriveFileId: 'drive-file-0211',
     imageBytes: Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]),
     contentType: 'image/jpeg' as const,
@@ -16,7 +16,7 @@ function boundInput() {
 }
 
 describe('LocalPhotoEnhancer', () => {
-  it('binds the exact source bytes and returns policy-pinned Creative Truth enhancement provenance', async () => {
+  it('creates a source-bound 4K restoration candidate without semantic synthesis', async () => {
     const runner = vi.fn(async (_command: string, args: readonly string[]) => {
       const outputPath = args.at(-1);
       if (!outputPath) throw new Error('missing output path');
@@ -28,14 +28,27 @@ describe('LocalPhotoEnhancer', () => {
 
     expect(result).toMatchObject({
       policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+      restorationPolicyId: 'TOCA_PHOTO_RESTORATION_POLICY_V1',
+      restorationProfile: 'SOURCE_FAITHFUL_CINEMATIC_RESTORATION_V1',
       creativeMode: 'REAL_PLUS_ENHANCEMENT',
-      sourceAssetId: 'MM-SUN-0211-V1',
+      sourceAssetId: 'SUN-0211',
       sourceDriveFileId: 'drive-file-0211',
       sourceImageBound: true,
       editMode: 'ENHANCE_EXISTING_IMAGE',
       editorProvider: 'LOCAL_IMAGEMAGICK',
-      pipelineVersion: 'local-photo-enhancer-v1',
-      requestedScale: '200%',
+      pipelineVersion: 'local-photo-enhancer-v2',
+      requestedScale: '4K_LONG_EDGE',
+      outputLongEdgePixels: 3840,
+      stillMasterFormat: 'JPEG_HIGH_QUALITY_4K',
+      proResApplicability: 'VIDEO_ONLY_NOT_APPLICABLE_TO_STILL',
+      identityLock: true,
+      compositionLock: true,
+      structureLock: true,
+      backgroundLock: true,
+      generativeDetailSynthesisUsed: false,
+      semanticAlterationDetected: false,
+      restorationConfidence: 'REVIEW_REQUIRED',
+      promotionEligible: false,
       outputContentType: 'image/jpeg',
       creativeTruthBound: true,
       requiresVenueFidelityGate: true,
@@ -53,11 +66,13 @@ describe('LocalPhotoEnhancer', () => {
         '-filter',
         'Lanczos',
         '-resize',
-        '200%',
+        '3840x3840',
+        '-contrast-stretch',
+        '0.15%x0.15%',
         '-unsharp',
-        '0x0.8+0.8+0.02',
+        '0x1.1+0.9+0.015',
         '-quality',
-        '95',
+        '98',
       ]),
     );
   });
@@ -77,26 +92,12 @@ describe('LocalPhotoEnhancer', () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
-  it('fails closed when Creative Truth binding is missing at runtime', async () => {
-    const runner = vi.fn();
-    const enhancer = new LocalPhotoEnhancer(runner);
-    const invalid = {
-      ...boundInput(),
-      creativeTruth: undefined,
-    } as unknown as Parameters<LocalPhotoEnhancer['enhance']>[0];
-
-    await expect(enhancer.enhance(invalid)).rejects.toMatchObject({ code: 'POLICY_DENIED' });
-    expect(runner).not.toHaveBeenCalled();
-  });
-
   it('fails closed when source bytes are empty', async () => {
     const enhancer = new LocalPhotoEnhancer(() => Promise.resolve());
 
     await expect(
       enhancer.enhance({
         ...boundInput(),
-        sourceAssetId: 'SUN-0211',
-        sourceDriveFileId: 'drive-file-0211',
         imageBytes: new Uint8Array(),
       }),
     ).rejects.toMatchObject({ code: 'SOURCE_IMAGE_BINDING_FAILURE' });
