@@ -10,6 +10,8 @@ import {
 } from '../../contracts/creative-truth-generative-reference-sets.js';
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
+  type BrandAsset,
+  type CreativeStandard,
   type VenueAsset,
   type VenueReference,
 } from '../../contracts/creative-truth.js';
@@ -37,6 +39,8 @@ export interface OperationScopedGenerativeRegistry {
     referenceSetId: TocaGenerativeVenueReferenceSetId,
   ): Promise<readonly VenueReference[]>;
   getVenueAssetBySourceAssetId(sourceAssetId: string): Promise<VenueAsset | undefined>;
+  getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
+  getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined>;
 }
 
 export interface OperationScopedGenerativeRegistryConfig {
@@ -153,6 +157,14 @@ export class GoogleSheetsOperationScopedGenerativeRegistry
 
   getVenueAssetBySourceAssetId(sourceAssetId: string): Promise<VenueAsset | undefined> {
     return this.base.getVenueAssetBySourceAssetId(sourceAssetId);
+  }
+
+  getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined> {
+    return this.base.getBrandAsset(brand, variant);
+  }
+
+  getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined> {
+    return this.base.getCreativeStandard(standardId);
   }
 }
 
