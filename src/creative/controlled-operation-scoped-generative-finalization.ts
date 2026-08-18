@@ -5,6 +5,7 @@ import {
   type OperationScopedGenerativeCandidateManifest,
 } from '../contracts/operation-scoped-generative-candidate.js';
 import type {
+  BrandAsset,
   CreativeStandard,
   FidelityEvidence,
   VenueReference,
@@ -27,6 +28,12 @@ const THE_PARTY_VISUAL_STANDARDS = new Set([
   'THE_PARTY_HYBRID_MINIMALIST_V1',
 ]);
 
+export interface OperationScopedGenerativeFinalizationRegistry
+  extends OperationScopedGenerativeRegistry {
+  getBrandAsset(brand: string, variant: string): Promise<BrandAsset | undefined>;
+  getCreativeStandard(standardId: string): Promise<CreativeStandard | undefined>;
+}
+
 export interface ControlledOperationScopedGenerativeFinalizationRequest {
   readonly candidateManifest: unknown;
   readonly candidateImageBytes: Uint8Array;
@@ -48,7 +55,7 @@ export interface ControlledOperationScopedGenerativeFinalizationRequest {
 }
 
 export interface ControlledOperationScopedGenerativeFinalizationDependencies {
-  readonly registry: OperationScopedGenerativeRegistry;
+  readonly registry: OperationScopedGenerativeFinalizationRegistry;
   readonly composer: Pick<LocalOperationScopedGenerativeComposer, 'compose'>;
   readonly now?: () => string;
 }
