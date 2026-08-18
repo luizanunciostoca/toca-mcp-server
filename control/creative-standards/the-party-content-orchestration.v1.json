@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0",
+  "contractId": "THE_PARTY_CONTENT_ORCHESTRATION_V1",
+  "status": "ACTIVE_CANONICAL",
+  "validatedAt": "2026-08-18",
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "contentRegistryDriveId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+    "sheet": "CONTENT_ITEMS",
+    "canonicalManualDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
+    "creativeTruthRegistryDriveId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU"
+  },
+  "requiredColumns": [
+    "the_party_intent",
+    "the_party_environment",
+    "creative_standard_id",
+    "creative_standard_version",
+    "visual_standard_status",
+    "hero_brand_asset_id",
+    "venue_asset_id",
+    "creative_truth_policy_id",
+    "brand_integrity_status",
+    "venue_fidelity_status",
+    "quality_gate_status",
+    "exact_asset_binding",
+    "output_sha256"
+  ],
+  "intentResolution": {
+    "THE_PARTY_HYBRID_NETWORKS_V1": [
+      "HIGH_IMPACT_CAMPAIGN",
+      "LINEUP",
+      "EVENT",
+      "ACTIVATION",
+      "SOCIAL_PROMOTION",
+      "IMMERSIVE_ANNOUNCEMENT"
+    ],
+    "THE_PARTY_HYBRID_MINIMALIST_V1": [
+      "INSTITUTIONAL_COMMUNICATION",
+      "ELEGANT_AD",
+      "INVITATION",
+      "HIGHLIGHT_COVER",
+      "LANDING_PAGE",
+      "WEBSITE",
+      "PEOPLE_FIRST_CONVERSION"
+    ]
+  },
+  "environmentPolicy": {
+    "requiredForStandard": "THE_PARTY_HYBRID_NETWORKS_V1",
+    "allowed": ["INTERNATIONAL", "NATIONAL"],
+    "mustNotBeInferred": true,
+    "missingStatus": "BLOCKED_NEEDS_ENVIRONMENT",
+    "failureCode": "THE_PARTY_ENVIRONMENT_REQUIRED"
+  },
+  "brandPolicy": {
+    "heroBrand": "THE_PARTY",
+    "heroBrandAssetId": "BRAND-THE-PARTY-WHITE-V1",
+    "institutionalFooterOrder": [
+      "TOCA_DO_MORCEGO",
+      "CORONA",
+      "RED_BULL",
+      "MORRO_DIGITAL"
+    ]
+  },
+  "goldenVenueAssets": [
+    "VENUE-TP-0130",
+    "VENUE-TP-0087",
+    "VENUE-TP-0071",
+    "VENUE-TP-0048",
+    "VENUE-TP-0113"
+  ],
+  "gateDefaults": {
+    "brand_integrity_status": "PENDING",
+    "venue_fidelity_status": "PENDING",
+    "quality_gate_status": "PENDING",
+    "exact_asset_binding": null,
+    "output_sha256": null
+  },
+  "readyBoundary": {
+    "resolvedVisualStandardDoesNotImplyReady": true,
+    "allCreativeTruthGatesMustPass": true,
+    "exactAssetBindingRequired": true,
+    "outputSha256Required": true
+  }
+}
