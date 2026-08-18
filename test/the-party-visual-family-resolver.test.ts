@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BrandAsset, CreativeStandard, VenueAsset } from '../src/contracts/creative-truth.js';
 import { CreativeTruthResolver } from '../src/creative/creative-truth-resolver.js';
 import {
+  resolveThePartyVenueAssetPreferences,
   resolveThePartyVisualFamily,
   type ThePartyVisualStandardId,
 } from '../src/creative/the-party-visual-family-resolver.js';
@@ -28,6 +29,50 @@ const venue: VenueAsset = {
   protectedElements: ['PISTA', 'TETO', 'COLUNAS'],
   status: 'ACTIVE_APPROVED',
 };
+
+const venue0087: VenueAsset = {
+  ...venue,
+  venueAssetId: 'VENUE-TP-0087',
+  sourceAssetId: 'TP-0087',
+  sourceDriveFileId: '119XngFf39R1b9JhgDxhketwWRnZE0crm',
+  masterAssetId: 'MM-TP-0087-V1',
+  masterDriveFileId: '1EFGhtSWfv5G6PGmK5P8ZlJ_FX-9G_6Kn',
+  dominantSubject: 'amigos_drink_retrato',
+};
+
+const venue0071: VenueAsset = {
+  ...venue,
+  venueAssetId: 'VENUE-TP-0071',
+  sourceAssetId: 'TP-0071',
+  sourceDriveFileId: '1VjJHnQTpZrs3gTIZQImYrMK9vdqbg0VW',
+  masterAssetId: 'MM-TP-0071-V1',
+  masterDriveFileId: '1IOnDnGpRvzzwr4DLQfJbjCroqtYoRUMv',
+  locationSignature: 'dj_booth',
+  dominantSubject: 'dj_performance',
+};
+
+const venue0048: VenueAsset = {
+  ...venue,
+  venueAssetId: 'VENUE-TP-0048',
+  sourceAssetId: 'TP-0048',
+  sourceDriveFileId: '1q0zeVdDPzA_odab4cDbi_CY8hRFVFROT',
+  masterAssetId: 'MM-TP-0048-V1',
+  masterDriveFileId: '1TX_VOw1XmamFzwDmKLnyiw8pOrGWcnkS',
+  locationSignature: 'entrada_toca',
+  dominantSubject: 'entrada_marca_publico',
+};
+
+const venue0113: VenueAsset = {
+  ...venue,
+  venueAssetId: 'VENUE-TP-0113',
+  sourceAssetId: 'TP-0113',
+  sourceDriveFileId: '1gpjE0xJk7tAYRkDNZaVup_PpC-UMtDCe',
+  masterAssetId: 'MM-TP-0113-V1',
+  masterDriveFileId: '1c-oqyVCSx852FgkRPMhEixAu1JV3NjBe',
+  dominantSubject: 'publico_luz_vermelha',
+};
+
+const venues = [venue, venue0048, venue0087, venue0071, venue0113] as const;
 
 function standard(standardId: ThePartyVisualStandardId): CreativeStandard {
   return {
@@ -75,8 +120,10 @@ function registryMock() {
       return undefined;
     }),
     getBrandAsset: vi.fn(async (name: string) => brand(name)),
-    getVenueAsset: vi.fn(async () => venue),
-    listVenueAssets: vi.fn(async () => [venue]),
+    getVenueAsset: vi.fn(async (venueAssetId: string) =>
+      venues.find((candidate) => candidate.venueAssetId === venueAssetId),
+    ),
+    listVenueAssets: vi.fn(async () => [...venues]),
     getApprovedGenerativeException: vi.fn(async () => undefined),
     getReferenceSet: vi.fn(async () => []),
   } as unknown as GoogleSheetsCreativeTruthRegistry;
@@ -119,6 +166,31 @@ describe('resolveThePartyVisualFamily', () => {
   });
 });
 
+describe('resolveThePartyVenueAssetPreferences', () => {
+  it('prefers people-first and institutional masters according to minimalist intent', () => {
+    expect(resolveThePartyVenueAssetPreferences({ intent: 'PEOPLE_FIRST_CONVERSION' })).toEqual([
+      'VENUE-TP-0087',
+      'VENUE-TP-0048',
+    ]);
+    expect(resolveThePartyVenueAssetPreferences({ intent: 'INSTITUTIONAL_COMMUNICATION' })).toEqual([
+      'VENUE-TP-0048',
+      'VENUE-TP-0087',
+    ]);
+  });
+
+  it('prefers environment-bound real masters for lineup and crowd-first masters for social', () => {
+    expect(
+      resolveThePartyVenueAssetPreferences({ intent: 'LINEUP', environment: 'INTERNATIONAL' }),
+    ).toEqual(['VENUE-TP-0071', 'VENUE-TP-0130']);
+    expect(
+      resolveThePartyVenueAssetPreferences({ intent: 'LINEUP', environment: 'NATIONAL' }),
+    ).toEqual(['VENUE-TP-0113', 'VENUE-TP-0130']);
+    expect(
+      resolveThePartyVenueAssetPreferences({ intent: 'SOCIAL_PROMOTION', environment: 'NATIONAL' }),
+    ).toEqual(['VENUE-TP-0130', 'VENUE-TP-0113']);
+  });
+});
+
 describe('CreativeTruthResolver The Party automatic standard selection', () => {
   it('auto-resolves a minimalist standard from intent when standardId is omitted', async () => {
     const resolver = new CreativeTruthResolver(registryMock());
@@ -152,6 +224,60 @@ describe('CreativeTruthResolver The Party automatic standard selection', () => {
     expect(result.thePartyEnvironment).toBe('NATIONAL');
   });
 
+  it('selects an intent-appropriate real golden master instead of the first registry row', async () => {
+    const resolver = new CreativeTruthResolver(registryMock());
+
+    const institutional = await resolver.resolve({
+      contentItemId: 'CONTENT-TP-AUTO-VENUE-INSTITUTIONAL',
+      operation: 'THE_PARTY',
+      thePartyIntent: 'INSTITUTIONAL_COMMUNICATION',
+      requiredBrands: ['THE_PARTY'],
+    });
+    expect(institutional.venueAsset?.venueAssetId).toBe('VENUE-TP-0048');
+
+    const peopleFirst = await resolver.resolve({
+      contentItemId: 'CONTENT-TP-AUTO-VENUE-PEOPLE',
+      operation: 'THE_PARTY',
+      thePartyIntent: 'PEOPLE_FIRST_CONVERSION',
+      requiredBrands: ['THE_PARTY'],
+    });
+    expect(peopleFirst.venueAsset?.venueAssetId).toBe('VENUE-TP-0087');
+
+    const internationalLineup = await resolver.resolve({
+      contentItemId: 'CONTENT-TP-AUTO-VENUE-LINEUP',
+      operation: 'THE_PARTY',
+      thePartyIntent: 'LINEUP',
+      thePartyEnvironment: 'INTERNATIONAL',
+      requiredBrands: ['THE_PARTY'],
+    });
+    expect(internationalLineup.venueAsset?.venueAssetId).toBe('VENUE-TP-0071');
+
+    const nationalLineup = await resolver.resolve({
+      contentItemId: 'CONTENT-TP-AUTO-VENUE-LINEUP-NATIONAL',
+      operation: 'THE_PARTY',
+      thePartyIntent: 'LINEUP',
+      thePartyEnvironment: 'NATIONAL',
+      requiredBrands: ['THE_PARTY'],
+    });
+    expect(nationalLineup.venueAsset?.venueAssetId).toBe('VENUE-TP-0113');
+  });
+
+  it('fails closed when explicit standard conflicts with the approved intent family', async () => {
+    const resolver = new CreativeTruthResolver(registryMock());
+
+    await expect(
+      resolver.resolve({
+        contentItemId: 'CONTENT-TP-MISMATCH',
+        standardId: 'THE_PARTY_HYBRID_NETWORKS_V1',
+        operation: 'THE_PARTY',
+        thePartyIntent: 'INSTITUTIONAL_COMMUNICATION',
+        thePartyEnvironment: 'NATIONAL',
+        venueAssetId: venue.venueAssetId,
+        requiredBrands: ['THE_PARTY'],
+      }),
+    ).rejects.toThrow('THE_PARTY_STANDARD_INTENT_MISMATCH');
+  });
+
   it('fails closed when neither a standard nor a The Party intent is supplied', async () => {
     const resolver = new CreativeTruthResolver(registryMock());
 
@@ -160,6 +286,19 @@ describe('CreativeTruthResolver The Party automatic standard selection', () => {
         contentItemId: 'CONTENT-TP-NO-INTENT',
         operation: 'THE_PARTY',
         venueAssetId: venue.venueAssetId,
+        requiredBrands: ['THE_PARTY'],
+      }),
+    ).rejects.toThrow('THE_PARTY_VISUAL_INTENT_REQUIRED');
+  });
+
+  it('requires intent for automatic venue selection even when the visual standard is explicit', async () => {
+    const resolver = new CreativeTruthResolver(registryMock());
+
+    await expect(
+      resolver.resolve({
+        contentItemId: 'CONTENT-TP-NO-VENUE-INTENT',
+        standardId: 'THE_PARTY_HYBRID_MINIMALIST_V1',
+        operation: 'THE_PARTY',
         requiredBrands: ['THE_PARTY'],
       }),
     ).rejects.toThrow('THE_PARTY_VISUAL_INTENT_REQUIRED');
