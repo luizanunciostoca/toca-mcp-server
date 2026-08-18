@@ -46,6 +46,29 @@ if (
   fail('Creative Truth parent policy violates the fail-closed contract');
 }
 
+requireIncludes('src/contracts/creative-truth.ts', [
+  'creativeTruthPolicySchema',
+  'enhancementProvenanceRequired: z.literal(true)',
+  "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
+  "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
+  'creativeEnhancementProvenanceSchema',
+  'policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID)',
+  "creativeMode: z.literal('REAL_PLUS_ENHANCEMENT')",
+  'enhancementProvenance: creativeEnhancementProvenanceSchema.optional()',
+  'FAILED_ENHANCEMENT_PROVENANCE',
+  'videoShotSchema',
+  'MEDIA_URL',
+  'META_IMAGE_HASH',
+  'META_VIDEO_ID',
+  'META_SOURCE_CREATIVE_ID',
+  'DRIVE_FILE_ID',
+]);
+
+const policyContract = read('src/contracts/creative-truth.ts');
+if (!policyContract.includes('export const creativeTruthPolicySchema')) {
+  fail('Creative Truth policy schema missing');
+}
+
 for (const path of [
   'control/creative-standards/sunset-story-standard.v1.json',
   'control/creative-standards/sunset-feed-standard.v1.json',
@@ -71,24 +94,6 @@ if (
 ) {
   fail('Synthetic Sunset examples must never become venue truth');
 }
-
-requireIncludes('src/contracts/creative-truth.ts', [
-  'creativeTruthPolicySchema',
-  'enhancementProvenanceRequired: z.literal(true)',
-  "videoRealPlusEnhancement: z.literal('FAIL_CLOSED_UNTIL_SHOT_LEVEL_PROVENANCE')",
-  "videoEnhancementFailure: z.literal('VIDEO_ENHANCEMENT_PROVENANCE_UNSUPPORTED')",
-  'creativeEnhancementProvenanceSchema',
-  'policyId: z.literal(TOCA_CREATIVE_TRUTH_POLICY_ID)',
-  "creativeMode: z.literal('REAL_PLUS_ENHANCEMENT')",
-  'enhancementProvenance: creativeEnhancementProvenanceSchema.optional()',
-  'FAILED_ENHANCEMENT_PROVENANCE',
-  'videoShotSchema',
-  'MEDIA_URL',
-  'META_IMAGE_HASH',
-  'META_VIDEO_ID',
-  'META_SOURCE_CREATIVE_ID',
-  'DRIVE_FILE_ID',
-]);
 
 requireIncludes('src/creative/creative-truth.ts', [
   'FAILED_AI_LOGO_RECONSTRUCTION',
