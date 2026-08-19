@@ -31,14 +31,7 @@
     "brandFooterBottomPx": 1830,
     "bottomBreathingRoomMinimumPx": 70
   },
-  "visualEssence": [
-    "SOLAR",
-    "SOPHISTICATED",
-    "SOCIAL",
-    "SENSORIAL",
-    "PREMIUM",
-    "HUMAN"
-  ],
+  "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN"],
   "visualPriority": [
     "REAL_PHOTOGRAPHY",
     "PEOPLE_OR_EXPERIENCE",
@@ -84,11 +77,7 @@
       "familyClass": "CLEAN_SANS",
       "weight": "MEDIUM_OR_SEMIBOLD",
       "container": "THIN_WHITE_OUTLINE",
-      "preferredTexts": [
-        "Garanta seu ingresso",
-        "Compre seu ingresso",
-        "Vem pra Toca"
-      ]
+      "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
     },
     "time": {
       "familyClass": "CLEAN_SANS",
@@ -109,14 +98,7 @@
     "maxSupportCopy": 1,
     "maxPrimaryCta": 1,
     "maxOptionalFunctionalInfo": 1,
-    "doNotCover": [
-      "FACE",
-      "EYES",
-      "HANDS",
-      "PRIMARY_DRINK",
-      "SUN",
-      "EXISTING_LOGO"
-    ]
+    "doNotCover": ["FACE", "EYES", "HANDS", "PRIMARY_DRINK", "SUN", "EXISTING_LOGO"]
   },
   "templateClasses": [
     {
@@ -153,22 +135,12 @@
   "antiRepeat": {
     "allowSameTemplateClassConsecutivelyWhenAlternativesExist": false,
     "headlineRepeatWindowDays": 14,
-    "preferredRotation": [
-      "PEOPLE",
-      "VIEW",
-      "EXPERIENCE_OR_DRINK",
-      "PEOPLE"
-    ],
+    "preferredRotation": ["PEOPLE", "VIEW", "EXPERIENCE_OR_DRINK", "PEOPLE"],
     "preserveGrammarNotExactLayout": true
   },
   "brandFooter": {
     "required": true,
-    "order": [
-      "TOCA_DO_MORCEGO",
-      "CORONA",
-      "RED_BULL",
-      "MORRO_DIGITAL"
-    ],
+    "order": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "preferredColor": "#FFFFFF",
     "logoSource": "OFFICIAL_DRIVE_ASSETS_ONLY",
     "forbidAiLogoReconstruction": true
