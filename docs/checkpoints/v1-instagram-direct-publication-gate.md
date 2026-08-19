@@ -1,8 +1,8 @@
 # V1 Instagram direct-publication gate
 
-Status: **CODE_COMPLETE + STATIC_REVIEW_VERIFIED; LOCAL_VERIFIED BLOCKED BY EXECUTION ENVIRONMENT; CI PENDING**
+Status: **CODE_COMPLETE + STATIC_REVIEW_VERIFIED + CI_VERIFIED; FINAL MERGE REQUIRES EXACT-HEAD GREEN**
 
-This checkpoint records the V1 integration gate for the existing Instagram direct-publication capabilities and the validated TOCA-managed reschedule binding.
+This checkpoint records the V1 integration gate for the existing Instagram direct-publication capabilities and the validated TOCA-managed reschedule binding. The work was recovered from the historical PR #185 branch onto the canonical repository as PR #8 without importing the old divergent merge history.
 
 ## Scope
 
@@ -32,7 +32,7 @@ The executable boundary remains fail-closed on all of the following:
 
 The MCP/Core path intentionally does not reuse the legacy one-shot `INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256` gate. Per-request authorization is owned by the Core ApprovalRecord lifecycle. The legacy controlled-publication path remains unchanged and still requires `MCP_ENABLED=false`, `META_ENABLED=true`, persistent OAuth token storage, and the pre-approved request hash.
 
-A configuration drift found during the PR #185 audit was corrected: the MCP deployment intentionally has `META_ENABLED=false` while using the explicit Meta access-token reference, but the previous shared configuration guard rejected every `INSTAGRAM_PUBLICATION_WRITES_ENABLED=true` process unless the legacy Meta OAuth module was enabled. Core/MCP and legacy publication guards are now separated without relaxing either boundary.
+A configuration drift found during the historical PR #185 audit was corrected: the MCP deployment intentionally has `META_ENABLED=false` while using the explicit Meta access-token reference, but the previous shared configuration guard rejected every `INSTAGRAM_PUBLICATION_WRITES_ENABLED=true` process unless the legacy Meta OAuth module was enabled. Core/MCP and legacy publication guards are now separated without relaxing either boundary.
 
 ## Media contracts
 
@@ -47,7 +47,7 @@ The existing Meta transport/builder remains the only provider path.
 
 ## Reschedule validation
 
-`instagram.toca_schedule.reschedule` now exposes `sideEffectValidated: true` and remains canonically `WRITE_REVERSIBLE`.
+`instagram.toca_schedule.reschedule` exposes `sideEffectValidated: true` and remains canonically `WRITE_REVERSIBLE`.
 
 Its deterministic Core idempotency key binds the source job ID and the approved replacement schedule descriptor. Replay recovery checks the durable scheduler state and reuses an already-persisted replacement when the source was canceled before a retry. Successful Core completion requires scheduler readback proving the replacement job is `SCHEDULED`, with the replacement job ID as the external resource ID.
 
@@ -73,27 +73,31 @@ Static source/test review confirms coverage or explicit fail-closed behavior for
 
 Provider uncertainty is never converted into a second blind publish. The existing publication executor persists the uncertain state and requires reconciliation/manual review before another write can proceed.
 
-## Validation evidence
+## Recovery and validation evidence
 
-`STATIC_REVIEW_VERIFIED`: PASS for the PR diff, capability catalog, runtime bindings, policy/authorization, ApprovalRecord engine, scheduler approval descriptor, executor, Meta transport, PostgreSQL persistence/idempotency, provider readback, reconciliation, and existing tests.
+`STATIC_REVIEW_VERIFIED`: PASS for the recovered PR diff, capability catalog, runtime bindings, policy/authorization, ApprovalRecord engine, scheduler approval descriptor, executor, Meta transport, PostgreSQL persistence/idempotency, provider readback, reconciliation, and tests.
 
-`LOCAL_VERIFIED`: **BLOCKED_BY_EXECUTION_ENVIRONMENT**. The assistant execution container used for this audit does not have the repository checkout, cannot resolve GitHub for a network clone, has Node 22 rather than the repository-required Node >=24, has no pnpm 10.15.0, and does not have the project-local Prettier/ESLint/Vitest/TypeScript toolchain or a PostgreSQL endpoint. Therefore format, architecture check, lint, project typecheck, focused Vitest, full Vitest, build, and PostgreSQL E2E are not truthfully claimed as passing here.
+`RECOVERY_BASE`: PR #8 was reconstructed from canonical `main` SHA `36da7c43cfb2cdc166c0ac914b5f94bc35f6b31e`. The recovery branch was verified zero commits behind `main` before validation and imported only the intended feature delta rather than the historical divergent commit graph.
 
-A syntax-only inspection of the edited TypeScript does not substitute for repository Quality.
+`CI_VERIFIED_IMPLEMENTATION_HEAD`: PASS on SHA `fc987f386d96d3749e3d1623398b435c0d518c84`.
 
-`CI`: **BLOCKED_EXTERNALLY**. GitHub Actions runs for the prior PR head ended in `startup_failure`; no such run is accepted as Quality evidence.
+- GitHub Actions `Quality Gate` run `32314159412`: PASS for workflow supply-chain verification, dependency install, format, architecture/control-plane checks, lint, typecheck, full Vitest suite, and build.
+- GitHub Actions `M-FOUND-12 PostgreSQL E2E` run `32314159404`: PASS for PostgreSQL container initialization, real repository migrations, restart/outbox/audit and Video/R29 E2E, migration-drift verification, and clean container shutdown.
+- The recovery exposed and corrected one compatibility regression in the legacy Meta publication-client test by explicitly binding that test to `MCP_ENABLED=false`; Core direct-publication validation remains fail-closed.
 
-No real Instagram publication was executed as part of this audit.
+`LOCAL_VERIFIED`: not used as release evidence for this recovery. The canonical hosted GitHub Actions gates now execute successfully and supersede the historical execution-environment blocker recorded by PR #185.
+
+No real Instagram publication was executed as part of recovery or CI validation.
 
 ## Merge contract
 
-PR #185 must not merge until:
+PR #8 must merge only when:
 
-1. the branch is reconciled to the then-current `main` with zero commits behind;
-2. repository-local `pnpm quality` or the canonical GitHub `Quality Gate` runs on the exact final head;
-3. format, architecture check, lint, typecheck, focused/full tests, and build are green;
-4. PostgreSQL E2E is executed when the required test environment is available and applicable;
-5. the exact green head SHA is captured;
-6. merge occurs without bypassing the required Quality gate.
+1. the final branch remains zero commits behind the then-current `main`;
+2. the canonical GitHub `Quality Gate` passes on the exact final PR head;
+3. format, architecture/control-plane checks, lint, typecheck, full tests, and build are green;
+4. `M-FOUND-12 PostgreSQL E2E` passes on the exact final PR head;
+5. merge occurs without bypassing the required gates;
+6. no real Instagram provider write is introduced as a validation shortcut.
 
-Historical/deleted `BuildFailed` registrations and GitHub Actions `startup_failure` runs are not accepted as Quality evidence.
+The historical PR #185 `startup_failure` state is superseded by PR #8 and is not accepted as current release evidence.
