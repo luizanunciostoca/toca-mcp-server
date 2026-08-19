@@ -123,7 +123,9 @@ describe('Instagram publication runtime configuration', () => {
         ...corePublicationEnv,
         INSTAGRAM_BUSINESS_ACCOUNT_ID: undefined,
       }),
-    ).toThrow('INSTAGRAM_BUSINESS_ACCOUNT_ID is required for Core Instagram direct publication');
+    ).toThrow(
+      'INSTAGRAM_BUSINESS_ACCOUNT_ID is required for Core Instagram direct publication',
+    );
   });
 
   it('requires a referenced Meta access token for Core direct publication', () => {
@@ -132,6 +134,8 @@ describe('Instagram publication runtime configuration', () => {
         ...corePublicationEnv,
         CORE_META_TOKEN: undefined,
       }),
-    ).toThrow('Missing environment secret referenced by META_ACCESS_TOKEN_ENV_KEY: CORE_META_TOKEN');
+    ).toThrow(
+      'Missing environment secret referenced by META_ACCESS_TOKEN_ENV_KEY: CORE_META_TOKEN',
+    );
   });
 });
