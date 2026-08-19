@@ -401,7 +401,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
 
   if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && config.MCP_ENABLED) {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
-      throw new Error('META_ACCESS_TOKEN_ENV_KEY is required for Core Instagram direct publication');
+      throw new Error(
+        'META_ACCESS_TOKEN_ENV_KEY is required for Core Instagram direct publication',
+      );
     }
     assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
   }

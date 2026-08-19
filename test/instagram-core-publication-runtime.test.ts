@@ -166,7 +166,10 @@ describe('Instagram direct publication Core runtime', () => {
       }),
     ).toThrow();
     expect(
-      resolveInstagramPublicationRuntimeBinding('instagram.publish.reel', runtime)?.inputSchema.parse({
+      resolveInstagramPublicationRuntimeBinding(
+        'instagram.publish.reel',
+        runtime,
+      )?.inputSchema.parse({
         account,
         mediaUrls: ['https://cdn.example.com/reel.mp4'],
         correlationId: 'corr-reel',
@@ -174,7 +177,10 @@ describe('Instagram direct publication Core runtime', () => {
       }),
     ).toBeDefined();
     expect(
-      resolveInstagramPublicationRuntimeBinding('instagram.publish.story', runtime)?.inputSchema.parse({
+      resolveInstagramPublicationRuntimeBinding(
+        'instagram.publish.story',
+        runtime,
+      )?.inputSchema.parse({
         account,
         mediaUrls: ['https://cdn.example.com/story.jpg'],
         correlationId: 'corr-story',

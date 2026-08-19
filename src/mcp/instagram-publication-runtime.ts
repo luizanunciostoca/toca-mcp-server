@@ -76,8 +76,7 @@ export function resolveInstagramPublicationRuntimeBinding(
       return executeUntilPublished(runtime, request);
     },
     targetAccount: (value) => schema.parse(value).account.instagramAccountId,
-    idempotencyKey: (value) =>
-      directPublicationIdempotencyKey(capabilityId, schema.parse(value)),
+    idempotencyKey: (value) => directPublicationIdempotencyKey(capabilityId, schema.parse(value)),
     providerReadback: async (result, value) => {
       const input = schema.parse(value);
       assertAllowedAccount(input, runtime.allowedInstagramAccountId);
@@ -199,13 +198,19 @@ function directPublicationIdempotencyKey(
   return `instagram:direct:${digest}`;
 }
 
-function assertAllowedAccount(input: DirectPublicationInput, allowedInstagramAccountId: string): void {
+function assertAllowedAccount(
+  input: DirectPublicationInput,
+  allowedInstagramAccountId: string,
+): void {
   if (input.account.instagramAccountId !== allowedInstagramAccountId) {
     throw new Error('INSTAGRAM_PUBLICATION_TARGET_ACCOUNT_NOT_ALLOWED');
   }
 }
 
-function providerMediaTypeMatches(expected: InstagramMediaType, observed: string | undefined): boolean {
+function providerMediaTypeMatches(
+  expected: InstagramMediaType,
+  observed: string | undefined,
+): boolean {
   switch (expected) {
     case 'IMAGE':
       return observed === 'IMAGE';
