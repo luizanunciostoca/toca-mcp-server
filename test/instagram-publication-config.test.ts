@@ -118,16 +118,20 @@ describe('Instagram publication runtime configuration', () => {
   });
 
   it('requires a canonical Instagram account for Core direct publication', () => {
-    const { INSTAGRAM_BUSINESS_ACCOUNT_ID: _account, ...env } = corePublicationEnv;
-    expect(() => loadConfig(env)).toThrow(
-      'INSTAGRAM_BUSINESS_ACCOUNT_ID is required for Core Instagram direct publication',
-    );
+    expect(() =>
+      loadConfig({
+        ...corePublicationEnv,
+        INSTAGRAM_BUSINESS_ACCOUNT_ID: undefined,
+      }),
+    ).toThrow('INSTAGRAM_BUSINESS_ACCOUNT_ID is required for Core Instagram direct publication');
   });
 
   it('requires a referenced Meta access token for Core direct publication', () => {
-    const { CORE_META_TOKEN: _token, ...env } = corePublicationEnv;
-    expect(() => loadConfig(env)).toThrow(
-      'Missing environment secret referenced by META_ACCESS_TOKEN_ENV_KEY: CORE_META_TOKEN',
-    );
+    expect(() =>
+      loadConfig({
+        ...corePublicationEnv,
+        CORE_META_TOKEN: undefined,
+      }),
+    ).toThrow('Missing environment secret referenced by META_ACCESS_TOKEN_ENV_KEY: CORE_META_TOKEN');
   });
 });
