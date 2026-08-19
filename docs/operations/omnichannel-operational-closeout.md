@@ -12,14 +12,14 @@ The existing Omnichannel contract/privacy/nurture work remains part of the V1 fo
 
 Canonical V1 classification:
 
-| Scope | V1 evidence state | Executable provider send? | V1 disposition |
-| --- | --- | --- | --- |
-| Omnichannel contracts and schemas | `CODE_COMPLETE` for contract/specification scope | No | V1 foundation |
-| Privacy/R16 suppression dependency | implemented/merged dependency | Used as policy foundation only | V1 foundation |
-| CRM `ContactRecord` resolution contract | implemented/merged dependency | Used as identity foundation only | V1 foundation |
-| Nurture durable workflow/timer model | `CODE_COMPLETE` for internal contract/workflow scope | No external delivery without a channel provider | V1 foundation |
-| Real WhatsApp provider binding/send/readback | `PLANNED` | **No** | **DEFERRED / NEXT_VERSION** |
-| Real Email provider binding/send/readback | `PLANNED` | **No** | **DEFERRED / NEXT_VERSION** |
+| Scope                                        | V1 evidence state                                    | Executable provider send?                       | V1 disposition              |
+| -------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------- | --------------------------- |
+| Omnichannel contracts and schemas            | `CODE_COMPLETE` for contract/specification scope     | No                                              | V1 foundation               |
+| Privacy/R16 suppression dependency           | implemented/merged dependency                        | Used as policy foundation only                  | V1 foundation               |
+| CRM `ContactRecord` resolution contract      | implemented/merged dependency                        | Used as identity foundation only                | V1 foundation               |
+| Nurture durable workflow/timer model         | `CODE_COMPLETE` for internal contract/workflow scope | No external delivery without a channel provider | V1 foundation               |
+| Real WhatsApp provider binding/send/readback | `PLANNED`                                            | **No**                                          | **DEFERRED / NEXT_VERSION** |
+| Real Email provider binding/send/readback    | `PLANNED`                                            | **No**                                          | **DEFERRED / NEXT_VERSION** |
 
 ## Canonical executability truth
 

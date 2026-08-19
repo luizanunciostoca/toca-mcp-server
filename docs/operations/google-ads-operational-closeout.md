@@ -12,14 +12,14 @@ The repository work already completed under R28 remains valid and must not be er
 
 Canonical V1 classification:
 
-| Scope | V1 evidence state | Executable live-provider claim | V1 disposition |
-| --- | --- | --- | --- |
-| Google Ads contracts, adapter, resolver and phase-gated runtime path in repository | `CODE_COMPLETE` | No production/provider claim | Preserved for next version |
-| Real provider `READ_ONLY` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
-| Real provider `PREPARE` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
-| Real provider `CREATE_PAUSED` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
-| Real provider `READBACK` | `PLANNED` as live-provider release scope | No | `DEFERRED / NEXT_VERSION` |
-| Real provider `MANAGE` / activation / budget changes | Not V1 validated | No | `DEFERRED / NEXT_VERSION` |
+| Scope                                                                              | V1 evidence state                        | Executable live-provider claim | V1 disposition             |
+| ---------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------ | -------------------------- |
+| Google Ads contracts, adapter, resolver and phase-gated runtime path in repository | `CODE_COMPLETE`                          | No production/provider claim   | Preserved for next version |
+| Real provider `READ_ONLY`                                                          | `PLANNED` as live-provider release scope | No                             | `DEFERRED / NEXT_VERSION`  |
+| Real provider `PREPARE`                                                            | `PLANNED` as live-provider release scope | No                             | `DEFERRED / NEXT_VERSION`  |
+| Real provider `CREATE_PAUSED`                                                      | `PLANNED` as live-provider release scope | No                             | `DEFERRED / NEXT_VERSION`  |
+| Real provider `READBACK`                                                           | `PLANNED` as live-provider release scope | No                             | `DEFERRED / NEXT_VERSION`  |
+| Real provider `MANAGE` / activation / budget changes                               | Not V1 validated                         | No                             | `DEFERRED / NEXT_VERSION`  |
 
 ## Repository truth
 
