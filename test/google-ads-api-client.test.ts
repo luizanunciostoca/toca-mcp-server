@@ -51,6 +51,91 @@ describe('Google Ads REST adapter', () => {
     });
   });
 
+  it('refreshes OAuth from secret references and reuses the cached access token', async () => {
+    const secrets = new InMemorySecretStore();
+    const clientIdRef = await secrets.put('client-id', 'client-test-id');
+    const clientSecretRef = await secrets.put('client-secret', 'client-test-secret');
+    const refreshTokenRef = await secrets.put('refresh-token', 'refresh-test-token');
+    const developerTokenRef = await secrets.put('developer-token', 'developer-test-token');
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      await Promise.resolve();
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return new Response(
+          JSON.stringify({ access_token: 'refreshed-access-token', expires_in: 3600 }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      return new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { 'request-id': 'req-provider', 'content-type': 'application/json' },
+      });
+    };
+
+    const client = new GoogleAdsRestApiClient(
+      {
+        customerId: '1234567890',
+        oauthRefresh: { clientIdRef, clientSecretRef, refreshTokenRef },
+        developerTokenRef,
+      },
+      secrets,
+      fakeFetch,
+    );
+
+    await client.search('SELECT campaign.id FROM campaign LIMIT 1');
+    await client.search('SELECT campaign.id FROM campaign LIMIT 2');
+
+    expect(calls.filter((call) => call.url === 'https://oauth2.googleapis.com/token')).toHaveLength(
+      1,
+    );
+    const providerCalls = calls.filter((call) => call.url.includes('googleads.googleapis.com'));
+    expect(providerCalls).toHaveLength(2);
+    expect(new Headers(providerCalls[0]?.init?.headers).get('authorization')).toBe(
+      'Bearer refreshed-access-token',
+    );
+    const tokenBody = calls[0]?.init?.body;
+    expect(tokenBody).toBeInstanceOf(URLSearchParams);
+    if (!(tokenBody instanceof URLSearchParams)) throw new Error('TEST_TOKEN_BODY_REQUIRED');
+    expect(tokenBody.get('grant_type')).toBe('refresh_token');
+    expect(tokenBody.get('client_secret')).toBe('client-test-secret');
+  });
+
+  it('normalizes OAuth provider failures without exposing credential values', async () => {
+    const secrets = new InMemorySecretStore();
+    const clientIdRef = await secrets.put('client-id', 'client-test-id');
+    const clientSecretRef = await secrets.put('client-secret', 'do-not-leak');
+    const refreshTokenRef = await secrets.put('refresh-token', 'also-do-not-leak');
+    const developerTokenRef = await secrets.put('developer-token', 'developer-test-token');
+    const client = new GoogleAdsRestApiClient(
+      {
+        customerId: '1234567890',
+        oauthRefresh: { clientIdRef, clientSecretRef, refreshTokenRef },
+        developerTokenRef,
+      },
+      secrets,
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({ error: 'invalid_grant', error_description: 'do-not-leak' }),
+            {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
+        ),
+    );
+
+    const failure = client.search('SELECT campaign.id FROM campaign LIMIT 1');
+    await expect(failure).rejects.toThrow('GOOGLE_ADS_OAUTH_ERROR:invalid_grant');
+    await expect(failure).rejects.not.toThrow('do-not-leak');
+  });
+
   it('fails closed when a mutation attempts to cross the configured customer boundary', async () => {
     const secrets = new InMemorySecretStore();
     const accessTokenRef = await secrets.put('access-token', 'oauth-test-token');

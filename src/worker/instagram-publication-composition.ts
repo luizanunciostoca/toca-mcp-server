@@ -23,7 +23,12 @@ export function createInstagramPublicationWorkerHandlers(
 ): ReadonlyMap<string, JobHandler> {
   const store = new PostgresPublicationExecutionStore(options.pool);
   const transport = new MetaInstagramPublicationTransport(options.metaClient);
-  const executor = new InstagramPublicationExecutor(store, transport);
+  const executor = new InstagramPublicationExecutor(
+    store,
+    transport,
+    () => new Date().toISOString(),
+    true,
+  );
   const handler = new InstagramPublicationJobHandler(executor);
   const approvalAudit = new InstagramPublicationApprovalAuditGate(
     options.pool,

@@ -115,8 +115,10 @@ function normalizeChange(
   const senderId = nestedString(value, 'from', 'id') ?? stringValue(value.from_id);
   const text = stringValue(value.text) ?? stringValue(value.message);
   const occurredAt = normalizeTimestamp(value.created_time ?? value.timestamp ?? fallbackTimestamp);
+  const parentId = stringValue(value.parent_id) ?? nestedString(value, 'parent', 'id');
+  const commentLike = Boolean(commentId) || field.includes('comment') || field.includes('mention');
 
-  if (!commentId && !field.includes('comment')) return undefined;
+  if (!commentLike) return undefined;
 
   return {
     eventId: deterministicEventId(accountId, 'COMMENT', commentId, occurredAt, raw),
@@ -127,7 +129,7 @@ function normalizeChange(
     ...(mediaId ? { mediaId } : {}),
     ...(text ? { text } : {}),
     ...(occurredAt ? { occurredAt } : {}),
-    rawType: field,
+    rawType: parentId ? `${field}:reply` : field,
   };
 }
 
