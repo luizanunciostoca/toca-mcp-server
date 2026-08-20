@@ -46,21 +46,21 @@ This is intentional: creating a second admin mutation API merely to make buttons
 
 ## Panel matrix
 
-| Panel | Current source | State rule |
-| --- | --- | --- |
-| Pending approvals | `toca.approval.get` + future tenant-safe list | Partial until canonical list exists |
-| Prepared campaigns | governed Meta/Google campaign READ/PREPARE capabilities | Dynamic |
-| Publications | `instagram.toca_schedule.list`, `instagram.media.list` | Dynamic |
-| Pipeline | advanced CRM/Sales | Dependency on PR #22 + Core READ exposure |
-| Critical leads | advanced CRM/Sales scoring | Dependency on PR #22 + Core READ exposure |
-| Next actions | advanced CRM/Sales next-action records | Dependency on PR #22 + Core READ exposure |
-| Provider health | `toca.system.health` + provider READ probes | Dynamic |
-| Dead letters | existing managed scheduler list/state | Dynamic; no second DLQ |
-| Demand Index | `meta_ads.opportunity.detect`, `meta_ads.audience.inspect` | Dependency on PR #15 until merged |
-| Budget recommendations | `meta_ads.budget.recommend` | Dependency on PR #15 until merged |
-| Experiments | future canonical experiment list/read | Dependency pending |
-| Incidents | typed observability/incident source | Dependency on PR #20 + Core READ exposure |
-| SLO status | typed SLO catalog | Dependency on PR #20 + Core READ exposure |
+| Panel                  | Current source                                             | State rule                                |
+| ---------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| Pending approvals      | `toca.approval.get` + future tenant-safe list              | Partial until canonical list exists       |
+| Prepared campaigns     | governed Meta/Google campaign READ/PREPARE capabilities    | Dynamic                                   |
+| Publications           | `instagram.toca_schedule.list`, `instagram.media.list`     | Dynamic                                   |
+| Pipeline               | advanced CRM/Sales                                         | Dependency on PR #22 + Core READ exposure |
+| Critical leads         | advanced CRM/Sales scoring                                 | Dependency on PR #22 + Core READ exposure |
+| Next actions           | advanced CRM/Sales next-action records                     | Dependency on PR #22 + Core READ exposure |
+| Provider health        | `toca.system.health` + provider READ probes                | Dynamic                                   |
+| Dead letters           | existing managed scheduler list/state                      | Dynamic; no second DLQ                    |
+| Demand Index           | `meta_ads.opportunity.detect`, `meta_ads.audience.inspect` | Dependency on PR #15 until merged         |
+| Budget recommendations | `meta_ads.budget.recommend`                                | Dependency on PR #15 until merged         |
+| Experiments            | future canonical experiment list/read                      | Dependency pending                        |
+| Incidents              | typed observability/incident source                        | Dependency on PR #20 + Core READ exposure |
+| SLO status             | typed SLO catalog                                          | Dependency on PR #20 + Core READ exposure |
 
 A panel is `READY` only when every declared source is actually present in the Core tool surface or in both the capability registry and runtime resolver. A registry/catalog declaration without a runtime binding is not considered available.
 

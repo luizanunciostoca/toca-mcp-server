@@ -69,7 +69,14 @@ describe('Human Control Center governed surface', () => {
 
   it('keeps parallel CRM, experiment, incident and SLO work dependency-pending instead of duplicating it', () => {
     const panels = build();
-    for (const id of ['pipeline', 'critical-leads', 'next-actions', 'experiments', 'incidents', 'slo-status']) {
+    for (const id of [
+      'pipeline',
+      'critical-leads',
+      'next-actions',
+      'experiments',
+      'incidents',
+      'slo-status',
+    ]) {
       expect(panels.find((panel) => panel.id === id)?.state).toBe('DEPENDENCY_PENDING');
     }
   });

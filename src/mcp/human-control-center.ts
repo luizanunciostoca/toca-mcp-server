@@ -83,7 +83,8 @@ const PANEL_DEFINITIONS: readonly PanelDefinition[] = [
   {
     id: 'prepared-campaigns',
     title: 'Prepared campaigns',
-    description: 'Paid-media campaigns and PAUSED candidates discovered only through governed provider READ.',
+    description:
+      'Paid-media campaigns and PAUSED candidates discovered only through governed provider READ.',
     capabilityIds: [
       'meta_ads.accounts.list',
       'meta_ads.campaigns.list',
@@ -284,8 +285,8 @@ export function buildControlCenterPanels(
           id,
           available: Boolean(
             canonicalId &&
-              dependencies.registry.get(canonicalId) &&
-              dependencies.runtimeResolver(canonicalId),
+            dependencies.registry.get(canonicalId) &&
+            dependencies.runtimeResolver(canonicalId),
           ),
           lifecycleStatus: canonical?.lifecycle_status ?? null,
           provider: canonical?.provider ?? null,
