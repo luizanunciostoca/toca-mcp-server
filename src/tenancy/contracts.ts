@@ -33,6 +33,13 @@ export interface TenantCredentialBinding {
   readonly evidence: readonly string[];
 }
 
+export interface TenantCampaignBinding {
+  readonly providerId: string;
+  readonly connectedAccountId: string;
+  readonly campaignId: string;
+  readonly evidence: readonly string[];
+}
+
 export interface TenantBrandCreativeTruthBinding {
   readonly brandResourceId: string;
   readonly creativeTruthRegistryResourceId: string;
@@ -87,6 +94,7 @@ export interface TenantConfiguration extends TenantScope {
   readonly deniedCapabilityIds: readonly string[];
   readonly providers: readonly TenantProviderBinding[];
   readonly credentials: readonly TenantCredentialBinding[];
+  readonly campaigns: readonly TenantCampaignBinding[];
   readonly brandCreativeTruth: TenantBrandCreativeTruthBinding;
   readonly budgets: readonly TenantBudgetEnvelope[];
   readonly policies: readonly TenantPolicyBinding[];
