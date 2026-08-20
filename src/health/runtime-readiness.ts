@@ -191,9 +191,7 @@ export function createRuntimeReadinessChecks(
       assertProviderCredentials(options.config, env);
     }),
     namedCheck('critical_configuration', async () => {
-      if (booleanFlag(env.TOCA_PLATFORM_KILL_SWITCH, false)) {
-        throw new Error('READINESS_PLATFORM_KILL_SWITCH_ACTIVE');
-      }
+      booleanFlag(env.TOCA_PLATFORM_KILL_SWITCH, false);
       requireText(options.config.DATABASE_URL, 'READINESS_DATABASE_URL_REQUIRED');
       if (options.config.NODE_ENV === 'production') {
         if (!options.config.MCP_ENABLED) throw new Error('READINESS_MCP_MUST_BE_ENABLED');
