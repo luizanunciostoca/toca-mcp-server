@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import { resolveRuntimeTenantIdentity } from '../src/runtime/tenant-identity.js';
 
-const expiresAt = Math.floor(Date.parse('2026-08-21T00:00:00.000Z') / 1000);
+const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
 function context(scopes: readonly string[]) {
   return {
