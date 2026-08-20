@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CrmCoreStore, OpportunityRecord } from '../src/crm/crm-records.js';
-import type { LearningRecordStore } from '../src/learning/store.js';
+import type {
+  AppendLearningRecordInput,
+  LearningRecord,
+  LearningRecordStore,
+} from '../src/learning/store.js';
 import type {
   CommerceProviderReadback,
   CommerceProviderReadbackAdapter,
@@ -9,7 +13,7 @@ import type {
   MarketingSalesFeedbackSnapshot,
   RevenueEvidenceRecord,
 } from '../src/measurement/attribution-revenue.js';
-import { AttributionRevenueService } from '../src/measurement/attribution-revenue-service.js';
+import type { AttributionRevenueService } from '../src/measurement/attribution-revenue-service.js';
 import {
   CommerceProviderRevenueCoordinator,
   resolveCommerceOpportunity,
@@ -178,42 +182,44 @@ const ingestion = {
   { readonly status: 'REVENUE_RECORDED' }
 >;
 
+function crmWithOpportunity(record: OpportunityRecord = opportunity): CrmCoreStore {
+  const getOpportunity = vi.fn(() => Promise.resolve(record));
+  return { getOpportunity } as unknown as CrmCoreStore;
+}
+
+function confirmedWonResult(): Awaited<
+  ReturnType<AttributionRevenueService['confirmOpportunityWon']>
+> {
+  return {
+    opportunity: { ...opportunity, status: 'WON', version: 2 },
+    feedback,
+  };
+}
+
 describe('commerce provider R31 feedback', () => {
   it('persists provider-confirmed WON feedback in the canonical LearningRecordStore', async () => {
-    const wonOpportunity = { ...opportunity, status: 'WON' as const, version: 2 };
-    const crm = {
-      getOpportunity: vi.fn(async () => opportunity),
-    } as unknown as CrmCoreStore;
-    const confirmOpportunityWon = vi.fn(async () => ({
-      opportunity: wonOpportunity,
-      revenue: {
-        currency: 'BRL',
-        grossRevenueMinor: 10000,
-        refundMinor: 500,
-        realizedRevenueMinor: 9500,
-        contributionMarginMinor: null,
-        confirmedReferences: 1,
-        refundedReferences: 0,
-        canceledReferences: 0,
-        evidenceRecordIds: ['revenue-1'],
-      },
-      attribution: [],
-      feedback,
-    }));
+    const crm = crmWithOpportunity();
+    const confirmed = confirmedWonResult();
+    const confirmOpportunityWon = vi.fn(() => Promise.resolve(confirmed));
     const attributionRevenue = {
       confirmOpportunityWon,
     } as unknown as AttributionRevenueService;
-    const append = vi.fn(async (input: Parameters<LearningRecordStore['append']>[0]) => ({
-      recordId: input.recordId,
-      recordType: input.recordType,
-      tenantId: input.tenantId,
-      workspaceId: input.workspaceId,
-      organizationId: input.organizationId,
-      experimentId: input.experimentId,
-      idempotencyKey: input.idempotencyKey,
-      payload: input.payload,
-      createdAt: input.createdAt,
-    }));
+
+    let appendedInput: AppendLearningRecordInput | undefined;
+    const append = vi.fn((input: AppendLearningRecordInput): Promise<LearningRecord> => {
+      appendedInput = input;
+      return Promise.resolve({
+        recordId: input.recordId,
+        recordType: input.recordType,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        organizationId: input.organizationId,
+        experimentId: input.experimentId,
+        idempotencyKey: input.idempotencyKey,
+        payload: input.payload,
+        createdAt: input.createdAt,
+      });
+    });
     const learning = { append } as unknown as LearningRecordStore;
     const coordinator = new CommerceProviderRevenueCoordinator(
       {} as CommerceProviderReadbackAdapter,
@@ -236,36 +242,37 @@ describe('commerce provider R31 feedback', () => {
       attributionKnown: true,
       providerEvidenceRefs: ['provider-readback:payment-1'],
     });
-    expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        recordType: 'OBSERVATION',
-        experimentId: null,
-        payload: expect.objectContaining({
-          outcome: 'WON',
-          opportunityId: 'opp-1',
-          revenueMinor: 9500,
-          campaign: 'party-aug',
-          content: 'creative-42',
-          confidence: 1,
-          confidenceScope: 'PROVIDER_CONFIRMED_REVENUE',
-          attributionKnown: true,
-          providerEvidenceRefs: ['provider-readback:payment-1'],
-        }),
-        evidence: expect.arrayContaining(['provider-readback:payment-1']),
-      }),
-    );
+    expect(append).toHaveBeenCalledOnce();
+    expect(appendedInput).toBeDefined();
+    const persisted = appendedInput as AppendLearningRecordInput;
+    expect(persisted.recordType).toBe('OBSERVATION');
+    expect(persisted.experimentId).toBeNull();
+    expect(persisted.evidence).toContain('provider-readback:payment-1');
+    expect(persisted.payload).toEqual({
+      outcome: 'WON',
+      opportunityId: 'opp-1',
+      revenueMinor: 9500,
+      currency: 'BRL',
+      campaign: 'party-aug',
+      content: 'creative-42',
+      confidence: 1,
+      confidenceScope: 'PROVIDER_CONFIRMED_REVENUE',
+      attributionKnown: true,
+      providerEvidenceRefs: ['provider-readback:payment-1'],
+    });
   });
 
   it('rejects an explicit Opportunity whose EventRecord lineage conflicts with provider readback', async () => {
-    const crm = {
-      getOpportunity: vi.fn(async () => opportunity),
-    } as unknown as CrmCoreStore;
     const mismatched = {
       ...paidReadback,
       attribution: { ...paidReadback.attribution, eventId: 'event-other' },
     } satisfies CommerceProviderReadback;
 
-    const resolution = await resolveCommerceOpportunity(crm, scope, mismatched);
+    const resolution = await resolveCommerceOpportunity(
+      crmWithOpportunity(),
+      scope,
+      mismatched,
+    );
 
     expect(resolution).toEqual({
       status: 'UNMATCHED',
@@ -275,20 +282,13 @@ describe('commerce provider R31 feedback', () => {
   });
 
   it('cannot confirm WON without the canonical R31 learning store', async () => {
-    const crm = {
-      getOpportunity: vi.fn(async () => opportunity),
-    } as unknown as CrmCoreStore;
+    const confirmed = confirmedWonResult();
     const attributionRevenue = {
-      confirmOpportunityWon: vi.fn(async () => ({
-        opportunity: { ...opportunity, status: 'WON' as const, version: 2 },
-        revenue: {},
-        attribution: [],
-        feedback,
-      })),
+      confirmOpportunityWon: vi.fn(() => Promise.resolve(confirmed)),
     } as unknown as AttributionRevenueService;
     const coordinator = new CommerceProviderRevenueCoordinator(
       {} as CommerceProviderReadbackAdapter,
-      crm,
+      crmWithOpportunity(),
       attributionRevenue,
     );
 
