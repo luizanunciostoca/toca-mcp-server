@@ -1,4 +1,4 @@
-import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
+import type { ExecutionIdentity } from '../core/identity.js';
 import type {
   TenantApprovalChainBinding,
   TenantCapabilityAvailability,
@@ -10,6 +10,7 @@ import type {
 } from './contracts.js';
 import { TenantCapabilityAvailabilityResolver } from './tenant-boundary.js';
 import { assertSameTenantBoundary, TenantIsolationError } from './tenant-configuration.js';
+import { authorizeTenantRbac } from './tenant-rbac.js';
 
 export class TenantPolicyOverlay {
   readonly #availability: TenantCapabilityAvailabilityResolver;
@@ -25,12 +26,7 @@ export class TenantPolicyOverlay {
     const configuration = await this.requireConfiguration(identity);
     if (configuration.status !== 'ACTIVE') return deny('TENANT_SUSPENDED');
 
-    const authorization = authorizeExecution(identity, {
-      capabilityId: request.capabilityId,
-      riskClass: request.riskClass,
-      ...(request.routeId ? { routeId: request.routeId } : {}),
-      ...(request.targetAccount ? { targetAccount: request.targetAccount } : {}),
-    });
+    const authorization = authorizeTenantRbac(configuration, identity, request);
     if (!authorization.allowed) return deny(authorization.reason);
 
     let availability: TenantCapabilityAvailability;
@@ -89,6 +85,7 @@ export class TenantPolicyOverlay {
       policyResourceIds: policyBindings.map((binding) => binding.policyResourceId),
       budgetId,
       evidence: [
+        ...authorization.evidence,
         ...configuration.evidence,
         ...availability.evidence,
         ...policyBindings.flatMap((binding) => binding.evidence),
