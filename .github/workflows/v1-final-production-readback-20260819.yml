@@ -1,0 +1,201 @@
+name: V1 Final Production Readback 2026-08-19
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v1-final-production-readback-20260819.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  MCP_SERVICE_NAME: toca-mcp-production
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  CLOUD_SQL_INSTANCE_ID: toca-mcp-db
+  EXPECTED_RELEASE_SHA: abfb09b17e90c83790e803dcda091c8142c7407f
+  EXPECTED_INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  production-readback:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout closeout head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Verify exact Cloud Run release and scheduler boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_suffix=":toca-managed-daemon-${EXPECTED_RELEASE_SHA}"
+          daemon_ok=false
+          mcp_ok=false
+          scheduler_ok=false
+          daemon_json='{}'
+          mcp_json='{}'
+          scheduler_json='{}'
+
+          for attempt in $(seq 1 72); do
+            daemon_json="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            mcp_json="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            scheduler_json="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+
+            daemon_image="$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+            mcp_image="$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+
+            daemon_ok=false
+            mcp_ok=false
+            scheduler_ok=false
+
+            if [[ "$daemon_image" == *"$expected_suffix" ]] && printf '%s' "$daemon_json" | jq -e '
+              .spec.template.spec.containers[0] as $c |
+              ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["false"]) and
+              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
+              ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+            ' >/dev/null; then daemon_ok=true; fi
+
+            if [[ "$mcp_image" == *"$expected_suffix" ]] && printf '%s' "$mcp_json" | jq -e --arg ig "$EXPECTED_INSTAGRAM_ACCOUNT_ID" '
+              .spec.template.spec.containers[0] as $c |
+              ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
+              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
+              ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
+              ([$c.env[]? | select(.name == "INSTAGRAM_BUSINESS_ACCOUNT_ID") | .value] == [$ig]) and
+              ([$c.env[]? | select(.name == "META_ENABLED") | .value] == ["false"]) and
+              ([$c.env[]? | select(.name == "META_ACCESS_TOKEN_ENV_KEY") | .value] == ["TOCA_SECRET_META_ACCESS_TOKEN"]) and
+              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+            ' >/dev/null; then mcp_ok=true; fi
+
+            if printf '%s' "$scheduler_json" | jq -e '
+              (.schedule == "* * * * *") and
+              (.timeZone == "America/Bahia") and
+              (.state == "ENABLED") and
+              (.httpTarget.httpMethod == "POST")
+            ' >/dev/null; then scheduler_ok=true; fi
+
+            if [[ "$daemon_ok" == true && "$mcp_ok" == true && "$scheduler_ok" == true ]]; then
+              break
+            fi
+            sleep 5
+          done
+
+          daemon_image="$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+          daemon_revision="$(printf '%s' "$daemon_json" | jq -r '.status.latestReadyRevisionName // ""')"
+          mcp_image="$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+          mcp_revision="$(printf '%s' "$mcp_json" | jq -r '.status.latestReadyRevisionName // ""')"
+          scheduler_state="$(printf '%s' "$scheduler_json" | jq -r '.state // ""')"
+          scheduler_schedule="$(printf '%s' "$scheduler_json" | jq -r '.schedule // ""')"
+          scheduler_timezone="$(printf '%s' "$scheduler_json" | jq -r '.timeZone // ""')"
+
+          jq -n \
+            --arg expectedReleaseSha "$EXPECTED_RELEASE_SHA" \
+            --arg daemonImage "$daemon_image" \
+            --arg daemonRevision "$daemon_revision" \
+            --arg mcpImage "$mcp_image" \
+            --arg mcpRevision "$mcp_revision" \
+            --arg schedulerState "$scheduler_state" \
+            --arg schedulerSchedule "$scheduler_schedule" \
+            --arg schedulerTimezone "$scheduler_timezone" \
+            --argjson daemonVerified "$daemon_ok" \
+            --argjson mcpVerified "$mcp_ok" \
+            --argjson schedulerVerified "$scheduler_ok" \
+            '{schemaVersion:1, expectedReleaseSha:$expectedReleaseSha, daemon:{image:$daemonImage, revision:$daemonRevision, verified:$daemonVerified}, mcp:{image:$mcpImage, revision:$mcpRevision, verified:$mcpVerified}, scheduler:{state:$schedulerState, schedule:$schedulerSchedule, timeZone:$schedulerTimezone, verified:$schedulerVerified}, noPublicationExecuted:true}' \
+            > v1-runtime-readback.json
+          cat v1-runtime-readback.json
+          test "$daemon_ok" = true
+          test "$mcp_ok" = true
+          test "$scheduler_ok" = true
+          echo 'V1_RUNTIME_READBACK=PASS'
+
+      - name: Verify Cloud SQL current DR safety and recovery window
+        shell: bash
+        run: |
+          set -euo pipefail
+          instance_json="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE_ID" --project "$GCP_PROJECT_ID" --format=json)"
+          state="$(printf '%s' "$instance_json" | jq -r '.state // ""')"
+          db_version="$(printf '%s' "$instance_json" | jq -r '.databaseVersion // ""')"
+          region="$(printf '%s' "$instance_json" | jq -r '.region // ""')"
+          deletion_protection="$(printf '%s' "$instance_json" | jq -r '.settings.deletionProtectionEnabled // .deletionProtectionEnabled // false')"
+          backups_enabled="$(printf '%s' "$instance_json" | jq -r '.settings.backupConfiguration.enabled // false')"
+          pitr_enabled="$(printf '%s' "$instance_json" | jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled // false')"
+          retained_backups="$(printf '%s' "$instance_json" | jq -r '.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0')"
+          log_retention_days="$(printf '%s' "$instance_json" | jq -r '.settings.backupConfiguration.transactionLogRetentionDays // 0')"
+
+          token="$(gcloud auth print-access-token)"
+          backup_json="$(curl -fsSL -H "Authorization: Bearer $token" "https://sqladmin.googleapis.com/v1/projects/$GCP_PROJECT_ID/instances/$CLOUD_SQL_INSTANCE_ID/backupRuns?maxResults=20")"
+          latest_backup="$(printf '%s' "$backup_json" | jq -r '[.items[]? | select(.status == "SUCCESSFUL")] | sort_by(.endTime // .startTime // .enqueuedTime) | last | (.endTime // .startTime // .enqueuedTime // "")')"
+          test -n "$latest_backup"
+          now_epoch="$(date -u +%s)"
+          backup_epoch="$(date -u -d "$latest_backup" +%s)"
+          backup_age_seconds="$((now_epoch - backup_epoch))"
+
+          recovery_json="$(curl -fsSL -H "Authorization: Bearer $token" "https://sqladmin.googleapis.com/v1/projects/$GCP_PROJECT_ID/instances/$CLOUD_SQL_INSTANCE_ID/getLatestRecoveryTime")"
+          earliest_recovery="$(printf '%s' "$recovery_json" | jq -r '.earliestRecoveryTime // ""')"
+          latest_recovery="$(printf '%s' "$recovery_json" | jq -r '.latestRecoveryTime // ""')"
+          test -n "$earliest_recovery"
+          test -n "$latest_recovery"
+          latest_recovery_epoch="$(date -u -d "$latest_recovery" +%s)"
+          recovery_lag_seconds="$((now_epoch - latest_recovery_epoch))"
+
+          jq -n \
+            --arg instance "$CLOUD_SQL_INSTANCE_ID" \
+            --arg state "$state" \
+            --arg databaseVersion "$db_version" \
+            --arg region "$region" \
+            --arg latestSuccessfulBackup "$latest_backup" \
+            --arg earliestRecoveryTime "$earliest_recovery" \
+            --arg latestRecoveryTime "$latest_recovery" \
+            --argjson deletionProtection "$deletion_protection" \
+            --argjson backupsEnabled "$backups_enabled" \
+            --argjson pitrEnabled "$pitr_enabled" \
+            --argjson retainedBackups "$retained_backups" \
+            --argjson transactionLogRetentionDays "$log_retention_days" \
+            --argjson latestBackupAgeSeconds "$backup_age_seconds" \
+            --argjson latestRecoveryLagSeconds "$recovery_lag_seconds" \
+            '{schemaVersion:1, instance:$instance, state:$state, databaseVersion:$databaseVersion, region:$region, deletionProtection:$deletionProtection, automatedBackupsEnabled:$backupsEnabled, pitrEnabled:$pitrEnabled, retainedBackups:$retainedBackups, transactionLogRetentionDays:$transactionLogRetentionDays, latestSuccessfulBackup:$latestSuccessfulBackup, latestBackupAgeSeconds:$latestBackupAgeSeconds, earliestRecoveryTime:$earliestRecoveryTime, latestRecoveryTime:$latestRecoveryTime, latestRecoveryLagSeconds:$latestRecoveryLagSeconds}' \
+            > v1-cloud-sql-readback.json
+          cat v1-cloud-sql-readback.json
+
+          test "$state" = RUNNABLE
+          test "$db_version" = POSTGRES_18
+          test "$region" = "$GCP_REGION"
+          test "$deletion_protection" = true
+          test "$backups_enabled" = true
+          test "$pitr_enabled" = true
+          test "$retained_backups" -eq 7
+          test "$log_retention_days" -eq 7
+          test "$backup_age_seconds" -ge 0
+          test "$backup_age_seconds" -le 129600
+          test "$recovery_lag_seconds" -ge 0
+          test "$recovery_lag_seconds" -le 900
+          echo 'V1_CLOUD_SQL_DR_READBACK=PASS'
+
+      - name: Upload sanitized V1 readback evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: v1-final-production-readback-${{ github.sha }}
+          path: |
+            v1-runtime-readback.json
+            v1-cloud-sql-readback.json
+          if-no-files-found: error
+          retention-days: 90
