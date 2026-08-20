@@ -3,7 +3,6 @@ import { PostgresVideoContentRuntime } from './content/runtime.js';
 import { loadConfig, type RuntimeConfig } from './config.js';
 import {
   createTrustedServiceExecutionIdentity,
-  resolveExecutionIdentityFromMcpContext,
   type ExecutionIdentity,
   type ExecutionIdentityResolver,
 } from './core/identity.js';
@@ -35,12 +34,13 @@ import { MetaAdsDemandIntelligenceService } from './providers/meta-ads/meta-ads-
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
+import { resolveRuntimeTenantIdentity } from './runtime/tenant-identity.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagram-scheduler.js';
 
 export const SERVER_NAME = 'toca-mcp-server';
 export const SERVER_VERSION = '0.2.0';
-const TOCA_TENANT_ID = 'toca-do-morcego';
+export const DEFAULT_TOCA_TENANT_ID = 'toca';
 const DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES = [
   'instagram.publish.image',
   'instagram.publish.carousel',
@@ -51,15 +51,32 @@ const DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES = [
 export interface TocaServerOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly executionIdentity?: ExecutionIdentity;
+  readonly defaultTenantId?: string;
+  readonly defaultWorkspaceId?: string;
+  readonly defaultOrganizationId?: string;
 }
 
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const env = options.env ?? process.env;
   const config = loadConfig(env);
-  const fallbackIdentity = options.executionIdentity ?? runtimeServiceIdentity(env, config);
+  const defaultTenantId =
+    options.defaultTenantId?.trim() || env.TOCA_DEFAULT_TENANT_ID?.trim() || DEFAULT_TOCA_TENANT_ID;
+  const defaultWorkspaceId =
+    options.defaultWorkspaceId?.trim() || env.TOCA_DEFAULT_WORKSPACE_ID?.trim() || defaultTenantId;
+  const defaultOrganizationId =
+    options.defaultOrganizationId?.trim() ||
+    env.TOCA_DEFAULT_ORGANIZATION_ID?.trim() ||
+    defaultTenantId;
+  const defaultScope = {
+    tenantId: defaultTenantId,
+    workspaceId: defaultWorkspaceId,
+    organizationId: defaultOrganizationId,
+  };
+  const fallbackIdentity =
+    options.executionIdentity ?? runtimeServiceIdentity(env, config, defaultScope);
   const resolveIdentity: ExecutionIdentityResolver = (context) =>
-    resolveExecutionIdentityFromMcpContext(context, {
-      tenantId: TOCA_TENANT_ID,
+    resolveRuntimeTenantIdentity(context, {
+      ...defaultScope,
       ...(fallbackIdentity ? { fallbackIdentity } : {}),
     });
 
@@ -135,7 +152,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
         metaAdsRead,
         pool ? new PostgresMetaAdsGeoAudienceStore(pool) : undefined,
         {
-          tenantId: TOCA_TENANT_ID,
+          tenantId: defaultTenantId,
           maxRecommendationChangePercent: 20,
           ...(config.META_ADS_ALLOWED_CURRENCY && config.META_ADS_MAX_DAILY_BUDGET_MINOR
             ? {
@@ -347,6 +364,11 @@ function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
 function runtimeServiceIdentity(
   env: NodeJS.ProcessEnv,
   config: RuntimeConfig,
+  scope: {
+    readonly tenantId: string;
+    readonly workspaceId: string;
+    readonly organizationId: string;
+  },
 ): ExecutionIdentity | undefined {
   const cloudRunService = env.K_SERVICE?.trim();
   if (config.NODE_ENV !== 'production' || !config.MCP_ENABLED || !cloudRunService) return undefined;
@@ -354,7 +376,9 @@ function runtimeServiceIdentity(
   const directPublicationEnabled = directPublicationRuntimeConfigured(config);
   return createTrustedServiceExecutionIdentity({
     principalId: `cloud-run-service:${cloudRunService}`,
-    tenantId: TOCA_TENANT_ID,
+    tenantId: scope.tenantId,
+    workspaceId: scope.workspaceId,
+    organizationId: scope.organizationId,
     roles: directPublicationEnabled ? ['OPERATOR', 'EXTERNAL_WRITER'] : ['OPERATOR'],
     allowedCapabilityIds: [
       'instagram.toca_schedule.create',
@@ -368,6 +392,7 @@ function runtimeServiceIdentity(
         : [],
     evidence: [
       `runtime:cloud-run:${cloudRunService}`,
+      `runtime:tenant:${scope.tenantId}`,
       'deployment-contract:cloud-run-authenticated-boundary',
     ],
   });
