@@ -40,6 +40,8 @@ R10 capabilities are reused rather than adding a parallel public MCP surface:
 - `sales.followup.schedule`: create next action/task
 - `sales.report.generate`: pipeline query (READ)
 
+The canonical capability catalog and runtime registry are required to resolve these same R10 IDs with matching lifecycle, risk, side-effect, idempotency, and execution-surface contracts. This is validated by a dedicated catalog↔runtime contract test rather than by introducing a second registry.
+
 Mutation scope and actor identity are derived from the authenticated Core `ExecutionIdentity`, never trusted from payload fields. Mutations reuse canonical authorization/policy handling, `crm_idempotency_keys`, PostgreSQL transaction boundaries, Transactional Outbox, Internal Audit Ledger, and persistence readback.
 
 The capability lifecycle remains `IMPLEMENTED` until formal promotion. Because side-effect bindings are not marked production validated, the existing Core Policy Engine fails closed for external writes until promotion evidence exists.
