@@ -2,24 +2,127 @@
   "schemaVersion": 1,
   "policySetId": "toca-platform-hardening-next",
   "policies": [
-    { "id": "provider-readback-unverified", "signal": "provider.readback_verified_ratio", "operator": "<", "threshold": 1, "windowMinutes": 15, "severity": "P0" },
-    { "id": "publication-slo", "signal": "publication.verified_terminal_success_ratio", "operator": "<", "threshold": 0.995, "windowMinutes": 60, "severity": "P1" },
-    { "id": "workflow-slo", "signal": "workflow.terminal_success_ratio", "operator": "<", "threshold": 0.995, "windowMinutes": 60, "severity": "P1" },
-    { "id": "lead-ingestion-slo", "signal": "lead.ingestion_success_ratio", "operator": "<", "threshold": 0.995, "windowMinutes": 60, "severity": "P1" },
-    { "id": "first-response-latency", "signal": "lead.first_response_p95_seconds", "operator": ">", "threshold": 300, "windowMinutes": 60, "severity": "P1" },
-    { "id": "webhook-slo", "signal": "webhook.accepted_success_ratio", "operator": "<", "threshold": 0.999, "windowMinutes": 60, "severity": "P1" },
-    { "id": "outbox-lag", "signal": "outbox.oldest_pending_age_seconds", "operator": ">", "threshold": 300, "windowMinutes": 15, "severity": "P1" },
-    { "id": "retry-exhausted", "signal": "retry.exhausted_count", "operator": ">", "threshold": 0, "windowMinutes": 15, "severity": "P1" },
-    { "id": "dead-letter-backlog", "signal": "dead_letter.pending_count", "operator": ">", "threshold": 0, "windowMinutes": 15, "severity": "P1" },
-    { "id": "crm-write-slo", "signal": "crm.durable_write_success_ratio", "operator": "<", "threshold": 0.999, "windowMinutes": 60, "severity": "P1" },
-    { "id": "attribution-write-slo", "signal": "attribution.durable_write_success_ratio", "operator": "<", "threshold": 0.999, "windowMinutes": 60, "severity": "P1" },
-    { "id": "r31-feedback-loop", "signal": "r31.feedback_loop_success_ratio", "operator": "<", "threshold": 0.99, "windowMinutes": 1440, "severity": "P2" }
+    {
+      "id": "provider-readback-unverified",
+      "signal": "provider.readback_verified_ratio",
+      "operator": "<",
+      "threshold": 1,
+      "windowMinutes": 15,
+      "severity": "P0"
+    },
+    {
+      "id": "publication-slo",
+      "signal": "publication.verified_terminal_success_ratio",
+      "operator": "<",
+      "threshold": 0.995,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "workflow-slo",
+      "signal": "workflow.terminal_success_ratio",
+      "operator": "<",
+      "threshold": 0.995,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "lead-ingestion-slo",
+      "signal": "lead.ingestion_success_ratio",
+      "operator": "<",
+      "threshold": 0.995,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "first-response-latency",
+      "signal": "lead.first_response_p95_seconds",
+      "operator": ">",
+      "threshold": 300,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "webhook-slo",
+      "signal": "webhook.accepted_success_ratio",
+      "operator": "<",
+      "threshold": 0.999,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "outbox-lag",
+      "signal": "outbox.oldest_pending_age_seconds",
+      "operator": ">",
+      "threshold": 300,
+      "windowMinutes": 15,
+      "severity": "P1"
+    },
+    {
+      "id": "retry-exhausted",
+      "signal": "retry.exhausted_count",
+      "operator": ">",
+      "threshold": 0,
+      "windowMinutes": 15,
+      "severity": "P1"
+    },
+    {
+      "id": "dead-letter-backlog",
+      "signal": "dead_letter.pending_count",
+      "operator": ">",
+      "threshold": 0,
+      "windowMinutes": 15,
+      "severity": "P1"
+    },
+    {
+      "id": "crm-write-slo",
+      "signal": "crm.durable_write_success_ratio",
+      "operator": "<",
+      "threshold": 0.999,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "attribution-write-slo",
+      "signal": "attribution.durable_write_success_ratio",
+      "operator": "<",
+      "threshold": 0.999,
+      "windowMinutes": 60,
+      "severity": "P1"
+    },
+    {
+      "id": "r31-feedback-loop",
+      "signal": "r31.feedback_loop_success_ratio",
+      "operator": "<",
+      "threshold": 0.99,
+      "windowMinutes": 1440,
+      "severity": "P2"
+    }
   ],
   "futureProviderPolicies": [
-    { "id": "whatsapp-delivery-slo", "signal": "whatsapp.delivery_verified_ratio", "operator": "<", "threshold": 0.99, "windowMinutes": 60, "severity": "P1", "enabled": false },
-    { "id": "email-delivery-slo", "signal": "email.delivery_verified_ratio", "operator": "<", "threshold": 0.99, "windowMinutes": 60, "severity": "P1", "enabled": false }
+    {
+      "id": "whatsapp-delivery-slo",
+      "signal": "whatsapp.delivery_verified_ratio",
+      "operator": "<",
+      "threshold": 0.99,
+      "windowMinutes": 60,
+      "severity": "P1",
+      "enabled": false
+    },
+    {
+      "id": "email-delivery-slo",
+      "signal": "email.delivery_verified_ratio",
+      "operator": "<",
+      "threshold": 0.99,
+      "windowMinutes": 60,
+      "severity": "P1",
+      "enabled": false
+    }
   ],
-  "mandatoryExistingPolicies": ["AUDIT_LEDGER_INTEGRITY_FAILED", "OUTBOX_DELIVERY_STALLED"],
+  "mandatoryExistingPolicies": [
+    "AUDIT_LEDGER_INTEGRITY_FAILED",
+    "OUTBOX_DELIVERY_STALLED"
+  ],
   "runbook": "docs/operations/observability-incident-runbook.md",
   "notes": "Declarative alert contract only. Activation and managed-provider firing/readback require separate provider evidence."
 }
