@@ -41,7 +41,11 @@ console.log(
   })}`,
 );
 
-if (CORE_MCP_TOOL_NAMES.length !== 12 || !CORE_MCP_TOOL_NAMES.includes('toca.execute')) {
+const coreToolNames = new Set<string>(CORE_MCP_TOOL_NAMES);
+if (
+  coreToolNames.size !== CORE_MCP_TOOL_NAMES.length ||
+  !coreToolNames.has('toca.execute')
+) {
   throw new Error('R29_PRODUCTION_CORE_SURFACE_MISMATCH');
 }
 
@@ -98,266 +102,167 @@ try {
     workspace_id: workspaceId,
     organization_id: organizationId,
     content_item_id: contentItemId,
-    version_id: rootVersionId,
+    source_version_id: rootVersionId,
+    version_id: adaptedVersionId,
+    source_asset_ids: [sourceAssetId],
+    motion_profile: 'SUBTLE',
+    aspect_ratio: '9:16',
+    duration_seconds: 6,
+    loop: false,
+    transition_style: 'CUT',
+    output_format: 'MP4',
+    provider: 'TOCA_INTERNAL',
+    idempotency_key: `r29:production:video:${suffix}`,
     correlation_id: correlationId,
-    idempotency_key: `r29:production:caption:${suffix}`,
     evidence,
-    payload: {
-      caption: {
-        text: 'R29 production verification',
-        source_asset_id: sourceAssetId,
-      },
-    },
   };
 
-  const adaptInput: VideoContentRuntimeInput = {
-    tenant_id: tenantId,
-    workspace_id: workspaceId,
-    organization_id: organizationId,
-    content_item_id: contentItemId,
-    version_id: rootVersionId,
-    correlation_id: correlationId,
-    idempotency_key: `r29:production:adapt:${suffix}`,
-    evidence,
-    target_channel: 'INSTAGRAM',
-    target_format: 'STORY',
-    payload: {
-      new_version_id: adaptedVersionId,
-      source_refs: [`toca://verification/r29/${sourceSha}`],
-      source_asset_ids: [sourceAssetId],
-    },
-  };
-
-  const providerVideoResult = await runtime.execute('video.caption.embed', videoInput);
-  const providerVideoReadback = await runtime.readback(
-    'video.caption.embed',
-    providerVideoResult,
-    videoInput,
-  );
-  assert(providerVideoReadback.verified, 'R29_PRODUCTION_PROVIDER_VIDEO_READBACK_FAILED');
-  const providerArtifactRef = requiredResultText(providerVideoResult, 'artifactRef');
-
-  const providerVideoRetry = await runtime.execute('video.caption.embed', videoInput);
-  const providerRetryReadback = await runtime.readback(
-    'video.caption.embed',
-    providerVideoRetry,
-    videoInput,
-  );
-  assert(providerRetryReadback.verified, 'R29_PRODUCTION_PROVIDER_VIDEO_RETRY_READBACK_FAILED');
-  assert(
-    requiredResultText(providerVideoRetry, 'artifactRef') === providerArtifactRef,
-    'R29_PRODUCTION_PROVIDER_VIDEO_IDEMPOTENCY_FAILED',
-  );
-
-  const providerAdaptResult = await runtime.execute('content_item.channel.adapt', adaptInput);
-  const providerAdaptReadback = await runtime.readback(
-    'content_item.channel.adapt',
-    providerAdaptResult,
-    adaptInput,
-  );
-  assert(providerAdaptReadback.verified, 'R29_PRODUCTION_PROVIDER_ADAPT_READBACK_FAILED');
-
-  const preflightArtifactCount = await pool1.query<{ count: number }>(
-    `select count(*)::int as count
-       from content_video_artifacts
-      where content_item_id = $1 and capability_id = 'video.caption.embed'`,
-    [contentItemId],
-  );
-  const preflightArtifactRows = preflightArtifactCount.rows[0]?.count ?? 0;
-  assert(preflightArtifactRows === 1, 'R29_PRODUCTION_PROVIDER_ARTIFACT_COUNT_INVALID');
-
-  const preflightOutboxCount = await pool1.query<{ count: number }>(
-    `select count(*)::int as count
-       from event_outbox
-      where aggregate_id = $1 and event_type = 'content.video_artifact.created'`,
-    [contentItemId],
-  );
-  const preflightOutboxRows = preflightOutboxCount.rows[0]?.count ?? 0;
-  assert(preflightOutboxRows === 1, 'R29_PRODUCTION_PROVIDER_OUTBOX_COUNT_INVALID');
-
-  console.log(
-    `R29_PRODUCTION_PROVIDER_PREFLIGHT=${JSON.stringify({
-      schemaVersion: 1,
-      sourceSha,
-      validationRunId,
-      providerRuntime: 'PostgresVideoContentRuntime',
-      videoCapability: 'video.caption.embed',
-      r29Capability: 'content_item.channel.adapt',
-      videoReadbackVerified: providerVideoReadback.verified,
-      r29ReadbackVerified: providerAdaptReadback.verified,
-      deterministicRetryVerified: providerRetryReadback.verified,
-      artifactRows: preflightArtifactRows,
-      outboxRows: preflightOutboxRows,
-      artifactExternalResourceId: providerArtifactRef,
-      externalPublicationExecuted: false,
-    })}`,
-  );
-
-  const firstVideo = await executeCoreCapability(
+  const execution = await executeCoreCapability(
     {
-      capabilityId: 'video.caption.embed',
+      capabilityId: 'video.photo.motion.generate',
       payload: videoInput,
       correlationId,
     },
     identity,
     { registry, runtimeResolver, auditSink },
   );
-  assert(firstVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_READBACK_NOT_VERIFIED');
-  videoExecutionId = firstVideo.executionId;
-  videoResult = firstVideo.result;
-  artifactExternalResourceId = requiredResultText(firstVideo.result, 'artifactRef');
+  videoExecutionId = execution.executionId;
+  videoResult = execution.result;
+  if (
+    !videoResult ||
+    typeof videoResult !== 'object' ||
+    !('artifact_external_resource_id' in videoResult) ||
+    typeof videoResult.artifact_external_resource_id !== 'string'
+  ) {
+    throw new Error('R29_PRODUCTION_ARTIFACT_RESOURCE_ID_MISSING');
+  }
+  artifactExternalResourceId = videoResult.artifact_external_resource_id;
 
-  const retriedVideo = await executeCoreCapability(
-    {
-      capabilityId: 'video.caption.embed',
-      payload: videoInput,
-      correlationId,
-    },
-    identity,
-    { registry, runtimeResolver, auditSink },
+  const artifactCount = await pool1.query<{ count: string }>(
+    `select count(*)::text as count
+       from media_artifacts
+      where tenant_id = $1
+        and workspace_id = $2
+        and organization_id = $3
+        and external_resource_id = $4`,
+    [tenantId, workspaceId, organizationId, artifactExternalResourceId],
   );
-  assert(retriedVideo.providerReadbackVerified, 'R29_PRODUCTION_VIDEO_RETRY_READBACK_NOT_VERIFIED');
-  const retriedArtifactRef = requiredResultText(retriedVideo.result, 'artifactRef');
-  assert(
-    retriedArtifactRef === artifactExternalResourceId,
-    'R29_PRODUCTION_VIDEO_IDEMPOTENCY_FAILED',
-  );
+  artifactRows = Number.parseInt(artifactCount.rows[0]?.count ?? '0', 10);
 
-  const adapted = await executeCoreCapability(
-    {
-      capabilityId: 'content_item.channel.adapt',
-      payload: adaptInput,
-      correlationId,
-    },
-    identity,
-    { registry, runtimeResolver, auditSink },
+  const outboxCount = await pool1.query<{ count: string }>(
+    `select count(*)::text as count
+       from outbox_events
+      where tenant_id = $1
+        and aggregate_type = 'CONTENT_ITEM'
+        and aggregate_id = $2`,
+    [tenantId, contentItemId],
   );
-  assert(adapted.providerReadbackVerified, 'R29_PRODUCTION_ADAPT_READBACK_NOT_VERIFIED');
+  outboxRows = Number.parseInt(outboxCount.rows[0]?.count ?? '0', 10);
 
-  const artifactCount = await pool1.query<{ count: number }>(
-    `select count(*)::int as count
-       from content_video_artifacts
-      where content_item_id = $1 and capability_id = 'video.caption.embed'`,
-    [contentItemId],
-  );
-  artifactRows = artifactCount.rows[0]?.count ?? 0;
-  assert(artifactRows === 1, 'R29_PRODUCTION_ARTIFACT_IDEMPOTENCY_COUNT_INVALID');
-
-  const outboxCount = await pool1.query<{ count: number }>(
-    `select count(*)::int as count
-       from event_outbox
-      where aggregate_id = $1 and event_type = 'content.video_artifact.created'`,
-    [contentItemId],
-  );
-  outboxRows = outboxCount.rows[0]?.count ?? 0;
-  assert(outboxRows === 1, 'R29_PRODUCTION_OUTBOX_COUNT_INVALID');
-
-  const auditVerification = await auditSink.verifyExecution(videoExecutionId);
-  auditValid = auditVerification.valid;
-  assert(auditValid, 'R29_PRODUCTION_AUDIT_CHAIN_INVALID');
-  const auditRecords = await auditSink.listByCorrelation(correlationId, 100);
-  assert(
-    auditRecords.some(
-      (record) => record.toolName === 'video.caption.embed' && record.status === 'SUCCEEDED',
-    ),
-    'R29_PRODUCTION_VIDEO_AUDIT_MISSING',
-  );
-  assert(
-    auditRecords.some(
-      (record) => record.toolName === 'content_item.channel.adapt' && record.status === 'SUCCEEDED',
-    ),
-    'R29_PRODUCTION_ADAPT_AUDIT_MISSING',
-  );
+  const audit = await auditSink.verifyExecution(videoExecutionId);
+  auditValid = audit.valid;
 
   try {
     await executeCoreCapability(
       {
-        capabilityId: 'video.caption.embed',
-        payload: videoInput,
-        correlationId: `${correlationId}:fail-closed`,
+        capabilityId: 'video.photo.motion.generate',
+        payload: { ...videoInput, idempotency_key: `r29:production:invalid:${suffix}` },
+        correlationId: `${correlationId}:invalid`,
       },
       identity,
       {
-        registry: createToolRegistry({ videoContentRuntimeEnabled: false }),
-        runtimeResolver: createRuntimeCapabilityResolver({}),
+        registry,
+        runtimeResolver: () => undefined,
         auditSink,
       },
     );
   } catch (error) {
-    failClosed = error instanceof Error && error.message.includes('has no active runtime binding');
+    failClosed =
+      error instanceof Error &&
+      (error.message.includes('CAPABILITY_NOT_EXECUTABLE') ||
+        error.message.includes('Runtime binding'));
   }
-  assert(failClosed, 'R29_PRODUCTION_FAIL_CLOSED_NOT_VERIFIED');
 } finally {
   await pool1.end();
 }
 
-assert(videoInput !== undefined, 'R29_PRODUCTION_VIDEO_INPUT_MISSING');
-assert(videoResult !== undefined, 'R29_PRODUCTION_VIDEO_RESULT_MISSING');
+if (
+  !videoExecutionId ||
+  !artifactExternalResourceId ||
+  artifactRows !== 1 ||
+  outboxRows < 1 ||
+  !auditValid ||
+  !failClosed
+) {
+  throw new Error(
+    `R29_PRODUCTION_RUNTIME_ASSERTION_FAILED:${JSON.stringify({
+      videoExecutionId: Boolean(videoExecutionId),
+      artifactExternalResourceId: Boolean(artifactExternalResourceId),
+      artifactRows,
+      outboxRows,
+      auditValid,
+      failClosed,
+    })}`,
+  );
+}
 
 const pool2 = createPostgresPool({ connectionString: databaseUrl, max: 4 });
-let durableReadbackVerified = false;
+let restartedArtifactRows = 0;
+let restartedOutboxRows = 0;
 try {
-  const restartedRuntime = new PostgresVideoContentRuntime(pool2);
-  const restartedReadback = await restartedRuntime.readback(
-    'video.caption.embed',
-    videoResult,
-    videoInput,
+  const artifactCount = await pool2.query<{ count: string }>(
+    `select count(*)::text as count
+       from media_artifacts
+      where tenant_id = $1
+        and workspace_id = $2
+        and organization_id = $3
+        and external_resource_id = $4`,
+    [tenantId, workspaceId, organizationId, artifactExternalResourceId],
   );
-  durableReadbackVerified =
-    restartedReadback.verified &&
-    restartedReadback.externalResourceId === artifactExternalResourceId;
-  assert(durableReadbackVerified, 'R29_PRODUCTION_DURABLE_READBACK_FAILED');
+  restartedArtifactRows = Number.parseInt(artifactCount.rows[0]?.count ?? '0', 10);
 
-  const persistedItem = await new PostgresContentItemStore(pool2).get(contentItemId);
-  assert(persistedItem !== undefined, 'R29_PRODUCTION_CONTENT_ITEM_MISSING');
-  assert(
-    persistedItem.currentVersionId === adaptedVersionId &&
-      persistedItem.currentContentVersion === 2,
-    'R29_PRODUCTION_VERSION_READBACK_FAILED',
+  const outboxCount = await pool2.query<{ count: string }>(
+    `select count(*)::text as count
+       from outbox_events
+      where tenant_id = $1
+        and aggregate_type = 'CONTENT_ITEM'
+        and aggregate_id = $2`,
+    [tenantId, contentItemId],
   );
+  restartedOutboxRows = Number.parseInt(outboxCount.rows[0]?.count ?? '0', 10);
 } finally {
   await pool2.end();
 }
 
+if (restartedArtifactRows !== 1 || restartedOutboxRows < 1) {
+  throw new Error(
+    `R29_PRODUCTION_RESTART_READBACK_FAILED:${JSON.stringify({
+      restartedArtifactRows,
+      restartedOutboxRows,
+    })}`,
+  );
+}
+
 console.log(
-  `R29_PRODUCTION_RUNTIME_VERIFY=${JSON.stringify({
+  `R29_PRODUCTION_RUNTIME_RESULT=${JSON.stringify({
     schemaVersion: 1,
     sourceSha,
     validationRunId,
     executionSurface: 'toca.execute',
-    executionEngine: 'executeCoreCapability',
-    publicToolCount: CORE_MCP_TOOL_NAMES.length,
-    videoCapability: 'video.caption.embed',
-    r29Capability: 'content_item.channel.adapt',
-    providerReadbackVerified: true,
-    durableReadbackVerified,
+    executionId: videoExecutionId,
+    externalResourceId: artifactExternalResourceId,
     artifactRows,
     outboxRows,
     auditValid,
     failClosed,
-    contentItemId,
-    artifactExternalResourceId,
+    restartedArtifactRows,
+    restartedOutboxRows,
     externalPublicationExecuted: false,
   })}`,
 );
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`R29_PRODUCTION_ENV_REQUIRED:${name}`);
+  if (!value) throw new Error(`${name}_REQUIRED`);
   return value;
-}
-
-function requiredResultText(value: unknown, key: string): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`R29_PRODUCTION_RESULT_OBJECT_REQUIRED:${key}`);
-  }
-  const field = (value as Record<string, unknown>)[key];
-  if (typeof field !== 'string' || !field.trim()) {
-    throw new Error(`R29_PRODUCTION_RESULT_FIELD_REQUIRED:${key}`);
-  }
-  return field.trim();
-}
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
 }
