@@ -16,7 +16,7 @@ import { MetaAdsReadProvider } from '../src/providers/meta-ads/meta-ads-read-pro
 class MemoryGeoAudienceHistoryStore implements MetaAdsGeoAudienceHistoryStore {
   readonly samples: MetaAdsGeoAudienceSample[] = [];
 
-  async append(sample: MetaAdsGeoAudienceSample): Promise<void> {
+  append(sample: MetaAdsGeoAudienceSample): Promise<void> {
     if (
       !this.samples.some(
         (existing) =>
@@ -28,21 +28,24 @@ class MemoryGeoAudienceHistoryStore implements MetaAdsGeoAudienceHistoryStore {
     ) {
       this.samples.push(sample);
     }
+    return Promise.resolve();
   }
 
-  async listSince(
+  listSince(
     query: MetaAdsGeoAudienceHistoryQuery,
   ): Promise<readonly MetaAdsGeoAudienceSample[]> {
-    return this.samples
-      .filter(
-        (sample) =>
-          sample.tenantId === query.tenantId &&
-          sample.adAccountId === query.adAccountId &&
-          sample.geoKey === query.geoKey &&
-          Date.parse(sample.observedAt) >= Date.parse(query.since),
-      )
-      .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
-      .slice(0, query.limit ?? 1000);
+    return Promise.resolve(
+      this.samples
+        .filter(
+          (sample) =>
+            sample.tenantId === query.tenantId &&
+            sample.adAccountId === query.adAccountId &&
+            sample.geoKey === query.geoKey &&
+            Date.parse(sample.observedAt) >= Date.parse(query.since),
+        )
+        .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
+        .slice(0, query.limit ?? 1000),
+    );
   }
 }
 
