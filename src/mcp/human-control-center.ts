@@ -75,7 +75,7 @@ const PANEL_DEFINITIONS: readonly PanelDefinition[] = [
     description: 'Formal ApprovalRecords waiting for human review.',
     coreTools: ['toca.approval.list', 'toca.approval.get'],
     dependency:
-      'Current Core exposes approval.get but not a tenant-safe approval list. Keep this panel fail-closed until canonical Core READ exposure exists.',
+      'Tenant-safe approval listing requires the canonical tenant-scoped ApprovalStore composition. Keep this panel fail-closed when that store is unavailable.',
     notes: [
       'The view never mutates ApprovalRecord directly.',
       'Approve/reject emits an AG-01 intent and must re-enter the governed Core path.',
@@ -254,7 +254,7 @@ export function registerTocaControlCenterSurface(
       mimeType: 'text/html+mcp',
     },
     (uri) => ({
-      contents: [{ uri: uri.href, mimeType: 'text/html+mcp', text: controlCenterHtml() }],
+      contents: [{ uri: uri.href, mimeType: 'text/html+mcp', text: buildControlCenterHtml() }],
     }),
   );
 }
@@ -361,7 +361,7 @@ function response(output: Readonly<Record<string, unknown>>) {
   };
 }
 
-function controlCenterHtml(): string {
+export function buildControlCenterHtml(): string {
   return String.raw`<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -396,7 +396,7 @@ function render(model){state.model=model;var panels=Array.isArray(model.panels)?
 function sendIntent(action,panelId,targetId,context){var key='cc:'+action.toLowerCase()+':'+panelId+':'+targetId;var text=['[TOCA_CONTROL_CENTER_ACTION_INTENT]','action='+action,'target_kind='+panelId,'target_id='+targetId,'idempotency_key='+key,context?'context='+context:'','required_path=identity>typed_schema>authorization>policy_risk>approval_when_required>idempotency>workflow>provider_when_applicable>provider_readback_when_applicable>audit_outbox_event','prohibited=direct_provider_write,parallel_backend,parallel_approval_engine,parallel_policy_engine'].filter(Boolean).join('\n');return request('ui/message',{role:'user',content:[{type:'text',text:text}]})}
 function bindCards(){document.querySelectorAll('[data-intent]').forEach(function(button){button.addEventListener('click',function(){var card=button.closest('[data-panel]');var panelId=card?card.dataset.panel:'unknown';var target=card&&card.dataset.targetId?card.dataset.targetId:panelId;sendIntent(button.dataset.intent,panelId,target,card&&card.dataset.targetContext?card.dataset.targetContext:'').catch(function(error){detail(panelId,'Intent não enviado: '+error.message)})})});document.querySelectorAll('[data-budget-read]').forEach(function(button){button.addEventListener('click',function(){var card=button.closest('[data-panel]');var input=card&&card.querySelector('[data-budget]');readBudget(Number(input&&input.value)).catch(function(error){detail('budget-recommendations',error.message)})})})}
 async function executeRead(capabilityId,payload){return parse(await callTool('toca.execute',{capabilityId:capabilityId,payload:payload||{},correlationId:'control-center:'+capabilityId+':'+Date.now()}))}
-async function refreshApprovals(){if(!sourceAvailable('pending-approvals','toca.approval.list')){detail('pending-approvals','Fail-closed: a main atual não expõe listagem tenant-safe de ApprovalRecord. approval.get continua disponível quando o ID é conhecido.');return}var result=parse(await callTool('toca.approval.list',{statuses:['REQUESTED','FAILED_REVIEW_REQUIRED'],limit:50}));var approvals=result&&Array.isArray(result.approvals)?result.approvals:[];detail('pending-approvals',approvals.length?approvals:'Nenhuma aprovação pendente.');var card=document.querySelector('[data-panel="pending-approvals"]');if(card&&approvals[0]){card.dataset.targetId=approvals[0].approval_id||approvals[0].approvalId||'approval';card.dataset.targetContext='version='+(approvals[0].version||'unknown')+';capability='+(approvals[0].capability_id||approvals[0].capabilityId||'unknown')}}
+async function refreshApprovals(){if(!sourceAvailable('pending-approvals','toca.approval.list')){detail('pending-approvals','Fail-closed: a composição atual não expõe listagem tenant-safe de ApprovalRecord. approval.get continua disponível quando o ID é conhecido.');return}var responses=await Promise.all([callTool('toca.approval.list',{status:'REQUESTED',limit:50}),callTool('toca.approval.list',{status:'FAILED_REVIEW_REQUIRED',limit:50})]);var approvals=responses.flatMap(function(response){var result=parse(response);return result&&Array.isArray(result.approvals)?result.approvals:[]});var seen=new Set();approvals=approvals.filter(function(approval){var id=approval.approval_id||approval.approvalId;if(!id||seen.has(id))return false;seen.add(id);return true}).sort(function(a,b){return String(b.requested_at||b.requestedAt||'').localeCompare(String(a.requested_at||a.requestedAt||''))}).slice(0,50);detail('pending-approvals',approvals.length?approvals:'Nenhuma aprovação pendente.');var card=document.querySelector('[data-panel="pending-approvals"]');if(card&&approvals[0]){card.dataset.targetId=approvals[0].approval_id||approvals[0].approvalId||'approval';card.dataset.targetContext='version='+(approvals[0].version||'unknown')+';capability='+(approvals[0].capability_id||approvals[0].capabilityId||'unknown')}}
 async function refreshPublications(){var result=await executeRead('instagram.toca_schedule.list',{});var raw=result&&result.result?result.result:result;var jobs=raw&&Array.isArray(raw.jobs)?raw.jobs:[];detail('publications',jobs.length?jobs:'Nenhuma publicação agendada.');var dead=jobs.filter(function(job){return /DEAD|FAIL|ERROR/i.test(String(job.status||''))});detail('dead-letters',dead.length?dead:'Nenhum dead letter/failed job na lista governada.');var card=document.querySelector('[data-panel="dead-letters"]');if(card&&dead[0])card.dataset.targetId=dead[0].id||dead[0].jobId||'dead-letter'}
 function metaAccountFrom(value){var raw=value&&value.result?value.result:value;var candidates=raw&&(raw.accounts||raw.data||raw.items);if(!Array.isArray(candidates)||!candidates[0])return null;var item=candidates[0];var id=item.adAccountId||item.account_id||item.id;var currency=item.currency||item.currency_code;if(typeof id==='string'&&!id.startsWith('act_'))id='act_'+id;return typeof id==='string'&&typeof currency==='string'&&currency?{adAccountId:id,currency:currency}:null}
 async function ensureMetaAccount(){if(state.metaAccount)return state.metaAccount;state.metaAccount=metaAccountFrom(await executeRead('meta_ads.accounts.list',{}));if(!state.metaAccount)throw new Error('Meta account READ não retornou ID + currency; nenhum valor será inferido.');return state.metaAccount}
