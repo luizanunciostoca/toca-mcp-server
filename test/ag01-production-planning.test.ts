@@ -11,17 +11,18 @@ import type {
   PlanBuilder,
 } from '../src/orchestrator/contracts.js';
 import { InMemoryConversationStore } from '../src/orchestrator/in-memory-conversation-store.js';
-import type {
-  Ag01DecisionModelAdapter,
-  Ag01ModelDecisionInput,
-} from '../src/orchestrator/openai-responses-adapter.js';
+import type { Ag01DecisionModelAdapter } from '../src/orchestrator/openai-responses-adapter.js';
 import {
   Ag01DecisionContext,
   ModelBackedIntentRouteResolver,
   StructuredDecisionPlanBuilder,
 } from '../src/orchestrator/production-planning.js';
 import { TocaOrchestratorRuntime } from '../src/orchestrator/runtime.js';
-import { TocaOsCanonicalArtifactResolver, type TocaOsRegistryClient, type TocaOsRegistrySnapshot } from '../src/orchestrator/toca-os-registry.js';
+import {
+  TocaOsCanonicalArtifactResolver,
+  type TocaOsRegistryClient,
+  type TocaOsRegistrySnapshot,
+} from '../src/orchestrator/toca-os-registry.js';
 
 const route = getRouteDefinition('R17');
 const readCapabilityId = route.capabilityIds.find((capabilityId) => {
@@ -107,7 +108,7 @@ class StaticModel implements Ag01DecisionModelAdapter {
   readiness(): Promise<void> {
     return Promise.resolve();
   }
-  decide(_input: Ag01ModelDecisionInput) {
+  decide() {
     return Promise.resolve({
       responseId: 'resp-e2e',
       model: 'test-model',
@@ -276,7 +277,8 @@ describe('AG-01 approval denial handling', () => {
       getApproval: () => Promise.resolve({ ...approval, status }),
     };
     const routeResolver: IntentRouteResolver = {
-      resolve: () => Promise.resolve({ routeId: 'R17', confidence: 1, evidence: ['test:route'] }),
+      resolve: () =>
+        Promise.resolve({ routeId: 'R17', confidence: 1, evidence: ['test:route'] }),
     };
     const artifacts: CanonicalArtifactResolver = {
       resolveSop: () =>
