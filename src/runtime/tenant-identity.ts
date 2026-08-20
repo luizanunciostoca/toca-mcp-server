@@ -26,7 +26,10 @@ export function resolveRuntimeTenantIdentity(
   context: McpToolContextLike,
   defaults: RuntimeTenantDefaults,
 ): ExecutionIdentity | undefined {
-  const defaultTenantId = requireScopeValue(defaults.tenantId, 'RUNTIME_DEFAULT_TENANT_REQUIRED');
+  const defaultTenantId = requireScopeValue(
+    defaults.tenantId,
+    'RUNTIME_DEFAULT_TENANT_REQUIRED',
+  );
   const authInfo = context.http?.authInfo;
   if (!authInfo) {
     return resolveExecutionIdentityFromMcpContext(context, {
@@ -89,7 +92,9 @@ function scopedValue(scopes: readonly string[], prefix: string): ScopedValue {
   if (values.length === 0) return { state: 'ABSENT', value: undefined };
   if (values.length !== 1) return { state: 'AMBIGUOUS', value: undefined };
   const value = values[0];
-  if (!value || !isSafeScopeValue(value)) return { state: 'AMBIGUOUS', value: undefined };
+  if (!value || !isSafeScopeValue(value)) {
+    return { state: 'AMBIGUOUS', value: undefined };
+  }
   return { state: 'RESOLVED', value };
 }
 
