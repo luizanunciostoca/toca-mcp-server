@@ -158,8 +158,7 @@ jobs:
           gcloud sql backups create \
             --instance "$GCP_CLOUD_SQL_INSTANCE" \
             --project "$GCP_PROJECT_ID" \
-            --description "pre-next-${GITHUB_SHA::12}" \
-            --async
+            --description "pre-next-${GITHUB_SHA::12}"
 
       - name: Apply repository migrations before traffic
         run: |
@@ -295,7 +294,7 @@ jobs:
         run: |
           set -euo pipefail
           MIN_INSTANCES="${{ vars.GCP_MIN_INSTANCES || '0' }}"
-          MAX_INSTANCES="${{ vars.GCP_MAX_INSTANCES || '3' }}"
+          MAX_INSTANCES="${{ vars.GCP_MAX_INSTANCES || '1' }}"
           gcloud run deploy "$GCP_CLOUD_RUN_SERVICE" \
             --image "$IMAGE" \
             --project "$GCP_PROJECT_ID" \
