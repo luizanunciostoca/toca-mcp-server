@@ -15,7 +15,7 @@ Status: **ACTIVE COORDINATION BASELINE**
 
 ## Next Version baseline
 
-Coordinator readback on 2026-08-20 03:40 America/Bahia:
+Coordinator readback on 2026-08-20 16:30 America/Bahia:
 
 - canonical branch: `main`
 - observed `main` SHA: `cd99521c8842268c5e1fb9e5efe58f9f6680ddf0`
@@ -49,32 +49,32 @@ Evidence is exact-head scoped. A branch update, rebase or conflict-resolution co
 
 The GitHub API and local `git merge-tree` readback on this round observed 18 open Next Version PRs. All listed heads were fetched, all local base/head comparisons were clean, and exact-head evidence is reported in the registry, tracker and evidence index. API `mergeable` is asynchronous and was null during collection; no null value is treated as merge approval.
 
-| PR  | Head          | Base       | Draft | Exact-head checks                                                             | Current coordination state     |
-| --- | ------------- | ---------- | ----- | ----------------------------------------------------------------------------- | ------------------------------ |
-| #14 | `de3ec2f6...` | `main`     | no    | Quality `32335049796`, PG `32335049795` PASS                                  | CI verified                    |
-| #15 | `ee7cb048...` | `main`     | no    | Quality `32333934188`, PG `32333934183` PASS                                  | provider READ verified         |
-| #16 | `c0b23b57...` | #14 branch | no    | Quality `32335823551` PASS                                                    | parent-dependent               |
-| #17 | `444317f7...` | `main`     | yes   | Quality `32337525360` PASS                                                    | coordinator; no auto-merge     |
-| #18 | `1bfa2680...` | `main`     | no    | Quality `32334357073`, PG `32334357088` PASS                                  | migration 022 collision        |
-| #19 | `a6345897...` | `main`     | no    | Quality `32334417380` PASS                                                    | privacy authority              |
-| #20 | `ccfde23e...` | `main`     | no    | Quality PASS; Security `32334666190` FAIL                                     | security gate blocked          |
-| #21 | `e741198f...` | `main`     | yes   | Quality `32337705724`, PG `32337705682` PASS                                  | dependency hold                |
-| #22 | `be97c0a6...` | `main`     | no    | Quality `32336854798`, PG `32336854963` PASS                                  | CRM authority                  |
-| #23 | `036bbec4...` | #22 branch | yes   | Quality `32337132353`, PG `32337132190`, Email `32337132201` PASS             | provider evidence pending      |
-| #24 | `dedcf3d7...` | `main`     | yes   | Quality `32334785013`, PG `32334784974` PASS                                  | activation dependencies        |
-| #26 | `7675bd73...` | `main`     | yes   | Quality `32336459217`, PG `32336459216` PASS                                  | downstream of #33              |
-| #27 | `d77b0921...` | `main`     | yes   | Quality `32337191793` FAIL; PG `32337191835`, analytics PG `32337191832` PASS | format blocked                 |
-| #28 | `f900c125...` | `main`     | no    | Quality `32337044377`, PG `32337044338` PASS                                  | provider evidence pending      |
-| #29 | `6976825a...` | `main`     | no    | Quality `32335977430` PASS                                                    | governed intent only           |
-| #30 | `2fce39b0...` | `main`     | yes   | Quality `32336878038`, PG `32336878082`, tenancy PG `32336878062` PASS        | migration 027 collision        |
-| #33 | `7e8df19a...` | `main`     | yes   | Quality `32336942395`, PG `32336942409` PASS                                  | provider-shaped fixtures only  |
-| #36 | `510d0202...` | #22 branch | yes   | Quality `32339737876`, PG `32339737890` PASS                                  | sole converged WhatsApp source |
+| PR  | Head          | Base       | Draft | Exact-head checks                                                        | Current coordination state               |
+| --- | ------------- | ---------- | ----- | ------------------------------------------------------------------------ | ---------------------------------------- |
+| #14 | `de3ec2f6...` | `main`     | no    | Quality `32335049796`, PG `32335049795` PASS                             | CI verified                              |
+| #15 | `ee7cb048...` | `main`     | no    | Quality `32333934188`, PG `32333934183` PASS                             | provider READ verified                   |
+| #16 | `c0b23b57...` | #14 branch | no    | Quality `32335823551` PASS                                               | parent-dependent                         |
+| #17 | `444317f7...` | `main`     | yes   | Quality `32337525360` PASS                                               | coordinator; no auto-merge               |
+| #18 | `e475a954...` | `main`     | no    | Quality `32342689685`, PG `32342689677` PASS                             | migration 029 after coordinated renumber |
+| #19 | `a6345897...` | `main`     | no    | Quality `32334417380` PASS                                               | privacy authority                        |
+| #20 | `0da69a1e...` | `main`     | no    | Quality `32342129929` PASS; Security `32342129938` PASS                  | security gate cleared                    |
+| #21 | `e741198f...` | `main`     | yes   | Quality `32337705724`, PG `32337705682` PASS                             | dependency hold                          |
+| #22 | `be97c0a6...` | `main`     | no    | Quality `32336854798`, PG `32336854963` PASS                             | CRM authority                            |
+| #23 | `036bbec4...` | #22 branch | yes   | Quality `32337132353`, PG `32337132190`, Email `32337132201` PASS        | provider evidence pending                |
+| #24 | `dedcf3d7...` | `main`     | yes   | Quality `32334785013`, PG `32334784974` PASS                             | activation dependencies                  |
+| #26 | `7675bd73...` | `main`     | yes   | Quality `32336459217`, PG `32336459216` PASS                             | downstream of #33                        |
+| #27 | `9aa2d62d...` | `main`     | yes   | Quality `32343861166`, PG `32343861116`, analytics PG `32343861120` PASS | CI verified                              |
+| #28 | `f900c125...` | `main`     | no    | Quality `32337044377`, PG `32337044338` PASS                             | provider evidence pending                |
+| #29 | `6976825a...` | `main`     | no    | Quality `32335977430` PASS                                               | governed intent only                     |
+| #30 | `2fce39b0...` | `main`     | yes   | Quality `32336878038`, PG `32336878082`, tenancy PG `32336878062` PASS   | migration 030 after coordinated renumber |
+| #33 | `7e8df19a...` | `main`     | yes   | Quality `32336942395`, PG `32336942409` PASS                             | provider-shaped fixtures only            |
+| #36 | `efe2e2f...`  | #22 branch | yes   | Quality `32343377890`, PG `32343377877` PASS                             | sole converged WhatsApp source           |
 
 The live `main` SHA remains `cd99521c8842268c5e1fb9e5efe58f9f6680ddf0`. PR #31 is now closed unmerged and superseded by #36; PR #25, #32, #34 and #35 remain closed non-merge lanes.
 
 ## Migration state
 
-Current `main` migration sequence reaches `021_r29_video_artifacts.sql`. Active collisions are `022` between #15/#18 and `027` between #30/#36. PR #36 is now the sole WhatsApp merge source, while #31 is closed unmerged. Recheck this immediately before any integration because migration numbering is globally serialized.
+Current `main` migration sequence reaches `021_r29_video_artifacts.sql`. Proposed monotonic queue is `022 #15`, `023 #22`, `024 #23`, `025 #26`, `026 #21`, `027 #30`, `028 #33`, `029 #18`, `030 #36`; no active collision remains after the completed renumbers. PR #36 is now the sole WhatsApp merge source, while #31 is closed unmerged. Recheck this immediately before any integration because migration numbering is globally serialized.
 
 ## Current synchronization result
 

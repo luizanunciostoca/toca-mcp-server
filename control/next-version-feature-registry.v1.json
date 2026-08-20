@@ -3,7 +3,7 @@
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.2",
   "status": "ACTIVE_COORDINATION",
-  "coordinationRound": "2026-08-20T03:40:00-03:00",
+  "coordinationRound": "2026-08-20T16:30:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
   "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
@@ -21,7 +21,7 @@
     "temporaryWorkflowForbiddenInFinalTree": true,
     "migrationNumbersGloballySerialized": true,
     "commercialConversationMessageOwner": "NEXT-010/PR-22",
-    "whatsappOwner": "PENDING_CONVERGENCE_PR_31_PR_36",
+    "whatsappOwner": "PR_36_ONLY",
     "attributionRevenueOwner": "NEXT-013/PR-33"
   },
   "features": [
@@ -183,7 +183,10 @@
       "evidenceState": "CI_VERIFIED",
       "pr": 22,
       "dependencies": ["NEXT-008"],
-      "providerEvidenceRequired": false
+      "providerEvidenceRequired": false,
+      "evidenceHeadSha": "be97c0a6249876ff306a67158ae35e94c217bd6d",
+      "qualityRun": 32336854798,
+      "postgresE2ERun": 32336854963
     },
     {
       "id": "NEXT-010",
@@ -193,7 +196,10 @@
       "pr": 22,
       "dependencies": ["NEXT-008"],
       "providerEvidenceRequired": false,
-      "ownershipRule": "All commercial channel integrations reuse PR #22 ConversationRecord/MessageRecord; transport sidecars may reference them but must not replace them."
+      "ownershipRule": "All commercial channel integrations reuse PR #22 ConversationRecord/MessageRecord; transport sidecars may reference them but must not replace them.",
+      "evidenceHeadSha": "be97c0a6249876ff306a67158ae35e94c217bd6d",
+      "qualityRun": 32336854798,
+      "postgresE2ERun": 32336854963
     },
     {
       "id": "NEXT-011",
@@ -202,7 +208,10 @@
       "evidenceState": "CI_VERIFIED",
       "pr": 22,
       "dependencies": ["NEXT-008", "NEXT-010"],
-      "providerEvidenceRequired": false
+      "providerEvidenceRequired": false,
+      "evidenceHeadSha": "be97c0a6249876ff306a67158ae35e94c217bd6d",
+      "qualityRun": 32336854798,
+      "postgresE2ERun": 32336854963
     },
     {
       "id": "NEXT-012",
@@ -266,7 +275,7 @@
       "pr": 19,
       "branch": "feat/privacy-communication-policy-next-20260820",
       "evidenceHeadSha": "a63458971fc6971c97c7221da02c61b8bb085e21",
-      "qualityRun": 32334687755,
+      "qualityRun": 32334417380,
       "prIntegrationQualityRun": 32334417380,
       "migration": null,
       "dependencies": [],
@@ -295,14 +304,17 @@
       "id": "NEXT-018",
       "name": "Google Ads real provider",
       "planningState": "CI_BLOCKED_AND_PROVIDER_PENDING",
-      "evidenceState": "IMPLEMENTED",
+      "evidenceState": "CI_VERIFIED",
       "pr": 28,
       "dependencies": ["NEXT-013"],
       "providerEvidenceRequired": true,
       "notes": [
         "no activation for testing",
         "live OAuth/account READ evidence required before provider promotion"
-      ]
+      ],
+      "evidenceHeadSha": "f900c125e5aee65057dbf2048ce5bb13b847a2d8",
+      "qualityRun": 32337044377,
+      "postgresE2ERun": 32337044338
     },
     {
       "id": "NEXT-019",
@@ -315,14 +327,14 @@
     {
       "id": "NEXT-020",
       "name": "Security and supply-chain hardening",
-      "planningState": "SECURITY_GATE_BLOCKED",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_SECURITY",
+      "evidenceState": "CI_VERIFIED",
       "pr": 20,
       "branch": "feat/platform-hardening-next-20260820",
-      "evidenceHeadSha": "ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494",
-      "qualityRun": 32334666158,
-      "securityRun": 32334666190,
-      "securityConclusion": "FAIL_CONTAINER_SCAN_AND_DEPENDENCY_REVIEW",
+      "evidenceHeadSha": "0da69a1e2dc261938e1c7d67e9367be0bd5a7dc4",
+      "qualityRun": 32342129929,
+      "securityRun": 32342129938,
+      "securityConclusion": "PASS",
       "migration": null,
       "dependencies": [],
       "providerEvidenceRequired": true,
@@ -334,29 +346,34 @@
     {
       "id": "NEXT-021",
       "name": "Growth, Sales and Capacity read models",
-      "planningState": "CI_BLOCKED_FORMAT",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED",
+      "evidenceState": "CI_VERIFIED",
       "pr": 27,
       "branch": "feat/analytics-capacity-read-models-20260820",
       "observedHeadSha": "d77b0921cf8bb54f04921608d3b6f0d54ce6d8e3",
-      "qualityRun": 32337191793,
+      "qualityRun": 32343861166,
       "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32337191835,
-      "analyticsPostgresE2ERun": 32337191832,
+      "postgresE2ERun": 32343861116,
+      "analyticsPostgresE2ERun": 32343861120,
       "analyticsPostgresE2EConclusion": "PASS",
       "migration": null,
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020"],
-      "providerEvidenceRequired": false
+      "providerEvidenceRequired": false,
+      "evidenceHeadSha": "9aa2d62dca218dee41ad1aff69904a7944c03cae"
     },
     {
       "id": "NEXT-022",
       "name": "DR coverage for Next Version state",
-      "planningState": "IN_PROGRESS_PR_20",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_SECURITY",
+      "evidenceState": "CI_VERIFIED",
       "pr": 20,
       "dependencies": ["NEXT-005", "NEXT-008", "NEXT-010", "NEXT-013"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"]
+      "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"],
+      "evidenceHeadSha": "0da69a1e2dc261938e1c7d67e9367be0bd5a7dc4",
+      "qualityRun": 32342129929,
+      "securityRun": 32342129938,
+      "securityConclusion": "PASS"
     },
     {
       "id": "NEXT-023",
@@ -413,6 +430,20 @@
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": false,
       "notes": ["same MCP server; UI emits governed AG01 intent only; no direct provider write"]
+    },
+    {
+      "id": "NEXT-027",
+      "name": "Asset Intelligence / Content Supply",
+      "planningState": "READY_FOR_INTEGRATION_AFTER_RENUMBER",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 18,
+      "branch": "feat/asset-intelligence-content-supply-20260820",
+      "evidenceHeadSha": "e475a95498bd71f76c483e305e2c4c8fccdd76c5",
+      "qualityRun": 32342689685,
+      "postgresE2ERun": 32342689677,
+      "migration": "029_asset_intelligence_content_supply.sql",
+      "dependencies": ["NEXT-001"],
+      "providerEvidenceRequired": false
     }
   ],
   "closedSupersededOrTemporaryPrs": [
@@ -436,12 +467,18 @@
       "pr": 35,
       "state": "CLOSED_UNMERGED_TEST_ONLY",
       "reason": "Email hardening runner only; explicitly do not merge"
+    },
+    {
+      "pr": 31,
+      "state": "CLOSED_UNMERGED_SUPERSEDED",
+      "reason": "WhatsApp candidate superseded by sole converged PR #36",
+      "headSha": "f3ceffd6b8e9cfdff12d43f49448931c17ee125a"
     }
   ],
   "coordinationReadback": {
     "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
     "pr17": {
-      "headSha": "444317f7659d66f7d38ffd9dc9b38fcfa4486beb",
+      "headSha": "b84cce9e20e06638801100973776ecc1cbeab7df",
       "base": "main",
       "draft": true,
       "mergeability": "clean_local_readback",
@@ -449,6 +486,6 @@
       "changedFiles": 5
     },
     "openNextVersionPrCount": 18,
-    "readbackSource": "GitHub API plus local merge-tree on 2026-08-20"
+    "readbackSource": "GitHub API plus local merge-tree and exact-head workflow readback on 2026-08-20"
   }
 }

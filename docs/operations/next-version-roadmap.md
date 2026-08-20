@@ -1,7 +1,7 @@
 # TOCA OS Next Version — Roadmap
 
-Status: **ACTIVE COORDINATION**  
-Round: 2026-08-20 03:40 America/Bahia
+Status: **ACTIVE COORDINATION / CHAT 16 RELEASE READBACK**
+Round: 2026-08-20 16:30 America/Bahia
 
 This roadmap coordinates implementation. It does not authorize provider/business side effects and does not replace canonical TOCA_OS business policy in Google Drive.
 
@@ -44,13 +44,13 @@ Land/revalidate #19 early because outbound Email, WhatsApp, Social Engagement an
 - #14 is currently CI-verified and non-Draft.
 - #15 is CI-verified plus provider-verified for its READ boundary, with `writeExecuted=false`, and currently owns migration `022` in the proposed queue.
 - #16 remains stacked on #14; after #14 merges, retarget/rebase and rerun exact-head Quality.
-- #18 Asset Intelligence is CI-verified but must not merge with its conflicting `022`; renumber only when its real predecessor sequence is established, then rerun Quality + PostgreSQL E2E.
+- #18 Asset Intelligence is CI-verified at `e475a954...` with migration `029_asset_intelligence_content_supply.sql`; its 022 collision was resolved and exact-head Quality/PG were rerun.
 
 ## Wave 2 — Security and canonical CRM
 
 ### Platform Hardening / #20
 
-Normal Quality is green, but Security Supply Chain is not. Candidate-container scan and dependency review must be fixed without weakening the gate. #20 remains a hard prerequisite for broad AG-01/autonomous operation.
+Quality and Security Supply Chain are green on #20 HEAD `0da69a1e...` (`32342129929`/`32342129938`). #20 remains a hard prerequisite for broad AG-01/autonomous operation.
 
 ### CRM / #22
 
@@ -100,11 +100,11 @@ After predecessors land, refresh AG-01, revalidate migration numbering and rerun
 
 ### Analytics / Capacity / #27
 
-Both PostgreSQL suites are green on the current head, including dedicated Analytics Capacity E2E, but Quality currently fails at Format. Fix formatting without relaxing gates and rerun full Quality. Missing data sources remain `UNAVAILABLE`, never silently zero.
+Both PostgreSQL suites and Quality are green on #27 HEAD `9aa2d62d...`: `32343861116`, `32343861120`, `32343861166`. Missing data sources remain `UNAVAILABLE`, never silently zero.
 
 ### Paid Media / Google Ads / #28
 
-Current PostgreSQL E2E passes, but Quality fails at Format. Fix and rerun. Continue consuming #15 Demand, #33 Attribution/Revenue and #27 Capacity through typed inputs rather than reimplementing them.
+Quality and PostgreSQL E2E pass on #28 HEAD. Continue consuming #15 Demand, #33 Attribution/Revenue and #27 Capacity through typed inputs rather than reimplementing them.
 
 Google Ads provider promotion requires real OAuth/developer-token/account READ/readback evidence. `ACTIVATE` stays separately gated and is never used just to test the integration.
 
@@ -128,11 +128,11 @@ Immediately before integration, establish the real migration order, renumber if 
 - from #36: provider media metadata readback and unmatched-status workflow handoff;
 - from both: canonical Message/Conversation IDs, Privacy/Policy/Approval gate, throttle, retry/idempotency, 24h service window, approved templates, callbacks/readback, dead-letter/human handoff, existing Meta HMAC boundary and existing Outbox/Audit persistence.
 
-PR #36 exact-head Quality `32339737876` and PostgreSQL E2E `32339737890` are green. Resolve the `027` migration collision with #30 before merge, then pursue WABA/scopes/Phone Number ID/template/callback/readback provider evidence separately.
+PR #36 exact-head Quality `32343377890` and PostgreSQL E2E `32343377877` are green on migration `030_whatsapp_provider_runtime.sql`. Pursue WABA/scopes/Phone Number ID/template/callback/readback provider evidence separately.
 
 ## Migration serialization
 
-Observed `main` ends at `021_r29_video_artifacts.sql` in this round. Active collision points are:
+Observed `main` ends at `021_r29_video_artifacts.sql`. The serialized integration queue is `022 #15`, `023 #22`, `024 #23`, `025 #26`, `026 #21`, `027 #30`, `028 #33`, `029 #18`, `030 #36`; no active migration collision remains on the current heads.
 
 - `022`: #15 vs #18;
 - `027`: #30 vs the final WhatsApp branch.
@@ -168,9 +168,10 @@ No automatic merge is authorized. Current dependency-based order:
 14. #28 Paid Media/Google Ads after #15/#33/#27 and Quality is green.
 15. #29 Human Control Center after dependency cards are reconciled.
 16. #18 Asset Intelligence after resolving `022` and Creative Truth integration, with post-renumber gates.
-17. #30 Multi-tenant after predecessor schemas/migrations stabilize.
-18. PR #36 WhatsApp after #22/#19, migration serialization and fresh exact-head gates.
-19. Dependabot #1–#6 remain separate maintenance work.
+17. #30 Multi-tenant (`027`) after predecessor schemas/migrations stabilize.
+18. #18 Asset Intelligence (`029`) after Creative Truth/queue review.
+19. PR #36 WhatsApp (`030`) after #22/#19 and fresh exact-head gates.
+20. Dependabot #1–#6 remain separate maintenance work.
 
 Recompute after every merge, rebase, renumber or material head change.
 
