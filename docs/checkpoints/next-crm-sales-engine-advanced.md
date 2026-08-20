@@ -44,6 +44,12 @@ Mutation scope and actor identity are derived from the authenticated Core `Execu
 
 The capability lifecycle remains `IMPLEMENTED` until formal promotion. Because side-effect bindings are not marked production validated, the existing Core Policy Engine fails closed for external writes until promotion evidence exists.
 
+## Strict typing boundary
+
+The runtime and persistence contracts remain compatible with the repository's strict TypeScript settings, including `exactOptionalPropertyTypes`. Optional provider, routing, and human-override fields are omitted rather than emitted as explicit `undefined`, and normalized mutation metadata does not make the optional caller timestamp part of the required audit identity contract.
+
+No `any`, `eslint-disable`, TypeScript suppression, policy bypass, or relaxed Quality rule is permitted as a compatibility mechanism.
+
 ## Persistence
 
 Migration `023_crm_sales_engine.sql` adds the advanced CRM tables and foreign-keys them to the existing CRM core tables. Append-only triggers protect message/activity/decision/score/attribution/assignment/stage/merge history from UPDATE/DELETE mutation.
