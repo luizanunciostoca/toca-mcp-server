@@ -43,9 +43,7 @@ export interface PreparedWhatsAppTemplateMessage {
 }
 
 export type PreparedWhatsAppMessage =
-  | PreparedWhatsAppTextMessage
-  | PreparedWhatsAppMediaMessage
-  | PreparedWhatsAppTemplateMessage;
+  PreparedWhatsAppTextMessage | PreparedWhatsAppMediaMessage | PreparedWhatsAppTemplateMessage;
 
 export interface PreparedWhatsAppPayloadResolver {
   resolve(preparedPayloadRef: string): Promise<PreparedWhatsAppMessage | undefined>;
@@ -115,7 +113,10 @@ export class WhatsAppCloudAdapter implements WhatsAppProviderAdapter {
     if (!candidate) {
       return {
         valid: false,
-        evidence: [...baseEvidence, `whatsapp:template:${input.templateKey}:${input.locale}:not-approved`],
+        evidence: [
+          ...baseEvidence,
+          `whatsapp:template:${input.templateKey}:${input.locale}:not-approved`,
+        ],
       };
     }
 

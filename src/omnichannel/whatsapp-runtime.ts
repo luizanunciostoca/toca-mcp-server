@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ContactRecord, CrmCoreStore, CrmScope } from '../crm/crm-records.js';
-import type {
-  ConversationRecord,
-  CrmSalesStore,
-  MessageRecord,
-} from '../crm/sales-engine.js';
+import type { ConversationRecord, CrmSalesStore, MessageRecord } from '../crm/sales-engine.js';
 import {
   assertOutboundEligibility,
   assertProductionProviderBinding,
@@ -199,11 +195,7 @@ export class WhatsAppInboundRuntime {
       contentSha256: contentSha256(event),
       providerMessageRef: event.providerMessageId,
       intent:
-        preference !== 'NONE'
-          ? `PRIVACY_${preference}`
-          : humanHandoff
-            ? 'HUMAN_HANDOFF'
-            : null,
+        preference !== 'NONE' ? `PRIVACY_${preference}` : humanHandoff ? 'HUMAN_HANDOFF' : null,
       urgency: humanHandoff ? 'HIGH' : null,
       occurredAt: event.occurredAt,
       executionId: `wa-message:${event.eventId}`,
@@ -617,11 +609,7 @@ export class WhatsAppOutboundRuntime {
       if (prepared.kind === 'MEDIA' && prepared.mediaId) {
         await this.deps.transport.recordMedia({
           ...input,
-          mediaRecordId: deterministicId(
-            'media-outbound',
-            submitted.messageId,
-            prepared.mediaId,
-          ),
+          mediaRecordId: deterministicId('media-outbound', submitted.messageId, prepared.mediaId),
           messageId: submitted.messageId,
           direction: 'OUTBOUND',
           providerMediaId: prepared.mediaId,
@@ -711,7 +699,8 @@ export class WhatsAppOutboundRuntime {
       throw new Error('WHATSAPP_CONVERSATION_BINDING_NOT_FOUND');
     }
     if (binding.humanHandoffAt) throw new Error('WHATSAPP_HUMAN_HANDOFF_ACTIVE');
-    if (Date.parse(now) < Date.parse(binding.createdAt)) throw new Error('WHATSAPP_NOW_BEFORE_BINDING');
+    if (Date.parse(now) < Date.parse(binding.createdAt))
+      throw new Error('WHATSAPP_NOW_BEFORE_BINDING');
     return binding;
   }
 

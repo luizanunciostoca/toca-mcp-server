@@ -306,7 +306,10 @@ export class PostgresWhatsAppRuntimeStore implements WhatsAppRuntimeStore {
         ? inserted.rows[0]
         : await selectMedia(client, input, input.mediaRecordId);
       const record = mediaFromRow(row);
-      if (record.messageId !== input.messageId || record.providerMediaId !== input.providerMediaId) {
+      if (
+        record.messageId !== input.messageId ||
+        record.providerMediaId !== input.providerMediaId
+      ) {
         throw new Error('WHATSAPP_MEDIA_IDEMPOTENCY_CONFLICT');
       }
       if (inserted.rows[0]) {
@@ -445,7 +448,9 @@ export class PostgresWhatsAppRuntimeStore implements WhatsAppRuntimeStore {
           input.expectedState,
         ],
       );
-      const record = dispatchFromRow(requiredRow(result.rows[0], 'WHATSAPP_DISPATCH_STATE_CONFLICT'));
+      const record = dispatchFromRow(
+        requiredRow(result.rows[0], 'WHATSAPP_DISPATCH_STATE_CONFLICT'),
+      );
       await this.#recordMutation(client, input, {
         operation: 'whatsapp.dispatch.updated',
         aggregateId: record.dispatchId,
@@ -501,7 +506,10 @@ export class PostgresWhatsAppRuntimeStore implements WhatsAppRuntimeStore {
         ? inserted.rows[0]
         : await selectProviderEvent(client, input, input.providerEventRef);
       const record = providerEventFromRow(row);
-      if (record.providerMessageRef !== input.providerMessageRef || record.status !== input.status) {
+      if (
+        record.providerMessageRef !== input.providerMessageRef ||
+        record.status !== input.status
+      ) {
         throw new Error('WHATSAPP_PROVIDER_EVENT_IDEMPOTENCY_CONFLICT');
       }
       if (inserted.rows[0]) {
@@ -744,7 +752,10 @@ function assertDispatchIdentity(
   }
 }
 
-function assertDispatchTransition(current: WhatsAppDispatchState, next: WhatsAppDispatchState): void {
+function assertDispatchTransition(
+  current: WhatsAppDispatchState,
+  next: WhatsAppDispatchState,
+): void {
   if (current === next) return;
   const transitions: Readonly<Record<WhatsAppDispatchState, readonly WhatsAppDispatchState[]>> = {
     PREPARED: ['SUBMITTED', 'FAILED_RETRYABLE', 'FAILED', 'DEAD_LETTER'],
@@ -761,7 +772,10 @@ function assertDispatchTransition(current: WhatsAppDispatchState, next: WhatsApp
   }
 }
 
-function shouldAdvanceDispatch(current: WhatsAppDispatchState, target: WhatsAppDispatchState): boolean {
+function shouldAdvanceDispatch(
+  current: WhatsAppDispatchState,
+  target: WhatsAppDispatchState,
+): boolean {
   if (current === 'READ' || current === 'DEAD_LETTER') return false;
   if (target === 'FAILED') return current !== 'DELIVERED' && current !== 'READ';
   const rank: Readonly<Record<WhatsAppDispatchState, number>> = {
@@ -777,7 +791,9 @@ function shouldAdvanceDispatch(current: WhatsAppDispatchState, target: WhatsAppD
   return rank[target] > rank[current];
 }
 
-function stateForProviderStatus(status: WhatsAppProviderEventRecord['status']): WhatsAppDispatchState {
+function stateForProviderStatus(
+  status: WhatsAppProviderEventRecord['status'],
+): WhatsAppDispatchState {
   switch (status) {
     case 'SENT':
       return 'SENT';
@@ -811,7 +827,13 @@ async function selectDispatchByIdempotency(
   const result = await client.query<DispatchRow>(
     `select * from whatsapp_dispatches
      where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and provider=$4 and idempotency_key=$5`,
-    [scope.tenantId, scope.workspaceId, scope.organizationId, WHATSAPP_PROVIDER_KEY, idempotencyKey],
+    [
+      scope.tenantId,
+      scope.workspaceId,
+      scope.organizationId,
+      WHATSAPP_PROVIDER_KEY,
+      idempotencyKey,
+    ],
   );
   return requiredRow(result.rows[0], 'WHATSAPP_DISPATCH_REPLAY_MISSING');
 }

@@ -86,7 +86,12 @@ function eligibility(): OutboundEligibilityContext {
   return {
     ...scope,
     channel: 'WHATSAPP',
-    contact: { ...scope, contactRecordId: 'contact-1', resolutionId: 'resolution-1', status: 'RESOLVED' },
+    contact: {
+      ...scope,
+      contactRecordId: 'contact-1',
+      resolutionId: 'resolution-1',
+      status: 'RESOLVED',
+    },
     privacy: {
       ...scope,
       executionId: 'privacy-1',
@@ -169,10 +174,18 @@ describe('WhatsAppCloudAdapter', () => {
   it('requires an approved template and exact positional variables', async () => {
     const { adapter } = await fixture({});
     await expect(
-      adapter.validateTemplate({ templateKey: 'booking_update', locale: 'pt_BR', variableNames: ['1', '2'] }),
+      adapter.validateTemplate({
+        templateKey: 'booking_update',
+        locale: 'pt_BR',
+        variableNames: ['1', '2'],
+      }),
     ).resolves.toMatchObject({ valid: true });
     await expect(
-      adapter.validateTemplate({ templateKey: 'booking_update', locale: 'pt_BR', variableNames: ['1'] }),
+      adapter.validateTemplate({
+        templateKey: 'booking_update',
+        locale: 'pt_BR',
+        variableNames: ['1'],
+      }),
     ).resolves.toMatchObject({ valid: false });
   });
 

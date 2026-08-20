@@ -281,7 +281,11 @@ function normalizeMessageContent(
   }
 
   if (providerType === 'contacts') {
-    return { text: null, attachments: [], payload: { contactCount: arrayValue(raw.contacts).length } };
+    return {
+      text: null,
+      attachments: [],
+      payload: { contactCount: arrayValue(raw.contacts).length },
+    };
   }
 
   return { text: null, attachments: [], payload: { providerType } };
