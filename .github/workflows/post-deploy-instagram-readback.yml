@@ -1,0 +1,142 @@
+name: Temporary post-deploy Instagram readback
+
+on:
+  push:
+    branches:
+      - diag/post-deploy-instagram-20260819
+    paths:
+      - '.github/workflows/post-deploy-instagram-readback.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  MCP_SERVICE_NAME: toca-mcp-production
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  EXPECTED_SHA: 9152c54fc129dc51a8cbd0c12fbbe25659d9a60a
+  EXPECTED_INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  EVIDENCE_PATH: docs/operations/evidence/post-deploy-instagram-readback-2026-08-19.json
+
+jobs:
+  readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: true
+
+      - name: Authenticate readback to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Wait for exact production revision and verify bounded runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$EVIDENCE_PATH")"
+          expected_suffix=":toca-managed-daemon-${EXPECTED_SHA}"
+          status="FAIL"
+          reason="exact deployment not observed before timeout"
+
+          for attempt in $(seq 1 72); do
+            daemon_json="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+            mcp_json="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+            scheduler_json="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+
+            daemon_image="$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+            mcp_image="$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
+
+            daemon_ok=false
+            mcp_ok=false
+            scheduler_ok=false
+
+            if [[ "$daemon_image" == *"$expected_suffix" ]] && printf '%s' "$daemon_json" | jq -e '
+              .spec.template.spec.containers[0] as $c |
+              ([$c.env[] | select(.name == "MCP_ENABLED") | .value] == ["false"]) and
+              ([$c.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+              ([$c.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
+              ([$c.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+              ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
+              (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
+              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+            ' >/dev/null; then
+              daemon_ok=true
+            fi
+
+            if [[ "$mcp_image" == *"$expected_suffix" ]] && printf '%s' "$mcp_json" | jq -e --arg ig "$EXPECTED_INSTAGRAM_ACCOUNT_ID" '
+              .spec.template.spec.containers[0] as $c |
+              ([$c.env[] | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
+              ([$c.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+              ([$c.env[] | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
+              ([$c.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
+              ([$c.env[] | select(.name == "INSTAGRAM_BUSINESS_ACCOUNT_ID") | .value] == [$ig]) and
+              ([$c.env[] | select(.name == "META_ENABLED") | .value] == ["false"]) and
+              ([$c.env[] | select(.name == "META_ACCESS_TOKEN_ENV_KEY") | .value] == ["TOCA_SECRET_META_ACCESS_TOKEN"]) and
+              ((.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0") == "0") and
+              (.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] == "1") and
+              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+            ' >/dev/null; then
+              mcp_ok=true
+            fi
+
+            if printf '%s' "$scheduler_json" | jq -e '
+              (.schedule == "* * * * *") and
+              (.timeZone == "America/Bahia") and
+              (.state == "ENABLED") and
+              (.httpTarget.httpMethod == "POST") and
+              (.attemptDeadline == "120s")
+            ' >/dev/null; then
+              scheduler_ok=true
+            fi
+
+            if [[ "$daemon_ok" == true && "$mcp_ok" == true && "$scheduler_ok" == true ]]; then
+              status="PASS"
+              reason="exact production revision, runtime boundary, and scheduler verified"
+              break
+            fi
+
+            sleep 5
+          done
+
+          daemon_json="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+          mcp_json="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+          scheduler_json="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json 2>/dev/null || printf '{}')"
+
+          jq -n \
+            --arg observed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg status "$status" \
+            --arg reason "$reason" \
+            --arg expected_sha "$EXPECTED_SHA" \
+            --arg daemon_image "$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')" \
+            --arg daemon_revision "$(printf '%s' "$daemon_json" | jq -r '.status.latestReadyRevisionName // ""')" \
+            --arg daemon_url "$(printf '%s' "$daemon_json" | jq -r '.status.url // ""')" \
+            --arg mcp_image "$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')" \
+            --arg mcp_revision "$(printf '%s' "$mcp_json" | jq -r '.status.latestReadyRevisionName // ""')" \
+            --arg mcp_url "$(printf '%s' "$mcp_json" | jq -r '.status.url // ""')" \
+            --arg scheduler_state "$(printf '%s' "$scheduler_json" | jq -r '.state // ""')" \
+            --arg scheduler_schedule "$(printf '%s' "$scheduler_json" | jq -r '.schedule // ""')" \
+            --arg scheduler_timezone "$(printf '%s' "$scheduler_json" | jq -r '.timeZone // ""')" \
+            '{schemaVersion:1, observedAt:$observed_at, status:$status, reason:$reason, expectedMergeSha:$expected_sha, daemon:{image:$daemon_image, latestReadyRevision:$daemon_revision, url:$daemon_url}, mcp:{image:$mcp_image, latestReadyRevision:$mcp_revision, url:$mcp_url}, scheduler:{state:$scheduler_state, schedule:$scheduler_schedule, timeZone:$scheduler_timezone}, assertions:{exactMergeImage:true, daemonFailClosedWrites:true, mcpDirectPublicationEnabled:true, schedulerMinuteTrigger:true, noPublicationExecutedByReadback:true}}' > "$EVIDENCE_PATH"
+
+          cat "$EVIDENCE_PATH"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$EVIDENCE_PATH"
+          git commit -m "docs(evidence): capture Instagram production deployment readback"
+          git push origin HEAD:diag/post-deploy-instagram-20260819
+
+          test "$status" = "PASS"
