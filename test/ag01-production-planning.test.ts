@@ -178,12 +178,9 @@ function governedRuntime(model: Ag01DecisionModelAdapter = new StaticModel()) {
   const registry = new StaticRegistry();
   const context = new Ag01DecisionContext();
   const core = new ReadOnlyCore();
-  const routeResolver = new ModelBackedIntentRouteResolver(
-    model,
-    registry,
-    context,
-    () => [readCapabilityId],
-  );
+  const routeResolver = new ModelBackedIntentRouteResolver(model, registry, context, () => [
+    readCapabilityId,
+  ]);
   const artifacts = new TocaOsCanonicalArtifactResolver(registry, context);
   const planner = new StructuredDecisionPlanBuilder(context, () => [readCapabilityId]);
   const runtime = new TocaOrchestratorRuntime({
