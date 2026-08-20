@@ -41,6 +41,8 @@ export interface MetaAdsGeoAudienceSample {
   readonly optimizationGoal: string;
   readonly targetingSpec: Readonly<Record<string, unknown>>;
   readonly observedAt: string;
+  readonly hourBucket: string;
+  readonly qualityConfidence: number;
 }
 
 export interface MetaAdsGeoAudienceHistoryQuery {
@@ -73,6 +75,7 @@ export interface MorroAudienceSignal {
   readonly historySampleCount: number;
   readonly confidence: number;
   readonly observedAt: string;
+  readonly hourBucket: string;
 }
 
 export interface MorroDemandIndexComponents {
@@ -148,26 +151,12 @@ export class MetaAdsDemandIntelligenceService {
 
   async inspectMorroAudience(input: MorroAudienceInspectInput): Promise<MorroAudienceSignal> {
     const observedAt = normalizeTimestamp(input.observedAt ?? currentHourlyObservationTimestamp());
+    const hourBucket = hourlyBucketTimestamp(observedAt);
     const estimate = await this.provider.getDeliveryEstimate(input.account, {
       optimizationGoal: input.optimizationGoal ?? 'REACH',
       targetingSpec: MORRO_DE_SAO_PAULO_TARGETING_SPEC,
     });
     const midpoint = midpointOf(estimate.lowerBound, estimate.upperBound);
-    const sample: MetaAdsGeoAudienceSample = {
-      tenantId: this.config.tenantId,
-      adAccountId: input.account.adAccountId,
-      geoKey: MORRO_DE_SAO_PAULO_GEO_KEY,
-      lowerBound: estimate.lowerBound,
-      upperBound: estimate.upperBound,
-      midpoint,
-      estimateReady: estimate.estimateReady,
-      optimizationGoal: estimate.optimizationGoal,
-      targetingSpec: MORRO_DE_SAO_PAULO_TARGETING_SPEC,
-      observedAt,
-    };
-
-    if (this.history && estimate.estimateReady) await this.history.append(sample);
-
     const history = this.history
       ? await this.history.listSince({
           tenantId: this.config.tenantId,
@@ -177,7 +166,9 @@ export class MetaAdsDemandIntelligenceService {
           limit: 1000,
         })
       : [];
-    const prior = history.filter((item) => Date.parse(item.observedAt) < Date.parse(observedAt));
+    const prior = history.filter(
+      (item) => item.estimateReady && Date.parse(item.observedAt) < Date.parse(observedAt),
+    );
     const baseline24h = nearestTo(prior, Date.parse(observedAt) - DAY_MS, 18 * HOUR_MS);
     const baseline7d = nearestTo(prior, Date.parse(observedAt) - 7 * DAY_MS, 2 * DAY_MS);
     const recentSevenDayMidpoints = prior
@@ -191,6 +182,22 @@ export class MetaAdsDemandIntelligenceService {
       has24h: Boolean(baseline24h),
       has7d: Boolean(baseline7d),
     });
+    const sample: MetaAdsGeoAudienceSample = {
+      tenantId: this.config.tenantId,
+      adAccountId: input.account.adAccountId,
+      geoKey: MORRO_DE_SAO_PAULO_GEO_KEY,
+      lowerBound: estimate.lowerBound,
+      upperBound: estimate.upperBound,
+      midpoint,
+      estimateReady: estimate.estimateReady,
+      optimizationGoal: estimate.optimizationGoal,
+      targetingSpec: MORRO_DE_SAO_PAULO_TARGETING_SPEC,
+      observedAt,
+      hourBucket,
+      qualityConfidence: confidence,
+    };
+
+    if (this.history) await this.history.append(sample);
 
     return {
       geoKey: MORRO_DE_SAO_PAULO_GEO_KEY,
@@ -202,6 +209,7 @@ export class MetaAdsDemandIntelligenceService {
       historySampleCount: prior.length,
       confidence,
       observedAt,
+      hourBucket,
     };
   }
 
@@ -405,8 +413,13 @@ function percentChange(current: number, baseline: number): number {
 }
 
 function currentHourlyObservationTimestamp(): string {
-  const now = Date.now();
-  return new Date(Math.floor(now / HOUR_MS) * HOUR_MS).toISOString();
+  return hourlyBucketTimestamp(new Date().toISOString());
+}
+
+function hourlyBucketTimestamp(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error('META_ADS_DEMAND_OBSERVED_AT_INVALID');
+  return new Date(Math.floor(parsed / HOUR_MS) * HOUR_MS).toISOString();
 }
 
 function normalizeTimestamp(value: string): string {
