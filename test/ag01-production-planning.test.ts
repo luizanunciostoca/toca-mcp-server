@@ -25,11 +25,12 @@ import {
 } from '../src/orchestrator/toca-os-registry.js';
 
 const route = getRouteDefinition('R17');
-const readCapabilityId = route.capabilityIds.find((capabilityId) => {
-  const definition = resolveCapabilityDefinition(capabilityId)?.canonical_definition;
-  return definition?.risk_class === 'READ' && definition.side_effects === false;
-});
-if (!readCapabilityId) throw new Error('TEST_R17_READ_CAPABILITY_REQUIRED');
+const readCapabilityId = requireReadCapability(
+  route.capabilityIds.find((capabilityId) => {
+    const definition = resolveCapabilityDefinition(capabilityId)?.canonical_definition;
+    return definition?.risk_class === 'READ' && definition.side_effects === false;
+  }),
+);
 const readDefinition = resolveCapabilityDefinition(readCapabilityId)!.canonical_definition;
 
 const identityA = createTrustedServiceExecutionIdentity({
@@ -54,6 +55,11 @@ const identityB = createTrustedServiceExecutionIdentity({
   evidence: ['test:ag01:b'],
   now: '2026-08-20T20:00:00.000Z',
 });
+
+function requireReadCapability(capabilityId: string | undefined): string {
+  if (!capabilityId) throw new Error('TEST_R17_READ_CAPABILITY_REQUIRED');
+  return capabilityId;
+}
 
 function snapshot(): TocaOsRegistrySnapshot {
   return {
