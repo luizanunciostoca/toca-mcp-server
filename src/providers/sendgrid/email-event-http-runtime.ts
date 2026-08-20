@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
+import { EnvironmentSecretResolver } from '../../core/environment-secret-resolver.js';
 import type { SecretResolver } from '../../core/secrets.js';
 import { ToolRegistry } from '../../core/tool-registry.js';
 import {
@@ -25,7 +26,6 @@ import type {
   SuppressionReason,
 } from '../../privacy/contracts.js';
 import { PrivacyGovernanceService } from '../../privacy/privacy-governance.js';
-import { EnvironmentSecretResolver } from '../../core/environment-secret-resolver.js';
 import {
   SENDGRID_PROVIDER_KEY,
   SendGridEmailProvider,
@@ -326,10 +326,14 @@ class PostgresEmailPrivacyReconciliationPort implements EmailPrivacyReconciliati
         order by purpose_id, ledger_sequence desc`,
       [input.tenantId, input.workspaceId, input.organizationId, input.subjectRef],
     );
-    if (purposes.rows.length === 0) throw new Error('EMAIL_PRIVACY_PURPOSE_CONTEXT_NOT_FOUND');
+    if (purposes.rows.length === 0) {
+      throw new Error('EMAIL_PRIVACY_PURPOSE_CONTEXT_NOT_FOUND');
+    }
 
     for (const row of purposes.rows) {
-      const executionId = `sendgrid-privacy:${stableOpaqueId(`${input.executionId}:${row.purpose_id}`)}`;
+      const executionId = `sendgrid-privacy:${stableOpaqueId(
+        `${input.executionId}:${row.purpose_id}`,
+      )}`;
       const state = await this.reconciliationState(input, executionId);
       const evidence = [
         `sendgrid:provider-event:${input.providerEvidenceRef}`,
