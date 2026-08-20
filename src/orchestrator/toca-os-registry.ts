@@ -92,11 +92,7 @@ export class GoogleSheetsTocaOsRegistryClient implements TocaOsRegistryClient {
   async #load(): Promise<TocaOsRegistrySnapshot> {
     const accessToken = await this.options.secrets.resolve(this.options.accessTokenReference);
     const [routingRows, resourceRows] = await Promise.all([
-      this.#fetchRows(
-        this.options.routingSpreadsheetId,
-        'ROUTING_REGISTRY!A:Z',
-        accessToken,
-      ),
+      this.#fetchRows(this.options.routingSpreadsheetId, 'ROUTING_REGISTRY!A:Z', accessToken),
       this.#fetchRows(
         this.options.canonicalResourcesSpreadsheetId,
         'CANONICAL_RESOURCES!A:Z',
@@ -315,9 +311,7 @@ function toArtifactRef(
       `toca-os:resource:${resource.resourceId}`,
       `drive:file:${resource.driveId}`,
       `toca-os:status:${resource.status}`,
-      ...(resource.lastValidatedAt
-        ? [`toca-os:last-validated:${resource.lastValidatedAt}`]
-        : []),
+      ...(resource.lastValidatedAt ? [`toca-os:last-validated:${resource.lastValidatedAt}`] : []),
       ...snapshot.evidence,
     ],
   };
