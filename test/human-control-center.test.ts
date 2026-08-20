@@ -50,7 +50,7 @@ describe('Human Control Center governed surface', () => {
     expect(panels.map((panel) => panel.id)).toEqual(CONTROL_CENTER_PANEL_IDS);
   });
 
-  it('fails closed for pending approval listing because current Core has no tenant-safe list tool', () => {
+  it('fails closed for pending approval listing when the tenant-scoped list store is unavailable', () => {
     const panel = build().find((candidate) => candidate.id === 'pending-approvals');
     expect(panel).toMatchObject({ state: 'PARTIAL' });
     expect(panel?.sources).toEqual(
