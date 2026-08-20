@@ -51,10 +51,11 @@ const toca: BrandAsset = {
 
 describe('LocalVideoComposer', () => {
   it('builds a deterministic video from verified shots and official logo files', async () => {
-    const runner = vi.fn(async (_command: string, args: readonly string[]) => {
+    const runner = vi.fn((command: string, args: readonly string[]) => {
+      void command;
       const outputPath = args.at(-1);
-      if (!outputPath) throw new Error('missing output path');
-      await writeFile(
+      if (!outputPath) return Promise.reject(new Error('missing output path'));
+      return writeFile(
         outputPath,
         Uint8Array.from([0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0, 0, 0, 0]),
       );
@@ -94,7 +95,7 @@ describe('LocalVideoComposer', () => {
   });
 
   it('rejects a video shot that is not venue verified before ffmpeg runs', async () => {
-    const runner = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
+    const runner = vi.fn(() => Promise.resolve());
     const composer = new LocalVideoComposer(runner);
 
     await expect(
