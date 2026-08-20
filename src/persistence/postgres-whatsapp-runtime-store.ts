@@ -777,7 +777,7 @@ function shouldAdvanceDispatch(
   target: WhatsAppDispatchState,
 ): boolean {
   if (current === 'READ' || current === 'DEAD_LETTER') return false;
-  if (target === 'FAILED') return current !== 'DELIVERED' && current !== 'READ';
+  if (target === 'FAILED') return current !== 'DELIVERED';
   const rank: Readonly<Record<WhatsAppDispatchState, number>> = {
     PREPARED: 0,
     FAILED_RETRYABLE: 0,
