@@ -87,8 +87,10 @@ export class GoogleOAuthRefreshSecretResolver implements SecretResolver {
       if (typeof payload.expires_in !== 'number' || !Number.isFinite(payload.expires_in)) {
         throw new Error('AG01_GOOGLE_OAUTH_EXPIRY_MISSING');
       }
-      const tokenType = typeof payload.token_type === 'string' ? payload.token_type.toLowerCase() : '';
-      if (tokenType && tokenType !== 'bearer') throw new Error('AG01_GOOGLE_OAUTH_TOKEN_TYPE_INVALID');
+      const tokenType =
+        typeof payload.token_type === 'string' ? payload.token_type.toLowerCase() : '';
+      if (tokenType && tokenType !== 'bearer')
+        throw new Error('AG01_GOOGLE_OAUTH_TOKEN_TYPE_INVALID');
       this.#cache = {
         token: payload.access_token,
         expiresAtMs: this.#now().getTime() + Math.max(1, payload.expires_in) * 1000,
