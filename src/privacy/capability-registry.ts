@@ -25,11 +25,16 @@ const contract = (
 
 export const PRIVACY_CAPABILITY_CONTRACTS: readonly PrivacyCapabilityContract[] = [
   contract('privacy.purpose.resolve', 'READ'),
+  contract('privacy.communication.resolve', 'READ'),
   contract('privacy.legal_basis.record', 'WRITE_REVERSIBLE'),
   contract('privacy.consent.record', 'WRITE_REVERSIBLE'),
   contract('privacy.consent.revoke', 'WRITE_REVERSIBLE'),
+  contract('privacy.opt_out.record', 'WRITE_REVERSIBLE'),
   contract('privacy.suppression.check', 'READ'),
+  contract('privacy.suppression.record', 'WRITE_REVERSIBLE'),
   contract('privacy.preference.update', 'WRITE_REVERSIBLE'),
+  contract('privacy.provider_consent.reconcile', 'WRITE_REVERSIBLE'),
+  contract('privacy.pii.access.evaluate', 'READ'),
   contract('privacy.retention.apply', 'WRITE_REVERSIBLE'),
   contract('privacy.subject_request.create', 'WRITE_REVERSIBLE'),
   contract('privacy.subject_request.status', 'READ'),
