@@ -49,6 +49,37 @@ Before a governed production rollout:
 
 If backup/PITR state cannot be read back, deployment aborts before migration or traffic promotion.
 
+## Staging fail-closed preconditions
+
+Staging is an independent safety boundary, not a production deployment with different labels. A staging workflow must abort before Google Cloud authentication, Secret Manager access, Cloud SQL access or `pnpm migrate` unless `scripts/validate-gcp-deploy-environment.mjs` proves all required coordinates are explicit and isolated.
+
+The GitHub `staging` Environment must define all of the following without fallback:
+
+- `GCP_PROJECT_ID` and `GCP_PROJECT_NUMBER` for staging;
+- `GCP_REGION` and `GCP_ARTIFACT_REPOSITORY`;
+- `GCP_CLOUD_SQL_INSTANCE`;
+- `GCP_CLOUD_RUN_SERVICE`;
+- `GCP_WORKLOAD_IDENTITY_PROVIDER` owned by the staging project number;
+- `GCP_DEPLOY_SERVICE_ACCOUNT` and `GCP_RUNTIME_SERVICE_ACCOUNT` owned by the staging project;
+- `GCP_DATABASE_URL_SECRET` as a project-local Secret Manager ID and an explicit `GCP_DATABASE_URL_SECRET_VERSION`;
+- `STAGING_DATABASE_ISOLATION_MODE=DEDICATED_CLOUD_SQL`, or `EXPLICITLY_APPROVED` together with `STAGING_DATABASE_ISOLATION_APPROVAL_REF`;
+- explicit project-local secret IDs for every provider that is enabled in staging.
+
+The same Environment must expose read-only production references used only for collision assertions:
+
+- `PRODUCTION_GCP_PROJECT_ID` and `PRODUCTION_GCP_PROJECT_NUMBER`;
+- `PRODUCTION_GCP_REGION`;
+- `PRODUCTION_GCP_CLOUD_SQL_INSTANCE`;
+- `PRODUCTION_GCP_CLOUD_RUN_SERVICE`;
+- `PRODUCTION_GCP_DATABASE_URL_SECRET`;
+- `PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER`;
+- `PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT`;
+- `PRODUCTION_GCP_RUNTIME_SERVICE_ACCOUNT`.
+
+The validator compares canonical resource identities, not only leaf names. Staging must differ from production for project ID, project number, Cloud SQL resource, Cloud Run resource, database secret resource, WIF provider, deploy identity and runtime identity. Service accounts must belong to the staging project, the WIF provider path must contain the staging project number and provider secret names must be project-local IDs so a fully qualified cross-project secret cannot be injected.
+
+No staging migration or provider mutation is authorized merely because the workflow exists. Until the staging Environment values and isolation evidence are read back and recorded, staging remains **BLOCKED FOR MUTABLE DEPLOY**.
+
 ## Recovery principles
 
 1. Prefer isolated restore targets. Never restore over production solely for testing.
@@ -60,6 +91,22 @@ If backup/PITR state cannot be read back, deployment aborts before migration or 
 7. Cleanup of isolated drill resources is required evidence; production state must be independently rechecked after a drill.
 8. A database restore does not restore raw secrets. Runtime resolves existing Secret Manager references through the authorized runtime identity.
 9. Schema rollback is not assumed. Application rollback is allowed only when the previous revision is backward-compatible with the migrated database; otherwise stop traffic promotion and execute the release-specific recovery decision.
+
+## Rollback and emergency mutation stop
+
+`deploy-gcp.yml` exposes explicit control operations. They never run repository migrations.
+
+### Application rollback
+
+Rollback requires both an explicit existing Cloud Run revision and `rollback_compatibility_ref` evidence that the target revision is compatible with the currently migrated database schema. The workflow verifies that the named revision belongs to the selected service before routing 100% traffic to it. A rollback must never be used as an implicit schema rollback.
+
+### Mutation kill switch
+
+`kill_switch` creates a new Cloud Run revision with `TOCA_PLATFORM_KILL_SWITCH=true` and explicitly routes traffic to that latest revision. The canonical Policy/Core gate denies every capability with `sideEffects=true` before provider execution while read-only capabilities, `/healthz` and dependency `/readyz` remain available for inspection and recovery.
+
+`clear_kill_switch` is a separate explicit operation. Normal deploy and rollback refuse to continue when the currently serving service has the mutation kill switch active, preventing an unrelated release operation from silently clearing the emergency stop.
+
+After either kill-switch operation, read back the latest revision, traffic target and configured switch value. After activation, prove a controlled side-effect capability is denied without calling a provider; do not perform a real business-provider mutation as the validation method.
 
 ## Backup and PITR operational procedure
 
@@ -241,4 +288,4 @@ For each scenario record:
 
 ## Failure/abort criteria
 
-Abort/resume later if any of the following occurs: backup/PITR state unknown, pre-migration backup incomplete, schema/migration mismatch, readiness failure, Audit Ledger invalid, lost idempotency identity, tenant-scope violation, uncontrolled provider mutation risk, unresolved partial write, RPO/RTO breach, cleanup uncertainty, or evidence that production changed unexpectedly.
+Abort/resume later if any of the following occurs: staging isolation is unproven, a staging coordinate is absent, a staging resource collides with production, WIF/service identity ownership is ambiguous, provider secret ownership is ambiguous, backup/PITR state is unknown, pre-migration backup is incomplete, schema/migration mismatch exists, readiness fails, Audit Ledger is invalid, idempotency identity is lost, tenant scope is violated, uncontrolled provider mutation risk exists, a partial write remains unresolved, rollback compatibility is unproven, RPO/RTO is breached, cleanup is uncertain, or production changed unexpectedly.
