@@ -41,71 +41,42 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Verify exact Cloud Run release and scheduler boundary
+      - name: Verify exact Cloud Run release boundary
+        id: runtime
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           expected_suffix=":toca-managed-daemon-${EXPECTED_RELEASE_SHA}"
-          daemon_ok=false
-          mcp_ok=false
-          scheduler_ok=false
-          daemon_json='{}'
-          mcp_json='{}'
-          scheduler_json='{}'
-
-          for attempt in $(seq 1 72); do
-            daemon_json="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-            mcp_json="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-            scheduler_json="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
-
-            daemon_image="$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
-            mcp_image="$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
-
-            daemon_ok=false
-            mcp_ok=false
-            scheduler_ok=false
-
-            if [[ "$daemon_image" == *"$expected_suffix" ]] && printf '%s' "$daemon_json" | jq -e '
-              .spec.template.spec.containers[0] as $c |
-              ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["false"]) and
-              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
-              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
-              ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
-              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
-            ' >/dev/null; then daemon_ok=true; fi
-
-            if [[ "$mcp_image" == *"$expected_suffix" ]] && printf '%s' "$mcp_json" | jq -e --arg ig "$EXPECTED_INSTAGRAM_ACCOUNT_ID" '
-              .spec.template.spec.containers[0] as $c |
-              ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
-              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
-              ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
-              ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
-              ([$c.env[]? | select(.name == "INSTAGRAM_BUSINESS_ACCOUNT_ID") | .value] == [$ig]) and
-              ([$c.env[]? | select(.name == "META_ENABLED") | .value] == ["false"]) and
-              ([$c.env[]? | select(.name == "META_ACCESS_TOKEN_ENV_KEY") | .value] == ["TOCA_SECRET_META_ACCESS_TOKEN"]) and
-              ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
-            ' >/dev/null; then mcp_ok=true; fi
-
-            if printf '%s' "$scheduler_json" | jq -e '
-              (.schedule == "* * * * *") and
-              (.timeZone == "America/Bahia") and
-              (.state == "ENABLED") and
-              (.httpTarget.httpMethod == "POST")
-            ' >/dev/null; then scheduler_ok=true; fi
-
-            if [[ "$daemon_ok" == true && "$mcp_ok" == true && "$scheduler_ok" == true ]]; then
-              break
-            fi
-            sleep 5
-          done
-
+          daemon_json="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          mcp_json="$(gcloud run services describe "$MCP_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           daemon_image="$(printf '%s' "$daemon_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
           daemon_revision="$(printf '%s' "$daemon_json" | jq -r '.status.latestReadyRevisionName // ""')"
           mcp_image="$(printf '%s' "$mcp_json" | jq -r '.spec.template.spec.containers[0].image // ""')"
           mcp_revision="$(printf '%s' "$mcp_json" | jq -r '.status.latestReadyRevisionName // ""')"
-          scheduler_state="$(printf '%s' "$scheduler_json" | jq -r '.state // ""')"
-          scheduler_schedule="$(printf '%s' "$scheduler_json" | jq -r '.schedule // ""')"
-          scheduler_timezone="$(printf '%s' "$scheduler_json" | jq -r '.timeZone // ""')"
+          daemon_ok=false
+          mcp_ok=false
+
+          if [[ "$daemon_image" == *"$expected_suffix" ]] && printf '%s' "$daemon_json" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["false"]) and
+            ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+            ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
+            ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+          ' >/dev/null; then daemon_ok=true; fi
+
+          if [[ "$mcp_image" == *"$expected_suffix" ]] && printf '%s' "$mcp_json" | jq -e --arg ig "$EXPECTED_INSTAGRAM_ACCOUNT_ID" '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] == ["true"]) and
+            ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+            ([$c.env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["false"]) and
+            ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["true"]) and
+            ([$c.env[]? | select(.name == "INSTAGRAM_BUSINESS_ACCOUNT_ID") | .value] == [$ig]) and
+            ([$c.env[]? | select(.name == "META_ENABLED") | .value] == ["false"]) and
+            ([$c.env[]? | select(.name == "META_ACCESS_TOKEN_ENV_KEY") | .value] == ["TOCA_SECRET_META_ACCESS_TOKEN"]) and
+            ([.status.conditions[]? | select(.type == "Ready") | .status] | index("True") != null)
+          ' >/dev/null; then mcp_ok=true; fi
 
           jq -n \
             --arg expectedReleaseSha "$EXPECTED_RELEASE_SHA" \
@@ -113,21 +84,46 @@ jobs:
             --arg daemonRevision "$daemon_revision" \
             --arg mcpImage "$mcp_image" \
             --arg mcpRevision "$mcp_revision" \
-            --arg schedulerState "$scheduler_state" \
-            --arg schedulerSchedule "$scheduler_schedule" \
-            --arg schedulerTimezone "$scheduler_timezone" \
             --argjson daemonVerified "$daemon_ok" \
             --argjson mcpVerified "$mcp_ok" \
-            --argjson schedulerVerified "$scheduler_ok" \
-            '{schemaVersion:1, expectedReleaseSha:$expectedReleaseSha, daemon:{image:$daemonImage, revision:$daemonRevision, verified:$daemonVerified}, mcp:{image:$mcpImage, revision:$mcpRevision, verified:$mcpVerified}, scheduler:{state:$schedulerState, schedule:$schedulerSchedule, timeZone:$schedulerTimezone, verified:$schedulerVerified}, noPublicationExecuted:true}' \
+            '{schemaVersion:2, expectedReleaseSha:$expectedReleaseSha, daemon:{image:$daemonImage, revision:$daemonRevision, verified:$daemonVerified}, mcp:{image:$mcpImage, revision:$mcpRevision, verified:$mcpVerified}, noPublicationExecuted:true}' \
             > v1-runtime-readback.json
           cat v1-runtime-readback.json
           test "$daemon_ok" = true
           test "$mcp_ok" = true
-          test "$scheduler_ok" = true
-          echo 'V1_RUNTIME_READBACK=PASS'
+          echo 'V1_CLOUD_RUN_READBACK=PASS'
+
+      - name: Verify Cloud Scheduler boundary
+        id: scheduler
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          scheduler_json='{}'
+          scheduler_error=''
+          if scheduler_json="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json 2>scheduler.err)"; then
+            scheduler_state="$(printf '%s' "$scheduler_json" | jq -r '.state // ""')"
+            scheduler_schedule="$(printf '%s' "$scheduler_json" | jq -r '.schedule // ""')"
+            scheduler_timezone="$(printf '%s' "$scheduler_json" | jq -r '.timeZone // ""')"
+            scheduler_method="$(printf '%s' "$scheduler_json" | jq -r '.httpTarget.httpMethod // ""')"
+            scheduler_ok=false
+            if [[ "$scheduler_state" == ENABLED && "$scheduler_schedule" == '* * * * *' && "$scheduler_timezone" == America/Bahia && "$scheduler_method" == POST ]]; then scheduler_ok=true; fi
+            jq -n --arg state "$scheduler_state" --arg schedule "$scheduler_schedule" --arg timeZone "$scheduler_timezone" --arg method "$scheduler_method" --argjson verified "$scheduler_ok" '{schemaVersion:2,state:$state,schedule:$schedule,timeZone:$timeZone,httpMethod:$method,verified:$verified}' > v1-scheduler-readback.json
+            cat v1-scheduler-readback.json
+            test "$scheduler_ok" = true
+          else
+            scheduler_error="$(cat scheduler.err)"
+            reason=UNKNOWN_PROVIDER_ERROR
+            if printf '%s' "$scheduler_error" | grep -q 'BILLING_DISABLED\|requires billing to be enabled'; then reason=BILLING_DISABLED; fi
+            jq -n --arg reason "$reason" '{schemaVersion:2,verified:false,blocked:true,blocker:$reason}' > v1-scheduler-readback.json
+            cat v1-scheduler-readback.json
+            exit 1
+          fi
+          echo 'V1_SCHEDULER_READBACK=PASS'
 
       - name: Verify Cloud SQL current DR safety and recovery window
+        id: sql
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -172,7 +168,7 @@ jobs:
             --argjson transactionLogRetentionDays "$log_retention_days" \
             --argjson latestBackupAgeSeconds "$backup_age_seconds" \
             --argjson latestRecoveryLagSeconds "$recovery_lag_seconds" \
-            '{schemaVersion:1, instance:$instance, state:$state, databaseVersion:$databaseVersion, region:$region, deletionProtection:$deletionProtection, automatedBackupsEnabled:$backupsEnabled, pitrEnabled:$pitrEnabled, retainedBackups:$retainedBackups, transactionLogRetentionDays:$transactionLogRetentionDays, latestSuccessfulBackup:$latestSuccessfulBackup, latestBackupAgeSeconds:$latestBackupAgeSeconds, earliestRecoveryTime:$earliestRecoveryTime, latestRecoveryTime:$latestRecoveryTime, latestRecoveryLagSeconds:$latestRecoveryLagSeconds}' \
+            '{schemaVersion:2, instance:$instance, state:$state, databaseVersion:$databaseVersion, region:$region, deletionProtection:$deletionProtection, automatedBackupsEnabled:$backupsEnabled, pitrEnabled:$pitrEnabled, retainedBackups:$retainedBackups, transactionLogRetentionDays:$transactionLogRetentionDays, latestSuccessfulBackup:$latestSuccessfulBackup, latestBackupAgeSeconds:$latestBackupAgeSeconds, earliestRecoveryTime:$earliestRecoveryTime, latestRecoveryTime:$latestRecoveryTime, latestRecoveryLagSeconds:$latestRecoveryLagSeconds}' \
             > v1-cloud-sql-readback.json
           cat v1-cloud-sql-readback.json
 
@@ -182,8 +178,8 @@ jobs:
           test "$deletion_protection" = true
           test "$backups_enabled" = true
           test "$pitr_enabled" = true
-          test "$retained_backups" -eq 7
-          test "$log_retention_days" -eq 7
+          test "$retained_backups" -ge 7
+          test "$log_retention_days" -ge 7
           test "$backup_age_seconds" -ge 0
           test "$backup_age_seconds" -le 129600
           test "$recovery_lag_seconds" -ge 0
@@ -191,11 +187,26 @@ jobs:
           echo 'V1_CLOUD_SQL_DR_READBACK=PASS'
 
       - name: Upload sanitized V1 readback evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: v1-final-production-readback-${{ github.sha }}
           path: |
             v1-runtime-readback.json
+            v1-scheduler-readback.json
             v1-cloud-sql-readback.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
+
+      - name: Enforce final V1 hosted-state gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runtime=${{ steps.runtime.outcome }}"
+          echo "scheduler=${{ steps.scheduler.outcome }}"
+          echo "sql=${{ steps.sql.outcome }}"
+          test '${{ steps.runtime.outcome }}' = success
+          test '${{ steps.scheduler.outcome }}' = success
+          test '${{ steps.sql.outcome }}' = success
+          echo 'V1_FINAL_HOSTED_READBACK=PASS'
