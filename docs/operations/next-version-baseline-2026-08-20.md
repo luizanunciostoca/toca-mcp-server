@@ -15,7 +15,7 @@ Status: **ACTIVE COORDINATION BASELINE**
 
 ## Next Version baseline
 
-Coordinator readback on 2026-08-20:
+Coordinator readback on 2026-08-20 03:40 America/Bahia:
 
 - canonical branch: `main`
 - observed `main` SHA: `cd99521c8842268c5e1fb9e5efe58f9f6680ddf0`
@@ -45,19 +45,36 @@ Only these promotion states are valid:
 
 Evidence is exact-head scoped. A branch update, rebase or conflict-resolution commit invalidates prior CI evidence for merge purposes until the new exact HEAD is revalidated.
 
-## Current feature PRs — refreshed state
+## Current feature PRs — live readback
 
-| PR  | Feature                         | Branch / base                                              | Current head                               | Base relation                   | Exact-head evidence                                           |
-| --- | ------------------------------- | ---------------------------------------------------------- | ------------------------------------------ | ------------------------------- | ------------------------------------------------------------- |
-| #14 | Creative Truth / Venue Fidelity | `recovery/creative-truth-20260819` -> `main`               | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind `cd99521c...`          | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS |
-| #15 | Morro Demand Intelligence       | `recovery/meta-ads-demand-intelligence-20260819` -> `main` | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind `cd99521c...`          | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS |
-| #16 | Photo-to-Video                  | `recovery/photo-to-video-20260819` -> #14 branch           | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind #14 head `2843e954...` | Quality `32333405034` PASS                                    |
+The GitHub API and local `git merge-tree` readback on this round observed 18 open Next Version PRs. All listed heads were fetched, all local base/head comparisons were clean, and exact-head evidence is reported in the registry, tracker and evidence index. API `mergeable` is asynchronous and was null during collection; no null value is treated as merge approval.
 
-Obsolete textual holds referring to V1 closeout / PR #13 were removed from PR merge conditions.
+| PR  | Head          | Base       | Draft | Exact-head checks                                                             | Current coordination state     |
+| --- | ------------- | ---------- | ----- | ----------------------------------------------------------------------------- | ------------------------------ |
+| #14 | `de3ec2f6...` | `main`     | no    | Quality `32335049796`, PG `32335049795` PASS                                  | CI verified                    |
+| #15 | `ee7cb048...` | `main`     | no    | Quality `32333934188`, PG `32333934183` PASS                                  | provider READ verified         |
+| #16 | `c0b23b57...` | #14 branch | no    | Quality `32335823551` PASS                                                    | parent-dependent               |
+| #17 | `444317f7...` | `main`     | yes   | Quality `32337525360` PASS                                                    | coordinator; no auto-merge     |
+| #18 | `1bfa2680...` | `main`     | no    | Quality `32334357073`, PG `32334357088` PASS                                  | migration 022 collision        |
+| #19 | `a6345897...` | `main`     | no    | Quality `32334417380` PASS                                                    | privacy authority              |
+| #20 | `ccfde23e...` | `main`     | no    | Quality PASS; Security `32334666190` FAIL                                     | security gate blocked          |
+| #21 | `e741198f...` | `main`     | yes   | Quality `32337705724`, PG `32337705682` PASS                                  | dependency hold                |
+| #22 | `be97c0a6...` | `main`     | no    | Quality `32336854798`, PG `32336854963` PASS                                  | CRM authority                  |
+| #23 | `036bbec4...` | #22 branch | yes   | Quality `32337132353`, PG `32337132190`, Email `32337132201` PASS             | provider evidence pending      |
+| #24 | `dedcf3d7...` | `main`     | yes   | Quality `32334785013`, PG `32334784974` PASS                                  | activation dependencies        |
+| #26 | `7675bd73...` | `main`     | yes   | Quality `32336459217`, PG `32336459216` PASS                                  | downstream of #33              |
+| #27 | `d77b0921...` | `main`     | yes   | Quality `32337191793` FAIL; PG `32337191835`, analytics PG `32337191832` PASS | format blocked                 |
+| #28 | `f900c125...` | `main`     | no    | Quality `32337044377`, PG `32337044338` PASS                                  | provider evidence pending      |
+| #29 | `6976825a...` | `main`     | no    | Quality `32335977430` PASS                                                    | governed intent only           |
+| #30 | `2fce39b0...` | `main`     | yes   | Quality `32336878038`, PG `32336878082`, tenancy PG `32336878062` PASS        | migration 027 collision        |
+| #33 | `7e8df19a...` | `main`     | yes   | Quality `32336942395`, PG `32336942409` PASS                                  | provider-shaped fixtures only  |
+| #36 | `510d0202...` | #22 branch | yes   | Quality `32339737876`, PG `32339737890` PASS                                  | sole converged WhatsApp source |
+
+The live `main` SHA remains `cd99521c8842268c5e1fb9e5efe58f9f6680ddf0`. PR #31 is now closed unmerged and superseded by #36; PR #25, #32, #34 and #35 remain closed non-merge lanes.
 
 ## Migration state
 
-Current `main` migration sequence reaches `021_r29_video_artifacts.sql`. PR #15 introduces `022_meta_ads_geo_demand_intelligence.sql`; no competing `022` exists on the observed `main` or the other current feature PRs. Recheck this immediately before any later integration because migration numbering is globally serialized.
+Current `main` migration sequence reaches `021_r29_video_artifacts.sql`. Active collisions are `022` between #15/#18 and `027` between #30/#36. PR #36 is now the sole WhatsApp merge source, while #31 is closed unmerged. Recheck this immediately before any integration because migration numbering is globally serialized.
 
 ## Current synchronization result
 

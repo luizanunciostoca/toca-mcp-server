@@ -1,7 +1,7 @@
 # TOCA OS Next Version — Roadmap
 
 Status: **ACTIVE COORDINATION**  
-Round: 2026-08-20 02:50 America/Bahia
+Round: 2026-08-20 03:40 America/Bahia
 
 This roadmap coordinates implementation. It does not authorize provider/business side effects and does not replace canonical TOCA_OS business policy in Google Drive.
 
@@ -120,17 +120,15 @@ Google Ads provider promotion requires real OAuth/developer-token/account READ/r
 
 Immediately before integration, establish the real migration order, renumber if needed and rerun exact-head Quality + PostgreSQL E2E after any renumber/rebase.
 
-### WhatsApp / #31 and #36
+### WhatsApp / #36
 
-#25 is correctly closed unmerged because it carried an obsolete duplicate CRM communication model. The active conflict is now #31 versus #36, both stacked on canonical #22.
-
-Neither wins by being older or newer. Converge into one branch preserving the strongest semantics:
+#25 is correctly closed unmerged because it carried an obsolete duplicate CRM communication model. PR #36 is now the sole converged merge source stacked on canonical #22; PR #31 is closed unmerged and superseded. The convergence preserved the strongest safe semantics from both candidates:
 
 - from #31: explicit runtime audit evidence, recipient-to-canonical-Contact channel validation, ambiguity-aware CRM resolution and sales activity for human handoff;
 - from #36: provider media metadata readback and unmatched-status workflow handoff;
 - from both: canonical Message/Conversation IDs, Privacy/Policy/Approval gate, throttle, retry/idempotency, 24h service window, approved templates, callbacks/readback, dead-letter/human handoff, existing Meta HMAC boundary and existing Outbox/Audit persistence.
 
-Both current candidates have PostgreSQL E2E green but Quality red at Lint. After semantic consolidation there must be exactly one WhatsApp merge source. Resolve the `027` migration collision with #30, rerun Quality + PostgreSQL E2E and only then pursue WABA/scopes/Phone Number ID/template/callback/readback provider evidence.
+PR #36 exact-head Quality `32339737876` and PostgreSQL E2E `32339737890` are green. Resolve the `027` migration collision with #30 before merge, then pursue WABA/scopes/Phone Number ID/template/callback/readback provider evidence separately.
 
 ## Migration serialization
 
@@ -171,7 +169,7 @@ No automatic merge is authorized. Current dependency-based order:
 15. #29 Human Control Center after dependency cards are reconciled.
 16. #18 Asset Intelligence after resolving `022` and Creative Truth integration, with post-renumber gates.
 17. #30 Multi-tenant after predecessor schemas/migrations stabilize.
-18. one converged WhatsApp branch from #31/#36 after #22/#19, migration serialization and fresh exact-head gates.
+18. PR #36 WhatsApp after #22/#19, migration serialization and fresh exact-head gates.
 19. Dependabot #1–#6 remain separate maintenance work.
 
 Recompute after every merge, rebase, renumber or material head change.

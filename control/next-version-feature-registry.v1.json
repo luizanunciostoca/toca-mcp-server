@@ -3,7 +3,7 @@
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.2",
   "status": "ACTIVE_COORDINATION",
-  "coordinationRound": "2026-08-20T02:50:00-03:00",
+  "coordinationRound": "2026-08-20T03:40:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
   "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
@@ -83,9 +83,9 @@
       "evidenceState": "CI_VERIFIED",
       "pr": 21,
       "branch": "feat/ag01-orchestrator-runtime-20260820",
-      "evidenceHeadSha": "9f5dd275b3823c3d435b42ccd2d51a1662bae383",
-      "qualityRun": 32336668556,
-      "postgresE2ERun": 32336668600,
+      "evidenceHeadSha": "e741198f2050f70bde7707fb9c13a1250c613e96",
+      "qualityRun": 32337705724,
+      "postgresE2ERun": 32337705682,
       "migration": "026_ag01_orchestrator_runtime.sql",
       "dependencies": ["NEXT-010", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": true,
@@ -110,20 +110,17 @@
     {
       "id": "NEXT-006",
       "name": "WhatsApp Business real provider",
-      "planningState": "DUPLICATE_WORKSTREAM_CONVERGENCE_REQUIRED",
+      "planningState": "CONVERGED_MERGE_SOURCE_SELECTED",
       "evidenceState": "IMPLEMENTED",
-      "candidatePrs": [31, 36],
+      "candidatePrs": [36],
       "candidateHeads": {
-        "31": "256f66051198f41577bff69bbbab261126e2581f",
-        "36": "7e1e581894510fc56e54075ccd121a980cea4f4c"
+        "36": "510d0202a9746ef53e42e10cdb3c8a5607000d73"
       },
       "candidateQualityRuns": {
-        "31": 32336999395,
-        "36": 32337031616
+        "36": 32339737876
       },
       "candidatePostgresRuns": {
-        "31": 32336999185,
-        "36": 32337031654
+        "36": 32339737890
       },
       "migration": "027_whatsapp_provider_runtime.sql",
       "dependencies": ["NEXT-005", "NEXT-010", "NEXT-016"],
@@ -131,18 +128,17 @@
       "providerEvidenceRequired": true,
       "supersededPr": 25,
       "blockers": [
-        "PR #31 and #36 both implement WhatsApp and must converge into one merge source",
-        "both current heads fail Quality at Lint after Format and Architecture pass",
-        "preserve PR #31 explicit audit/contact-recipient/ambiguity/handoff safeguards and PR #36 media readback/unmatched-status behavior",
-        "migration 027 collides with PR #30",
-        "real WABA/scopes/template/callback/readback evidence unavailable"
-      ]
+        "PR #36 is the sole converged WhatsApp merge source; PR #31 is closed unmerged as superseded",
+        "migration 027 still collides with PR #30 and requires global serialization",
+        "real WABA/scopes/template/callback/readback evidence remains unavailable"
+      ],
+      "mergeSourcePr": 36
     },
     {
       "id": "NEXT-007",
       "name": "Email real provider",
-      "planningState": "CURRENT_HEAD_CI_RUNNING",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_PROVIDER_PENDING",
+      "evidenceState": "CI_VERIFIED",
       "pr": 23,
       "branch": "feat/email-real-sendgrid-20260820",
       "observedHeadSha": "036bbec4aff0f77eede4ae36fb347b12967b0ada",
@@ -155,9 +151,12 @@
       "priorQualityRun": 32336964982,
       "priorPostgresE2ERun": 32336964932,
       "blockers": [
-        "newer current head requires its own exact-head CI before CI_VERIFIED is restored",
-        "sender/domain/SPF/DKIM/DMARC/credentials/webhook keys/readback not configured"
-      ]
+        "provider sender/domain/SPF/DKIM/DMARC/credentials/webhook/readback evidence is not configured"
+      ],
+      "evidenceHeadSha": "036bbec4aff0f77eede4ae36fb347b12967b0ada",
+      "qualityRun": 32337132353,
+      "postgresE2ERun": 32337132190,
+      "emailProviderGateRun": 32337132201
     },
     {
       "id": "NEXT-008",
@@ -276,16 +275,21 @@
     {
       "id": "NEXT-017",
       "name": "Meta Ads closed-loop optimization",
-      "planningState": "CI_BLOCKED_FORMAT",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_PROVIDER_PENDING",
+      "evidenceState": "CI_VERIFIED",
       "pr": 28,
       "branch": "feat/paid-media-next-meta-google-20260820",
       "observedHeadSha": "85ae60e95300a1d3fb73d35cd7b0083a4a980c72",
-      "qualityRun": 32336953445,
+      "qualityRun": 32337044377,
       "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336953388,
+      "postgresE2ERun": 32337044338,
       "dependencies": ["NEXT-002", "NEXT-013", "NEXT-021"],
-      "providerEvidenceRequired": true
+      "providerEvidenceRequired": true,
+      "evidenceHeadSha": "f900c125e5aee65057dbf2048ce5bb13b847a2d8",
+      "blockers": [
+        "real Google Ads OAuth/customer/billing READ evidence is pending",
+        "no activation was executed for testing"
+      ]
     },
     {
       "id": "NEXT-018",
@@ -334,11 +338,11 @@
       "evidenceState": "IMPLEMENTED",
       "pr": 27,
       "branch": "feat/analytics-capacity-read-models-20260820",
-      "observedHeadSha": "ce65dbfb686b4e64a35a209de3517ddb2762bec9",
-      "qualityRun": 32336961228,
+      "observedHeadSha": "d77b0921cf8bb54f04921608d3b6f0d54ce6d8e3",
+      "qualityRun": 32337191793,
       "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336961148,
-      "analyticsPostgresE2ERun": 32336961160,
+      "postgresE2ERun": 32337191835,
+      "analyticsPostgresE2ERun": 32337191832,
       "analyticsPostgresE2EConclusion": "PASS",
       "migration": null,
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020"],
@@ -433,5 +437,18 @@
       "state": "CLOSED_UNMERGED_TEST_ONLY",
       "reason": "Email hardening runner only; explicitly do not merge"
     }
-  ]
+  ],
+  "coordinationReadback": {
+    "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
+    "pr17": {
+      "headSha": "444317f7659d66f7d38ffd9dc9b38fcfa4486beb",
+      "base": "main",
+      "draft": true,
+      "mergeability": "clean_local_readback",
+      "qualityRun": 32337525360,
+      "changedFiles": 5
+    },
+    "openNextVersionPrCount": 18,
+    "readbackSource": "GitHub API plus local merge-tree on 2026-08-20"
+  }
 }
