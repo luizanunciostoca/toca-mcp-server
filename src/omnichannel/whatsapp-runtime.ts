@@ -185,7 +185,8 @@ export class WhatsAppInboundRuntime {
       ? await this.deps.communications.markHumanHandoff({
           ...binding,
           conversationId: conversation.conversationId,
-          reason: event.contentType === 'UNKNOWN' ? 'UNSUPPORTED_WHATSAPP_CONTENT' : 'CUSTOMER_REQUEST',
+          reason:
+            event.contentType === 'UNKNOWN' ? 'UNSUPPORTED_WHATSAPP_CONTENT' : 'CUSTOMER_REQUEST',
           executionId: `wa-handoff:${event.eventId}`,
           correlationId: event.eventId,
           actorPrincipalId: binding.actorPrincipalId,
@@ -699,7 +700,8 @@ function classifyProviderFailure(
 function toReadbackState(status: MessageRecord['status']): ProviderMessageReadback['state'] {
   if (status === 'SENT') return 'SENT';
   if (status === 'DELIVERED' || status === 'READ') return 'DELIVERED';
-  if (status === 'FAILED' || status === 'FAILED_RETRYABLE' || status === 'DEAD_LETTER') return 'FAILED';
+  if (status === 'FAILED' || status === 'FAILED_RETRYABLE' || status === 'DEAD_LETTER')
+    return 'FAILED';
   if (status === 'SUBMITTED') return 'QUEUED';
   return 'UNKNOWN';
 }

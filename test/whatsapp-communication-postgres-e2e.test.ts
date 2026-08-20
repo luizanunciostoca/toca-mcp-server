@@ -135,7 +135,11 @@ postgresDescribe('WhatsApp CRM communication PostgreSQL E2E', () => {
       expect(firstThrottle.allowed).toBe(true);
       expect(blockedThrottle).toMatchObject({ allowed: false, count: 1, limit: 1 });
 
-      const rows = await pool1.query<{ message_count: number; delivery_count: number; outbox_count: number }>(
+      const rows = await pool1.query<{
+        message_count: number;
+        delivery_count: number;
+        outbox_count: number;
+      }>(
         `select
            (select count(*)::int from crm_messages where message_id=$1) as message_count,
            (select count(*)::int from crm_message_delivery_events where message_id=$1) as delivery_count,
@@ -152,16 +156,21 @@ postgresDescribe('WhatsApp CRM communication PostgreSQL E2E', () => {
     try {
       const restarted = new PostgresCrmCommunicationStore(pool2);
       await expect(
-        restarted.getMessageByProviderId({ ...scope, provider: 'META_WHATSAPP_CLOUD', providerMessageId }),
+        restarted.getMessageByProviderId({
+          ...scope,
+          provider: 'META_WHATSAPP_CLOUD',
+          providerMessageId,
+        }),
       ).resolves.toMatchObject({
         messageId,
         conversationId,
         providerMessageId,
         status: 'DELIVERED',
       });
-      await expect(
-        restarted.getConversation({ ...scope, conversationId }),
-      ).resolves.toMatchObject({ conversationId, contactId });
+      await expect(restarted.getConversation({ ...scope, conversationId })).resolves.toMatchObject({
+        conversationId,
+        contactId,
+      });
     } finally {
       await pool2.end();
     }

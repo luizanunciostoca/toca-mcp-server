@@ -43,9 +43,7 @@ export interface PreparedWhatsAppTemplateMessage {
 }
 
 export type PreparedWhatsAppMessage =
-  | PreparedWhatsAppTextMessage
-  | PreparedWhatsAppMediaMessage
-  | PreparedWhatsAppTemplateMessage;
+  PreparedWhatsAppTextMessage | PreparedWhatsAppMediaMessage | PreparedWhatsAppTemplateMessage;
 
 export interface PreparedWhatsAppPayloadResolver {
   resolve(preparedPayloadRef: string): Promise<PreparedWhatsAppMessage | undefined>;
@@ -179,7 +177,9 @@ export class WhatsAppCloudAdapter implements WhatsAppProviderAdapter {
 
   async readMediaMetadata(mediaId: string): Promise<WhatsAppMediaMetadata> {
     assertProductionProviderBinding(this.binding);
-    const response = asRecord(await this.api.get(requireText(mediaId, 'WHATSAPP_MEDIA_ID_REQUIRED')));
+    const response = asRecord(
+      await this.api.get(requireText(mediaId, 'WHATSAPP_MEDIA_ID_REQUIRED')),
+    );
     const id = stringValue(response.id);
     const url = stringValue(response.url);
     if (!id || !url) throw new Error('WHATSAPP_MEDIA_METADATA_INVALID');
@@ -270,7 +270,8 @@ function validatePreparedMessage(message: PreparedWhatsAppMessage): void {
   requireText(message.templateKey, 'WHATSAPP_TEMPLATE_KEY_REQUIRED');
   requireText(message.locale, 'WHATSAPP_TEMPLATE_LOCALE_REQUIRED');
   assertDistinctVariableNames(message.variables.map((variable) => variable.name));
-  for (const variable of message.variables) requireText(variable.value, 'WHATSAPP_TEMPLATE_VARIABLE_VALUE_REQUIRED');
+  for (const variable of message.variables)
+    requireText(variable.value, 'WHATSAPP_TEMPLATE_VARIABLE_VALUE_REQUIRED');
 }
 
 function firstProviderMessageId(value: unknown): string {
@@ -282,8 +283,11 @@ function firstProviderMessageId(value: unknown): string {
 }
 
 function assertDistinctVariableNames(names: readonly string[]): void {
-  const normalized = names.map((name) => requireText(name, 'WHATSAPP_TEMPLATE_VARIABLE_NAME_REQUIRED'));
-  if (new Set(normalized).size !== normalized.length) throw new Error('WHATSAPP_TEMPLATE_VARIABLE_DUPLICATE');
+  const normalized = names.map((name) =>
+    requireText(name, 'WHATSAPP_TEMPLATE_VARIABLE_NAME_REQUIRED'),
+  );
+  if (new Set(normalized).size !== normalized.length)
+    throw new Error('WHATSAPP_TEMPLATE_VARIABLE_DUPLICATE');
 }
 
 function countTemplateVariables(componentsValue: unknown): number | null {

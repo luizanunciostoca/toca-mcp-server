@@ -1,8 +1,5 @@
 import { createHash } from 'node:crypto';
-import type {
-  CrmDeliveryStatus,
-  CrmMessageContentType,
-} from '../../crm/communication-records.js';
+import type { CrmDeliveryStatus, CrmMessageContentType } from '../../crm/communication-records.js';
 
 export interface WhatsAppInboundAttachment {
   readonly providerMediaId: string;
@@ -88,7 +85,8 @@ export function parseWhatsAppWebhookEvents(rawBody: Buffer): readonly WhatsAppWe
   }
 
   const deduplicated = new Map<string, WhatsAppWebhookEvent>();
-  for (const event of events) if (!deduplicated.has(event.eventId)) deduplicated.set(event.eventId, event);
+  for (const event of events)
+    if (!deduplicated.has(event.eventId)) deduplicated.set(event.eventId, event);
   return [...deduplicated.values()];
 }
 
@@ -175,7 +173,7 @@ function normalizeStatus(input: {
   const firstError = errors[0];
   const errorCode = firstError ? scalarString(firstError.code) : null;
   const errorTitle = firstError
-    ? stringValue(firstError.title) ?? stringValue(firstError.message) ?? null
+    ? (stringValue(firstError.title) ?? stringValue(firstError.message) ?? null)
     : null;
   const providerEventId = deterministicId(
     'status',
@@ -342,7 +340,11 @@ function validSha256(value: string | undefined): string | undefined {
 function compactObject(
   input: Readonly<Record<string, string | number | boolean | null>>,
 ): Readonly<Record<string, string | number | boolean>> {
-  return Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string | number | boolean] => entry[1] !== null));
+  return Object.fromEntries(
+    Object.entries(input).filter(
+      (entry): entry is [string, string | number | boolean] => entry[1] !== null,
+    ),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

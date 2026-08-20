@@ -112,7 +112,10 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
       input.occurredAt,
       'CRM_CONVERSATION_ACTIVITY_AT_INVALID',
     );
-    const provider = requireCommunicationText(input.provider, 'CRM_COMMUNICATION_PROVIDER_REQUIRED');
+    const provider = requireCommunicationText(
+      input.provider,
+      'CRM_COMMUNICATION_PROVIDER_REQUIRED',
+    );
     const providerAccountRef = requireCommunicationText(
       input.providerAccountRef,
       'CRM_COMMUNICATION_PROVIDER_ACCOUNT_REQUIRED',
@@ -170,7 +173,9 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
           now,
         ],
       );
-      const record = conversationFromRow(requiredRow(result.rows[0], 'CRM_CONVERSATION_UPSERT_FAILED'));
+      const record = conversationFromRow(
+        requiredRow(result.rows[0], 'CRM_CONVERSATION_UPSERT_FAILED'),
+      );
       await this.#enqueue(client, {
         eventKey: `communication.conversation.activity:${input.idempotencyKey}`,
         eventType: 'crm.communication.conversation.activity',
@@ -208,10 +213,19 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
     validateCommunicationScope(input);
     const evidence = requireCommunicationEvidence(input.evidence);
     const now = normalizeNow(input.now);
-    const occurredAt = assertCommunicationTimestamp(input.occurredAt, 'CRM_MESSAGE_OCCURRED_AT_INVALID');
+    const occurredAt = assertCommunicationTimestamp(
+      input.occurredAt,
+      'CRM_MESSAGE_OCCURRED_AT_INVALID',
+    );
     const messageId = requireCommunicationText(input.messageId, 'CRM_MESSAGE_ID_REQUIRED');
-    const provider = requireCommunicationText(input.provider, 'CRM_COMMUNICATION_PROVIDER_REQUIRED');
-    const idempotencyKey = requireCommunicationText(input.idempotencyKey, 'CRM_MESSAGE_IDEMPOTENCY_KEY_REQUIRED');
+    const provider = requireCommunicationText(
+      input.provider,
+      'CRM_COMMUNICATION_PROVIDER_REQUIRED',
+    );
+    const idempotencyKey = requireCommunicationText(
+      input.idempotencyKey,
+      'CRM_MESSAGE_IDEMPOTENCY_KEY_REQUIRED',
+    );
     const payload = input.payload ?? {};
     const attemptCount = input.attemptCount ?? 0;
 
@@ -323,7 +337,9 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
             idempotencyKey,
           ],
         );
-        record = messageFromRow(requiredRow(replay.rows[0], 'CRM_MESSAGE_IDEMPOTENCY_REPLAY_MISSING'));
+        record = messageFromRow(
+          requiredRow(replay.rows[0], 'CRM_MESSAGE_IDEMPOTENCY_REPLAY_MISSING'),
+        );
         if (record.messageId !== messageId || record.conversationId !== input.conversationId) {
           throw new Error('CRM_MESSAGE_IDEMPOTENCY_CONFLICT');
         }
@@ -368,7 +384,10 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
     validateCommunicationScope(input);
     const evidence = requireCommunicationEvidence(input.evidence);
     const now = normalizeNow(input.now);
-    const observedAt = assertCommunicationTimestamp(input.observedAt, 'CRM_DELIVERY_OBSERVED_AT_INVALID');
+    const observedAt = assertCommunicationTimestamp(
+      input.observedAt,
+      'CRM_DELIVERY_OBSERVED_AT_INVALID',
+    );
 
     return this.#transaction(async (client) => {
       const messageResult = await client.query<MessageRow>(
@@ -378,7 +397,9 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
          for update`,
         [input.tenantId, input.workspaceId, input.organizationId, input.providerMessageId],
       );
-      const message = messageFromRow(requiredRow(messageResult.rows[0], 'CRM_DELIVERY_MESSAGE_NOT_FOUND'));
+      const message = messageFromRow(
+        requiredRow(messageResult.rows[0], 'CRM_DELIVERY_MESSAGE_NOT_FOUND'),
+      );
       const inserted = await client.query<DeliveryRow>(
         `insert into crm_message_delivery_events (
            delivery_event_id, tenant_id, workspace_id, organization_id, message_id,
@@ -411,7 +432,9 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
            where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and provider_event_id=$4`,
           [input.tenantId, input.workspaceId, input.organizationId, input.providerEventId],
         );
-        return deliveryFromRow(requiredRow(replay.rows[0], 'CRM_DELIVERY_IDEMPOTENCY_REPLAY_MISSING'));
+        return deliveryFromRow(
+          requiredRow(replay.rows[0], 'CRM_DELIVERY_IDEMPOTENCY_REPLAY_MISSING'),
+        );
       }
 
       const nextStatus = deliveryStatusToMessageStatus(message.status, input.status);
@@ -490,7 +513,9 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
           now,
         ],
       );
-      const record = messageFromRow(requiredRow(result.rows[0], 'CRM_MESSAGE_STATUS_CONCURRENT_UPDATE'));
+      const record = messageFromRow(
+        requiredRow(result.rows[0], 'CRM_MESSAGE_STATUS_CONCURRENT_UPDATE'),
+      );
       await this.#enqueue(client, {
         eventKey: `communication.message.transport:${input.idempotencyKey}:${input.status}`,
         eventType: 'crm.communication.message.transport_changed',
@@ -517,7 +542,10 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
     validateCommunicationScope(input);
     const evidence = requireCommunicationEvidence(input.evidence);
     const now = normalizeNow(input.now);
-    const reason = requireCommunicationText(input.reason, 'CRM_CONVERSATION_HANDOFF_REASON_REQUIRED');
+    const reason = requireCommunicationText(
+      input.reason,
+      'CRM_CONVERSATION_HANDOFF_REASON_REQUIRED',
+    );
 
     return this.#transaction(async (client) => {
       const result = await client.query<ConversationRow>(
@@ -598,7 +626,13 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
             now,
           ],
         );
-        return { allowed: true, count: 1, limit: input.limit, windowStartedAt: now, retryAfterSeconds: 0 };
+        return {
+          allowed: true,
+          count: 1,
+          limit: input.limit,
+          windowStartedAt: now,
+          retryAfterSeconds: 0,
+        };
       }
 
       const windowStartedAt = toIso(row.window_started_at);
@@ -619,7 +653,13 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
             now,
           ],
         );
-        return { allowed: true, count: 1, limit: input.limit, windowStartedAt: now, retryAfterSeconds: 0 };
+        return {
+          allowed: true,
+          count: 1,
+          limit: input.limit,
+          windowStartedAt: now,
+          retryAfterSeconds: 0,
+        };
       }
 
       if (row.sent_count >= input.limit) {

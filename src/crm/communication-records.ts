@@ -126,8 +126,7 @@ export interface ResolveConversationInput extends CrmScope, CrmCommunicationMuta
 }
 
 export interface RecordCommunicationMessageInput
-  extends CrmScope,
-    CrmCommunicationMutationMetadata {
+  extends CrmScope, CrmCommunicationMutationMetadata {
   readonly messageId: string;
   readonly conversationId: string;
   readonly contactId: string;
@@ -197,7 +196,9 @@ export interface CommunicationThrottleDecision {
 
 export interface CrmCommunicationStore {
   resolveConversation(input: ResolveConversationInput): Promise<ConversationRecord>;
-  getConversation(input: CrmScope & { readonly conversationId: string }): Promise<ConversationRecord | undefined>;
+  getConversation(
+    input: CrmScope & { readonly conversationId: string },
+  ): Promise<ConversationRecord | undefined>;
   recordMessage(input: RecordCommunicationMessageInput): Promise<MessageRecord>;
   getMessage(input: CrmScope & { readonly messageId: string }): Promise<MessageRecord | undefined>;
   getMessageByProviderId(
@@ -213,18 +214,25 @@ export function validateConversationRecord(record: ConversationRecord): void {
   validateCommunicationScope(record);
   requireCommunicationText(record.conversationId, 'CRM_CONVERSATION_ID_REQUIRED');
   requireCommunicationText(record.contactId, 'CRM_CONTACT_ID_REQUIRED');
-  if (!CRM_COMMUNICATION_CHANNELS.includes(record.channel)) throw new Error('CRM_COMMUNICATION_CHANNEL_INVALID');
+  if (!CRM_COMMUNICATION_CHANNELS.includes(record.channel))
+    throw new Error('CRM_COMMUNICATION_CHANNEL_INVALID');
   requireCommunicationText(record.provider, 'CRM_COMMUNICATION_PROVIDER_REQUIRED');
-  requireCommunicationText(record.providerAccountRef, 'CRM_COMMUNICATION_PROVIDER_ACCOUNT_REQUIRED');
-  if (!CRM_CONVERSATION_STATUSES.includes(record.status)) throw new Error('CRM_CONVERSATION_STATUS_INVALID');
+  requireCommunicationText(
+    record.providerAccountRef,
+    'CRM_COMMUNICATION_PROVIDER_ACCOUNT_REQUIRED',
+  );
+  if (!CRM_CONVERSATION_STATUSES.includes(record.status))
+    throw new Error('CRM_CONVERSATION_STATUS_INVALID');
   assertNullableTimestamp(record.lastInboundAt, 'CRM_CONVERSATION_LAST_INBOUND_INVALID');
   assertNullableTimestamp(record.lastOutboundAt, 'CRM_CONVERSATION_LAST_OUTBOUND_INVALID');
   assertNullableTimestamp(record.humanHandoffAt, 'CRM_CONVERSATION_HANDOFF_AT_INVALID');
   if ((record.humanHandoffAt === null) !== (record.humanHandoffReason === null)) {
     throw new Error('CRM_CONVERSATION_HANDOFF_STATE_INVALID');
   }
-  if (record.humanHandoffReason !== null) requireCommunicationText(record.humanHandoffReason, 'CRM_CONVERSATION_HANDOFF_REASON_REQUIRED');
-  if (!Number.isSafeInteger(record.version) || record.version < 1) throw new Error('CRM_CONVERSATION_VERSION_INVALID');
+  if (record.humanHandoffReason !== null)
+    requireCommunicationText(record.humanHandoffReason, 'CRM_CONVERSATION_HANDOFF_REASON_REQUIRED');
+  if (!Number.isSafeInteger(record.version) || record.version < 1)
+    throw new Error('CRM_CONVERSATION_VERSION_INVALID');
   assertCommunicationTimestamp(record.createdAt, 'CRM_CONVERSATION_CREATED_AT_INVALID');
   assertCommunicationTimestamp(record.updatedAt, 'CRM_CONVERSATION_UPDATED_AT_INVALID');
 }
@@ -234,21 +242,36 @@ export function validateMessageRecord(record: MessageRecord): void {
   requireCommunicationText(record.messageId, 'CRM_MESSAGE_ID_REQUIRED');
   requireCommunicationText(record.conversationId, 'CRM_CONVERSATION_ID_REQUIRED');
   requireCommunicationText(record.contactId, 'CRM_CONTACT_ID_REQUIRED');
-  if (!CRM_COMMUNICATION_CHANNELS.includes(record.channel)) throw new Error('CRM_COMMUNICATION_CHANNEL_INVALID');
+  if (!CRM_COMMUNICATION_CHANNELS.includes(record.channel))
+    throw new Error('CRM_COMMUNICATION_CHANNEL_INVALID');
   requireCommunicationText(record.provider, 'CRM_COMMUNICATION_PROVIDER_REQUIRED');
-  if (!CRM_MESSAGE_DIRECTIONS.includes(record.direction)) throw new Error('CRM_MESSAGE_DIRECTION_INVALID');
-  if (!CRM_MESSAGE_CONTENT_TYPES.includes(record.contentType)) throw new Error('CRM_MESSAGE_CONTENT_TYPE_INVALID');
+  if (!CRM_MESSAGE_DIRECTIONS.includes(record.direction))
+    throw new Error('CRM_MESSAGE_DIRECTION_INVALID');
+  if (!CRM_MESSAGE_CONTENT_TYPES.includes(record.contentType))
+    throw new Error('CRM_MESSAGE_CONTENT_TYPE_INVALID');
   if (!CRM_MESSAGE_STATUSES.includes(record.status)) throw new Error('CRM_MESSAGE_STATUS_INVALID');
-  if (record.providerMessageId !== null) requireCommunicationText(record.providerMessageId, 'CRM_PROVIDER_MESSAGE_ID_INVALID');
-  if (record.replyToProviderMessageId !== null) requireCommunicationText(record.replyToProviderMessageId, 'CRM_REPLY_TO_PROVIDER_MESSAGE_ID_INVALID');
-  if ((record.templateKey === null) !== (record.templateLocale === null)) throw new Error('CRM_MESSAGE_TEMPLATE_STATE_INVALID');
-  if (record.templateKey !== null) requireCommunicationText(record.templateKey, 'CRM_MESSAGE_TEMPLATE_KEY_INVALID');
-  if (record.templateLocale !== null) requireCommunicationText(record.templateLocale, 'CRM_MESSAGE_TEMPLATE_LOCALE_INVALID');
-  if (record.purposeId !== null) requireCommunicationText(record.purposeId, 'CRM_MESSAGE_PURPOSE_INVALID');
-  if (record.text !== null && record.text.length > 16384) throw new Error('CRM_MESSAGE_TEXT_TOO_LARGE');
-  if (!Number.isSafeInteger(record.attemptCount) || record.attemptCount < 0) throw new Error('CRM_MESSAGE_ATTEMPT_COUNT_INVALID');
+  if (record.providerMessageId !== null)
+    requireCommunicationText(record.providerMessageId, 'CRM_PROVIDER_MESSAGE_ID_INVALID');
+  if (record.replyToProviderMessageId !== null)
+    requireCommunicationText(
+      record.replyToProviderMessageId,
+      'CRM_REPLY_TO_PROVIDER_MESSAGE_ID_INVALID',
+    );
+  if ((record.templateKey === null) !== (record.templateLocale === null))
+    throw new Error('CRM_MESSAGE_TEMPLATE_STATE_INVALID');
+  if (record.templateKey !== null)
+    requireCommunicationText(record.templateKey, 'CRM_MESSAGE_TEMPLATE_KEY_INVALID');
+  if (record.templateLocale !== null)
+    requireCommunicationText(record.templateLocale, 'CRM_MESSAGE_TEMPLATE_LOCALE_INVALID');
+  if (record.purposeId !== null)
+    requireCommunicationText(record.purposeId, 'CRM_MESSAGE_PURPOSE_INVALID');
+  if (record.text !== null && record.text.length > 16384)
+    throw new Error('CRM_MESSAGE_TEXT_TOO_LARGE');
+  if (!Number.isSafeInteger(record.attemptCount) || record.attemptCount < 0)
+    throw new Error('CRM_MESSAGE_ATTEMPT_COUNT_INVALID');
   assertNullableTimestamp(record.nextRetryAt, 'CRM_MESSAGE_NEXT_RETRY_INVALID');
-  if (record.lastErrorCode !== null) requireCommunicationText(record.lastErrorCode, 'CRM_MESSAGE_ERROR_CODE_INVALID');
+  if (record.lastErrorCode !== null)
+    requireCommunicationText(record.lastErrorCode, 'CRM_MESSAGE_ERROR_CODE_INVALID');
   assertCommunicationTimestamp(record.occurredAt, 'CRM_MESSAGE_OCCURRED_AT_INVALID');
   assertCommunicationTimestamp(record.createdAt, 'CRM_MESSAGE_CREATED_AT_INVALID');
   assertCommunicationTimestamp(record.updatedAt, 'CRM_MESSAGE_UPDATED_AT_INVALID');

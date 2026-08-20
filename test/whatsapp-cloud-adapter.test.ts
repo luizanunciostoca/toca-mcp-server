@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { InMemorySecretStore } from '../src/core/secrets.js';
-import { MetaApiClient, type MetaApiResponse, type MetaApiTransport } from '../src/providers/meta/meta-api-client.js';
+import {
+  MetaApiClient,
+  type MetaApiResponse,
+  type MetaApiTransport,
+} from '../src/providers/meta/meta-api-client.js';
 import {
   WhatsAppCloudAdapter,
   type PreparedWhatsAppMessage,
@@ -60,7 +64,10 @@ class Readbacks implements WhatsAppProviderReadbackStore {
   }
 }
 
-async function fixture(payloads: Readonly<Record<string, PreparedWhatsAppMessage>>, readback?: ProviderMessageReadback) {
+async function fixture(
+  payloads: Readonly<Record<string, PreparedWhatsAppMessage>>,
+  readback?: ProviderMessageReadback,
+) {
   const secrets = new InMemorySecretStore();
   const accessToken = await secrets.put('META_ACCESS_TOKEN', 'secret-token-value');
   const transport = new RecordingTransport();
@@ -110,21 +117,44 @@ describe('WhatsApp Cloud API adapter', () => {
         correlationId: 'corr-1',
         channel: 'WHATSAPP',
         contact: {
-          tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1',
-          contactRecordId: 'contact-1', resolutionId: 'resolution-1', status: 'RESOLVED',
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          contactRecordId: 'contact-1',
+          resolutionId: 'resolution-1',
+          status: 'RESOLVED',
         },
         privacy: {
-          tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1',
-          executionId: 'privacy-1', subjectRef: 'subject-1',
-          decision: { state: 'ALLOWED', blocked: false, reasons: [], purposeId: 'service', channel: 'WHATSAPP' },
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          executionId: 'privacy-1',
+          subjectRef: 'subject-1',
+          decision: {
+            state: 'ALLOWED',
+            blocked: false,
+            reasons: [],
+            purposeId: 'service',
+            channel: 'WHATSAPP',
+          },
         },
         policy: {
-          tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1',
-          decisionId: 'policy-1', allowed: true,
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          decisionId: 'policy-1',
+          allowed: true,
         },
         approval: {
-          tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1',
-          approvalId: 'approval-1', status: 'APPROVED',
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          approvalId: 'approval-1',
+          status: 'APPROVED',
         },
       },
     });
@@ -160,7 +190,9 @@ describe('WhatsApp Cloud API adapter', () => {
       },
     });
     const result = await adapter.validateTemplate({
-      templateKey: 'booking_update', locale: 'pt_BR', variableNames: ['1', '2'],
+      templateKey: 'booking_update',
+      locale: 'pt_BR',
+      variableNames: ['1', '2'],
     });
     expect(result.valid).toBe(true);
     expect(transport.requests[0]?.url).toContain('/waba-1/message_templates?');
@@ -201,26 +233,80 @@ describe('WhatsApp Cloud API adapter', () => {
     const token = await secrets.put('META_ACCESS_TOKEN', 'secret');
     const transport = new RecordingTransport();
     const adapter = new WhatsAppCloudAdapter(
-      new MetaApiClient({ graphBaseUrl: 'https://graph.facebook.com', apiVersion: 'v23.0' }, secrets, token, transport),
+      new MetaApiClient(
+        { graphBaseUrl: 'https://graph.facebook.com', apiVersion: 'v23.0' },
+        secrets,
+        token,
+        transport,
+      ),
       {
-        wabaId: 'waba-1', phoneNumberId: 'phone-1',
+        wabaId: 'waba-1',
+        phoneNumberId: 'phone-1',
         binding: { providerKey: 'META_WHATSAPP_CLOUD', bindingId: 'binding-1', state: 'CONNECTED' },
       },
       new Payloads({ text: { kind: 'TEXT', to: '5511888888888', text: 'Olá' } }),
       new Readbacks(),
     );
 
-    await expect(adapter.send({
-      tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1',
-      channel: 'WHATSAPP', contactRecordId: 'contact-1', preparedPayloadRef: 'text', idempotencyKey: 'idem-1',
-      eligibility: {
-        tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1', channel: 'WHATSAPP',
-        contact: { tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1', contactRecordId: 'contact-1', resolutionId: 'resolution-1', status: 'RESOLVED' },
-        privacy: { tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1', executionId: 'privacy-1', subjectRef: 'subject-1', decision: { state: 'ALLOWED', blocked: false, reasons: [], purposeId: 'service', channel: 'WHATSAPP' } },
-        policy: { tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1', decisionId: 'policy-1', allowed: true },
-        approval: { tenantId: 'tenant-1', workspaceId: 'workspace-1', organizationId: 'org-1', correlationId: 'corr-1', approvalId: 'approval-1', status: 'APPROVED' },
-      },
-    })).rejects.toThrow('OMNICHANNEL_PROVIDER_NOT_PRODUCTION_VALIDATED');
+    await expect(
+      adapter.send({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        organizationId: 'org-1',
+        correlationId: 'corr-1',
+        channel: 'WHATSAPP',
+        contactRecordId: 'contact-1',
+        preparedPayloadRef: 'text',
+        idempotencyKey: 'idem-1',
+        eligibility: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          channel: 'WHATSAPP',
+          contact: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            organizationId: 'org-1',
+            correlationId: 'corr-1',
+            contactRecordId: 'contact-1',
+            resolutionId: 'resolution-1',
+            status: 'RESOLVED',
+          },
+          privacy: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            organizationId: 'org-1',
+            correlationId: 'corr-1',
+            executionId: 'privacy-1',
+            subjectRef: 'subject-1',
+            decision: {
+              state: 'ALLOWED',
+              blocked: false,
+              reasons: [],
+              purposeId: 'service',
+              channel: 'WHATSAPP',
+            },
+          },
+          policy: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            organizationId: 'org-1',
+            correlationId: 'corr-1',
+            decisionId: 'policy-1',
+            allowed: true,
+          },
+          approval: {
+            tenantId: 'tenant-1',
+            workspaceId: 'workspace-1',
+            organizationId: 'org-1',
+            correlationId: 'corr-1',
+            approvalId: 'approval-1',
+            status: 'APPROVED',
+          },
+        },
+      }),
+    ).rejects.toThrow('OMNICHANNEL_PROVIDER_NOT_PRODUCTION_VALIDATED');
     expect(transport.requests).toHaveLength(0);
   });
 });
