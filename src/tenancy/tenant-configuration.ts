@@ -110,28 +110,29 @@ export class InMemoryTenantConfigurationStore implements TenantConfigurationStor
   }
 
   put(configuration: TenantConfiguration): Promise<void> {
-    validateTenantConfiguration(configuration);
-    const resourceKeys = ownedResourceKeys(configuration);
-    for (const resourceKey of resourceKeys) {
-      const owner = this.#resourceOwners.get(resourceKey);
-      if (owner && owner !== configuration.tenantId) {
-        throw new TenantIsolationError('TENANT_RESOURCE_ALREADY_OWNED');
-      }
-    }
-
-    const previous = this.#configurations.get(configuration.tenantId);
-    if (previous) {
-      for (const resourceKey of ownedResourceKeys(previous)) {
-        if (this.#resourceOwners.get(resourceKey) === configuration.tenantId) {
-          this.#resourceOwners.delete(resourceKey);
+    return Promise.resolve().then(() => {
+      validateTenantConfiguration(configuration);
+      const resourceKeys = ownedResourceKeys(configuration);
+      for (const resourceKey of resourceKeys) {
+        const owner = this.#resourceOwners.get(resourceKey);
+        if (owner && owner !== configuration.tenantId) {
+          throw new TenantIsolationError('TENANT_RESOURCE_ALREADY_OWNED');
         }
       }
-    }
-    for (const resourceKey of resourceKeys) {
-      this.#resourceOwners.set(resourceKey, configuration.tenantId);
-    }
-    this.#configurations.set(configuration.tenantId, configuration);
-    return Promise.resolve();
+
+      const previous = this.#configurations.get(configuration.tenantId);
+      if (previous) {
+        for (const resourceKey of ownedResourceKeys(previous)) {
+          if (this.#resourceOwners.get(resourceKey) === configuration.tenantId) {
+            this.#resourceOwners.delete(resourceKey);
+          }
+        }
+      }
+      for (const resourceKey of resourceKeys) {
+        this.#resourceOwners.set(resourceKey, configuration.tenantId);
+      }
+      this.#configurations.set(configuration.tenantId, configuration);
+    });
   }
 }
 
