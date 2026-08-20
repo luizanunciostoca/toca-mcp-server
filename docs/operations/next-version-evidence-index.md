@@ -1,65 +1,74 @@
 # TOCA OS Next Version — Evidence Index
 
 Status: **ACTIVE / EXACT-HEAD SCOPED**  
-Round: 2026-08-20 02:32 America/Bahia
+Round: 2026-08-20 02:50 America/Bahia
 
 ## Evidence rules
 
-Valid lifecycle:
+Lifecycle:
 
 `IMPLEMENTED -> CI_VERIFIED -> PROVIDER_VERIFIED -> PRODUCTION_VERIFIED`
 
-1. Evidence belongs to the exact commit/head that produced it.
-2. Any material commit, rebase, retarget, merge-from-main, conflict resolution, migration renumber or workflow cleanup requires fresh evidence for merge readiness.
-3. Required Quality means Format + Architecture + Lint + Typecheck + Unit + Build.
-4. Persistence/migration work additionally requires PostgreSQL E2E and applicable restart/retry/idempotency evidence.
-5. CI cannot substitute for provider readback.
-6. Provider evidence cannot substitute for production deployment/readback.
-7. No provider side effect is executed solely to manufacture evidence.
-8. A green run does not make a PR merge-ready if a temporary/diagnostic workflow, stale stack, migration collision or architecture ownership conflict remains.
+- Evidence belongs only to the exact SHA that produced it.
+- Rebase, retarget, merge-from-main, conflict resolution, migration renumber, workflow cleanup or other material commit requires fresh applicable evidence.
+- `CI_VERIFIED` requires full Quality: Format + Architecture + Lint + Typecheck + Unit + Build.
+- Persistence/migration work additionally requires PostgreSQL E2E and applicable restart/retry/idempotency evidence.
+- Provider-shaped fixtures are not provider evidence.
+- Green CI does not override migration collisions, duplicate domain ownership, stale stacks, forbidden workflows or missing provider readback.
+- No provider/business side effect is executed solely to manufacture evidence.
 
-## Frozen V1 evidence
+## Frozen V1
 
-| Claim                             | State                 | Evidence                                           |
-| --------------------------------- | --------------------- | -------------------------------------------------- |
-| V1 release identity               | `PRODUCTION_VERIFIED` | `abfb09b17e90c83790e803dcda091c8142c7407f`         |
-| Canonical V1 state                | `PRODUCTION_VERIFIED` | `docs/operations/v1-canonical-state-2026-08-20.md` |
-| Final V1 hosted closeout          | `PRODUCTION_VERIFIED` | `docs/operations/v1-final-closeout-2026-08-20.md`  |
-| Final runtime redeploy            | `PRODUCTION_VERIFIED` | run `32325385858`                                  |
-| Final hosted production readback  | `PRODUCTION_VERIFIED` | run `32325385886`                                  |
-| Sanitized final readback artifact | `PRODUCTION_VERIFIED` | artifact `9393447493`                              |
+| Claim | State | Evidence |
+| --- | --- | --- |
+| V1 release identity | `PRODUCTION_VERIFIED` | `abfb09b17e90c83790e803dcda091c8142c7407f` |
+| Canonical V1 state | `PRODUCTION_VERIFIED` | `docs/operations/v1-canonical-state-2026-08-20.md` |
+| Final V1 closeout | `PRODUCTION_VERIFIED` | `docs/operations/v1-final-closeout-2026-08-20.md` |
+| Final runtime redeploy | `PRODUCTION_VERIFIED` | run `32325385858` |
+| Final hosted production readback | `PRODUCTION_VERIFIED` | run `32325385886` |
+| Sanitized final readback artifact | `PRODUCTION_VERIFIED` | artifact `9393447493` |
 
 V1 evidence is immutable and is not invalidated by Next Version work.
 
-## Next Version exact-head matrix
+## Next Version matrix
 
-| PR  | Feature                      | Exact head observed                        | Evidence state                   | Quality                                                            | PostgreSQL / specialized                                              | Provider evidence / caveat                                                                      |
-| --- | ---------------------------- | ------------------------------------------ | -------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| #14 | Creative Truth               | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c` | `CI_VERIFIED`                    | `32335049796` PASS                                                 | `32335049795` PASS                                                    | no provider mutation required for CI claim                                                      |
-| #15 | Demand Intelligence          | `ee7cb048b01e6859beb949b9d049f218b8e31f56` | `PROVIDER_VERIFIED` READ only    | `32333934188` PASS                                                 | `32333934183` PASS                                                    | provider READ `32333785052`; artifact `9393934030`; `writeExecuted=false`                       |
-| #16 | Photo-to-Video               | `c0b23b573bec4de42746de2915e92daa36532a7b` | `CI_VERIFIED`                    | `32335823551` PASS                                                 | no new migration                                                      | stacked on #14; provider promotion blocked by rights/likeness/approval                          |
-| #18 | Asset Intelligence           | `1bfa2680b1d661d865c7901303bf3c3d75dc6235` | `CI_VERIFIED`                    | `32334357073` PASS                                                 | `32334357088` PASS                                                    | migration collision prevents merge readiness                                                    |
-| #19 | Privacy / LGPD               | `a63458971fc6971c97c7221da02c61b8bb085e21` | `CI_VERIFIED`                    | exact validator `32334687755` PASS; integration `32334417380` PASS | no new migration                                                      | no provider claim                                                                               |
-| #20 | Platform Hardening           | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494` | `IMPLEMENTED`                    | `32334666158` PASS                                                 | Security `32334666190` FAIL                                           | candidate-container scan and dependency review failed; CodeQL passed                            |
-| #21 | AG-01                        | `20d55bf0de8368378380dcb3b3ba65b460b26b0e` | `CI_VERIFIED`, merge hold        | `32335887999` PASS                                                 | `32335888008` PASS                                                    | repair workflow remains in diff; no provider promotion                                          |
-| #22 | CRM / Sales                  | `8fa24ba0e5dfb3708f77dab1596d609d37d10755` | `CI_VERIFIED`, merge hold        | `32336063124` PASS                                                 | `32336063161` PASS                                                    | one-shot workflow remains; canonical Conversation/Message owner                                 |
-| #23 | Email / SendGrid             | `5aa954c82912cb48e022575e64b0ec7aa6d9443f` | `IMPLEMENTED`                    | no current normal full Quality claim                               | `32335836596` PG PASS; Email Gate `32335836602` overall FAIL          | Email-owned subgraph passes; stacked repo typecheck fails; sender/domain/provider config absent |
-| #24 | Social Engagement            | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b` | `CI_VERIFIED`                    | `32334785013` PASS                                                 | `32334784974` PASS                                                    | new full feature not provider-promoted; activation waits #19/#22                                |
-| #25 | WhatsApp duplicate candidate | `d36fde463f89f9ad49fcf1858097501ed7815674` | `CI_VERIFIED`, architecture hold | `32335362897` PASS                                                 | `32335362899` PASS                                                    | duplicate Conversation/Message ownership; candidate superseded after preservation review        |
-| #26 | R31 / Learning               | `0e58fd3f109c31986d0ef854f88bfa02ecf01c16` | `IMPLEMENTED`                    | `32336012297` FAIL Format                                          | `32336012300` PASS                                                    | no provider write required for learning engine                                                  |
-| #27 | Analytics / Capacity         | `9639cc8056d62551ceb298488eabefd213cfa11d` | `IMPLEMENTED`                    | `32336060637` FAIL Format                                          | base PG `32336060639` PASS; dedicated analytics PG `32336060638` FAIL | read-only feature; dedicated functional E2E still failing                                       |
-| #28 | Paid Media / Google Ads      | `579e6e402e860c20ce428277c836f5ae9488a857` | `IMPLEMENTED` snapshot           | `32336319196` in progress at readback                              | `32336319232` in progress at readback                                 | Google Ads provider verification pending; no activation for testing                             |
-| #29 | Human Control Center         | `6976825a18b5cc1179ef8e73d72e135705508030` | `CI_VERIFIED`                    | `32335977430` PASS                                                 | no migration                                                          | no direct provider write; dependency panels fail closed                                         |
-| #30 | Multi-tenant foundation      | `7677495c0d54c63354645c78ee86a0d502ced924` | `IMPLEMENTED`                    | `32336071267` FAIL Format                                          | `32336071284` PASS                                                    | no provider claim; migration collision 027                                                      |
-| #31 | WhatsApp intended owner      | `5eee722e2589b746786906fd3bd9eebc1032295a` | `IMPLEMENTED`                    | `32336105089` FAIL Format                                          | `32336105114` PASS                                                    | temp workflow + stale CRM stack + migration collision + WABA/scopes/readback blocker            |
+| PR | Feature | Exact current/verified head | State | Quality | PostgreSQL / specialized | Provider / caveat |
+| --- | --- | --- | --- | --- | --- | --- |
+| #14 | Creative Truth | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c` | `CI_VERIFIED` | `32335049796` PASS | `32335049795` PASS | no provider mutation claimed |
+| #15 | Demand Intelligence | `ee7cb048b01e6859beb949b9d049f218b8e31f56` | `PROVIDER_VERIFIED` READ only | `32333934188` PASS | `32333934183` PASS | READ `32333785052`, artifact `9393934030`, `writeExecuted=false` |
+| #16 | Photo-to-Video | `c0b23b573bec4de42746de2915e92daa36532a7b` | `CI_VERIFIED` | `32335823551` PASS | no migration | parent #14 must merge/retarget/revalidate; provider rights/likeness/approval pending |
+| #18 | Asset Intelligence | `1bfa2680b1d661d865c7901303bf3c3d75dc6235` | `CI_VERIFIED` | `32334357073` PASS | `32334357088` PASS | migration collision prevents merge readiness |
+| #19 | Privacy / LGPD | `a63458971fc6971c97c7221da02c61b8bb085e21` | `CI_VERIFIED` | exact validator `32334687755` PASS; integration `32334417380` PASS | no new migration | no provider promotion |
+| #20 | Platform Hardening | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494` | `IMPLEMENTED` | `32334666158` PASS | Security `32334666190` FAIL | container scan + dependency review failed; CodeQL passed |
+| #21 | AG-01 | `9f5dd275b3823c3d435b42ccd2d51a1662bae383` | `CI_VERIFIED` | `32336668556` PASS | `32336668600` PASS | final diff clean; provider evidence not claimed |
+| #22 | CRM / Sales | `be97c0a6249876ff306a67158ae35e94c217bd6d` | `CI_VERIFIED` | `32336854798` PASS | `32336854963` PASS | final diff clean; canonical Conversation/Message owner |
+| #23 | Email / SendGrid | current `036bbec4aff0f77eede4ae36fb347b12967b0ada` | `IMPLEMENTED` current head | current runs were in progress at readback | current runs in progress | prior `fe078cc70f720e15f34fba445a21624fcd45df37` had Email `32336964937`, Quality `32336964982`, PG `32336964932` PASS; cannot carry to newer SHA |
+| #24 | Social Engagement | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b` | `CI_VERIFIED` | `32334785013` PASS | `32334784974` PASS | full feature not provider-promoted; activation waits #19/#22 |
+| #26 | R31 / Learning | `7675bd734d0c11bdff8357656b9b0a1a6253a8b7` | `CI_VERIFIED` | `32336459217` PASS | `32336459216` PASS | recommendation/evidence engine; no live provider write |
+| #27 | Analytics / Capacity | `ce65dbfb686b4e64a35a209de3517ddb2762bec9` | `IMPLEMENTED` | `32336961228` FAIL Format | base PG `32336961148` PASS; analytics PG `32336961160` PASS | read-only; not CI_VERIFIED until full Quality green |
+| #28 | Paid Media / Google Ads | `85ae60e95300a1d3fb73d35cd7b0083a4a980c72` | `IMPLEMENTED` | `32336953445` FAIL Format | `32336953388` PASS | Google Ads real account/OAuth READ evidence pending; no activation for testing |
+| #29 | Human Control Center | `6976825a18b5cc1179ef8e73d72e135705508030` | `CI_VERIFIED` | `32335977430` PASS | no migration | same MCP; no direct provider write |
+| #30 | Multi-tenant | `2fce39b05f99185a3db0763be82097b272561b35` | `CI_VERIFIED` | `32336878038` PASS | base PG `32336878082` PASS; tenancy PG `32336878062` PASS | migration `027` collision still blocks merge readiness |
+| #31 | WhatsApp candidate A | `256f66051198f41577bff69bbbab261126e2581f` | `IMPLEMENTED` | `32336999395` FAIL Lint | `32336999185` PASS | duplicate with #36; WABA/scopes/readback absent |
+| #33 | Attribution / Revenue | `7e8df19ae23da2193ddb6e4e64d127b86b49729a` | `CI_VERIFIED` | `32336942395` PASS | `32336942409` PASS | provider-shaped payment fixtures do not count as provider evidence |
+| #36 | WhatsApp candidate B | `7e1e581894510fc56e54075ccd121a980cea4f4c` | `IMPLEMENTED` | `32337031616` FAIL Lint | `32337031654` PASS | duplicate with #31; WABA/scopes/readback absent |
 
-## Evidence-specific notes
+## Closed non-merge PRs
 
-### PR #15 provider READ
+- #25 — closed unmerged / superseded; obsolete duplicate CRM communication model.
+- #32 — closed unmerged; temporary Email stack synchronization.
+- #34 — closed unmerged; temporary Email rebase synchronization.
+- #35 — closed unmerged; test-only Email hardening runner, explicitly never a merge source.
+
+Their historical green or red runs do not promote any active feature head.
+
+## Provider evidence notes
+
+### Demand Intelligence / #15
 
 Permanent evidence document: `docs/operations/demand-intelligence-provider-read-evidence-2026-08-20.md`.
 
-Sanitized observed provider values:
+Observed sanitized provider values:
 
 - `estimate_ready=true`
 - modeled MAU lower `74300`
@@ -70,9 +79,9 @@ Sanitized observed provider values:
 
 This is an aggregate modeled Meta audience estimate, not an exact count of people, phones or devices physically present in Morro de São Paulo.
 
-### PR #20 security gate
+### Security / #20
 
-Security Supply Chain `32334666190` cannot be represented as green:
+Security Supply Chain `32334666190`:
 
 - dependency audit: PASS
 - committed-history secret scan: PASS
@@ -83,59 +92,50 @@ Security Supply Chain `32334666190` cannot be represented as green:
 - dependency review: **FAIL**
 - SBOM generation/upload: skipped after failure
 
-Because PR #20's own promotion rule requires both normal Quality and Security Supply Chain, its current state remains `IMPLEMENTED`.
+The PR therefore remains `IMPLEMENTED` for its declared hardening scope until the security gate is fully green on the exact head.
 
-### PR #23 Email
+### Email / #23
 
-Email Provider Gate `32335836602` has mixed evidence:
+A prior clean Email head `fe078cc70f720e15f34fba445a21624fcd45df37` produced:
 
-- Email-owned verification: PASS
-- Email Prettier/Lint/typecheck: PASS
-- Email unit tests: 22/22 PASS
-- stacked repository integration: FAIL at repository typecheck
-- repository build: skipped
+- Email Provider Gate `32336964937`: PASS
+- Quality `32336964982`: PASS
+- PostgreSQL E2E `32336964932`: PASS
 
-The failure occurred on a stale snapshot of parent PR #22. Since #22 subsequently reached a different green head, #23 must restack on that clean final parent and rerun normal Quality + Email Provider Gate + PostgreSQL E2E. Provider promotion additionally requires real sender/domain, SPF, DKIM, DMARC, credentials, webhook keys and delivery/readback evidence.
+The active branch then advanced to `036bbec4aff0f77eede4ae36fb347b12967b0ada`. Because evidence is exact-head scoped, the active head remains `IMPLEMENTED` until its new Quality + Email Provider Gate + PostgreSQL E2E finish green.
 
-### Final-tree hygiene evidence
+Even after CI, provider promotion requires real sender/domain, SPF, DKIM, DMARC, credentials, webhook keys, controlled delivery/readback, bounce/complaint/unsubscribe reconciliation, and other documented provider evidence. No send is authorized solely to make the evidence state green.
 
-The following current diffs contain workflows that mutate/repair the feature branch and therefore cannot be present in a final merge-ready head:
+### WhatsApp / #31 and #36
 
-- #21 `.github/workflows/ag01-type-repair.yml`
-- #22 `.github/workflows/crm-sales-catalog-one-shot.yml`
-- #31 `.github/workflows/format-whatsapp-stack-once.yml`
+Both active candidates are stacked on canonical CRM #22 and both current PostgreSQL E2E runs pass, but both Quality runs fail at Lint after Format + Architecture succeed. More importantly, two implementations cannot coexist.
 
-Their removal is itself a material head change; fresh gates are mandatory after cleanup.
+Semantic comparison found non-identical useful behavior:
 
-## Migration-evidence rule
+- #31: explicit runtime audit writes, canonical recipient/Contact channel match, ambiguity-aware CRM sales resolution, sales activity on human handoff;
+- #36: media metadata readback and unmatched-status workflow handoff.
 
-Current collisions:
+The final merge source must deliberately converge the strongest safe behavior from both and retain #22 as the sole commercial Conversation/Message owner. After convergence and migration serialization, fresh exact-head Quality + PostgreSQL E2E are required. `PROVIDER_VERIFIED` remains blocked until real WhatsApp scopes/WABA/Phone Number ID/template/callback/readback evidence exists.
+
+### Attribution / Revenue / #33
+
+`CI_VERIFIED` proves the contracts, persistence and fail-closed revenue/WON logic at head `7e8df19...`; it does **not** prove real ticketing/checkout/payment/order provider readback. Provider-shaped PAYMENT fixtures are test evidence only. Real commerce provider evidence is required before provider/production promotion of revenue claims.
+
+## Migration evidence rule
+
+Current open-branch collisions:
 
 - `022`: #15 vs #18
-- `024`: #23 vs duplicate/superseded-candidate #25
-- `027`: #30 vs #31
+- `027`: #30 vs WhatsApp #31/#36
 
-A migration renumber changes the exact tested tree. Therefore the PR must be demoted from merge-readiness until its new exact head receives the applicable full Quality and PostgreSQL E2E evidence.
+The old `024` collision from #25 is no longer active because #25 is closed unmerged.
 
-## Coordinator control-plane evidence
+A migration renumber changes the tested tree. After any renumber, the prior exact-head Quality/PG evidence becomes historical and the resulting SHA must rerun all applicable gates.
 
-Branch: `coord/next-version-control-plane-20260820`.
+## Coordinator evidence
 
-Before this round, exact coordinator head `cb04de63e51da88ab68df2aa44cb814a797cb724` had Quality `32334144393` PASS. That evidence remains historical for that exact head only.
+Coordinator branch: `coord/next-version-control-plane-20260820`.
 
-This round modifies the coordinator artifacts. The updated coordinator head must remain `IMPLEMENTED` until a new exact-head Quality Gate passes. No provider evidence is applicable to the coordinator docs/registry-only scope.
+Historical exact coordinator head `a5412eb4fa03044348700295457ee319c0305fe7` passed Quality `32336832810` after its one-shot formatting helper was removed. This round has since modified the coordinator artifacts again to incorporate #33/#36 and later workstream cleanup. Therefore that earlier evidence is historical only; the final coordinator head must receive a new exact-head Quality before this round can be called `CI_VERIFIED`.
 
-## Provider-evidence boundary
-
-Provider evidence is mandatory before the corresponding promotion where work touches:
-
-- WhatsApp sends/status callbacks/readback;
-- Email sends/delivery/bounce/complaint/unsubscribe/readback;
-- Meta Ads live demand reads or governed writes;
-- Google Ads live account/provider execution;
-- payment/ticketing/conversion evidence;
-- OpenAI video generation;
-- external AG-01 provider/model execution claims;
-- production observability/DR claims involving managed cloud state.
-
-Pure docs/contracts can reach `CI_VERIFIED` without external side effects, but never `PROVIDER_VERIFIED` or `PRODUCTION_VERIFIED` without matching external evidence.
+No provider evidence is applicable to the coordinator documentation/registry-only scope.
