@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "standardId": "TOCA_VIDEO_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "1.1",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
@@ -11,7 +11,13 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "referenceSetStrategy": "OPERATION_SCOPED_ONLY_V1",
+    "legacyVenueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1",
+    "legacyVenueReferenceSetExecution": "DENY",
+    "operationScopedVenueReferenceSets": {
+      "SUNSET": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+      "THE_PARTY": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1"
+    }
   },
   "defaultMode": "REAL_COMPOSITE",
   "shotRules": {
@@ -19,6 +25,8 @@
     "venueVerifiedRequired": true,
     "marketingReadyRequiredForFinalOutput": true,
     "sourceAndMasterLineageRequired": true,
+    "shotLevelProvenanceRequiredForEnhancement": true,
+    "realPlusEnhancementWithoutShotProvenance": "FAIL_CLOSED",
     "syntheticVenueReplacementForbidden": true
   },
   "composition": {
@@ -29,8 +37,11 @@
     "publicationMayNotReencodeOrRebuildWithoutNewManifest": true
   },
   "generativeException": {
+    "fullSyntheticVenueVideo": "UNSUPPORTED_V1",
+    "sourceAnchoredPhotoToVideoPolicyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
     "explicitApprovalRequired": true,
-    "verifiedVenueReferenceSetRequired": true,
+    "operationScopedVerifiedVenueReferenceSetRequired": true,
+    "crossOperationReferenceReuse": "FORBIDDEN",
     "architectureInventionForbidden": true,
     "environmentDriftForbidden": true,
     "venueFidelityGateRequired": true
@@ -41,9 +52,11 @@
     "rejectOn": [
       "UNVERIFIED_SHOT",
       "MISSING_SHOT_LINEAGE",
+      "UNVERIFIED_RIGHTS",
       "AI_RECREATED_LOGO",
       "ARCHITECTURE_DRIFT",
       "SCENE_INVENTION",
+      "REFERENCE_OPERATION_MISMATCH",
       "MISSING_OUTPUT_HASH",
       "MISSING_EXACT_ASSET_BINDING"
     ]
