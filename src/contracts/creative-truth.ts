@@ -1,7 +1,13 @@
 import * as z from 'zod/v4';
 
 export const TOCA_CREATIVE_TRUTH_POLICY_ID = 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const;
-export const TOCA_VENUE_REFERENCE_SET_ID = 'TOCA_VENUE_REFERENCE_SET_V1' as const;
+export const TOCA_VENUE_REFERENCE_SET_LEGACY_ID = 'TOCA_VENUE_REFERENCE_SET_V1' as const;
+export const TOCA_VENUE_REFERENCE_SET_SUNSET_ID =
+  'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const;
+export const TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID =
+  'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' as const;
+/** @deprecated Execution against the legacy global reference set is denied by policy v1.3. */
+export const TOCA_VENUE_REFERENCE_SET_ID = TOCA_VENUE_REFERENCE_SET_LEGACY_ID;
 export const CREATIVE_TRUTH_REGISTRY_DRIVE_ID =
   '1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU' as const;
 
@@ -20,11 +26,14 @@ export const creativeTruthFailureCodeSchema = z.enum([
   'FAILED_ARCHITECTURE_DRIFT',
   'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
   'FAILED_GENERATIVE_REFERENCE_MISSING',
+  'FAILED_GENERATIVE_REFERENCE_OPERATION_MISMATCH',
   'FAILED_STANDARD_NOT_RESOLVED',
   'FAILED_LINEAGE_MISSING',
+  'FAILED_ENHANCEMENT_PROVENANCE',
   'FAILED_VENUE_FIDELITY_GATE',
   'FAILED_BRAND_INTEGRITY_GATE',
   'FAILED_QUALITY_GATE',
+  'FAILED_PUBLICATION_ASSET_HASH_MISMATCH',
 ]);
 
 export const creativeTruthGateNameSchema = z.enum(['BRAND_INTEGRITY', 'VENUE_FIDELITY', 'QUALITY']);
@@ -55,6 +64,14 @@ export const brandAssetSchema = z
     }
   });
 
+export const venueAssetStatusSchema = z.enum([
+  'ACTIVE_APPROVED',
+  'VENUE_VERIFIED_MARKETING_READY',
+  'VENUE_VERIFIED_LEGACY_MASTER_REVALIDATION_REQUIRED',
+  'VENUE_VERIFIED_SOURCE',
+  'REVOKED',
+]);
+
 export const venueAssetSchema = z
   .object({
     venueAssetId: z.string().min(1),
@@ -77,7 +94,7 @@ export const venueAssetSchema = z
     marketingReady: z.boolean(),
     generativeReferenceAllowed: z.boolean(),
     protectedElements: z.array(z.string().min(1)).default([]),
-    status: z.enum(['ACTIVE_APPROVED', 'VENUE_VERIFIED_SOURCE', 'REVOKED']),
+    status: venueAssetStatusSchema,
   })
   .superRefine((value, ctx) => {
     if (
@@ -102,7 +119,8 @@ export const venueReferenceSchema = z.object({
   requiredForGenerativeException: z.boolean(),
   venueVerified: z.boolean(),
   protectedElements: z.array(z.string().min(1)).default([]),
-  status: z.enum(['ACTIVE', 'REVOKED']),
+  status: z.enum(['ACTIVE', 'DEPRECATED', 'REVOKED']),
+  operationScope: z.string().min(1),
 });
 
 export const creativeStandardSchema = z.object({
@@ -136,7 +154,44 @@ export const generativeExceptionApprovalSchema = z.object({
   status: z.enum(['APPROVED', 'REVOKED', 'EXPIRED']),
   expiresAt: z.string().min(1).optional(),
   createdAt: z.string().min(1),
+  operation: z.string().min(1),
 });
+
+export const videoShotSchema = z
+  .object({
+    shotId: z.string().min(1),
+    sourceAssetId: z.string().min(1),
+    sourceDriveFileId: z.string().min(1),
+    masterAssetId: z.string().min(1).optional(),
+    masterDriveFileId: z.string().min(1).optional(),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    masterSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
+    operation: z.string().min(1),
+    locationSignature: z.string().min(1),
+    shotClass: z.string().min(1),
+    durationMs: z.number().int().positive(),
+    orientation: z.string().min(1),
+    venueVerified: z.boolean(),
+    marketingReady: z.boolean(),
+    rightsStatus: z.string().min(1),
+    status: venueAssetStatusSchema,
+    notes: z.string().default(''),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.marketingReady &&
+      (!value.masterAssetId || !value.masterDriveFileId || !value.masterSha256)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['marketingReady'],
+        message: 'MARKETING_READY video shots require master lineage and master SHA-256',
+      });
+    }
+  });
 
 export const fidelityEvidenceSchema = z.object({
   verifier: z.string().min(1),
@@ -154,6 +209,20 @@ export const creativeTruthGateResultSchema = z.object({
   status: z.enum(['PASSED', 'FAILED']),
   failureCodes: z.array(creativeTruthFailureCodeSchema).default([]),
   evidence: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const creativeAssetLineageNodeSchema = z.object({
+  assetId: z.string().min(1),
+  driveFileId: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+});
+
+export const creativeAssetLineageSchema = z.object({
+  source: creativeAssetLineageNodeSchema,
+  master: creativeAssetLineageNodeSchema.optional(),
+  derivative: creativeAssetLineageNodeSchema.optional(),
+  final: creativeAssetLineageNodeSchema,
+  transformations: z.array(z.string().min(1)).default([]),
 });
 
 export const creativeTruthPublicationBindingSchema = z.object({
@@ -180,6 +249,7 @@ export const deterministicRenderManifestSchema = z.object({
   outputDimensions: z.string().regex(/^\d+x\d+$/),
   exactAssetBinding: z.literal(true),
   gates: z.array(creativeTruthGateResultSchema).min(3),
+  lineage: creativeAssetLineageSchema.optional(),
   createdAt: z.string().min(1),
 });
 
@@ -187,11 +257,14 @@ export type CreativeMode = z.infer<typeof creativeModeSchema>;
 export type CreativeTruthFailureCode = z.infer<typeof creativeTruthFailureCodeSchema>;
 export type CreativeTruthGateName = z.infer<typeof creativeTruthGateNameSchema>;
 export type BrandAsset = z.infer<typeof brandAssetSchema>;
+export type VenueAssetStatus = z.infer<typeof venueAssetStatusSchema>;
 export type VenueAsset = z.infer<typeof venueAssetSchema>;
 export type VenueReference = z.infer<typeof venueReferenceSchema>;
 export type CreativeStandard = z.infer<typeof creativeStandardSchema>;
 export type GenerativeExceptionApproval = z.infer<typeof generativeExceptionApprovalSchema>;
+export type VideoShot = z.infer<typeof videoShotSchema>;
 export type FidelityEvidence = z.infer<typeof fidelityEvidenceSchema>;
 export type CreativeTruthGateResult = z.infer<typeof creativeTruthGateResultSchema>;
+export type CreativeAssetLineage = z.infer<typeof creativeAssetLineageSchema>;
 export type CreativeTruthPublicationBinding = z.infer<typeof creativeTruthPublicationBindingSchema>;
 export type DeterministicRenderManifest = z.infer<typeof deterministicRenderManifestSchema>;
