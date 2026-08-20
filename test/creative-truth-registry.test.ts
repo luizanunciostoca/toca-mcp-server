@@ -8,11 +8,8 @@ function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])
       ranges[range] ?? [],
   );
   const appendRow = vi.fn(
-    async (
-      _spreadsheetId: string,
-      _range: string,
-      _values: readonly unknown[],
-    ): Promise<void> => undefined,
+    async (_spreadsheetId: string, _range: string, _values: readonly unknown[]): Promise<void> =>
+      undefined,
   );
   return {
     client: { readRange, appendRow } satisfies SpreadsheetValuesClient,

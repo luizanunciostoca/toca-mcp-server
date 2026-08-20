@@ -27,11 +27,7 @@ export const creativeTruthFailureCodeSchema = z.enum([
   'FAILED_QUALITY_GATE',
 ]);
 
-export const creativeTruthGateNameSchema = z.enum([
-  'BRAND_INTEGRITY',
-  'VENUE_FIDELITY',
-  'QUALITY',
-]);
+export const creativeTruthGateNameSchema = z.enum(['BRAND_INTEGRITY', 'VENUE_FIDELITY', 'QUALITY']);
 
 export const brandAssetSchema = z
   .object({
@@ -42,7 +38,10 @@ export const brandAssetSchema = z
     fileName: z.string().min(1),
     contentType: z.string().min(1),
     integrityMode: z.enum(['DRIVE_FILE_ID_PINNED', 'SHA256_PINNED']),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    sha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
     status: z.enum(['ACTIVE_APPROVED', 'REVOKED']),
     aiReconstructionAllowed: z.literal(false),
   })
@@ -63,8 +62,14 @@ export const venueAssetSchema = z
     sourceDriveFileId: z.string().min(1),
     masterAssetId: z.string().min(1).optional(),
     masterDriveFileId: z.string().min(1).optional(),
-    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
-    masterSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    sourceSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
+    masterSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
     operation: z.string().min(1),
     locationSignature: z.string().min(1),
     dominantSubject: z.string().min(1),
@@ -188,7 +193,5 @@ export type CreativeStandard = z.infer<typeof creativeStandardSchema>;
 export type GenerativeExceptionApproval = z.infer<typeof generativeExceptionApprovalSchema>;
 export type FidelityEvidence = z.infer<typeof fidelityEvidenceSchema>;
 export type CreativeTruthGateResult = z.infer<typeof creativeTruthGateResultSchema>;
-export type CreativeTruthPublicationBinding = z.infer<
-  typeof creativeTruthPublicationBindingSchema
->;
+export type CreativeTruthPublicationBinding = z.infer<typeof creativeTruthPublicationBindingSchema>;
 export type DeterministicRenderManifest = z.infer<typeof deterministicRenderManifestSchema>;

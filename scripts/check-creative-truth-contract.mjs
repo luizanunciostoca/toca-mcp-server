@@ -77,7 +77,10 @@ for (const marker of [
 }
 
 const openAiEdit = readFileSync('src/providers/openai/openai-image-edit-provider.ts', 'utf8');
-if (!openAiEdit.includes('buildTocaImageEditPrompt') || !openAiEdit.includes('creativeTruthBound')) {
+if (
+  !openAiEdit.includes('buildTocaImageEditPrompt') ||
+  !openAiEdit.includes('creativeTruthBound')
+) {
   console.error('OpenAI image edit path must remain Creative Truth bound');
   process.exit(1);
 }
@@ -86,7 +89,10 @@ const publicationComposition = readFileSync(
   'src/worker/instagram-publication-composition.ts',
   'utf8',
 );
-if (!publicationComposition.includes('new InstagramPublicationExecutor') || !publicationComposition.includes('true,')) {
+if (
+  !publicationComposition.includes('new InstagramPublicationExecutor') ||
+  !publicationComposition.includes('true,')
+) {
   console.error('Production Instagram publication must require Creative Truth binding');
   process.exit(1);
 }

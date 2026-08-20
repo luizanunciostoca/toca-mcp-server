@@ -79,7 +79,12 @@
   },
   "referencePolicy": {
     "syntheticExamplesMayTeach": ["PALETTE", "TYPOGRAPHY_HIERARCHY", "LAYOUT", "CTA_STYLE"],
-    "syntheticExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
+    "syntheticExamplesMayNotTeach": [
+      "VENUE_GEOMETRY",
+      "ARCHITECTURE",
+      "FURNITURE",
+      "SPATIAL_FACTS"
+    ],
     "syntheticExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY"
   }
 }

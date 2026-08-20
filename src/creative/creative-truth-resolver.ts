@@ -65,22 +65,14 @@ export class CreativeTruthResolver {
         generativeException.allowEnvironmentDrift ||
         generativeException.allowAiLogoGeneration
       ) {
-        throw new ExecutionError(
-          'POLICY_DENIED',
-          'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION',
-          false,
-        );
+        throw new ExecutionError('POLICY_DENIED', 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', false);
       }
       const references = await this.registry.getReferenceSet(generativeException.referenceSetId);
       const verified = references.filter(
         (reference) => reference.venueVerified && reference.status === 'ACTIVE',
       );
       if (verified.length < generativeException.minReferenceCount) {
-        throw new ExecutionError(
-          'POLICY_DENIED',
-          'FAILED_GENERATIVE_REFERENCE_MISSING',
-          false,
-        );
+        throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
       }
       return {
         policyId: TOCA_CREATIVE_TRUTH_POLICY_ID,
@@ -96,11 +88,7 @@ export class CreativeTruthResolver {
       ? await this.registry.getVenueAsset(request.venueAssetId)
       : await this.selectVenueAsset(request.operation);
     if (!venueAsset || !venueAsset.venueVerified || venueAsset.status === 'REVOKED') {
-      throw new ExecutionError(
-        'POLICY_DENIED',
-        'FAILED_NO_VENUE_VERIFIED_ASSET',
-        false,
-      );
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
     }
     if (
       standard.realAssetRequired &&

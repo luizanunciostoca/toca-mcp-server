@@ -96,10 +96,7 @@ describe('LocalCreativeComposer', () => {
     expect(result.readyForReview).toBe(true);
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
     expect(result.manifest.masterAssetIds).toEqual(['MM-SUN-0244-V1']);
-    expect(result.manifest.brandAssetIds).toEqual([
-      'BRAND-TOCA-WHITE-V1',
-      'BRAND-MORRO-WHITE-V1',
-    ]);
+    expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1', 'BRAND-MORRO-WHITE-V1']);
     expect(result.manifest.gates.map((gate) => gate.status)).toEqual([
       'PASSED',
       'PASSED',

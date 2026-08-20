@@ -129,10 +129,7 @@ export class GoogleSheetsCreativeTruthRegistry {
   async getApprovedGenerativeException(
     contentItemId: string,
   ): Promise<GenerativeExceptionApproval | undefined> {
-    const rows = await this.client.readRange(
-      this.spreadsheetId,
-      'GENERATIVE_EXCEPTIONS!A2:N1000',
-    );
+    const rows = await this.client.readRange(this.spreadsheetId, 'GENERATIVE_EXCEPTIONS!A2:N1000');
     const row = rows.find(
       (candidate) => cell(candidate[1]) === contentItemId && cell(candidate[11]) === 'APPROVED',
     );
@@ -211,7 +208,9 @@ function cell(value: unknown): string {
 
 function bool(value: unknown): boolean {
   const normalized = cell(value).toLowerCase();
-  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'sim';
+  return (
+    normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'sim'
+  );
 }
 
 function integer(value: unknown, fallback: number): number {

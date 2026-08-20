@@ -110,11 +110,7 @@ export function evaluateQualityGate(
   passed: boolean,
   evidence: Readonly<Record<string, unknown>> = {},
 ): CreativeTruthGateResult {
-  return gateResult(
-    'QUALITY',
-    passed ? [] : ['FAILED_QUALITY_GATE'],
-    evidence,
-  );
+  return gateResult('QUALITY', passed ? [] : ['FAILED_QUALITY_GATE'], evidence);
 }
 
 export function requireGatePassed(result: CreativeTruthGateResult): void {
@@ -156,10 +152,7 @@ export function assertCreativeReadyForPublication(
   return parsed;
 }
 
-export function buildTocaImageEditPrompt(
-  userPrompt: string,
-  creativeMode: CreativeMode,
-): string {
+export function buildTocaImageEditPrompt(userPrompt: string, creativeMode: CreativeMode): string {
   const common = [
     'TOCA CREATIVE TRUTH POLICY — mandatory.',
     'The supplied real Toca do Morcego asset is the source of spatial and factual truth.',
@@ -198,7 +191,10 @@ function validateGenerativeException(
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
     return;
   }
-  if (approval.expiresAt && Date.parse(approval.expiresAt) <= Date.parse(input.nowIso ?? new Date().toISOString())) {
+  if (
+    approval.expiresAt &&
+    Date.parse(approval.expiresAt) <= Date.parse(input.nowIso ?? new Date().toISOString())
+  ) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
   if (

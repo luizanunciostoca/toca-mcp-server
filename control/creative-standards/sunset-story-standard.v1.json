@@ -58,15 +58,27 @@
     "requireLineage": true
   },
   "typography": {
-    "headline": { "familyClass": "ELEGANT_EDITORIAL_SERIF", "defaultColor": "#FFFFFF", "maxLines": 3 },
-    "support": { "familyClass": "CLEAN_GEOMETRIC_SANS", "weight": "REGULAR_OR_MEDIUM", "maxLines": 3 },
+    "headline": {
+      "familyClass": "ELEGANT_EDITORIAL_SERIF",
+      "defaultColor": "#FFFFFF",
+      "maxLines": 3
+    },
+    "support": {
+      "familyClass": "CLEAN_GEOMETRIC_SANS",
+      "weight": "REGULAR_OR_MEDIUM",
+      "maxLines": 3
+    },
     "cta": {
       "familyClass": "CLEAN_SANS",
       "weight": "MEDIUM_OR_SEMIBOLD",
       "container": "THIN_WHITE_OUTLINE",
       "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
     },
-    "time": { "familyClass": "CLEAN_SANS", "weight": "BOLD_OR_SEMIBOLD", "preferredContainer": "DISCREET_RECTANGULAR_STRIP" },
+    "time": {
+      "familyClass": "CLEAN_SANS",
+      "weight": "BOLD_OR_SEMIBOLD",
+      "preferredContainer": "DISCREET_RECTANGULAR_STRIP"
+    },
     "maxFontFamilies": 2,
     "scriptUsage": "EXCEPTIONAL_ONLY"
   },

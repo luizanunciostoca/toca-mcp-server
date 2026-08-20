@@ -54,13 +54,16 @@ const cleanEvidence: FidelityEvidence = {
 
 describe('Creative Truth gates', () => {
   it('rejects an AI-reconstructed Morro Digital logo even when the brand name matches', () => {
-    const gate = evaluateBrandIntegrity(['MORRO_DIGITAL'], [
-      {
-        asset: morroLogo,
-        observedDriveFileId: morroLogo.driveFileId,
-        aiGenerated: true,
-      },
-    ]);
+    const gate = evaluateBrandIntegrity(
+      ['MORRO_DIGITAL'],
+      [
+        {
+          asset: morroLogo,
+          observedDriveFileId: morroLogo.driveFileId,
+          aiGenerated: true,
+        },
+      ],
+    );
 
     expect(gate.status).toBe('FAILED');
     expect(gate.failureCodes).toContain('FAILED_AI_LOGO_RECONSTRUCTION');
