@@ -1,0 +1,45 @@
+name: Temporary Control Center Lint Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/human-control-center-next-20260820
+          persist-credentials: true
+      - name: Apply exact lint fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/mcp/human-control-center.ts')
+          text = path.read_text()
+          before = '    async (uri) => ({\n'
+          after = '    (uri) => ({\n'
+          count = text.count(before)
+          if count != 1:
+              raise SystemExit(f'expected exactly one callback match, found {count}')
+          path.write_text(text.replace(before, after, 1))
+          PY
+      - name: Commit fix when needed
+        shell: bash
+        run: |
+          if git diff --quiet -- src/mcp/human-control-center.ts; then
+            echo "NO_DIFF=1"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/mcp/human-control-center.ts
+          git commit -m "fix(control-center): remove unnecessary async callback"
+          git push origin HEAD:feat/human-control-center-next-20260820
