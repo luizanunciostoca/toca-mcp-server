@@ -61,7 +61,7 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
           true,
           true,
           'DECK|AMBIENTE|ILUMINACAO',
-          'ACTIVE_APPROVED',
+          'VENUE_VERIFIED_MARKETING_READY',
           '',
         ],
       ],
@@ -76,7 +76,95 @@ describe('GoogleSheetsCreativeTruthRegistry', () => {
     expect(venue?.venueVerified).toBe(true);
     expect(venue?.marketingReady).toBe(true);
     expect(venue?.masterAssetId).toBe('MM-SUN-0244-V1');
+    expect(venue?.status).toBe('VENUE_VERIFIED_MARKETING_READY');
     expect(venue?.protectedElements).toEqual(['DECK', 'AMBIENTE', 'ILUMINACAO']);
+  });
+
+  it('validates policy v1.3, operation-scoped references and video-shot provenance', async () => {
+    const { client } = clientFor({
+      'POLICY!A2:AK20': [
+        [
+          'TOCA_CREATIVE_TRUTH_POLICY_V1',
+          '1.3',
+          'ACTIVE_CANONICAL',
+          '',
+          '',
+          '',
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          'OPERATION_SCOPED_ONLY_V1',
+          'TOCA_VENUE_REFERENCE_SET_V1',
+          'DEPRECATED',
+          'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+          'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1',
+          'FORBIDDEN',
+          'REQUIRED',
+          'DENY',
+          'UNSUPPORTED_V1',
+        ],
+      ],
+      'VENUE_REFERENCE_SET!A2:K1000': [
+        [
+          'TOCA_VENUE_REFERENCE_SET_SUNSET_V1',
+          'REF-SUN-001',
+          'SUN-0244',
+          'source-drive',
+          'VENUE_REFERENCE',
+          'spatial truth',
+          true,
+          true,
+          'DECK|HORIZONTE',
+          'ACTIVE',
+          'SUNSET',
+        ],
+      ],
+      'VIDEO_SHOTS!A2:Q2000': [
+        [
+          'SHOT-SUN-001',
+          'SUN-VIDEO-001',
+          'source-video-drive',
+          '',
+          '',
+          'c'.repeat(64),
+          '',
+          'SUNSET',
+          'deck_ocean_view',
+          'ESTABLISHING',
+          '6000',
+          'VERTICAL',
+          true,
+          false,
+          'UNVERIFIED',
+          'VENUE_VERIFIED_SOURCE',
+          'source shot pending marketing master',
+        ],
+      ],
+    });
+    const registry = new GoogleSheetsCreativeTruthRegistry(client, { spreadsheetId: 'sheet' });
+
+    await expect(registry.assertCanonicalPolicy()).resolves.toBeUndefined();
+
+    const references = await registry.getReferenceSet('TOCA_VENUE_REFERENCE_SET_SUNSET_V1');
+    expect(references).toHaveLength(1);
+    expect(references[0]?.operationScope).toBe('SUNSET');
+    expect(references[0]?.venueVerified).toBe(true);
+
+    const shots = await registry.listVideoShots('SUNSET');
+    expect(shots).toHaveLength(1);
+    expect(shots[0]?.shotId).toBe('SHOT-SUN-001');
+    expect(shots[0]?.status).toBe('VENUE_VERIFIED_SOURCE');
+    expect(shots[0]?.sourceSha256).toBe('c'.repeat(64));
+    expect(shots[0]?.marketingReady).toBe(false);
   });
 
   it('appends gate evidence with policy and exact output hash', async () => {
