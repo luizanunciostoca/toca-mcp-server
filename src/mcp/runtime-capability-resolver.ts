@@ -17,6 +17,7 @@ import {
   type ControlledCreatePausedPlan,
   type MetaAdsControlledWriteService,
 } from '../providers/meta-ads/meta-ads-controlled-write.js';
+import type { MetaAdsDemandIntelligenceService } from '../providers/meta-ads/meta-ads-demand-intelligence.js';
 import type { MetaAdsReadProvider } from '../providers/meta-ads/meta-ads-read-provider.js';
 import {
   hashTocaManagedInstagramApprovalDescriptor,
@@ -146,6 +147,19 @@ const insightsSchema = adAccountSchema.extend({
   since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+const morroAudienceSchema = adAccountSchema.extend({
+  optimizationGoal: z.string().min(1).default('REACH'),
+  observedAt: z.string().datetime({ offset: true }).optional(),
+});
+const morroDemandSchema = morroAudienceSchema.extend({
+  performanceScore: z.number().min(0).max(100).optional(),
+  calendarEventScore: z.number().min(0).max(100).optional(),
+  seasonalityScore: z.number().min(0).max(100).optional(),
+  capacityScore: z.number().min(0).max(100).optional(),
+});
+const morroBudgetSchema = morroDemandSchema.extend({
+  currentBudgetMinor: z.number().int().positive(),
+});
 const planSchema = z.object({
   account: z.object({
     adAccountId: z.string().min(1),
@@ -228,6 +242,7 @@ export interface RuntimeCapabilityServices {
   readonly instagramHistory?: InstagramHistoryProvider;
   readonly instagramPublication?: InstagramCorePublicationRuntime;
   readonly metaAdsRead?: MetaAdsReadProvider;
+  readonly metaAdsDemand?: MetaAdsDemandIntelligenceService;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
   readonly instagramScheduler?: TocaManagedInstagramScheduler;
@@ -553,6 +568,70 @@ function resolveBinding(
             {
               targetAccount: (input) => input.adAccountId,
             },
+          )
+        : undefined;
+    case 'meta_ads.audience.inspect':
+      return services.metaAdsDemand
+        ? binding(
+            morroAudienceSchema,
+            (input) =>
+              services.metaAdsDemand!.inspectMorroAudience({
+                account: { adAccountId: input.adAccountId, currency: input.currency },
+                optimizationGoal: input.optimizationGoal,
+                ...(input.observedAt !== undefined ? { observedAt: input.observedAt } : {}),
+              }),
+            { targetAccount: (input) => input.adAccountId },
+          )
+        : undefined;
+    case 'meta_ads.opportunity.detect':
+      return services.metaAdsDemand
+        ? binding(
+            morroDemandSchema,
+            (input) =>
+              services.metaAdsDemand!.evaluateMorroDemand({
+                account: { adAccountId: input.adAccountId, currency: input.currency },
+                optimizationGoal: input.optimizationGoal,
+                ...(input.observedAt !== undefined ? { observedAt: input.observedAt } : {}),
+                ...(input.performanceScore !== undefined
+                  ? { performanceScore: input.performanceScore }
+                  : {}),
+                ...(input.calendarEventScore !== undefined
+                  ? { calendarEventScore: input.calendarEventScore }
+                  : {}),
+                ...(input.seasonalityScore !== undefined
+                  ? { seasonalityScore: input.seasonalityScore }
+                  : {}),
+                ...(input.capacityScore !== undefined
+                  ? { capacityScore: input.capacityScore }
+                  : {}),
+              }),
+            { targetAccount: (input) => input.adAccountId },
+          )
+        : undefined;
+    case 'meta_ads.budget.recommend':
+      return services.metaAdsDemand
+        ? binding(
+            morroBudgetSchema,
+            (input) =>
+              services.metaAdsDemand!.recommendMorroBudget({
+                account: { adAccountId: input.adAccountId, currency: input.currency },
+                optimizationGoal: input.optimizationGoal,
+                currentBudgetMinor: input.currentBudgetMinor,
+                ...(input.observedAt !== undefined ? { observedAt: input.observedAt } : {}),
+                ...(input.performanceScore !== undefined
+                  ? { performanceScore: input.performanceScore }
+                  : {}),
+                ...(input.calendarEventScore !== undefined
+                  ? { calendarEventScore: input.calendarEventScore }
+                  : {}),
+                ...(input.seasonalityScore !== undefined
+                  ? { seasonalityScore: input.seasonalityScore }
+                  : {}),
+                ...(input.capacityScore !== undefined
+                  ? { capacityScore: input.capacityScore }
+                  : {}),
+              }),
+            { targetAccount: (input) => input.adAccountId },
           )
         : undefined;
     case 'meta_ads.campaign.prepare_paused':
