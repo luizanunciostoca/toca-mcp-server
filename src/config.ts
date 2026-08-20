@@ -264,13 +264,8 @@ const configSchema = z
       });
     }
 
-    if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && !config.META_ENABLED) {
-      context.addIssue({
-        code: 'custom',
-        path: ['INSTAGRAM_PUBLICATION_WRITES_ENABLED'],
-        message: 'META_ENABLED must be true when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
-      });
-    }
+    const coreDirectPublicationEnabled =
+      config.MCP_ENABLED && config.INSTAGRAM_PUBLICATION_WRITES_ENABLED;
 
     if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && !config.DATABASE_URL) {
       context.addIssue({
@@ -280,28 +275,46 @@ const configSchema = z
       });
     }
 
-    if (
-      config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
-      config.META_TOKEN_STORE_PROVIDER !== 'gcp-secret-manager'
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['META_TOKEN_STORE_PROVIDER'],
-        message:
-          'META_TOKEN_STORE_PROVIDER must be gcp-secret-manager when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
-      });
-    }
-
-    if (
-      config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
-      !config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256'],
-        message:
-          'INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256 is required when INSTAGRAM_PUBLICATION_WRITES_ENABLED=true',
-      });
+    if (coreDirectPublicationEnabled) {
+      if (!config.INSTAGRAM_BUSINESS_ACCOUNT_ID) {
+        context.addIssue({
+          code: 'custom',
+          path: ['INSTAGRAM_BUSINESS_ACCOUNT_ID'],
+          message:
+            'INSTAGRAM_BUSINESS_ACCOUNT_ID is required for Core Instagram direct publication',
+        });
+      }
+      if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+        context.addIssue({
+          code: 'custom',
+          path: ['META_ACCESS_TOKEN_ENV_KEY'],
+          message: 'META_ACCESS_TOKEN_ENV_KEY is required for Core Instagram direct publication',
+        });
+      }
+    } else if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED) {
+      if (!config.META_ENABLED) {
+        context.addIssue({
+          code: 'custom',
+          path: ['INSTAGRAM_PUBLICATION_WRITES_ENABLED'],
+          message: 'META_ENABLED must be true when legacy Instagram publication writes are enabled',
+        });
+      }
+      if (config.META_TOKEN_STORE_PROVIDER !== 'gcp-secret-manager') {
+        context.addIssue({
+          code: 'custom',
+          path: ['META_TOKEN_STORE_PROVIDER'],
+          message:
+            'META_TOKEN_STORE_PROVIDER must be gcp-secret-manager when legacy Instagram publication writes are enabled',
+        });
+      }
+      if (!config.INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256) {
+        context.addIssue({
+          code: 'custom',
+          path: ['INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256'],
+          message:
+            'INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256 is required when legacy Instagram publication writes are enabled',
+        });
+      }
     }
 
     if (!config.META_ENABLED) return;
@@ -382,6 +395,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     }
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_READ_ENABLED=true');
+    }
+    assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
+  }
+
+  if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED && config.MCP_ENABLED) {
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+      throw new Error(
+        'META_ACCESS_TOKEN_ENV_KEY is required for Core Instagram direct publication',
+      );
     }
     assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
   }

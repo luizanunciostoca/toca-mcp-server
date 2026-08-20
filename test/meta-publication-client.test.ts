@@ -4,6 +4,7 @@ import { createMetaPublicationTokenReference } from '../src/providers/meta/meta-
 
 const publicationEnv = {
   NODE_ENV: 'test',
+  MCP_ENABLED: 'false',
   META_ENABLED: 'true',
   META_APP_ID: 'app-123',
   META_APP_SECRET_PROVIDER: 'env',
