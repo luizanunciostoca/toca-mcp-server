@@ -1,4 +1,4 @@
-name: TEMP Demand Intelligence three-way recovery
+name: TEMP Demand Intelligence observable three-way recovery
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Apply historical feature delta with three-way merge
+      - name: Apply or record three-way result
         shell: bash
         run: |
           set -euo pipefail
@@ -39,9 +39,29 @@ jobs:
             test/meta-ads-demand-intelligence.test.ts \
             > /tmp/demand-recovery.patch
           test -s /tmp/demand-recovery.patch
-          git apply --3way --index /tmp/demand-recovery.patch
-          git diff --cached --check
-          git diff --cached --stat
-          git rm .github/workflows/temp-demand-recovery-three-way.yml
-          git commit -m 'feat(meta-ads): three-way recover Demand Intelligence bindings'
+
+          if git apply --3way --index /tmp/demand-recovery.patch; then
+            git diff --cached --check
+            git rm .github/workflows/temp-demand-recovery-three-way.yml
+            git commit -m 'feat(meta-ads): three-way recover Demand Intelligence bindings'
+          else
+            git diff --name-only --diff-filter=U | sort -u > /tmp/conflicts.txt || true
+            git reset --hard HEAD
+            mkdir -p docs/operations
+            {
+              echo '# Demand Intelligence three-way recovery diagnostic'
+              echo
+              echo 'Status: CONFLICTS_REQUIRE_MANUAL_RECONCILIATION'
+              echo
+              echo 'Historical source: feat/meta-ads-morro-demand-intelligence-20260818'
+              echo 'Merge base: 7874ef7813f716aea685bef316310501b9f27a30'
+              echo 'Current base: abfb09b17e90c83790e803dcda091c8142c7407f'
+              echo
+              echo 'Conflicting files:'
+              sed 's/^/- `/' /tmp/conflicts.txt | sed 's/$/`/'
+            } > docs/operations/demand-intelligence-three-way-diagnostic.md
+            git rm .github/workflows/temp-demand-recovery-three-way.yml
+            git add docs/operations/demand-intelligence-three-way-diagnostic.md
+            git commit -m 'docs(recovery): record Demand Intelligence three-way conflicts'
+          fi
           git push origin HEAD:recovery/meta-ads-demand-intelligence-auto3way-20260819
