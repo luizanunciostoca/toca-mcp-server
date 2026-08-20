@@ -176,7 +176,8 @@ describe('WhatsAppCloudAdapter', () => {
     expect(request?.url).toBe('https://graph.facebook.com/v23.0/phone-1/messages');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer secret-token-value' });
     if (typeof request?.init.body !== 'string') throw new Error('EXPECTED_JSON_BODY');
-    expect(JSON.parse(request.init.body)).toEqual({
+    const parsedBody = JSON.parse(request.init.body) as unknown;
+    expect(parsedBody).toEqual({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: '5511888888888',
