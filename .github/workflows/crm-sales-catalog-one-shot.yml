@@ -1,0 +1,120 @@
+name: CRM Sales catalog one-shot integration
+
+on:
+  push:
+    branches:
+      - feat/next-crm-sales-engine-advanced-20260820
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crm-sales-catalog-one-shot-integration
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout CRM branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/next-crm-sales-engine-advanced-20260820
+          persist-credentials: true
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Bind R10 registry to canonical catalog
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          catalog = Path('src/governance/capability-catalog.ts')
+          text = catalog.read_text()
+          old = """    googleAdsPhase: 'MANAGE',
+    tocaManagedInstagramSchedulerEnabled: true,
+  })"""
+          new = """    googleAdsPhase: 'MANAGE',
+    tocaManagedInstagramSchedulerEnabled: true,
+    crmSalesRuntimeEnabled: true,
+  })"""
+          if old not in text:
+              raise SystemExit('CRM_SALES_CATALOG_REGISTRY_PATTERN_NOT_FOUND')
+          catalog.write_text(text.replace(old, new, 1))
+
+          test = Path('test/crm-sales-runtime-contract.test.ts')
+          test.write_text("""import { describe, expect, it } from 'vitest';
+import { getCapabilityDefinition } from '../src/governance/capability-catalog.js';
+import { createToolRegistry } from '../src/registry.js';
+
+const READ_CAPABILITIES = ['sales.lead.enrich', 'sales.report.generate'] as const;
+const WRITE_CAPABILITIES = [
+  'sales.lead.create',
+  'sales.lead.qualify',
+  'sales.pipeline.update',
+  'sales.followup.create',
+  'sales.followup.schedule',
+] as const;
+
+describe('CRM Sales R10 runtime contract', () => {
+  it('keeps catalog and registry lifecycle/risk contracts aligned', () => {
+    const registry = createToolRegistry({ crmSalesRuntimeEnabled: true });
+
+    for (const capabilityId of READ_CAPABILITIES) {
+      expect(registry.get(capabilityId)).toMatchObject({
+        capabilityStatus: 'IMPLEMENTED',
+        riskClass: 'READ',
+        sideEffects: false,
+        idempotent: true,
+      });
+      expect(getCapabilityDefinition(capabilityId)).toMatchObject({
+        lifecycle_status: 'IMPLEMENTED',
+        risk_class: 'READ',
+        side_effects: false,
+        idempotent: true,
+        execution_surface: 'MCP_TOOL',
+      });
+    }
+
+    for (const capabilityId of WRITE_CAPABILITIES) {
+      expect(registry.get(capabilityId)).toMatchObject({
+        capabilityStatus: 'IMPLEMENTED',
+        riskClass: 'WRITE_REVERSIBLE',
+        sideEffects: true,
+        idempotent: true,
+      });
+      expect(getCapabilityDefinition(capabilityId)).toMatchObject({
+        lifecycle_status: 'IMPLEMENTED',
+        risk_class: 'WRITE_REVERSIBLE',
+        side_effects: true,
+        idempotent: true,
+        execution_surface: 'MCP_TOOL',
+      });
+    }
+  });
+});
+""")
+          PY
+      - name: Validate integration
+        run: |
+          pnpm exec prettier --write src/governance/capability-catalog.ts test/crm-sales-runtime-contract.test.ts
+          pnpm exec eslint src/governance/capability-catalog.ts test/crm-sales-runtime-contract.test.ts
+          pnpm typecheck
+          pnpm exec vitest run test/crm-sales-runtime-contract.test.ts
+      - name: Commit integration and remove one-shot workflow
+        run: |
+          git rm .github/workflows/crm-sales-catalog-one-shot.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/governance/capability-catalog.ts test/crm-sales-runtime-contract.test.ts
+          git commit -m 'fix(crm): align R10 catalog and runtime contract'
+          git push origin HEAD:feat/next-crm-sales-engine-advanced-20260820
