@@ -8,6 +8,7 @@ import {
   type ExecutionIdentityResolver,
 } from './core/identity.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
+import { registerTocaControlCenterSurface } from './mcp/control-center-surface.js';
 import type { InstagramCorePublicationRuntime } from './mcp/instagram-publication-runtime.js';
 import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
@@ -230,20 +231,31 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ...(videoContent ? { videoContent } : {}),
   });
 
+  const workflowStore = pool ? new PostgresWorkflowStore(pool) : undefined;
+  const approvalStore = pool ? new PostgresApprovalStore(pool) : undefined;
+  const auditStore = pool ? new PostgresAuditSink(pool, registry) : undefined;
+  const eventStore = pool ? new PostgresEventRecordStore(pool) : undefined;
+
   registerTocaCoreSurface(server, {
     serviceName: SERVER_NAME,
     serviceVersion: SERVER_VERSION,
     registry,
     runtimeResolver,
     resolveIdentity,
-    ...(pool
-      ? {
-          workflowStore: new PostgresWorkflowStore(pool),
-          approvalStore: new PostgresApprovalStore(pool),
-          auditStore: new PostgresAuditSink(pool, registry),
-          eventStore: new PostgresEventRecordStore(pool),
-        }
-      : {}),
+    ...(workflowStore ? { workflowStore } : {}),
+    ...(approvalStore ? { approvalStore } : {}),
+    ...(auditStore ? { auditStore } : {}),
+    ...(eventStore ? { eventStore } : {}),
+  });
+
+  registerTocaControlCenterSurface(server, {
+    registry,
+    runtimeResolver,
+    resolveIdentity,
+    ...(approvalStore ? { approvalStore } : {}),
+    workflowStoreAvailable: Boolean(workflowStore),
+    auditStoreAvailable: Boolean(auditStore),
+    eventStoreAvailable: Boolean(eventStore),
   });
 
   return server;
