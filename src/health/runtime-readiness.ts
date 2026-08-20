@@ -129,14 +129,18 @@ export function createRuntimeReadinessChecks(
       const pool = requiredPool(options.pool);
       await Promise.all([
         pool.query('select tenant_id, workspace_id, organization_id from crm_contacts limit 0'),
-        pool.query('select tenant_id, workspace_id, organization_id from crm_conversations limit 0'),
+        pool.query(
+          'select tenant_id, workspace_id, organization_id from crm_conversations limit 0',
+        ),
         pool.query('select tenant_id, workspace_id, organization_id from crm_messages limit 0'),
       ]);
     }),
     namedCheck('ag01', async () => {
       const pool = requiredPool(options.pool);
       await Promise.all([
-        pool.query('select tenant_id, workspace_id, organization_id from ag01_conversations limit 0'),
+        pool.query(
+          'select tenant_id, workspace_id, organization_id from ag01_conversations limit 0',
+        ),
         pool.query('select tenant_id, conversation_id from ag01_message_records limit 0'),
         pool.query('select tenant_id, capability_id from ag01_runtime_circuits limit 0'),
       ]);
@@ -187,6 +191,9 @@ export function createRuntimeReadinessChecks(
       assertProviderCredentials(options.config, env);
     }),
     namedCheck('critical_configuration', async () => {
+      if (booleanFlag(env.TOCA_PLATFORM_KILL_SWITCH, false)) {
+        throw new Error('READINESS_PLATFORM_KILL_SWITCH_ACTIVE');
+      }
       requireText(options.config.DATABASE_URL, 'READINESS_DATABASE_URL_REQUIRED');
       if (options.config.NODE_ENV === 'production') {
         if (!options.config.MCP_ENABLED) throw new Error('READINESS_MCP_MUST_BE_ENABLED');
