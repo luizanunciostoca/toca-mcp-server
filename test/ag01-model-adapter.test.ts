@@ -113,7 +113,10 @@ function input() {
   };
 }
 
-function adapter(fetchFn: typeof fetch, overrides: { timeoutMs?: number; maxRetries?: number } = {}) {
+function adapter(
+  fetchFn: typeof fetch,
+  overrides: { timeoutMs?: number; maxRetries?: number } = {},
+) {
   return new OpenAiResponsesDecisionAdapter({
     baseUrl: 'https://api.openai.test/v1',
     model: 'configured-test-model',
@@ -156,7 +159,8 @@ describe('AG-01 OpenAI Responses adapter', () => {
   it('times out a model request without executing any capability', async () => {
     const fetchFn: typeof fetch = (url, init) => {
       void url;
-      return new Promise((_resolve, reject) => {
+      return new Promise<Response>((resolve, reject) => {
+        void resolve;
         init?.signal?.addEventListener('abort', () => {
           const error = new Error('aborted');
           error.name = 'AbortError';
