@@ -290,6 +290,7 @@ export class PostgresTenantConfigurationStore implements TenantConfigurationStor
   ): Promise<void> {
     const tenantId = configuration.tenantId;
     for (const table of [
+      'tenant_campaign_scopes',
       'tenant_provider_bindings',
       'tenant_credential_bindings',
       'tenant_budget_envelopes',
@@ -299,7 +300,6 @@ export class PostgresTenantConfigurationStore implements TenantConfigurationStor
       'tenant_asset_registry_bindings',
       'tenant_analytics_namespaces',
       'tenant_quotas',
-      'tenant_campaign_scopes',
     ]) {
       await client.query(`delete from ${table} where tenant_id = $1`, [tenantId]);
     }
