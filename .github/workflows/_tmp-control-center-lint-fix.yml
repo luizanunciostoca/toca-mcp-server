@@ -1,0 +1,53 @@
+name: Temporary Control Center Lint Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  lint-fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/human-control-center-next-20260820
+          persist-credentials: true
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply exact lint fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/mcp/human-control-center.ts')
+          text = path.read_text()
+          old = """    async (uri) => ({\n      contents: [{ uri: uri.href, mimeType: 'text/html+mcp', text: controlCenterHtml() }],\n    }),\n"""
+          new = """    (uri) =>\n      Promise.resolve({\n        contents: [{ uri: uri.href, mimeType: 'text/html+mcp', text: controlCenterHtml() }],\n      }),\n"""
+          if old not in text:
+              raise SystemExit('EXPECTED_CALLBACK_NOT_FOUND')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write src/mcp/human-control-center.ts
+          pnpm lint
+      - name: Commit exact lint fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/mcp/human-control-center.ts
+          git commit -m "fix(control-center): satisfy resource callback lint"
+          git push origin HEAD:feat/human-control-center-next-20260820
