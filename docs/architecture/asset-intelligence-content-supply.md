@@ -138,7 +138,7 @@ This contract is deliberately stricter than `FIND_VENUE_VERIFIED`, which only an
 
 ## Persistence
 
-Migration: `022_asset_intelligence_content_supply.sql`.
+Migration: `029_asset_intelligence_content_supply.sql`.
 
 Tables:
 
