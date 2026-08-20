@@ -1,9 +1,7 @@
 name: Demand Intelligence Provider READ TEMP
 
 on:
-  push:
-    branches:
-      - recovery/meta-ads-demand-intelligence-20260819
+  pull_request:
     paths:
       - '.github/workflows/demand-intelligence-provider-read-temp.yml'
 
@@ -12,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: demand-intelligence-provider-read-temp
+  group: demand-intelligence-provider-read-temp-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 env:
