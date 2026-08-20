@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "checkSetId": "toca-platform-hardening-next",
+  "safety": {
+    "realSideEffectsForTesting": false,
+    "destructiveOperations": false,
+    "providerMutationAllowed": false
+  },
+  "checks": [
+    { "id": "runtime-readiness", "mode": "READ_ONLY", "assertion": "runtime accepts authenticated health/readiness inspection", "frequencyMinutes": 5 },
+    { "id": "audit-integrity", "mode": "INTERNAL_CONTRACT", "assertion": "audit ledger verification remains valid", "frequencyMinutes": 15 },
+    { "id": "outbox-lag", "mode": "INTERNAL_CONTRACT", "assertion": "oldest pending Outbox age remains within SLO", "frequencyMinutes": 5 },
+    { "id": "dead-letter-backlog", "mode": "INTERNAL_CONTRACT", "assertion": "dead-letter backlog remains zero or incident-classified", "frequencyMinutes": 5 },
+    { "id": "provider-readback-contract", "mode": "READ_ONLY", "assertion": "verified provider reads/readbacks remain available without creating a mutation", "frequencyMinutes": 15 },
+    { "id": "crm-read-contract", "mode": "READ_ONLY", "assertion": "CRM durable records are readable through the governed core", "frequencyMinutes": 15 },
+    { "id": "attribution-read-contract", "mode": "READ_ONLY", "assertion": "attribution durable records are readable through the governed core", "frequencyMinutes": 15 }
+  ],
+  "futureChecks": [
+    { "id": "whatsapp-provider-read", "enabled": false, "activationGate": "PROVIDER_VERIFIED" },
+    { "id": "email-provider-read", "enabled": false, "activationGate": "PROVIDER_VERIFIED" },
+    { "id": "r31-feedback-readback", "enabled": false, "activationGate": "R31_IMPLEMENTED" }
+  ],
+  "runbook": "docs/operations/observability-incident-runbook.md"
+}
