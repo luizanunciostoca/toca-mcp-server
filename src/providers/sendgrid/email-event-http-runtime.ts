@@ -213,10 +213,7 @@ export async function createSendGridEventHttpRuntime(
     options.engagementAuthorization ?? FAIL_CLOSED_ENGAGEMENT_AUTHORIZATION,
   );
   const provider = new SendGridEmailProvider(loaded.config, EVENT_ONLY_PREPARED_RESOLVER);
-  const dispatchResolver = new PostgresSendGridWebhookDispatchResolver(
-    options.pool,
-    dispatchStore,
-  );
+  const dispatchResolver = new PostgresSendGridWebhookDispatchResolver(options.pool, dispatchStore);
   return new SendGridEventHttpRuntime(
     provider,
     dispatchResolver,
@@ -227,10 +224,7 @@ export async function createSendGridEventHttpRuntime(
 }
 
 export class PostgresSendGridWebhookDispatchResolver {
-  constructor(
-    private readonly pool: pg.Pool,
-    private readonly store: PostgresEmailRuntimeStore,
-  ) {}
+  constructor(private readonly pool: pg.Pool, private readonly store: PostgresEmailRuntimeStore) {}
 
   async resolve(input: {
     readonly providerMessageRef: string;
@@ -307,10 +301,7 @@ class PostgresEmailProviderEventContextPort implements EmailProviderEventContext
 }
 
 class PostgresEmailPrivacyReconciliationPort implements EmailPrivacyReconciliationPort {
-  constructor(
-    private readonly pool: pg.Pool,
-    private readonly privacy: PrivacyGovernanceService,
-  ) {}
+  constructor(private readonly pool: pg.Pool, private readonly privacy: PrivacyGovernanceService) {}
 
   async reconcileProviderSignal(
     input: Parameters<EmailPrivacyReconciliationPort['reconcileProviderSignal']>[0],
@@ -469,9 +460,7 @@ function normalizedProcessorEvent(event: SendGridWebhookEvent) {
   };
 }
 
-export function extractTocaIdempotencyKey(
-  raw: Readonly<Record<string, unknown>>,
-): string | null {
+export function extractTocaIdempotencyKey(raw: Readonly<Record<string, unknown>>): string | null {
   const direct = raw.toca_idempotency_key;
   if (typeof direct === 'string' && direct.trim()) return direct.trim();
   const customArgs = raw.custom_args;
@@ -482,9 +471,7 @@ export function extractTocaIdempotencyKey(
   return null;
 }
 
-function suppressionReason(
-  state: 'BOUNCED' | 'COMPLAINT' | 'UNSUBSCRIBED',
-): SuppressionReason {
+function suppressionReason(state: 'BOUNCED' | 'COMPLAINT' | 'UNSUBSCRIBED'): SuppressionReason {
   switch (state) {
     case 'BOUNCED':
       return 'PROVIDER_BOUNCED';
