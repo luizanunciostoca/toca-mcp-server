@@ -64,6 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec prettier --write \
+            scripts/verify-r29-production-runtime.ts \
             src/governance/approval-scope.ts \
             src/persistence/postgres-approval-store.ts \
             src/mcp/core-surface.ts \
@@ -86,6 +87,7 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git add \
             migrations/032_tenant_scoped_approvals.sql \
+            scripts/verify-r29-production-runtime.ts \
             src/governance/approval-scope.ts \
             src/persistence/postgres-approval-store.ts \
             src/mcp/core-surface.ts \
