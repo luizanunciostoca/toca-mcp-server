@@ -54,16 +54,17 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
   );
   requireEvidence(configuration.analytics.evidence, 'TENANT_ANALYTICS_EVIDENCE_REQUIRED');
 
-  const providerIds = new Set<string>();
+  const providerBindings = new Set<string>();
   for (const provider of configuration.providers) {
     requireNonEmpty(provider.providerId, 'TENANT_PROVIDER_ID_REQUIRED');
     requireNonEmpty(provider.connectedAccountId, 'TENANT_CONNECTED_ACCOUNT_REQUIRED');
     requireNonEmpty(provider.credentialBindingId, 'TENANT_PROVIDER_CREDENTIAL_REQUIRED');
     requireEvidence(provider.evidence, 'TENANT_PROVIDER_EVIDENCE_REQUIRED');
-    if (providerIds.has(provider.providerId)) {
+    const providerKey = `${provider.providerId}:${provider.connectedAccountId}`;
+    if (providerBindings.has(providerKey)) {
       throw new TenantIsolationError('TENANT_PROVIDER_DUPLICATE');
     }
-    providerIds.add(provider.providerId);
+    providerBindings.add(providerKey);
   }
 
   const credentialIds = new Set<string>();
