@@ -24,9 +24,9 @@ function passingObservation(
 describe('controlled resilience drills', () => {
   it('declares every requested drill without allowing destructive provider mutation', () => {
     expect(CONTROLLED_DRILL_CATALOG).toHaveLength(CONTROLLED_DRILL_SCENARIOS.length);
-    expect(CONTROLLED_DRILL_CATALOG.every((drill) => !drill.destructiveProviderMutationAllowed)).toBe(
-      true,
-    );
+    expect(
+      CONTROLLED_DRILL_CATALOG.every((drill) => !drill.destructiveProviderMutationAllowed),
+    ).toBe(true);
   });
 
   it.each(CONTROLLED_DRILL_SCENARIOS)('accepts preserved invariants for %s', (scenario) => {
