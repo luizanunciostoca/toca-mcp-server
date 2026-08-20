@@ -102,6 +102,7 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
 
 export class InMemoryTenantConfigurationStore implements TenantConfigurationStore {
   readonly #configurations = new Map<string, TenantConfiguration>();
+  readonly #resourceOwners = new Map<string, string>();
 
   get(tenantId: string): Promise<TenantConfiguration | undefined> {
     requireNonEmpty(tenantId, 'TENANT_ID_REQUIRED');
@@ -110,9 +111,50 @@ export class InMemoryTenantConfigurationStore implements TenantConfigurationStor
 
   put(configuration: TenantConfiguration): Promise<void> {
     validateTenantConfiguration(configuration);
+    const resourceKeys = ownedResourceKeys(configuration);
+    for (const resourceKey of resourceKeys) {
+      const owner = this.#resourceOwners.get(resourceKey);
+      if (owner && owner !== configuration.tenantId) {
+        throw new TenantIsolationError('TENANT_RESOURCE_ALREADY_OWNED');
+      }
+    }
+
+    const previous = this.#configurations.get(configuration.tenantId);
+    if (previous) {
+      for (const resourceKey of ownedResourceKeys(previous)) {
+        if (this.#resourceOwners.get(resourceKey) === configuration.tenantId) {
+          this.#resourceOwners.delete(resourceKey);
+        }
+      }
+    }
+    for (const resourceKey of resourceKeys) {
+      this.#resourceOwners.set(resourceKey, configuration.tenantId);
+    }
     this.#configurations.set(configuration.tenantId, configuration);
     return Promise.resolve();
   }
+}
+
+function ownedResourceKeys(configuration: TenantConfiguration): readonly string[] {
+  const keys = new Set<string>([
+    `brand:${configuration.brandCreativeTruth.brandResourceId}`,
+    `creative-truth:${configuration.brandCreativeTruth.creativeTruthRegistryResourceId}`,
+    `asset-registry:${configuration.assets.assetRegistryResourceId}`,
+    `analytics:${configuration.analytics.analyticsNamespace}`,
+  ]);
+  for (const provider of configuration.providers) {
+    keys.add(`provider-account:${provider.providerId}:${provider.connectedAccountId}`);
+  }
+  for (const credential of configuration.credentials) {
+    keys.add(`secret:${credential.secretReference.provider}:${credential.secretReference.key}`);
+  }
+  for (const policy of configuration.policies) {
+    keys.add(`policy:${policy.policyResourceId}`);
+  }
+  for (const approvalChain of configuration.approvalChains) {
+    keys.add(`approval:${approvalChain.approvalResourceId}`);
+  }
+  return [...keys].sort();
 }
 
 function requireNonEmpty(value: string, code: string): string {
