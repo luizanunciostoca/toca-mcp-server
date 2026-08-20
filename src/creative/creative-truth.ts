@@ -2,16 +2,21 @@ import { createHash } from 'node:crypto';
 import { ExecutionError } from '../core/errors.js';
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
+  TOCA_VENUE_REFERENCE_SET_LEGACY_ID,
+  TOCA_VENUE_REFERENCE_SET_SUNSET_ID,
+  TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID,
   type BrandAsset,
   type CreativeMode,
   type CreativeStandard,
   type CreativeTruthFailureCode,
   type CreativeTruthGateResult,
+  type CreativeTruthPublicationBinding,
   type DeterministicRenderManifest,
   type FidelityEvidence,
   type GenerativeExceptionApproval,
   type VenueAsset,
   type VenueReference,
+  creativeTruthPublicationBindingSchema,
   deterministicRenderManifestSchema,
 } from '../contracts/creative-truth.js';
 
@@ -90,7 +95,7 @@ export function evaluateVenueFidelity(input: VenueFidelityInput): CreativeTruthG
 
     if (input.creativeMode === 'REAL_PLUS_ENHANCEMENT') {
       if (!evidence || !evidence.sourceIdentityPreserved) {
-        failures.add('FAILED_VENUE_FIDELITY_GATE');
+        failures.add('FAILED_ENHANCEMENT_PROVENANCE');
       }
       addVisualDriftFailures(evidence, failures);
     }
@@ -152,6 +157,17 @@ export function assertCreativeReadyForPublication(
   return parsed;
 }
 
+export function assertCreativePublicationAssetHash(
+  binding: CreativeTruthPublicationBinding,
+  publicationAssetSha256: string,
+): CreativeTruthPublicationBinding {
+  const parsed = creativeTruthPublicationBindingSchema.parse(binding);
+  if (parsed.outputSha256.toLowerCase() !== publicationAssetSha256.toLowerCase()) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_PUBLICATION_ASSET_HASH_MISMATCH', false);
+  }
+  return parsed;
+}
+
 export function buildTocaImageEditPrompt(userPrompt: string, creativeMode: CreativeMode): string {
   const common = [
     'TOCA CREATIVE TRUTH POLICY — mandatory.',
@@ -204,11 +220,22 @@ function validateGenerativeException(
   ) {
     failures.add('FAILED_UNAPPROVED_GENERATIVE_EXCEPTION');
   }
+
+  const expectedReferenceSetId = referenceSetForOperation(approval.operation);
+  if (
+    !expectedReferenceSetId ||
+    approval.referenceSetId === TOCA_VENUE_REFERENCE_SET_LEGACY_ID ||
+    approval.referenceSetId !== expectedReferenceSetId
+  ) {
+    failures.add('FAILED_GENERATIVE_REFERENCE_OPERATION_MISMATCH');
+  }
+
   const activeReferences = (input.references ?? []).filter(
     (reference) =>
       reference.status === 'ACTIVE' &&
       reference.venueVerified &&
-      reference.referenceSetId === approval.referenceSetId,
+      reference.referenceSetId === approval.referenceSetId &&
+      reference.operationScope === approval.operation,
   );
   if (activeReferences.length < approval.minReferenceCount) {
     failures.add('FAILED_GENERATIVE_REFERENCE_MISSING');
@@ -221,6 +248,12 @@ function validateGenerativeException(
     failures.add('FAILED_VENUE_FIDELITY_GATE');
   }
   addVisualDriftFailures(input.evidence, failures);
+}
+
+function referenceSetForOperation(operation: string): string | undefined {
+  if (operation === 'SUNSET') return TOCA_VENUE_REFERENCE_SET_SUNSET_ID;
+  if (operation === 'THE_PARTY') return TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID;
+  return undefined;
 }
 
 function addVisualDriftFailures(
