@@ -1,9 +1,9 @@
 name: Temporary Control Center Format Capture
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/human-control-center-next-20260820
+      - main
 
 permissions:
   contents: read
