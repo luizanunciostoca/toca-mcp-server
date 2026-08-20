@@ -32,6 +32,8 @@ jobs:
           cache: pnpm
       - name: Verify permanent workflow supply chain
         run: node scripts/check-workflow-supply-chain.mjs
+      - name: Verify platform hardening contracts
+        run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format check
