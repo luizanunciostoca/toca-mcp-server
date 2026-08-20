@@ -1,0 +1,72 @@
+name: Tenant approval UI contract fix helper
+
+on:
+  push:
+    branches:
+      - feat/tenant-approval-control-center-20260820
+    paths:
+      - .github/workflows/tenant-approval-ui-contract-fix-helper.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/tenant-approval-control-center-20260820
+          fetch-depth: 0
+      - name: Align Control Center with approval list contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/mcp/human-control-center.ts')
+          text = source.read_text()
+
+          replacements = [
+              (
+                  "Current Core exposes approval.get but not a tenant-safe approval list. Keep this panel fail-closed until canonical Core READ exposure exists.",
+                  "Tenant-safe approval listing requires the canonical tenant-scoped ApprovalStore composition. Keep this panel fail-closed when that store is unavailable.",
+              ),
+              ("text: controlCenterHtml()", "text: buildControlCenterHtml()"),
+              ("function controlCenterHtml(): string {", "export function buildControlCenterHtml(): string {"),
+              (
+                  "async function refreshApprovals(){if(!sourceAvailable('pending-approvals','toca.approval.list')){detail('pending-approvals','Fail-closed: a main atual não expõe listagem tenant-safe de ApprovalRecord. approval.get continua disponível quando o ID é conhecido.');return}var result=parse(await callTool('toca.approval.list',{statuses:['REQUESTED','FAILED_REVIEW_REQUIRED'],limit:50}));var approvals=result&&Array.isArray(result.approvals)?result.approvals:[];detail('pending-approvals',approvals.length?approvals:'Nenhuma aprovação pendente.');var card=document.querySelector('[data-panel=\"pending-approvals\"]');if(card&&approvals[0]){card.dataset.targetId=approvals[0].approval_id||approvals[0].approvalId||'approval';card.dataset.targetContext='version='+(approvals[0].version||'unknown')+';capability='+(approvals[0].capability_id||approvals[0].capabilityId||'unknown')}}",
+                  "async function refreshApprovals(){if(!sourceAvailable('pending-approvals','toca.approval.list')){detail('pending-approvals','Fail-closed: a composição atual não expõe listagem tenant-safe de ApprovalRecord. approval.get continua disponível quando o ID é conhecido.');return}var responses=await Promise.all([callTool('toca.approval.list',{status:'REQUESTED',limit:50}),callTool('toca.approval.list',{status:'FAILED_REVIEW_REQUIRED',limit:50})]);var approvals=responses.flatMap(function(response){var result=parse(response);return result&&Array.isArray(result.approvals)?result.approvals:[]});var seen=new Set();approvals=approvals.filter(function(approval){var id=approval.approval_id||approval.approvalId;if(!id||seen.has(id))return false;seen.add(id);return true}).sort(function(a,b){return String(b.requested_at||b.requestedAt||'').localeCompare(String(a.requested_at||a.requestedAt||''))}).slice(0,50);detail('pending-approvals',approvals.length?approvals:'Nenhuma aprovação pendente.');var card=document.querySelector('[data-panel=\"pending-approvals\"]');if(card&&approvals[0]){card.dataset.targetId=approvals[0].approval_id||approvals[0].approvalId||'approval';card.dataset.targetContext='version='+(approvals[0].version||'unknown')+';capability='+(approvals[0].capability_id||approvals[0].capabilityId||'unknown')}}",
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'expected source block not found: {old[:100]}')
+              text = text.replace(old, new, 1)
+          source.write_text(text)
+
+          test = Path('test/human-control-center.test.ts')
+          test_text = test.read_text()
+          old_import = """import {\n  CONTROL_CENTER_PANEL_IDS,\n  buildControlCenterPanels,\n} from '../src/mcp/human-control-center.js';"""
+          new_import = """import {\n  CONTROL_CENTER_PANEL_IDS,\n  buildControlCenterHtml,\n  buildControlCenterPanels,\n} from '../src/mcp/human-control-center.js';"""
+          if old_import not in test_text:
+              raise SystemExit('expected test import not found')
+          test_text = test_text.replace(old_import, new_import, 1)
+
+          anchor = """  it('marks publication and dead-letter panels ready only when their existing Core capabilities are bound', () => {"""
+          added = """  it('marks pending approvals ready only when the tenant-scoped approval list store is available', () => {\n    const runtime = runtimeHarness([]);\n    const panels = buildControlCenterPanels({\n      ...runtime,\n      approvalStoreAvailable: true,\n      approvalListAvailable: true,\n      workflowStoreAvailable: true,\n      auditStoreAvailable: true,\n      eventStoreAvailable: true,\n    });\n    const panel = panels.find((candidate) => candidate.id === 'pending-approvals');\n    expect(panel).toMatchObject({ state: 'READY', dependency: null });\n    expect(panel?.sources).toEqual(\n      expect.arrayContaining([\n        expect.objectContaining({ id: 'toca.approval.list', available: true }),\n        expect.objectContaining({ id: 'toca.approval.get', available: true }),\n      ]),\n    );\n  });\n\n  it('keeps Control Center approval reads aligned with the singular status Core contract', () => {\n    const html = buildControlCenterHtml();\n    expect(html).toContain(\"callTool('toca.approval.list',{status:'REQUESTED',limit:50})\");\n    expect(html).toContain(\n      \"callTool('toca.approval.list',{status:'FAILED_REVIEW_REQUIRED',limit:50})\",\n    );\n    expect(html).not.toContain(\"statuses:['REQUESTED'\");\n  });\n\n"""
+          if anchor not in test_text:
+              raise SystemExit('expected test anchor not found')
+          test_text = test_text.replace(anchor, added + anchor, 1)
+          test.write_text(test_text)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/mcp/human-control-center.ts test/human-control-center.test.ts
+          git diff --cached --check
+          git commit -m "fix(governance): align control center approval list contract"
+          git push origin HEAD:feat/tenant-approval-control-center-20260820
