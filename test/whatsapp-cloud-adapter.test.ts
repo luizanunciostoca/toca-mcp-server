@@ -163,13 +163,15 @@ describe('WhatsAppCloudAdapter', () => {
     expect(request?.url).toBe('https://graph.facebook.com/v23.0/phone-1/messages');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer secret-token-value' });
     if (typeof request?.init.body !== 'string') throw new Error('EXPECTED_JSON_BODY');
-    const requestBody = JSON.parse(request.init.body) as unknown;
-    expect(requestBody).toMatchObject({
-      messaging_product: 'whatsapp',
-      to: '5511888888888',
-      type: 'text',
-      text: { body: 'Olá' },
-    });
+    expect(request.init.body).toBe(
+      JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: '5511888888888',
+        type: 'text',
+        text: { preview_url: false, body: 'Olá' },
+      }),
+    );
   });
 
   it('requires an approved template and exact positional variables', async () => {
