@@ -13,7 +13,7 @@ FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba32756
 ENV NODE_ENV=production
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends imagemagick \
-  && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
