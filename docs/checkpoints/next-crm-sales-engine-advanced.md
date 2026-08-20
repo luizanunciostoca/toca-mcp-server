@@ -40,7 +40,7 @@ R10 capabilities are reused rather than adding a parallel public MCP surface:
 - `sales.followup.schedule`: create next action/task
 - `sales.report.generate`: pipeline query (READ)
 
-The canonical capability catalog and runtime registry are required to resolve these same R10 IDs with matching lifecycle, risk, side-effect, idempotency, and execution-surface contracts. A dedicated catalog↔runtime contract test is part of the branch Quality evidence rather than a second registry.
+The canonical capability catalog and runtime registry resolve these same R10 IDs with matching lifecycle, risk, side-effect, idempotency, and execution-surface contracts. A dedicated catalog↔runtime contract test is part of the branch Quality evidence rather than a second registry.
 
 Mutation scope and actor identity are derived from the authenticated Core `ExecutionIdentity`, never trusted from payload fields. Mutations reuse canonical authorization/policy handling, `crm_idempotency_keys`, PostgreSQL transaction boundaries, Transactional Outbox, Internal Audit Ledger, and persistence readback.
 
@@ -57,10 +57,6 @@ No `any`, `eslint-disable`, TypeScript suppression, policy bypass, or relaxed Qu
 Migration `023_crm_sales_engine.sql` adds the advanced CRM tables and foreign-keys them to the existing CRM core tables. Append-only triggers protect message/activity/decision/score/attribution/assignment/stage/merge history from UPDATE/DELETE mutation.
 
 No WhatsApp or Email provider is implemented by this PR. `MessageRecord` keeps provider-neutral references/digests so Omnichannel can integrate later without bypassing the CRM/Core boundary.
-
-## Integration trigger audit
-
-The final catalog alignment is applied through a native Git ref update so the temporary one-shot can execute and remove itself; no temporary workflow is allowed in the resulting tree.
 
 ## Required evidence before promotion
 
