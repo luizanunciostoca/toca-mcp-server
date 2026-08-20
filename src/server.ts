@@ -12,6 +12,9 @@ import type { InstagramCorePublicationRuntime } from './mcp/instagram-publicatio
 import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
 import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
+import { PostgresCrmCoreStore } from './persistence/postgres-crm-core-store.js';
+import { PostgresCrmSalesStore } from './persistence/postgres-crm-sales-store.js';
+import { PostgresCrmSalesPersistenceReadback } from './persistence/postgres-crm-sales-readback.js';
 import { PostgresAuditSink } from './persistence/postgres-audit-sink.js';
 import { PostgresEventRecordStore } from './persistence/postgres-event-record-store.js';
 import { PostgresMetaAdsGeoAudienceStore } from './persistence/postgres-meta-ads-geo-audience-store.js';
@@ -75,6 +78,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     googleAdsPhase: config.GOOGLE_ADS_PHASE,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
     videoContentRuntimeEnabled: Boolean(pool),
+    crmSalesRuntimeEnabled: Boolean(pool),
   });
   const createMetaClient = () => {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
@@ -234,6 +238,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   }
 
   const videoContent = pool ? new PostgresVideoContentRuntime(pool) : undefined;
+  const crmCore = pool ? new PostgresCrmCoreStore(pool) : undefined;
+  const crmSales = pool ? new PostgresCrmSalesStore(pool) : undefined;
+  const crmSalesReadback = pool ? new PostgresCrmSalesPersistenceReadback(pool) : undefined;
 
   const runtimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
@@ -251,6 +258,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       : {}),
     ...(instagramScheduler ? { instagramScheduler } : {}),
     ...(videoContent ? { videoContent } : {}),
+    ...(crmCore && crmSales && crmSalesReadback
+      ? { crmSales: { core: crmCore, sales: crmSales, persistenceReadback: crmSalesReadback } }
+      : {}),
   });
 
   registerTocaCoreSurface(server, {
