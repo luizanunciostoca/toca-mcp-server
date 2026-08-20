@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "scripts/validate-sendgrid-email.ts",
+    "src/omnichannel/email-runtime.ts",
+    "src/omnichannel/email-orchestrator.ts",
+    "src/persistence/postgres-email-runtime-store.ts",
+    "src/providers/sendgrid/email-provider.ts",
+    "src/providers/sendgrid/runtime-config.ts",
+    "test/email-runtime.test.ts",
+    "test/email-orchestrator.test.ts",
+    "test/sendgrid-email-provider.test.ts"
+  ]
+}
