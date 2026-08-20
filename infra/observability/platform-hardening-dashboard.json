@@ -34,10 +34,7 @@
     },
     {
       "id": "crm-attribution",
-      "signals": [
-        "crm.durable_write_success_ratio",
-        "attribution.durable_write_success_ratio"
-      ]
+      "signals": ["crm.durable_write_success_ratio", "attribution.durable_write_success_ratio"]
     },
     {
       "id": "future-provider-readiness",
