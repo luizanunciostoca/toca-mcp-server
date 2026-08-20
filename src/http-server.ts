@@ -11,6 +11,10 @@ import {
   verifyMetaWebhookChallenge,
   verifyMetaWebhookSignature,
 } from './providers/meta/meta-webhook.js';
+import {
+  parseWhatsAppWebhookEvents,
+  type WhatsAppWebhookEvent,
+} from './providers/whatsapp/whatsapp-cloud-webhook.js';
 import { createTocaServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
 const MAX_META_WEBHOOK_BODY_BYTES = 1024 * 1024;
@@ -21,6 +25,7 @@ export interface MetaWebhookHttpBoundary {
   resolveVerifyToken(): Promise<string>;
   resolveAppSecret(): Promise<string>;
   onEvents?: (events: readonly InstagramWebhookEvent[]) => Promise<void> | void;
+  onWhatsAppEvents?: (events: readonly WhatsAppWebhookEvent[]) => Promise<void> | void;
 }
 
 export interface TocaHttpServerOptions {
@@ -433,7 +438,9 @@ async function handleMetaWebhookEvent(
   }
 
   const events = parseMetaWebhookEvents(rawBody);
+  const whatsAppEvents = parseWhatsAppWebhookEvents(rawBody);
   await options.metaWebhook!.onEvents?.(events);
+  await options.metaWebhook!.onWhatsAppEvents?.(whatsAppEvents);
 
   response.writeHead(200, {
     'content-type': 'text/plain; charset=utf-8',

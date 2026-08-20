@@ -550,9 +550,17 @@ export class PostgresCrmCommunicationStore implements CrmCommunicationStore {
     return this.#transaction(async (client) => {
       const result = await client.query<ConversationRow>(
         `update crm_conversations set
-           status='HUMAN_HANDOFF', human_handoff_at=coalesce(human_handoff_at,$5::timestamptz),
-           human_handoff_reason=coalesce(human_handoff_reason,$6), version=version+1,
-           updated_at=$5::timestamptz
+           status='HUMAN_HANDOFF',
+           human_handoff_at=coalesce(human_handoff_at,$5::timestamptz),
+           human_handoff_reason=coalesce(human_handoff_reason,$6),
+           version=case
+             when status='HUMAN_HANDOFF' and human_handoff_reason=$6 then version
+             else version+1
+           end,
+           updated_at=case
+             when status='HUMAN_HANDOFF' and human_handoff_reason=$6 then updated_at
+             else $5::timestamptz
+           end
          where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and conversation_id=$4
          returning *`,
         [

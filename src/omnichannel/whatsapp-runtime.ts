@@ -564,8 +564,10 @@ export class WhatsAppOutboundRuntime {
         workspaceId: input.workspaceId,
         organizationId: input.organizationId,
         status: 'SUCCEEDED',
-        approvalId: input.eligibility.approval?.approvalId,
-        externalResourceId: submitted.providerMessageId ?? undefined,
+        ...(input.eligibility.approval
+          ? { approvalId: input.eligibility.approval.approvalId }
+          : {}),
+        ...(submitted.providerMessageId ? { externalResourceId: submitted.providerMessageId } : {}),
         evidence: [...input.evidence, ...receipt.evidence, ...readback.evidence],
         createdAt: now,
       });
@@ -603,7 +605,9 @@ export class WhatsAppOutboundRuntime {
         workspaceId: input.workspaceId,
         organizationId: input.organizationId,
         status: 'FAILED',
-        approvalId: input.eligibility.approval?.approvalId,
+        ...(input.eligibility.approval
+          ? { approvalId: input.eligibility.approval.approvalId }
+          : {}),
         errorCode: failure.errorCode,
         evidence: input.evidence,
         createdAt: now,
