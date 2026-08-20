@@ -11,7 +11,7 @@ describe('R16 privacy capability registry', () => {
     expect(PRIVACY_CAPABILITY_CONTRACTS.map((item) => item.capabilityId)).toEqual([
       ...PRIVACY_CAPABILITY_IDS,
     ]);
-    expect(PRIVACY_CAPABILITY_CONTRACTS).toHaveLength(13);
+    expect(PRIVACY_CAPABILITY_CONTRACTS).toHaveLength(18);
     expect(PRIVACY_CAPABILITY_CONTRACTS.every((item) => item.routeId === 'R16')).toBe(true);
     expect(
       PRIVACY_CAPABILITY_CONTRACTS.every((item) => item.lifecycleStatus === 'IMPLEMENTED'),
@@ -31,12 +31,35 @@ describe('R16 privacy capability registry', () => {
     ).toMatchObject({ riskClass: 'DESTRUCTIVE', approvalRequired: true });
   });
 
+  it('keeps communication decisions and PII minimization read-only while privacy state changes remain governed writes', () => {
+    expect(
+      PRIVACY_CAPABILITY_CONTRACTS.find(
+        (item) => item.capabilityId === 'privacy.communication.resolve',
+      ),
+    ).toMatchObject({ riskClass: 'READ', sideEffects: false });
+    expect(
+      PRIVACY_CAPABILITY_CONTRACTS.find(
+        (item) => item.capabilityId === 'privacy.pii.access.evaluate',
+      ),
+    ).toMatchObject({ riskClass: 'READ', sideEffects: false });
+    expect(
+      PRIVACY_CAPABILITY_CONTRACTS.find(
+        (item) => item.capabilityId === 'privacy.provider_consent.reconcile',
+      ),
+    ).toMatchObject({ riskClass: 'WRITE_REVERSIBLE', sideEffects: true });
+    expect(
+      PRIVACY_CAPABILITY_CONTRACTS.find(
+        (item) => item.capabilityId === 'privacy.suppression.record',
+      ),
+    ).toMatchObject({ riskClass: 'WRITE_REVERSIBLE', sideEffects: true });
+  });
+
   it('registers audit metadata without pretending MCP exposure or production validation', () => {
     const registry = new ToolRegistry();
     registerPrivacyAuditCapabilities(registry);
     registerPrivacyAuditCapabilities(registry);
 
-    expect(registry.list()).toHaveLength(13);
+    expect(registry.list()).toHaveLength(18);
     expect(registry.get('privacy.consent.record')).toMatchObject({
       capabilityStatus: 'IMPLEMENTED',
       provider: 'TOCA_OS+toca-mcp',
@@ -44,6 +67,11 @@ describe('R16 privacy capability registry', () => {
       sideEffects: true,
     });
     expect(registry.get('privacy.suppression.check')).toMatchObject({
+      capabilityStatus: 'IMPLEMENTED',
+      riskClass: 'READ',
+      sideEffects: false,
+    });
+    expect(registry.get('privacy.communication.resolve')).toMatchObject({
       capabilityStatus: 'IMPLEMENTED',
       riskClass: 'READ',
       sideEffects: false,
