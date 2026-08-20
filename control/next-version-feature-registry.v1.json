@@ -6,12 +6,7 @@
   "coordinationRound": "2026-08-20T02:50:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-  "evidenceStates": [
-    "IMPLEMENTED",
-    "CI_VERIFIED",
-    "PROVIDER_VERIFIED",
-    "PRODUCTION_VERIFIED"
-  ],
+  "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
   "rules": {
     "liveMainIsNextBaseline": true,
     "exactHeadEvidenceRequired": true,
@@ -79,9 +74,7 @@
       "stackedOnPr": 14,
       "providerEvidenceRequired": true,
       "providerEvidenceState": "BLOCKED_BY_RIGHTS_LIKENESS_APPROVAL",
-      "notes": [
-        "retarget/rebase to main and rerun exact-head Quality after PR #14 merges"
-      ]
+      "notes": ["retarget/rebase to main and rerun exact-head Quality after PR #14 merges"]
     },
     {
       "id": "NEXT-004",
@@ -219,11 +212,7 @@
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-009", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": [
-        "existing durable workflow",
-        "existing scheduler",
-        "canonical Privacy"
-      ]
+      "reuse": ["existing durable workflow", "existing scheduler", "canonical Privacy"]
     },
     {
       "id": "NEXT-013",
@@ -363,10 +352,7 @@
       "pr": 20,
       "dependencies": ["NEXT-005", "NEXT-008", "NEXT-010", "NEXT-013"],
       "providerEvidenceRequired": true,
-      "reuse": [
-        "existing Cloud SQL backup/PITR/runbooks",
-        "existing DR evidence model"
-      ]
+      "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"]
     },
     {
       "id": "NEXT-023",
@@ -375,11 +361,7 @@
       "evidenceState": null,
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "reuse": [
-        "existing route catalog",
-        "existing capability registry",
-        "existing Policy Engine"
-      ]
+      "reuse": ["existing route catalog", "existing capability registry", "existing Policy Engine"]
     },
     {
       "id": "NEXT-024",
@@ -426,9 +408,7 @@
       "migration": null,
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": false,
-      "notes": [
-        "same MCP server; UI emits governed AG01 intent only; no direct provider write"
-      ]
+      "notes": ["same MCP server; UI emits governed AG01 intent only; no direct provider write"]
     }
   ],
   "closedSupersededOrTemporaryPrs": [
