@@ -207,9 +207,9 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
       );
       expect(rows.rows[0]?.count).toBe('1');
       const auditRows = await pool2.query<{ count: string }>(
-        `select count(*)::text as count from internal_audit_ledger
+        `select count(*)::text as count from audit_ledger_events
           where tenant_id=$1 and workspace_id=$2 and organization_id=$3
-            and record_type='OPPORTUNITY' and record_id=$4`,
+            and tool_name='core.crm.sales.opportunity.updated' and external_resource_id=$4`,
         [TENANT, WORKSPACE, ORGANIZATION, opportunityId],
       );
       expect(Number(auditRows.rows[0]?.count ?? '0')).toBeGreaterThan(0);
@@ -251,7 +251,12 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
         leadId,
         activityType: 'CONTACT_ATTEMPT',
         summary: 'Contacted lead',
-        stageTransition: { pipelineKey: PIPELINE, fromStage: 'NEW', toStage: 'CONTACTED', reason: 'Contact made' },
+        stageTransition: {
+          pipelineKey: PIPELINE,
+          fromStage: 'NEW',
+          toStage: 'CONTACTED',
+          reason: 'Contact made',
+        },
       });
       const scoring = scoreLeadDeterministically({
         intentStrength: 4,
@@ -291,7 +296,12 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
         opportunityId,
         activityType: 'QUALIFICATION',
         summary: 'Opportunity created',
-        stageTransition: { pipelineKey: PIPELINE, fromStage: 'QUALIFIED', toStage: 'OPPORTUNITY', reason: 'Opportunity created' },
+        stageTransition: {
+          pipelineKey: PIPELINE,
+          fromStage: 'QUALIFIED',
+          toStage: 'OPPORTUNITY',
+          reason: 'Opportunity created',
+        },
       });
       await expect(
         sales.updateOpportunity({
@@ -319,7 +329,14 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
         reason: 'Customer declined on price',
       });
       expect(lost.toStage).toBe('LOST');
-      expect(await core.getOpportunity({ tenantId: TENANT, workspaceId: WORKSPACE, organizationId: ORGANIZATION, opportunityId })).toMatchObject({
+      expect(
+        await core.getOpportunity({
+          tenantId: TENANT,
+          workspaceId: WORKSPACE,
+          organizationId: ORGANIZATION,
+          opportunityId,
+        }),
+      ).toMatchObject({
         status: 'LOST',
         lossReason: 'PRICE_MISMATCH',
       });
@@ -355,7 +372,12 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
         leadId,
         activityType: 'CONTACT_ATTEMPT',
         summary: 'Initial contact attempt',
-        stageTransition: { pipelineKey: PIPELINE, fromStage: 'NEW', toStage: 'CONTACTED', reason: 'Initial attempt' },
+        stageTransition: {
+          pipelineKey: PIPELINE,
+          fromStage: 'NEW',
+          toStage: 'CONTACTED',
+          reason: 'Initial attempt',
+        },
       });
       const scoring = scoreLeadDeterministically({
         intentStrength: 1,
@@ -381,7 +403,14 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
       expect(decision.decision).toBe('NURTURE');
       expect(scoring.aiScore).toBe(95);
       expect(scoring.deterministicScore).toBeLessThan(35);
-      expect(await core.getLead({ tenantId: TENANT, workspaceId: WORKSPACE, organizationId: ORGANIZATION, leadId })).toMatchObject({
+      expect(
+        await core.getLead({
+          tenantId: TENANT,
+          workspaceId: WORKSPACE,
+          organizationId: ORGANIZATION,
+          leadId,
+        }),
+      ).toMatchObject({
         status: 'NURTURING',
         qualification: 'MARKETING_QUALIFIED',
       });
@@ -394,7 +423,9 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
       );
       expect(history.rows[0]).toEqual({ decisions: '1', scores: '1', nurture: '1' });
       await expect(
-        pool.query(`update crm_qualification_decisions set rationale='tampered' where lead_id=$1`, [leadId]),
+        pool.query(`update crm_qualification_decisions set rationale='tampered' where lead_id=$1`, [
+          leadId,
+        ]),
       ).rejects.toThrow('CRM_SALES_HISTORY_MUTATION_FORBIDDEN');
     } finally {
       await pool.end();

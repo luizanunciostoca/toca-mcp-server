@@ -66,12 +66,7 @@ export interface ConversationRecord extends CrmScope {
   readonly channel: SalesChannel;
   readonly language: string;
   readonly status:
-    | 'OPEN'
-    | 'WAITING_CUSTOMER'
-    | 'WAITING_HUMAN'
-    | 'ABANDONED'
-    | 'HANDED_OFF'
-    | 'CLOSED';
+    'OPEN' | 'WAITING_CUSTOMER' | 'WAITING_HUMAN' | 'ABANDONED' | 'HANDED_OFF' | 'CLOSED';
   readonly startedAt: string;
   readonly lastMessageAt: string | null;
   readonly closedAt: string | null;
@@ -274,7 +269,11 @@ export interface LeadScoringResult {
 export function scoreLeadDeterministically(input: LeadScoringInput): LeadScoringResult {
   const nowMs = timestampMs(input.now, 'CRM_SALES_SCORE_NOW_INVALID');
   assertRange(input.propensity, 0, 1, 'CRM_SALES_PROPENSITY_INVALID');
-  if (!Number.isInteger(input.intentStrength) || input.intentStrength < 0 || input.intentStrength > 4) {
+  if (
+    !Number.isInteger(input.intentStrength) ||
+    input.intentStrength < 0 ||
+    input.intentStrength > 4
+  ) {
     throw new Error('CRM_SALES_INTENT_STRENGTH_INVALID');
   }
   const engagementSignals = input.engagementSignals ?? 0;
@@ -373,7 +372,8 @@ export function recommendQualification(
   return {
     outcome: 'NURTURE',
     authority: 'DETERMINISTIC',
-    rationale: 'Low deterministic score is retained for governed nurture/reactivation rather than discarded.',
+    rationale:
+      'Low deterministic score is retained for governed nurture/reactivation rather than discarded.',
   };
 }
 
@@ -416,13 +416,19 @@ export function calculateInitialSla(
 }
 
 export function calculateSlaState(
-  input: Pick<LeadSlaRecord, 'firstResponseDueAt' | 'firstResponseAt' | 'followUpDueAt' | 'state'> & {
+  input: Pick<
+    LeadSlaRecord,
+    'firstResponseDueAt' | 'firstResponseAt' | 'followUpDueAt' | 'state'
+  > & {
     readonly now: string;
   },
 ): SalesSlaState {
   if (input.state === 'PAUSED' || input.state === 'SATISFIED') return input.state;
   const nowMs = timestampMs(input.now, 'CRM_SALES_SLA_NOW_INVALID');
-  if (!input.firstResponseAt && nowMs > timestampMs(input.firstResponseDueAt, 'CRM_SALES_SLA_DUE_INVALID')) {
+  if (
+    !input.firstResponseAt &&
+    nowMs > timestampMs(input.firstResponseDueAt, 'CRM_SALES_SLA_DUE_INVALID')
+  ) {
     return 'BREACHED';
   }
   if (input.followUpDueAt) {
@@ -540,7 +546,9 @@ export interface LeadRoutingDecision {
 }
 
 export function routeLeadDeterministically(input: LeadRoutingInput): LeadRoutingDecision {
-  const owners = [...new Set(input.eligibleOwnerPrincipalIds.map((value) => value.trim()).filter(Boolean))].sort();
+  const owners = [
+    ...new Set(input.eligibleOwnerPrincipalIds.map((value) => value.trim()).filter(Boolean)),
+  ].sort();
   if (owners.length === 0) throw new Error('CRM_SALES_ROUTING_OWNER_REQUIRED');
   const preferred = input.preferredOwnerPrincipalId?.trim();
   if (preferred && owners.includes(preferred)) {
@@ -575,7 +583,12 @@ export interface ContactMergeDecision {
 
 export function evaluateContactMerge(input: ContactMergeEvidence): ContactMergeDecision {
   if (!input.sameScope) {
-    return { allowed: false, confidence: 0, rule: 'scope-boundary-v1', reason: 'Cross-scope merge is forbidden.' };
+    return {
+      allowed: false,
+      confidence: 0,
+      rule: 'scope-boundary-v1',
+      reason: 'Cross-scope merge is forbidden.',
+    };
   }
   if (input.explicitHumanApproval && input.exactNormalizedChannelMatch) {
     return {
@@ -723,13 +736,15 @@ export interface PipelineQueryRow extends CrmScope {
 }
 
 export interface CrmSalesStore {
-  resolveContact(input: CrmScope & {
-    readonly channels: readonly {
-      readonly channelType: 'EMAIL' | 'PHONE' | 'SOCIAL' | 'OTHER';
-      readonly provider?: string | null;
-      readonly value: string;
-    }[];
-  }): Promise<ContactResolutionResult>;
+  resolveContact(
+    input: CrmScope & {
+      readonly channels: readonly {
+        readonly channelType: 'EMAIL' | 'PHONE' | 'SOCIAL' | 'OTHER';
+        readonly provider?: string | null;
+        readonly value: string;
+      }[];
+    },
+  ): Promise<ContactResolutionResult>;
   createConversation(input: CreateConversationInput): Promise<ConversationRecord>;
   appendMessage(input: AppendMessageInput): Promise<MessageRecord>;
   appendActivity(input: AppendSalesActivityInput): Promise<SalesActivityRecord>;
@@ -737,8 +752,12 @@ export interface CrmSalesStore {
   qualifyLead(input: QualifyLeadInput): Promise<QualificationDecision>;
   updateOpportunity(input: UpdateSalesOpportunityInput): Promise<PipelineStageHistoryRecord>;
   queryPipeline(input: PipelineQueryInput): Promise<readonly PipelineQueryRow[]>;
-  getQualificationDecision(input: CrmScope & { readonly qualificationDecisionId: string }): Promise<QualificationDecision | undefined>;
-  getNextAction(input: CrmScope & { readonly nextActionId: string }): Promise<NextActionRecord | undefined>;
+  getQualificationDecision(
+    input: CrmScope & { readonly qualificationDecisionId: string },
+  ): Promise<QualificationDecision | undefined>;
+  getNextAction(
+    input: CrmScope & { readonly nextActionId: string },
+  ): Promise<NextActionRecord | undefined>;
 }
 
 function urgencyWeight(urgency: SalesUrgency): number {
@@ -756,7 +775,8 @@ function urgencyWeight(urgency: SalesUrgency): number {
 
 function estimatedValuePoints(valueMinor: number | null): number {
   if (valueMinor === null) return 0;
-  if (!Number.isInteger(valueMinor) || valueMinor < 0) throw new Error('CRM_SALES_ESTIMATED_VALUE_INVALID');
+  if (!Number.isInteger(valueMinor) || valueMinor < 0)
+    throw new Error('CRM_SALES_ESTIMATED_VALUE_INVALID');
   if (valueMinor >= 500_000) return 15;
   if (valueMinor >= 200_000) return 12;
   if (valueMinor >= 100_000) return 9;

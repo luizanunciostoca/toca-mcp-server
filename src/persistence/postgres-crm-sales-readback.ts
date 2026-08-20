@@ -9,9 +9,7 @@ export interface CrmSalesPersistenceReadback {
 export class PostgresCrmSalesPersistenceReadback implements CrmSalesPersistenceReadback {
   constructor(private readonly pool: pg.Pool) {}
 
-  async activityExists(
-    input: CrmScope & { readonly activityId: string },
-  ): Promise<boolean> {
+  async activityExists(input: CrmScope & { readonly activityId: string }): Promise<boolean> {
     validateCrmScope(input);
     const activityId = input.activityId.trim();
     if (!activityId) throw new Error('CRM_ACTIVITY_ID_REQUIRED');

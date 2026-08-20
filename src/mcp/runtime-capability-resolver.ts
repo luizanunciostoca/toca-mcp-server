@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import { VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET } from '../content/capability-ids.js';
+import { resolveCrmSalesRuntimeBinding, type CrmSalesRuntimeServices } from '../crm/runtime.js';
 import {
   VIDEO_CONTENT_WRITE_CAPABILITY_IDS,
   runtimeIdempotencyKey,
@@ -232,6 +233,7 @@ export interface RuntimeCapabilityServices {
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
   readonly instagramScheduler?: TocaManagedInstagramScheduler;
   readonly videoContent?: VideoContentRuntimeService;
+  readonly crmSales?: CrmSalesRuntimeServices;
 }
 
 interface GoogleAdsRuntimeContext {
@@ -250,6 +252,9 @@ function resolveBinding(
   capabilityId: string,
   services: RuntimeCapabilityServices,
 ): CoreCapabilityRuntimeBinding | undefined {
+  const crmSales = resolveCrmSalesRuntimeBinding(capabilityId, services.crmSales);
+  if (crmSales) return crmSales;
+
   const instagramPublication = resolveInstagramPublicationRuntimeBinding(
     capabilityId,
     services.instagramPublication,

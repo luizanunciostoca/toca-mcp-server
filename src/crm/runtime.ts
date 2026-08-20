@@ -6,6 +6,7 @@ import type {
   CoreCapabilityRuntimeContext,
 } from '../mcp/core-execution.js';
 import type { CrmCoreStore, CrmMutationMetadata, CrmScope } from './crm-records.js';
+import type { CrmSalesPersistenceReadback } from '../persistence/postgres-crm-sales-readback.js';
 import {
   calculateInitialSla,
   recommendQualification,
@@ -230,6 +231,7 @@ const pipelineQuerySchema = z.object({
 export interface CrmSalesRuntimeServices {
   readonly core: CrmCoreStore;
   readonly sales: CrmSalesStore;
+  readonly persistenceReadback: CrmSalesPersistenceReadback;
 }
 
 export function resolveCrmSalesRuntimeBinding(
@@ -295,9 +297,11 @@ export function resolveCrmSalesRuntimeBinding(
             organizationId: record.organizationId,
             leadId: record.leadId,
           });
-          return readback(Boolean(persisted && persisted.version === record.version), record.leadId, [
-            `crm:postgres:lead:${record.leadId}:version:${record.version}`,
-          ]);
+          return readback(
+            Boolean(persisted && persisted.version === record.version),
+            record.leadId,
+            [`crm:postgres:lead:${record.leadId}:version:${record.version}`],
+          );
         },
       );
     case 'sales.lead.qualify':
@@ -387,7 +391,8 @@ export function resolveCrmSalesRuntimeBinding(
             organizationId: stage.organizationId,
             opportunityId: stage.opportunityId,
           });
-          const expectedStatus = stage.toStage === 'WON' ? 'WON' : stage.toStage === 'LOST' ? 'LOST' : 'OPEN';
+          const expectedStatus =
+            stage.toStage === 'WON' ? 'WON' : stage.toStage === 'LOST' ? 'LOST' : 'OPEN';
           return readback(Boolean(persisted?.status === expectedStatus), stage.opportunityId, [
             `crm:postgres:opportunity:${stage.opportunityId}:status:${persisted?.status ?? 'missing'}`,
           ]);
@@ -417,7 +422,7 @@ export function resolveCrmSalesRuntimeBinding(
           }),
         async (result) => {
           const activity = activityResult(result);
-          const persisted = await services.sales.getActivity({
+          const persisted = await services.persistenceReadback.activityExists({
             tenantId: activity.tenantId,
             workspaceId: activity.workspaceId,
             organizationId: activity.organizationId,
@@ -511,7 +516,10 @@ function mutationBinding<T>(
   schema: z.ZodType<T>,
   idempotencyKey: (input: T) => string,
   execute: (input: T, context: CoreCapabilityRuntimeContext) => Promise<unknown>,
-  providerReadback: (result: unknown, input: T) => Promise<{
+  providerReadback: (
+    result: unknown,
+    input: T,
+  ) => Promise<{
     readonly verified: boolean;
     readonly evidence: readonly string[];
     readonly externalResourceId?: string;
@@ -546,7 +554,13 @@ function metadataFromContext(
     executionId: context.executionId,
     correlationId: context.correlationId,
     actorPrincipalId: principal.principalId,
-    evidence: [...new Set([...principal.evidence, ...context.identity.authorization.evidence, ...input.evidence])],
+    evidence: [
+      ...new Set([
+        ...principal.evidence,
+        ...context.identity.authorization.evidence,
+        ...input.evidence,
+      ]),
+    ],
   };
 }
 
@@ -563,7 +577,9 @@ function scoreFromSignals(
       : {}),
     ...(input.visitEventAt !== undefined ? { visitEventAt: input.visitEventAt } : {}),
     now,
-    ...(input.engagementSignals !== undefined ? { engagementSignals: input.engagementSignals } : {}),
+    ...(input.engagementSignals !== undefined
+      ? { engagementSignals: input.engagementSignals }
+      : {}),
     ...(input.aiScore !== undefined ? { aiScore: input.aiScore } : {}),
   });
 }

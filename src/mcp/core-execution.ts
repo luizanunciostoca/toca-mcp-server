@@ -23,9 +23,15 @@ export interface CoreCapabilityFinancialContext {
   readonly currency: string;
 }
 
+export interface CoreCapabilityRuntimeContext {
+  readonly identity: ExecutionIdentity;
+  readonly executionId: string;
+  readonly correlationId: string;
+}
+
 export interface CoreCapabilityRuntimeBinding {
   readonly inputSchema: CoreInputParser;
-  execute(input: unknown): Promise<unknown>;
+  execute(input: unknown, context?: CoreCapabilityRuntimeContext): Promise<unknown>;
   readonly targetAccount?: (input: unknown) => string | undefined;
   readonly idempotencyKey?: (input: unknown) => string | undefined;
   readonly financialContext?: (input: unknown) => CoreCapabilityFinancialContext | undefined;
@@ -171,7 +177,11 @@ export async function executeCoreCapability(
       : undefined;
 
   const action = async (): Promise<unknown> => {
-    const result = await resolved.binding.execute(resolved.payload);
+    const result = await resolved.binding.execute(resolved.payload, {
+      identity,
+      executionId,
+      correlationId,
+    });
     if (resolved.tool.sideEffects && !formalApproval) {
       if (!providerReadback) {
         throw new ExecutionError(

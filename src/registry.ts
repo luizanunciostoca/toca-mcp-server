@@ -1,5 +1,6 @@
 import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from './content/capability-contracts.js';
 import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';
+import { CRM_SALES_RUNTIME_TOOL_DEFINITIONS } from './crm/runtime.js';
 import {
   googleAdsPhaseAtLeast,
   type GoogleAdsPhase,
@@ -421,6 +422,7 @@ export interface ToolRegistryOptions {
   readonly googleAdsPhase?: GoogleAdsPhase;
   readonly tocaManagedInstagramSchedulerEnabled?: boolean;
   readonly videoContentRuntimeEnabled?: boolean;
+  readonly crmSalesRuntimeEnabled?: boolean;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
@@ -438,5 +440,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
     for (const tool of tocaManagedInstagramSchedulerTools) registry.register(tool);
   if (options.videoContentRuntimeEnabled)
     for (const tool of videoContentRuntimeTools) registry.register(tool);
+  if (options.crmSalesRuntimeEnabled)
+    for (const tool of CRM_SALES_RUNTIME_TOOL_DEFINITIONS) registry.register(tool);
   return registry;
 }

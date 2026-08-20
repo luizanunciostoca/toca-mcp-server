@@ -282,7 +282,12 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
         `crm:contact-match:${candidate.contactId}:${candidate.matchedChannels.length}:${candidate.verified ? 'verified' : 'unverified'}`,
     );
     if (candidates.length === 0) {
-      return { state: 'NOT_FOUND', canonicalContactId: null, candidates: [], evidence: ['crm:contact-match:none'] };
+      return {
+        state: 'NOT_FOUND',
+        canonicalContactId: null,
+        candidates: [],
+        evidence: ['crm:contact-match:none'],
+      };
     }
     if (candidates.length > 1) {
       return {
@@ -296,11 +301,13 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     return {
       state: 'RESOLVED',
       canonicalContactId: only.contactId,
-      candidates: [{
-        contactId: only.contactId,
-        matchedChannels: only.matchedChannels,
-        mergedIntoContactId: only.mergedIntoContactId,
-      }],
+      candidates: [
+        {
+          contactId: only.contactId,
+          matchedChannels: only.matchedChannels,
+          mergedIntoContactId: only.mergedIntoContactId,
+        },
+      ],
       evidence,
     };
   }
@@ -314,7 +321,13 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
     const language = normalizeLanguage(input.language);
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'sales.conversation.create', 'CONTACT', contactId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.conversation.create',
+        'CONTACT',
+        contactId,
+      );
       if (replay) return conversationFromSnapshot(replay);
       await assertContactExists(client, input, contactId);
       if (leadId) await assertLeadLineage(client, input, leadId, contactId);
@@ -325,10 +338,35 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
            version, created_at, updated_at
          ) values ($1,$2,$3,$4,$5,$6,$7,$8,'OPEN',$9::timestamptz,null,null,$10::jsonb,1,$9::timestamptz,$9::timestamptz)
          returning *`,
-        [conversationId, input.tenantId, input.workspaceId, input.organizationId, contactId, leadId, input.channel, language, now, json(input.attributes ?? {})],
+        [
+          conversationId,
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          contactId,
+          leadId,
+          input.channel,
+          language,
+          now,
+          json(input.attributes ?? {}),
+        ],
       );
-      const record = conversationFromRow(requiredRow(inserted.rows[0], 'CRM_CONVERSATION_INSERT_FAILED'));
-      await recordMutation(client, this.#outbox, input, metadata, 'CONTACT', contactId, 'sales.conversation.created', conversationId, 1, record, now);
+      const record = conversationFromRow(
+        requiredRow(inserted.rows[0], 'CRM_CONVERSATION_INSERT_FAILED'),
+      );
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        'CONTACT',
+        contactId,
+        'sales.conversation.created',
+        conversationId,
+        1,
+        record,
+        now,
+      );
       await completeIdempotency(client, input, 'sales.conversation.create', contactId, record, now);
       return record;
     });
@@ -338,7 +376,10 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     validateCrmScope(input);
     const metadata = mutationMetadata(input);
     const now = normalizeNow(input.now);
-    const occurredAt = normalizeCrmTimestamp(input.occurredAt ?? now, 'CRM_MESSAGE_OCCURRED_AT_INVALID');
+    const occurredAt = normalizeCrmTimestamp(
+      input.occurredAt ?? now,
+      'CRM_MESSAGE_OCCURRED_AT_INVALID',
+    );
     const messageId = requireCrmText(input.messageId, 'CRM_MESSAGE_ID_REQUIRED');
     const conversationId = requireCrmText(input.conversationId, 'CRM_CONVERSATION_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
@@ -347,7 +388,13 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     return this.#transaction(async (client) => {
       const recordType = leadId ? 'LEAD' : 'CONTACT';
       const recordId = leadId ?? contactId;
-      const replay = await beginIdempotency(client, input, 'sales.message.append', recordType, recordId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.message.append',
+        recordType,
+        recordId,
+      );
       if (replay) return messageFromSnapshot(replay);
       await lockConversationLineage(client, input, conversationId, contactId, leadId);
       const inserted = await client.query<MessageRow>(
@@ -385,9 +432,29 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
                 status=case when $6='INBOUND' then 'OPEN' else 'WAITING_CUSTOMER' end,
                 version=version+1, updated_at=$7::timestamptz
           where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and conversation_id=$4`,
-        [input.tenantId, input.workspaceId, input.organizationId, conversationId, occurredAt, input.direction, now],
+        [
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          conversationId,
+          occurredAt,
+          input.direction,
+          now,
+        ],
       );
-      await recordMutation(client, this.#outbox, input, metadata, recordType, recordId, 'sales.message.appended', messageId, 1, record, now);
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        recordType,
+        recordId,
+        'sales.message.appended',
+        messageId,
+        1,
+        record,
+        now,
+      );
       await completeIdempotency(client, input, 'sales.message.append', recordId, record, now);
       return record;
     });
@@ -397,7 +464,10 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     validateCrmScope(input);
     const metadata = mutationMetadata(input);
     const now = normalizeNow(input.now);
-    const occurredAt = normalizeCrmTimestamp(input.occurredAt ?? now, 'CRM_ACTIVITY_OCCURRED_AT_INVALID');
+    const occurredAt = normalizeCrmTimestamp(
+      input.occurredAt ?? now,
+      'CRM_ACTIVITY_OCCURRED_AT_INVALID',
+    );
     const activityId = requireCrmText(input.activityId, 'CRM_ACTIVITY_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
     const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
@@ -409,11 +479,18 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     return this.#transaction(async (client) => {
       const recordType = opportunityId ? 'OPPORTUNITY' : 'LEAD';
       const recordId = opportunityId ?? leadId!;
-      const replay = await beginIdempotency(client, input, 'sales.activity.append', recordType, recordId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.activity.append',
+        recordType,
+        recordId,
+      );
       if (replay) return activityFromSnapshot(replay);
       await assertContactExists(client, input, contactId);
       if (leadId) await assertLeadLineage(client, input, leadId, contactId);
-      if (opportunityId) await assertOpportunityLineage(client, input, opportunityId, contactId, leadId);
+      if (opportunityId)
+        await assertOpportunityLineage(client, input, opportunityId, contactId, leadId);
       if (input.conversationId) {
         await lockConversationLineage(client, input, input.conversationId, contactId, leadId);
       }
@@ -458,8 +535,21 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           now,
         });
       }
-      if (leadId) await updateSlaFromActivity(client, input, leadId, input.activityType, occurredAt, now);
-      await recordMutation(client, this.#outbox, input, metadata, recordType, recordId, 'sales.activity.appended', activityId, 1, record, now);
+      if (leadId)
+        await updateSlaFromActivity(client, input, leadId, input.activityType, occurredAt, now);
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        recordType,
+        recordId,
+        'sales.activity.appended',
+        activityId,
+        1,
+        record,
+        now,
+      );
       await completeIdempotency(client, input, 'sales.activity.append', recordId, record, now);
       return record;
     });
@@ -474,15 +564,24 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
     const opportunityId = nullableCrmText(input.opportunityId, 'CRM_OPPORTUNITY_ID_INVALID');
     if (!leadId && !opportunityId) throw new Error('CRM_NEXT_ACTION_LEAD_OR_OPPORTUNITY_REQUIRED');
-    const dueAt = input.dueAt ? normalizeCrmTimestamp(input.dueAt, 'CRM_NEXT_ACTION_DUE_AT_INVALID') : null;
+    const dueAt = input.dueAt
+      ? normalizeCrmTimestamp(input.dueAt, 'CRM_NEXT_ACTION_DUE_AT_INVALID')
+      : null;
     return this.#transaction(async (client) => {
       const recordType = opportunityId ? 'OPPORTUNITY' : 'LEAD';
       const recordId = opportunityId ?? leadId!;
-      const replay = await beginIdempotency(client, input, 'sales.next_action.schedule', recordType, recordId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.next_action.schedule',
+        recordType,
+        recordId,
+      );
       if (replay) return nextActionFromSnapshot(replay);
       await assertContactExists(client, input, contactId);
       if (leadId) await assertLeadLineage(client, input, leadId, contactId);
-      if (opportunityId) await assertOpportunityLineage(client, input, opportunityId, contactId, leadId);
+      if (opportunityId)
+        await assertOpportunityLineage(client, input, opportunityId, contactId, leadId);
       const inserted = await client.query<NextActionRow>(
         `insert into crm_next_actions (
            next_action_id, tenant_id, workspace_id, organization_id, contact_id, lead_id,
@@ -508,8 +607,22 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           now,
         ],
       );
-      const record = nextActionFromRow(requiredRow(inserted.rows[0], 'CRM_NEXT_ACTION_INSERT_FAILED'));
-      await recordMutation(client, this.#outbox, input, metadata, recordType, recordId, 'sales.next_action.scheduled', nextActionId, 1, record, now);
+      const record = nextActionFromRow(
+        requiredRow(inserted.rows[0], 'CRM_NEXT_ACTION_INSERT_FAILED'),
+      );
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        recordType,
+        recordId,
+        'sales.next_action.scheduled',
+        nextActionId,
+        1,
+        record,
+        now,
+      );
       await completeIdempotency(client, input, 'sales.next_action.schedule', recordId, record, now);
       return record;
     });
@@ -524,12 +637,23 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     requireCrmText(input.leadId, 'CRM_LEAD_ID_REQUIRED');
     requireCrmText(input.rationale, 'CRM_QUALIFICATION_RATIONALE_REQUIRED');
     requireCrmText(input.pipelineKey, 'CRM_PIPELINE_KEY_REQUIRED');
-    if (input.scoring.ruleVersion.length === 0) throw new Error('CRM_SCORING_RULE_VERSION_REQUIRED');
-    if (input.authority !== 'DETERMINISTIC' && input.authority !== 'HUMAN' && input.authority !== 'HYBRID') {
+    if (input.scoring.ruleVersion.length === 0)
+      throw new Error('CRM_SCORING_RULE_VERSION_REQUIRED');
+    if (
+      input.authority !== 'DETERMINISTIC' &&
+      input.authority !== 'HUMAN' &&
+      input.authority !== 'HYBRID'
+    ) {
       throw new Error('CRM_QUALIFICATION_AUTHORITY_INVALID');
     }
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'sales.lead.qualify', 'LEAD', input.leadId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.lead.qualify',
+        'LEAD',
+        input.leadId,
+      );
       if (replay) return qualificationFromSnapshot(replay);
       const lead = await lockLead(client, input, input.leadId);
       const toStage = qualificationStage(input.outcome, input.fromStage);
@@ -586,7 +710,9 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           now,
         ],
       );
-      const decision = qualificationFromRow(requiredRow(decisionResult.rows[0], 'CRM_QUALIFICATION_INSERT_FAILED'));
+      const decision = qualificationFromRow(
+        requiredRow(decisionResult.rows[0], 'CRM_QUALIFICATION_INSERT_FAILED'),
+      );
       await insertStageHistory(client, input, {
         stageHistoryId: deterministicChildId('stage', input.qualificationDecisionId),
         contactId: lead.contact_id,
@@ -600,16 +726,42 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
         now,
       });
       await ensureLeadSla(client, input, lead, observation, now);
-      await insertCoreRevision(client, input, metadata, 'LEAD', input.leadId, nextVersion, 'QUALIFIED', {
-        leadId: input.leadId,
-        contactId: lead.contact_id,
-        status: leadState.status,
-        qualification: leadState.qualification,
-        score: input.scoring.effectiveScore,
-        version: nextVersion,
-        updatedAt: now,
-      }, { qualificationDecisionId: input.qualificationDecisionId, leadScoreObservationId: input.leadScoreObservationId }, now);
-      await recordMutation(client, this.#outbox, input, metadata, 'LEAD', input.leadId, 'sales.lead.qualified', input.qualificationDecisionId, nextVersion, decision, now);
+      await insertCoreRevision(
+        client,
+        input,
+        metadata,
+        'LEAD',
+        input.leadId,
+        nextVersion,
+        'QUALIFIED',
+        {
+          leadId: input.leadId,
+          contactId: lead.contact_id,
+          status: leadState.status,
+          qualification: leadState.qualification,
+          score: input.scoring.effectiveScore,
+          version: nextVersion,
+          updatedAt: now,
+        },
+        {
+          qualificationDecisionId: input.qualificationDecisionId,
+          leadScoreObservationId: input.leadScoreObservationId,
+        },
+        now,
+      );
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        'LEAD',
+        input.leadId,
+        'sales.lead.qualified',
+        input.qualificationDecisionId,
+        nextVersion,
+        decision,
+        now,
+      );
       await completeIdempotency(client, input, 'sales.lead.qualify', input.leadId, decision, now);
       return decision;
     });
@@ -621,21 +773,36 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const now = normalizeNow(input.now);
     assertCrmVersion(input.expectedVersion);
     assertSalesPipelineTransition(input.fromStage, input.toStage);
-    if (input.status === 'LOST' && !nullableCrmText(input.lossReason, 'CRM_OPPORTUNITY_LOSS_REASON_INVALID')) {
+    if (
+      input.status === 'LOST' &&
+      !nullableCrmText(input.lossReason, 'CRM_OPPORTUNITY_LOSS_REASON_INVALID')
+    ) {
       throw new Error('CRM_OPPORTUNITY_LOSS_REASON_REQUIRED');
     }
-    if (input.status !== 'LOST' && input.lossReason) throw new Error('CRM_OPPORTUNITY_LOSS_REASON_NOT_ALLOWED');
+    if (input.status !== 'LOST' && input.lossReason)
+      throw new Error('CRM_OPPORTUNITY_LOSS_REASON_NOT_ALLOWED');
     const valueMinor = input.valueMinor ?? null;
     const currency = input.currency?.trim().toUpperCase() ?? null;
-    if ((valueMinor === null) !== (currency === null)) throw new Error('CRM_OPPORTUNITY_MONEY_PAIR_REQUIRED');
-    if (valueMinor !== null && (!Number.isInteger(valueMinor) || valueMinor < 0)) throw new Error('CRM_OPPORTUNITY_VALUE_INVALID');
-    if (currency !== null && !/^[A-Z]{3}$/.test(currency)) throw new Error('CRM_OPPORTUNITY_CURRENCY_INVALID');
+    if ((valueMinor === null) !== (currency === null))
+      throw new Error('CRM_OPPORTUNITY_MONEY_PAIR_REQUIRED');
+    if (valueMinor !== null && (!Number.isInteger(valueMinor) || valueMinor < 0))
+      throw new Error('CRM_OPPORTUNITY_VALUE_INVALID');
+    if (currency !== null && !/^[A-Z]{3}$/.test(currency))
+      throw new Error('CRM_OPPORTUNITY_CURRENCY_INVALID');
     return this.#transaction(async (client) => {
-      const replay = await beginIdempotency(client, input, 'sales.opportunity.update', 'OPPORTUNITY', input.opportunityId);
+      const replay = await beginIdempotency(
+        client,
+        input,
+        'sales.opportunity.update',
+        'OPPORTUNITY',
+        input.opportunityId,
+      );
       if (replay) return stageFromSnapshot(replay);
       const current = await lockOpportunity(client, input, input.opportunityId);
-      if (current.version !== input.expectedVersion) throw new Error('CRM_OPPORTUNITY_VERSION_CONFLICT');
-      if (current.pipeline_key !== input.pipelineKey) throw new Error('CRM_OPPORTUNITY_PIPELINE_MISMATCH');
+      if (current.version !== input.expectedVersion)
+        throw new Error('CRM_OPPORTUNITY_VERSION_CONFLICT');
+      if (current.pipeline_key !== input.pipelineKey)
+        throw new Error('CRM_OPPORTUNITY_PIPELINE_MISMATCH');
       const nextVersion = current.version + 1;
       const closedAt = input.status === 'OPEN' ? null : now;
       const updated = await client.query(
@@ -653,9 +820,17 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           input.status,
           currency ?? current.currency,
           valueMinor ?? numberOrNull(current.value_minor),
-          input.nextAction === undefined ? current.next_action : nullableCrmText(input.nextAction, 'CRM_OPPORTUNITY_NEXT_ACTION_INVALID'),
-          input.nextActionAt === undefined ? isoOrNull(current.next_action_at) : input.nextActionAt ? normalizeCrmTimestamp(input.nextActionAt, 'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID') : null,
-          input.ownerPrincipalId === undefined ? current.owner_principal_id : nullableCrmText(input.ownerPrincipalId, 'CRM_OPPORTUNITY_OWNER_INVALID'),
+          input.nextAction === undefined
+            ? current.next_action
+            : nullableCrmText(input.nextAction, 'CRM_OPPORTUNITY_NEXT_ACTION_INVALID'),
+          input.nextActionAt === undefined
+            ? isoOrNull(current.next_action_at)
+            : input.nextActionAt
+              ? normalizeCrmTimestamp(input.nextActionAt, 'CRM_OPPORTUNITY_NEXT_ACTION_AT_INVALID')
+              : null,
+          input.ownerPrincipalId === undefined
+            ? current.owner_principal_id
+            : nullableCrmText(input.ownerPrincipalId, 'CRM_OPPORTUNITY_OWNER_INVALID'),
           closedAt,
           input.status === 'LOST' ? input.lossReason : null,
           nextVersion,
@@ -676,23 +851,56 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
         metadata,
         now,
       });
-      await insertCoreRevision(client, input, metadata, 'OPPORTUNITY', input.opportunityId, nextVersion, 'UPDATED', {
-        opportunityId: input.opportunityId,
-        contactId: current.contact_id,
-        leadId: current.lead_id,
-        pipelineKey: current.pipeline_key,
-        stageKey: input.stageKey,
-        status: input.status,
-        currency: currency ?? current.currency,
-        valueMinor: valueMinor ?? numberOrNull(current.value_minor),
-        ownerPrincipalId: input.ownerPrincipalId === undefined ? current.owner_principal_id : input.ownerPrincipalId ?? null,
-        closedAt,
-        lossReason: input.status === 'LOST' ? input.lossReason ?? null : null,
-        version: nextVersion,
-        updatedAt: now,
-      }, { fromStage: input.fromStage, toStage: input.toStage, reason: input.reason }, now);
-      await recordMutation(client, this.#outbox, input, metadata, 'OPPORTUNITY', input.opportunityId, 'sales.opportunity.updated', stage.stageHistoryId, nextVersion, stage, now);
-      await completeIdempotency(client, input, 'sales.opportunity.update', input.opportunityId, stage, now);
+      await insertCoreRevision(
+        client,
+        input,
+        metadata,
+        'OPPORTUNITY',
+        input.opportunityId,
+        nextVersion,
+        'UPDATED',
+        {
+          opportunityId: input.opportunityId,
+          contactId: current.contact_id,
+          leadId: current.lead_id,
+          pipelineKey: current.pipeline_key,
+          stageKey: input.stageKey,
+          status: input.status,
+          currency: currency ?? current.currency,
+          valueMinor: valueMinor ?? numberOrNull(current.value_minor),
+          ownerPrincipalId:
+            input.ownerPrincipalId === undefined
+              ? current.owner_principal_id
+              : (input.ownerPrincipalId ?? null),
+          closedAt,
+          lossReason: input.status === 'LOST' ? (input.lossReason ?? null) : null,
+          version: nextVersion,
+          updatedAt: now,
+        },
+        { fromStage: input.fromStage, toStage: input.toStage, reason: input.reason },
+        now,
+      );
+      await recordMutation(
+        client,
+        this.#outbox,
+        input,
+        metadata,
+        'OPPORTUNITY',
+        input.opportunityId,
+        'sales.opportunity.updated',
+        stage.stageHistoryId,
+        nextVersion,
+        stage,
+        now,
+      );
+      await completeIdempotency(
+        client,
+        input,
+        'sales.opportunity.update',
+        input.opportunityId,
+        stage,
+        now,
+      );
       return stage;
     });
   }
@@ -700,7 +908,8 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
   async queryPipeline(input: PipelineQueryInput): Promise<readonly PipelineQueryRow[]> {
     validateCrmScope(input);
     const limit = input.limit ?? 100;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('CRM_PIPELINE_QUERY_LIMIT_INVALID');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500)
+      throw new Error('CRM_PIPELINE_QUERY_LIMIT_INVALID');
     const stages = input.stages ?? [];
     const result = await this.pool.query<{
       contact_id: string;
@@ -734,7 +943,15 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
         where ($6::text is null or coalesce(o.owner_principal_id, d.owner_principal_id)=$6)
         order by l.changed_at desc, l.pipeline_key, l.contact_id
         limit $7`,
-      [input.tenantId, input.workspaceId, input.organizationId, input.pipelineKey ?? null, stages, input.ownerPrincipalId ?? null, limit],
+      [
+        input.tenantId,
+        input.workspaceId,
+        input.organizationId,
+        input.pipelineKey ?? null,
+        stages,
+        input.ownerPrincipalId ?? null,
+        limit,
+      ],
     );
     return result.rows.map((row) => ({
       tenantId: input.tenantId,
@@ -821,7 +1038,17 @@ async function beginIdempotency(
        tenant_id,workspace_id,organization_id,operation,idempotency_key,request_hash,
        record_type,record_id,response_snapshot,created_at,completed_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,null,$9::timestamptz,null)`,
-    [input.tenantId, input.workspaceId, input.organizationId, operation, input.idempotencyKey, requestHash, recordType, recordId, new Date().toISOString()],
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      operation,
+      input.idempotencyKey,
+      requestHash,
+      recordType,
+      recordId,
+      new Date().toISOString(),
+    ],
   );
   return undefined;
 }
@@ -837,7 +1064,16 @@ async function completeIdempotency(
   const updated = await client.query(
     `update crm_idempotency_keys set record_id=$6,response_snapshot=$7::jsonb,completed_at=$8::timestamptz
       where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and operation=$4 and idempotency_key=$5 and completed_at is null`,
-    [input.tenantId, input.workspaceId, input.organizationId, operation, input.idempotencyKey, recordId, json(response), now],
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      operation,
+      input.idempotencyKey,
+      recordId,
+      json(response),
+      now,
+    ],
   );
   if (updated.rowCount !== 1) throw new Error('CRM_IDEMPOTENCY_COMPLETE_FAILED');
 }
@@ -905,7 +1141,23 @@ async function insertCoreRevision(
        tenant_id,workspace_id,organization_id,record_type,record_id,revision,change_type,
        snapshot,details,evidence,execution_id,correlation_id,actor_principal_id,idempotency_key,created_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15::timestamptz)`,
-    [input.tenantId, input.workspaceId, input.organizationId, recordType, recordId, revision, changeType, json(snapshot), json(details), json(metadata.evidence), metadata.executionId, metadata.correlationId, metadata.actorPrincipalId, metadata.idempotencyKey, now],
+    [
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      recordType,
+      recordId,
+      revision,
+      changeType,
+      json(snapshot),
+      json(details),
+      json(metadata.evidence),
+      metadata.executionId,
+      metadata.correlationId,
+      metadata.actorPrincipalId,
+      metadata.idempotencyKey,
+      now,
+    ],
   );
 }
 
@@ -916,7 +1168,8 @@ async function insertScoreObservation(
   now: string,
 ): Promise<LeadScoreObservation> {
   const currency = input.currency?.trim().toUpperCase() ?? null;
-  if ((input.estimatedValueMinor ?? null) !== null && !currency) throw new Error('CRM_SCORE_CURRENCY_REQUIRED');
+  if ((input.estimatedValueMinor ?? null) !== null && !currency)
+    throw new Error('CRM_SCORE_CURRENCY_REQUIRED');
   const result = await client.query<{
     lead_score_observation_id: string;
     tenant_id: string;
@@ -948,7 +1201,29 @@ async function insertScoreObservation(
        observed_at,evidence,created_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::timestamptz,$17,$18,$19::jsonb,$20::timestamptz,$21::jsonb,$20::timestamptz)
      returning *`,
-    [input.leadScoreObservationId, input.tenantId, input.workspaceId, input.organizationId, input.leadId, input.scoring.ruleVersion, input.scoring.deterministicScore, input.scoring.aiScore, input.scoring.effectiveScore, input.scoring.temperature, nullableCrmText(input.intent, 'CRM_SCORE_INTENT_INVALID'), input.urgency, input.propensity, input.estimatedValueMinor ?? null, currency, input.visitEventAt ?? null, nullableCrmText(input.campaignRef, 'CRM_SCORE_CAMPAIGN_INVALID'), nullableCrmText(input.sourceRef, 'CRM_SCORE_SOURCE_INVALID'), json(input.scoring.factors), now, json(requireCrmEvidence(input.evidence))],
+    [
+      input.leadScoreObservationId,
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      input.leadId,
+      input.scoring.ruleVersion,
+      input.scoring.deterministicScore,
+      input.scoring.aiScore,
+      input.scoring.effectiveScore,
+      input.scoring.temperature,
+      nullableCrmText(input.intent, 'CRM_SCORE_INTENT_INVALID'),
+      input.urgency,
+      input.propensity,
+      input.estimatedValueMinor ?? null,
+      currency,
+      input.visitEventAt ?? null,
+      nullableCrmText(input.campaignRef, 'CRM_SCORE_CAMPAIGN_INVALID'),
+      nullableCrmText(input.sourceRef, 'CRM_SCORE_SOURCE_INVALID'),
+      json(input.scoring.factors),
+      now,
+      json(requireCrmEvidence(input.evidence)),
+    ],
   );
   const row = requiredRow(result.rows[0], 'CRM_SCORE_OBSERVATION_INSERT_FAILED');
   return {
@@ -1000,7 +1275,22 @@ async function insertStageHistory(
        changed_at,evidence,created_at
      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14::jsonb,$13::timestamptz)
      returning *`,
-    [value.stageHistoryId, input.tenantId, input.workspaceId, input.organizationId, value.contactId, value.leadId, value.opportunityId, requireCrmText(value.pipelineKey, 'CRM_PIPELINE_KEY_REQUIRED'), value.fromStage, value.toStage, requireCrmText(value.reason, 'CRM_PIPELINE_REASON_REQUIRED'), value.metadata.actorPrincipalId, value.now, json(value.metadata.evidence)],
+    [
+      value.stageHistoryId,
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      value.contactId,
+      value.leadId,
+      value.opportunityId,
+      requireCrmText(value.pipelineKey, 'CRM_PIPELINE_KEY_REQUIRED'),
+      value.fromStage,
+      value.toStage,
+      requireCrmText(value.reason, 'CRM_PIPELINE_REASON_REQUIRED'),
+      value.metadata.actorPrincipalId,
+      value.now,
+      json(value.metadata.evidence),
+    ],
   );
   return stageFromRow(requiredRow(result.rows[0], 'CRM_PIPELINE_STAGE_INSERT_FAILED'));
 }
@@ -1020,7 +1310,16 @@ async function ensureLeadSla(
        reactivation_due_at,version,updated_at
      ) values ($1,$2,$3,$4,$5::timestamptz,null,null,null,0,$6,null,$7::timestamptz,1,$8::timestamptz)
      on conflict (lead_id) do update set updated_at=excluded.updated_at`,
-    [input.leadId, input.tenantId, input.workspaceId, input.organizationId, initial.firstResponseDueAt, initial.state, initial.reactivationDueAt, now],
+    [
+      input.leadId,
+      input.tenantId,
+      input.workspaceId,
+      input.organizationId,
+      initial.firstResponseDueAt,
+      initial.state,
+      initial.reactivationDueAt,
+      now,
+    ],
   );
 }
 
@@ -1049,7 +1348,11 @@ async function updateSlaFromActivity(
   }
 }
 
-async function assertContactExists(client: pg.PoolClient, input: CrmScope, contactId: string): Promise<void> {
+async function assertContactExists(
+  client: pg.PoolClient,
+  input: CrmScope,
+  contactId: string,
+): Promise<void> {
   const result = await client.query(
     `select 1 from crm_contacts where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and contact_id=$4`,
     [input.tenantId, input.workspaceId, input.organizationId, contactId],
@@ -1057,7 +1360,12 @@ async function assertContactExists(client: pg.PoolClient, input: CrmScope, conta
   if (result.rowCount !== 1) throw new Error('CRM_CONTACT_NOT_FOUND');
 }
 
-async function assertLeadLineage(client: pg.PoolClient, input: CrmScope, leadId: string, contactId: string): Promise<void> {
+async function assertLeadLineage(
+  client: pg.PoolClient,
+  input: CrmScope,
+  leadId: string,
+  contactId: string,
+): Promise<void> {
   const result = await client.query(
     `select 1 from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4 and contact_id=$5`,
     [input.tenantId, input.workspaceId, input.organizationId, leadId, contactId],
@@ -1077,7 +1385,8 @@ async function assertOpportunityLineage(
     [input.tenantId, input.workspaceId, input.organizationId, opportunityId, contactId],
   );
   const row = result.rows[0];
-  if (!row || (leadId && row.lead_id !== leadId)) throw new Error('CRM_OPPORTUNITY_LINEAGE_MISMATCH');
+  if (!row || (leadId && row.lead_id !== leadId))
+    throw new Error('CRM_OPPORTUNITY_LINEAGE_MISMATCH');
 }
 
 async function lockConversationLineage(
@@ -1098,7 +1407,11 @@ async function lockConversationLineage(
   }
 }
 
-async function lockLead(client: pg.PoolClient, input: CrmScope, leadId: string): Promise<LeadLockRow> {
+async function lockLead(
+  client: pg.PoolClient,
+  input: CrmScope,
+  leadId: string,
+): Promise<LeadLockRow> {
   const result = await client.query<LeadLockRow>(
     `select lead_id,contact_id,status,qualification,owner_principal_id,version,attributes,captured_at
        from crm_leads where tenant_id=$1 and workspace_id=$2 and organization_id=$3 and lead_id=$4 for update`,
@@ -1135,7 +1448,10 @@ function qualificationLeadState(outcome: QualifyLeadInput['outcome']): {
   }
 }
 
-function qualificationStage(outcome: QualifyLeadInput['outcome'], current: SalesPipelineStage): SalesPipelineStage {
+function qualificationStage(
+  outcome: QualifyLeadInput['outcome'],
+  current: SalesPipelineStage,
+): SalesPipelineStage {
   switch (outcome) {
     case 'QUALIFIED':
       return 'QUALIFIED';
@@ -1300,7 +1616,9 @@ function activityFromSnapshot(value: Readonly<Record<string, unknown>>): SalesAc
 function nextActionFromSnapshot(value: Readonly<Record<string, unknown>>): NextActionRecord {
   return value as unknown as NextActionRecord;
 }
-function qualificationFromSnapshot(value: Readonly<Record<string, unknown>>): QualificationDecision {
+function qualificationFromSnapshot(
+  value: Readonly<Record<string, unknown>>,
+): QualificationDecision {
   return value as unknown as QualificationDecision;
 }
 function stageFromSnapshot(value: Readonly<Record<string, unknown>>): PipelineStageHistoryRecord {
