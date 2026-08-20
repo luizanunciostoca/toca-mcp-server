@@ -26,10 +26,7 @@ export function resolveRuntimeTenantIdentity(
   context: McpToolContextLike,
   defaults: RuntimeTenantDefaults,
 ): ExecutionIdentity | undefined {
-  const defaultTenantId = requireScopeValue(
-    defaults.tenantId,
-    'RUNTIME_DEFAULT_TENANT_REQUIRED',
-  );
+  const defaultTenantId = requireScopeValue(defaults.tenantId, 'RUNTIME_DEFAULT_TENANT_REQUIRED');
   const authInfo = context.http?.authInfo;
   if (!authInfo) {
     return resolveExecutionIdentityFromMcpContext(context, {
@@ -62,10 +59,10 @@ export function resolveRuntimeTenantIdentity(
 
   const workspaceId =
     workspaceSelection.value ??
-    (selectingAnotherTenant ? undefined : defaults.workspaceId ?? defaultTenantId);
+    (selectingAnotherTenant ? undefined : (defaults.workspaceId ?? defaultTenantId));
   const organizationId =
     organizationSelection.value ??
-    (selectingAnotherTenant ? undefined : defaults.organizationId ?? defaultTenantId);
+    (selectingAnotherTenant ? undefined : (defaults.organizationId ?? defaultTenantId));
   if (!workspaceId || !organizationId) return undefined;
 
   return resolveExecutionIdentityFromMcpContext(context, {
