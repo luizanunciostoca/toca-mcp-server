@@ -2,7 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolveCapabilityDefinition } from '../governance/capability-resolution.js';
 import { getRouteDefinition } from '../governance/route-catalog.js';
 import type { IntentRouteResolver, OrchestratorPlanStep, PlanBuilder } from './contracts.js';
-import type { Ag01DecisionModelAdapter, Ag01ModelDecisionResult } from './openai-responses-adapter.js';
+import type {
+  Ag01DecisionModelAdapter,
+  Ag01ModelDecisionResult,
+} from './openai-responses-adapter.js';
 import { parseDecisionPayload, type Ag01StructuredDecision } from './structured-decision.js';
 import { resolveRequiredResources, type TocaOsRegistryClient } from './toca-os-registry.js';
 
@@ -130,10 +133,17 @@ function validateDecision(
     throw new Error(`AG01_MODEL_AGENT_INVALID:${decision.routeId}:${decision.agent}`);
   }
   const resources = resolveRequiredResources(decision.requiredArtifacts, snapshot);
-  if (!resources.some((item) => item.resourceId.startsWith('SOP-') || item.resourceId.startsWith('PIPE-'))) {
+  if (
+    !resources.some(
+      (item) => item.resourceId.startsWith('SOP-') || item.resourceId.startsWith('PIPE-'),
+    )
+  ) {
     throw new Error(`AG01_SOP_ARTIFACT_REQUIRED:${decision.routeId}`);
   }
-  if (identity.authorization.allowedRouteIds && !identity.authorization.allowedRouteIds.includes(decision.routeId)) {
+  if (
+    identity.authorization.allowedRouteIds &&
+    !identity.authorization.allowedRouteIds.includes(decision.routeId)
+  ) {
     throw new Error(`AG01_ROUTE_NOT_AUTHORIZED:${decision.routeId}`);
   }
 
@@ -144,9 +154,12 @@ function validateDecision(
     : null;
   for (const step of decision.steps) {
     const capabilityId = canonicalCapability(step.capabilityId);
-    if (!routeCapabilities.has(capabilityId)) throw new Error(`AG01_CAPABILITY_NOT_ALLOWED_FOR_ROUTE:${decision.routeId}:${capabilityId}`);
-    if (!runtimeCapabilities.has(capabilityId)) throw new Error(`AG01_CAPABILITY_NOT_RUNTIME_BOUND:${capabilityId}`);
-    if (authorized && !authorized.has(capabilityId)) throw new Error(`AG01_CAPABILITY_NOT_AUTHORIZED:${capabilityId}`);
+    if (!routeCapabilities.has(capabilityId))
+      throw new Error(`AG01_CAPABILITY_NOT_ALLOWED_FOR_ROUTE:${decision.routeId}:${capabilityId}`);
+    if (!runtimeCapabilities.has(capabilityId))
+      throw new Error(`AG01_CAPABILITY_NOT_RUNTIME_BOUND:${capabilityId}`);
+    if (authorized && !authorized.has(capabilityId))
+      throw new Error(`AG01_CAPABILITY_NOT_AUTHORIZED:${capabilityId}`);
   }
 
   if (decision.proposedCapability) {
