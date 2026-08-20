@@ -27,3 +27,16 @@ create index if not exists approval_records_tenant_correlation_idx
     correlation_id,
     updated_at desc
   );
+
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'approval_records_tenant_fk'
+  ) then
+    alter table approval_records
+      add constraint approval_records_tenant_fk
+      foreign key (tenant_id) references tenants (tenant_id) on delete restrict;
+  end if;
+end;
+$$;

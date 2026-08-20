@@ -8,6 +8,7 @@ import { requiresFormalApproval } from '../core/policy.js';
 import type { ToolRegistry } from '../core/tool-registry.js';
 import type { EventRecordStore } from '../events/event-record.js';
 import { toApprovalRecordWire, type ApprovalStore } from '../governance/approval-governance.js';
+import { bindApprovalStoreToScope } from '../governance/approval-scope.js';
 import {
   getEffectiveCapabilityCatalog,
   resolveCapabilityDefinition,
@@ -30,6 +31,7 @@ export const CORE_MCP_TOOL_NAMES = [
   'toca.workflow.get',
   'toca.workflow.advance',
   'toca.approval.request',
+  'toca.approval.list',
   'toca.approval.get',
   'toca.execute',
   'toca.verify',
@@ -489,12 +491,50 @@ export function registerTocaCoreSurface(
     },
     async (input, context) => {
       const identity = requireIdentity(dependencies, context);
+      const approvalStore = dependencies.approvalStore
+        ? bindApprovalStoreToScope(dependencies.approvalStore, identity.principal)
+        : undefined;
       const approval = await requestCoreApproval(input, identity, {
         registry: dependencies.registry,
         runtimeResolver: dependencies.runtimeResolver,
-        ...(dependencies.approvalStore ? { approvalStore: dependencies.approvalStore } : {}),
+        ...(approvalStore ? { approvalStore } : {}),
       });
       return response({ approval: toApprovalRecordWire(approval) });
+    },
+  );
+
+  server.registerTool(
+    'toca.approval.list',
+    {
+      title: 'List TOCA Approvals',
+      description:
+        'List ApprovalRecords inside the authenticated tenant/workspace/organization boundary.',
+      inputSchema: z.object({
+        status: z
+          .enum([
+            'REQUESTED',
+            'APPROVED',
+            'RESERVED',
+            'EXECUTING',
+            'PROVIDER_READBACK',
+            'CONSUMED',
+            'RELEASED',
+            'FAILED_REVIEW_REQUIRED',
+            'REVOKED',
+            'EXPIRED',
+          ])
+          .optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      annotations: readAnnotations,
+    },
+    async ({ status, limit }, context) => {
+      const identity = requireIdentity(dependencies, context);
+      requireMutationRole(identity);
+      const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');
+      const scoped = bindApprovalStoreToScope(store, identity.principal);
+      const approvals = await scoped.list({ ...(status ? { status } : {}), limit });
+      return response({ approvals: approvals.map(toApprovalRecordWire) });
     },
   );
 
@@ -509,7 +549,8 @@ export function registerTocaCoreSurface(
     async ({ approvalId }, context) => {
       const identity = requireIdentity(dependencies, context);
       const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');
-      const approval = await store.get(approvalId);
+      const scoped = bindApprovalStoreToScope(store, identity.principal);
+      const approval = await scoped.get(approvalId);
       if (!approval) throw new Error('APPROVAL_NOT_FOUND');
       if (approval.requester !== identity.principal.principalId) {
         throw new Error('APPROVAL_ACCESS_DENIED');
@@ -541,12 +582,15 @@ export function registerTocaCoreSurface(
         correlationId: input.correlationId,
         ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
       };
+      const approvalStore = dependencies.approvalStore
+        ? bindApprovalStoreToScope(dependencies.approvalStore, identity.principal)
+        : undefined;
       return response(
         await executeCoreCapability(executionInput, identity, {
           registry: dependencies.registry,
           runtimeResolver: dependencies.runtimeResolver,
           auditSink: auditStore,
-          ...(dependencies.approvalStore ? { approvalStore: dependencies.approvalStore } : {}),
+          ...(approvalStore ? { approvalStore } : {}),
         }),
       );
     },

@@ -91,12 +91,7 @@ export class PostgresApprovalStore implements ApprovalStore, TenantScopedApprova
          and tenant_id = $2
          and workspace_id = $3
          and organization_id = $4`,
-      [
-        approvalId,
-        normalized.tenantId,
-        normalized.workspaceId,
-        normalized.organizationId,
-      ],
+      [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
     );
     const row = result.rows[0] as ApprovalRow | undefined;
     return row ? fromRow(row) : undefined;
@@ -168,6 +163,84 @@ export class PostgresApprovalStore implements ApprovalStore, TenantScopedApprova
             `insert into approval_execution_claims
                (execution_id, approval_id, principal_id, correlation_id, claimed_at)
              values ($1, $2, $3, $4, $5::timestamptz)`,
+            [
+              transition.binding.executionId,
+              approvalId,
+              transition.binding.principalId,
+              transition.binding.correlationId,
+              transition.now ?? new Date().toISOString(),
+            ],
+          );
+        } catch (error) {
+          if (isUniqueViolation(error)) throw new Error('APPROVAL_EXECUTION_ID_ALREADY_CLAIMED');
+          throw error;
+        }
+      }
+
+      const next = applyApprovalAtomicTransition(current, transition);
+      if (next.version !== current.version + 1)
+        throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
+      await client.query(updateSql, values(next));
+      await appendHistory(client, next);
+      await client.query('commit');
+      return next;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async historyScoped(
+    approvalId: string,
+    scope: ApprovalTenantScope,
+  ): Promise<readonly ApprovalRecord[]> {
+    const normalized = approvalTenantScope(scope);
+    const result = await this.pool.query(
+      `select h.record
+       from approval_record_history h
+       join approval_records a on a.approval_id = h.approval_id
+      where h.approval_id = $1
+        and a.tenant_id = $2
+        and a.workspace_id = $3
+        and a.organization_id = $4
+      order by h.version asc`,
+      [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
+    );
+    return result.rows.map((row) =>
+      normalizeApprovalRecord((row as { record: ApprovalRecord }).record),
+    );
+  }
+
+  async transitionScoped(
+    approvalId: string,
+    transition: ApprovalAtomicTransition,
+    scope: ApprovalTenantScope,
+  ): Promise<ApprovalRecord> {
+    const normalized = approvalTenantScope(scope);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const currentResult = await client.query(
+        `select * from approval_records
+        where approval_id = $1
+          and tenant_id = $2
+          and workspace_id = $3
+          and organization_id = $4
+        for update`,
+        [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
+      );
+      const row = currentResult.rows[0] as ApprovalRow | undefined;
+      if (!row) throw new Error('APPROVAL_NOT_FOUND');
+      const current = fromRow(row);
+
+      if (transition.type === 'RESERVE') {
+        try {
+          await client.query(
+            `insert into approval_execution_claims
+             (execution_id, approval_id, principal_id, correlation_id, claimed_at)
+           values ($1, $2, $3, $4, $5::timestamptz)`,
             [
               transition.binding.executionId,
               approvalId,

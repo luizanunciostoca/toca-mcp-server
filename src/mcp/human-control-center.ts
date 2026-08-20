@@ -52,6 +52,7 @@ export interface ControlCenterSurfaceDependencies {
   readonly runtimeResolver: CoreCapabilityRuntimeResolver;
   readonly resolveIdentity: ExecutionIdentityResolver;
   readonly approvalStoreAvailable: boolean;
+  readonly approvalListAvailable?: boolean;
   readonly workflowStoreAvailable: boolean;
   readonly auditStoreAvailable: boolean;
   readonly eventStoreAvailable: boolean;
@@ -264,6 +265,7 @@ export function buildControlCenterPanels(
     | 'registry'
     | 'runtimeResolver'
     | 'approvalStoreAvailable'
+    | 'approvalListAvailable'
     | 'workflowStoreAvailable'
     | 'auditStoreAvailable'
     | 'eventStoreAvailable'
@@ -318,12 +320,14 @@ function coreToolAvailable(
   dependencies: Pick<
     ControlCenterSurfaceDependencies,
     | 'approvalStoreAvailable'
+    | 'approvalListAvailable'
     | 'workflowStoreAvailable'
     | 'auditStoreAvailable'
     | 'eventStoreAvailable'
   >,
 ): boolean {
   if (!CORE_TOOLS.has(id)) return false;
+  if (id === 'toca.approval.list') return dependencies.approvalListAvailable === true;
   if (id.startsWith('toca.approval.')) return dependencies.approvalStoreAvailable;
   if (id.startsWith('toca.workflow.')) return dependencies.workflowStoreAvailable;
   if (id === 'toca.audit.query') return dependencies.auditStoreAvailable;

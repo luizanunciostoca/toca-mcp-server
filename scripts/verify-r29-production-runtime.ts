@@ -312,7 +312,8 @@ try {
   const persistedItem = await new PostgresContentItemStore(pool2).get(contentItemId);
   assert(persistedItem !== undefined, 'R29_PRODUCTION_CONTENT_ITEM_MISSING');
   assert(
-    persistedItem.currentVersionId === adaptedVersionId && persistedItem.currentContentVersion === 2,
+    persistedItem.currentVersionId === adaptedVersionId &&
+      persistedItem.currentContentVersion === 2,
     'R29_PRODUCTION_VERSION_READBACK_FAILED',
   );
 } finally {
