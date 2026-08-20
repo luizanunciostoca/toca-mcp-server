@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "THE_PARTY_HYBRID_NETWORKS_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "THE_PARTY",
+    "channel": "ALL",
+    "format": "ALL"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "canonicalDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
+  },
+  "visualFamily": "HYBRID_NETWORKS",
+  "rules": {
+    "realVenueAssetRequired": true,
+    "deterministicBrandInsertion": true,
+    "venueFidelityGateRequired": true,
+    "officialBrandAssetsOnly": true,
+    "aiLogoReconstructionForbidden": true,
+    "architectureInventionForbidden": true,
+    "environmentDriftForbidden": true,
+    "generativeExceptionRequiresOperationScopedReferenceSet": true,
+    "exactAssetBindingRequired": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true
+  }
+}
