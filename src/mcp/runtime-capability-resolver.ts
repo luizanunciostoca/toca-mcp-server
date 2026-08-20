@@ -601,7 +601,9 @@ function resolveBinding(
                 ...(input.seasonalityScore !== undefined
                   ? { seasonalityScore: input.seasonalityScore }
                   : {}),
-                ...(input.capacityScore !== undefined ? { capacityScore: input.capacityScore } : {}),
+                ...(input.capacityScore !== undefined
+                  ? { capacityScore: input.capacityScore }
+                  : {}),
               }),
             { targetAccount: (input) => input.adAccountId },
           )
@@ -625,7 +627,9 @@ function resolveBinding(
                 ...(input.seasonalityScore !== undefined
                   ? { seasonalityScore: input.seasonalityScore }
                   : {}),
-                ...(input.capacityScore !== undefined ? { capacityScore: input.capacityScore } : {}),
+                ...(input.capacityScore !== undefined
+                  ? { capacityScore: input.capacityScore }
+                  : {}),
               }),
             { targetAccount: (input) => input.adAccountId },
           )
