@@ -59,7 +59,7 @@ describe('Human Control Center governed surface', () => {
         expect.objectContaining({ id: 'toca.approval.get', available: true }),
       ]),
     );
-    expect(panel?.dependency).toContain('tenant-safe approval list');
+    expect(panel?.dependency).toContain('tenant-scoped ApprovalStore');
   });
 
   it('marks pending approvals ready only when the tenant-scoped approval list store is available', () => {
