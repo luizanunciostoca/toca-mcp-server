@@ -6,11 +6,13 @@ import {
   generativeExceptionApprovalSchema,
   venueAssetSchema,
   venueReferenceSchema,
+  videoShotSchema,
   type BrandAsset,
   type CreativeStandard,
   type GenerativeExceptionApproval,
   type VenueAsset,
   type VenueReference,
+  type VideoShot,
   type CreativeTruthGateResult,
 } from '../../contracts/creative-truth.js';
 import type { SpreadsheetValuesClient } from './media-assets.js';
@@ -43,10 +45,29 @@ export class GoogleSheetsCreativeTruthRegistry {
   }
 
   async assertCanonicalPolicy(): Promise<void> {
-    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:N20');
+    const rows = await this.client.readRange(this.spreadsheetId, 'POLICY!A2:AK20');
     const policy = rows.find((row) => cell(row[0]) === TOCA_CREATIVE_TRUTH_POLICY_ID);
-    if (!policy || cell(policy[2]) !== 'ACTIVE_CANONICAL' || !bool(policy[11])) {
-      throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_ACTIVE');
+    if (
+      !policy ||
+      cell(policy[1]) !== '1.3' ||
+      cell(policy[2]) !== 'ACTIVE_CANONICAL' ||
+      !bool(policy[6]) ||
+      !bool(policy[7]) ||
+      !bool(policy[8]) ||
+      !bool(policy[9]) ||
+      !bool(policy[10]) ||
+      !bool(policy[11]) ||
+      cell(policy[18]) !== 'OPERATION_SCOPED_ONLY_V1' ||
+      cell(policy[19]) !== 'TOCA_VENUE_REFERENCE_SET_V1' ||
+      cell(policy[20]) !== 'DEPRECATED' ||
+      cell(policy[21]) !== 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' ||
+      cell(policy[22]) !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' ||
+      cell(policy[23]) !== 'FORBIDDEN' ||
+      cell(policy[24]) !== 'REQUIRED' ||
+      cell(policy[25]) !== 'DENY' ||
+      cell(policy[26]) !== 'UNSUPPORTED_V1'
+    ) {
+      throw new Error('TOCA_CREATIVE_TRUTH_POLICY_NOT_CANONICAL_V1_3');
     }
   }
 
@@ -86,7 +107,7 @@ export class GoogleSheetsCreativeTruthRegistry {
   }
 
   async getReferenceSet(referenceSetId: string): Promise<readonly VenueReference[]> {
-    const rows = await this.client.readRange(this.spreadsheetId, 'VENUE_REFERENCE_SET!A2:J1000');
+    const rows = await this.client.readRange(this.spreadsheetId, 'VENUE_REFERENCE_SET!A2:K1000');
     return rows
       .filter((row) => cell(row[0]) === referenceSetId && cell(row[9]) === 'ACTIVE')
       .map((row) =>
@@ -101,6 +122,7 @@ export class GoogleSheetsCreativeTruthRegistry {
           venueVerified: bool(row[7]),
           protectedElements: list(row[8]),
           status: cell(row[9]),
+          operationScope: cell(row[10]),
         }),
       );
   }
@@ -129,7 +151,7 @@ export class GoogleSheetsCreativeTruthRegistry {
   async getApprovedGenerativeException(
     contentItemId: string,
   ): Promise<GenerativeExceptionApproval | undefined> {
-    const rows = await this.client.readRange(this.spreadsheetId, 'GENERATIVE_EXCEPTIONS!A2:N1000');
+    const rows = await this.client.readRange(this.spreadsheetId, 'GENERATIVE_EXCEPTIONS!A2:O1000');
     const row = rows.find(
       (candidate) => cell(candidate[1]) === contentItemId && cell(candidate[11]) === 'APPROVED',
     );
@@ -150,7 +172,22 @@ export class GoogleSheetsCreativeTruthRegistry {
       status: cell(row[11]),
       ...(expiresAt ? { expiresAt } : {}),
       createdAt: cell(row[13]),
+      operation: cell(row[14]),
     });
+  }
+
+  async listVideoShots(operation?: string): Promise<readonly VideoShot[]> {
+    const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
+    return rows
+      .filter((row) => !operation || cell(row[7]) === operation)
+      .filter((row) => cell(row[15]) !== 'REVOKED')
+      .map(parseVideoShot);
+  }
+
+  async getVideoShot(shotId: string): Promise<VideoShot | undefined> {
+    const rows = await this.client.readRange(this.spreadsheetId, 'VIDEO_SHOTS!A2:Q2000');
+    const row = rows.find((candidate) => cell(candidate[0]) === shotId);
+    return row ? parseVideoShot(row) : undefined;
   }
 
   async appendGateLog(record: CreativeTruthGateLogRecord): Promise<void> {
@@ -194,6 +231,31 @@ function parseVenueAsset(row: readonly unknown[]): VenueAsset {
     generativeReferenceAllowed: bool(row[12]),
     protectedElements: list(row[13]),
     status: cell(row[14]),
+  });
+}
+
+function parseVideoShot(row: readonly unknown[]): VideoShot {
+  const masterAssetId = cell(row[3]);
+  const masterDriveFileId = cell(row[4]);
+  const masterSha256 = cell(row[6]);
+  return videoShotSchema.parse({
+    shotId: cell(row[0]),
+    sourceAssetId: cell(row[1]),
+    sourceDriveFileId: cell(row[2]),
+    ...(masterAssetId ? { masterAssetId } : {}),
+    ...(masterDriveFileId ? { masterDriveFileId } : {}),
+    sourceSha256: cell(row[5]),
+    ...(masterSha256 ? { masterSha256 } : {}),
+    operation: cell(row[7]),
+    locationSignature: cell(row[8]),
+    shotClass: cell(row[9]),
+    durationMs: integer(row[10], 0),
+    orientation: cell(row[11]),
+    venueVerified: bool(row[12]),
+    marketingReady: bool(row[13]),
+    rightsStatus: cell(row[14]),
+    status: cell(row[15]),
+    notes: cell(row[16]),
   });
 }
 
