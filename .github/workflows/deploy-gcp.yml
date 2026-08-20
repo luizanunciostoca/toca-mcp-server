@@ -1,4 +1,4 @@
-name: Deploy GCP
+name: Deploy GCP Next
 
 on:
   workflow_dispatch:
@@ -8,33 +8,60 @@ on:
         required: true
         type: choice
         options: [staging, production]
+      rollout:
+        description: Traffic promotion after candidate readiness
+        required: true
+        default: candidate
+        type: choice
+        options: [candidate, canary, full]
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: deploy-gcp-${{ inputs.environment }}
+  group: deploy-gcp-next-${{ inputs.environment }}
   cancel-in-progress: false
-
-env:
-  GCP_PROJECT_ID: toca-mcp-production
-  GCP_PROJECT_NUMBER: '990081828836'
-  GCP_REGION: southamerica-east1
-  GCP_ARTIFACT_REPOSITORY: toca-mcp
-  GCP_CLOUD_SQL_INSTANCE: toca-mcp-db
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
   deploy:
     if: inputs.environment != 'production' || github.ref == 'refs/heads/main'
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER || '990081828836' }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE || 'toca-mcp-db' }}
+      GCP_CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET || 'toca-database-url' }}
+      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION || 'latest' }}
+      TOCA_DEFAULT_TENANT_ID: ${{ vars.TOCA_DEFAULT_TENANT_ID || 'toca' }}
+      TOCA_DEFAULT_WORKSPACE_ID: ${{ vars.TOCA_DEFAULT_WORKSPACE_ID || 'toca' }}
+      TOCA_DEFAULT_ORGANIZATION_ID: ${{ vars.TOCA_DEFAULT_ORGANIZATION_ID || 'toca' }}
+      META_ENABLED: ${{ vars.META_ENABLED || 'false' }}
+      META_PROVIDER_VERIFIED: ${{ vars.META_PROVIDER_VERIFIED || 'false' }}
+      META_WEBHOOK_ENABLED: ${{ vars.META_WEBHOOK_ENABLED || 'false' }}
+      META_WEBHOOK_PERSISTENCE_ENABLED: ${{ vars.META_WEBHOOK_PERSISTENCE_ENABLED || 'false' }}
+      INSTAGRAM_READ_ENABLED: ${{ vars.INSTAGRAM_READ_ENABLED || 'false' }}
+      META_ADS_READ_ENABLED: ${{ vars.META_ADS_READ_ENABLED || 'false' }}
+      META_ADS_WRITE_ENABLED: ${{ vars.META_ADS_WRITE_ENABLED || 'false' }}
+      WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
+      WHATSAPP_PROVIDER_VERIFIED: ${{ vars.WHATSAPP_PROVIDER_VERIFIED || 'false' }}
+      EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
+      EMAIL_SENDGRID_PROVIDER_VERIFIED: ${{ vars.EMAIL_SENDGRID_PROVIDER_VERIFIED || 'false' }}
+      GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+      GOOGLE_ADS_PROVIDER_VERIFIED: ${{ vars.GOOGLE_ADS_PROVIDER_VERIFIED || 'false' }}
+      AG01_MODEL_ENABLED: ${{ vars.AG01_MODEL_ENABLED || 'false' }}
+      AG01_MODEL_PROVIDER_VERIFIED: ${{ vars.AG01_MODEL_PROVIDER_VERIFIED || 'false' }}
+
     steps:
-      - name: Checkout
+      - name: Checkout exact revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -50,8 +77,57 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm quality
+      - name: Install and run exact-head Quality gate
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Resolve environment control plane
+        run: |
+          set -euo pipefail
+          if [[ -z "$GCP_CLOUD_RUN_SERVICE" ]]; then
+            echo "GCP_CLOUD_RUN_SERVICE=toca-mcp-${{ inputs.environment }}" >> "$GITHUB_ENV"
+          fi
+          if [[ -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]]; then
+            echo "GCP_WORKLOAD_IDENTITY_PROVIDER=projects/${GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/providers/github-toca-mcp" >> "$GITHUB_ENV"
+          fi
+          if [[ -z "$GCP_DEPLOY_SERVICE_ACCOUNT" ]]; then
+            echo "GCP_DEPLOY_SERVICE_ACCOUNT=toca-mcp-deployer@${GCP_PROJECT_ID}.iam.gserviceaccount.com" >> "$GITHUB_ENV"
+          fi
+          if [[ -z "$GCP_RUNTIME_SERVICE_ACCOUNT" ]]; then
+            echo "GCP_RUNTIME_SERVICE_ACCOUNT=toca-mcp-runtime@${GCP_PROJECT_ID}.iam.gserviceaccount.com" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fail closed on unverified provider activation
+        run: |
+          set -euo pipefail
+          assert_boolean() {
+            case "$2" in true|false) ;; *) echo "$1 must be true or false" >&2; exit 1 ;; esac
+          }
+          assert_provider_gate() {
+            local provider="$1" enabled="$2" verified="$3"
+            assert_boolean "${provider}_enabled" "$enabled"
+            assert_boolean "${provider}_provider_verified" "$verified"
+            if [[ "$enabled" == true && "$verified" != true ]]; then
+              echo "Refusing to enable ${provider}: PROVIDER_VERIFIED evidence is absent" >&2
+              exit 1
+            fi
+          }
+          assert_provider_gate META "$META_ENABLED" "$META_PROVIDER_VERIFIED"
+          assert_provider_gate WHATSAPP "$WHATSAPP_ENABLED" "$WHATSAPP_PROVIDER_VERIFIED"
+          assert_provider_gate EMAIL_SENDGRID "$EMAIL_SENDGRID_ENABLED" "$EMAIL_SENDGRID_PROVIDER_VERIFIED"
+          assert_provider_gate AG01_MODEL "$AG01_MODEL_ENABLED" "$AG01_MODEL_PROVIDER_VERIFIED"
+          if [[ "$GOOGLE_ADS_PHASE" != OFF && "$GOOGLE_ADS_PROVIDER_VERIFIED" != true ]]; then
+            echo 'Refusing Google Ads activation: PROVIDER_VERIFIED evidence is absent' >&2
+            exit 1
+          fi
+          if [[ "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_WEBHOOK_ENABLED" == true || "$WHATSAPP_ENABLED" == true ]]; then
+            if [[ "$META_PROVIDER_VERIFIED" != true ]]; then
+              echo 'Refusing Meta-backed capability activation without META_PROVIDER_VERIFIED=true' >&2
+              exit 1
+            fi
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -62,31 +138,238 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Verify Cloud SQL backup and PITR controls
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --format=json > /tmp/cloud-sql.json
+          jq -e '.settings.backupConfiguration.enabled == true' /tmp/cloud-sql.json >/dev/null
+          jq -e '.settings.backupConfiguration.pointInTimeRecoveryEnabled == true' /tmp/cloud-sql.json >/dev/null
+          if [[ "${{ inputs.environment }}" == production && "$GCP_DATABASE_URL_SECRET_VERSION" == latest ]]; then
+            echo 'Production requires a pinned GCP_DATABASE_URL_SECRET_VERSION for revision reproducibility' >&2
+            exit 1
+          fi
+
+      - name: Create production pre-migration backup
+        if: inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          gcloud sql backups create \
+            --instance "$GCP_CLOUD_SQL_INSTANCE" \
+            --project "$GCP_PROJECT_ID" \
+            --description "pre-next-${GITHUB_SHA::12}" \
+            --async
+
+      - name: Apply repository migrations before traffic
+        run: |
+          set -euo pipefail
+          export DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
+          export DATABASE_SSL="${{ vars.DATABASE_SSL || 'false' }}"
+          pnpm migrate
+          unset DATABASE_URL
+
       - name: Configure Docker auth
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
-      - name: Build and push image
+      - name: Build and push immutable image
         run: |
           set -euo pipefail
           IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server:${GITHUB_SHA}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "REVISION_SUFFIX=next-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          echo "CANDIDATE_TAG=candidate-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Deploy Cloud Run revision with bounded scale-to-zero
+      - name: Build fail-closed runtime configuration
         run: |
           set -euo pipefail
-          gcloud run deploy "toca-mcp-${{ inputs.environment }}" \
+          ENV_ENTRIES=(
+            "NODE_ENV=production"
+            "MCP_ENABLED=true"
+            "TOCA_DEPLOY_ENVIRONMENT=${{ inputs.environment }}"
+            "TOCA_RELEASE_SHA=${GITHUB_SHA}"
+            "TOCA_DEFAULT_TENANT_ID=${TOCA_DEFAULT_TENANT_ID}"
+            "TOCA_DEFAULT_WORKSPACE_ID=${TOCA_DEFAULT_WORKSPACE_ID}"
+            "TOCA_DEFAULT_ORGANIZATION_ID=${TOCA_DEFAULT_ORGANIZATION_ID}"
+            "TOCA_READY_OUTBOX_MAX_LAG_SECONDS=${{ vars.TOCA_READY_OUTBOX_MAX_LAG_SECONDS || '300' }}"
+            "META_ENABLED=${META_ENABLED}"
+            "META_PROVIDER_VERIFIED=${META_PROVIDER_VERIFIED}"
+            "META_WEBHOOK_ENABLED=${META_WEBHOOK_ENABLED}"
+            "META_WEBHOOK_PERSISTENCE_ENABLED=${META_WEBHOOK_PERSISTENCE_ENABLED}"
+            "INSTAGRAM_READ_ENABLED=${INSTAGRAM_READ_ENABLED}"
+            "META_ADS_READ_ENABLED=${META_ADS_READ_ENABLED}"
+            "META_ADS_WRITE_ENABLED=${META_ADS_WRITE_ENABLED}"
+            "WHATSAPP_ENABLED=${WHATSAPP_ENABLED}"
+            "WHATSAPP_PROVIDER_VERIFIED=${WHATSAPP_PROVIDER_VERIFIED}"
+            "EMAIL_SENDGRID_ENABLED=${EMAIL_SENDGRID_ENABLED}"
+            "EMAIL_SENDGRID_PROVIDER_VERIFIED=${EMAIL_SENDGRID_PROVIDER_VERIFIED}"
+            "GOOGLE_ADS_PHASE=${GOOGLE_ADS_PHASE}"
+            "GOOGLE_ADS_PROVIDER_VERIFIED=${GOOGLE_ADS_PROVIDER_VERIFIED}"
+            "AG01_MODEL_ENABLED=${AG01_MODEL_ENABLED}"
+            "AG01_MODEL_PROVIDER_VERIFIED=${AG01_MODEL_PROVIDER_VERIFIED}"
+            "GCP_PROJECT_ID=${GCP_PROJECT_ID}"
+          )
+          SECRET_ENTRIES=("DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}")
+          append_env() { [[ -n "$2" ]] && ENV_ENTRIES+=("$1=$2"); }
+          append_secret() { [[ -n "$2" ]] && SECRET_ENTRIES+=("$1=$2:${3:-latest}"); }
+
+          if [[ "$META_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_WEBHOOK_ENABLED" == true || "$WHATSAPP_ENABLED" == true ]]; then
+            append_env META_APP_ID "${{ vars.META_APP_ID }}"
+            append_env META_GRAPH_API_VERSION "${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}"
+            append_env META_GRAPH_BASE_URL "${{ vars.META_GRAPH_BASE_URL || 'https://graph.facebook.com' }}"
+            append_env META_AUTHORIZATION_ENDPOINT "${{ vars.META_AUTHORIZATION_ENDPOINT || 'https://www.facebook.com/dialog/oauth' }}"
+            append_env META_TOKEN_ENDPOINT "${{ vars.META_TOKEN_ENDPOINT || 'https://graph.facebook.com/oauth/access_token' }}"
+            append_env META_REDIRECT_URI "${{ vars.META_REDIRECT_URI }}"
+            append_env META_REQUESTED_SCOPES "${{ vars.META_REQUESTED_SCOPES }}"
+            append_env META_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
+            append_secret TOCA_SECRET_META_ACCESS_TOKEN "${{ vars.GCP_META_ACCESS_TOKEN_SECRET || 'toca-meta-oauth-token' }}" "${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION || 'latest' }}"
+          fi
+          if [[ "$META_ENABLED" == true ]]; then
+            append_env META_APP_SECRET_PROVIDER env
+            append_env META_APP_SECRET_KEY TOCA_SECRET_META_APP_SECRET
+            append_env META_TOKEN_STORE_PROVIDER "${{ vars.META_TOKEN_STORE_PROVIDER || 'memory' }}"
+            append_env META_TOKEN_SECRET_ID "${{ vars.META_TOKEN_SECRET_ID }}"
+            append_secret TOCA_SECRET_META_APP_SECRET "${{ vars.GCP_META_APP_SECRET || 'toca-meta-app-secret' }}" "${{ vars.GCP_META_APP_SECRET_VERSION || 'latest' }}"
+          fi
+          if [[ "$META_WEBHOOK_ENABLED" == true ]]; then
+            append_env META_WEBHOOK_VERIFY_TOKEN_KEY TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN
+            append_secret TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN "${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET || 'toca-meta-webhook-verify-token' }}" "${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION || 'latest' }}"
+          fi
+          if [[ "$WHATSAPP_ENABLED" == true ]]; then
+            append_env WHATSAPP_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
+            append_env WHATSAPP_BINDING_STATE "${{ vars.WHATSAPP_BINDING_STATE }}"
+            append_env WHATSAPP_BINDING_ID "${{ vars.WHATSAPP_BINDING_ID }}"
+            append_env WHATSAPP_META_APP_ID "${{ vars.WHATSAPP_META_APP_ID }}"
+            append_env WHATSAPP_WABA_ID "${{ vars.WHATSAPP_WABA_ID }}"
+            append_env WHATSAPP_PHONE_NUMBER_ID "${{ vars.WHATSAPP_PHONE_NUMBER_ID }}"
+          fi
+          if [[ "$EMAIL_SENDGRID_ENABLED" == true ]]; then
+            append_env EMAIL_SENDGRID_BINDING_STATE "${{ vars.EMAIL_SENDGRID_BINDING_STATE }}"
+            append_env EMAIL_SENDGRID_BINDING_ID "${{ vars.EMAIL_SENDGRID_BINDING_ID }}"
+            append_env EMAIL_SENDGRID_API_KEY_SECRET_PROVIDER env
+            append_env EMAIL_SENDGRID_API_KEY_SECRET_KEY TOCA_SECRET_SENDGRID_API_KEY
+            append_env EMAIL_SENDGRID_SENDING_DOMAIN "${{ vars.EMAIL_SENDGRID_SENDING_DOMAIN }}"
+            append_env EMAIL_SENDGRID_FROM_EMAIL "${{ vars.EMAIL_SENDGRID_FROM_EMAIL }}"
+            append_env EMAIL_SENDGRID_FROM_NAME "${{ vars.EMAIL_SENDGRID_FROM_NAME }}"
+            append_env EMAIL_SENDGRID_REPLY_TO_EMAIL "${{ vars.EMAIL_SENDGRID_REPLY_TO_EMAIL }}"
+            append_env EMAIL_SENDGRID_INBOUND_PARSE_ENABLED "${{ vars.EMAIL_SENDGRID_INBOUND_PARSE_ENABLED || 'false' }}"
+            append_env EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED "${{ vars.EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED || 'false' }}"
+            append_secret TOCA_SECRET_SENDGRID_API_KEY "${{ vars.GCP_SENDGRID_API_KEY_SECRET || 'toca-sendgrid-api-key' }}" "${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION || 'latest' }}"
+          fi
+          if [[ "$GOOGLE_ADS_PHASE" != OFF ]]; then
+            append_env GOOGLE_ADS_CUSTOMER_ID "${{ vars.GOOGLE_ADS_CUSTOMER_ID }}"
+            append_env GOOGLE_ADS_ALLOWED_CUSTOMER_ID "${{ vars.GOOGLE_ADS_ALLOWED_CUSTOMER_ID }}"
+            append_env GOOGLE_ADS_ALLOWED_CURRENCY "${{ vars.GOOGLE_ADS_ALLOWED_CURRENCY }}"
+            append_env GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS "${{ vars.GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS }}"
+            append_env GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS "${{ vars.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS }}"
+            append_env GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS "${{ vars.GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS }}"
+            append_env GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS "${{ vars.GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS }}"
+            append_env GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN
+            append_env GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_ID
+            append_env GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET
+            append_env GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN
+            append_secret TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN "${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET || 'toca-google-ads-developer-token' }}" "${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION || 'latest' }}"
+            append_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_ID "${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET || 'toca-google-ads-client-id' }}" "${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION || 'latest' }}"
+            append_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET "${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET || 'toca-google-ads-client-secret' }}" "${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION || 'latest' }}"
+            append_secret TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN "${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET || 'toca-google-ads-refresh-token' }}" "${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION || 'latest' }}"
+          fi
+          if [[ "$AG01_MODEL_ENABLED" == true ]]; then
+            append_env AG01_MODEL_API_KEY_ENV_KEY TOCA_SECRET_AG01_MODEL_API_KEY
+            append_env AG01_MODEL_PROVIDER "${{ vars.AG01_MODEL_PROVIDER }}"
+            append_env AG01_MODEL_NAME "${{ vars.AG01_MODEL_NAME }}"
+            append_secret TOCA_SECRET_AG01_MODEL_API_KEY "${{ vars.GCP_AG01_MODEL_API_KEY_SECRET || 'toca-ag01-model-api-key' }}" "${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION || 'latest' }}"
+          fi
+
+          { IFS='|'; echo "RUNTIME_ENV_VARS=^|^${ENV_ENTRIES[*]}"; } >> "$GITHUB_ENV"
+          { IFS='|'; echo "RUNTIME_SECRETS=^|^${SECRET_ENTRIES[*]}"; } >> "$GITHUB_ENV"
+
+      - name: Capture current traffic target
+        run: |
+          set -euo pipefail
+          PREVIOUS_REVISION="$(gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format="value(status.traffic[percent=100].revisionName)" 2>/dev/null || true)"
+          echo "PREVIOUS_REVISION=$PREVIOUS_REVISION" >> "$GITHUB_ENV"
+
+      - name: Deploy candidate revision without production traffic
+        run: |
+          set -euo pipefail
+          MIN_INSTANCES="${{ vars.GCP_MIN_INSTANCES || '0' }}"
+          MAX_INSTANCES="${{ vars.GCP_MAX_INSTANCES || '3' }}"
+          gcloud run deploy "$GCP_CLOUD_RUN_SERVICE" \
             --image "$IMAGE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
+            --revision-suffix "$REVISION_SUFFIX" \
+            --tag "$CANDIDATE_TAG" \
+            --no-traffic \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-            --update-secrets "DATABASE_URL=toca-database-url:latest,TOCA_SECRET_META_APP_SECRET=toca-meta-app-secret:latest,TOCA_SECRET_META_ACCESS_TOKEN=toca-meta-oauth-token:latest" \
-            --update-env-vars "META_ENABLED=false,MCP_ENABLED=true,META_ADS_READ_ENABLED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN" \
-            --min-instances 0 \
-            --max-instances 1 \
+            --update-secrets "$RUNTIME_SECRETS" \
+            --update-env-vars "$RUNTIME_ENV_VARS" \
+            --startup-probe "httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3" \
+            --readiness-probe "httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5" \
+            --liveness-probe "httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10" \
+            --min-instances "$MIN_INSTANCES" \
+            --max-instances "$MAX_INSTANCES" \
             --cpu-throttling \
-            --memory 512Mi \
-            --cpu 1 \
+            --memory "${{ vars.GCP_MEMORY || '512Mi' }}" \
+            --cpu "${{ vars.GCP_CPU || '1' }}" \
             --no-allow-unauthenticated
+
+      - name: Verify candidate health and readiness with authenticated readback
+        run: |
+          set -euo pipefail
+          CANDIDATE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format="value(status.traffic[tag=${CANDIDATE_TAG}].url)")"
+          test -n "$CANDIDATE_URL"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$CANDIDATE_URL")"
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 \
+            -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/healthz" | tee /tmp/healthz.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 \
+            -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/readyz" | tee /tmp/readyz.json
+          jq -e '.status == "ready" and (.checks | all(.ok == true))' /tmp/readyz.json >/dev/null
+          echo "CANDIDATE_URL=$CANDIDATE_URL" >> "$GITHUB_ENV"
+
+      - name: Promote 10 percent canary
+        if: inputs.rollout == 'canary' && inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-tags "${CANDIDATE_TAG}=10"
+
+      - name: Promote candidate to full traffic
+        if: inputs.rollout == 'full' || (inputs.rollout == 'canary' && inputs.environment == 'staging')
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-tags "${CANDIDATE_TAG}=100"
+
+      - name: Read back deployed revision and traffic
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json > /tmp/cloud-run-readback.json
+          jq '{latestReadyRevisionName: .status.latestReadyRevisionName, traffic: .status.traffic}' /tmp/cloud-run-readback.json
+          {
+            echo '### TOCA OS Next deploy readback'
+            echo "- environment: ${{ inputs.environment }}"
+            echo "- rollout: ${{ inputs.rollout }}"
+            echo "- release: $GITHUB_SHA"
+            echo "- candidate: $CANDIDATE_URL"
+            echo "- previous revision: ${PREVIOUS_REVISION:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Roll back traffic on failed promotion
+        if: failure() && env.PREVIOUS_REVISION != ''
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-revisions "${PREVIOUS_REVISION}=100"
