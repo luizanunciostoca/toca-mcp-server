@@ -3,9 +3,7 @@ import * as z from 'zod/v4';
 import { creativeTruthPublicationBindingSchema } from '../contracts/creative-truth.js';
 import type { Scheduler, ScheduledJob } from '../scheduler/scheduler-contracts.js';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
-import type {
-  InstagramPublicationExecutor,
-} from '../providers/instagram/instagram-publication-executor.js';
+import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
 import type { JobHandler } from './worker.js';
 
 export const INSTAGRAM_PUBLICATION_JOB = 'internal.instagram.publication.execute';
@@ -21,7 +19,10 @@ const instagramPublishRequestSchema = z.object({
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
   creativeTruthBinding: creativeTruthPublicationBindingSchema.optional(),
-  publicationAssetSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  publicationAssetSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/i)
+    .optional(),
 });
 
 export class InstagramPublicationJobScheduler {
