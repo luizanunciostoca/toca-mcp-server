@@ -116,6 +116,7 @@ describe('Meta Ads Morro demand intelligence', () => {
       historySampleCount: 20,
       confidence: 1,
       observedAt: '2026-08-18T04:00:00.000Z',
+      hourBucket: '2026-08-18T04:00:00.000Z',
     };
 
     const result = calculateMorroDemandIndex(audience, {
@@ -179,6 +180,53 @@ describe('Meta Ads Morro demand intelligence', () => {
     expect(recommendation.guardrail).toEqual({ decision: 'ALLOW' });
     expect(recommendation.writeExecuted).toBe(false);
     expect(history.samples).toHaveLength(5);
+    expect(history.samples.at(-1)).toEqual(
+      expect.objectContaining({
+        estimateReady: true,
+        hourBucket: observedAt,
+        qualityConfidence: recommendation.demandIndex.confidence,
+      }),
+    );
+  });
+
+  it('persists provider not-ready observations without using them as trend history', async () => {
+    const get = vi.fn().mockResolvedValue({
+      data: [{ estimate_ready: false }],
+    });
+    const provider = new MetaAdsReadProvider({ get } as unknown as MetaApiClient);
+    const history = new MemoryGeoAudienceHistoryStore();
+    history.samples.push({
+      ...sample('2026-08-17T04:00:00.000Z', 11_000),
+      estimateReady: false,
+      lowerBound: 0,
+      upperBound: 0,
+      midpoint: 0,
+      qualityConfidence: 0,
+    });
+    const service = new MetaAdsDemandIntelligenceService(provider, history, {
+      tenantId: 'toca-do-morcego',
+    });
+
+    const signal = await service.inspectMorroAudience({
+      account: { adAccountId: '123', currency: 'BRL' },
+      observedAt: '2026-08-18T04:37:00.000Z',
+    });
+
+    expect(signal.confidence).toBe(0);
+    expect(signal.historySampleCount).toBe(0);
+    expect(signal.trend24hPercent).toBeUndefined();
+    expect(signal.hourBucket).toBe('2026-08-18T04:00:00.000Z');
+    expect(history.samples).toHaveLength(2);
+    expect(history.samples.at(-1)).toEqual(
+      expect.objectContaining({
+        lowerBound: 0,
+        upperBound: 0,
+        midpoint: 0,
+        estimateReady: false,
+        hourBucket: '2026-08-18T04:00:00.000Z',
+        qualityConfidence: 0,
+      }),
+    );
   });
 
   it('caps budget adaptation at 10% until the audience signal has enough history', async () => {
@@ -278,5 +326,7 @@ function sample(observedAt: string, midpoint: number): MetaAdsGeoAudienceSample 
     optimizationGoal: 'REACH',
     targetingSpec: MORRO_DE_SAO_PAULO_TARGETING_SPEC,
     observedAt,
+    hourBucket: observedAt,
+    qualityConfidence: 1,
   };
 }
