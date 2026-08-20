@@ -4,10 +4,7 @@ import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/med
 
 function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])[]>>) {
   const readRange = vi.fn(
-    (
-      spreadsheetId: string,
-      range: string,
-    ): Promise<readonly (readonly unknown[])[]> => {
+    (spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]> => {
       void spreadsheetId;
       return Promise.resolve(ranges[range] ?? []);
     },
