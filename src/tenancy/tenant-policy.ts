@@ -1,6 +1,7 @@
 import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
 import type {
   TenantApprovalChainBinding,
+  TenantCapabilityAvailability,
   TenantConfiguration,
   TenantConfigurationStore,
   TenantPolicyDecision,
@@ -32,7 +33,7 @@ export class TenantPolicyOverlay {
     });
     if (!authorization.allowed) return deny(authorization.reason);
 
-    let availability;
+    let availability: TenantCapabilityAvailability;
     try {
       availability = await this.#availability.resolve({
         identity,
