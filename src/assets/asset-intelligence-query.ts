@@ -138,21 +138,28 @@ export function queryAssetIntelligence(
   now: Date,
 ): MarketingAutopilotAssetQueryResult {
   const query = assetIntelligenceQuerySchema.parse(rawQuery);
-  const candidates = rawCandidates.map((candidate) => assetCandidateSnapshotSchema.parse(candidate));
+  const candidates = rawCandidates.map((candidate) =>
+    assetCandidateSnapshotSchema.parse(candidate),
+  );
   const unusedSinceMs = query.unusedSince === null ? null : Date.parse(query.unusedSince);
   if (query.unusedSince !== null && !Number.isFinite(unusedSinceMs)) {
     throw new Error('ASSET_UNUSED_SINCE_INVALID');
   }
 
-  const projected = candidates.filter((asset) => isInScope(asset, query)).map((asset) => ({
-    source: asset,
-    result: toCandidate(asset, query, now),
-  }));
+  const projected = candidates
+    .filter((asset) => isInScope(asset, query))
+    .map((asset) => ({
+      source: asset,
+      result: toCandidate(asset, query, now),
+    }));
 
   const filtered = projected.filter(({ source, result }) => {
     if (query.mode === 'FIND_ELIGIBLE') return result.marketingReady && !result.fatigued;
     if (query.mode === 'FIND_VENUE_VERIFIED') {
-      return source.creativeTruth.venueFidelity === 'VERIFIED' && source.creativeTruth.evidenceRef !== null;
+      return (
+        source.creativeTruth.venueFidelity === 'VERIFIED' &&
+        source.creativeTruth.evidenceRef !== null
+      );
     }
     if (query.mode === 'FIND_UNUSED') {
       if (source.lastUsedAt === null) return true;

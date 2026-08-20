@@ -88,7 +88,11 @@ describe('Marketing Autopilot Asset Intelligence queries', () => {
     });
     const fatigued = asset({ assetId: 'fatigued', sha256: 'e'.repeat(64), usesLast14Days: 5 });
 
-    const result = queryAssetIntelligence(query('FIND_ELIGIBLE'), [rejected, expired, fatigued, eligible], NOW);
+    const result = queryAssetIntelligence(
+      query('FIND_ELIGIBLE'),
+      [rejected, expired, fatigued, eligible],
+      NOW,
+    );
     expect(result.candidates.map((candidate) => candidate.assetId)).toEqual(['eligible']);
   });
 
@@ -108,13 +112,18 @@ describe('Marketing Autopilot Asset Intelligence queries', () => {
       recentPerformanceScore: 99,
     });
 
-    expect(queryAssetIntelligence(query('FIND_VENUE_VERIFIED'), [neverUsed, top], NOW).candidates).toHaveLength(2);
+    expect(
+      queryAssetIntelligence(query('FIND_VENUE_VERIFIED'), [neverUsed, top], NOW).candidates,
+    ).toHaveLength(2);
     expect(
       queryAssetIntelligence(query('FIND_UNUSED'), [top, neverUsed], NOW).candidates.map(
         (candidate) => candidate.assetId,
       ),
     ).toEqual(['never-used']);
-    expect(queryAssetIntelligence(query('FIND_TOP_PERFORMING'), [neverUsed, top], NOW).candidates[0]?.assetId).toBe('top');
+    expect(
+      queryAssetIntelligence(query('FIND_TOP_PERFORMING'), [neverUsed, top], NOW).candidates[0]
+        ?.assetId,
+    ).toBe('top');
   });
 
   it('keeps rights resolution distinct from Creative Truth final eligibility', () => {
@@ -129,7 +138,9 @@ describe('Marketing Autopilot Asset Intelligence queries', () => {
         readAt: null,
       },
     });
-    expect(queryAssetIntelligence(query('RESOLVE_RIGHTS'), [unknownTruth], NOW).candidates[0]).toMatchObject({
+    expect(
+      queryAssetIntelligence(query('RESOLVE_RIGHTS'), [unknownTruth], NOW).candidates[0],
+    ).toMatchObject({
       assetId: 'unknown-truth',
       rightsEligible: true,
       creativeTruthEligible: false,

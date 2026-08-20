@@ -2,9 +2,20 @@ import { createHash } from 'node:crypto';
 import * as z from 'zod/v4';
 
 export const assetFormatSchema = z.enum(['FEED', 'STORIES', 'REEL_COVER', 'AD']);
-export const assetLineageKindSchema = z.enum(['SOURCE', 'DERIVATIVE', 'MASTER_CANDIDATE', 'MASTER']);
+export const assetLineageKindSchema = z.enum([
+  'SOURCE',
+  'DERIVATIVE',
+  'MASTER_CANDIDATE',
+  'MASTER',
+]);
 export const assetMasterStateSchema = z.enum(['NOT_MASTER', 'CANDIDATE', 'APPROVED_MASTER']);
-export const assetRightsStatusSchema = z.enum(['UNKNOWN', 'CLEARED', 'RESTRICTED', 'EXPIRED', 'BLOCKED']);
+export const assetRightsStatusSchema = z.enum([
+  'UNKNOWN',
+  'CLEARED',
+  'RESTRICTED',
+  'EXPIRED',
+  'BLOCKED',
+]);
 export const assetTimeOfDaySchema = z.enum([
   'UNKNOWN',
   'DAWN',
@@ -13,7 +24,14 @@ export const assetTimeOfDaySchema = z.enum([
   'SUNSET',
   'NIGHT',
 ]);
-export const assetCrowdLevelSchema = z.enum(['UNKNOWN', 'EMPTY', 'LOW', 'MEDIUM', 'HIGH', 'PACKED']);
+export const assetCrowdLevelSchema = z.enum([
+  'UNKNOWN',
+  'EMPTY',
+  'LOW',
+  'MEDIUM',
+  'HIGH',
+  'PACKED',
+]);
 export const assetMarketingReadinessSchema = z.enum(['NOT_READY', 'REVIEW_REQUIRED', 'READY']);
 export const creativeTruthVerdictSchema = z.enum(['UNKNOWN', 'VERIFIED', 'REJECTED']);
 
@@ -112,11 +130,7 @@ export type AssetCandidateSnapshot = z.infer<typeof assetCandidateSnapshotSchema
 export interface RightsEligibility {
   readonly eligible: boolean;
   readonly reason:
-    | 'RIGHTS_CLEARED'
-    | 'RIGHTS_UNKNOWN'
-    | 'RIGHTS_RESTRICTED'
-    | 'RIGHTS_EXPIRED'
-    | 'RIGHTS_BLOCKED';
+    'RIGHTS_CLEARED' | 'RIGHTS_UNKNOWN' | 'RIGHTS_RESTRICTED' | 'RIGHTS_EXPIRED' | 'RIGHTS_BLOCKED';
 }
 
 export interface FatigueAssessment {
@@ -161,7 +175,9 @@ export function perceptualHashDistance(left: string, right: string): number {
   return distance;
 }
 
-export function assertAssetIntelligenceRecord(input: AssetIntelligenceRecord): AssetIntelligenceRecord {
+export function assertAssetIntelligenceRecord(
+  input: AssetIntelligenceRecord,
+): AssetIntelligenceRecord {
   const record = assetIntelligenceRecordSchema.parse(input);
   if (record.sourceAssetId === record.assetId || record.masterAssetId === record.assetId) {
     throw new Error('ASSET_LINEAGE_SELF_REFERENCE');
@@ -175,7 +191,10 @@ export function assertAssetIntelligenceRecord(input: AssetIntelligenceRecord): A
   if (record.masterState === 'APPROVED_MASTER' && record.masterApprovalEvidenceId === null) {
     throw new Error('ASSET_MASTER_APPROVAL_EVIDENCE_REQUIRED');
   }
-  if (record.creativeTruth.finalAssetEligibility === 'VERIFIED' && record.creativeTruth.evidenceRef === null) {
+  if (
+    record.creativeTruth.finalAssetEligibility === 'VERIFIED' &&
+    record.creativeTruth.evidenceRef === null
+  ) {
     throw new Error('ASSET_CREATIVE_TRUTH_EVIDENCE_REQUIRED');
   }
   return record;

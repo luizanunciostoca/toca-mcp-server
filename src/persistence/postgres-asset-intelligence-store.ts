@@ -277,7 +277,14 @@ export class PostgresAssetIntelligenceStore {
        ) values ($1, $2, $3, $4, $5, $6::timestamptz)
        on conflict (provider, source_ref) do nothing
        returning asset_id`,
-      [input.assetId, input.provider, input.sourceRef, input.sourceKind, input.isPrimary, input.observedAt],
+      [
+        input.assetId,
+        input.provider,
+        input.sourceRef,
+        input.sourceKind,
+        input.isPrimary,
+        input.observedAt,
+      ],
     );
     if (inserted.rows[0]) return;
     const existing = await this.pool.query<SourceRow>(
@@ -337,7 +344,11 @@ export class PostgresAssetIntelligenceStore {
   ): Promise<AssetDuplicateMatch[]> {
     if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('ASSET_SHA256_INVALID');
     if (!/^[01]{64}$/.test(perceptualHash)) throw new Error('ASSET_PHASH_INVALID');
-    if (!Number.isInteger(maxPerceptualDistance) || maxPerceptualDistance < 0 || maxPerceptualDistance > 64) {
+    if (
+      !Number.isInteger(maxPerceptualDistance) ||
+      maxPerceptualDistance < 0 ||
+      maxPerceptualDistance > 64
+    ) {
       throw new Error('ASSET_PHASH_DISTANCE_INVALID');
     }
     const result = await this.pool.query<DuplicateRow>(

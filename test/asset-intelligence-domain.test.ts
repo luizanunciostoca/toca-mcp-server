@@ -109,7 +109,11 @@ describe('Asset Intelligence domain', () => {
   it('requires explicit evidence before an asset can be an approved master', () => {
     expect(() =>
       assertAssetIntelligenceRecord(
-        record({ lineageKind: 'MASTER', masterState: 'APPROVED_MASTER', masterApprovalEvidenceId: null }),
+        record({
+          lineageKind: 'MASTER',
+          masterState: 'APPROVED_MASTER',
+          masterApprovalEvidenceId: null,
+        }),
       ),
     ).toThrow('ASSET_MASTER_APPROVAL_EVIDENCE_REQUIRED');
   });
@@ -128,6 +132,11 @@ describe('Asset Intelligence domain', () => {
       candidate({ usesLast14Days: 4, recentPerformanceScore: 50, previousPerformanceScore: 100 }),
       60,
     );
-    expect(result).toMatchObject({ fatigued: true, score: 80, usagePressure: 60, performanceDecay: 20 });
+    expect(result).toMatchObject({
+      fatigued: true,
+      score: 80,
+      usagePressure: 60,
+      performanceDecay: 20,
+    });
   });
 });
