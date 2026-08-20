@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { Scheduler, ScheduledJob } from '../scheduler/scheduler-contracts.js';
+import {
+  SCHEDULER_STALE_RECOVERY_MARKER,
+  type ScheduledJob,
+  type Scheduler,
+} from '../scheduler/scheduler-contracts.js';
 import type { Telemetry } from '../core/observability.js';
 
 export interface JobHandler {
@@ -22,6 +26,7 @@ export interface DeadLetterRecord {
 
 export interface DeadLetterSink {
   put(record: DeadLetterRecord): Promise<void>;
+  finalize?(job: ScheduledJob, record: DeadLetterRecord): Promise<void>;
 }
 
 export interface RetryPolicy {
@@ -86,6 +91,13 @@ export class SchedulerWorker {
       this.options.claimToolName,
     );
     this.options.telemetry.record('worker.claimed_jobs', jobs.length);
+    const recovered = jobs.filter((job) =>
+      job.lastError?.startsWith(SCHEDULER_STALE_RECOVERY_MARKER),
+    ).length;
+    this.options.telemetry.record('worker.recovered_stale_jobs', recovered);
+    if (recovered > 0) {
+      this.options.logger.info('worker.stale_jobs.recovered', { recovered });
+    }
 
     for (const job of jobs) {
       await this.executeJob(job);
@@ -128,17 +140,8 @@ export class SchedulerWorker {
     attempt: number,
     normalizedError: string,
   ): Promise<void> {
-    await this.options.scheduler.markFailed(job.id, normalizedError);
-    this.options.telemetry.increment('worker.job.failed', { toolName: job.toolName });
-    this.options.logger.error('worker.job.failed', {
-      jobId: job.id,
-      toolName: job.toolName,
-      attempt,
-      error: normalizedError,
-    });
-
     if (attempt >= this.options.retry.maxAttempts) {
-      await this.options.deadLetters.put({
+      const record: DeadLetterRecord = {
         id: this.#createId(),
         originalJobId: job.id,
         toolName: job.toolName,
@@ -146,22 +149,40 @@ export class SchedulerWorker {
         attempts: attempt,
         lastError: normalizedError,
         failedAt: this.#now().toISOString(),
-      });
+      };
+      if (this.options.deadLetters.finalize) {
+        await this.options.deadLetters.finalize(job, record);
+      } else {
+        await this.options.scheduler.markFailed(job.id, normalizedError);
+        await this.options.deadLetters.put(record);
+      }
       this.options.telemetry.increment('worker.job.dead_lettered', { toolName: job.toolName });
-      return;
+    } else {
+      const delay = retryDelayMs(attempt, this.options.retry);
+      const retryAt = new Date(this.#now().getTime() + delay).toISOString();
+      if (this.options.scheduler.retryAfterFailure) {
+        await this.options.scheduler.retryAfterFailure(job.id, normalizedError, retryAt);
+      } else {
+        await this.options.scheduler.markFailed(job.id, normalizedError);
+        await this.options.scheduler.schedule({
+          id: this.#createId(),
+          toolName: job.toolName,
+          payload: job.payload,
+          runAt: retryAt,
+          timezone: job.timezone,
+          idempotencyKey: `${rootIdempotencyKey(job.idempotencyKey)}:retry:${attempt}`,
+        });
+      }
+      this.options.telemetry.increment('worker.job.retry_scheduled', { toolName: job.toolName });
     }
 
-    const delay = retryDelayMs(attempt, this.options.retry);
-    const retryAt = new Date(this.#now().getTime() + delay).toISOString();
-    await this.options.scheduler.schedule({
-      id: this.#createId(),
+    this.options.telemetry.increment('worker.job.failed', { toolName: job.toolName });
+    this.options.logger.error('worker.job.failed', {
+      jobId: job.id,
       toolName: job.toolName,
-      payload: job.payload,
-      runAt: retryAt,
-      timezone: job.timezone,
-      idempotencyKey: `${rootIdempotencyKey(job.idempotencyKey)}:retry:${attempt}`,
+      attempt,
+      error: normalizedError,
     });
-    this.options.telemetry.increment('worker.job.retry_scheduled', { toolName: job.toolName });
   }
 }
 
