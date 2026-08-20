@@ -23,87 +23,13 @@ on:
       - 'src/worker/**'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: m-found-12-postgres-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  crm-sales-one-shot-normalize:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feat/next-crm-sales-engine-advanced-20260820'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout CRM branch
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: feat/next-crm-sales-engine-advanced-20260820
-          persist-credentials: true
-      - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 10.15.0
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Apply CRM Core integration patches
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_if_present(path_name: str, old: str, new: str) -> None:
-              path = Path(path_name)
-              text = path.read_text()
-              if old in text:
-                  path.write_text(text.replace(old, new, 1))
-
-          replace_if_present('test/crm-sales-postgres-e2e.test.ts', "`select count(*)::text as count from internal_audit_ledger\n          where tenant_id=$1 and workspace_id=$2 and organization_id=$3\n            and record_type='OPPORTUNITY' and record_id=$4`", "`select count(*)::text as count from audit_ledger_events\n          where tenant_id=$1 and workspace_id=$2 and organization_id=$3\n            and tool_name='core.crm.sales.opportunity.updated' and external_resource_id=$4`")
-          replace_if_present('src/mcp/core-execution.ts', "export interface CoreCapabilityRuntimeBinding {\n  readonly inputSchema: CoreInputParser;\n  execute(input: unknown): Promise<unknown>;", "export interface CoreCapabilityRuntimeContext {\n  readonly identity: ExecutionIdentity;\n  readonly executionId: string;\n  readonly correlationId: string;\n}\n\nexport interface CoreCapabilityRuntimeBinding {\n  readonly inputSchema: CoreInputParser;\n  execute(input: unknown, context?: CoreCapabilityRuntimeContext): Promise<unknown>;")
-          replace_if_present('src/mcp/core-execution.ts', "const result = await resolved.binding.execute(resolved.payload);", "const result = await resolved.binding.execute(resolved.payload, {\n      identity,\n      executionId,\n      correlationId,\n    });")
-          replace_if_present('src/crm/runtime.ts', "import type { CrmCoreStore, CrmMutationMetadata, CrmScope } from './crm-records.js';", "import type { CrmCoreStore, CrmMutationMetadata, CrmScope } from './crm-records.js';\nimport type { CrmSalesPersistenceReadback } from '../persistence/postgres-crm-sales-readback.js';")
-          replace_if_present('src/crm/runtime.ts', "export interface CrmSalesRuntimeServices {\n  readonly core: CrmCoreStore;\n  readonly sales: CrmSalesStore;\n}", "export interface CrmSalesRuntimeServices {\n  readonly core: CrmCoreStore;\n  readonly sales: CrmSalesStore;\n  readonly persistenceReadback: CrmSalesPersistenceReadback;\n}")
-          replace_if_present('src/crm/runtime.ts', "const persisted = await services.sales.getActivity({", "const persisted = await services.persistenceReadback.activityExists({")
-          replace_if_present('src/mcp/runtime-capability-resolver.ts', "import { VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET } from '../content/capability-ids.js';", "import { VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET } from '../content/capability-ids.js';\nimport { resolveCrmSalesRuntimeBinding, type CrmSalesRuntimeServices } from '../crm/runtime.js';")
-          replace_if_present('src/mcp/runtime-capability-resolver.ts', "  readonly videoContent?: VideoContentRuntimeService;\n}", "  readonly videoContent?: VideoContentRuntimeService;\n  readonly crmSales?: CrmSalesRuntimeServices;\n}")
-          replace_if_present('src/mcp/runtime-capability-resolver.ts', "function resolveBinding(\n  capabilityId: string,\n  services: RuntimeCapabilityServices,\n): CoreCapabilityRuntimeBinding | undefined {\n  const instagramPublication", "function resolveBinding(\n  capabilityId: string,\n  services: RuntimeCapabilityServices,\n): CoreCapabilityRuntimeBinding | undefined {\n  const crmSales = resolveCrmSalesRuntimeBinding(capabilityId, services.crmSales);\n  if (crmSales) return crmSales;\n\n  const instagramPublication")
-          replace_if_present('src/registry.ts', "import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';", "import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';\nimport { CRM_SALES_RUNTIME_TOOL_DEFINITIONS } from './crm/runtime.js';")
-          replace_if_present('src/registry.ts', "  readonly videoContentRuntimeEnabled?: boolean;\n}", "  readonly videoContentRuntimeEnabled?: boolean;\n  readonly crmSalesRuntimeEnabled?: boolean;\n}")
-          replace_if_present('src/registry.ts', "  if (options.videoContentRuntimeEnabled)\n    for (const tool of videoContentRuntimeTools) registry.register(tool);\n  return registry;", "  if (options.videoContentRuntimeEnabled)\n    for (const tool of videoContentRuntimeTools) registry.register(tool);\n  if (options.crmSalesRuntimeEnabled)\n    for (const tool of CRM_SALES_RUNTIME_TOOL_DEFINITIONS) registry.register(tool);\n  return registry;")
-          replace_if_present('src/server.ts', "import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';", "import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';\nimport { PostgresCrmCoreStore } from './persistence/postgres-crm-core-store.js';\nimport { PostgresCrmSalesStore } from './persistence/postgres-crm-sales-store.js';\nimport { PostgresCrmSalesPersistenceReadback } from './persistence/postgres-crm-sales-readback.js';")
-          replace_if_present('src/server.ts', "    videoContentRuntimeEnabled: Boolean(pool),\n  });", "    videoContentRuntimeEnabled: Boolean(pool),\n    crmSalesRuntimeEnabled: Boolean(pool),\n  });")
-          replace_if_present('src/server.ts', "  const videoContent = pool ? new PostgresVideoContentRuntime(pool) : undefined;\n\n  const runtimeResolver", "  const videoContent = pool ? new PostgresVideoContentRuntime(pool) : undefined;\n  const crmCore = pool ? new PostgresCrmCoreStore(pool) : undefined;\n  const crmSales = pool ? new PostgresCrmSalesStore(pool) : undefined;\n  const crmSalesReadback = pool ? new PostgresCrmSalesPersistenceReadback(pool) : undefined;\n\n  const runtimeResolver")
-          replace_if_present('src/server.ts', "    ...(videoContent ? { videoContent } : {}),\n  });", "    ...(videoContent ? { videoContent } : {}),\n    ...(crmCore && crmSales && crmSalesReadback\n      ? { crmSales: { core: crmCore, sales: crmSales, persistenceReadback: crmSalesReadback } }\n      : {}),\n  });")
-          PY
-      - name: Apply repository formatting
-        run: >-
-          pnpm exec prettier --write
-          src/crm/runtime.ts
-          src/crm/sales-engine.ts
-          src/mcp/core-execution.ts
-          src/mcp/runtime-capability-resolver.ts
-          src/persistence/postgres-crm-sales-readback.ts
-          src/persistence/postgres-crm-sales-store.ts
-          src/registry.ts
-          src/server.ts
-          test/crm-sales-engine.test.ts
-          test/crm-sales-postgres-e2e.test.ts
-      - name: Commit source normalization only
-        run: |
-          if git diff --quiet -- src test; then
-            echo 'CRM_SALES_SOURCE_ALREADY_NORMALIZED=1'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src test
-          git commit -m 'feat(crm): integrate governed R10 sales runtime'
-          git push origin HEAD:feat/next-crm-sales-engine-advanced-20260820
-
   postgres-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
