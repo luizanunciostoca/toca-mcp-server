@@ -4,6 +4,7 @@ import { bindApprovalStoreToScope } from '../governance/approval-scope.js';
 import { createTocaRuntimeComposition } from '../server.js';
 import { PostgresDeadLetterSink } from '../worker/postgres-dead-letter.js';
 import { ExistingCoreCapabilityGateway } from './core-gateway.js';
+import { GoogleOAuthRefreshSecretResolver } from './google-oauth-secret-resolver.js';
 import { PostgresConversationStore } from './postgres-conversation-store.js';
 import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
 import { OpenAiResponsesDecisionAdapter } from './openai-responses-adapter.js';
@@ -83,14 +84,19 @@ export function createAg01ProductionRuntime(
   const conversations = new PostgresConversationStore(pool);
   const deadLetters = new PostgresDeadLetterSink(pool);
   const secrets = new EnvironmentSecretResolver(env);
+  const googleOAuth = new GoogleOAuthRefreshSecretResolver({
+    clientIdReference: { provider: 'env', key: config.googleOAuthClientIdEnvKey },
+    clientSecretReference: { provider: 'env', key: config.googleOAuthClientSecretEnvKey },
+    refreshTokenReference: { provider: 'env', key: config.googleOAuthRefreshTokenEnvKey },
+    secrets,
+    tokenEndpoint: config.googleOAuthTokenEndpoint,
+    timeoutMs: config.registryTimeoutMs,
+  });
   const tocaOs = new GoogleSheetsTocaOsRegistryClient({
     routingSpreadsheetId: config.routingSpreadsheetId,
     canonicalResourcesSpreadsheetId: config.canonicalResourcesSpreadsheetId,
-    accessTokenReference: {
-      provider: 'env',
-      key: config.googleSheetsAccessTokenEnvKey,
-    },
-    secrets,
+    accessTokenReference: { provider: 'google-oauth', key: 'sheets-readonly' },
+    secrets: googleOAuth,
     cacheTtlMs: config.registryCacheTtlMs,
     timeoutMs: config.registryTimeoutMs,
   });
@@ -176,11 +182,7 @@ export function createAg01ProductionRuntime(
     execute,
     resume,
     readiness: async () => {
-      await Promise.all([
-        pool.query('select 1'),
-        model.readiness(),
-        tocaOs.snapshot(true),
-      ]);
+      await Promise.all([pool.query('select 1'), model.readiness(), tocaOs.snapshot(true)]);
       if (runtimeCapabilityIds.length === 0) throw new Error('AG01_CORE_RUNTIME_CAPABILITIES_EMPTY');
     },
     close: () => pool.end(),
