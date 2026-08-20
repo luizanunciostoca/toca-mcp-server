@@ -17,6 +17,8 @@
     "dev:instagram-publication-approval-manifest": "tsx src/instagram-publication-approval-manifest.ts",
     "dev:instagram-publication-asset-staging": "tsx src/instagram-publication-asset-staging.ts",
     "dev:marketing-autopilot-image-edit": "tsx src/marketing-autopilot-image-edit.ts",
+    "dev:marketing-autopilot-video-generate": "tsx src/marketing-autopilot-video-generate.ts",
+    "dev:marketing-autopilot-video-finalize": "tsx src/marketing-autopilot-video-finalize.ts",
     "start": "node dist/src/index.js",
     "start:http": "node dist/src/http.js",
     "start:instagram-publication-worker": "node dist/src/instagram-publication-worker.js",
@@ -32,7 +34,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-photo-to-video-contract.mjs",
     "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

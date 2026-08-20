@@ -1,5 +1,5 @@
 import type { SecretReference, SecretResolver } from '../../core/secrets.js';
-import type { SpreadsheetValuesClient } from './media-assets.js';
+import type { SpreadsheetValuesBatchWriter, SpreadsheetValuesClient } from './media-assets.js';
 
 export interface GoogleSheetsRestClientOptions {
   readonly tokenReference: SecretReference;
@@ -14,7 +14,9 @@ interface GoogleSheetsValuesResponse {
 
 const DEFAULT_GOOGLE_SHEETS_BASE_URL = 'https://sheets.googleapis.com/v4';
 
-export class GoogleSheetsRestClient implements SpreadsheetValuesClient {
+export class GoogleSheetsRestClient
+  implements SpreadsheetValuesClient, SpreadsheetValuesBatchWriter
+{
   private readonly baseUrl: string;
 
   constructor(
@@ -60,6 +62,38 @@ export class GoogleSheetsRestClient implements SpreadsheetValuesClient {
       body: JSON.stringify({ majorDimension: 'ROWS', values: [values] }),
     });
     await assertGoogleSheetsResponse(response, 'append row');
+  }
+
+  async updateRanges(
+    spreadsheetId: string,
+    updates: readonly {
+      readonly range: string;
+      readonly values: readonly (readonly unknown[])[];
+    }[],
+  ): Promise<void> {
+    if (updates.length === 0) return;
+
+    const token = await this.secrets.resolve(this.options.tokenReference);
+    const url = new URL(
+      `${this.baseUrl}/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+    );
+
+    const response = await this.fetcher(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        valueInputOption: 'RAW',
+        data: updates.map((update) => ({
+          range: update.range,
+          majorDimension: 'ROWS',
+          values: update.values,
+        })),
+      }),
+    });
+    await assertGoogleSheetsResponse(response, 'batch update ranges');
   }
 }
 
