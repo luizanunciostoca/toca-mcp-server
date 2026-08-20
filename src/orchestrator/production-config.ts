@@ -21,7 +21,10 @@ const schema = z.object({
   AG01_OPENAI_MAX_OUTPUT_TOKENS: positiveInteger(4096),
   AG01_TOCA_OS_ROUTING_SPREADSHEET_ID: z.string().trim().min(1),
   AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID: z.string().trim().min(1),
-  AG01_GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1),
+  AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY: z.string().trim().min(1),
+  AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY: z.string().trim().min(1),
+  AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY: z.string().trim().min(1),
+  AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT: z.string().url().default('https://oauth2.googleapis.com/token'),
   AG01_REGISTRY_CACHE_TTL_MS: positiveInteger(60_000),
   AG01_REGISTRY_TIMEOUT_MS: positiveInteger(10_000),
   AG01_AUTHORIZATION_ROLES: z.string().default('READER'),
@@ -47,7 +50,10 @@ export interface Ag01ProductionConfig {
   readonly openAiMaxOutputTokens: number;
   readonly routingSpreadsheetId: string;
   readonly canonicalResourcesSpreadsheetId: string;
-  readonly googleSheetsAccessTokenEnvKey: string;
+  readonly googleOAuthClientIdEnvKey: string;
+  readonly googleOAuthClientSecretEnvKey: string;
+  readonly googleOAuthRefreshTokenEnvKey: string;
+  readonly googleOAuthTokenEndpoint: string;
   readonly registryCacheTtlMs: number;
   readonly registryTimeoutMs: number;
   readonly authorizationRoles: readonly AuthorizationRole[];
@@ -67,8 +73,18 @@ export function loadAg01ProductionConfig(
   requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
   requireReferencedSecret(
     env,
-    value.AG01_GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY,
-    'AG01_GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY',
+    value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
+    'AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY',
+  );
+  requireReferencedSecret(
+    env,
+    value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY,
+    'AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY',
+  );
+  requireReferencedSecret(
+    env,
+    value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY,
+    'AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY',
   );
 
   const authorizationRoles = parseRoles(value.AG01_AUTHORIZATION_ROLES);
@@ -91,7 +107,10 @@ export function loadAg01ProductionConfig(
     openAiMaxOutputTokens: value.AG01_OPENAI_MAX_OUTPUT_TOKENS,
     routingSpreadsheetId: value.AG01_TOCA_OS_ROUTING_SPREADSHEET_ID,
     canonicalResourcesSpreadsheetId: value.AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID,
-    googleSheetsAccessTokenEnvKey: value.AG01_GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY,
+    googleOAuthClientIdEnvKey: value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
+    googleOAuthClientSecretEnvKey: value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY,
+    googleOAuthRefreshTokenEnvKey: value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY,
+    googleOAuthTokenEndpoint: value.AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT,
     registryCacheTtlMs: value.AG01_REGISTRY_CACHE_TTL_MS,
     registryTimeoutMs: value.AG01_REGISTRY_TIMEOUT_MS,
     authorizationRoles,
