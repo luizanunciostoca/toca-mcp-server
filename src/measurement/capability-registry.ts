@@ -1,4 +1,5 @@
 import type { ToolRegistry } from '../core/tool-registry.js';
+import { ATTRIBUTION_REVENUE_CAPABILITY_CONTRACTS } from './attribution-revenue-contracts.js';
 import { MEASUREMENT_CAPABILITY_CONTRACTS } from './contracts.js';
 
 /**
@@ -7,7 +8,10 @@ import { MEASUREMENT_CAPABILITY_CONTRACTS } from './contracts.js';
  * provider connectivity or production validation.
  */
 export function registerMeasurementAuditCapabilities(registry: ToolRegistry): void {
-  for (const capability of MEASUREMENT_CAPABILITY_CONTRACTS) {
+  for (const capability of [
+    ...MEASUREMENT_CAPABILITY_CONTRACTS,
+    ...ATTRIBUTION_REVENUE_CAPABILITY_CONTRACTS,
+  ]) {
     if (registry.get(capability.capabilityId)) continue;
     registry.register({
       name: capability.capabilityId,

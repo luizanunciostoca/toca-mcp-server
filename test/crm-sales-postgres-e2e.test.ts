@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { scoreLeadDeterministically } from '../src/crm/sales-engine.js';
 import { PostgresCrmCoreStore } from '../src/persistence/postgres-crm-core-store.js';
 import { PostgresCrmSalesStore } from '../src/persistence/postgres-crm-sales-store.js';
@@ -155,6 +156,44 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
         reason: 'Commercial opportunity created',
       },
     });
+
+    const occurredAt = '2026-08-20T12:04:45.000Z';
+    const orderReference = `order-${suffix}`;
+    await pool1.query(
+      `insert into revenue_evidence_records (
+         revenue_evidence_id, dedupe_key, tenant_id, workspace_id, organization_id,
+         opportunity_id, contact_id, lead_id, event_id, source_type, provider,
+         provider_event_id, provider_evidence_ref, external_reference, status,
+         provider_readback_at, occurred_at, currency, gross_revenue_minor,
+         net_revenue_minor, refund_minor, cost_minor, order_reference,
+         idempotency_key, execution_id, correlation_id, actor_principal_id,
+         evidence, created_at
+       ) values (
+         $1, $2, $3, $4, $5, $6, $7, $8, null, 'ORDER', 'crm-sales-e2e',
+         $9, $10, $11, 'CONFIRMED', $12::timestamptz, $12::timestamptz,
+         'BRL', 250000, 250000, null, null, $11,
+         $13, $14, $15, $16, $17::jsonb, $12::timestamptz
+       )`,
+      [
+        `revenue-evidence-won-${suffix}`,
+        createHash('sha256').update(`crm-sales-e2e:${orderReference}`).digest('hex'),
+        TENANT,
+        WORKSPACE,
+        ORGANIZATION,
+        opportunityId,
+        contactId,
+        leadId,
+        `provider-event-${suffix}`,
+        `provider-evidence-${suffix}`,
+        orderReference,
+        occurredAt,
+        `revenue-evidence-idempotency-${suffix}`,
+        `revenue-evidence-execution-${suffix}`,
+        `revenue-evidence-correlation-${suffix}`,
+        ACTOR,
+        JSON.stringify(['crm-sales:e2e:verified-order']),
+      ],
+    );
 
     const won = await sales1.updateOpportunity({
       ...mutation(suffix, 'opportunity-won', '2026-08-20T12:05:00.000Z'),
