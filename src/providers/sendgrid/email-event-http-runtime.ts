@@ -490,8 +490,8 @@ function suppressionReason(state: 'BOUNCED' | 'COMPLAINT' | 'UNSUBSCRIBED'): Sup
 
 function singleHeader(value: string | readonly string[] | undefined): string | null {
   if (typeof value === 'string') return value.trim() || null;
-  if (Array.isArray(value) && value.length === 1) return value[0]?.trim() || null;
-  return null;
+  if (!value || value.length !== 1) return null;
+  return value[0]?.trim() || null;
 }
 
 function stableOpaqueId(value: string): string {
