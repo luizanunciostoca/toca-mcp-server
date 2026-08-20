@@ -79,6 +79,23 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
     }
   }
 
+  const campaignIds = new Set<string>();
+  for (const campaign of configuration.campaigns) {
+    requireNonEmpty(campaign.providerId, 'TENANT_CAMPAIGN_PROVIDER_REQUIRED');
+    requireNonEmpty(campaign.connectedAccountId, 'TENANT_CAMPAIGN_ACCOUNT_REQUIRED');
+    requireNonEmpty(campaign.campaignId, 'TENANT_CAMPAIGN_ID_REQUIRED');
+    requireEvidence(campaign.evidence, 'TENANT_CAMPAIGN_EVIDENCE_REQUIRED');
+    const provider = configuration.providers.find(
+      (candidate) =>
+        candidate.providerId === campaign.providerId &&
+        candidate.connectedAccountId === campaign.connectedAccountId,
+    );
+    if (!provider) throw new TenantIsolationError('TENANT_CAMPAIGN_PROVIDER_MISMATCH');
+    const campaignKey = `${campaign.providerId}:${campaign.connectedAccountId}:${campaign.campaignId}`;
+    if (campaignIds.has(campaignKey)) throw new TenantIsolationError('TENANT_CAMPAIGN_DUPLICATE');
+    campaignIds.add(campaignKey);
+  }
+
   for (const budget of configuration.budgets) {
     requireNonEmpty(budget.budgetId, 'TENANT_BUDGET_ID_REQUIRED');
     if (!/^[A-Z]{3}$/.test(budget.currency)) {
@@ -148,6 +165,9 @@ function ownedResourceKeys(configuration: TenantConfiguration): readonly string[
   }
   for (const credential of configuration.credentials) {
     keys.add(`secret:${credential.secretReference.provider}:${credential.secretReference.key}`);
+  }
+  for (const campaign of configuration.campaigns) {
+    keys.add(`campaign:${campaign.providerId}:${campaign.connectedAccountId}:${campaign.campaignId}`);
   }
   for (const policy of configuration.policies) {
     keys.add(`policy:${policy.policyResourceId}`);
