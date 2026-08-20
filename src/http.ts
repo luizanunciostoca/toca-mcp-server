@@ -1,10 +1,18 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
 import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
 import { PostgresMetaWebhookEventStore } from './persistence/meta-webhook-event-store.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { createMetaHttpRuntime } from './providers/meta/meta-http-runtime.js';
+import {
+  createSendGridEventHttpRuntime,
+  type SendGridEventHttpRuntime,
+} from './providers/sendgrid/email-event-http-runtime.js';
 import { SERVER_NAME } from './server.js';
+
+const SENDGRID_EVENT_WEBHOOK_PATH = '/webhooks/sendgrid/events';
+const SENDGRID_MAX_EVENT_WEBHOOK_BYTES = 2 * 1024 * 1024;
 
 const config = loadConfig();
 const metaRuntime = createMetaHttpRuntime(config, process.env);
@@ -17,8 +25,9 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const metaWebhook = createMetaWebhookBoundary();
+const sendGridEventRuntime = await createEmailWebhookRuntime();
 
-const server = createTocaHttpServer({
+const baseServer = createTocaHttpServer({
   onError: (error) => {
     console.error('HTTP request failed', error instanceof Error ? error.message : 'unknown error');
   },
@@ -32,9 +41,57 @@ const server = createTocaHttpServer({
   ...(metaWebhook ? { metaWebhook } : {}),
 });
 
+const server = sendGridEventRuntime
+  ? createServer((request, response) => {
+      void handleComposedHttpRequest(request, response, sendGridEventRuntime, baseServer);
+    })
+  : baseServer;
+
 server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
+
+async function createEmailWebhookRuntime(): Promise<SendGridEventHttpRuntime | undefined> {
+  if (!isTrue(process.env.EMAIL_SENDGRID_ENABLED)) return undefined;
+  if (!config.DATABASE_URL?.trim()) throw new Error('EMAIL_SENDGRID_DATABASE_URL_REQUIRED');
+  const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
+  const runtime = await createSendGridEventHttpRuntime({ pool, env: process.env });
+  if (!runtime) throw new Error('EMAIL_SENDGRID_RUNTIME_ENABLED_BUT_NOT_COMPOSED');
+  return runtime;
+}
+
+async function handleComposedHttpRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  sendGrid: SendGridEventHttpRuntime,
+  baseServer: ReturnType<typeof createTocaHttpServer>,
+): Promise<void> {
+  const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+  if (pathname !== SENDGRID_EVENT_WEBHOOK_PATH) {
+    baseServer.emit('request', request, response);
+    return;
+  }
+
+  if (request.method !== 'POST') {
+    sendJson(response, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
+    return;
+  }
+
+  try {
+    const rawBody = await readRawRequestBody(request, SENDGRID_MAX_EVENT_WEBHOOK_BYTES);
+    const result = await sendGrid.handleEventWebhook(rawBody, {
+      'x-twilio-email-event-webhook-timestamp':
+        request.headers['x-twilio-email-event-webhook-timestamp'],
+      'x-twilio-email-event-webhook-signature':
+        request.headers['x-twilio-email-event-webhook-signature'],
+    });
+    sendJson(response, 202, { ok: true, ...result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'SENDGRID_EVENT_WEBHOOK_FAILED';
+    console.error('SendGrid Event Webhook failed', code);
+    sendJson(response, webhookErrorStatus(code), { ok: false, error: safeErrorCode(code) });
+  }
+}
 
 function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
   if (!config.META_WEBHOOK_ENABLED) return undefined;
@@ -86,4 +143,42 @@ function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
       );
     },
   };
+}
+
+async function readRawRequestBody(request: IncomingMessage, maximumBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    total += buffer.length;
+    if (total > maximumBytes) throw new Error('SENDGRID_EVENT_WEBHOOK_BODY_TOO_LARGE');
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+function webhookErrorStatus(code: string): number {
+  if (code.includes('SIGNATURE') || code.includes('TIMESTAMP')) return 401;
+  if (code.includes('BODY_TOO_LARGE')) return 413;
+  if (code.includes('BODY_INVALID') || code.includes('EVENT_TYPE_REQUIRED')) return 400;
+  return 500;
+}
+
+function safeErrorCode(value: string): string {
+  const code = value.split(':', 1)[0]?.trim();
+  return code && /^[A-Z0-9_]+$/.test(code) ? code : 'SENDGRID_EVENT_WEBHOOK_FAILED';
+}
+
+function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
+  const payload = Buffer.from(JSON.stringify(body));
+  response.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': payload.length,
+    'cache-control': 'no-store',
+  });
+  response.end(payload);
+}
+
+function isTrue(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true';
 }
