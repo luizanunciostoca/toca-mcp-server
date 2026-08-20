@@ -1,0 +1,63 @@
+name: Tenant FK Order Fix
+
+on:
+  push:
+    branches:
+      - feat/multi-tenant-foundation-20260820
+    paths:
+      - '.github/workflows/tenant-fk-order-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/multi-tenant-foundation-20260820
+          persist-credentials: true
+      - name: Repair replacement order
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/persistence/postgres-tenant-configuration-store.ts')
+          text = path.read_text()
+          old = """    for (const table of [
+      'tenant_provider_bindings',
+      'tenant_credential_bindings',
+      'tenant_budget_envelopes',
+      'tenant_policy_bindings',
+      'tenant_approval_chain_bindings',
+      'tenant_rbac_grants',
+      'tenant_asset_registry_bindings',
+      'tenant_analytics_namespaces',
+      'tenant_quotas',
+      'tenant_campaign_scopes',
+    ]) {"""
+          new = """    for (const table of [
+      'tenant_campaign_scopes',
+      'tenant_provider_bindings',
+      'tenant_credential_bindings',
+      'tenant_budget_envelopes',
+      'tenant_policy_bindings',
+      'tenant_approval_chain_bindings',
+      'tenant_rbac_grants',
+      'tenant_asset_registry_bindings',
+      'tenant_analytics_namespaces',
+      'tenant_quotas',
+    ]) {"""
+          if old not in text:
+              raise SystemExit('TENANT_REPLACEMENT_ORDER_MARKER_NOT_FOUND')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/persistence/postgres-tenant-configuration-store.ts
+          git commit -m "fix(tenancy): delete dependent scopes before providers"
+          git push origin HEAD:feat/multi-tenant-foundation-20260820
