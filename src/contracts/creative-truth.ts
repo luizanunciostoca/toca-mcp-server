@@ -2,8 +2,7 @@ import * as z from 'zod/v4';
 
 export const TOCA_CREATIVE_TRUTH_POLICY_ID = 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const;
 export const TOCA_VENUE_REFERENCE_SET_LEGACY_ID = 'TOCA_VENUE_REFERENCE_SET_V1' as const;
-export const TOCA_VENUE_REFERENCE_SET_SUNSET_ID =
-  'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const;
+export const TOCA_VENUE_REFERENCE_SET_SUNSET_ID = 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const;
 export const TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID =
   'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' as const;
 /** @deprecated Execution against the legacy global reference set is denied by policy v1.3. */
@@ -47,10 +46,7 @@ export const brandAssetSchema = z
     fileName: z.string().min(1),
     contentType: z.string().min(1),
     integrityMode: z.enum(['DRIVE_FILE_ID_PINNED', 'SHA256_PINNED']),
-    sha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/i)
-      .optional(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     status: z.enum(['ACTIVE_APPROVED', 'REVOKED']),
     aiReconstructionAllowed: z.literal(false),
   })
@@ -79,14 +75,8 @@ export const venueAssetSchema = z
     sourceDriveFileId: z.string().min(1),
     masterAssetId: z.string().min(1).optional(),
     masterDriveFileId: z.string().min(1).optional(),
-    sourceSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/i)
-      .optional(),
-    masterSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/i)
-      .optional(),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    masterSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     operation: z.string().min(1),
     locationSignature: z.string().min(1),
     dominantSubject: z.string().min(1),
@@ -165,10 +155,7 @@ export const videoShotSchema = z
     masterAssetId: z.string().min(1).optional(),
     masterDriveFileId: z.string().min(1).optional(),
     sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
-    masterSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/i)
-      .optional(),
+    masterSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     operation: z.string().min(1),
     locationSignature: z.string().min(1),
     shotClass: z.string().min(1),
