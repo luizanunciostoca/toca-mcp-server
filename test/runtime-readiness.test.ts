@@ -111,7 +111,7 @@ describe('production runtime readiness', () => {
     expect(report.checks).toContainEqual({ name: 'outbox', ok: false });
   });
 
-  it('fails readiness while the emergency platform kill switch is active', async () => {
+  it('keeps dependency readiness healthy while the mutation kill switch is active', async () => {
     const migrationsDirectory = await emptyMigrationsDirectory();
     const report = await evaluateReadiness(
       createRuntimeReadinessChecks({
@@ -122,8 +122,8 @@ describe('production runtime readiness', () => {
       }),
     );
 
-    expect(report.status).toBe('not_ready');
-    expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: false });
+    expect(report.status).toBe('ready');
+    expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: true });
   });
 });
 
