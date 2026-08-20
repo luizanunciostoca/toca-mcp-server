@@ -1,3 +1,6 @@
+import { creativeTruthPublicationBindingSchema } from '../../contracts/creative-truth.js';
+import { assertCreativePublicationAssetHash } from '../../creative/creative-truth.js';
+import { ExecutionError } from '../../core/errors.js';
 import type { InstagramPublishRequest } from './instagram-contracts.js';
 import {
   transitionPublication,
@@ -42,9 +45,12 @@ export class InstagramPublicationExecutor {
     private readonly store: PublicationExecutionStore,
     private readonly transport: InstagramPublicationTransport,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly requireCreativeTruthBinding = false,
   ) {}
 
   async execute(request: InstagramPublishRequest): Promise<PublicationExecutionResult> {
+    if (this.requireCreativeTruthBinding) assertCreativeTruthBinding(request);
+
     let record = await this.store.reserve(request, this.now());
     let publishingAuthorizedThisRun = false;
 
@@ -136,6 +142,24 @@ export class InstagramPublicationExecutor {
       throw error;
     }
   }
+}
+
+export function assertCreativeTruthBinding(request: InstagramPublishRequest): void {
+  if (!request.creativeTruthBinding) {
+    throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_BINDING_REQUIRED', false);
+  }
+  const parsed = creativeTruthPublicationBindingSchema.safeParse(request.creativeTruthBinding);
+  if (!parsed.success) {
+    throw new ExecutionError('POLICY_DENIED', 'CREATIVE_TRUTH_BINDING_INVALID', false);
+  }
+  if (!request.publicationAssetSha256 || !/^[a-f0-9]{64}$/i.test(request.publicationAssetSha256)) {
+    throw new ExecutionError(
+      'POLICY_DENIED',
+      'CREATIVE_TRUTH_PUBLICATION_ASSET_HASH_REQUIRED',
+      false,
+    );
+  }
+  assertCreativePublicationAssetHash(parsed.data, request.publicationAssetSha256);
 }
 
 async function getPublishedEvidence(

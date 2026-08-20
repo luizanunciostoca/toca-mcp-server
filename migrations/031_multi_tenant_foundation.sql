@@ -1,5 +1,5 @@
 -- TOCA OS multi-tenant foundation.
--- Migration number 027 is intentionally serialized after the active 023-026 workstreams.
+-- Migration number 031 is serialized after the integrated 022-030 workstreams.
 -- The V1 runtime remains the compatibility tenant `toca` until runtime integration is merged.
 
 create table if not exists tenants (
@@ -15,7 +15,7 @@ create table if not exists tenants (
 );
 
 insert into tenants (tenant_id, status, display_name, evidence)
-values ('toca', 'ACTIVE', 'Toca do Morcego', '["migration:027:legacy-v1-tenant"]'::jsonb)
+values ('toca', 'ACTIVE', 'Toca do Morcego', '["migration:031:legacy-v1-tenant"]'::jsonb)
 on conflict (tenant_id) do nothing;
 
 create table if not exists tenant_configurations (

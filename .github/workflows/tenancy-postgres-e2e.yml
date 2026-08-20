@@ -3,7 +3,7 @@ name: Tenancy PostgreSQL E2E
 on:
   pull_request:
     paths:
-      - 'migrations/027_multi_tenant_foundation.sql'
+      - 'migrations/031_multi_tenant_foundation.sql'
       - 'src/tenancy/**'
       - 'src/persistence/postgres-tenant-configuration-store.ts'
       - 'test/tenant-configuration-postgres-e2e.test.ts'

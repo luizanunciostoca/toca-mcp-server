@@ -1,3 +1,5 @@
+import type { CreativeTruthPublicationBinding } from '../../contracts/creative-truth.js';
+
 export type InstagramMediaType = 'IMAGE' | 'CAROUSEL' | 'REEL' | 'STORY';
 
 export interface InstagramAccountRef {
@@ -63,6 +65,9 @@ export interface InstagramPublishRequest {
   readonly caption?: string;
   readonly correlationId: string;
   readonly idempotencyKey: string;
+  readonly creativeTruthBinding?: CreativeTruthPublicationBinding;
+  /** SHA-256 computed from the exact staged publication bytes before provider execution. */
+  readonly publicationAssetSha256?: string;
 }
 
 export interface InstagramPublishResult {

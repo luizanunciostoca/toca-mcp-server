@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import type { CreativeMode } from '../../contracts/creative-truth.js';
+import { TOCA_CREATIVE_TRUTH_POLICY_ID } from '../../contracts/creative-truth.js';
+import { buildTocaImageEditPrompt } from '../../creative/creative-truth.js';
 import { ExecutionError } from '../../core/errors.js';
 import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 
@@ -13,12 +16,19 @@ Apenas texturas fotorrealistas. Apenas melhorias fieis à fonte original.`;
 const OPENAI_IMAGE_EDIT_ENDPOINT = 'https://api.openai.com/v1/images/edits';
 const SUPPORTED_SOURCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+export interface TocaCreativeTruthEditBinding {
+  readonly brandScope: 'TOCA_DO_MORCEGO';
+  readonly policyId: typeof TOCA_CREATIVE_TRUTH_POLICY_ID;
+  readonly creativeMode: CreativeMode;
+}
+
 export interface OpenAiImageEditRequest {
   readonly sourceAssetId: string;
   readonly sourceDriveFileId: string;
   readonly imageBytes: Uint8Array;
   readonly contentType: 'image/jpeg' | 'image/png' | 'image/webp';
   readonly prompt?: string;
+  readonly creativeTruth?: TocaCreativeTruthEditBinding;
 }
 
 export interface OpenAiImageEditResult {
@@ -36,6 +46,8 @@ export interface OpenAiImageEditResult {
   readonly prompt: string;
   readonly sourceAssetId: string;
   readonly sourceDriveFileId: string;
+  readonly creativeTruthBound?: true;
+  readonly requiresVenueFidelityGate?: true;
 }
 
 export interface OpenAiImageEditProviderOptions {
@@ -63,7 +75,10 @@ export class OpenAiImageEditProvider {
     const sourceBytes = Uint8Array.from(request.imageBytes);
     const sourceSha256 = sha256(sourceBytes);
     const apiKey = await this.options.secretResolver.resolve(this.options.apiKeyReference);
-    const prompt = request.prompt?.trim() || TOCA_CANONICAL_IMAGE_TREATMENT_PROMPT;
+    const basePrompt = request.prompt?.trim() || TOCA_CANONICAL_IMAGE_TREATMENT_PROMPT;
+    const prompt = request.creativeTruth
+      ? buildTocaImageEditPrompt(basePrompt, request.creativeTruth.creativeMode)
+      : basePrompt;
 
     const form = new FormData();
     form.set('model', this.model);
@@ -138,6 +153,9 @@ export class OpenAiImageEditProvider {
       prompt,
       sourceAssetId: request.sourceAssetId,
       sourceDriveFileId: request.sourceDriveFileId,
+      ...(request.creativeTruth
+        ? { creativeTruthBound: true as const, requiresVenueFidelityGate: true as const }
+        : {}),
     };
   }
 }
@@ -159,6 +177,14 @@ function validateRequest(request: OpenAiImageEditRequest): void {
   }
   if (request.imageBytes.byteLength === 0) {
     throw new ExecutionError('SOURCE_IMAGE_FETCH_BLOCK', 'SOURCE_IMAGE_EMPTY', false);
+  }
+  if (request.creativeTruth?.policyId !== undefined) {
+    if (
+      request.creativeTruth.brandScope !== 'TOCA_DO_MORCEGO' ||
+      request.creativeTruth.policyId !== TOCA_CREATIVE_TRUTH_POLICY_ID
+    ) {
+      throw new ExecutionError('POLICY_DENIED', 'INVALID_CREATIVE_TRUTH_BINDING', false);
+    }
   }
 }
 

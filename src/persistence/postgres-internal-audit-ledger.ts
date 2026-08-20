@@ -16,9 +16,53 @@ interface AuditLedgerHeadRow {
   readonly head_hash: string;
 }
 
+export type InternalAuditRecordType =
+  | 'CONTACT'
+  | 'LEAD'
+  | 'OPPORTUNITY'
+  | 'OBSERVATION'
+  | 'EXPERIMENT'
+  | 'OUTCOME'
+  | 'DECISION'
+  | 'RECOMMENDATION';
+
 export interface InternalAuditLedgerInput {
+  readonly namespace?: 'crm' | 'learning';
   readonly operation: string;
-  readonly recordType: 'CONTACT' | 'LEAD' | 'OPPORTUNITY';
+  readonly recordType: InternalAuditRecordType;
+  readonly recordId: string;
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly organizationId: string;
+  readonly executionId: string;
+  readonly correlationId: string;
+  readonly actorPrincipalId: string;
+  readonly evidence: readonly string[];
+  readonly createdAt: string;
+}
+
+export interface InternalMeasurementAuditLedgerInput {
+  readonly operation: string;
+  readonly recordType:
+    | 'ATTRIBUTION_WINDOW_POLICY'
+    | 'ATTRIBUTION_TOUCHPOINT'
+    | 'REVENUE_EVIDENCE'
+    | 'MARKETING_SALES_FEEDBACK';
+  readonly recordId: string;
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly organizationId: string;
+  readonly executionId: string;
+  readonly correlationId: string;
+  readonly actorPrincipalId: string;
+  readonly evidence: readonly string[];
+  readonly createdAt: string;
+}
+
+interface InternalCoreAuditLedgerInput {
+  readonly toolNamespace: 'core.crm' | 'core.measurement';
+  readonly operation: string;
+  readonly recordType: string;
   readonly recordId: string;
   readonly tenantId: string;
   readonly workspaceId: string;
@@ -32,15 +76,17 @@ export interface InternalAuditLedgerInput {
 
 /**
  * Appends a successful internal core mutation to the existing hash-chained Audit Ledger.
- * It deliberately does not register an MCP tool or a capability: the operation name is
- * audit metadata only. The caller owns the surrounding PostgreSQL transaction so the
- * business mutation, revision, outbox event and audit evidence commit atomically.
+ * The caller owns the surrounding PostgreSQL transaction so the business mutation,
+ * outbox event and audit evidence commit atomically.
  */
-export async function appendInternalAuditLedgerEvent(
+async function appendInternalCoreAuditLedgerEvent(
   client: pg.PoolClient,
-  input: InternalAuditLedgerInput,
+  input: InternalCoreAuditLedgerInput,
 ): Promise<void> {
-  const toolName = `core.crm.${requireText(input.operation, 'CRM_AUDIT_OPERATION_REQUIRED')}`;
+  const toolNamespace = requireToolNamespace(input.toolNamespace);
+  const errorPrefix = toolNamespace === 'core.measurement' ? 'MEASUREMENT' : 'CRM';
+  const operation = requireText(input.operation, `${errorPrefix}_AUDIT_OPERATION_REQUIRED`);
+  const toolName = `${toolNamespace}.${operation}`;
   const evidence = normalizeAuditEvidence({
     executionId: input.executionId,
     correlationId: input.correlationId,
@@ -55,15 +101,15 @@ export async function appendInternalAuditLedgerEvent(
     createdAt: input.createdAt,
   });
   const event: AuditEvent = {
-    executionId: requireText(input.executionId, 'CRM_EXECUTION_ID_REQUIRED'),
-    correlationId: requireText(input.correlationId, 'CRM_CORRELATION_ID_REQUIRED'),
+    executionId: requireText(input.executionId, `${errorPrefix}_EXECUTION_ID_REQUIRED`),
+    correlationId: requireText(input.correlationId, `${errorPrefix}_CORRELATION_ID_REQUIRED`),
     toolName,
-    requester: requireText(input.actorPrincipalId, 'CRM_ACTOR_PRINCIPAL_ID_REQUIRED'),
-    tenantId: requireText(input.tenantId, 'CRM_TENANT_ID_REQUIRED'),
-    workspaceId: requireText(input.workspaceId, 'CRM_WORKSPACE_ID_REQUIRED'),
-    organizationId: requireText(input.organizationId, 'CRM_ORGANIZATION_ID_REQUIRED'),
+    requester: requireText(input.actorPrincipalId, `${errorPrefix}_ACTOR_PRINCIPAL_ID_REQUIRED`),
+    tenantId: requireText(input.tenantId, `${errorPrefix}_TENANT_ID_REQUIRED`),
+    workspaceId: requireText(input.workspaceId, `${errorPrefix}_WORKSPACE_ID_REQUIRED`),
+    organizationId: requireText(input.organizationId, `${errorPrefix}_ORGANIZATION_ID_REQUIRED`),
     status: 'SUCCEEDED',
-    externalResourceId: requireText(input.recordId, 'CRM_AUDIT_RECORD_ID_REQUIRED'),
+    externalResourceId: requireText(input.recordId, `${errorPrefix}_AUDIT_RECORD_ID_REQUIRED`),
     evidence,
     createdAt: input.createdAt,
   };
@@ -171,6 +217,34 @@ export async function appendInternalAuditLedgerEvent(
       JSON.stringify({ externalResourceId: input.recordId, errorCode: null }),
     ],
   );
+}
+
+/** Measurement-domain wrapper over the same canonical hash-chained Audit Ledger. */
+export async function appendInternalMeasurementAuditLedgerEvent(
+  client: pg.PoolClient,
+  input: InternalMeasurementAuditLedgerInput,
+): Promise<void> {
+  return appendInternalCoreAuditLedgerEvent(client, {
+    ...input,
+    toolNamespace: 'core.measurement',
+  });
+}
+
+/** Backwards-compatible CRM wrapper. */
+export async function appendInternalAuditLedgerEvent(
+  client: pg.PoolClient,
+  input: InternalAuditLedgerInput,
+): Promise<void> {
+  return appendInternalCoreAuditLedgerEvent(client, {
+    ...input,
+    toolNamespace: 'core.crm',
+  });
+}
+
+function requireToolNamespace(
+  value: 'core.crm' | 'core.measurement',
+): 'core.crm' | 'core.measurement' {
+  return value;
 }
 
 function requireText(value: string, errorCode: string): string {

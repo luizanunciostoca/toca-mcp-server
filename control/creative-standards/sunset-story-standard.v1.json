@@ -1,9 +1,10 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.2",
   "standardId": "SUNSET_STORY_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "1.2",
   "status": "ACTIVE_CANONICAL",
-  "validatedAt": "2026-08-17",
+  "validatedAt": "2026-08-20",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
     "operation": "SUNSET",
     "channel": "INSTAGRAM",
@@ -12,10 +13,13 @@
   "sourceOfTruth": {
     "provider": "GOOGLE_DRIVE",
     "driveDocumentId": "1gTFxCLWnsZIy2vRKHGglXILMAexXoIUzd5WDZvpOtsM",
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
     "referenceFolderId": "1kNN7WDKbdP_iJ7bBOztY3A1d2fBkapWY",
     "originalReferencesFolderId": "1mT4NJdY4wQfbTP580lxvmJC9IbH-3ttz",
     "derivedExamplesFolderId": "1oFEJBYjyZKPCLsnHfnbMul7hIv9N2BwK",
-    "referenceSetId": "SUNSET_STORY_REFERENCE_SET_20260817"
+    "referenceSetId": "SUNSET_STORY_REFERENCE_SET_20260817",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
   },
   "canvas": {
     "width": 1080,
@@ -31,17 +35,10 @@
     "brandFooterBottomPx": 1830,
     "bottomBreathingRoomMinimumPx": 70
   },
-  "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN"],
-  "visualPriority": [
-    "REAL_PHOTOGRAPHY",
-    "PEOPLE_OR_EXPERIENCE",
-    "SUNSET_OR_ENVIRONMENT",
-    "HEADLINE",
-    "CTA",
-    "BRAND_FOOTER"
-  ],
+  "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN", "REAL"],
   "photography": {
-    "masterStatusRequired": "MARKETING_READY",
+    "venueVerifiedRequired": true,
+    "masterStatusRequired": "VENUE_VERIFIED_MARKETING_READY",
     "preferredThemes": [
       "PEOPLE_GOLDEN_HOUR",
       "SOCIAL_INTERACTION",
@@ -70,8 +67,7 @@
     "support": {
       "familyClass": "CLEAN_GEOMETRIC_SANS",
       "weight": "REGULAR_OR_MEDIUM",
-      "maxLines": 3,
-      "preferredContrastTreatment": "TRANSLUCENT_OR_WHITE_TEXT_STRIPS"
+      "maxLines": 3
     },
     "cta": {
       "familyClass": "CLEAN_SANS",
@@ -89,61 +85,45 @@
   },
   "palette": {
     "white": "#FFFFFF",
+    "sunGlow": "#FFC84A",
     "sunsetOrange": "#FF7A00",
+    "deepOrange": "#E65A00",
     "softGold": "#F2C17A",
+    "deepBrown": "#3A1C0F",
     "translucentBlackRange": "rgba(0,0,0,0.50)-rgba(0,0,0,0.65)"
   },
-  "composition": {
-    "maxPrimaryHeadline": 1,
-    "maxSupportCopy": 1,
-    "maxPrimaryCta": 1,
-    "maxOptionalFunctionalInfo": 1,
-    "doNotCover": ["FACE", "EYES", "HANDS", "PRIMARY_DRINK", "SUN", "EXISTING_LOGO"]
-  },
   "templateClasses": [
-    {
-      "id": "SUNSET_HERO_LIFESTYLE",
-      "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR"
-    },
-    {
-      "id": "SUNSET_VIEW_SCENERY",
-      "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE"
-    },
-    {
-      "id": "SUNSET_SOCIAL_EXPERIENCE",
-      "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY"
-    },
-    {
-      "id": "SUNSET_DRINKS_EXPERIENCE",
-      "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL"
-    },
-    {
-      "id": "SUNSET_INFO_HOURS",
-      "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS"
-    }
+    { "id": "SUNSET_HERO_LIFESTYLE", "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR" },
+    { "id": "SUNSET_VIEW_SCENERY", "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE" },
+    { "id": "SUNSET_SOCIAL_EXPERIENCE", "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY" },
+    { "id": "SUNSET_DRINKS_EXPERIENCE", "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL" },
+    { "id": "SUNSET_INFO_HOURS", "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS" }
   ],
-  "copyPolicy": {
-    "headlinePreferredWordCount": {
-      "min": 3,
-      "max": 9
-    },
-    "supportMustComplementHeadline": true,
-    "singlePrimaryCta": true,
-    "hashtagPolicy": "OPTIONAL_SMALL_SUPPORT_ELEMENT",
-    "preferredHashtag": "#VemPraToca"
+  "brandFooter": {
+    "required": true,
+    "orderDefault": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
+    "partnerLogosOnlyWhenCampaignRequires": true,
+    "preferredColor": "#FFFFFF",
+    "logoSource": "OFFICIAL_DRIVE_ASSETS_ONLY",
+    "deterministicInsertionRequired": true,
+    "forbidAiLogoReconstruction": true
+  },
+  "creativeTruth": {
+    "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "defaultModes": ["REAL_COMPOSITE", "REAL_PLUS_ENHANCEMENT"],
+    "generativeExceptionRequiresExplicitApproval": true,
+    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "crossOperationReferenceReuse": "FORBIDDEN",
+    "venueFidelityGateRequired": true,
+    "brandIntegrityGateRequired": true,
+    "qualityGateRequired": true,
+    "exactApprovedAssetPublicationRequired": true
   },
   "antiRepeat": {
     "allowSameTemplateClassConsecutivelyWhenAlternativesExist": false,
     "headlineRepeatWindowDays": 14,
     "preferredRotation": ["PEOPLE", "VIEW", "EXPERIENCE_OR_DRINK", "PEOPLE"],
     "preserveGrammarNotExactLayout": true
-  },
-  "brandFooter": {
-    "required": true,
-    "order": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
-    "preferredColor": "#FFFFFF",
-    "logoSource": "OFFICIAL_DRIVE_ASSETS_ONLY",
-    "forbidAiLogoReconstruction": true
   },
   "qualityGate": {
     "failClosed": true,
@@ -153,49 +133,41 @@
       "TEXT_ILLEGIBLE",
       "INSUFFICIENT_CONTRAST",
       "TEXT_COVERS_ESSENTIAL_SUBJECT",
-      "GENERIC_OR_COLD_VISUAL_IDENTITY",
       "EXCESSIVE_TEXT",
       "MULTIPLE_PRIMARY_CTAS",
       "REQUIRED_LOGOS_MISSING_OR_MISALIGNED",
       "AI_RECREATED_LOGO",
       "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET",
+      "ARCHITECTURE_DRIFT",
       "COPY_TIME_OR_FACT_ERROR",
       "ASSET_LINEAGE_MISSING",
       "CREATIVE_STANDARD_ID_OR_VERSION_MISSING"
     ]
   },
-  "requiredStoryCreativeFields": [
-    "creative_standard_id",
-    "creative_standard_version",
-    "template_class",
-    "reference_set_id",
-    "source_asset_id",
-    "master_asset_id",
-    "master_drive_file_id",
-    "story_creative_id",
-    "creative_version",
-    "headline",
-    "support_copy",
-    "cta_text",
-    "brand_gate_status",
-    "quality_gate_status",
-    "lineage_verified"
-  ],
   "productionFlow": [
+    "RESOLVE_CREATIVE_TRUTH_POLICY",
     "RESOLVE_STANDARD",
     "SELECT_TEMPLATE_CLASS",
-    "SELECT_MARKETING_READY_MASTER",
+    "SELECT_VENUE_VERIFIED_MARKETING_READY_MASTER",
     "COMPOSE_1080X1920",
     "APPLY_COPY_AND_CTA",
-    "INSERT_OFFICIAL_LOGOS",
-    "BRAND_GATE",
+    "INSERT_OFFICIAL_LOGOS_DETERMINISTICALLY",
+    "BRAND_INTEGRITY_GATE",
+    "VENUE_FIDELITY_GATE",
     "QUALITY_GATE_SUNSET",
-    "PERSIST_STORY_CREATIVE",
+    "PERSIST_EXACT_OUTPUT_AND_SHA256",
     "STORY_READY",
     "REVIEW_OR_APPROVAL",
     "PREPARE",
-    "PUBLISH"
+    "PUBLISH_EXACT_APPROVED_ASSET"
   ],
+  "referencePolicy": {
+    "originalReferencesAreVisualStyleReferences": true,
+    "derivedExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
+    "derivedExamplesMayTeach": ["PALETTE", "TYPOGRAPHY", "LAYOUT", "CTA_STYLE"],
+    "derivedExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
+    "venueTruthComesOnlyFromVenueRegistry": true
+  },
   "referenceFiles": {
     "originals": [
       "1VyNGIt_KnJnd05igp3G4EPHuyIqi6y8U",

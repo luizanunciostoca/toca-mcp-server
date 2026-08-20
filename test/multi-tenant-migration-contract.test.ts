@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const tenancyMigration = readFileSync(
-  new URL('../migrations/027_multi_tenant_foundation.sql', import.meta.url),
+  new URL('../migrations/031_multi_tenant_foundation.sql', import.meta.url),
   'utf8',
 );
 const crmMigration = readFileSync(
