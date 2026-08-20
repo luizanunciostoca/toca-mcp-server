@@ -34,6 +34,7 @@ import { MetaAdsDemandIntelligenceService } from './providers/meta-ads/meta-ads-
 import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
+import { isTenantScopedApprovalStore } from './governance/approval-scope.js';
 import { resolveRuntimeTenantIdentity } from './runtime/tenant-identity.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagram-scheduler.js';
@@ -337,6 +338,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     runtimeResolver,
     resolveIdentity,
     approvalStoreAvailable: Boolean(approvalStore),
+    approvalListAvailable: isTenantScopedApprovalStore(approvalStore),
     workflowStoreAvailable: Boolean(workflowStore),
     auditStoreAvailable: Boolean(auditStore),
     eventStoreAvailable: Boolean(eventStore),

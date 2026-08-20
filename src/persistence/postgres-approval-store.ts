@@ -8,10 +8,19 @@ import {
   type ApprovalRecord,
   type ApprovalStore,
 } from '../governance/approval-governance.js';
+import {
+  approvalTenantScope,
+  type ApprovalListOptions,
+  type ApprovalTenantScope,
+  type TenantScopedApprovalStore,
+} from '../governance/approval-scope.js';
 import { isRouteId } from '../governance/types.js';
 
 interface ApprovalRow {
   readonly approval_id: string;
+  readonly tenant_id: string;
+  readonly workspace_id: string;
+  readonly organization_id: string;
   readonly requester: string;
   readonly approver: string | null;
   readonly route_id: string;
@@ -42,38 +51,25 @@ interface ApprovalRow {
   readonly version: number;
 }
 
-export class PostgresApprovalStore implements ApprovalStore {
+const COMPATIBILITY_APPROVAL_SCOPE: ApprovalTenantScope = {
+  tenantId: 'toca',
+  workspaceId: 'toca',
+  organizationId: 'toca',
+};
+
+export class PostgresApprovalStore implements ApprovalStore, TenantScopedApprovalStore {
   constructor(private readonly pool: pg.Pool) {}
 
   async put(record: ApprovalRecord, expectedVersion?: number): Promise<void> {
-    if (!isDirectApprovalPutAllowed(record.status))
-      throw new Error('APPROVAL_EXECUTION_TRANSITION_REQUIRED');
-    const client = await this.pool.connect();
-    try {
-      await client.query('begin');
-      const current = await client.query(
-        'select version from approval_records where approval_id = $1 for update',
-        [record.approvalId],
-      );
-      const currentVersion = (current.rows[0] as { version: number } | undefined)?.version;
-      if (expectedVersion !== undefined && currentVersion !== expectedVersion)
-        throw new Error('APPROVAL_VERSION_CONFLICT');
-      if (currentVersion === undefined) {
-        if (record.version !== 1) throw new Error('APPROVAL_INITIAL_VERSION_INVALID');
-        await client.query(insertSql, values(record));
-      } else {
-        if (record.version !== currentVersion + 1)
-          throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
-        await client.query(updateSql, values(record));
-      }
-      await appendHistory(client, record);
-      await client.query('commit');
-    } catch (error) {
-      await client.query('rollback');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return this.putInternal(record, COMPATIBILITY_APPROVAL_SCOPE, expectedVersion);
+  }
+
+  async putScoped(
+    record: ApprovalRecord,
+    scope: ApprovalTenantScope,
+    expectedVersion?: number,
+  ): Promise<void> {
+    return this.putInternal(record, approvalTenantScope(scope), expectedVersion);
   }
 
   async get(approvalId: string): Promise<ApprovalRecord | undefined> {
@@ -82,6 +78,57 @@ export class PostgresApprovalStore implements ApprovalStore {
     ]);
     const row = result.rows[0] as ApprovalRow | undefined;
     return row ? fromRow(row) : undefined;
+  }
+
+  async getScoped(
+    approvalId: string,
+    scope: ApprovalTenantScope,
+  ): Promise<ApprovalRecord | undefined> {
+    const normalized = approvalTenantScope(scope);
+    const result = await this.pool.query(
+      `select * from approval_records
+       where approval_id = $1
+         and tenant_id = $2
+         and workspace_id = $3
+         and organization_id = $4`,
+      [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
+    );
+    const row = result.rows[0] as ApprovalRow | undefined;
+    return row ? fromRow(row) : undefined;
+  }
+
+  async listScoped(
+    scope: ApprovalTenantScope,
+    options: ApprovalListOptions = {},
+  ): Promise<readonly ApprovalRecord[]> {
+    const normalized = approvalTenantScope(scope);
+    const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new Error('APPROVAL_LIST_LIMIT_INVALID');
+    }
+    const params: unknown[] = [
+      normalized.tenantId,
+      normalized.workspaceId,
+      normalized.organizationId,
+    ];
+    const statusSql = options.status
+      ? (() => {
+          params.push(options.status);
+          return ` and status = $${params.length}`;
+        })()
+      : '';
+    params.push(limit);
+    const limitPlaceholder = `$${params.length}`;
+    const result = await this.pool.query(
+      `select * from approval_records
+       where tenant_id = $1
+         and workspace_id = $2
+         and organization_id = $3${statusSql}
+       order by requested_at desc, approval_id asc
+       limit ${limitPlaceholder}`,
+      params,
+    );
+    return result.rows.map((row) => fromRow(row as ApprovalRow));
   }
 
   async history(approvalId: string): Promise<readonly ApprovalRecord[]> {
@@ -144,21 +191,147 @@ export class PostgresApprovalStore implements ApprovalStore {
       client.release();
     }
   }
+
+  async historyScoped(
+    approvalId: string,
+    scope: ApprovalTenantScope,
+  ): Promise<readonly ApprovalRecord[]> {
+    const normalized = approvalTenantScope(scope);
+    const result = await this.pool.query(
+      `select h.record
+       from approval_record_history h
+       join approval_records a on a.approval_id = h.approval_id
+      where h.approval_id = $1
+        and a.tenant_id = $2
+        and a.workspace_id = $3
+        and a.organization_id = $4
+      order by h.version asc`,
+      [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
+    );
+    return result.rows.map((row) =>
+      normalizeApprovalRecord((row as { record: ApprovalRecord }).record),
+    );
+  }
+
+  async transitionScoped(
+    approvalId: string,
+    transition: ApprovalAtomicTransition,
+    scope: ApprovalTenantScope,
+  ): Promise<ApprovalRecord> {
+    const normalized = approvalTenantScope(scope);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const currentResult = await client.query(
+        `select * from approval_records
+        where approval_id = $1
+          and tenant_id = $2
+          and workspace_id = $3
+          and organization_id = $4
+        for update`,
+        [approvalId, normalized.tenantId, normalized.workspaceId, normalized.organizationId],
+      );
+      const row = currentResult.rows[0] as ApprovalRow | undefined;
+      if (!row) throw new Error('APPROVAL_NOT_FOUND');
+      const current = fromRow(row);
+
+      if (transition.type === 'RESERVE') {
+        try {
+          await client.query(
+            `insert into approval_execution_claims
+             (execution_id, approval_id, principal_id, correlation_id, claimed_at)
+           values ($1, $2, $3, $4, $5::timestamptz)`,
+            [
+              transition.binding.executionId,
+              approvalId,
+              transition.binding.principalId,
+              transition.binding.correlationId,
+              transition.now ?? new Date().toISOString(),
+            ],
+          );
+        } catch (error) {
+          if (isUniqueViolation(error)) throw new Error('APPROVAL_EXECUTION_ID_ALREADY_CLAIMED');
+          throw error;
+        }
+      }
+
+      const next = applyApprovalAtomicTransition(current, transition);
+      if (next.version !== current.version + 1)
+        throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
+      await client.query(updateSql, values(next));
+      await appendHistory(client, next);
+      await client.query('commit');
+      return next;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async putInternal(
+    record: ApprovalRecord,
+    scope: ApprovalTenantScope,
+    expectedVersion?: number,
+  ): Promise<void> {
+    if (!isDirectApprovalPutAllowed(record.status))
+      throw new Error('APPROVAL_EXECUTION_TRANSITION_REQUIRED');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const current = await client.query(
+        `select version, tenant_id, workspace_id, organization_id
+         from approval_records where approval_id = $1 for update`,
+        [record.approvalId],
+      );
+      const currentRow = current.rows[0] as
+        | {
+            version: number;
+            tenant_id: string;
+            workspace_id: string;
+            organization_id: string;
+          }
+        | undefined;
+      const currentVersion = currentRow?.version;
+      if (expectedVersion !== undefined && currentVersion !== expectedVersion)
+        throw new Error('APPROVAL_VERSION_CONFLICT');
+      if (currentRow && !sameScope(currentRow, scope)) {
+        throw new Error('APPROVAL_TENANT_SCOPE_MISMATCH');
+      }
+      if (currentVersion === undefined) {
+        if (record.version !== 1) throw new Error('APPROVAL_INITIAL_VERSION_INVALID');
+        await client.query(insertSql, scopedValues(record, scope));
+      } else {
+        if (record.version !== currentVersion + 1)
+          throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
+        await client.query(updateSql, values(record));
+      }
+      await appendHistory(client, record);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 const insertSql = `insert into approval_records (
-  approval_id, requester, approver, route_id, capability_id, descriptor_sha256,
+  approval_id, tenant_id, workspace_id, organization_id,
+  requester, approver, route_id, capability_id, descriptor_sha256,
   target_account, scope, financial_ceiling, requested_at, issued_at, expires_at,
   consumed_at, revoked_at, reservation_execution_id, reservation_principal_id,
   reservation_correlation_id, reserved_at, executing_at, provider_readback_at,
   provider_readback_evidence, released_at, release_reason, failed_review_at,
   failure_reason, status, evidence, correlation_id, version, updated_at
 ) values (
-  $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::timestamptz,
-  $11::timestamptz, $12::timestamptz, $13::timestamptz, $14::timestamptz,
-  $15, $16, $17, $18::timestamptz, $19::timestamptz, $20::timestamptz,
-  $21::jsonb, $22::timestamptz, $23, $24::timestamptz, $25, $26,
-  $27::jsonb, $28, $29, now()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+  $13::timestamptz, $14::timestamptz, $15::timestamptz, $16::timestamptz,
+  $17::timestamptz, $18, $19, $20, $21::timestamptz, $22::timestamptz,
+  $23::timestamptz, $24::jsonb, $25::timestamptz, $26, $27::timestamptz,
+  $28, $29, $30::jsonb, $31, $32, now()
 )`;
 
 const updateSql = `update approval_records set
@@ -175,6 +348,17 @@ const updateSql = `update approval_records set
   status = $26, evidence = $27::jsonb, correlation_id = $28,
   version = $29, updated_at = now()
 where approval_id = $1`;
+
+function scopedValues(record: ApprovalRecord, scope: ApprovalTenantScope): unknown[] {
+  const recordValues = values(record);
+  return [
+    recordValues[0],
+    scope.tenantId,
+    scope.workspaceId,
+    scope.organizationId,
+    ...recordValues.slice(1),
+  ];
+}
 
 function values(record: ApprovalRecord): unknown[] {
   return [
@@ -251,6 +435,17 @@ async function appendHistory(client: pg.PoolClient, record: ApprovalRecord): Pro
     `insert into approval_record_history (approval_id, version, record)
      values ($1, $2, $3::jsonb)`,
     [record.approvalId, record.version, JSON.stringify(record)],
+  );
+}
+
+function sameScope(
+  row: Pick<ApprovalRow, 'tenant_id' | 'workspace_id' | 'organization_id'>,
+  scope: ApprovalTenantScope,
+): boolean {
+  return (
+    row.tenant_id === scope.tenantId &&
+    row.workspace_id === scope.workspaceId &&
+    row.organization_id === scope.organizationId
   );
 }
 

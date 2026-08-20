@@ -41,7 +41,8 @@ console.log(
   })}`,
 );
 
-if (CORE_MCP_TOOL_NAMES.length !== 12 || !CORE_MCP_TOOL_NAMES.includes('toca.execute')) {
+const coreToolNames = new Set<string>(CORE_MCP_TOOL_NAMES);
+if (coreToolNames.size !== CORE_MCP_TOOL_NAMES.length || !coreToolNames.has('toca.execute')) {
   throw new Error('R29_PRODUCTION_CORE_SURFACE_MISMATCH');
 }
 

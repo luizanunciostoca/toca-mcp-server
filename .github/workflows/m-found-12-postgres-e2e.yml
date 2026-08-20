@@ -17,6 +17,7 @@ on:
       - 'test/ag01-orchestrator-postgres-e2e.test.ts'
       - 'test/attribution-revenue-postgres-e2e.test.ts'
       - 'test/asset-intelligence-postgres-e2e.test.ts'
+      - 'test/tenant-approval-postgres-e2e.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'src/assets/**'
@@ -80,7 +81,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue and Asset Intelligence E2E
+      - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence and tenant Approval isolation E2E
         # This permanent matrix is the exact-head revalidation trigger for the integrated runtime.
         run: >-
           pnpm exec vitest run
@@ -94,5 +95,6 @@ jobs:
           test/ag01-orchestrator-postgres-e2e.test.ts
           test/attribution-revenue-postgres-e2e.test.ts
           test/asset-intelligence-postgres-e2e.test.ts
+          test/tenant-approval-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
         run: pnpm migrate
