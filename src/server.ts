@@ -60,9 +60,13 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const env = options.env ?? process.env;
   const config = loadConfig(env);
   const defaultTenantId =
-    options.defaultTenantId?.trim() || env.TOCA_DEFAULT_TENANT_ID?.trim() || DEFAULT_TOCA_TENANT_ID;
+    options.defaultTenantId?.trim() ||
+    env.TOCA_DEFAULT_TENANT_ID?.trim() ||
+    DEFAULT_TOCA_TENANT_ID;
   const defaultWorkspaceId =
-    options.defaultWorkspaceId?.trim() || env.TOCA_DEFAULT_WORKSPACE_ID?.trim() || defaultTenantId;
+    options.defaultWorkspaceId?.trim() ||
+    env.TOCA_DEFAULT_WORKSPACE_ID?.trim() ||
+    defaultTenantId;
   const defaultOrganizationId =
     options.defaultOrganizationId?.trim() ||
     env.TOCA_DEFAULT_ORGANIZATION_ID?.trim() ||
@@ -364,7 +368,11 @@ function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
 function runtimeServiceIdentity(
   env: NodeJS.ProcessEnv,
   config: RuntimeConfig,
-  scope: { readonly tenantId: string; readonly workspaceId: string; readonly organizationId: string },
+  scope: {
+    readonly tenantId: string;
+    readonly workspaceId: string;
+    readonly organizationId: string;
+  },
 ): ExecutionIdentity | undefined {
   const cloudRunService = env.K_SERVICE?.trim();
   if (config.NODE_ENV !== 'production' || !config.MCP_ENABLED || !cloudRunService) return undefined;
