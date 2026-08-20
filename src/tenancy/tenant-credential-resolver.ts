@@ -1,6 +1,6 @@
 import type { ConnectedAccount } from '../core/connected-account.js';
 import type { ConnectedAccountStore } from '../core/connected-account-store.js';
-import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
+import type { ExecutionIdentity } from '../core/identity.js';
 import type { SecretResolver } from '../core/secrets.js';
 import type {
   TenantBoundaryExpectation,
@@ -9,6 +9,7 @@ import type {
   TenantScope,
 } from './contracts.js';
 import { assertSameTenantBoundary, TenantIsolationError } from './tenant-configuration.js';
+import { authorizeTenantRbac } from './tenant-rbac.js';
 
 export interface ResolvedTenantProviderAccess {
   readonly providerId: string;
@@ -34,7 +35,11 @@ export class TenantCredentialResolver {
       throw new TenantIsolationError('TENANT_SUSPENDED');
     }
 
-    const authorization = authorizeExecution(input.identity, input.expectation);
+    const authorization = authorizeTenantRbac(
+      configuration,
+      input.identity,
+      input.expectation,
+    );
     if (!authorization.allowed) throw new TenantIsolationError(authorization.reason);
 
     const capabilityId = input.expectation.capabilityId;
@@ -81,7 +86,12 @@ export class TenantCredentialResolver {
       providerId: provider.providerId,
       connectedAccount,
       secret,
-      evidence: [...provider.evidence, ...credential.evidence, ...configuration.evidence],
+      evidence: [
+        ...authorization.evidence,
+        ...provider.evidence,
+        ...credential.evidence,
+        ...configuration.evidence,
+      ],
     };
   }
 
