@@ -143,10 +143,14 @@ export function createAg01ProductionRuntime(
         deterministicId('ag01corr', identity.principal.tenantId, request.idempotencyKey);
       try {
         const orchestration = await orchestrator.handle({
-          ...request,
+          idempotencyKey: request.idempotencyKey,
+          message: request.message,
           conversationId,
           correlationId,
           identity,
+          ...(request.messageId ? { messageId: request.messageId } : {}),
+          ...(request.causationId !== undefined ? { causationId: request.causationId } : {}),
+          ...(request.routeHint ? { routeHint: request.routeHint } : {}),
         });
         const result = decisionContext.result();
         return {
