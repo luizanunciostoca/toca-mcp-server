@@ -31,7 +31,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --write src/orchestrator/google-oauth-secret-resolver.ts src/orchestrator/openai-responses-adapter.ts src/orchestrator/production-config.ts src/orchestrator/production-planning.ts src/orchestrator/production-runtime.ts src/orchestrator/toca-os-registry.ts test/ag01-model-adapter.test.ts test/ag01-production-planning.test.ts && git diff -- src/orchestrator test",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
