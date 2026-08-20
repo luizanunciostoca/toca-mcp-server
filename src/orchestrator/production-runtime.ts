@@ -187,7 +187,8 @@ export function createAg01ProductionRuntime(
     resume,
     readiness: async () => {
       await Promise.all([pool.query('select 1'), model.readiness(), tocaOs.snapshot(true)]);
-      if (runtimeCapabilityIds.length === 0) throw new Error('AG01_CORE_RUNTIME_CAPABILITIES_EMPTY');
+      if (runtimeCapabilityIds.length === 0)
+        throw new Error('AG01_CORE_RUNTIME_CAPABILITIES_EMPTY');
     },
     close: () => pool.end(),
   };
@@ -218,8 +219,16 @@ async function persistPlanningFailure(
   conversationId: string,
   errorCode: string,
 ): Promise<void> {
-  const conversation = await conversations.getConversation(identity.principal.tenantId, conversationId);
-  if (!conversation || conversation.status === 'SUCCEEDED' || conversation.status === 'DEAD_LETTERED') return;
+  const conversation = await conversations.getConversation(
+    identity.principal.tenantId,
+    conversationId,
+  );
+  if (
+    !conversation ||
+    conversation.status === 'SUCCEEDED' ||
+    conversation.status === 'DEAD_LETTERED'
+  )
+    return;
   const now = new Date().toISOString();
   await conversations.updateConversation({
     tenantId: conversation.tenantId,
