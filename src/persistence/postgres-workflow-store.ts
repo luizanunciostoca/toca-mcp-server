@@ -279,8 +279,10 @@ export class PostgresWorkflowStore implements WorkflowStore {
     readonly workerId: string;
     readonly now: string;
     readonly limit: number;
+    readonly workflowId?: string;
   }): Promise<readonly WorkflowStepClaim[]> {
     requireText(input.workerId, 'WORKFLOW_WORKER_ID_REQUIRED');
+    if (input.workflowId !== undefined) requireText(input.workflowId, 'WORKFLOW_ID_REQUIRED');
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertLimit(input.limit);
     const client = await this.pool.connect();
@@ -293,9 +295,10 @@ export class PostgresWorkflowStore implements WorkflowStore {
          where s.status = 'READY'
            and (s.started_at is not null or s.attempts < s.max_attempts)
            and w.status in ('RUNNING', 'WAITING')
+           and ($2::text is null or s.workflow_id = $2)
          order by w.updated_at asc, s.workflow_id asc, s.step_id asc
          limit $1`,
-        [input.limit],
+        [input.limit, input.workflowId ?? null],
       );
       const claims: WorkflowStepClaim[] = [];
       for (const candidate of candidates.rows) {
