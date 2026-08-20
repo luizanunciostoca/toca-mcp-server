@@ -99,7 +99,10 @@ export class OpenAiResponsesDecisionAdapter implements Ag01DecisionModelAdapter 
 
         const responseBody = (await response.json()) as OpenAiResponseBody;
         const responseId = requireString(responseBody.id, 'AG01_MODEL_RESPONSE_ID_MISSING');
-        const responseModel = requireString(responseBody.model, 'AG01_MODEL_RESPONSE_MODEL_MISSING');
+        const responseModel = requireString(
+          responseBody.model,
+          'AG01_MODEL_RESPONSE_MODEL_MISSING',
+        );
         const responseStatus =
           typeof responseBody.status === 'string' ? responseBody.status : 'unknown';
         if (responseStatus !== 'completed') {
