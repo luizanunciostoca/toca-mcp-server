@@ -47,11 +47,11 @@ Evidence is exact-head scoped. A branch update, rebase or conflict-resolution co
 
 ## Current feature PRs — refreshed state
 
-| PR | Feature | Branch / base | Current head | Base relation | Exact-head evidence |
-| --- | --- | --- | --- | --- | --- |
-| #14 | Creative Truth / Venue Fidelity | `recovery/creative-truth-20260819` -> `main` | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind `cd99521c...` | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS |
-| #15 | Morro Demand Intelligence | `recovery/meta-ads-demand-intelligence-20260819` -> `main` | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind `cd99521c...` | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS |
-| #16 | Photo-to-Video | `recovery/photo-to-video-20260819` -> #14 branch | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind #14 head `2843e954...` | Quality `32333405034` PASS |
+| PR  | Feature                         | Branch / base                                              | Current head                               | Base relation                   | Exact-head evidence                                           |
+| --- | ------------------------------- | ---------------------------------------------------------- | ------------------------------------------ | ------------------------------- | ------------------------------------------------------------- |
+| #14 | Creative Truth / Venue Fidelity | `recovery/creative-truth-20260819` -> `main`               | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind `cd99521c...`          | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS |
+| #15 | Morro Demand Intelligence       | `recovery/meta-ads-demand-intelligence-20260819` -> `main` | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind `cd99521c...`          | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS |
+| #16 | Photo-to-Video                  | `recovery/photo-to-video-20260819` -> #14 branch           | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind #14 head `2843e954...` | Quality `32333405034` PASS                                    |
 
 Obsolete textual holds referring to V1 closeout / PR #13 were removed from PR merge conditions.
 

@@ -12,11 +12,11 @@ Round: 2026-08-20 / America-Bahia
 
 ## Feature PR map — current exact heads
 
-| PR | Feature | Intended base | Current head | Relation | Exact-head CI | Current disposition |
-| --- | --- | --- | --- | --- | --- | --- |
-| #14 | Creative Truth / Venue Fidelity | `main` | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind observed `main` | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS | technically synchronized; Draft; no provider side effect required for CI claim |
-| #15 | Morro Demand Intelligence | `main` | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind observed `main` | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS | synchronized; Draft; provider READ evidence still pending for promotion beyond CI |
-| #16 | Photo-to-Video | `recovery/creative-truth-20260819` | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind refreshed #14 head | Quality `32333405034` PASS | correctly stacked; Draft; provider validation blocked by canonical rights/likeness/approval prerequisites |
+| PR  | Feature                         | Intended base                      | Current head                               | Relation                    | Exact-head CI                                                 | Current disposition                                                                                       |
+| --- | ------------------------------- | ---------------------------------- | ------------------------------------------ | --------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| #14 | Creative Truth / Venue Fidelity | `main`                             | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind observed `main`    | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS | technically synchronized; Draft; no provider side effect required for CI claim                            |
+| #15 | Morro Demand Intelligence       | `main`                             | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind observed `main`    | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS | synchronized; Draft; provider READ evidence still pending for promotion beyond CI                         |
+| #16 | Photo-to-Video                  | `recovery/creative-truth-20260819` | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind refreshed #14 head | Quality `32333405034` PASS                                    | correctly stacked; Draft; provider validation blocked by canonical rights/likeness/approval prerequisites |
 
 All evidence above is scoped to the exact listed head. If any head or intended base changes, recompute and re-run gates.
 
@@ -29,17 +29,17 @@ All evidence above is scoped to the exact listed head. If any head or intended b
 
 ## Current overlap / conflict matrix
 
-| Files / concern | #14 | #15 | #16 | Coordination action |
-| --- | --- | --- | --- | --- |
-| `package.json` | yes | no | yes | expected parent/child overlap; #16 inherits #14 and must be restacked after any parent change |
-| `src/providers/google-sheets/creative-truth-registry.ts` | yes | no | yes | child extension only; never replace parent implementation wholesale |
-| `src/server.ts` | no | yes | no | #15 hotspot; recompare after every earlier merge |
-| `src/registry.ts` | no | yes | no | #15 hotspot; isolate future integration conflict changes |
-| `src/mcp/runtime-capability-resolver.ts` | no | yes | no | #15 hotspot; preserve all other route bindings |
-| `scripts/architecture-check.mjs` | no | yes | no | #15 hotspot; never remove existing checks to make CI pass |
-| migrations | none | `022_meta_ads_geo_demand_intelligence.sql` | none | observed `main` ends at 021; no competing 022 in #14/#16; re-read before merge |
-| GCS publication asset boundary | no | no | yes | reuse existing boundary; no second staging system |
-| Instagram publication boundary | yes | no | inherited through parent | publication remains a separate governed side effect |
+| Files / concern                                          | #14  | #15                                        | #16                      | Coordination action                                                                           |
+| -------------------------------------------------------- | ---- | ------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------- |
+| `package.json`                                           | yes  | no                                         | yes                      | expected parent/child overlap; #16 inherits #14 and must be restacked after any parent change |
+| `src/providers/google-sheets/creative-truth-registry.ts` | yes  | no                                         | yes                      | child extension only; never replace parent implementation wholesale                           |
+| `src/server.ts`                                          | no   | yes                                        | no                       | #15 hotspot; recompare after every earlier merge                                              |
+| `src/registry.ts`                                        | no   | yes                                        | no                       | #15 hotspot; isolate future integration conflict changes                                      |
+| `src/mcp/runtime-capability-resolver.ts`                 | no   | yes                                        | no                       | #15 hotspot; preserve all other route bindings                                                |
+| `scripts/architecture-check.mjs`                         | no   | yes                                        | no                       | #15 hotspot; never remove existing checks to make CI pass                                     |
+| migrations                                               | none | `022_meta_ads_geo_demand_intelligence.sql` | none                     | observed `main` ends at 021; no competing 022 in #14/#16; re-read before merge                |
+| GCS publication asset boundary                           | no   | no                                         | yes                      | reuse existing boundary; no second staging system                                             |
+| Instagram publication boundary                           | yes  | no                                         | inherited through parent | publication remains a separate governed side effect                                           |
 
 ## Migration inventory
 
@@ -58,14 +58,14 @@ At this round there is no migration-number collision among #14, #15 and #16. Bec
 
 Open Dependabot PRs observed in the repository:
 
-| PR | Change | Coordination classification |
-| --- | --- | --- |
-| #1 | `pnpm/action-setup` 4.3.0 -> 6.0.10 | workflow/tooling change; keep outside feature stack until dedicated validation |
-| #2 | Vitest 3.2.7 -> 4.1.10 | major test-framework change; do not interleave with recovery stack |
-| #3 | `@types/node` 24.x -> 26.x | major type-surface change; validate separately |
-| #4 | `globals` 16.x -> 17.x | major lint/global metadata change; validate separately |
-| #5 | `typescript-eslint` 8.66 -> 8.67 | lint maintenance; validate independently |
-| #6 | `tsx` 4.23.11 -> 4.23.12 | low-risk maintenance but still exact-head Quality scoped |
+| PR  | Change                              | Coordination classification                                                    |
+| --- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| #1  | `pnpm/action-setup` 4.3.0 -> 6.0.10 | workflow/tooling change; keep outside feature stack until dedicated validation |
+| #2  | Vitest 3.2.7 -> 4.1.10              | major test-framework change; do not interleave with recovery stack             |
+| #3  | `@types/node` 24.x -> 26.x          | major type-surface change; validate separately                                 |
+| #4  | `globals` 16.x -> 17.x              | major lint/global metadata change; validate separately                         |
+| #5  | `typescript-eslint` 8.66 -> 8.67    | lint maintenance; validate independently                                       |
+| #6  | `tsx` 4.23.11 -> 4.23.12            | low-risk maintenance but still exact-head Quality scoped                       |
 
 These PRs are not in the Next Version feature merge order and must not obscure regression attribution.
 

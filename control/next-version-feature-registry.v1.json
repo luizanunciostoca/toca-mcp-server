@@ -5,12 +5,7 @@
   "status": "ACTIVE_COORDINATION",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-  "evidenceStates": [
-    "IMPLEMENTED",
-    "CI_VERIFIED",
-    "PROVIDER_VERIFIED",
-    "PRODUCTION_VERIFIED"
-  ],
+  "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
   "rules": {
     "liveMainIsNextBaseline": true,
     "exactHeadEvidenceRequired": true,
@@ -133,7 +128,13 @@
       "evidenceState": null,
       "dependencies": ["NEXT-016"],
       "providerEvidenceRequired": false,
-      "reuse": ["ContactRecord", "LeadRecord", "OpportunityRecord", "existing PostgreSQL", "existing outbox/audit"]
+      "reuse": [
+        "ContactRecord",
+        "LeadRecord",
+        "OpportunityRecord",
+        "existing PostgreSQL",
+        "existing outbox/audit"
+      ]
     },
     {
       "id": "NEXT-009",
@@ -167,7 +168,11 @@
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-009", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing durable workflow", "existing scheduler", "existing consent/suppression policy"]
+      "reuse": [
+        "existing durable workflow",
+        "existing scheduler",
+        "existing consent/suppression policy"
+      ]
     },
     {
       "id": "NEXT-013",
@@ -201,7 +206,10 @@
       "evidenceState": null,
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "reuse": ["existing R16 privacy policy authority", "existing suppression and approval concepts"]
+      "reuse": [
+        "existing R16 privacy policy authority",
+        "existing suppression and approval concepts"
+      ]
     },
     {
       "id": "NEXT-017",

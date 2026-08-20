@@ -18,15 +18,15 @@ Rules:
 
 ## Frozen V1 evidence
 
-| Claim | State | Evidence |
-| --- | --- | --- |
-| V1 release identity | PRODUCTION_VERIFIED | `abfb09b17e90c83790e803dcda091c8142c7407f` |
-| Canonical V1 state | PRODUCTION_VERIFIED | `docs/operations/v1-canonical-state-2026-08-20.md` |
-| Final V1 hosted readback | PRODUCTION_VERIFIED | `docs/operations/v1-final-closeout-2026-08-20.md` |
-| Final runtime redeploy | PRODUCTION_VERIFIED | workflow run `32325385858` |
-| Final hosted production readback | PRODUCTION_VERIFIED | workflow run `32325385886` |
-| Sanitized final readback artifact | PRODUCTION_VERIFIED | artifact `9393447493` |
-| Meta Ads V1 controlled path | PRODUCTION_VERIFIED within V1 boundary | `READ -> PREPARE -> CREATE_PAUSED -> independent READBACK`; no activation implied |
+| Claim                             | State                                  | Evidence                                                                          |
+| --------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| V1 release identity               | PRODUCTION_VERIFIED                    | `abfb09b17e90c83790e803dcda091c8142c7407f`                                        |
+| Canonical V1 state                | PRODUCTION_VERIFIED                    | `docs/operations/v1-canonical-state-2026-08-20.md`                                |
+| Final V1 hosted readback          | PRODUCTION_VERIFIED                    | `docs/operations/v1-final-closeout-2026-08-20.md`                                 |
+| Final runtime redeploy            | PRODUCTION_VERIFIED                    | workflow run `32325385858`                                                        |
+| Final hosted production readback  | PRODUCTION_VERIFIED                    | workflow run `32325385886`                                                        |
+| Sanitized final readback artifact | PRODUCTION_VERIFIED                    | artifact `9393447493`                                                             |
+| Meta Ads V1 controlled path       | PRODUCTION_VERIFIED within V1 boundary | `READ -> PREPARE -> CREATE_PAUSED -> independent READBACK`; no activation implied |
 
 V1 evidence remains frozen and is not invalidated by Next Version branch work.
 
