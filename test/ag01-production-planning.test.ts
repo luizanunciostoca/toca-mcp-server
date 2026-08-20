@@ -274,8 +274,7 @@ describe('AG-01 approval denial handling', () => {
       getApproval: () => Promise.resolve({ ...approval, status }),
     };
     const routeResolver: IntentRouteResolver = {
-      resolve: () =>
-        Promise.resolve({ routeId: 'R17', confidence: 1, evidence: ['test:route'] }),
+      resolve: () => Promise.resolve({ routeId: 'R17', confidence: 1, evidence: ['test:route'] }),
     };
     const artifacts: CanonicalArtifactResolver = {
       resolveSop: () =>
