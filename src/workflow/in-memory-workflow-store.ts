@@ -137,13 +137,19 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     readonly workerId: string;
     readonly now: string;
     readonly limit: number;
+    readonly workflowId?: string;
   }): Promise<readonly WorkflowStepClaim[]> {
     requireText(input.workerId, 'WORKFLOW_WORKER_ID_REQUIRED');
+    if (input.workflowId !== undefined) requireText(input.workflowId, 'WORKFLOW_ID_REQUIRED');
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertLimit(input.limit);
 
     const claims: WorkflowStepClaim[] = [];
-    const workflowIds = [...this.#instances.keys()].sort();
+    const workflowIds = input.workflowId
+      ? this.#instances.has(input.workflowId)
+        ? [input.workflowId]
+        : []
+      : [...this.#instances.keys()].sort();
     for (const workflowId of workflowIds) {
       const instance = this.#requireInstance(workflowId);
       if (!['RUNNING', 'WAITING'].includes(instance.status)) continue;
