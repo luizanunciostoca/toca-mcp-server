@@ -157,8 +157,9 @@ describe('WhatsAppCloudAdapter', () => {
     expect(receipt).toMatchObject({
       provider: 'META_WHATSAPP_CLOUD',
       providerMessageId: 'wamid.provider-1',
-      evidence: expect.arrayContaining(['meta:app:app-1', 'meta:waba:waba-1']),
     });
+    expect(receipt.evidence).toContain('meta:app:app-1');
+    expect(receipt.evidence).toContain('meta:waba:waba-1');
     const request = transport.requests.at(-1);
     expect(request?.url).toBe('https://graph.facebook.com/v23.0/phone-1/messages');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer secret-token-value' });
