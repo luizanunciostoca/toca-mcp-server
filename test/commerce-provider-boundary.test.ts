@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CrmCoreStore, OpportunityRecord } from '../src/crm/crm-records.js';
+import type { ContactRecord, CrmCoreStore, OpportunityRecord } from '../src/crm/crm-records.js';
 import type {
   CommerceProviderEvent,
   CommerceProviderReadback,
   CommerceProviderReadbackAdapter,
   CommerceProviderStatus,
 } from '../src/measurement/adapters.js';
-import type { RevenueEvidenceRecord } from '../src/measurement/attribution-revenue.js';
-import { AttributionRevenueService } from '../src/measurement/attribution-revenue-service.js';
+import type {
+  AttributionTouchpointRecord,
+  RevenueEvidenceRecord,
+} from '../src/measurement/attribution-revenue.js';
+import type { AttributionRevenueService } from '../src/measurement/attribution-revenue-service.js';
 import {
   CommerceProviderRevenueCoordinator,
   commerceIdempotencyKey,
@@ -16,6 +19,18 @@ import {
 import type { MeasurementOperationContext } from '../src/measurement/service.js';
 
 const scope = { tenantId: 'toca', workspaceId: 'toca', organizationId: 'toca' } as const;
+
+const contact: ContactRecord = {
+  ...scope,
+  contactId: 'contact-1',
+  contactType: 'PERSON',
+  displayName: 'Buyer',
+  status: 'ACTIVE',
+  attributes: {},
+  version: 1,
+  createdAt: '2026-08-20T18:00:00.000Z',
+  updatedAt: '2026-08-20T18:00:00.000Z',
+};
 
 const opportunity: OpportunityRecord = {
   ...scope,
@@ -155,94 +170,69 @@ function revenueEvidence(status: RevenueEvidenceRecord['status']): RevenueEviden
   };
 }
 
-function crm(overrides: Partial<CrmCoreStore> = {}): CrmCoreStore {
+type CrmOverrides = Partial<
+  Pick<CrmCoreStore, 'getContact' | 'findContactByChannel' | 'getOpportunity' | 'listOpportunitiesForContact'>
+>;
+
+function crm(overrides: CrmOverrides = {}): CrmCoreStore {
+  const getContact = vi.fn((input: Parameters<CrmCoreStore['getContact']>[0]) =>
+    Promise.resolve(input.contactId === contact.contactId ? contact : undefined),
+  );
+  const findContactByChannel = vi.fn(
+    (input: Parameters<CrmCoreStore['findContactByChannel']>[0]) =>
+      Promise.resolve(input.value === 'buyer@example.com' ? contact : undefined),
+  );
+  const getOpportunity = vi.fn((input: Parameters<CrmCoreStore['getOpportunity']>[0]) =>
+    Promise.resolve(
+      input.opportunityId === opportunity.opportunityId ? opportunity : undefined,
+    ),
+  );
+  const listOpportunitiesForContact = vi.fn(
+    (input: Parameters<CrmCoreStore['listOpportunitiesForContact']>[0]) =>
+      Promise.resolve(input.contactId === opportunity.contactId ? [opportunity] : []),
+  );
   return {
-    createContact: vi.fn(),
-    getContact: vi.fn(async ({ contactId }) =>
-      contactId === 'contact-1'
-        ? {
-            ...scope,
-            contactId,
-            contactType: 'PERSON',
-            displayName: 'Buyer',
-            status: 'ACTIVE',
-            attributes: {},
-            version: 1,
-            createdAt: '2026-08-20T18:00:00.000Z',
-            updatedAt: '2026-08-20T18:00:00.000Z',
-          }
-        : undefined,
-    ),
-    updateContact: vi.fn(),
-    attachContactChannel: vi.fn(),
-    findContactByChannel: vi.fn(async ({ value }) =>
-      value === 'buyer@example.com'
-        ? {
-            ...scope,
-            contactId: 'contact-1',
-            contactType: 'PERSON',
-            displayName: 'Buyer',
-            status: 'ACTIVE',
-            attributes: {},
-            version: 1,
-            createdAt: '2026-08-20T18:00:00.000Z',
-            updatedAt: '2026-08-20T18:00:00.000Z',
-          }
-        : undefined,
-    ),
-    listContactChannels: vi.fn(async () => []),
-    createLead: vi.fn(),
-    getLead: vi.fn(),
-    updateLead: vi.fn(),
-    listLeadsForContact: vi.fn(async () => []),
-    createOpportunity: vi.fn(),
-    getOpportunity: vi.fn(async ({ opportunityId }) =>
-      opportunityId === opportunity.opportunityId ? opportunity : undefined,
-    ),
-    updateOpportunity: vi.fn(),
-    transitionOpportunity: vi.fn(),
-    listOpportunitiesForContact: vi.fn(async () => [opportunity]),
-    listRevisions: vi.fn(async () => []),
+    getContact,
+    findContactByChannel,
+    getOpportunity,
+    listOpportunitiesForContact,
     ...overrides,
-  } as CrmCoreStore;
+  } as unknown as CrmCoreStore;
 }
 
 function service() {
-  const recordRevenueEvidence = vi.fn(async (_context, input) =>
-    revenueEvidence(input.status as RevenueEvidenceRecord['status']),
+  const recordRevenueEvidence = vi.fn(
+    (
+      _context: Parameters<AttributionRevenueService['recordRevenueEvidence']>[0],
+      input: Parameters<AttributionRevenueService['recordRevenueEvidence']>[1],
+    ) => Promise.resolve(revenueEvidence(input.status)),
   );
-  const captureTouchpoint = vi.fn(async () => ({ touchpointId: 'touch-1' }));
-  const confirmOpportunityWon = vi.fn();
+  const touchpoint = { touchpointId: 'touch-1' } as AttributionTouchpointRecord;
+  const captureTouchpoint = vi.fn(() => Promise.resolve(touchpoint));
   return {
-    value: {
-      recordRevenueEvidence,
-      captureTouchpoint,
-      confirmOpportunityWon,
-    } as unknown as AttributionRevenueService,
+    value: { recordRevenueEvidence, captureTouchpoint } as unknown as AttributionRevenueService,
     recordRevenueEvidence,
     captureTouchpoint,
-    confirmOpportunityWon,
   };
 }
 
-function adapter(providerReadback: CommerceProviderReadback, verified = true) {
-  const event = commerceEvent(providerReadback.status, {
-    providerEventId: providerReadback.providerEventId,
-    externalReference: providerReadback.externalReference,
-    source: providerReadback.source,
-    attribution: providerReadback.attribution,
-    customer: providerReadback.customer,
-  });
+function adapter(
+  providerReadback: CommerceProviderReadback,
+  verified = true,
+  providerEvent: CommerceProviderEvent = commerceEvent(providerReadback.status),
+): CommerceProviderReadbackAdapter {
   return {
     provider: 'provider-test',
-    verifyWebhookSignature: vi.fn(async () => ({
-      verified,
-      providerDeliveryId: 'delivery-1',
-      evidence: ['signature:hmac:verified'],
-    })),
-    parseWebhook: vi.fn(async () => event),
-    readback: vi.fn(async () => providerReadback),
-  } satisfies CommerceProviderReadbackAdapter;
+    verifyWebhookSignature: vi.fn(() =>
+      Promise.resolve({
+        verified,
+        providerDeliveryId: 'delivery-1',
+        evidence: ['signature:hmac:verified'],
+      }),
+    ),
+    parseWebhook: vi.fn(() => Promise.resolve(providerEvent)),
+    readback: vi.fn(() => Promise.resolve(providerReadback)),
+  };
 }
 
 const envelope = {
@@ -308,15 +298,35 @@ describe('commerce provider boundary', () => {
     },
   );
 
-  it('deduplicates duplicate webhook processing with a deterministic idempotency key', async () => {
+  it('deduplicates duplicate webhook processing and restart with the same key', async () => {
     const value = readback('PAID');
-    const first = commerceIdempotencyKey('revenue', value, 'opp-1');
-    const second = commerceIdempotencyKey('revenue', { ...value }, 'opp-1');
+    const expected = commerceIdempotencyKey('revenue', value, 'opp-1');
+    const firstService = service();
+    const first = new CommerceProviderRevenueCoordinator(adapter(value), crm(), firstService.value);
+    await first.ingestWebhook(context, envelope);
+    await first.ingestWebhook(context, envelope);
+    expect(firstService.recordRevenueEvidence).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: expected }),
+    );
+    expect(firstService.recordRevenueEvidence).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: expected }),
+    );
 
-    expect(first).toBe(second);
-
-    const restarted = commerceIdempotencyKey('revenue', readback('PAID'), 'opp-1');
-    expect(restarted).toBe(first);
+    const restartedService = service();
+    const restarted = new CommerceProviderRevenueCoordinator(
+      adapter({ ...value }),
+      crm(),
+      restartedService.value,
+    );
+    await restarted.ingestWebhook(context, envelope);
+    expect(restartedService.recordRevenueEvidence).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: expected }),
+    );
   });
 
   it('keeps unknown contacts unmatched and revenue-free', async () => {
@@ -412,7 +422,7 @@ describe('commerce provider boundary', () => {
   it('rejects a readback that does not match the webhook provider event', async () => {
     const value = readback('PAID', { providerEventId: 'different-provider-event' });
     const coordinator = new CommerceProviderRevenueCoordinator(
-      adapter(value),
+      adapter(value, true, commerceEvent('PAID')),
       crm(),
       service().value,
     );
