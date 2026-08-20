@@ -6,7 +6,7 @@ import {
   type ProviderSendRequest,
   type WhatsAppProviderAdapter,
 } from '../../omnichannel/contracts.js';
-import { MetaApiClient } from '../meta/meta-api-client.js';
+import type { MetaApiClient } from '../meta/meta-api-client.js';
 
 export type WhatsAppMediaType = 'image' | 'audio' | 'video' | 'document';
 
