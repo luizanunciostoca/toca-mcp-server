@@ -1,0 +1,35 @@
+name: TEMP Demand format final three
+
+on:
+  push:
+    branches:
+      - recovery/meta-ads-demand-intelligence-20260819
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout recovery branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Format exact remaining files and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA Recovery Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          npm install --global pnpm@10.15.0
+          pnpm install --frozen-lockfile
+          pnpm exec prettier --write \
+            docs/architecture/meta-ads-morro-demand-intelligence.md \
+            src/providers/meta-ads/meta-ads-demand-intelligence.ts \
+            test/meta-ads-demand-intelligence.test.ts
+          git rm .github/workflows/temp-demand-format-final-three.yml
+          git add -A
+          git diff --cached --check
+          git commit -m 'style(meta-ads): format remaining Demand Intelligence files'
+          git push origin HEAD:recovery/meta-ads-demand-intelligence-20260819
