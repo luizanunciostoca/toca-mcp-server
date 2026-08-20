@@ -14,9 +14,10 @@ const requiredFiles = [
   'scripts/validate-gcp-deploy-environment.mjs',
   'src/core/audit-ledger.ts',
   'src/core/operational-observability.ts',
-  'src/core/structured-logger.ts',
   'src/core/platform-slo-catalog.ts',
+  'src/core/policy.ts',
   'src/core/resilience-drills.ts',
+  'src/core/structured-logger.ts',
   'src/health/readiness.ts',
   'src/health/runtime-readiness.ts',
 ];
@@ -68,6 +69,8 @@ for (const marker of [
   'workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}',
   'service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}',
   'PRODUCTION_GCP_PROJECT_ID',
+  'PRODUCTION_GCP_PROJECT_NUMBER',
+  'PRODUCTION_GCP_REGION',
   'PRODUCTION_GCP_CLOUD_SQL_INSTANCE',
   'PRODUCTION_GCP_CLOUD_RUN_SERVICE',
   'PRODUCTION_GCP_DATABASE_URL_SECRET',
@@ -93,7 +96,9 @@ for (const marker of [
   'TOCA_DEFAULT_WORKSPACE_ID',
   'TOCA_DEFAULT_ORGANIZATION_ID',
   'rollback_revision',
+  'rollback_compatibility_ref',
   'TOCA_PLATFORM_KILL_SWITCH=true',
+  '--to-latest',
   '--to-revisions',
 ]) {
   requireContains(deployPath, marker, 'DEPLOY_NEXT_MARKER_MISSING');
@@ -118,6 +123,9 @@ for (const marker of [
   'STAGING_DATABASE_ISOLATION_MODE_INVALID',
   'STAGING_DATABASE_ISOLATION_APPROVAL_REF',
   'PRODUCTION_DATABASE_SECRET_VERSION_MUST_BE_PINNED',
+  'STAGING_WIF_NOT_OWNED_BY_PROJECT',
+  'STAGING_SERVICE_ACCOUNT_NOT_OWNED_BY_PROJECT',
+  'GCP_SECRET_MUST_BE_PROJECT_LOCAL_ID',
 ]) {
   requireContains(isolationValidatorPath, marker, 'DEPLOY_ISOLATION_GUARD_MISSING');
 }
@@ -139,6 +147,15 @@ requireContains(
   'JSON.stringify',
   'STRUCTURED_JSON_LOGGING_MISSING',
 );
+
+const policyPath = 'src/core/policy.ts';
+for (const marker of [
+  'TOCA_PLATFORM_KILL_SWITCH',
+  'tool.sideEffects && platformMutationKillSwitchActive(context)',
+  'Platform mutation kill switch is active.',
+]) {
+  requireContains(policyPath, marker, 'PLATFORM_KILL_SWITCH_GUARD_MISSING');
+}
 
 const readinessPath = 'src/health/runtime-readiness.ts';
 for (const checkName of [
@@ -169,7 +186,7 @@ for (const marker of [
   'READINESS_AUDIT_HEAD_MISMATCH',
   'READINESS_OUTBOX_LAG_EXCEEDED',
   'READINESS_OUTBOX_DEAD_LETTER_PRESENT',
-  'READINESS_PLATFORM_KILL_SWITCH_ACTIVE',
+  'TOCA_PLATFORM_KILL_SWITCH',
   'PROVIDER_NOT_VERIFIED',
   'PRODUCTION_VALIDATED',
 ]) {
