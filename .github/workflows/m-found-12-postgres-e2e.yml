@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/m-found-12-e2e-production-validation
+      - feat/next-crm-sales-engine-advanced-20260820
   pull_request:
     paths:
       - 'test/m-found-12-postgres-e2e.test.ts'
@@ -31,7 +32,7 @@ concurrency:
 
 jobs:
   crm-sales-strict-type-repair:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feat/next-crm-sales-engine-advanced-20260820'
+    if: github.event_name == 'push' && github.event.head_commit.message == 'chore(crm): trigger strict type repair'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
