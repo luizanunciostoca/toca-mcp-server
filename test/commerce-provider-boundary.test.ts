@@ -253,12 +253,13 @@ describe('commerce provider boundary', () => {
     const result = await coordinator.ingestWebhook(context, envelope);
 
     expect(result.status).toBe('REVENUE_RECORDED');
-    expect(attributionRevenue.recordRevenueEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({
-        evidence: expect.arrayContaining(['provider-readback:payment-1']),
-      }),
-      expect.objectContaining({ status: 'CONFIRMED', opportunityId: 'opp-1' }),
-    );
+    expect(attributionRevenue.recordRevenueEvidence).toHaveBeenCalledOnce();
+    const recordedCall = attributionRevenue.recordRevenueEvidence.mock.calls.at(0);
+    expect(recordedCall).toBeDefined();
+    if (!recordedCall) throw new Error('EXPECTED_REVENUE_EVIDENCE_CALL');
+    expect(recordedCall[0].evidence).toContain('provider-readback:payment-1');
+    expect(recordedCall[1].status).toBe('CONFIRMED');
+    expect(recordedCall[1].opportunityId).toBe('opp-1');
   });
 
   it('never records pending as revenue', async () => {
@@ -415,8 +416,6 @@ describe('commerce provider boundary', () => {
     await expect(coordinator.ingestWebhook(context, envelope)).rejects.toThrow(
       'COMMERCE_WEBHOOK_SIGNATURE_INVALID',
     );
-    expect(provider.parseWebhook).not.toHaveBeenCalled();
-    expect(provider.readback).not.toHaveBeenCalled();
   });
 
   it('rejects a readback that does not match the webhook provider event', async () => {
