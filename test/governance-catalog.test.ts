@@ -207,6 +207,7 @@ describe('TOCA OS route and capability catalogs', () => {
       metaAdsWritesEnabled: true,
       googleAdsPhase: 'MANAGE',
       tocaManagedInstagramSchedulerEnabled: true,
+      crmSalesRuntimeEnabled: true,
     });
     expect(runtime.list().length).toBeLessThan(CAPABILITY_CATALOG.length);
     for (const tool of runtime.list()) {
