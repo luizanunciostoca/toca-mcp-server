@@ -42,11 +42,17 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
     configuration.brandCreativeTruth.creativeTruthRegistryResourceId,
     'TENANT_CREATIVE_TRUTH_REGISTRY_REQUIRED',
   );
+  requireEvidence(
+    configuration.brandCreativeTruth.evidence,
+    'TENANT_BRAND_CREATIVE_TRUTH_EVIDENCE_REQUIRED',
+  );
   requireNonEmpty(configuration.assets.assetRegistryResourceId, 'TENANT_ASSET_REGISTRY_REQUIRED');
+  requireEvidence(configuration.assets.evidence, 'TENANT_ASSET_REGISTRY_EVIDENCE_REQUIRED');
   requireNonEmpty(
     configuration.analytics.analyticsNamespace,
     'TENANT_ANALYTICS_NAMESPACE_REQUIRED',
   );
+  requireEvidence(configuration.analytics.evidence, 'TENANT_ANALYTICS_EVIDENCE_REQUIRED');
 
   const providerIds = new Set<string>();
   for (const provider of configuration.providers) {
@@ -111,6 +117,29 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
       throw new TenantIsolationError('TENANT_BUDGET_LIMIT_INVALID');
     }
     requireEvidence(budget.evidence, 'TENANT_BUDGET_EVIDENCE_REQUIRED');
+  }
+
+  for (const policy of configuration.policies) {
+    requireNonEmpty(policy.policyId, 'TENANT_POLICY_ID_REQUIRED');
+    requireNonEmpty(policy.policyResourceId, 'TENANT_POLICY_RESOURCE_REQUIRED');
+    requireEvidence(policy.evidence, 'TENANT_POLICY_EVIDENCE_REQUIRED');
+  }
+
+  for (const approvalChain of configuration.approvalChains) {
+    requireNonEmpty(approvalChain.approvalChainId, 'TENANT_APPROVAL_CHAIN_ID_REQUIRED');
+    requireNonEmpty(approvalChain.approvalResourceId, 'TENANT_APPROVAL_RESOURCE_REQUIRED');
+    requireEvidence(approvalChain.evidence, 'TENANT_APPROVAL_EVIDENCE_REQUIRED');
+  }
+
+  const rbacGrantIds = new Set<string>();
+  for (const grant of configuration.rbacGrants) {
+    requireNonEmpty(grant.grantId, 'TENANT_RBAC_GRANT_ID_REQUIRED');
+    requireNonEmpty(grant.principalId, 'TENANT_RBAC_PRINCIPAL_REQUIRED');
+    requireEvidence(grant.evidence, 'TENANT_RBAC_EVIDENCE_REQUIRED');
+    if (rbacGrantIds.has(grant.grantId)) {
+      throw new TenantIsolationError('TENANT_RBAC_GRANT_DUPLICATE');
+    }
+    rbacGrantIds.add(grant.grantId);
   }
 
   for (const quota of configuration.quotas) {
