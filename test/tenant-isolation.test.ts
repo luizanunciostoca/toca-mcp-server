@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryConnectedAccountStore } from '../src/core/connected-account-store.js';
-import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
+import {
+  createTrustedServiceExecutionIdentity,
+  type AuthorizationRole,
+} from '../src/core/identity.js';
 import { InMemorySecretStore, type SecretReference } from '../src/core/secrets.js';
-import type { AuthorizationRole } from '../src/core/identity.js';
 import type { TenantConfiguration } from '../src/tenancy/contracts.js';
 import {
   authorizeTenantResourceAccess,
@@ -24,6 +26,7 @@ interface ConfigurationOptions {
     readonly connectedAccountId: string;
     readonly secretReference: SecretReference;
   };
+  readonly campaignId?: string;
   readonly budgetMinor?: number;
 }
 
@@ -62,6 +65,17 @@ function tenantConfiguration(options: ConfigurationOptions): TenantConfiguration
           },
         ]
       : [],
+    campaigns:
+      provider && options.campaignId
+        ? [
+            {
+              providerId: provider.providerId,
+              connectedAccountId: provider.connectedAccountId,
+              campaignId: options.campaignId,
+              evidence: [`${tenant}:campaign`],
+            },
+          ]
+        : [],
     brandCreativeTruth: {
       brandResourceId: `${tenant}:brand`,
       creativeTruthRegistryResourceId: `${tenant}:creative-truth`,
@@ -291,13 +305,31 @@ describe('tenant isolation', () => {
     expect(decision).toMatchObject({ allowed: false, reason: 'TENANT_BUDGET_LIMIT_EXCEEDED' });
   });
 
-  it('resolves capability, asset registry and analytics only from the identity tenant', async () => {
+  it('resolves capability, assets, analytics and campaigns only from the identity tenant', async () => {
     const configurations = new InMemoryTenantConfigurationStore();
     await configurations.put(
-      tenantConfiguration({ tenantId: 'tenant-a', allowedCapabilityIds: ['system.health'] }),
+      tenantConfiguration({
+        tenantId: 'tenant-a',
+        allowedCapabilityIds: ['system.health'],
+        provider: {
+          providerId: 'meta_ads',
+          connectedAccountId: 'meta-account-a',
+          secretReference: { provider: 'memory', key: 'meta-a' },
+        },
+        campaignId: 'campaign-a',
+      }),
     );
     await configurations.put(
-      tenantConfiguration({ tenantId: 'tenant-b', allowedCapabilityIds: ['other.capability'] }),
+      tenantConfiguration({
+        tenantId: 'tenant-b',
+        allowedCapabilityIds: ['other.capability'],
+        provider: {
+          providerId: 'meta_ads',
+          connectedAccountId: 'meta-account-b',
+          secretReference: { provider: 'memory', key: 'meta-b' },
+        },
+        campaignId: 'campaign-b',
+      }),
     );
 
     const availability = new TenantCapabilityAvailabilityResolver(configurations);
@@ -312,5 +344,11 @@ describe('tenant isolation', () => {
     await expect(registries.resolveAnalytics(identity('tenant-a'))).resolves.toMatchObject({
       analyticsNamespace: 'tenant-a:analytics',
     });
+    await expect(
+      registries.resolveCampaign(identity('tenant-a'), 'meta_ads', 'campaign-a'),
+    ).resolves.toMatchObject({ campaignId: 'campaign-a', connectedAccountId: 'meta-account-a' });
+    await expect(
+      registries.resolveCampaign(identity('tenant-a'), 'meta_ads', 'campaign-b'),
+    ).rejects.toThrow('TENANT_CAMPAIGN_NOT_OWNED');
   });
 });
