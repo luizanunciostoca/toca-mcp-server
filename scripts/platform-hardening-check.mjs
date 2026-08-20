@@ -11,6 +11,7 @@ const requiredFiles = [
   'infra/observability/platform-hardening-alerts.json',
   'infra/observability/platform-hardening-dashboard.json',
   'infra/observability/platform-hardening-synthetics.json',
+  'scripts/validate-gcp-deploy-environment.mjs',
   'src/core/audit-ledger.ts',
   'src/core/operational-observability.ts',
   'src/core/structured-logger.ts',
@@ -63,10 +64,18 @@ for (const marker of [
 
 const deployPath = '.github/workflows/deploy-gcp.yml';
 for (const marker of [
+  'node scripts/validate-gcp-deploy-environment.mjs',
   'workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}',
   'service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}',
-  'toca-mcp-deployer@${GCP_PROJECT_ID}.iam.gserviceaccount.com',
-  'toca-mcp-runtime@${GCP_PROJECT_ID}.iam.gserviceaccount.com',
+  'PRODUCTION_GCP_PROJECT_ID',
+  'PRODUCTION_GCP_CLOUD_SQL_INSTANCE',
+  'PRODUCTION_GCP_CLOUD_RUN_SERVICE',
+  'PRODUCTION_GCP_DATABASE_URL_SECRET',
+  'PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER',
+  'PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT',
+  'PRODUCTION_GCP_RUNTIME_SERVICE_ACCOUNT',
+  'STAGING_DATABASE_ISOLATION_MODE',
+  'STAGING_DATABASE_ISOLATION_APPROVAL_REF',
   '--update-secrets',
   'GCP_DATABASE_URL_SECRET_VERSION',
   'pointInTimeRecoveryEnabled',
@@ -83,6 +92,8 @@ for (const marker of [
   'TOCA_DEFAULT_TENANT_ID',
   'TOCA_DEFAULT_WORKSPACE_ID',
   'TOCA_DEFAULT_ORGANIZATION_ID',
+  'rollback_revision',
+  'TOCA_PLATFORM_KILL_SWITCH=true',
   '--to-revisions',
 ]) {
   requireContains(deployPath, marker, 'DEPLOY_NEXT_MARKER_MISSING');
@@ -93,8 +104,22 @@ for (const forbidden of [
   'META_ADS_WRITE_ENABLED=true',
   'WHATSAPP_ENABLED=true',
   'EMAIL_SENDGRID_ENABLED=true',
+  'toca-mcp-production',
+  'toca-mcp-db',
+  'toca-database-url',
 ]) {
-  forbidContains(deployPath, forbidden, 'DEPLOY_UNGOVERNED_PROVIDER_ACTIVATION');
+  forbidContains(deployPath, forbidden, 'DEPLOY_UNGOVERNED_OR_PRODUCTION_FALLBACK');
+}
+
+const isolationValidatorPath = 'scripts/validate-gcp-deploy-environment.mjs';
+for (const marker of [
+  'GCP_DEPLOY_CONFIGURATION_MISSING',
+  'STAGING_PRODUCTION_COLLISION',
+  'STAGING_DATABASE_ISOLATION_MODE_INVALID',
+  'STAGING_DATABASE_ISOLATION_APPROVAL_REF',
+  'PRODUCTION_DATABASE_SECRET_VERSION_MUST_BE_PINNED',
+]) {
+  requireContains(isolationValidatorPath, marker, 'DEPLOY_ISOLATION_GUARD_MISSING');
 }
 
 requireContains('Dockerfile', 'USER node', 'CONTAINER_NON_ROOT_USER_MISSING');
@@ -144,6 +169,7 @@ for (const marker of [
   'READINESS_AUDIT_HEAD_MISMATCH',
   'READINESS_OUTBOX_LAG_EXCEEDED',
   'READINESS_OUTBOX_DEAD_LETTER_PRESENT',
+  'READINESS_PLATFORM_KILL_SWITCH_ACTIVE',
   'PROVIDER_NOT_VERIFIED',
   'PRODUCTION_VALIDATED',
 ]) {
@@ -190,18 +216,24 @@ for (const signal of requiredSignals) {
   if (!manifestText.includes(signal)) failures.push(`OBSERVABILITY_SIGNAL_MISSING:${signal}`);
 }
 
-if (alerts.routing?.minimumNotificationChannels < 2)
+if (alerts.routing?.minimumNotificationChannels < 2) {
   failures.push('ALERT_REDUNDANT_CHANNELS_REQUIRED');
-if (alerts.routing?.requireRedundantChannelFamilies !== true)
+}
+if (alerts.routing?.requireRedundantChannelFamilies !== true) {
   failures.push('ALERT_REDUNDANT_CHANNEL_FAMILIES_REQUIRED');
-if (alerts.routing?.syntheticFiringRequiresReadback !== true)
+}
+if (alerts.routing?.syntheticFiringRequiresReadback !== true) {
   failures.push('ALERT_SYNTHETIC_READBACK_REQUIRED');
-if (synthetics.safety?.realSideEffectsForTesting !== false)
+}
+if (synthetics.safety?.realSideEffectsForTesting !== false) {
   failures.push('SYNTHETIC_REAL_SIDE_EFFECTS_MUST_BE_FALSE');
-if (synthetics.safety?.destructiveOperations !== false)
+}
+if (synthetics.safety?.destructiveOperations !== false) {
   failures.push('SYNTHETIC_DESTRUCTIVE_OPERATIONS_MUST_BE_FALSE');
-if (synthetics.safety?.providerMutationAllowed !== false)
+}
+if (synthetics.safety?.providerMutationAllowed !== false) {
   failures.push('SYNTHETIC_PROVIDER_MUTATION_MUST_BE_FALSE');
+}
 
 const drillContract = files.get('src/core/resilience-drills.ts');
 for (const scenario of [
