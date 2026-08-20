@@ -16,9 +16,20 @@ interface AuditLedgerHeadRow {
   readonly head_hash: string;
 }
 
+export type InternalAuditRecordType =
+  | 'CONTACT'
+  | 'LEAD'
+  | 'OPPORTUNITY'
+  | 'OBSERVATION'
+  | 'EXPERIMENT'
+  | 'OUTCOME'
+  | 'DECISION'
+  | 'RECOMMENDATION';
+
 export interface InternalAuditLedgerInput {
+  readonly namespace?: 'crm' | 'learning';
   readonly operation: string;
-  readonly recordType: 'CONTACT' | 'LEAD' | 'OPPORTUNITY';
+  readonly recordType: InternalAuditRecordType;
   readonly recordId: string;
   readonly tenantId: string;
   readonly workspaceId: string;
@@ -40,7 +51,9 @@ export async function appendInternalAuditLedgerEvent(
   client: pg.PoolClient,
   input: InternalAuditLedgerInput,
 ): Promise<void> {
-  const toolName = `core.crm.${requireText(input.operation, 'CRM_AUDIT_OPERATION_REQUIRED')}`;
+  const namespace = input.namespace ?? 'crm';
+  const errorPrefix = namespace === 'crm' ? 'CRM' : 'R31';
+  const toolName = `core.${namespace}.${requireText(input.operation, `${errorPrefix}_AUDIT_OPERATION_REQUIRED`)}`;
   const evidence = normalizeAuditEvidence({
     executionId: input.executionId,
     correlationId: input.correlationId,
@@ -55,15 +68,15 @@ export async function appendInternalAuditLedgerEvent(
     createdAt: input.createdAt,
   });
   const event: AuditEvent = {
-    executionId: requireText(input.executionId, 'CRM_EXECUTION_ID_REQUIRED'),
-    correlationId: requireText(input.correlationId, 'CRM_CORRELATION_ID_REQUIRED'),
+    executionId: requireText(input.executionId, `${errorPrefix}_EXECUTION_ID_REQUIRED`),
+    correlationId: requireText(input.correlationId, `${errorPrefix}_CORRELATION_ID_REQUIRED`),
     toolName,
-    requester: requireText(input.actorPrincipalId, 'CRM_ACTOR_PRINCIPAL_ID_REQUIRED'),
-    tenantId: requireText(input.tenantId, 'CRM_TENANT_ID_REQUIRED'),
-    workspaceId: requireText(input.workspaceId, 'CRM_WORKSPACE_ID_REQUIRED'),
-    organizationId: requireText(input.organizationId, 'CRM_ORGANIZATION_ID_REQUIRED'),
+    requester: requireText(input.actorPrincipalId, `${errorPrefix}_ACTOR_PRINCIPAL_ID_REQUIRED`),
+    tenantId: requireText(input.tenantId, `${errorPrefix}_TENANT_ID_REQUIRED`),
+    workspaceId: requireText(input.workspaceId, `${errorPrefix}_WORKSPACE_ID_REQUIRED`),
+    organizationId: requireText(input.organizationId, `${errorPrefix}_ORGANIZATION_ID_REQUIRED`),
     status: 'SUCCEEDED',
-    externalResourceId: requireText(input.recordId, 'CRM_AUDIT_RECORD_ID_REQUIRED'),
+    externalResourceId: requireText(input.recordId, `${errorPrefix}_AUDIT_RECORD_ID_REQUIRED`),
     evidence,
     createdAt: input.createdAt,
   };
