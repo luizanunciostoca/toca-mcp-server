@@ -21,8 +21,9 @@ export async function evaluateReadiness(
       }
     }),
   );
+  const failed = results.some((result) => !result.ok);
   return {
-    status: results.every((result) => result.ok) ? 'ready' : 'not_ready',
+    status: failed ? 'not_ready' : 'ready',
     checks: results,
   };
 }
