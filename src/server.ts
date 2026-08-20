@@ -8,7 +8,7 @@ import {
   type ExecutionIdentityResolver,
 } from './core/identity.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
-import { registerTocaControlCenterSurface } from './mcp/control-center-surface.js';
+import { registerTocaControlCenterSurface } from './mcp/human-control-center.js';
 import type { InstagramCorePublicationRuntime } from './mcp/instagram-publication-runtime.js';
 import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
@@ -252,7 +252,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     registry,
     runtimeResolver,
     resolveIdentity,
-    ...(approvalStore ? { approvalStore } : {}),
+    approvalStoreAvailable: Boolean(approvalStore),
     workflowStoreAvailable: Boolean(workflowStore),
     auditStoreAvailable: Boolean(auditStore),
     eventStoreAvailable: Boolean(eventStore),
