@@ -1,5 +1,8 @@
 import {
   TOCA_CREATIVE_TRUTH_POLICY_ID,
+  TOCA_VENUE_REFERENCE_SET_LEGACY_ID,
+  TOCA_VENUE_REFERENCE_SET_SUNSET_ID,
+  TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID,
   type BrandAsset,
   type CreativeMode,
   type CreativeStandard,
@@ -67,9 +70,27 @@ export class CreativeTruthResolver {
       ) {
         throw new ExecutionError('POLICY_DENIED', 'FAILED_UNAPPROVED_GENERATIVE_EXCEPTION', false);
       }
+
+      const expectedReferenceSetId = operationReferenceSetId(request.operation);
+      if (
+        !expectedReferenceSetId ||
+        generativeException.operation !== request.operation ||
+        generativeException.referenceSetId === TOCA_VENUE_REFERENCE_SET_LEGACY_ID ||
+        generativeException.referenceSetId !== expectedReferenceSetId
+      ) {
+        throw new ExecutionError(
+          'POLICY_DENIED',
+          'FAILED_GENERATIVE_REFERENCE_OPERATION_MISMATCH',
+          false,
+        );
+      }
+
       const references = await this.registry.getReferenceSet(generativeException.referenceSetId);
       const verified = references.filter(
-        (reference) => reference.venueVerified && reference.status === 'ACTIVE',
+        (reference) =>
+          reference.venueVerified &&
+          reference.status === 'ACTIVE' &&
+          reference.operationScope === request.operation,
       );
       if (verified.length < generativeException.minReferenceCount) {
         throw new ExecutionError('POLICY_DENIED', 'FAILED_GENERATIVE_REFERENCE_MISSING', false);
@@ -87,7 +108,12 @@ export class CreativeTruthResolver {
     const venueAsset = request.venueAssetId
       ? await this.registry.getVenueAsset(request.venueAssetId)
       : await this.selectVenueAsset(request.operation);
-    if (!venueAsset || !venueAsset.venueVerified || venueAsset.status === 'REVOKED') {
+    if (
+      !venueAsset ||
+      !venueAsset.venueVerified ||
+      venueAsset.status === 'REVOKED' ||
+      venueAsset.operation !== request.operation
+    ) {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_NO_VENUE_VERIFIED_ASSET', false);
     }
     if (
@@ -134,8 +160,14 @@ export class CreativeTruthResolver {
       (asset) =>
         asset.venueVerified &&
         asset.marketingReady &&
-        asset.status === 'ACTIVE_APPROVED' &&
+        (asset.status === 'VENUE_VERIFIED_MARKETING_READY' || asset.status === 'ACTIVE_APPROVED') &&
         Boolean(asset.masterAssetId && asset.masterDriveFileId && asset.masterSha256),
     );
   }
+}
+
+export function operationReferenceSetId(operation: string): string | undefined {
+  if (operation === 'SUNSET') return TOCA_VENUE_REFERENCE_SET_SUNSET_ID;
+  if (operation === 'THE_PARTY') return TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID;
+  return undefined;
 }
