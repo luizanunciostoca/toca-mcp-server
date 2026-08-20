@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { CrmCoreStore, CrmScope, OpportunityRecord } from '../crm/crm-records.js';
+import type { LearningRecord, LearningRecordStore } from '../learning/store.js';
 import type {
   CommerceProviderAttributionContext,
   CommerceProviderReadback,
@@ -28,7 +29,8 @@ export type CommerceOpportunityResolution =
         | 'AMBIGUOUS_CONTACT'
         | 'NO_ELIGIBLE_OPPORTUNITY'
         | 'AMBIGUOUS_OPPORTUNITY'
-        | 'CONTACT_OPPORTUNITY_MISMATCH';
+        | 'CONTACT_OPPORTUNITY_MISMATCH'
+        | 'EVENT_OPPORTUNITY_MISMATCH';
       readonly contactId: string | null;
     };
 
@@ -58,9 +60,12 @@ export interface CommerceConfirmedLearningFeedback {
   readonly currency: string | null;
   readonly campaign: string | null;
   readonly content: string | null;
+  /** Confidence applies to provider-confirmed revenue, not causal attribution. */
   readonly confidence: 1;
+  readonly attributionKnown: boolean;
   readonly providerEvidenceRefs: readonly string[];
   readonly feedback: MarketingSalesFeedbackSnapshot;
+  readonly learningRecord: LearningRecord;
 }
 
 /**
@@ -76,6 +81,7 @@ export class CommerceProviderRevenueCoordinator {
     private readonly adapter: CommerceProviderReadbackAdapter,
     private readonly crm: CrmCoreStore,
     private readonly attributionRevenue: AttributionRevenueService,
+    private readonly learning?: LearningRecordStore,
   ) {}
 
   async ingestWebhook(
@@ -197,17 +203,53 @@ export class CommerceProviderRevenueCoordinator {
       },
     );
 
-    return {
-      outcome: 'WON',
+    if (!this.learning) throw new Error('COMMERCE_R31_LEARNING_STORE_REQUIRED');
+    const campaign = result.feedback.sales.campaign;
+    const content = result.feedback.sales.creative ?? result.feedback.sales.message;
+    const attributionKnown = Boolean(campaign || content || result.feedback.sales.touchpointId);
+    const feedback = {
+      outcome: 'WON' as const,
       opportunityId: result.opportunity.opportunityId,
       revenueMinor: result.feedback.marketing.revenueMinor,
       currency: result.feedback.marketing.currency,
-      campaign: result.feedback.sales.campaign,
-      content: result.feedback.sales.creative ?? result.feedback.sales.message,
-      confidence: 1,
+      campaign,
+      content,
+      confidence: 1 as const,
+      attributionKnown,
       providerEvidenceRefs: [providerEvidenceRef],
       feedback: result.feedback,
     };
+    const learningIdempotencyKey = commerceIdempotencyKey(
+      'learning',
+      ingestion.readback,
+      opportunity.opportunityId,
+    );
+    const learningRecord = await this.learning.append({
+      recordId: `commerce-learning-${learningIdempotencyKey.slice(-40)}`,
+      recordType: 'OBSERVATION',
+      ...scopeFromContext(context),
+      experimentId: null,
+      idempotencyKey: learningIdempotencyKey,
+      payload: {
+        outcome: feedback.outcome,
+        opportunityId: feedback.opportunityId,
+        revenueMinor: feedback.revenueMinor,
+        currency: feedback.currency,
+        campaign: feedback.campaign,
+        content: feedback.content,
+        confidence: feedback.confidence,
+        confidenceScope: 'PROVIDER_CONFIRMED_REVENUE',
+        attributionKnown: feedback.attributionKnown,
+        providerEvidenceRefs: feedback.providerEvidenceRefs,
+      },
+      createdAt: context.now ?? ingestion.readback.providerReadbackAt,
+      executionId: context.executionId,
+      correlationId: context.correlationId,
+      actorPrincipalId: context.identity.principal.principalId,
+      evidence: [...new Set([...context.evidence, providerEvidenceRef])],
+    });
+
+    return { ...feedback, learningRecord };
   }
 
   async captureAttributionIfPresent(
@@ -261,6 +303,14 @@ export async function resolveCommerceOpportunity(
         status: 'UNMATCHED',
         reason: 'CONTACT_OPPORTUNITY_MISMATCH',
         contactId: explicitContactId,
+      };
+    }
+    const explicitEventId = nullableText(readback.attribution.eventId);
+    if (explicitEventId && explicitEventId !== opportunity.eventId) {
+      return {
+        status: 'UNMATCHED',
+        reason: 'EVENT_OPPORTUNITY_MISMATCH',
+        contactId: opportunity.contactId,
       };
     }
     return { status: 'MATCHED', opportunity, matchedBy: 'OPPORTUNITY_ID' };
@@ -327,7 +377,7 @@ export async function resolveCommerceOpportunity(
 }
 
 export function commerceIdempotencyKey(
-  purpose: 'revenue' | 'touchpoint' | 'won' | 'feedback',
+  purpose: 'revenue' | 'touchpoint' | 'won' | 'feedback' | 'learning',
   readback: Pick<
     CommerceProviderReadback,
     'provider' | 'providerEventId' | 'source' | 'externalReference' | 'status'
