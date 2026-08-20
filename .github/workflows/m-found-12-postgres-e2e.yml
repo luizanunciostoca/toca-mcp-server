@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - 'test/m-found-12-postgres-e2e.test.ts'
+      - 'test/foundation-worker-postgres-e2e.test.ts'
       - 'test/r29-video-postgres-e2e.test.ts'
       - 'test/r29-video-core-runtime.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
@@ -17,6 +18,8 @@ on:
       - 'src/events/**'
       - 'src/workflow/**'
       - 'src/crm/**'
+      - 'src/scheduler/**'
+      - 'src/worker/**'
 
 permissions:
   contents: read
@@ -64,10 +67,11 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit and Video/R29 E2E
+      - name: Execute PostgreSQL restart/outbox/audit, worker restart safety and Video/R29 E2E
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
+          test/foundation-worker-postgres-e2e.test.ts
           test/r29-video-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
         run: pnpm migrate
