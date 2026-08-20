@@ -1,0 +1,127 @@
+import type { TenantConfiguration, TenantConfigurationStore, TenantScope } from './contracts.js';
+
+export class TenantIsolationError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'TenantIsolationError';
+  }
+}
+
+export function assertTenantScope(scope: TenantScope): void {
+  requireNonEmpty(scope.tenantId, 'TENANT_ID_REQUIRED');
+  requireNonEmpty(scope.workspaceId, 'TENANT_WORKSPACE_REQUIRED');
+  requireNonEmpty(scope.organizationId, 'TENANT_ORGANIZATION_REQUIRED');
+}
+
+export function assertSameTenantBoundary(expected: TenantScope, actual: TenantScope): void {
+  assertTenantScope(expected);
+  assertTenantScope(actual);
+  if (expected.tenantId !== actual.tenantId) {
+    throw new TenantIsolationError('TENANT_SCOPE_MISMATCH');
+  }
+  if (expected.workspaceId !== actual.workspaceId) {
+    throw new TenantIsolationError('TENANT_WORKSPACE_MISMATCH');
+  }
+  if (expected.organizationId !== actual.organizationId) {
+    throw new TenantIsolationError('TENANT_ORGANIZATION_MISMATCH');
+  }
+}
+
+export function validateTenantConfiguration(configuration: TenantConfiguration): void {
+  assertTenantScope(configuration);
+  requireNonEmpty(configuration.displayName, 'TENANT_DISPLAY_NAME_REQUIRED');
+  if (!Number.isInteger(configuration.version) || configuration.version < 1) {
+    throw new TenantIsolationError('TENANT_CONFIGURATION_VERSION_INVALID');
+  }
+  requireEvidence(configuration.evidence, 'TENANT_CONFIGURATION_EVIDENCE_REQUIRED');
+  requireNonEmpty(
+    configuration.brandCreativeTruth.brandResourceId,
+    'TENANT_BRAND_RESOURCE_REQUIRED',
+  );
+  requireNonEmpty(
+    configuration.brandCreativeTruth.creativeTruthRegistryResourceId,
+    'TENANT_CREATIVE_TRUTH_REGISTRY_REQUIRED',
+  );
+  requireNonEmpty(configuration.assets.assetRegistryResourceId, 'TENANT_ASSET_REGISTRY_REQUIRED');
+  requireNonEmpty(configuration.analytics.analyticsNamespace, 'TENANT_ANALYTICS_NAMESPACE_REQUIRED');
+
+  const providerIds = new Set<string>();
+  for (const provider of configuration.providers) {
+    requireNonEmpty(provider.providerId, 'TENANT_PROVIDER_ID_REQUIRED');
+    requireNonEmpty(provider.connectedAccountId, 'TENANT_CONNECTED_ACCOUNT_REQUIRED');
+    requireNonEmpty(provider.credentialBindingId, 'TENANT_PROVIDER_CREDENTIAL_REQUIRED');
+    requireEvidence(provider.evidence, 'TENANT_PROVIDER_EVIDENCE_REQUIRED');
+    if (providerIds.has(provider.providerId)) {
+      throw new TenantIsolationError('TENANT_PROVIDER_DUPLICATE');
+    }
+    providerIds.add(provider.providerId);
+  }
+
+  const credentialIds = new Set<string>();
+  for (const credential of configuration.credentials) {
+    requireNonEmpty(credential.credentialBindingId, 'TENANT_CREDENTIAL_ID_REQUIRED');
+    requireNonEmpty(credential.providerId, 'TENANT_CREDENTIAL_PROVIDER_REQUIRED');
+    requireNonEmpty(credential.secretReference.provider, 'TENANT_SECRET_PROVIDER_REQUIRED');
+    requireNonEmpty(credential.secretReference.key, 'TENANT_SECRET_KEY_REQUIRED');
+    requireEvidence(credential.evidence, 'TENANT_CREDENTIAL_EVIDENCE_REQUIRED');
+    if (credentialIds.has(credential.credentialBindingId)) {
+      throw new TenantIsolationError('TENANT_CREDENTIAL_DUPLICATE');
+    }
+    credentialIds.add(credential.credentialBindingId);
+  }
+
+  for (const provider of configuration.providers) {
+    const credential = configuration.credentials.find(
+      (candidate) => candidate.credentialBindingId === provider.credentialBindingId,
+    );
+    if (!credential || credential.providerId !== provider.providerId) {
+      throw new TenantIsolationError('TENANT_PROVIDER_CREDENTIAL_MISMATCH');
+    }
+  }
+
+  for (const budget of configuration.budgets) {
+    requireNonEmpty(budget.budgetId, 'TENANT_BUDGET_ID_REQUIRED');
+    if (!/^[A-Z]{3}$/.test(budget.currency)) {
+      throw new TenantIsolationError('TENANT_BUDGET_CURRENCY_INVALID');
+    }
+    if (!Number.isSafeInteger(budget.maxSingleOperationMinor) || budget.maxSingleOperationMinor < 0) {
+      throw new TenantIsolationError('TENANT_BUDGET_LIMIT_INVALID');
+    }
+    requireEvidence(budget.evidence, 'TENANT_BUDGET_EVIDENCE_REQUIRED');
+  }
+
+  for (const quota of configuration.quotas) {
+    requireNonEmpty(quota.quotaId, 'TENANT_QUOTA_ID_REQUIRED');
+    requireNonEmpty(quota.capabilityId, 'TENANT_QUOTA_CAPABILITY_REQUIRED');
+    if (!Number.isSafeInteger(quota.limit) || quota.limit < 0) {
+      throw new TenantIsolationError('TENANT_QUOTA_LIMIT_INVALID');
+    }
+    requireEvidence(quota.evidence, 'TENANT_QUOTA_EVIDENCE_REQUIRED');
+  }
+}
+
+export class InMemoryTenantConfigurationStore implements TenantConfigurationStore {
+  readonly #configurations = new Map<string, TenantConfiguration>();
+
+  get(tenantId: string): Promise<TenantConfiguration | undefined> {
+    requireNonEmpty(tenantId, 'TENANT_ID_REQUIRED');
+    return Promise.resolve(this.#configurations.get(tenantId));
+  }
+
+  put(configuration: TenantConfiguration): Promise<void> {
+    validateTenantConfiguration(configuration);
+    this.#configurations.set(configuration.tenantId, configuration);
+    return Promise.resolve();
+  }
+}
+
+function requireNonEmpty(value: string, code: string): string {
+  if (!value.trim()) throw new TenantIsolationError(code);
+  return value;
+}
+
+function requireEvidence(evidence: readonly string[], code: string): void {
+  if (evidence.length === 0 || evidence.some((entry) => !entry.trim())) {
+    throw new TenantIsolationError(code);
+  }
+}
