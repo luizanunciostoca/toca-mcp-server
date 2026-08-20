@@ -27,25 +27,29 @@ The canonical targeting spec is owned by `src/providers/meta-ads/meta-ads-demand
 - `optimization_goal` (default `REACH` at the demand-intelligence layer);
 - fields `estimate_mau_lower_bound`, `estimate_mau_upper_bound`, `estimate_ready`.
 
-The system stores and exposes lower/upper bounds and their midpoint. No device identifiers, user identifiers, precise live-location records, or individual-level data are requested or persisted.
+The system stores and exposes lower/upper MAU bounds and their midpoint. No device identifiers, user identifiers, precise live-location records, or individual-level data are requested or persisted.
 
 ## Durable history
 
 Migration `022_meta_ads_geo_demand_intelligence.sql` creates `meta_ads_geo_audience_samples`.
 
-For each ready estimate, the runtime records:
+For each provider observation, the runtime records:
 
 - tenant;
 - ad account;
 - canonical geo key;
-- lower/upper estimate bounds;
+- lower/upper MAU estimate bounds;
 - midpoint;
-- estimate readiness;
+- provider readiness (`estimate_ready`);
 - optimization goal;
 - targeting spec;
-- observation timestamp.
+- exact observation timestamp;
+- explicit UTC hour bucket;
+- bounded signal quality/confidence (`0..1`).
 
-Automatic observations are bucketed to the UTC hour. Multiple demand capabilities executed in the same hourly planning cycle therefore reuse the same durable observation key instead of generating near-duplicate samples. An explicit `observedAt` remains available for deterministic tests and controlled backfills.
+Automatic observations are bucketed to the UTC hour. Multiple demand capabilities executed in the same hourly planning cycle therefore reuse the same durable observation key instead of generating near-duplicate samples. An explicit `observedAt` remains available for deterministic tests and controlled backfills, while its separate `hour_bucket` is still persisted.
+
+Provider responses with `estimate_ready=false` are persisted with confidence `0` so readiness degradation is observable. Those not-ready samples are excluded from the 7-day median and the ~24h/~7d trend baselines; they must never be interpreted as a real audience collapse to zero.
 
 `PostgresMetaAdsGeoAudienceStore` provides idempotent append semantics for the same `(tenant, account, geo, observed_at)` tuple and chronological readback.
 
@@ -65,7 +69,7 @@ Weights:
 | Seasonality score                         |    15% |
 | Operational capacity score                |    10% |
 
-Missing contextual scores are neutral (`50`). Until enough audience history exists, missing audience baselines are also neutral. Signal confidence starts at `0.4` for a ready provider estimate and increases as history, 24h baseline, and 7d baseline become available.
+Missing contextual scores are neutral (`50`). Until enough ready audience history exists, missing audience baselines are also neutral. Signal confidence starts at `0.4` for a ready provider estimate and increases as ready history, 24h baseline, and 7d baseline become available. A provider not-ready observation has confidence `0`.
 
 The 24h/7d values represent changes in Meta's modeled audience estimate, not measured changes in physical footfall.
 
@@ -110,7 +114,7 @@ The implementation binds these existing canonical R08 capability IDs to the TOCA
 
 ### `meta_ads.audience.inspect`
 
-Reads the Meta audience estimate for canonical Morro targeting, records a ready hourly observation when PostgreSQL is available, and returns current bounds, midpoint, history count, 24h/7d estimate trends and confidence.
+Reads the Meta audience estimate for canonical Morro targeting, records the hourly provider observation when PostgreSQL is available, and returns current bounds, midpoint, history count, 24h/7d estimate trends and confidence.
 
 ### `meta_ads.opportunity.detect`
 
@@ -120,7 +124,22 @@ Calculates the Morro Demand Index using the audience signal plus optional perfor
 
 Calculates a guarded daily-budget recommendation from the demand index and current budget. It also returns the full demand-index evidence and does not modify campaigns or budgets.
 
-All three are READ-only and require Meta `ads_read` access.
+All three are READ-only and require Meta `ads_read` access. Their registry definitions have `sideEffects=false`; no campaign mutation is part of this Demand Intelligence scope.
+
+## Prepared extension points
+
+The current weighted model remains intentionally small and versioned. The following sources are prepared as the next evidence inputs to integrate without creating a parallel intelligence engine:
+
+- weather;
+- holidays;
+- external/local events;
+- ticketing;
+- advance sales;
+- site traffic;
+- operational capacity telemetry;
+- campaign history.
+
+These future sources must enter through typed adapters and normalized evidence scores, preserving source timestamp, provenance/readiness and confidence. They must reuse the same Demand Intelligence service/history/audit lineage. They are not silently assigned weight in the current model: changing weights or activating a new signal requires a versioned model change, tests and fresh evidence gates.
 
 ## Planner integration
 
@@ -143,7 +162,7 @@ A high Meta audience estimate alone is never sufficient to scale spend. Weak cam
 - migration applied to the target database;
 - live `delivery_estimate` READ against the approved Meta ad account;
 - evidence that the canonical 15 km Morro targeting is accepted by the provider;
-- durable sample readback;
+- durable sample readback including hour bucket, readiness and confidence;
 - verification that no provider write is emitted by the three demand capabilities;
-- accumulation of historical samples before trend-based decisions are treated as high-confidence;
-- Quality Gate passing on the implementation commit.
+- accumulation of historical ready samples before trend-based decisions are treated as high-confidence;
+- Quality Gate passing on the exact implementation commit.
