@@ -177,10 +177,7 @@ export function createRuntimeReadinessChecks(
         'READINESS_EMAIL_BINDING_NOT_PRODUCTION_VALIDATED',
       );
       requireText(env.EMAIL_SENDGRID_BINDING_ID, 'READINESS_EMAIL_BINDING_ID_REQUIRED');
-      requireText(
-        env.EMAIL_SENDGRID_SENDING_DOMAIN,
-        'READINESS_EMAIL_SENDING_DOMAIN_REQUIRED',
-      );
+      requireText(env.EMAIL_SENDGRID_SENDING_DOMAIN, 'READINESS_EMAIL_SENDING_DOMAIN_REQUIRED');
       requireText(env.EMAIL_SENDGRID_FROM_EMAIL, 'READINESS_EMAIL_FROM_REQUIRED');
     }),
     namedCheck('google_ads', async () => {
