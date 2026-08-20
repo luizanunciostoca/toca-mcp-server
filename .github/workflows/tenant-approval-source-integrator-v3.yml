@@ -1,0 +1,305 @@
+name: Tenant Approval Source Integrator V3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/tenant-approval-source-integrator-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: toca
+          POSTGRES_PASSWORD: toca-approval-local-only
+          POSTGRES_DB: toca_approval
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U toca -d toca_approval"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://toca:toca-approval-local-only@127.0.0.1:5432/toca_approval
+      DATABASE_SSL: 'false'
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/tenant-approval-control-center-20260820
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Patch canonical sources
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          def once(path, old, new):
+              p=Path(path); t=p.read_text(); n=t.count(old)
+              if n != 1: raise SystemExit(f'{path}: expected 1 match, got {n}: {old[:80]!r}')
+              p.write_text(t.replace(old,new,1))
+
+          Path('src/governance/approval-scope.ts').write_text('''import type {
+            ApprovalAtomicTransition,
+            ApprovalRecord,
+            ApprovalStatus,
+            ApprovalStore,
+          } from './approval-governance.js';
+
+          export interface ApprovalTenantScope {
+            readonly tenantId: string;
+            readonly workspaceId: string;
+            readonly organizationId: string;
+          }
+          export interface ApprovalListOptions {
+            readonly status?: ApprovalStatus;
+            readonly limit?: number;
+          }
+          export interface TenantScopedApprovalStore extends ApprovalStore {
+            putScoped(record: ApprovalRecord, scope: ApprovalTenantScope, expectedVersion?: number): Promise<void>;
+            getScoped(approvalId: string, scope: ApprovalTenantScope): Promise<ApprovalRecord | undefined>;
+            listScoped(scope: ApprovalTenantScope, options?: ApprovalListOptions): Promise<readonly ApprovalRecord[]>;
+            historyScoped(approvalId: string, scope: ApprovalTenantScope): Promise<readonly ApprovalRecord[]>;
+            transitionScoped(approvalId: string, transition: ApprovalAtomicTransition, scope: ApprovalTenantScope): Promise<ApprovalRecord>;
+          }
+          export interface BoundApprovalStore extends ApprovalStore {
+            list(options?: ApprovalListOptions): Promise<readonly ApprovalRecord[]>;
+          }
+          export function isTenantScopedApprovalStore(store: ApprovalStore | undefined): store is TenantScopedApprovalStore {
+            if (!store) return false;
+            const s = store as Partial<TenantScopedApprovalStore>;
+            return typeof s.putScoped === 'function' && typeof s.getScoped === 'function' && typeof s.listScoped === 'function' && typeof s.historyScoped === 'function' && typeof s.transitionScoped === 'function';
+          }
+          export function bindApprovalStoreToScope(store: ApprovalStore, scope: ApprovalTenantScope): BoundApprovalStore {
+            const normalized = approvalTenantScope(scope);
+            if (isTenantScopedApprovalStore(store)) return {
+              put: (record, expectedVersion) => store.putScoped(record, normalized, expectedVersion),
+              get: (approvalId) => store.getScoped(approvalId, normalized),
+              history: (approvalId) => store.historyScoped(approvalId, normalized),
+              transition: (approvalId, transition) => store.transitionScoped(approvalId, transition, normalized),
+              list: (options) => store.listScoped(normalized, options),
+            };
+            if (normalized.tenantId === 'toca' && normalized.workspaceId === 'toca' && normalized.organizationId === 'toca') return {
+              put: (record, expectedVersion) => store.put(record, expectedVersion),
+              get: (approvalId) => store.get(approvalId),
+              history: (approvalId) => store.history(approvalId),
+              transition: (approvalId, transition) => store.transition(approvalId, transition),
+              list: () => Promise.reject(new Error('APPROVAL_TENANT_LIST_STORE_REQUIRED')),
+            };
+            throw new Error('APPROVAL_TENANT_SCOPED_STORE_REQUIRED');
+          }
+          export function approvalTenantScope(input: ApprovalTenantScope): ApprovalTenantScope {
+            const req=(value:string, code:string)=>{ const v=value.trim(); if(!v) throw new Error(code); return v; };
+            return { tenantId:req(input.tenantId,'APPROVAL_TENANT_REQUIRED'), workspaceId:req(input.workspaceId,'APPROVAL_WORKSPACE_REQUIRED'), organizationId:req(input.organizationId,'APPROVAL_ORGANIZATION_REQUIRED') };
+          }
+          ''')
+
+          p=Path('src/persistence/postgres-approval-store.ts'); t=p.read_text()
+          marker='  private async putInternal('
+          if t.count(marker)!=1: raise SystemExit('postgres store marker mismatch')
+          methods='''  async historyScoped(approvalId: string, scope: ApprovalTenantScope): Promise<readonly ApprovalRecord[]> {
+            const s = approvalTenantScope(scope);
+            const result = await this.pool.query(
+              `select h.record from approval_record_history h
+               join approval_records a on a.approval_id = h.approval_id
+               where h.approval_id = $1 and a.tenant_id = $2 and a.workspace_id = $3 and a.organization_id = $4
+               order by h.version asc`,
+              [approvalId, s.tenantId, s.workspaceId, s.organizationId],
+            );
+            return result.rows.map((row) => normalizeApprovalRecord((row as { record: ApprovalRecord }).record));
+          }
+
+          async transitionScoped(approvalId: string, transition: ApprovalAtomicTransition, scope: ApprovalTenantScope): Promise<ApprovalRecord> {
+            const s = approvalTenantScope(scope);
+            const client = await this.pool.connect();
+            try {
+              await client.query('begin');
+              const currentResult = await client.query(
+                `select * from approval_records where approval_id = $1 and tenant_id = $2 and workspace_id = $3 and organization_id = $4 for update`,
+                [approvalId, s.tenantId, s.workspaceId, s.organizationId],
+              );
+              const row = currentResult.rows[0] as ApprovalRow | undefined;
+              if (!row) throw new Error('APPROVAL_NOT_FOUND');
+              const current = fromRow(row);
+              if (transition.type === 'RESERVE') {
+                try {
+                  await client.query(
+                    `insert into approval_execution_claims (execution_id, approval_id, principal_id, correlation_id, claimed_at)
+                     values ($1, $2, $3, $4, $5::timestamptz)`,
+                    [transition.binding.executionId, approvalId, transition.binding.principalId, transition.binding.correlationId, transition.now ?? new Date().toISOString()],
+                  );
+                } catch (error) {
+                  if (isUniqueViolation(error)) throw new Error('APPROVAL_EXECUTION_ID_ALREADY_CLAIMED');
+                  throw error;
+                }
+              }
+              const next = applyApprovalAtomicTransition(current, transition);
+              if (next.version !== current.version + 1) throw new Error('APPROVAL_VERSION_SEQUENCE_INVALID');
+              await client.query(updateSql, values(next));
+              await appendHistory(client, next);
+              await client.query('commit');
+              return next;
+            } catch (error) {
+              await client.query('rollback');
+              throw error;
+            } finally { client.release(); }
+          }
+
+          '''
+          p.write_text(t.replace(marker,methods+marker,1))
+
+          once('src/mcp/core-surface.ts',
+            "import { toApprovalRecordWire, type ApprovalStore } from '../governance/approval-governance.js';\n",
+            "import { toApprovalRecordWire, type ApprovalStore } from '../governance/approval-governance.js';\nimport { bindApprovalStoreToScope } from '../governance/approval-scope.js';\n")
+          once('src/mcp/core-surface.ts',"  'toca.approval.request',\n  'toca.approval.get',\n","  'toca.approval.request',\n  'toca.approval.list',\n  'toca.approval.get',\n")
+          once('src/mcp/core-surface.ts',
+            '''      const approval = await requestCoreApproval(input, identity, {
+            registry: dependencies.registry,
+            runtimeResolver: dependencies.runtimeResolver,
+            ...(dependencies.approvalStore ? { approvalStore: dependencies.approvalStore } : {}),
+          });
+          ''',
+            '''      const approvalStore = dependencies.approvalStore
+            ? bindApprovalStoreToScope(dependencies.approvalStore, identity.principal)
+            : undefined;
+          const approval = await requestCoreApproval(input, identity, {
+            registry: dependencies.registry,
+            runtimeResolver: dependencies.runtimeResolver,
+            ...(approvalStore ? { approvalStore } : {}),
+          });
+          ''')
+          list_tool='''  server.registerTool(
+            'toca.approval.list',
+            {
+              title: 'List TOCA Approvals',
+              description: 'List ApprovalRecords inside the authenticated tenant/workspace/organization boundary.',
+              inputSchema: z.object({
+                status: z.enum(['REQUESTED','APPROVED','RESERVED','EXECUTING','PROVIDER_READBACK','CONSUMED','RELEASED','FAILED_REVIEW_REQUIRED','REVOKED','EXPIRED']).optional(),
+                limit: z.number().int().min(1).max(200).default(50),
+              }),
+              annotations: readAnnotations,
+            },
+            async ({ status, limit }, context) => {
+              const identity = requireIdentity(dependencies, context);
+              const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');
+              const scoped = bindApprovalStoreToScope(store, identity.principal);
+              const approvals = await scoped.list({ ...(status ? { status } : {}), limit });
+              return response({ approvals: approvals.map(toApprovalRecordWire) });
+            },
+          );
+
+          '''
+          once('src/mcp/core-surface.ts',"  server.registerTool(\n    'toca.approval.get',\n",list_tool+"  server.registerTool(\n    'toca.approval.get',\n")
+          once('src/mcp/core-surface.ts',
+            "      const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');\n      const approval = await store.get(approvalId);\n",
+            "      const store = requireStore(dependencies.approvalStore, 'APPROVAL_STORE_REQUIRED');\n      const scoped = bindApprovalStoreToScope(store, identity.principal);\n      const approval = await scoped.get(approvalId);\n")
+          once('src/mcp/core-surface.ts',
+            '''      return response(
+            await executeCoreCapability(executionInput, identity, {
+              registry: dependencies.registry,
+              runtimeResolver: dependencies.runtimeResolver,
+              auditSink: auditStore,
+              ...(dependencies.approvalStore ? { approvalStore: dependencies.approvalStore } : {}),
+            }),
+          );
+          ''',
+            '''      const approvalStore = dependencies.approvalStore
+            ? bindApprovalStoreToScope(dependencies.approvalStore, identity.principal)
+            : undefined;
+          return response(
+            await executeCoreCapability(executionInput, identity, {
+              registry: dependencies.registry,
+              runtimeResolver: dependencies.runtimeResolver,
+              auditSink: auditStore,
+              ...(approvalStore ? { approvalStore } : {}),
+            }),
+          );
+          ''')
+
+          once('src/server.ts',"import { createToolRegistry } from './registry.js';\n","import { createToolRegistry } from './registry.js';\nimport { isTenantScopedApprovalStore } from './governance/approval-scope.js';\n")
+          once('src/server.ts',"    approvalStoreAvailable: Boolean(approvalStore),\n    workflowStoreAvailable: Boolean(workflowStore),\n","    approvalStoreAvailable: Boolean(approvalStore),\n    approvalListAvailable: isTenantScopedApprovalStore(approvalStore),\n    workflowStoreAvailable: Boolean(workflowStore),\n")
+
+          once('src/mcp/human-control-center.ts',"  readonly approvalStoreAvailable: boolean;\n  readonly workflowStoreAvailable: boolean;\n","  readonly approvalStoreAvailable: boolean;\n  readonly approvalListAvailable: boolean;\n  readonly workflowStoreAvailable: boolean;\n")
+          p=Path('src/mcp/human-control-center.ts'); t=p.read_text()
+          t=t.replace("    | 'approvalStoreAvailable'\n    | 'workflowStoreAvailable'\n","    | 'approvalStoreAvailable'\n    | 'approvalListAvailable'\n    | 'workflowStoreAvailable'\n")
+          once_text="  if (id.startsWith('toca.approval.')) return dependencies.approvalStoreAvailable;\n"
+          if t.count(once_text)!=1: raise SystemExit(f'hcc availability match {t.count(once_text)}')
+          t=t.replace(once_text,"  if (id === 'toca.approval.list') return dependencies.approvalListAvailable;\n"+once_text,1)
+          p.write_text(t)
+
+          migration=Path('migrations/032_tenant_scoped_approvals.sql')
+          mt=migration.read_text()
+          if 'approval_records_tenant_fk' not in mt:
+              migration.write_text(mt+'''\n\ndo $$\nbegin\n  if not exists (select 1 from pg_constraint where conname = 'approval_records_tenant_fk') then\n    alter table approval_records add constraint approval_records_tenant_fk foreign key (tenant_id) references tenants (tenant_id) on delete restrict;\n  end if;\nend;\n$$;\n''')
+
+          Path('test/tenant-approval-postgres-e2e.test.ts').write_text('''import { describe, expect, it } from 'vitest';
+          import type { ApprovalRecord } from '../src/governance/approval-governance.js';
+          import { bindApprovalStoreToScope } from '../src/governance/approval-scope.js';
+          import { PostgresApprovalStore } from '../src/persistence/postgres-approval-store.js';
+          import { createPostgresPool } from '../src/persistence/postgres.js';
+          const DATABASE_URL = process.env.DATABASE_URL;
+          const postgresDescribe = DATABASE_URL ? describe : describe.skip;
+          function databaseUrl(): string { if (!DATABASE_URL) throw new Error('TENANT_APPROVAL_DATABASE_URL_REQUIRED'); return DATABASE_URL; }
+          function requestedRecord(approvalId:string, requester:string, correlationId:string): ApprovalRecord { return {
+            approvalId, requester, approver:null, routeId:'R28', capabilityId:'meta_ads.campaign.create_paused', descriptorSha256:'a'.repeat(64), targetAccount:'act_test', scope:['meta_ads.campaign.create_paused'], financialCeiling:null, requestedAt:'2026-08-20T19:00:00.000Z', issuedAt:null, expiresAt:'2026-08-21T19:00:00.000Z', consumedAt:null, revokedAt:null, reservationExecutionId:null, reservationPrincipalId:null, reservationCorrelationId:null, reservedAt:null, executingAt:null, providerReadbackAt:null, providerReadbackEvidence:[], releasedAt:null, releaseReason:null, failedReviewAt:null, failureReason:null, status:'REQUESTED', evidence:['postgres:e2e:tenant-approval'], correlationId, version:1,
+          }; }
+          postgresDescribe('tenant-scoped ApprovalRecord PostgreSQL E2E', () => {
+            it('isolates Approval reads and transitions across two tenants', async () => {
+              const suffix=`${Date.now()}-${Math.random().toString(16).slice(2)}`;
+              const a={tenantId:`approval-a-${suffix}`,workspaceId:`workspace-a-${suffix}`,organizationId:`org-a-${suffix}`};
+              const b={tenantId:`approval-b-${suffix}`,workspaceId:`workspace-b-${suffix}`,organizationId:`org-b-${suffix}`};
+              const ar=requestedRecord(`approval-a-${suffix}`,'operator-a',`corr-a-${suffix}`);
+              const br=requestedRecord(`approval-b-${suffix}`,'operator-b',`corr-b-${suffix}`);
+              const pool=createPostgresPool({connectionString:databaseUrl(),max:4});
+              try {
+                for (const s of [a,b]) await pool.query(`insert into tenants (tenant_id,status,display_name,evidence) values ($1,'ACTIVE',$2,'["postgres:e2e:tenant-approval"]'::jsonb)`,[s.tenantId,s.tenantId]);
+                const store=new PostgresApprovalStore(pool);
+                await store.putScoped(ar,a); await store.putScoped(br,b);
+                expect((await store.listScoped(a)).map(r=>r.approvalId)).toEqual([ar.approvalId]);
+                expect((await store.listScoped(b)).map(r=>r.approvalId)).toEqual([br.approvalId]);
+                expect(await store.getScoped(ar.approvalId,b)).toBeUndefined();
+                expect(await store.historyScoped(ar.approvalId,b)).toEqual([]);
+                await expect(store.transitionScoped(ar.approvalId,{type:'RESERVE',expectation:{requester:'operator-a',routeId:'R28',capabilityId:ar.capabilityId,descriptorSha256:ar.descriptorSha256,targetAccount:ar.targetAccount,requiredScope:ar.scope},binding:{executionId:`exec-${suffix}`,principalId:'operator-a',correlationId:`exec-corr-${suffix}`},now:'2026-08-20T19:05:00.000Z'},b)).rejects.toThrow('APPROVAL_NOT_FOUND');
+                expect((await bindApprovalStoreToScope(store,a).list()).map(r=>r.approvalId)).toEqual([ar.approvalId]);
+                expect(await bindApprovalStoreToScope(store,b).get(ar.approvalId)).toBeUndefined();
+              } finally { await pool.end(); }
+            });
+          });
+          ''')
+          PY
+      - name: Format and static validation
+        run: |
+          pnpm exec prettier --write src/governance/approval-scope.ts src/persistence/postgres-approval-store.ts src/mcp/core-surface.ts src/mcp/human-control-center.ts src/server.ts test/tenant-approval-postgres-e2e.test.ts migrations/032_tenant_scoped_approvals.sql
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+      - name: PostgreSQL proof
+        run: |
+          pnpm migrate
+          pnpm exec vitest run test/tenant-approval-postgres-e2e.test.ts
+          pnpm migrate
+      - name: Commit source only
+        run: |
+          git config user.name 'TOCA OS Integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git add migrations/032_tenant_scoped_approvals.sql src/governance/approval-scope.ts src/persistence/postgres-approval-store.ts src/mcp/core-surface.ts src/mcp/human-control-center.ts src/server.ts test/tenant-approval-postgres-e2e.test.ts
+          git commit -m 'feat(governance): tenant-scope approvals and control center reads'
+          git push origin HEAD:feat/tenant-approval-control-center-20260820
