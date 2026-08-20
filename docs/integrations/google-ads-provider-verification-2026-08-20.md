@@ -56,6 +56,19 @@ As a result, the repository-defined standard Cloud Run deployment provides no au
 
 No Secret Manager read/control-plane integration was available in this verification context to prove that the required Google Ads secrets exist, are current, or are bound to the runtime service identity. No secret value was requested or exposed.
 
+## Core / Approval bootstrap blocker
+
+The normal governed Phase 2 path is currently blocked before any provider mutation:
+
+- the Google Ads `create_paused` runtime binding explicitly declares `sideEffectValidated: false`;
+- Core rejects every side-effect capability whose runtime binding is not explicitly validated, with `CAPABILITY_RUNTIME_BINDING_UNVALIDATED`;
+- normal `requestCoreApproval` rejects a capability unless its lifecycle is `PRODUCTION_VALIDATED`;
+- the Google Ads registry entries remain `IMPLEMENTED`.
+
+Therefore there is currently no legitimate path to use the ordinary Core/Approval execution flow to generate the first `CREATE_PAUSED` provider evidence. Changing either guard ad hoc would be a governance bypass and was not attempted.
+
+Before Phase 2, the system needs a canonical **provider-verification execution gate** that preserves Policy, formal Approval, idempotency, provider readback and Audit while allowing a tightly bounded verification candidate to execute before production validation. That gate must not mark the capability production-valid merely to make the verification executable.
+
 ## TOCA_OS canonical drift
 
 The current TOCA_OS capability spreadsheet returned no `google_ads` capability rows, while route `R28` is currently named `META_ADS_CONTROLLED_LIFECYCLE`. The repository, by contrast, contains Google Ads capabilities and historical R28 references.
@@ -86,7 +99,7 @@ Therefore these fields are intentionally absent rather than fabricated:
 
 **NOT EXECUTED.**
 
-Prerequisites are not satisfied because Phase 1 provider evidence, deployed secret/config binding, canonical TOCA_OS reconciliation, and all requested minimum capability surfaces are incomplete.
+Prerequisites are not satisfied because Phase 1 provider evidence, deployed secret/config binding, canonical TOCA_OS reconciliation, all requested minimum capability surfaces, and a legitimate pre-production provider-verification Approval path are incomplete.
 
 No campaign was created, activated, or allowed to spend. No Approval was bypassed.
 
@@ -100,8 +113,9 @@ When eligible, Phase 2 must execute only through Core/Policy/Approval, create th
 4. Set the verification environment to `GOOGLE_ADS_PHASE=READ_ONLY`; keep activation disabled.
 5. Execute `account.verify`/`account.inspect` and the required immutable READs through Core and capture exact `request-id`, customer/account metadata, billing state and Audit readback.
 6. Verify Developer Token access level/permissible use and OAuth/manager-account permissions from real provider evidence.
-7. Only after Phase 1 succeeds, move the controlled verification environment to `CREATE_PAUSED`, obtain normal Approval, create exactly one PAUSED campaign, independently read it back as PAUSED, and record Audit evidence.
-8. Do not promote `PRODUCTION_VERIFIED` until the production configuration, provider credentials, least privilege, observability/readback and governed runtime path have separate production evidence.
+7. Add a canonical provider-verification execution gate so `CREATE_PAUSED` can obtain formal Approval and run with idempotency/readback/Audit **without** falsely pre-promoting the capability to `PRODUCTION_VALIDATED` and without setting `sideEffectValidated=true` merely to manufacture evidence.
+8. Only after Phase 1 succeeds and the verification gate is valid, move the controlled verification environment to `CREATE_PAUSED`, obtain formal Approval, create exactly one PAUSED campaign, independently read it back as PAUSED, and record Audit evidence.
+9. Do not promote `PRODUCTION_VERIFIED` until the production configuration, provider credentials, least privilege, observability/readback and governed runtime path have separate production evidence.
 
 ## Safety statement
 
