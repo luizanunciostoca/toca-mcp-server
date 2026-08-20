@@ -31,9 +31,7 @@ class MemoryGeoAudienceHistoryStore implements MetaAdsGeoAudienceHistoryStore {
     return Promise.resolve();
   }
 
-  listSince(
-    query: MetaAdsGeoAudienceHistoryQuery,
-  ): Promise<readonly MetaAdsGeoAudienceSample[]> {
+  listSince(query: MetaAdsGeoAudienceHistoryQuery): Promise<readonly MetaAdsGeoAudienceSample[]> {
     return Promise.resolve(
       this.samples
         .filter(
