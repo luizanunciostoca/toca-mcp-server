@@ -2,8 +2,7 @@ import * as z from 'zod/v4';
 
 export const TOCA_CREATIVE_TRUTH_POLICY_ID = 'TOCA_CREATIVE_TRUTH_POLICY_V1' as const;
 export const TOCA_VENUE_REFERENCE_SET_LEGACY_ID = 'TOCA_VENUE_REFERENCE_SET_V1' as const;
-export const TOCA_VENUE_REFERENCE_SET_SUNSET_ID =
-  'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const;
+export const TOCA_VENUE_REFERENCE_SET_SUNSET_ID = 'TOCA_VENUE_REFERENCE_SET_SUNSET_V1' as const;
 export const TOCA_VENUE_REFERENCE_SET_THE_PARTY_ID =
   'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1' as const;
 /** @deprecated Execution against the legacy global reference set is denied by policy v1.3. */
