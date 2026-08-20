@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryConnectedAccountStore } from '../src/core/connected-account-store.js';
 import {
+  AUTHORIZATION_ROLES,
   createTrustedServiceExecutionIdentity,
   type AuthorizationRole,
 } from '../src/core/identity.js';
@@ -13,6 +14,7 @@ import {
 import { InMemoryTenantConfigurationStore } from '../src/tenancy/tenant-configuration.js';
 import { TenantCredentialResolver } from '../src/tenancy/tenant-credential-resolver.js';
 import { TenantPolicyOverlay } from '../src/tenancy/tenant-policy.js';
+import { authorizeTenantRbac } from '../src/tenancy/tenant-rbac.js';
 import { TenantRegistryResolver } from '../src/tenancy/tenant-registry-resolver.js';
 
 const WRITE_CAPABILITY = 'instagram.media.publish';
@@ -110,6 +112,16 @@ function tenantConfiguration(options: ConfigurationOptions): TenantConfiguration
         evidence: [`${tenant}:approval-chain`],
       },
     ],
+    rbacGrants: AUTHORIZATION_ROLES.map((role) => ({
+      grantId: `${tenant}:${role.toLowerCase()}`,
+      principalId: `${tenant}:principal`,
+      role,
+      allowedRouteIds: null,
+      allowedCapabilityIds: null,
+      allowedTargetAccounts: null,
+      enabled: true,
+      evidence: [`${tenant}:rbac:${role}`],
+    })),
     assets: {
       assetRegistryResourceId: `${tenant}:asset-registry`,
       evidence: [`${tenant}:asset-registry`],
@@ -124,9 +136,13 @@ function tenantConfiguration(options: ConfigurationOptions): TenantConfiguration
   };
 }
 
-function identity(tenantId: string, roles: readonly AuthorizationRole[] = ['ADMIN']) {
+function identity(
+  tenantId: string,
+  roles: readonly AuthorizationRole[] = ['ADMIN'],
+  principalId = `${tenantId}:principal`,
+) {
   return createTrustedServiceExecutionIdentity({
-    principalId: `${tenantId}:principal`,
+    principalId,
     tenantId,
     workspaceId: `${tenantId}-workspace`,
     organizationId: `${tenantId}-organization`,
@@ -153,6 +169,17 @@ describe('tenant isolation', () => {
     );
 
     expect(decision).toMatchObject({ allowed: false, reason: 'TENANT_SCOPE_MISMATCH' });
+  });
+
+  it('requires a tenant-specific RBAC grant even for a same-tenant authenticated principal', () => {
+    const configuration = tenantConfiguration({ tenantId: 'tenant-a' });
+    const decision = authorizeTenantRbac(
+      configuration,
+      identity('tenant-a', ['ADMIN'], 'tenant-a:ungranted-principal'),
+      { capabilityId: 'system.health', riskClass: 'READ' },
+    );
+
+    expect(decision).toMatchObject({ allowed: false, reason: 'TENANT_RBAC_GRANT_REQUIRED' });
   });
 
   it('rejects exclusive provider account and secret ownership across tenants', async () => {
@@ -275,6 +302,14 @@ describe('tenant isolation', () => {
         expectation: { capabilityId: WRITE_CAPABILITY, riskClass: 'WRITE_EXTERNAL' },
       }),
     ).rejects.toThrow();
+
+    await expect(
+      resolver.resolve({
+        identity: identity('tenant-a', ['ADMIN'], 'tenant-a:ungranted-principal'),
+        providerId: 'instagram',
+        expectation: { capabilityId: WRITE_CAPABILITY, riskClass: 'WRITE_EXTERNAL' },
+      }),
+    ).rejects.toThrow('TENANT_RBAC_GRANT_REQUIRED');
   });
 
   it('does not allow a tenant to consume another tenant budget', async () => {
