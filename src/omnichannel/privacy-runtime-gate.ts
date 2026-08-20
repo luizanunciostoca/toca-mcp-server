@@ -39,6 +39,14 @@ export class CanonicalOutboundPrivacyRevalidationPort
   ) {}
 
   revalidate(input: OutboundPrivacyRevalidationInput): Promise<CommunicationPolicyDecision> {
+    const privacyChannel = requireText(
+      input.privacyChannel,
+      'OMNICHANNEL_PRIVACY_CHANNEL_REQUIRED',
+    );
+    if (privacyChannel.toUpperCase() !== input.channel) {
+      throw new Error('OMNICHANNEL_PRIVACY_TRANSPORT_CHANNEL_MISMATCH');
+    }
+
     const context: PrivacyExecutionContext = {
       tenantId: requireText(input.tenantId, 'OMNICHANNEL_PRIVACY_TENANT_REQUIRED'),
       workspaceId: requireText(input.workspaceId, 'OMNICHANNEL_PRIVACY_WORKSPACE_REQUIRED'),
@@ -61,7 +69,7 @@ export class CanonicalOutboundPrivacyRevalidationPort
         subjectRef: requireText(input.subjectRef, 'OMNICHANNEL_PRIVACY_SUBJECT_REQUIRED'),
         identityState: 'RESOLVED',
       },
-      channel: requireText(input.privacyChannel, 'OMNICHANNEL_PRIVACY_CHANNEL_REQUIRED'),
+      channel: privacyChannel,
       purposeId: requireText(input.purposeId, 'OMNICHANNEL_PRIVACY_PURPOSE_REQUIRED'),
     });
   }
