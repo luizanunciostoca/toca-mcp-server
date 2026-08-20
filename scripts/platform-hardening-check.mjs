@@ -96,11 +96,7 @@ requireContains(
   'verifyAuditLedger',
   'AUDIT_INTEGRITY_VERIFIER_MISSING',
 );
-requireContains(
-  'src/core/operational-observability.ts',
-  'correlationId',
-  'CORRELATION_ID_MISSING',
-);
+requireContains('src/core/operational-observability.ts', 'correlationId', 'CORRELATION_ID_MISSING');
 requireContains(
   'src/core/structured-logger.ts',
   'JSON.stringify',
@@ -152,8 +148,7 @@ for (const scenario of [
   'expired_token',
   'quota_exceeded',
 ]) {
-  if (!drillContract.includes(`'${scenario}'`))
-    failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
+  if (!drillContract.includes(`'${scenario}'`)) failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
 }
 if (!drillContract.includes('destructiveProviderMutationAllowed: false'))
   failures.push('DRILL_DESTRUCTIVE_MUTATION_GUARD_MISSING');
