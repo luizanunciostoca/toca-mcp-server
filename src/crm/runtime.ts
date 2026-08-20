@@ -243,7 +243,14 @@ export function resolveCrmSalesRuntimeBinding(
     case 'sales.lead.enrich':
       return readBinding(contactSearchSchema, async (input, context) => {
         const scope = scopeFromContext(context);
-        return services.sales.resolveContact({ ...scope, channels: input.channels });
+        return services.sales.resolveContact({
+          ...scope,
+          channels: input.channels.map((channel) => ({
+            channelType: channel.channelType,
+            value: channel.value,
+            ...(channel.provider !== undefined ? { provider: channel.provider } : {}),
+          })),
+        });
       });
     case 'sales.lead.create':
       return mutationBinding(
@@ -260,7 +267,9 @@ export function resolveCrmSalesRuntimeBinding(
             ? routeLeadDeterministically({
                 leadId: input.leadId,
                 eligibleOwnerPrincipalIds: input.eligibleOwnerPrincipalIds,
-                preferredOwnerPrincipalId: input.preferredOwnerPrincipalId,
+                ...(input.preferredOwnerPrincipalId !== undefined
+                  ? { preferredOwnerPrincipalId: input.preferredOwnerPrincipalId }
+                  : {}),
               })
             : undefined;
           return services.core.createLead({
@@ -318,7 +327,7 @@ export function resolveCrmSalesRuntimeBinding(
             scoring,
             hasVerifiedContactPath: input.hasVerifiedContactPath,
             explicitOptOut: input.explicitOptOut,
-            humanOverride: input.humanOverride,
+            ...(input.humanOverride !== undefined ? { humanOverride: input.humanOverride } : {}),
           });
           return services.sales.qualifyLead({
             ...scope,

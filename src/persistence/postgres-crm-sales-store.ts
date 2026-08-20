@@ -39,6 +39,8 @@ import { PostgresTransactionalOutbox } from '../events/postgres-transactional-ou
 import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
 import { appendInternalAuditLedgerEvent } from './postgres-internal-audit-ledger.js';
 
+type CrmSalesMutationMetadata = Required<Omit<CrmMutationMetadata, 'now'>>;
+
 interface ContactCandidateRow {
   readonly contact_id: string;
   readonly channel_id: string;
@@ -321,7 +323,7 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const now = normalizeNow(input.now);
     const conversationId = requireCrmText(input.conversationId, 'CRM_CONVERSATION_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
-    const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
+    const leadId = nullableCrmText(input.leadId);
     const language = normalizeLanguage(input.language);
     return this.#transaction(async (client) => {
       const replay = await beginIdempotency(
@@ -386,7 +388,7 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const messageId = requireCrmText(input.messageId, 'CRM_MESSAGE_ID_REQUIRED');
     const conversationId = requireCrmText(input.conversationId, 'CRM_CONVERSATION_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
-    const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
+    const leadId = nullableCrmText(input.leadId);
     assertSha256(input.contentSha256);
     return this.#transaction(async (client) => {
       const recordType = leadId ? 'LEAD' : 'CONTACT';
@@ -418,10 +420,10 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           input.direction,
           input.channel,
           normalizeLanguage(input.language),
-          nullableCrmText(input.contentRef, 'CRM_MESSAGE_CONTENT_REF_INVALID'),
+          nullableCrmText(input.contentRef),
           input.contentSha256,
-          nullableCrmText(input.providerMessageRef, 'CRM_MESSAGE_PROVIDER_REF_INVALID'),
-          nullableCrmText(input.intent, 'CRM_MESSAGE_INTENT_INVALID'),
+          nullableCrmText(input.providerMessageRef),
+          nullableCrmText(input.intent),
           input.urgency ?? null,
           occurredAt,
           json(metadata.evidence),
@@ -473,8 +475,8 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     );
     const activityId = requireCrmText(input.activityId, 'CRM_ACTIVITY_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
-    const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
-    const opportunityId = nullableCrmText(input.opportunityId, 'CRM_OPPORTUNITY_ID_INVALID');
+    const leadId = nullableCrmText(input.leadId);
+    const opportunityId = nullableCrmText(input.opportunityId);
     if (!leadId && !opportunityId) throw new Error('CRM_ACTIVITY_LEAD_OR_OPPORTUNITY_REQUIRED');
     if (input.stageTransition) {
       assertSalesPipelineTransition(input.stageTransition.fromStage, input.stageTransition.toStage);
@@ -512,11 +514,11 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           contactId,
           leadId,
           opportunityId,
-          nullableCrmText(input.conversationId, 'CRM_CONVERSATION_ID_INVALID'),
+          nullableCrmText(input.conversationId),
           input.activityType,
           input.channel ?? null,
           requireCrmText(input.summary, 'CRM_ACTIVITY_SUMMARY_REQUIRED'),
-          nullableCrmText(input.outcome, 'CRM_ACTIVITY_OUTCOME_INVALID'),
+          nullableCrmText(input.outcome),
           metadata.actorPrincipalId,
           occurredAt,
           json(metadata.evidence),
@@ -564,8 +566,8 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const now = normalizeNow(input.now);
     const nextActionId = requireCrmText(input.nextActionId, 'CRM_NEXT_ACTION_ID_REQUIRED');
     const contactId = requireCrmText(input.contactId, 'CRM_CONTACT_ID_REQUIRED');
-    const leadId = nullableCrmText(input.leadId, 'CRM_LEAD_ID_INVALID');
-    const opportunityId = nullableCrmText(input.opportunityId, 'CRM_OPPORTUNITY_ID_INVALID');
+    const leadId = nullableCrmText(input.leadId);
+    const opportunityId = nullableCrmText(input.opportunityId);
     if (!leadId && !opportunityId) throw new Error('CRM_NEXT_ACTION_LEAD_OR_OPPORTUNITY_REQUIRED');
     const dueAt = input.dueAt
       ? normalizeCrmTimestamp(input.dueAt, 'CRM_NEXT_ACTION_DUE_AT_INVALID')
@@ -604,8 +606,8 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           requireCrmText(input.title, 'CRM_NEXT_ACTION_TITLE_REQUIRED'),
           requireCrmText(input.rationale, 'CRM_NEXT_ACTION_RATIONALE_REQUIRED'),
           input.priority,
-          nullableCrmText(input.ownerPrincipalId, 'CRM_NEXT_ACTION_OWNER_INVALID'),
-          nullableCrmText(input.playbookKey, 'CRM_NEXT_ACTION_PLAYBOOK_INVALID'),
+          nullableCrmText(input.ownerPrincipalId),
+          nullableCrmText(input.playbookKey),
           dueAt,
           now,
         ],
@@ -776,10 +778,7 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
     const now = normalizeNow(input.now);
     assertCrmVersion(input.expectedVersion);
     assertSalesPipelineTransition(input.fromStage, input.toStage);
-    if (
-      input.status === 'LOST' &&
-      !nullableCrmText(input.lossReason, 'CRM_OPPORTUNITY_LOSS_REASON_INVALID')
-    ) {
+    if (input.status === 'LOST' && !nullableCrmText(input.lossReason)) {
       throw new Error('CRM_OPPORTUNITY_LOSS_REASON_REQUIRED');
     }
     if (input.status !== 'LOST' && input.lossReason)
@@ -823,9 +822,7 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
           input.status,
           currency ?? current.currency,
           valueMinor ?? numberOrNull(current.value_minor),
-          input.nextAction === undefined
-            ? current.next_action
-            : nullableCrmText(input.nextAction, 'CRM_OPPORTUNITY_NEXT_ACTION_INVALID'),
+          input.nextAction === undefined ? current.next_action : nullableCrmText(input.nextAction),
           input.nextActionAt === undefined
             ? isoOrNull(current.next_action_at)
             : input.nextActionAt
@@ -833,7 +830,7 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
               : null,
           input.ownerPrincipalId === undefined
             ? current.owner_principal_id
-            : nullableCrmText(input.ownerPrincipalId, 'CRM_OPPORTUNITY_OWNER_INVALID'),
+            : nullableCrmText(input.ownerPrincipalId),
           closedAt,
           input.status === 'LOST' ? input.lossReason : null,
           nextVersion,
@@ -1085,7 +1082,7 @@ async function recordMutation(
   client: pg.PoolClient,
   outbox: TransactionalOutboxWriter,
   input: CrmScope,
-  metadata: Required<CrmMutationMetadata>,
+  metadata: CrmSalesMutationMetadata,
   recordType: 'CONTACT' | 'LEAD' | 'OPPORTUNITY',
   recordId: string,
   eventType: string,
@@ -1130,7 +1127,7 @@ async function recordMutation(
 async function insertCoreRevision(
   client: pg.PoolClient,
   input: CrmScope,
-  metadata: Required<CrmMutationMetadata>,
+  metadata: CrmSalesMutationMetadata,
   recordType: 'LEAD' | 'OPPORTUNITY',
   recordId: string,
   revision: number,
@@ -1215,14 +1212,14 @@ async function insertScoreObservation(
       input.scoring.aiScore,
       input.scoring.effectiveScore,
       input.scoring.temperature,
-      nullableCrmText(input.intent, 'CRM_SCORE_INTENT_INVALID'),
+      nullableCrmText(input.intent),
       input.urgency,
       input.propensity,
       input.estimatedValueMinor ?? null,
       currency,
       input.visitEventAt ?? null,
-      nullableCrmText(input.campaignRef, 'CRM_SCORE_CAMPAIGN_INVALID'),
-      nullableCrmText(input.sourceRef, 'CRM_SCORE_SOURCE_INVALID'),
+      nullableCrmText(input.campaignRef),
+      nullableCrmText(input.sourceRef),
       json(input.scoring.factors),
       now,
       json(requireCrmEvidence(input.evidence)),
@@ -1267,7 +1264,7 @@ async function insertStageHistory(
     readonly fromStage: SalesPipelineStage | null;
     readonly toStage: SalesPipelineStage;
     readonly reason: string;
-    readonly metadata: Required<CrmMutationMetadata>;
+    readonly metadata: CrmSalesMutationMetadata;
     readonly now: string;
   },
 ): Promise<PipelineStageHistoryRecord> {
@@ -1467,7 +1464,7 @@ function qualificationStage(
   }
 }
 
-function mutationMetadata(input: CrmMutationMetadata): Required<CrmMutationMetadata> {
+function mutationMetadata(input: CrmMutationMetadata): CrmSalesMutationMetadata {
   return {
     idempotencyKey: requireCrmText(input.idempotencyKey, 'CRM_IDEMPOTENCY_KEY_REQUIRED'),
     executionId: requireCrmText(input.executionId, 'CRM_EXECUTION_ID_REQUIRED'),
