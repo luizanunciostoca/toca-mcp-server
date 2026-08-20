@@ -1,0 +1,96 @@
+name: Tenant Approval Source Integrator V5
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/tenant-approval-source-integrator-v5.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: toca
+          POSTGRES_PASSWORD: toca-approval-local-only
+          POSTGRES_DB: toca_approval
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U toca -d toca_approval"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://toca:toca-approval-local-only@127.0.0.1:5432/toca_approval
+      DATABASE_SSL: 'false'
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/tenant-approval-control-center-20260820
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Reuse reviewed V4 patch script
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/tenant-approval-source-integrator-v4.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(source) if line.strip() == "python <<'PY'") + 1
+          end = next(i for i in range(start, len(source)) if source[i].strip() == 'PY')
+          body = []
+          for line in source[start:end]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/tenant-approval-integrate.py').write_text('\n'.join(body) + '\n')
+          PY
+          python /tmp/tenant-approval-integrate.py
+      - name: Format and static validation
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write \
+            src/governance/approval-scope.ts \
+            src/persistence/postgres-approval-store.ts \
+            src/mcp/core-surface.ts \
+            src/mcp/human-control-center.ts \
+            src/server.ts \
+            test/tenant-approval-postgres-e2e.test.ts
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+      - name: PostgreSQL proof
+        run: |
+          set -euo pipefail
+          pnpm migrate
+          pnpm exec vitest run test/tenant-approval-postgres-e2e.test.ts
+          pnpm migrate
+      - name: Commit validated source only
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            migrations/032_tenant_scoped_approvals.sql \
+            src/governance/approval-scope.ts \
+            src/persistence/postgres-approval-store.ts \
+            src/mcp/core-surface.ts \
+            src/mcp/human-control-center.ts \
+            src/server.ts \
+            test/tenant-approval-postgres-e2e.test.ts
+          git commit -m 'feat(governance): tenant-scope approvals and control center reads'
+          git push origin HEAD:feat/tenant-approval-control-center-20260820
