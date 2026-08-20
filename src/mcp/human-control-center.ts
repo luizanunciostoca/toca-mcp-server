@@ -252,7 +252,7 @@ export function registerTocaControlCenterSurface(
       description: 'Interactive governed operations dashboard for TOCA OS.',
       mimeType: 'text/html+mcp',
     },
-    async (uri) => ({
+    (uri) => ({
       contents: [{ uri: uri.href, mimeType: 'text/html+mcp', text: controlCenterHtml() }],
     }),
   );
