@@ -63,8 +63,8 @@ class FakeVideoContentRuntime implements VideoContentRuntimeService {
 }
 
 describe('Video/R29 current TOCA Core runtime integration', () => {
-  it('keeps the public MCP facade fixed at the 12 TOCA Core tools', () => {
-    expect(CORE_MCP_TOOL_NAMES).toHaveLength(12);
+  it('keeps the public MCP facade explicit while allowing governed Core reads', () => {
+    expect(CORE_MCP_TOOL_NAMES).toHaveLength(13);
     expect(CORE_MCP_TOOL_NAMES).toContain('toca.execute');
     expect(CORE_MCP_TOOL_NAMES.some((name) => name.includes('video'))).toBe(false);
   });

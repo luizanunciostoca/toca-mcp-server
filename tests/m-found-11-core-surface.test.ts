@@ -135,8 +135,8 @@ function partialWorkflowSnapshot(
 
 describe('M-FOUND-11 TOCA Core MCP Surface', () => {
   it('keeps the public MCP surface small and stable', () => {
-    expect(CORE_MCP_TOOL_NAMES).toHaveLength(12);
-    expect(new Set(CORE_MCP_TOOL_NAMES).size).toBe(12);
+    expect(CORE_MCP_TOOL_NAMES).toHaveLength(13);
+    expect(new Set(CORE_MCP_TOOL_NAMES).size).toBe(13);
     expect(CORE_MCP_TOOL_NAMES).toEqual([
       'toca.system.health',
       'toca.capabilities.search',
@@ -145,6 +145,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
       'toca.workflow.get',
       'toca.workflow.advance',
       'toca.approval.request',
+      'toca.approval.list',
       'toca.approval.get',
       'toca.execute',
       'toca.verify',
@@ -461,7 +462,7 @@ describe('M-FOUND-11 TOCA Core MCP Surface', () => {
       serviceVersion: '1.0.0',
       registry: createToolRegistry(),
       runtimeResolver: () => undefined,
-      resolveIdentity: () => adminIdentity(),
+      resolveIdentity: () => adminIdentity('test:admin', 'toca'),
       approvalStore,
     });
     const handler = handlers.get('toca.approval.get');
