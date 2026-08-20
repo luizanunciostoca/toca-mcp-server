@@ -173,7 +173,10 @@ const ingestion = {
   resolution: { status: 'MATCHED', opportunity, matchedBy: 'OPPORTUNITY_ID' },
   revenueEvidence,
   attributionTouchpointId: 'touch-1',
-} as const satisfies Extract<CommerceRevenueIngestionResult, { readonly status: 'REVENUE_RECORDED' }>;
+} as const satisfies Extract<
+  CommerceRevenueIngestionResult,
+  { readonly status: 'REVENUE_RECORDED' }
+>;
 
 describe('commerce provider R31 feedback', () => {
   it('persists provider-confirmed WON feedback in the canonical LearningRecordStore', async () => {
