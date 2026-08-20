@@ -1,5 +1,6 @@
 export * from './contracts.js';
 export * from './core-gateway.js';
+export * from './google-oauth-secret-resolver.js';
 export * from './http-server.js';
 export * from './in-memory-conversation-store.js';
 export * from './openai-responses-adapter.js';
