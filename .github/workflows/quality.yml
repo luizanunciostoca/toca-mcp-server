@@ -36,6 +36,11 @@ jobs:
         run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Emit exact Prettier repair diff
+        run: |
+          pnpm exec prettier --write scripts/platform-hardening-check.mjs src/health/runtime-readiness.ts test/runtime-readiness.test.ts
+          git diff -- scripts/platform-hardening-check.mjs src/health/runtime-readiness.ts test/runtime-readiness.test.ts
+          exit 1
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
