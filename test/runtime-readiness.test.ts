@@ -78,11 +78,7 @@ describe('production runtime readiness', () => {
 
   it('detects repository migrations missing from the database', async () => {
     const migrationsDirectory = await emptyMigrationsDirectory();
-    await writeFile(
-      join(migrationsDirectory, '999_readiness_fixture.sql'),
-      'select 1;\n',
-      'utf8',
-    );
+    await writeFile(join(migrationsDirectory, '999_readiness_fixture.sql'), 'select 1;\n', 'utf8');
     const report = await evaluateReadiness(
       createRuntimeReadinessChecks({
         config: testConfig(),
@@ -167,9 +163,7 @@ function fakePool(
     }
 
     if (text.includes('to_regclass')) {
-      const tableNames = Array.isArray(values?.[0])
-        ? (values?.[0] as readonly string[])
-        : [];
+      const tableNames = Array.isArray(values?.[0]) ? (values?.[0] as readonly string[]) : [];
       return {
         rows: tableNames.map((tableName) => ({
           table_name: tableName,
