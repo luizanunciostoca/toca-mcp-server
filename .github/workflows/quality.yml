@@ -36,6 +36,11 @@ jobs:
         run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Capture exact formatter patch
+        run: |
+          pnpm exec prettier --write infra/observability/platform-hardening-alerts.json infra/observability/platform-hardening-dashboard.json scripts/platform-hardening-check.mjs src/core/platform-slo-catalog.ts
+          git diff --no-ext-diff --no-color -- infra/observability/platform-hardening-alerts.json infra/observability/platform-hardening-dashboard.json scripts/platform-hardening-check.mjs src/core/platform-slo-catalog.ts
+          exit 1
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
