@@ -99,9 +99,21 @@ for (const forbidden of [
 
 requireContains('Dockerfile', 'USER node', 'CONTAINER_NON_ROOT_USER_MISSING');
 requireContains('Dockerfile', 'COPY migrations ./migrations', 'CONTAINER_MIGRATIONS_MISSING');
-requireContains('src/core/audit-ledger.ts', 'verifyAuditLedger', 'AUDIT_INTEGRITY_VERIFIER_MISSING');
-requireContains('src/core/operational-observability.ts', 'correlationId', 'CORRELATION_ID_MISSING');
-requireContains('src/core/structured-logger.ts', 'JSON.stringify', 'STRUCTURED_JSON_LOGGING_MISSING');
+requireContains(
+  'src/core/audit-ledger.ts',
+  'verifyAuditLedger',
+  'AUDIT_INTEGRITY_VERIFIER_MISSING',
+);
+requireContains(
+  'src/core/operational-observability.ts',
+  'correlationId',
+  'CORRELATION_ID_MISSING',
+);
+requireContains(
+  'src/core/structured-logger.ts',
+  'JSON.stringify',
+  'STRUCTURED_JSON_LOGGING_MISSING',
+);
 
 const readinessPath = 'src/health/runtime-readiness.ts';
 for (const checkName of [
@@ -120,7 +132,11 @@ for (const checkName of [
   'provider_credentials',
   'critical_configuration',
 ]) {
-  requireContains(readinessPath, `namedCheck('${checkName}'`, `READINESS_CHECK_MISSING:${checkName}`);
+  requireContains(
+    readinessPath,
+    `namedCheck('${checkName}'`,
+    `READINESS_CHECK_MISSING:${checkName}`,
+  );
 }
 for (const marker of [
   'READINESS_MIGRATIONS_PENDING',
@@ -133,7 +149,11 @@ for (const marker of [
 ]) {
   requireContains(readinessPath, marker, 'READINESS_FAIL_CLOSED_MARKER_MISSING');
 }
-requireContains('src/health/readiness.ts', "status: failed ? 'not_ready' : 'ready'", 'READINESS_STATUS_GATE_MISSING');
+requireContains(
+  'src/health/readiness.ts',
+  "status: failed ? 'not_ready' : 'ready'",
+  'READINESS_STATUS_GATE_MISSING',
+);
 
 const alerts = JSON.parse(files.get('infra/observability/platform-hardening-alerts.json'));
 const dashboard = JSON.parse(files.get('infra/observability/platform-hardening-dashboard.json'));
@@ -195,10 +215,13 @@ for (const scenario of [
   'expired_token',
   'quota_exceeded',
 ]) {
-  if (!drillContract.includes(`'${scenario}'`)) failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
+  if (!drillContract.includes(`'${scenario}'`)) {
+    failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
+  }
 }
-if (!drillContract.includes('destructiveProviderMutationAllowed: false'))
+if (!drillContract.includes('destructiveProviderMutationAllowed: false')) {
   failures.push('DRILL_DESTRUCTIVE_MUTATION_GUARD_MISSING');
+}
 
 const drRunbook = files.get('docs/operations/disaster-recovery-next-runbook.md');
 for (const marker of ['RPO `<=15m`', 'RTO `<=60m`', 'PITR', 'isolated restore']) {
