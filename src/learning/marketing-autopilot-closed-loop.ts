@@ -47,7 +47,10 @@ const STAGE_STEP_IDS: Readonly<Record<MarketingAutopilotStage, string>> = {
 };
 
 const STEP_STAGE = new Map(
-  Object.entries(STAGE_STEP_IDS).map(([stage, stepId]) => [stepId, stage as MarketingAutopilotStage]),
+  Object.entries(STAGE_STEP_IDS).map(([stage, stepId]) => [
+    stepId,
+    stage as MarketingAutopilotStage,
+  ]),
 );
 
 export interface MarketingAutopilotClosedLoopStartInput {
@@ -75,7 +78,6 @@ export interface MarketingAutopilotStageContext {
 export interface MarketingAutopilotStageResult {
   readonly output?: unknown;
   readonly evidenceRefs: readonly string[];
-  /** A partial result is checkpointed as a failed step and never unlocks side effects. */
   readonly partial?: boolean;
 }
 
@@ -90,7 +92,6 @@ export interface MarketingAutopilotGatesResult extends MarketingAutopilotStageRe
 }
 
 export interface MarketingAutopilotReadbackResult extends MarketingAutopilotStageResult {
-  /** Independent provider-backed readback, not an inference from a scheduled/published request. */
   readonly providerBacked: boolean;
 }
 
@@ -100,7 +101,6 @@ export interface MarketingAutopilotMeasurementResult extends MarketingAutopilotS
 }
 
 export interface MarketingAutopilotLearningResult extends MarketingAutopilotStageResult {
-  /** R31 is recommendation-only. Any direct action request is rejected. */
   readonly actionRequested?: boolean;
 }
 
@@ -207,18 +207,46 @@ export class MarketingAutopilotClosedLoopRunner {
           stepId: STAGE_STEP_IDS[stage],
           name: stage,
           maxAttempts: stage === 'SCHEDULE_OR_PUBLISH' ? 1 : 3,
-          ...(index > 0 ? { dependsOn: [STAGE_STEP_IDS[MARKETING_AUTOPILOT_STAGES[index - 1]!]] } : {}),
+          ...(index > 0
+            ? {
+                dependsOn: [STAGE_STEP_IDS[MARKETING_AUTOPILOT_STAGES[index - 1]!]],
+              }
+            : {}),
         })),
       },
       now,
     );
   }
 
-  /**
-   * Handles a claim created atomically by the existing durable WorkflowStore.
-   * Claim acquisition/dispatch remains the responsibility of the existing workflow runtime.
-   */
-  async handleClaim(claim: WorkflowStepClaim, now = new Date().toISOString()): Promise<WorkflowSnapshot> {
+  async resumeRunningCheckpoint(
+    workflowId: string,
+    now = new Date().toISOString(),
+  ): Promise<WorkflowSnapshot> {
+    const snapshot = await this.#requireAutopilotSnapshot(workflowId);
+    const running = snapshot.steps.filter((step) => step.status === 'RUNNING');
+    if (running.length !== 1) {
+      throw new Error('MARKETING_AUTOPILOT_RUNNING_CHECKPOINT_REQUIRED');
+    }
+    const step = running[0]!;
+    if (!step.claimedBy || !step.claimExecutionId || !step.claimedAt) {
+      throw new Error('MARKETING_AUTOPILOT_RUNNING_CHECKPOINT_INVALID');
+    }
+    return this.handleClaim(
+      {
+        workflowId,
+        stepId: step.stepId,
+        workerId: step.claimedBy,
+        executionId: step.claimExecutionId,
+        claimedAt: step.claimedAt,
+      },
+      now,
+    );
+  }
+
+  async handleClaim(
+    claim: WorkflowStepClaim,
+    now = new Date().toISOString(),
+  ): Promise<WorkflowSnapshot> {
     const snapshot = await this.#requireAutopilotSnapshot(claim.workflowId);
     const step = snapshot.steps.find((item) => item.stepId === claim.stepId);
     if (!step) throw new Error('MARKETING_AUTOPILOT_STEP_NOT_FOUND');
@@ -230,21 +258,33 @@ export class MarketingAutopilotClosedLoopRunner {
 
     try {
       if (stage === 'APPROVAL') return await this.#handleApproval(snapshot, claim, now);
-      if (stage === 'SCHEDULE_OR_PUBLISH') return await this.#handleSideEffect(snapshot, claim, now);
+      if (stage === 'SCHEDULE_OR_PUBLISH') {
+        return await this.#handleSideEffect(snapshot, claim, now);
+      }
 
       const context = this.#context(snapshot, stage, now);
       if (stage === 'READBACK') {
         const result = await this.#adapters.readback(context);
         const evidence = requireStageEvidence(result.evidenceRefs, stage);
         if (!result.providerBacked) {
-          return this.#failClaim(claim, stage, 'MARKETING_AUTOPILOT_PROVIDER_READBACK_REQUIRED', evidence, now);
+          return this.#failClaim(
+            claim,
+            stage,
+            'MARKETING_AUTOPILOT_PROVIDER_READBACK_REQUIRED',
+            evidence,
+            now,
+          );
         }
         return this.#completeStage(claim, stage, result, now);
       }
+
       if (stage === 'MEASURE') {
         const result = await this.#adapters.measure(context);
         requireStageEvidence(result.evidenceRefs, stage);
-        if (result.revenue !== null && (!Number.isFinite(result.revenue) || !result.revenueProviderBacked)) {
+        if (
+          result.revenue !== null &&
+          (!Number.isFinite(result.revenue) || !result.revenueProviderBacked)
+        ) {
           return this.#failClaim(
             claim,
             stage,
@@ -255,6 +295,7 @@ export class MarketingAutopilotClosedLoopRunner {
         }
         return this.#completeStage(claim, stage, result, now);
       }
+
       if (stage === 'LEARN') {
         const priorEvidence = requireWorkflowEvidence(
           snapshot.steps
@@ -263,11 +304,18 @@ export class MarketingAutopilotClosedLoopRunner {
           'MARKETING_AUTOPILOT_LEARNING_EVIDENCE_REQUIRED',
         );
         assertLearningBoundary({
-          providerBackedRead: this.#providerReadbackSucceeded(snapshot),
-          evidenceRefs: priorEvidence,
-          actionRequested: false,
+          creativeTruthRefs: this.#stageEvidence(snapshot, 'CREATIVE_TRUTH'),
+          assetRefs: this.#stageEvidence(snapshot, 'ASSET'),
+          gateRefs: this.#stageEvidence(snapshot, 'GATES'),
+          approvalRefs: this.#stageEvidence(snapshot, 'APPROVAL'),
+          scheduleOrPublishRefs: this.#stageEvidence(snapshot, 'SCHEDULE_OR_PUBLISH'),
+          providerReadbackRefs: this.#stageEvidence(snapshot, 'READBACK'),
+          measurementRefs: this.#stageEvidence(snapshot, 'MEASURE'),
         });
-        const result = await this.#adapters.learn({ ...context, evidenceRefs: priorEvidence });
+        const result = await this.#adapters.learn({
+          ...context,
+          evidenceRefs: priorEvidence,
+        });
         requireStageEvidence(result.evidenceRefs, stage);
         if (result.actionRequested) {
           return this.#failClaim(
@@ -309,13 +357,19 @@ export class MarketingAutopilotClosedLoopRunner {
     return this.#workflowStore.retryStep({
       workflowId: input.workflowId,
       stepId: input.stepId,
-      evidence: requireWorkflowEvidence(input.evidenceRefs, 'MARKETING_AUTOPILOT_RETRY_EVIDENCE_REQUIRED'),
+      evidence: requireWorkflowEvidence(
+        input.evidenceRefs,
+        'MARKETING_AUTOPILOT_RETRY_EVIDENCE_REQUIRED',
+      ),
       now: input.now ?? new Date().toISOString(),
     });
   }
 
   async #runOrdinaryStage(
-    stage: Exclude<MarketingAutopilotStage, 'APPROVAL' | 'SCHEDULE_OR_PUBLISH' | 'READBACK' | 'MEASURE' | 'LEARN'>,
+    stage: Exclude<
+      MarketingAutopilotStage,
+      'APPROVAL' | 'SCHEDULE_OR_PUBLISH' | 'READBACK' | 'MEASURE' | 'LEARN'
+    >,
     context: MarketingAutopilotStageContext,
   ): Promise<MarketingAutopilotStageResult> {
     switch (stage) {
@@ -356,7 +410,7 @@ export class MarketingAutopilotClosedLoopRunner {
       workflowId: claim.workflowId,
       stepId: claim.stepId,
       executionId: claim.executionId,
-      output: result.output ?? null,
+      output: persistedStageOutput(stage, result),
       evidence,
       now,
     });
@@ -373,8 +427,12 @@ export class MarketingAutopilotClosedLoopRunner {
       payload: gates.sideEffect.payload,
       identity: this.#persistedInput(snapshot).identity,
     });
-    if (!inspection.sideEffects) throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_CAPABILITY_REQUIRED');
-    if (!inspection.idempotent) throw new Error('MARKETING_AUTOPILOT_NON_IDEMPOTENT_SIDE_EFFECT_FORBIDDEN');
+    if (!inspection.sideEffects) {
+      throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_CAPABILITY_REQUIRED');
+    }
+    if (!inspection.idempotent) {
+      throw new Error('MARKETING_AUTOPILOT_NON_IDEMPOTENT_SIDE_EFFECT_FORBIDDEN');
+    }
 
     if (!inspection.approvalRequired) {
       return this.#workflowStore.completeStep({
@@ -387,7 +445,10 @@ export class MarketingAutopilotClosedLoopRunner {
           payload: gates.sideEffect.payload,
         } satisfies ApprovalStepOutput,
         evidence: requireStageEvidence(
-          [...gates.evidenceRefs, `core://inspection/${inspection.canonicalCapabilityId}/approval-not-required`],
+          [
+            ...gates.evidenceRefs,
+            `core://inspection/${inspection.canonicalCapabilityId}/approval-not-required`,
+          ],
           'APPROVAL',
         ),
         now,
@@ -440,7 +501,11 @@ export class MarketingAutopilotClosedLoopRunner {
         payload: gates.sideEffect.payload,
       } satisfies ApprovalStepOutput,
       evidence: requireStageEvidence(
-        [...task.evidence, ...approval.evidence, `approval://${approvalId}/${approval.status.toLowerCase()}`],
+        [
+          ...task.evidence,
+          ...approval.evidence,
+          `approval://${approvalId}/${approval.status.toLowerCase()}`,
+        ],
         'APPROVAL',
       ),
       now,
@@ -497,7 +562,9 @@ export class MarketingAutopilotClosedLoopRunner {
     const outputs: Partial<Record<MarketingAutopilotStage, unknown>> = {};
     for (const step of snapshot.steps) {
       const completedStage = STEP_STAGE.get(step.stepId);
-      if (completedStage && step.status === 'SUCCEEDED') outputs[completedStage] = step.output;
+      if (completedStage && step.status === 'SUCCEEDED') {
+        outputs[completedStage] = step.output;
+      }
     }
     return {
       workflowId: snapshot.instance.workflowId,
@@ -520,25 +587,31 @@ export class MarketingAutopilotClosedLoopRunner {
       throw new Error('MARKETING_AUTOPILOT_GATES_OUTPUT_REQUIRED');
     }
     const sideEffect = output.sideEffect;
-    if (!isRecord(sideEffect)) throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_PLAN_REQUIRED');
+    if (!isRecord(sideEffect)) {
+      throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_PLAN_REQUIRED');
+    }
     const capabilityId = text(sideEffect.capabilityId);
     const approvalExpiresAt = text(sideEffect.approvalExpiresAt);
-    if (!capabilityId || !approvalExpiresAt) throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_PLAN_INVALID');
+    if (!capabilityId || !approvalExpiresAt) {
+      throw new Error('MARKETING_AUTOPILOT_SIDE_EFFECT_PLAN_INVALID');
+    }
     return {
-      sideEffect: { capabilityId, payload: sideEffect.payload ?? null, approvalExpiresAt },
+      sideEffect: {
+        capabilityId,
+        payload: sideEffect.payload ?? null,
+        approvalExpiresAt,
+      },
       output,
       evidenceRefs: step.evidence,
     };
   }
 
-  #providerReadbackSucceeded(snapshot: WorkflowSnapshot): boolean {
-    const readback = snapshot.steps.find((item) => item.stepId === STAGE_STEP_IDS.READBACK);
-    return Boolean(
-      readback?.status === 'SUCCEEDED' &&
-        isRecord(readback.output) &&
-        readback.output.providerBacked === true &&
-        readback.evidence.length > 0,
-    );
+  #stageEvidence(
+    snapshot: WorkflowSnapshot,
+    stage: MarketingAutopilotStage,
+  ): readonly string[] {
+    const step = snapshot.steps.find((item) => item.stepId === STAGE_STEP_IDS[stage]);
+    return step?.status === 'SUCCEEDED' ? step.evidence : [];
   }
 
   #persistedInput(snapshot: WorkflowSnapshot): PersistedAutopilotInput {
@@ -579,6 +652,46 @@ export class MarketingAutopilotClosedLoopRunner {
   }
 }
 
+function persistedStageOutput(
+  stage: MarketingAutopilotStage,
+  result: MarketingAutopilotStageResult,
+): unknown {
+  if (stage === 'GATES') {
+    const gates = result as MarketingAutopilotGatesResult;
+    return {
+      ...recordOutput(result.output),
+      sideEffect: gates.sideEffect,
+    };
+  }
+  if (stage === 'READBACK') {
+    const readback = result as MarketingAutopilotReadbackResult;
+    return {
+      ...recordOutput(result.output),
+      providerBacked: readback.providerBacked,
+    };
+  }
+  if (stage === 'MEASURE') {
+    const measurement = result as MarketingAutopilotMeasurementResult;
+    return {
+      ...recordOutput(result.output),
+      revenue: measurement.revenue,
+      revenueProviderBacked: measurement.revenueProviderBacked,
+    };
+  }
+  if (stage === 'LEARN') {
+    const learning = result as MarketingAutopilotLearningResult;
+    return {
+      ...recordOutput(result.output),
+      actionRequested: learning.actionRequested === true,
+    };
+  }
+  return result.output ?? null;
+}
+
+function recordOutput(output: unknown): Record<string, unknown> {
+  return isRecord(output) ? output : {};
+}
+
 function approvalOutput(snapshot: WorkflowSnapshot): ApprovalStepOutput {
   const step = snapshot.steps.find((item) => item.stepId === STAGE_STEP_IDS.APPROVAL);
   if (!step || step.status !== 'SUCCEEDED' || !isRecord(step.output)) {
@@ -594,7 +707,9 @@ function approvalOutput(snapshot: WorkflowSnapshot): ApprovalStepOutput {
 }
 
 function approvalIdFromTask(payload: unknown): string {
-  if (!isRecord(payload)) throw new Error('MARKETING_AUTOPILOT_APPROVAL_TASK_PAYLOAD_INVALID');
+  if (!isRecord(payload)) {
+    throw new Error('MARKETING_AUTOPILOT_APPROVAL_TASK_PAYLOAD_INVALID');
+  }
   const approvalId = text(payload.approvalId);
   if (!approvalId) throw new Error('MARKETING_AUTOPILOT_APPROVAL_ID_REQUIRED');
   return approvalId;
