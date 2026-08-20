@@ -1,5 +1,6 @@
 import type { ExecutionIdentity } from '../core/identity.js';
 import type {
+  TenantCampaignBinding,
   TenantConfiguration,
   TenantConfigurationStore,
   TenantQuota,
@@ -34,10 +35,7 @@ export class TenantRegistryResolver {
       brandResourceId: configuration.brandCreativeTruth.brandResourceId,
       creativeTruthRegistryResourceId:
         configuration.brandCreativeTruth.creativeTruthRegistryResourceId,
-      evidence: [
-        ...configuration.brandCreativeTruth.evidence,
-        ...configuration.evidence,
-      ],
+      evidence: [...configuration.brandCreativeTruth.evidence, ...configuration.evidence],
     };
   }
 
@@ -55,6 +53,19 @@ export class TenantRegistryResolver {
       analyticsNamespace: configuration.analytics.analyticsNamespace,
       evidence: [...configuration.analytics.evidence, ...configuration.evidence],
     };
+  }
+
+  async resolveCampaign(
+    identity: ExecutionIdentity,
+    providerId: string,
+    campaignId: string,
+  ): Promise<TenantCampaignBinding> {
+    const configuration = await this.requireActiveConfiguration(identity);
+    const campaign = configuration.campaigns.find(
+      (candidate) => candidate.providerId === providerId && candidate.campaignId === campaignId,
+    );
+    if (!campaign) throw new TenantIsolationError('TENANT_CAMPAIGN_NOT_OWNED');
+    return campaign;
   }
 
   async resolveQuota(
