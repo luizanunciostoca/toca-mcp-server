@@ -63,7 +63,7 @@ describe('Creative Truth gates', () => {
         {
           asset: morroLogo,
           observedDriveFileId: morroLogo.driveFileId,
-          observedSha256: morroLogo.sha256,
+          observedSha256: 'd'.repeat(64),
           aiGenerated: true,
         },
       ],
