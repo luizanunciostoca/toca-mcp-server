@@ -1,123 +1,139 @@
 # TOCA OS V1 — New-repository administrative closeout — 2026-08-19
 
-Status: **BLOCKED ON TWO HOSTED ADMIN CONTROLS — NO APPLICATION GAP**
+Status: **BLOCKED ONLY ON GCP BILLING ENABLEMENT — APPLICATION / WIF / CLOUD SQL GATES VERIFIED**
 
 ## Scope
 
-This runbook closes hosted controls that could not migrate automatically with Git history from `luizidebook/toca-mcp-server` to `luizanunciostoca/toca-mcp-server`.
+This runbook records the hosted-control closeout after migration from `luizidebook/toca-mcp-server` to `luizanunciostoca/toca-mcp-server`.
 
-Do not use this document to change application capabilities, enable campaign activation, publish Instagram content, or widen provider permissions.
+Do not use this document to enable campaign activation, publish Instagram content, broaden provider permissions, or start post-V1 feature work.
 
-## 1. Google Cloud Workload Identity Federation repository trust
+## 1. Canonical release identity
 
-### Observed failure
+- Canonical repository: `luizanunciostoca/toca-mcp-server`
+- V1 final application SHA on `main`: `abfb09b17e90c83790e803dcda091c8142c7407f`
+- `main` API readback: `protected=true`
+- Classic protection payload does not expose required checks (`protection.enabled=false`), so the exact Ruleset clauses are not independently asserted here.
 
-Final V1 readback run `32317579469` reached `google-github-actions/auth` from the new repository and failed before `gcloud` with:
-
-`unauthorized_client: The given credential is rejected by the attribute condition.`
-
-No Google Cloud resource mutation occurred.
+## 2. Workload Identity Federation — CLOSED
 
 Provider:
 
 `projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp`
 
-Target repository identity:
+The original new-repository failure was:
 
-`luizanunciostoca/toca-mcp-server`
+`unauthorized_client: The given credential is rejected by the attribute condition.`
 
-### Fail-closed inspection
+That blocker is now closed. Current GitHub Actions runs from `luizanunciostoca/toca-mcp-server` successfully complete `google-github-actions/auth` using:
 
-Run in an authenticated Google Cloud Shell with authority to update the Workload Identity Pool provider:
+`toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com`
 
-```bash
-set -euo pipefail
-PROJECT_ID='toca-mcp-production'
-POOL_ID='github'
-PROVIDER_ID='github-toca-mcp'
-OLD_REPO='luizidebook/toca-mcp-server'
-NEW_REPO='luizanunciostoca/toca-mcp-server'
+Therefore the new repository identity is accepted by Google STS. No further WIF change is required for V1 closeout.
 
-CURRENT_CONDITION="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
-  --project="$PROJECT_ID" \
-  --location='global' \
-  --workload-identity-pool="$POOL_ID" \
-  --format='value(attributeCondition)')"
+## 3. Current Cloud SQL / DR readback — PASS
 
-printf 'CURRENT_ATTRIBUTE_CONDITION=%s\n' "$CURRENT_CONDITION"
+Final diagnostic readback run `32325042036` independently verified the current production database state:
 
-test -n "$CURRENT_CONDITION"
-case "$CURRENT_CONDITION" in
-  *"$OLD_REPO"*) ;;
-  *)
-    echo 'STOP: the current condition does not contain the exact old repository identity. Do not guess or broaden the condition.' >&2
-    exit 41
-    ;;
-esac
+- instance: `toca-mcp-db`
+- state: `RUNNABLE`
+- database version: `POSTGRES_18`
+- region: `southamerica-east1`
+- deletion protection: `true`
+- automated backups: `true`
+- PITR: `true`
+- retained backups: `7`
+- transaction-log retention: `7` days
+- latest successful backup: `2026-08-19T03:45:56.366Z`
+- latest backup age at readback: `82069` seconds
+- earliest recovery time: `2026-08-13T03:57:06.184Z`
+- latest recovery time: `2026-08-20T02:29:27.311355170Z`
+- latest recovery lag at readback: `258` seconds
+- result: `V1_CLOUD_SQL_DR_READBACK=PASS`
 
-NEW_CONDITION="${CURRENT_CONDITION//$OLD_REPO/$NEW_REPO}"
-printf 'PROPOSED_ATTRIBUTE_CONDITION=%s\n' "$NEW_CONDITION"
-test "$NEW_CONDITION" != "$CURRENT_CONDITION"
-```
+Sanitized evidence artifact:
 
-### Minimal update
+- artifact id: `9391052044`
+- name: `v1-final-production-readback-b97b2bcb2448943663cdadbb3a1fed69423a0678`
+- artifact ZIP SHA-256: `8539b62fd8f5c33e458ae8b3638e183fc9f6b2c3b290eebc42a57a40b42f2501`
 
-Only if the inspection above finds the exact old repository identity, apply the one-string substitution while preserving every other clause:
+Historical isolated restore / PITR / RPO / RTO evidence remains valid in `docs/operations/cloud-sql-pitr-rpo-drill-2026-08-16.md`; destructive DR operations do not need to be repeated merely because the GitHub repository identity changed.
 
-```bash
-gcloud iam workload-identity-pools providers update-oidc "$PROVIDER_ID" \
-  --project="$PROJECT_ID" \
-  --location='global' \
-  --workload-identity-pool="$POOL_ID" \
-  --attribute-condition="$NEW_CONDITION"
+## 4. Cloud Run exact-release status — BLOCKED BY BILLING
 
-AFTER_CONDITION="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
-  --project="$PROJECT_ID" \
-  --location='global' \
-  --workload-identity-pool="$POOL_ID" \
-  --format='value(attributeCondition)')"
+Current production readback shows both Cloud Run services still reference the previous immutable image:
 
-printf 'AFTER_ATTRIBUTE_CONDITION=%s\n' "$AFTER_CONDITION"
-test "$AFTER_CONDITION" = "$NEW_CONDITION"
-```
+`.../server:toca-managed-daemon-ac0ba469a57f12c801148b5821e14e34fd86d281`
 
-Do not replace the condition with `true`, do not broaden it to an entire GitHub organization unless separately reviewed, and do not modify attribute mappings during this closeout.
+Observed revisions:
 
-### Required readback after update
+- daemon: `toca-managed-instagram-daemon-00058-qnd`
+- MCP: `toca-mcp-production-00061-67h`
 
-Rerun PR #13 final V1 production readback. The gate must authenticate successfully and then verify exact Cloud Run identity, runtime safety flags, Cloud Scheduler state, and current Cloud SQL DR state before V1 promotion.
+Expected V1 final image tag:
 
-## 2. GitHub `main` hosted protection
+`.../server:toca-managed-daemon-abfb09b17e90c83790e803dcda091c8142c7407f`
 
-Current API readback after Foundation restart-safety merge:
+Temporary exact-redeploy run `32325183160` proved:
 
-- `main` SHA: `abfb09b17e90c83790e803dcda091c8142c7407f`;
-- `protected=false`;
-- required status checks: none.
+1. exact checkout of `abfb09b17e90c83790e803dcda091c8142c7407f` — PASS;
+2. exact-release `pnpm quality` — PASS;
+3. 106 test files passed, 3 skipped; 496 tests passed, 4 skipped;
+4. TypeScript build — PASS;
+5. WIF authentication — PASS;
+6. Docker build of the exact release — PASS;
+7. local image digest: `sha256:7c24fc70c47b6e75b657fe4d96fdfc3b43c061327446501330c00fb2c494ad46`;
+8. Artifact Registry push — BLOCKED before upload with `BILLING_DISABLED`.
 
-Before the final V1 closeout, configure hosted protection/rules for `main` with at least:
+Because the image push failed, no Cloud Run deployment occurred in that attempt and no Instagram publication was executed.
 
-1. require a pull request before merging;
-2. require the repository Quality Gate status check;
-3. require applicable PostgreSQL E2E when it is emitted for a change;
-4. block force pushes;
-5. block branch deletion;
-6. apply/enforce the rule to repository administrators where supported;
-7. do not bypass required gates for routine releases.
+## 5. Cloud Scheduler status — BLOCKED BY BILLING
 
-After configuration, perform API readback and record the exact hosted state in the final V1 closeout evidence.
+Current Scheduler readback is blocked by the same project-level condition:
 
-## 3. Final closeout sequence
+`BILLING_DISABLED`
 
-After both hosted controls are corrected:
+The API reports that billing must be enabled for project number `990081828836` before `cloudscheduler.googleapis.com` can be used.
 
-1. rerun PR #13 production/DR readback;
-2. if the recovered release is not yet the active Cloud Run image, execute one canonical production deploy from the new repository after WIF succeeds;
-3. repeat exact production readback;
-4. record sanitized Cloud Run, Scheduler and Cloud SQL evidence;
-5. remove the temporary readback workflow;
-6. update canonical V1 state to the new repository identity and current evidence;
-7. run exact-head Quality Gate;
-8. merge the documentation-only closeout PR;
-9. read back `main` protection and final repository SHA;
-10. declare V1 complete only if all gates are green.
+The scheduler must not be declared current until billing is enabled and a successful readback verifies:
+
+- job: `toca-managed-instagram-tick`
+- state: `ENABLED`
+- schedule: `* * * * *`
+- timezone: `America/Bahia`
+- HTTP method: `POST`
+
+## 6. Single remaining hosted blocker
+
+The only hard external blocker currently proven for V1 closeout is:
+
+**Google Cloud billing disabled for project `toca-mcp-production` (`990081828836`).**
+
+This single condition blocks both:
+
+- pushing the final immutable image to Artifact Registry;
+- reading/reconciling Cloud Scheduler.
+
+It is not an application-code failure, GitHub Actions failure, WIF failure, Cloud SQL failure, or missing V1 feature.
+
+## 7. Exact closeout sequence after billing is enabled
+
+1. rerun exact-redeploy workflow run `32325183160`;
+2. require immutable image push for SHA `abfb09b17e90c83790e803dcda091c8142c7407f` to succeed;
+3. deploy daemon and MCP using the existing safety boundaries;
+4. verify both Cloud Run services use the exact V1 image and are Ready;
+5. verify daemon flags: MCP off, scheduler on, executor on, publication writes off;
+6. verify MCP flags: MCP on, scheduler on, executor off, publication writes on, Instagram account `17841402033495654`, `META_ENABLED=false`, token key bound through `TOCA_SECRET_META_ACCESS_TOKEN`;
+7. rerun final production readback;
+8. verify Scheduler state/schedule/timezone/method;
+9. reverify Cloud SQL DR state without repeating destructive restore/PITR drills;
+10. write final durable closeout evidence;
+11. remove both temporary closeout workflows;
+12. run exact-head Quality Gate;
+13. merge PR #13;
+14. read back final `main` SHA and `protected=true`;
+15. only then classify `V1 = PRODUCTION_VERIFIED` and begin post-V1 implementation.
+
+## 8. Explicit safety statement
+
+No Instagram publication was executed solely to validate deployment. No advertising campaign was activated for testing. Post-V1 Creative Truth, Demand Intelligence and Photo-to-Video work remains isolated in Draft PRs and is not part of this V1 closeout.
