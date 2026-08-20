@@ -36,12 +36,7 @@ export type RetentionAction = 'HOLD' | 'REVIEW' | 'DELETE' | 'ANONYMIZE';
 export type PrivacyIdentityState = 'RESOLVED' | 'AMBIGUOUS' | 'UNKNOWN';
 export type CommunicationPolicyState = 'ALLOWED' | 'BLOCKED' | 'UNKNOWN_BLOCKED';
 export type ProviderConsentState =
-  | 'OPTED_IN'
-  | 'OPTED_OUT'
-  | 'UNSUBSCRIBED'
-  | 'BOUNCED'
-  | 'COMPLAINT'
-  | 'UNKNOWN';
+  'OPTED_IN' | 'OPTED_OUT' | 'UNSUBSCRIBED' | 'BOUNCED' | 'COMPLAINT' | 'UNKNOWN';
 export type SuppressionReason =
   | 'USER_OPT_OUT'
   | 'PROVIDER_OPT_OUT'

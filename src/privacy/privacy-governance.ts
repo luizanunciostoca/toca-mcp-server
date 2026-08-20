@@ -303,10 +303,7 @@ export class PrivacyGovernanceService extends PrivacyGovernanceRights {
         sourceRef: requireSafeText(input.sourceRef, 'PRIVACY_SUPPRESSION_SOURCE_REQUIRED'),
         recordedAt: requireTimestamp(input.recordedAt, 'PRIVACY_SUPPRESSION_TIMESTAMP_INVALID'),
       },
-      extraEvidence: requireEvidence(
-        input.sourceEvidence,
-        'PRIVACY_SUPPRESSION_EVIDENCE_REQUIRED',
-      ),
+      extraEvidence: requireEvidence(input.sourceEvidence, 'PRIVACY_SUPPRESSION_EVIDENCE_REQUIRED'),
     });
   }
 
@@ -554,7 +551,9 @@ export class PrivacyGovernanceService extends PrivacyGovernanceRights {
 }
 
 function isProviderConsentState(value: unknown): value is ProviderConsentState {
-  return typeof value === 'string' && PROVIDER_CONSENT_STATES.includes(value as ProviderConsentState);
+  return (
+    typeof value === 'string' && PROVIDER_CONSENT_STATES.includes(value as ProviderConsentState)
+  );
 }
 
 function providerSuppressionReason(state: ProviderConsentState): SuppressionReason | null {
