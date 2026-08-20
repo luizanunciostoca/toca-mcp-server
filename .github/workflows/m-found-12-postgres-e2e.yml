@@ -10,8 +10,10 @@ on:
       - 'test/foundation-worker-postgres-e2e.test.ts'
       - 'test/r29-video-postgres-e2e.test.ts'
       - 'test/r29-video-core-runtime.test.ts'
+      - 'test/asset-intelligence-postgres-e2e.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
+      - 'src/assets/**'
       - 'src/content/**'
       - 'src/registry.ts'
       - 'src/persistence/**'
@@ -67,11 +69,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit, worker restart safety and Video/R29 E2E
+      - name: Execute PostgreSQL restart/outbox/audit, worker restart safety, Video/R29 and Asset Intelligence E2E
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
           test/foundation-worker-postgres-e2e.test.ts
           test/r29-video-postgres-e2e.test.ts
+          test/asset-intelligence-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
         run: pnpm migrate
