@@ -1,11 +1,17 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
-  "registryVersion": "1.0",
+  "registryVersion": "1.1",
   "status": "ACTIVE_COORDINATION",
+  "coordinationRound": "2026-08-20T02:32:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-  "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
+  "evidenceStates": [
+    "IMPLEMENTED",
+    "CI_VERIFIED",
+    "PROVIDER_VERIFIED",
+    "PRODUCTION_VERIFIED"
+  ],
   "rules": {
     "liveMainIsNextBaseline": true,
     "exactHeadEvidenceRequired": true,
@@ -16,168 +22,193 @@
     "noSecondApprovalEngine": true,
     "noSecondPolicyEngine": true,
     "noProviderBypass": true,
-    "reuseExistingIdempotencyOutboxAudit": true
+    "reuseExistingIdempotencyOutboxAudit": true,
+    "temporaryWorkflowForbiddenInFinalTree": true,
+    "migrationNumbersGloballySerialized": true,
+    "commercialConversationMessageOwner": "NEXT-010/PR-22",
+    "whatsappIntendedOwner": "NEXT-006/PR-31",
+    "whatsappSupersededCandidate": "PR-25"
   },
   "features": [
     {
       "id": "NEXT-001",
       "name": "Creative Truth / Venue Fidelity",
-      "planningState": "IN_PROGRESS",
+      "planningState": "READY_FOR_INTEGRATION_REVIEW",
       "evidenceState": "CI_VERIFIED",
-      "evidenceHeadSha": "2843e9544c0bb0eb15affeba6d7abdc0b286f515",
-      "observedBaseSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-      "zeroBehindObservedBase": true,
-      "qualityRun": 32333328028,
-      "postgresE2ERun": 32333328092,
       "pr": 14,
       "branch": "recovery/creative-truth-20260819",
+      "evidenceHeadSha": "de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c",
+      "qualityRun": 32335049796,
+      "postgresE2ERun": 32335049795,
+      "migration": null,
       "dependencies": [],
-      "providerEvidenceRequired": false,
-      "reuse": [
-        "existing Instagram publication pipeline",
-        "existing Google Drive/Sheets canonical assets",
-        "existing policy/approval boundaries"
-      ]
+      "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-002",
       "name": "Morro Demand Intelligence",
-      "planningState": "IN_PROGRESS",
-      "evidenceState": "CI_VERIFIED",
-      "evidenceHeadSha": "84e96652db604a8ac1ea258d868c4f5ce2994ad8",
-      "observedBaseSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-      "zeroBehindObservedBase": true,
-      "qualityRun": 32333311073,
-      "postgresE2ERun": 32333311077,
+      "planningState": "READY_FOR_INTEGRATION_REVIEW",
+      "evidenceState": "PROVIDER_VERIFIED",
+      "providerEvidenceScope": "READ_BOUNDARY_ONLY",
       "pr": 15,
       "branch": "recovery/meta-ads-demand-intelligence-20260819",
+      "evidenceHeadSha": "ee7cb048b01e6859beb949b9d049f218b8e31f56",
+      "qualityRun": 32333934188,
+      "postgresE2ERun": 32333934183,
+      "providerReadRun": 32333785052,
+      "providerArtifact": 9393934030,
+      "migration": "022_meta_ads_geo_demand_intelligence.sql",
       "dependencies": [],
       "providerEvidenceRequired": true,
-      "providerEvidenceState": "PENDING",
-      "migration": "022_meta_ads_geo_demand_intelligence.sql",
-      "reuse": [
-        "existing Meta Ads read provider",
-        "existing governed Meta Ads write/readback path",
-        "existing PostgreSQL",
-        "existing budget guardrails"
+      "notes": [
+        "provider read is modeled aggregate MAU, not physical people/devices",
+        "writeExecuted=false"
       ]
     },
     {
       "id": "NEXT-003",
       "name": "Photo-to-Video governed routes",
-      "planningState": "IN_PROGRESS",
+      "planningState": "STACKED_WAIT_PARENT_MERGE",
       "evidenceState": "CI_VERIFIED",
-      "evidenceHeadSha": "99edf42d06dc70958ac9791a79c00e877e82c4ad",
-      "observedBaseSha": "2843e9544c0bb0eb15affeba6d7abdc0b286f515",
-      "zeroBehindObservedBase": true,
-      "qualityRun": 32333405034,
       "pr": 16,
       "branch": "recovery/photo-to-video-20260819",
+      "evidenceHeadSha": "c0b23b573bec4de42746de2915e92daa36532a7b",
+      "qualityRun": 32335823551,
+      "migration": null,
       "dependencies": ["NEXT-001"],
       "stackedOnPr": 14,
       "providerEvidenceRequired": true,
-      "providerEvidenceState": "BLOCKED_BY_CANONICAL_RIGHTS_LIKENESS_APPROVAL",
-      "reuse": [
-        "Creative Truth parent policy",
-        "existing GCS publication asset boundary",
-        "existing Drive/Sheets registries",
-        "existing publication approval path"
-      ]
+      "providerEvidenceState": "BLOCKED_BY_RIGHTS_LIKENESS_APPROVAL",
+      "notes": ["retarget/rebase to main and rerun exact-head Quality after PR #14 merges"]
     },
     {
       "id": "NEXT-004",
       "name": "AG-01 external orchestrator runtime",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-020"],
+      "planningState": "MERGE_HOLD_TEMP_WORKFLOW_AND_DEPENDENCIES",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 21,
+      "branch": "feat/ag01-orchestrator-runtime-20260820",
+      "evidenceHeadSha": "20d55bf0de8368378380dcb3b3ba65b460b26b0e",
+      "qualityRun": 32335887999,
+      "postgresE2ERun": 32335888008,
+      "migration": "026_ag01_orchestrator_runtime.sql",
+      "dependencies": ["NEXT-010", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": true,
-      "architectureBoundary": "separate orchestrator runtime; TOCA MCP remains deterministic executor",
-      "reuse": ["32 canonical routes", "TOCA MCP typed tools", "existing identity and audit model"]
+      "blockers": [
+        ".github/workflows/ag01-type-repair.yml remains in current PR diff",
+        "platform hardening security gate PR #20 is red",
+        "final CRM MessageRecord and learning integration required"
+      ]
     },
     {
       "id": "NEXT-005",
       "name": "TOCA Omnichannel Gateway",
-      "planningState": "PLANNED",
+      "planningState": "INTEGRATION_FOUNDATION",
       "evidenceState": null,
-      "dependencies": ["NEXT-004", "NEXT-010"],
+      "dependencies": ["NEXT-004", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing durable workflows", "existing idempotency", "existing outbox/audit"]
+      "reuse": ["existing omnichannel contracts", "existing durable workflow", "existing audit/outbox"]
     },
     {
       "id": "NEXT-006",
       "name": "WhatsApp Business real provider",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-005", "NEXT-016"],
+      "planningState": "INTENDED_OWNER_NOT_MERGE_READY",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 31,
+      "branch": "feat/next-whatsapp-real-stack-crm-20260820",
+      "evidenceHeadSha": "5eee722e2589b746786906fd3bd9eebc1032295a",
+      "qualityRun": 32336105089,
+      "qualityConclusion": "FAIL_FORMAT",
+      "postgresE2ERun": 32336105114,
+      "migration": "027_whatsapp_provider_runtime.sql",
+      "dependencies": ["NEXT-005", "NEXT-010", "NEXT-016"],
+      "stackedOnPr": 22,
       "providerEvidenceRequired": true,
-      "promotionPath": ["READ_VERIFY", "PREPARE", "CONTROLLED_SEND", "PRODUCTION_SEND"]
+      "supersededCandidatePr": 25,
+      "blockers": [
+        "reconcile unique useful behavior from PR #25 before superseding it",
+        "remove .github/workflows/format-whatsapp-stack-once.yml",
+        "refresh stack onto final clean PR #22 head",
+        "resolve migration 027 collision with PR #30",
+        "real WABA/scopes/provider readback unavailable"
+      ]
     },
     {
       "id": "NEXT-007",
       "name": "Email real provider",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-005", "NEXT-016"],
+      "planningState": "STACKED_REVALIDATION_REQUIRED",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 23,
+      "branch": "feat/email-real-sendgrid-20260820",
+      "evidenceHeadSha": "5aa954c82912cb48e022575e64b0ec7aa6d9443f",
+      "providerGateRun": 32335836602,
+      "providerGateConclusion": "FAIL_STACKED_REPOSITORY_TYPECHECK",
+      "postgresE2ERun": 32335836596,
+      "migration": "024_email_provider_runtime.sql",
+      "dependencies": ["NEXT-010", "NEXT-016"],
+      "stackedOnPr": 22,
       "providerEvidenceRequired": true,
-      "reuse": ["MessageRecord model", "suppression/consent policy", "outbox/audit"]
+      "blockers": [
+        "restack on current clean PR #22 head and rerun normal Quality/provider gate",
+        "sender/domain/SPF/DKIM/DMARC/credentials/readback not configured"
+      ]
     },
     {
       "id": "NEXT-008",
       "name": "CRM and Sales Engine expansion",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-016"],
+      "planningState": "MERGE_HOLD_TEMP_WORKFLOW",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 22,
+      "branch": "feat/next-crm-sales-engine-advanced-20260820",
+      "evidenceHeadSha": "8fa24ba0e5dfb3708f77dab1596d609d37d10755",
+      "qualityRun": 32336063124,
+      "postgresE2ERun": 32336063161,
+      "migration": "023_crm_sales_engine.sql",
+      "dependencies": [],
       "providerEvidenceRequired": false,
-      "reuse": [
-        "ContactRecord",
-        "LeadRecord",
-        "OpportunityRecord",
-        "existing PostgreSQL",
-        "existing outbox/audit"
-      ]
+      "blockers": ["remove .github/workflows/crm-sales-catalog-one-shot.yml and rerun exact-head gates"]
     },
     {
       "id": "NEXT-009",
       "name": "Canonical sales pipeline",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "IMPLEMENTED_IN_PR_22",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 22,
       "dependencies": ["NEXT-008"],
       "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-010",
       "name": "Conversation and Message records",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "CANONICAL_OWNER_PR_22",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 22,
       "dependencies": ["NEXT-008"],
       "providerEvidenceRequired": false,
-      "reuse": ["CRM Core", "EventRecord", "existing identity/correlation model"]
+      "ownershipRule": "All commercial channel integrations reuse PR #22 ConversationRecord/MessageRecord; transport sidecars may reference them but must not replace them."
     },
     {
       "id": "NEXT-011",
       "name": "Deterministic lead scoring",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "IMPLEMENTED_IN_PR_22",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 22,
       "dependencies": ["NEXT-008", "NEXT-010"],
       "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-012",
       "name": "Durable follow-up and nurture",
-      "planningState": "PLANNED",
+      "planningState": "PARTIAL_PR_22_INTEGRATION_PENDING",
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-009", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": [
-        "existing durable workflow",
-        "existing scheduler",
-        "existing consent/suppression policy"
-      ]
+      "reuse": ["existing durable workflow", "existing scheduler", "canonical Privacy"]
     },
     {
       "id": "NEXT-013",
       "name": "Attribution and Revenue Intelligence",
-      "planningState": "PLANNED",
+      "planningState": "PARTIAL_PR_22_AND_PR_27",
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-010"],
       "providerEvidenceRequired": true
@@ -185,48 +216,65 @@
     {
       "id": "NEXT-014",
       "name": "Marketing Autopilot R19 closed loop",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-001", "NEXT-002", "NEXT-013"],
-      "providerEvidenceRequired": true,
-      "reuse": ["existing scheduler", "existing content registry", "existing publication workflow"]
+      "planningState": "IN_PROGRESS_PR_26",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 26,
+      "evidenceHeadSha": "0e58fd3f109c31986d0ef854f88bfa02ecf01c16",
+      "qualityRun": 32336012297,
+      "qualityConclusion": "FAIL_FORMAT",
+      "postgresE2ERun": 32336012300,
+      "dependencies": ["NEXT-001", "NEXT-002", "NEXT-013", "NEXT-024"],
+      "providerEvidenceRequired": true
     },
     {
       "id": "NEXT-015",
       "name": "Social Engagement R30 to CRM",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "CI_VERIFIED_ACTIVATION_DEPENDENCIES_PENDING",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 24,
+      "branch": "feat/social-engagement-lead-engine-20260820",
+      "evidenceHeadSha": "dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b",
+      "qualityRun": 32334785013,
+      "postgresE2ERun": 32334784974,
+      "migration": null,
       "dependencies": ["NEXT-008", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true
     },
     {
       "id": "NEXT-016",
       "name": "Privacy / LGPD policy expansion",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "READY_FOR_INTEGRATION_REVIEW",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 19,
+      "branch": "feat/privacy-communication-policy-next-20260820",
+      "evidenceHeadSha": "a63458971fc6971c97c7221da02c61b8bb085e21",
+      "qualityRun": 32334687755,
+      "prIntegrationQualityRun": 32334417380,
+      "migration": null,
       "dependencies": [],
-      "providerEvidenceRequired": false,
-      "reuse": [
-        "existing R16 privacy policy authority",
-        "existing suppression and approval concepts"
-      ]
+      "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-017",
       "name": "Meta Ads closed-loop optimization",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "IN_PROGRESS_PR_28",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 28,
+      "branch": "feat/paid-media-next-meta-google-20260820",
+      "observedHeadSha": "579e6e402e860c20ce428277c836f5ae9488a857",
       "dependencies": ["NEXT-002", "NEXT-013"],
       "providerEvidenceRequired": true,
-      "reuse": ["V1 READ_PREPARE_CREATE_PAUSED_READBACK path", "existing budget guardrails"]
+      "notes": ["exact-head Quality and PostgreSQL E2E were still in progress at coordinator readback"]
     },
     {
       "id": "NEXT-018",
       "name": "Google Ads real provider",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "IN_PROGRESS_PR_28_PROVIDER_PENDING",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 28,
       "dependencies": ["NEXT-013"],
-      "providerEvidenceRequired": true
+      "providerEvidenceRequired": true,
+      "notes": ["no activation for testing; live OAuth/account READ evidence required before provider promotion"]
     },
     {
       "id": "NEXT-019",
@@ -239,29 +287,42 @@
     {
       "id": "NEXT-020",
       "name": "Security and supply-chain hardening",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "SECURITY_GATE_BLOCKED",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 20,
+      "branch": "feat/platform-hardening-next-20260820",
+      "evidenceHeadSha": "ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494",
+      "qualityRun": 32334666158,
+      "securityRun": 32334666190,
+      "securityConclusion": "FAIL_CONTAINER_SCAN_AND_DEPENDENCY_REVIEW",
+      "migration": null,
       "dependencies": [],
       "providerEvidenceRequired": true,
-      "notes": [
-        "main protection is verified by V1 closeout",
-        "Drive anyone-with-link exposure remains a governance review item"
-      ]
+      "notes": ["CodeQL passed; SBOM was skipped after security failure", "Drive anyone-with-link ACL remains governance review item"]
     },
     {
       "id": "NEXT-021",
-      "name": "Growth and Sales observability",
-      "planningState": "PLANNED",
-      "evidenceState": null,
-      "dependencies": ["NEXT-008", "NEXT-013"],
-      "providerEvidenceRequired": true,
-      "reuse": ["existing Foundation/SLO telemetry"]
+      "name": "Growth, Sales and Capacity read models",
+      "planningState": "CI_BLOCKED",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 27,
+      "branch": "feat/analytics-capacity-read-models-20260820",
+      "evidenceHeadSha": "9639cc8056d62551ceb298488eabefd213cfa11d",
+      "qualityRun": 32336060637,
+      "qualityConclusion": "FAIL_FORMAT",
+      "postgresE2ERun": 32336060639,
+      "analyticsPostgresE2ERun": 32336060638,
+      "analyticsPostgresE2EConclusion": "FAIL_ANALYTICS_CAPACITY_TEST",
+      "migration": null,
+      "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020"],
+      "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-022",
       "name": "DR coverage for Next Version state",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "planningState": "IN_PROGRESS_PR_20",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 20,
       "dependencies": ["NEXT-005", "NEXT-008", "NEXT-010", "NEXT-013"],
       "providerEvidenceRequired": true,
       "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"]
@@ -269,19 +330,67 @@
     {
       "id": "NEXT-023",
       "name": "Capability and data governance",
-      "planningState": "PLANNED",
+      "planningState": "INTEGRATION_CONTINUOUS",
       "evidenceState": null,
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "reuse": ["existing 32 routes", "existing capability registry", "existing policy engine"]
+      "reuse": ["existing route catalog", "existing capability registry", "existing Policy Engine"]
     },
     {
       "id": "NEXT-024",
-      "name": "R31 governed learning loop",
-      "planningState": "PLANNED",
-      "evidenceState": null,
+      "name": "R31 governed learning and experimentation loop",
+      "planningState": "CI_BLOCKED",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 26,
+      "branch": "feat/marketing-autopilot-r31-experimentation-20260820",
+      "evidenceHeadSha": "0e58fd3f109c31986d0ef854f88bfa02ecf01c16",
+      "qualityRun": 32336012297,
+      "postgresE2ERun": 32336012300,
+      "migration": "025_marketing_autopilot_r31_learning.sql",
       "dependencies": ["NEXT-013", "NEXT-014", "NEXT-021"],
       "providerEvidenceRequired": false
+    },
+    {
+      "id": "NEXT-025",
+      "name": "Multi-tenant foundation",
+      "planningState": "CI_BLOCKED_AND_MIGRATION_COORDINATION",
+      "evidenceState": "IMPLEMENTED",
+      "pr": 30,
+      "branch": "feat/multi-tenant-foundation-20260820",
+      "evidenceHeadSha": "7677495c0d54c63354645c78ee86a0d502ced924",
+      "qualityRun": 32336071267,
+      "qualityConclusion": "FAIL_FORMAT",
+      "postgresE2ERun": 32336071284,
+      "migration": "027_multi_tenant_foundation.sql",
+      "dependencies": ["NEXT-008", "NEXT-010", "NEXT-023"],
+      "providerEvidenceRequired": false,
+      "blockers": ["migration 027 collides with intended WhatsApp PR #31", "body exact evidence is stale and must follow live head"]
+    },
+    {
+      "id": "NEXT-026",
+      "name": "Human Control Center MCP App",
+      "planningState": "CI_VERIFIED_DEPENDENCY_PANELS_PENDING",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 29,
+      "branch": "feat/human-control-center-next-20260820",
+      "evidenceHeadSha": "6976825a18b5cc1179ef8e73d72e135705508030",
+      "qualityRun": 32335977430,
+      "migration": null,
+      "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020", "NEXT-024"],
+      "providerEvidenceRequired": false,
+      "notes": ["same MCP server; UI emits governed AG01 intent only; no direct provider write"]
+    }
+  ],
+  "supersededCandidates": [
+    {
+      "pr": 25,
+      "branch": "feat/next-whatsapp-real-20260820",
+      "reason": "duplicates WhatsApp front and defines ConversationRecord/MessageRecord parallel to canonical PR #22",
+      "preservationRule": "compare and preserve unique provider/webhook/throttle/retry behavior in intended PR #31 before closing/superseding",
+      "evidenceHeadSha": "d36fde463f89f9ad49fcf1858097501ed7815674",
+      "qualityRun": 32335362897,
+      "postgresE2ERun": 32335362899,
+      "migration": "024_crm_communication_records.sql"
     }
   ]
 }
