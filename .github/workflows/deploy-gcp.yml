@@ -282,14 +282,29 @@ jobs:
         if: inputs.operation == 'deploy'
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
-      - name: Build and push immutable image
+      - name: Build, attest and push immutable image
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
-          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server:${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
+          IMAGE_REPOSITORY="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker buildx version
+          docker buildx build \
+            --pull \
+            --push \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file /tmp/build-metadata.json \
+            -t "$IMAGE_TAG" \
+            .
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$IMAGE_DIGEST" == sha256:* ]] || { echo 'BuildKit did not return an image digest' >&2; exit 1; }
+          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$REMOTE_DIGEST" == "$IMAGE_DIGEST" ]] || { echo 'Artifact Registry digest readback mismatch' >&2; exit 1; }
+          IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "REVISION_SUFFIX=${{ inputs.environment }}-next-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
           echo "CANDIDATE_TAG=${{ inputs.environment }}-candidate-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
@@ -486,6 +501,8 @@ jobs:
             echo "- environment: ${{ inputs.environment }}"
             echo "- rollout: ${{ inputs.rollout }}"
             echo "- release: $GITHUB_SHA"
+            echo "- image tag: $IMAGE_TAG"
+            echo "- image digest: $IMAGE_DIGEST"
             echo "- candidate: $CANDIDATE_URL"
             echo "- previous revision: ${PREVIOUS_REVISION:-none}"
           } >> "$GITHUB_STEP_SUMMARY"
