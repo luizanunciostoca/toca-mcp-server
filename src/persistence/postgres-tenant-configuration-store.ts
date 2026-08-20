@@ -1,8 +1,5 @@
 import type pg from 'pg';
-import {
-  AUTHORIZATION_ROLES,
-  type AuthorizationRole,
-} from '../core/identity.js';
+import { AUTHORIZATION_ROLES, type AuthorizationRole } from '../core/identity.js';
 import type { RiskClass } from '../core/tool-registry.js';
 import { isRouteId, type RouteId } from '../governance/types.js';
 import {

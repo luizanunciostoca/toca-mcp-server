@@ -35,11 +35,7 @@ export class TenantCredentialResolver {
       throw new TenantIsolationError('TENANT_SUSPENDED');
     }
 
-    const authorization = authorizeTenantRbac(
-      configuration,
-      input.identity,
-      input.expectation,
-    );
+    const authorization = authorizeTenantRbac(configuration, input.identity, input.expectation);
     if (!authorization.allowed) throw new TenantIsolationError(authorization.reason);
 
     const capabilityId = input.expectation.capabilityId;

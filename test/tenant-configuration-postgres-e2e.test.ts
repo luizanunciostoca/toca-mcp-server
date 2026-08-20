@@ -151,9 +151,9 @@ postgresDescribe('tenant configuration PostgreSQL E2E', () => {
     expect(readA?.providers.some((binding) => binding.connectedAccountId.includes(tenantB))).toBe(
       false,
     );
-    expect(readA?.credentials.some((binding) => binding.secretReference.key.includes(tenantB))).toBe(
-      false,
-    );
+    expect(
+      readA?.credentials.some((binding) => binding.secretReference.key.includes(tenantB)),
+    ).toBe(false);
     expect(readB?.tenantId).toBe(tenantB);
     await pool2.end();
   });
