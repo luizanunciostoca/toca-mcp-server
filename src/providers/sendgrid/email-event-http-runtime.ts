@@ -1,16 +1,7 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
-import { PostgresApprovalStore } from '../../persistence/postgres-approval-store.js';
-import { PostgresAuditSink } from '../../persistence/postgres-audit-sink.js';
-import { PostgresEmailRuntimeStore } from '../../persistence/postgres-email-runtime-store.js';
-import { PostgresPrivacyLedgerStore } from '../../persistence/postgres-privacy-ledger-store.js';
-import type {
-  PrivacyDataGateway,
-  PrivacyPurposeDefinition,
-  PrivacyPurposeRegistry,
-  PrivacyScope,
-} from '../../privacy/contracts.js';
-import { PrivacyGovernanceService } from '../../privacy/privacy-governance.js';
+import type { SecretResolver } from '../../core/secrets.js';
+import { ToolRegistry } from '../../core/tool-registry.js';
 import {
   EmailProviderEventProcessor,
   type EmailEngagementAuthorizationPort,
@@ -21,6 +12,19 @@ import type {
   EmailDispatchRecord,
   EmailPrivacyReconciliationPort,
 } from '../../omnichannel/email-runtime.js';
+import { PostgresApprovalStore } from '../../persistence/postgres-approval-store.js';
+import { PostgresAuditSink } from '../../persistence/postgres-audit-sink.js';
+import { PostgresEmailRuntimeStore } from '../../persistence/postgres-email-runtime-store.js';
+import { PostgresPrivacyLedgerStore } from '../../persistence/postgres-privacy-ledger-store.js';
+import { registerPrivacyAuditCapabilities } from '../../privacy/capability-registry.js';
+import type {
+  PrivacyDataGateway,
+  PrivacyPurposeDefinition,
+  PrivacyPurposeRegistry,
+  PrivacyScope,
+  SuppressionReason,
+} from '../../privacy/contracts.js';
+import { PrivacyGovernanceService } from '../../privacy/privacy-governance.js';
 import { EnvironmentSecretResolver } from '../../core/environment-secret-resolver.js';
 import {
   SENDGRID_PROVIDER_KEY,
@@ -49,6 +53,7 @@ export interface SendGridEventWebhookResult {
 export interface SendGridEventHttpRuntimeOptions {
   readonly pool: pg.Pool;
   readonly env?: NodeJS.ProcessEnv;
+  readonly secretResolver?: SecretResolver;
   readonly engagementAuthorization?: EmailEngagementAuthorizationPort;
 }
 
@@ -57,7 +62,6 @@ interface DispatchScopeRow {
   readonly workspace_id: string;
   readonly organization_id: string;
   readonly idempotency_key: string;
-  readonly provider_message_ref: string | null;
 }
 
 interface PrivacyPurposeRow {
@@ -70,17 +74,22 @@ interface MessageContextRow {
   readonly contact_id: string;
 }
 
+interface PrivacyReconciliationStateRow {
+  readonly capability_id: string;
+}
+
 /**
- * Production HTTP/Event boundary for Twilio SendGrid. It owns only provider
- * transport/correlation metadata. Canonical Message/Conversation records stay
- * in CRM and provider consent/suppression changes are delegated to Privacy.
+ * Signed production boundary for Twilio SendGrid Event Webhook. Provider
+ * transport metadata is correlated back into canonical CRM/Privacy records;
+ * this module deliberately owns no Message, Conversation or suppression model.
  */
 export class SendGridEventHttpRuntime {
   constructor(
     private readonly provider: SendGridEmailProvider,
-    private readonly dispatchStore: PostgresEmailRuntimeStore,
     private readonly dispatchResolver: PostgresSendGridWebhookDispatchResolver,
     private readonly processor: EmailProviderEventProcessor,
+    private readonly privacy: PostgresEmailPrivacyReconciliationPort,
+    private readonly context: EmailProviderEventContextPort,
   ) {}
 
   async handleEventWebhook(
@@ -103,15 +112,45 @@ export class SendGridEventHttpRuntime {
 
     for (const event of events) {
       eventIds.push(event.providerEventId);
-      const idempotencyKey = extractTocaIdempotencyKey(event.raw);
       const dispatch = await this.dispatchResolver.resolve({
         providerMessageRef: event.providerMessageId,
-        idempotencyKey,
+        idempotencyKey: extractTocaIdempotencyKey(event.raw),
         observedAt: event.occurredAt,
       });
       if (!dispatch) {
         ignoredWithoutDispatch += 1;
         continue;
+      }
+
+      const executionId = `sendgrid-event:${stableOpaqueId(event.providerEventId)}`;
+      const correlationId = executionId;
+
+      // Reconcile suppressing provider signals before provider-event dedupe. The
+      // adapter itself is idempotent, so a retry cannot lose a suppression if a
+      // previous attempt failed between Privacy and provider-event persistence.
+      if (event.privacySignal) {
+        const privacyContext = await this.context.resolvePrivacyContext({
+          tenantId: dispatch.tenantId,
+          workspaceId: dispatch.workspaceId,
+          organizationId: dispatch.organizationId,
+          messageId: dispatch.messageId,
+          provider: SENDGRID_PROVIDER_KEY,
+          providerMessageRef: event.providerMessageId,
+        });
+        await this.privacy.reconcileProviderSignal({
+          tenantId: dispatch.tenantId,
+          workspaceId: dispatch.workspaceId,
+          organizationId: dispatch.organizationId,
+          capabilityId: 'privacy.provider_consent.reconcile',
+          subjectRef: privacyContext.subjectRef,
+          provider: SENDGRID_PROVIDER_KEY,
+          providerSubjectRef: privacyContext.providerSubjectRef,
+          providerState: event.privacySignal,
+          observedAt: event.occurredAt,
+          providerEvidenceRef: `sendgrid-event:${stableOpaqueId(event.providerEventId)}`,
+          executionId,
+          correlationId,
+        });
       }
 
       const result = await this.processor.process({
@@ -125,8 +164,8 @@ export class SendGridEventHttpRuntime {
           'sendgrid:event-webhook:ecdsa-valid',
           `sendgrid:payload-sha256:${payloadSha256}`,
         ],
-        executionId: `sendgrid-event:${stableOpaqueId(event.providerEventId)}`,
-        correlationId: `sendgrid-event:${stableOpaqueId(event.providerEventId)}`,
+        executionId,
+        correlationId,
       });
       results.push(result);
     }
@@ -147,7 +186,7 @@ export async function createSendGridEventHttpRuntime(
   const env = options.env ?? process.env;
   const loaded = await loadSendGridRuntimeConfig({
     env,
-    secretResolver: new EnvironmentSecretResolver(),
+    secretResolver: options.secretResolver ?? new EnvironmentSecretResolver(),
   });
   if (!loaded.enabled || !loaded.config) return undefined;
   if (!loaded.config.eventWebhookPublicKeyPem?.trim()) {
@@ -156,30 +195,35 @@ export async function createSendGridEventHttpRuntime(
 
   const dispatchStore = new PostgresEmailRuntimeStore(options.pool);
   const privacyStore = new PostgresPrivacyLedgerStore(options.pool);
-  const purposeRegistry = new LedgerBackedPrivacyPurposeRegistry(options.pool);
+  const privacyRegistry = new ToolRegistry();
+  registerPrivacyAuditCapabilities(privacyRegistry);
   const privacy = new PrivacyGovernanceService({
     store: privacyStore,
-    purposeRegistry,
-    auditSink: new PostgresAuditSink(options.pool),
+    purposeRegistry: new LedgerBackedPrivacyPurposeRegistry(options.pool),
+    auditSink: new PostgresAuditSink(options.pool, privacyRegistry),
     approvalStore: new PostgresApprovalStore(options.pool),
     dataGateway: FAIL_CLOSED_PRIVACY_DATA_GATEWAY,
   });
   const privacyPort = new PostgresEmailPrivacyReconciliationPort(options.pool, privacy);
   const contextPort = new PostgresEmailProviderEventContextPort(options.pool);
-  const engagementAuthorization =
-    options.engagementAuthorization ?? FAIL_CLOSED_ENGAGEMENT_AUTHORIZATION;
   const processor = new EmailProviderEventProcessor(
     dispatchStore,
     privacyPort,
     contextPort,
-    engagementAuthorization,
+    options.engagementAuthorization ?? FAIL_CLOSED_ENGAGEMENT_AUTHORIZATION,
   );
   const provider = new SendGridEmailProvider(loaded.config, EVENT_ONLY_PREPARED_RESOLVER);
   const dispatchResolver = new PostgresSendGridWebhookDispatchResolver(
     options.pool,
     dispatchStore,
   );
-  return new SendGridEventHttpRuntime(provider, dispatchStore, dispatchResolver, processor);
+  return new SendGridEventHttpRuntime(
+    provider,
+    dispatchResolver,
+    processor,
+    privacyPort,
+    contextPort,
+  );
 }
 
 export class PostgresSendGridWebhookDispatchResolver {
@@ -205,7 +249,7 @@ export class PostgresSendGridWebhookDispatchResolver {
     }
 
     const result = await this.pool.query<DispatchScopeRow>(
-      `select tenant_id, workspace_id, organization_id, idempotency_key, provider_message_ref
+      `select tenant_id, workspace_id, organization_id, idempotency_key
          from email_dispatches
         where provider = $1
           and (${clauses.join(' or ')})
@@ -231,11 +275,7 @@ export class PostgresSendGridWebhookDispatchResolver {
     if (!dispatch) throw new Error('SENDGRID_EVENT_DISPATCH_CORRELATION_LOST');
 
     if (dispatch.providerMessageRef !== providerMessageRef) {
-      dispatch = {
-        ...dispatch,
-        providerMessageRef,
-        updatedAt: input.observedAt,
-      };
+      dispatch = { ...dispatch, providerMessageRef, updatedAt: input.observedAt };
       await this.store.saveDispatch(dispatch);
     }
     return dispatch;
@@ -245,7 +285,9 @@ export class PostgresSendGridWebhookDispatchResolver {
 class PostgresEmailProviderEventContextPort implements EmailProviderEventContextPort {
   constructor(private readonly pool: pg.Pool) {}
 
-  async resolvePrivacyContext(input: Parameters<EmailProviderEventContextPort['resolvePrivacyContext']>[0]) {
+  async resolvePrivacyContext(
+    input: Parameters<EmailProviderEventContextPort['resolvePrivacyContext']>[0],
+  ) {
     const result = await this.pool.query<MessageContextRow>(
       `select contact_id
          from crm_messages
@@ -273,51 +315,88 @@ class PostgresEmailPrivacyReconciliationPort implements EmailPrivacyReconciliati
   async reconcileProviderSignal(
     input: Parameters<EmailPrivacyReconciliationPort['reconcileProviderSignal']>[0],
   ): Promise<void> {
-    const result = await this.pool.query<PrivacyPurposeRow>(
+    const purposes = await this.pool.query<PrivacyPurposeRow>(
       `select distinct on (purpose_id)
               purpose_id, policy_ref, ledger_sequence
          from privacy_ledger_events
         where tenant_id=$1 and workspace_id=$2 and organization_id=$3
           and subject_ref=$4 and channel='EMAIL'
           and purpose_id is not null and policy_ref is not null
-          and event_type in ('COMMUNICATION_POLICY_RESOLVED','CONSENT_RECORDED','LEGAL_BASIS_RECORDED','SUPPRESSION_CHECKED')
+          and event_type in ('COMMUNICATION_POLICY_RESOLVED','CONSENT_RECORDED','SUPPRESSION_CHECKED')
         order by purpose_id, ledger_sequence desc`,
       [input.tenantId, input.workspaceId, input.organizationId, input.subjectRef],
     );
-    if (result.rows.length === 0) throw new Error('EMAIL_PRIVACY_PURPOSE_CONTEXT_NOT_FOUND');
+    if (purposes.rows.length === 0) throw new Error('EMAIL_PRIVACY_PURPOSE_CONTEXT_NOT_FOUND');
 
-    for (const row of result.rows) {
-      const executionSuffix = stableOpaqueId(`${input.executionId}:${row.purpose_id}`);
-      await this.privacy.reconcileProviderConsent({
-        context: {
-          tenantId: input.tenantId,
-          workspaceId: input.workspaceId,
-          organizationId: input.organizationId,
-          requester: 'service:sendgrid-event-webhook',
-          executionId: `sendgrid-privacy:${executionSuffix}`,
-          correlationId: input.correlationId,
-          evidence: [
-            `sendgrid:provider-event:${input.providerEvidenceRef}`,
-            `privacy:source-ledger-sequence:${row.ledger_sequence}`,
-          ],
-        },
-        subjectRef: input.subjectRef,
-        purposeId: row.purpose_id,
-        channel: 'EMAIL',
-        policyRef: row.policy_ref,
-        observation: {
-          provider: input.provider,
-          providerSubjectRef: input.providerSubjectRef,
-          state: input.providerState,
-          observedAt: input.observedAt,
-          providerEvidenceRef: input.providerEvidenceRef,
-        },
-        sourceEvidence: [
-          `sendgrid:provider-event:${input.providerEvidenceRef}`,
-          `privacy:source-ledger-sequence:${row.ledger_sequence}`,
-        ],
-      });
+    for (const row of purposes.rows) {
+      const executionId = `sendgrid-privacy:${stableOpaqueId(`${input.executionId}:${row.purpose_id}`)}`;
+      const state = await this.reconciliationState(input, executionId);
+      const evidence = [
+        `sendgrid:provider-event:${input.providerEvidenceRef}`,
+        `privacy:source-ledger-sequence:${row.ledger_sequence}`,
+      ];
+      const context = {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        organizationId: input.organizationId,
+        requester: 'service:sendgrid-event-webhook',
+        executionId,
+        correlationId: input.correlationId,
+        evidence,
+      } as const;
+
+      if (!state.providerConsent) {
+        await this.privacy.reconcileProviderConsent({
+          context,
+          subjectRef: input.subjectRef,
+          purposeId: row.purpose_id,
+          channel: 'EMAIL',
+          policyRef: row.policy_ref,
+          observation: {
+            provider: input.provider,
+            providerSubjectRef: input.providerSubjectRef,
+            state: input.providerState,
+            observedAt: input.observedAt,
+            providerEvidenceRef: input.providerEvidenceRef,
+          },
+          sourceEvidence: evidence,
+        });
+        continue;
+      }
+
+      if (!state.suppression) {
+        await this.privacy.suppress({
+          context,
+          subjectRef: input.subjectRef,
+          purposeId: row.purpose_id,
+          channel: 'EMAIL',
+          reason: suppressionReason(input.providerState),
+          policyRef: row.policy_ref,
+          sourceRef: input.providerEvidenceRef,
+          recordedAt: input.observedAt,
+          sourceEvidence: evidence,
+        });
+      }
     }
+  }
+
+  private async reconciliationState(
+    input: PrivacyScope,
+    executionId: string,
+  ): Promise<{ readonly providerConsent: boolean; readonly suppression: boolean }> {
+    const result = await this.pool.query<PrivacyReconciliationStateRow>(
+      `select capability_id
+         from privacy_ledger_events
+        where tenant_id=$1 and workspace_id=$2 and organization_id=$3
+          and execution_id=$4
+          and capability_id in ('privacy.provider_consent.reconcile','privacy.suppression.record')`,
+      [input.tenantId, input.workspaceId, input.organizationId, executionId],
+    );
+    const capabilities = new Set(result.rows.map((row) => row.capability_id));
+    return {
+      providerConsent: capabilities.has('privacy.provider_consent.reconcile'),
+      suppression: capabilities.has('privacy.suppression.record'),
+    };
   }
 }
 
@@ -397,6 +476,19 @@ export function extractTocaIdempotencyKey(
     if (typeof nested === 'string' && nested.trim()) return nested.trim();
   }
   return null;
+}
+
+function suppressionReason(
+  state: 'BOUNCED' | 'COMPLAINT' | 'UNSUBSCRIBED',
+): SuppressionReason {
+  switch (state) {
+    case 'BOUNCED':
+      return 'PROVIDER_BOUNCED';
+    case 'COMPLAINT':
+      return 'PROVIDER_COMPLAINT';
+    case 'UNSUBSCRIBED':
+      return 'PROVIDER_UNSUBSCRIBED';
+  }
 }
 
 function singleHeader(value: string | readonly string[] | undefined): string | null {
