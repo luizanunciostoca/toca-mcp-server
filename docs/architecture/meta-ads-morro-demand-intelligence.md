@@ -55,15 +55,15 @@ The index is deterministic and bounded from `0` to `100`.
 
 Weights:
 
-| Signal | Weight |
-| --- | ---: |
-| Audience level vs. 7-day median | 10% |
-| Audience-estimate trend vs. ~24h baseline | 5% |
-| Audience-estimate trend vs. ~7d baseline | 5% |
-| Paid-media performance score | 35% |
-| Calendar/event score | 20% |
-| Seasonality score | 15% |
-| Operational capacity score | 10% |
+| Signal                                    | Weight |
+| ----------------------------------------- | -----: |
+| Audience level vs. 7-day median           |    10% |
+| Audience-estimate trend vs. ~24h baseline |     5% |
+| Audience-estimate trend vs. ~7d baseline  |     5% |
+| Paid-media performance score              |    35% |
+| Calendar/event score                      |    20% |
+| Seasonality score                         |    15% |
+| Operational capacity score                |    10% |
 
 Missing contextual scores are neutral (`50`). Until enough audience history exists, missing audience baselines are also neutral. Signal confidence starts at `0.4` for a ready provider estimate and increases as history, 24h baseline, and 7d baseline become available.
 
@@ -84,13 +84,13 @@ Bands:
 Base recommendation by index:
 
 | Demand Index | Suggested daily-budget change |
-| --- | ---: |
-| < 30 | -20% |
-| 30–44 | -10% |
-| 45–59 | 0% |
-| 60–74 | +10% |
-| 75–89 | +15% |
-| 90–100 | +20% |
+| ------------ | ----------------------------: |
+| < 30         |                          -20% |
+| 30–44        |                          -10% |
+| 45–59        |                            0% |
+| 60–74        |                          +10% |
+| 75–89        |                          +15% |
+| 90–100       |                          +20% |
 
 Safety controls:
 

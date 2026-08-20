@@ -197,9 +197,7 @@ export class MetaAdsDemandIntelligenceService {
       estimate,
       midpoint,
       ...(sevenDayMedianMidpoint !== undefined ? { sevenDayMedianMidpoint } : {}),
-      ...(baseline24h
-        ? { trend24hPercent: percentChange(midpoint, baseline24h.midpoint) }
-        : {}),
+      ...(baseline24h ? { trend24hPercent: percentChange(midpoint, baseline24h.midpoint) } : {}),
       ...(baseline7d ? { trend7dPercent: percentChange(midpoint, baseline7d.midpoint) } : {}),
       historySampleCount: prior.length,
       confidence,

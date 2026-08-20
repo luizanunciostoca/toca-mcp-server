@@ -191,15 +191,19 @@ describe('Meta Ads Morro demand intelligence', () => {
       ],
     });
     const provider = new MetaAdsReadProvider({ get } as unknown as MetaApiClient);
-    const service = new MetaAdsDemandIntelligenceService(provider, new MemoryGeoAudienceHistoryStore(), {
-      tenantId: 'toca-do-morcego',
-      budgetPolicy: {
-        currency: 'BRL',
-        maxDailyBudgetMinor: 100_000,
-        maxLifetimeBudgetMinor: 500_000,
-        maxSingleIncreasePercent: 20,
+    const service = new MetaAdsDemandIntelligenceService(
+      provider,
+      new MemoryGeoAudienceHistoryStore(),
+      {
+        tenantId: 'toca-do-morcego',
+        budgetPolicy: {
+          currency: 'BRL',
+          maxDailyBudgetMinor: 100_000,
+          maxLifetimeBudgetMinor: 500_000,
+          maxSingleIncreasePercent: 20,
+        },
       },
-    });
+    );
 
     const recommendation = await service.recommendMorroBudget({
       account: { adAccountId: '123', currency: 'BRL' },
