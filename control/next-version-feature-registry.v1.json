@@ -1,12 +1,17 @@
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
-  "registryVersion": "1.1",
+  "registryVersion": "1.2",
   "status": "ACTIVE_COORDINATION",
-  "coordinationRound": "2026-08-20T02:32:00-03:00",
+  "coordinationRound": "2026-08-20T02:50:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-  "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
+  "evidenceStates": [
+    "IMPLEMENTED",
+    "CI_VERIFIED",
+    "PROVIDER_VERIFIED",
+    "PRODUCTION_VERIFIED"
+  ],
   "rules": {
     "liveMainIsNextBaseline": true,
     "exactHeadEvidenceRequired": true,
@@ -21,8 +26,8 @@
     "temporaryWorkflowForbiddenInFinalTree": true,
     "migrationNumbersGloballySerialized": true,
     "commercialConversationMessageOwner": "NEXT-010/PR-22",
-    "whatsappIntendedOwner": "NEXT-006/PR-31",
-    "whatsappSupersededCandidate": "PR-25"
+    "whatsappOwner": "PENDING_CONVERGENCE_PR_31_PR_36",
+    "attributionRevenueOwner": "NEXT-013/PR-33"
   },
   "features": [
     {
@@ -74,25 +79,26 @@
       "stackedOnPr": 14,
       "providerEvidenceRequired": true,
       "providerEvidenceState": "BLOCKED_BY_RIGHTS_LIKENESS_APPROVAL",
-      "notes": ["retarget/rebase to main and rerun exact-head Quality after PR #14 merges"]
+      "notes": [
+        "retarget/rebase to main and rerun exact-head Quality after PR #14 merges"
+      ]
     },
     {
       "id": "NEXT-004",
       "name": "AG-01 external orchestrator runtime",
-      "planningState": "MERGE_HOLD_TEMP_WORKFLOW_AND_DEPENDENCIES",
+      "planningState": "CI_VERIFIED_DEPENDENCY_HOLD",
       "evidenceState": "CI_VERIFIED",
       "pr": 21,
       "branch": "feat/ag01-orchestrator-runtime-20260820",
-      "evidenceHeadSha": "20d55bf0de8368378380dcb3b3ba65b460b26b0e",
-      "qualityRun": 32335887999,
-      "postgresE2ERun": 32335888008,
+      "evidenceHeadSha": "9f5dd275b3823c3d435b42ccd2d51a1662bae383",
+      "qualityRun": 32336668556,
+      "postgresE2ERun": 32336668600,
       "migration": "026_ag01_orchestrator_runtime.sql",
       "dependencies": ["NEXT-010", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": true,
       "blockers": [
-        ".github/workflows/ag01-type-repair.yml remains in current PR diff",
-        "platform hardening security gate PR #20 is red",
-        "final CRM MessageRecord and learning integration required"
+        "platform hardening PR #20 Security Supply Chain is not green",
+        "final CRM MessageRecord and learning handoff integration must be revalidated after predecessors land"
       ]
     },
     {
@@ -111,62 +117,71 @@
     {
       "id": "NEXT-006",
       "name": "WhatsApp Business real provider",
-      "planningState": "INTENDED_OWNER_NOT_MERGE_READY",
+      "planningState": "DUPLICATE_WORKSTREAM_CONVERGENCE_REQUIRED",
       "evidenceState": "IMPLEMENTED",
-      "pr": 31,
-      "branch": "feat/next-whatsapp-real-stack-crm-20260820",
-      "evidenceHeadSha": "5eee722e2589b746786906fd3bd9eebc1032295a",
-      "qualityRun": 32336105089,
-      "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336105114,
+      "candidatePrs": [31, 36],
+      "candidateHeads": {
+        "31": "256f66051198f41577bff69bbbab261126e2581f",
+        "36": "7e1e581894510fc56e54075ccd121a980cea4f4c"
+      },
+      "candidateQualityRuns": {
+        "31": 32336999395,
+        "36": 32337031616
+      },
+      "candidatePostgresRuns": {
+        "31": 32336999185,
+        "36": 32337031654
+      },
       "migration": "027_whatsapp_provider_runtime.sql",
       "dependencies": ["NEXT-005", "NEXT-010", "NEXT-016"],
       "stackedOnPr": 22,
       "providerEvidenceRequired": true,
-      "supersededCandidatePr": 25,
+      "supersededPr": 25,
       "blockers": [
-        "reconcile unique useful behavior from PR #25 before superseding it",
-        "remove .github/workflows/format-whatsapp-stack-once.yml",
-        "refresh stack onto final clean PR #22 head",
-        "resolve migration 027 collision with PR #30",
-        "real WABA/scopes/provider readback unavailable"
+        "PR #31 and #36 both implement WhatsApp and must converge into one merge source",
+        "both current heads fail Quality at Lint after Format and Architecture pass",
+        "preserve PR #31 explicit audit/contact-recipient/ambiguity/handoff safeguards and PR #36 media readback/unmatched-status behavior",
+        "migration 027 collides with PR #30",
+        "real WABA/scopes/template/callback/readback evidence unavailable"
       ]
     },
     {
       "id": "NEXT-007",
       "name": "Email real provider",
-      "planningState": "STACKED_REVALIDATION_REQUIRED",
+      "planningState": "CURRENT_HEAD_CI_RUNNING",
       "evidenceState": "IMPLEMENTED",
       "pr": 23,
       "branch": "feat/email-real-sendgrid-20260820",
-      "evidenceHeadSha": "5aa954c82912cb48e022575e64b0ec7aa6d9443f",
-      "providerGateRun": 32335836602,
-      "providerGateConclusion": "FAIL_STACKED_REPOSITORY_TYPECHECK",
-      "postgresE2ERun": 32335836596,
+      "observedHeadSha": "036bbec4aff0f77eede4ae36fb347b12967b0ada",
       "migration": "024_email_provider_runtime.sql",
       "dependencies": ["NEXT-010", "NEXT-016"],
       "stackedOnPr": 22,
       "providerEvidenceRequired": true,
+      "priorGreenHeadSha": "fe078cc70f720e15f34fba445a21624fcd45df37",
+      "priorEmailProviderGateRun": 32336964937,
+      "priorQualityRun": 32336964982,
+      "priorPostgresE2ERun": 32336964932,
       "blockers": [
-        "restack on current clean PR #22 head and rerun normal Quality/provider gate",
-        "sender/domain/SPF/DKIM/DMARC/credentials/readback not configured"
+        "newer current head requires its own exact-head CI before CI_VERIFIED is restored",
+        "sender/domain/SPF/DKIM/DMARC/credentials/webhook keys/readback not configured"
       ]
     },
     {
       "id": "NEXT-008",
       "name": "CRM and Sales Engine expansion",
-      "planningState": "MERGE_HOLD_TEMP_WORKFLOW",
+      "planningState": "READY_FOR_INTEGRATION_REVIEW",
       "evidenceState": "CI_VERIFIED",
       "pr": 22,
       "branch": "feat/next-crm-sales-engine-advanced-20260820",
-      "evidenceHeadSha": "8fa24ba0e5dfb3708f77dab1596d609d37d10755",
-      "qualityRun": 32336063124,
-      "postgresE2ERun": 32336063161,
+      "evidenceHeadSha": "be97c0a6249876ff306a67158ae35e94c217bd6d",
+      "qualityRun": 32336854798,
+      "postgresE2ERun": 32336854963,
       "migration": "023_crm_sales_engine.sql",
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "blockers": [
-        "remove .github/workflows/crm-sales-catalog-one-shot.yml and rerun exact-head gates"
+      "notes": [
+        "temporary repair/one-shot workflows removed from final diff",
+        "revalidate after PR #15 or other hotspot predecessor changes main"
       ]
     },
     {
@@ -204,28 +219,42 @@
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-009", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing durable workflow", "existing scheduler", "canonical Privacy"]
+      "reuse": [
+        "existing durable workflow",
+        "existing scheduler",
+        "canonical Privacy"
+      ]
     },
     {
       "id": "NEXT-013",
       "name": "Attribution and Revenue Intelligence",
-      "planningState": "PARTIAL_PR_22_AND_PR_27",
-      "evidenceState": null,
+      "planningState": "READY_FOR_INTEGRATION_AFTER_MIGRATION_SERIALIZATION",
+      "evidenceState": "CI_VERIFIED",
+      "pr": 33,
+      "branch": "feat/attribution-revenue-feedback-loop",
+      "evidenceHeadSha": "7e8df19ae23da2193ddb6e4e64d127b86b49729a",
+      "qualityRun": 32336942395,
+      "postgresE2ERun": 32336942409,
+      "migration": "028_attribution_revenue_feedback.sql",
       "dependencies": ["NEXT-008", "NEXT-010"],
-      "providerEvidenceRequired": true
+      "providerEvidenceRequired": true,
+      "providerEvidenceState": "NOT_PROMOTED_PROVIDER_SHAPED_FIXTURES_ONLY",
+      "notes": [
+        "WON requires confirmed TICKETING/CHECKOUT/PAYMENT/ORDER readback evidence",
+        "PR #26 and #21 are downstream consumers"
+      ]
     },
     {
       "id": "NEXT-014",
       "name": "Marketing Autopilot R19 closed loop",
-      "planningState": "IN_PROGRESS_PR_26",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_IN_PR_26",
+      "evidenceState": "CI_VERIFIED",
       "pr": 26,
-      "evidenceHeadSha": "0e58fd3f109c31986d0ef854f88bfa02ecf01c16",
-      "qualityRun": 32336012297,
-      "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336012300,
+      "evidenceHeadSha": "7675bd734d0c11bdff8357656b9b0a1a6253a8b7",
+      "qualityRun": 32336459217,
+      "postgresE2ERun": 32336459216,
       "dependencies": ["NEXT-001", "NEXT-002", "NEXT-013", "NEXT-024"],
-      "providerEvidenceRequired": true
+      "providerEvidenceRequired": false
     },
     {
       "id": "NEXT-015",
@@ -258,33 +287,34 @@
     {
       "id": "NEXT-017",
       "name": "Meta Ads closed-loop optimization",
-      "planningState": "IN_PROGRESS_PR_28",
+      "planningState": "CI_BLOCKED_FORMAT",
       "evidenceState": "IMPLEMENTED",
       "pr": 28,
       "branch": "feat/paid-media-next-meta-google-20260820",
-      "observedHeadSha": "579e6e402e860c20ce428277c836f5ae9488a857",
-      "dependencies": ["NEXT-002", "NEXT-013"],
-      "providerEvidenceRequired": true,
-      "notes": [
-        "exact-head Quality and PostgreSQL E2E were still in progress at coordinator readback"
-      ]
+      "observedHeadSha": "85ae60e95300a1d3fb73d35cd7b0083a4a980c72",
+      "qualityRun": 32336953445,
+      "qualityConclusion": "FAIL_FORMAT",
+      "postgresE2ERun": 32336953388,
+      "dependencies": ["NEXT-002", "NEXT-013", "NEXT-021"],
+      "providerEvidenceRequired": true
     },
     {
       "id": "NEXT-018",
       "name": "Google Ads real provider",
-      "planningState": "IN_PROGRESS_PR_28_PROVIDER_PENDING",
+      "planningState": "CI_BLOCKED_AND_PROVIDER_PENDING",
       "evidenceState": "IMPLEMENTED",
       "pr": 28,
       "dependencies": ["NEXT-013"],
       "providerEvidenceRequired": true,
       "notes": [
-        "no activation for testing; live OAuth/account READ evidence required before provider promotion"
+        "no activation for testing",
+        "live OAuth/account READ evidence required before provider promotion"
       ]
     },
     {
       "id": "NEXT-019",
       "name": "Sales conversion / ticketing / checkout evidence",
-      "planningState": "PLANNED",
+      "planningState": "PROVIDER_EVIDENCE_SOURCE_FOR_PR_33",
       "evidenceState": null,
       "dependencies": ["NEXT-008", "NEXT-013"],
       "providerEvidenceRequired": true
@@ -311,16 +341,16 @@
     {
       "id": "NEXT-021",
       "name": "Growth, Sales and Capacity read models",
-      "planningState": "CI_BLOCKED",
+      "planningState": "CI_BLOCKED_FORMAT",
       "evidenceState": "IMPLEMENTED",
       "pr": 27,
       "branch": "feat/analytics-capacity-read-models-20260820",
-      "evidenceHeadSha": "9639cc8056d62551ceb298488eabefd213cfa11d",
-      "qualityRun": 32336060637,
+      "observedHeadSha": "ce65dbfb686b4e64a35a209de3517ddb2762bec9",
+      "qualityRun": 32336961228,
       "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336060639,
-      "analyticsPostgresE2ERun": 32336060638,
-      "analyticsPostgresE2EConclusion": "FAIL_ANALYTICS_CAPACITY_TEST",
+      "postgresE2ERun": 32336961148,
+      "analyticsPostgresE2ERun": 32336961160,
+      "analyticsPostgresE2EConclusion": "PASS",
       "migration": null,
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020"],
       "providerEvidenceRequired": false
@@ -333,7 +363,10 @@
       "pr": 20,
       "dependencies": ["NEXT-005", "NEXT-008", "NEXT-010", "NEXT-013"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"]
+      "reuse": [
+        "existing Cloud SQL backup/PITR/runbooks",
+        "existing DR evidence model"
+      ]
     },
     {
       "id": "NEXT-023",
@@ -342,18 +375,22 @@
       "evidenceState": null,
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "reuse": ["existing route catalog", "existing capability registry", "existing Policy Engine"]
+      "reuse": [
+        "existing route catalog",
+        "existing capability registry",
+        "existing Policy Engine"
+      ]
     },
     {
       "id": "NEXT-024",
       "name": "R31 governed learning and experimentation loop",
-      "planningState": "CI_BLOCKED",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED",
+      "evidenceState": "CI_VERIFIED",
       "pr": 26,
       "branch": "feat/marketing-autopilot-r31-experimentation-20260820",
-      "evidenceHeadSha": "0e58fd3f109c31986d0ef854f88bfa02ecf01c16",
-      "qualityRun": 32336012297,
-      "postgresE2ERun": 32336012300,
+      "evidenceHeadSha": "7675bd734d0c11bdff8357656b9b0a1a6253a8b7",
+      "qualityRun": 32336459217,
+      "postgresE2ERun": 32336459216,
       "migration": "025_marketing_autopilot_r31_learning.sql",
       "dependencies": ["NEXT-013", "NEXT-014", "NEXT-021"],
       "providerEvidenceRequired": false
@@ -361,20 +398,20 @@
     {
       "id": "NEXT-025",
       "name": "Multi-tenant foundation",
-      "planningState": "CI_BLOCKED_AND_MIGRATION_COORDINATION",
-      "evidenceState": "IMPLEMENTED",
+      "planningState": "CI_VERIFIED_MIGRATION_COORDINATION",
+      "evidenceState": "CI_VERIFIED",
       "pr": 30,
       "branch": "feat/multi-tenant-foundation-20260820",
-      "evidenceHeadSha": "7677495c0d54c63354645c78ee86a0d502ced924",
-      "qualityRun": 32336071267,
-      "qualityConclusion": "FAIL_FORMAT",
-      "postgresE2ERun": 32336071284,
+      "evidenceHeadSha": "2fce39b05f99185a3db0763be82097b272561b35",
+      "qualityRun": 32336878038,
+      "postgresE2ERun": 32336878082,
+      "tenancyPostgresE2ERun": 32336878062,
       "migration": "027_multi_tenant_foundation.sql",
       "dependencies": ["NEXT-008", "NEXT-010", "NEXT-023"],
       "providerEvidenceRequired": false,
       "blockers": [
-        "migration 027 collides with intended WhatsApp PR #31",
-        "body exact evidence is stale and must follow live head"
+        "migration 027 collides with WhatsApp PR #31/#36",
+        "rebase/renumber/revalidate after predecessor queue stabilizes"
       ]
     },
     {
@@ -389,19 +426,32 @@
       "migration": null,
       "dependencies": ["NEXT-002", "NEXT-008", "NEXT-020", "NEXT-024"],
       "providerEvidenceRequired": false,
-      "notes": ["same MCP server; UI emits governed AG01 intent only; no direct provider write"]
+      "notes": [
+        "same MCP server; UI emits governed AG01 intent only; no direct provider write"
+      ]
     }
   ],
-  "supersededCandidates": [
+  "closedSupersededOrTemporaryPrs": [
     {
       "pr": 25,
-      "branch": "feat/next-whatsapp-real-20260820",
-      "reason": "duplicates WhatsApp front and defines ConversationRecord/MessageRecord parallel to canonical PR #22",
-      "preservationRule": "compare and preserve unique provider/webhook/throttle/retry behavior in intended PR #31 before closing/superseding",
-      "evidenceHeadSha": "d36fde463f89f9ad49fcf1858097501ed7815674",
-      "qualityRun": 32335362897,
-      "postgresE2ERun": 32335362899,
-      "migration": "024_crm_communication_records.sql"
+      "state": "CLOSED_UNMERGED_SUPERSEDED",
+      "reason": "obsolete duplicate CRM communication model predating canonical PR #22",
+      "headSha": "d36fde463f89f9ad49fcf1858097501ed7815674"
+    },
+    {
+      "pr": 32,
+      "state": "CLOSED_UNMERGED_TEMP_SYNC",
+      "reason": "Email stack synchronization only"
+    },
+    {
+      "pr": 34,
+      "state": "CLOSED_UNMERGED_TEMP_SYNC",
+      "reason": "Email rebase synchronization only"
+    },
+    {
+      "pr": 35,
+      "state": "CLOSED_UNMERGED_TEST_ONLY",
+      "reason": "Email hardening runner only; explicitly do not merge"
     }
   ]
 }
