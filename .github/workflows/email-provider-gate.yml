@@ -44,23 +44,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format Email-owned files
-        run: >-
-          pnpm exec prettier --check
-          scripts/validate-sendgrid-email.ts
-          scripts/verify-email-typecheck.mjs
-          src/http.ts
-          src/omnichannel/email-runtime.ts
-          src/omnichannel/email-orchestrator.ts
-          src/persistence/postgres-email-runtime-store.ts
-          src/providers/sendgrid/email-event-http-runtime.ts
-          src/providers/sendgrid/email-provider.ts
-          src/providers/sendgrid/runtime-config.ts
-          test/email-runtime.test.ts
-          test/email-orchestrator.test.ts
-          test/sendgrid-email-event-runtime.test.ts
-          test/sendgrid-email-provider.test.ts
-          tsconfig.email.json
+      - name: Emit Prettier diff for Email runtime
+        run: |
+          pnpm exec prettier --write src/providers/sendgrid/email-event-http-runtime.ts
+          git diff -- src/providers/sendgrid/email-event-http-runtime.ts
+          exit 1
       - name: Lint Email-owned files
         run: >-
           pnpm exec eslint
