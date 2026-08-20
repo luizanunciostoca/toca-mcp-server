@@ -19,6 +19,7 @@ const instagramPublishRequestSchema = z.object({
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
   creativeTruthBinding: creativeTruthPublicationBindingSchema.optional(),
+  publicationAssetSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
 });
 
 export class InstagramPublicationJobScheduler {
@@ -106,6 +107,9 @@ export function parseInstagramPublishRequest(value: unknown): InstagramPublishRe
     ...(parsed.caption !== undefined ? { caption: parsed.caption } : {}),
     ...(parsed.creativeTruthBinding !== undefined
       ? { creativeTruthBinding: parsed.creativeTruthBinding }
+      : {}),
+    ...(parsed.publicationAssetSha256 !== undefined
+      ? { publicationAssetSha256: parsed.publicationAssetSha256 }
       : {}),
   };
 }
