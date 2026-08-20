@@ -4,7 +4,11 @@
   "standardVersion": "1.0",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-  "scope": {"operation": "THE_PARTY", "channel": "ALL", "format": "ALL"},
+  "scope": {
+    "operation": "THE_PARTY",
+    "channel": "ALL",
+    "format": "ALL"
+  },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
     "canonicalDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
@@ -23,5 +27,8 @@
     "generativeExceptionRequiresOperationScopedReferenceSet": true,
     "exactAssetBindingRequired": true
   },
-  "qualityGate": {"failClosed": true, "requiresParentPolicyGates": true}
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true
+  }
 }
