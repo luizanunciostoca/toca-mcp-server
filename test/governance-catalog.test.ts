@@ -14,6 +14,8 @@ import { ROUTE_IDS } from '../src/governance/types.js';
 import { createToolRegistry } from '../src/registry.js';
 
 const googleAdsCapabilities = [
+  'google_ads.customers.discover',
+  'google_ads.account.verify',
   'google_ads.account.inspect',
   'google_ads.campaigns.list',
   'google_ads.insights.get',
@@ -50,9 +52,9 @@ describe('TOCA OS route and capability catalogs', () => {
     }
   });
 
-  it('materializes the 758-capability catalog using contract v1.1 without pretending inference is explicit', () => {
+  it('materializes the canonical capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(783);
+    expect(CAPABILITY_CATALOG).toHaveLength(792);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
@@ -205,7 +207,9 @@ describe('TOCA OS route and capability catalogs', () => {
       instagramReadsEnabled: true,
       metaAdsReadsEnabled: true,
       metaAdsWritesEnabled: true,
+      paidMediaDecisionEnabled: true,
       googleAdsPhase: 'MANAGE',
+      googleAdsActivateEnabled: true,
       tocaManagedInstagramSchedulerEnabled: true,
       crmSalesRuntimeEnabled: true,
     });

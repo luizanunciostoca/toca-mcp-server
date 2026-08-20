@@ -29,6 +29,25 @@ const bootstrapTools: readonly ToolDefinition[] = [
   },
 ];
 
+const paidMediaDecisionTools: readonly ToolDefinition[] = [
+  'paid_media.experiment.plan',
+  'paid_media.naming.build',
+  'paid_media.budget.allocate',
+  'paid_media.audience.plan',
+  'paid_media.creative_rotation.plan',
+  'paid_media.performance.assess',
+  'paid_media.google_ads.autopilot_readiness',
+].map((name) => ({
+  name,
+  version: '1.0.0',
+  provider: 'TOCA_OS+toca-mcp',
+  riskClass: 'READ' as const,
+  requiredScopes: [],
+  capabilityStatus: 'IMPLEMENTED' as const,
+  sideEffects: false,
+  idempotent: true,
+}));
+
 const instagramReadTools: readonly ToolDefinition[] = [
   {
     name: 'instagram.media.list',
@@ -170,6 +189,8 @@ const metaAdsWriteTools: readonly ToolDefinition[] = [
 
 const googleAdsTools: readonly (ToolDefinition & { readonly minimumPhase: GoogleAdsPhase })[] = [
   ...[
+    'google_ads.customers.discover',
+    'google_ads.account.verify',
     'google_ads.account.inspect',
     'google_ads.campaigns.list',
     'google_ads.insights.get',
@@ -449,7 +470,9 @@ export interface ToolRegistryOptions {
   readonly instagramPublicationWritesEnabled?: boolean;
   readonly metaAdsReadsEnabled?: boolean;
   readonly metaAdsWritesEnabled?: boolean;
+  readonly paidMediaDecisionEnabled?: boolean;
   readonly googleAdsPhase?: GoogleAdsPhase;
+  readonly googleAdsActivateEnabled?: boolean;
   readonly tocaManagedInstagramSchedulerEnabled?: boolean;
   readonly videoContentRuntimeEnabled?: boolean;
   readonly crmSalesRuntimeEnabled?: boolean;
@@ -458,12 +481,20 @@ export interface ToolRegistryOptions {
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [...bootstrapTools, ...publicationTools(options)]) registry.register(tool);
+  if (options.paidMediaDecisionEnabled)
+    for (const tool of paidMediaDecisionTools) registry.register(tool);
   if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
   if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
   if (options.metaAdsWritesEnabled) for (const tool of metaAdsWriteTools) registry.register(tool);
   if (options.googleAdsPhase) {
     for (const { minimumPhase, ...tool } of googleAdsTools) {
-      if (googleAdsPhaseAtLeast(options.googleAdsPhase, minimumPhase)) registry.register(tool);
+      if (!googleAdsPhaseAtLeast(options.googleAdsPhase, minimumPhase)) continue;
+      if (
+        tool.name === 'google_ads.campaign.activate' &&
+        options.googleAdsActivateEnabled === false
+      )
+        continue;
+      registry.register(tool);
     }
   }
   if (options.tocaManagedInstagramSchedulerEnabled)
