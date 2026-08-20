@@ -13,6 +13,10 @@ import {
   type ProviderMessageReadback,
   type WhatsAppProviderAdapter,
 } from './contracts.js';
+import {
+  requireFreshOutboundPrivacy,
+  type OutboundPrivacyRevalidationPort,
+} from './privacy-runtime-gate.js';
 import type { PrivacyExecutionContext } from '../privacy/contracts.js';
 import type { PrivacyGovernanceCore } from '../privacy/privacy-governance-core.js';
 import { MetaApiError } from '../providers/meta/meta-api-client.js';
@@ -506,6 +510,7 @@ export interface WhatsAppOutboundRuntimeDependencies {
   readonly transport: WhatsAppRuntimeStore;
   readonly provider: WhatsAppProviderAdapter;
   readonly preparedPayloads: PreparedWhatsAppPayloadResolver;
+  readonly privacyRevalidation: OutboundPrivacyRevalidationPort;
 }
 
 export class WhatsAppOutboundRuntime {
@@ -646,6 +651,41 @@ export class WhatsAppOutboundRuntime {
     now: string,
   ): Promise<ProviderMessageReadback> {
     const attemptCount = dispatch.attemptCount + 1;
+    try {
+      await requireFreshOutboundPrivacy(this.deps.privacyRevalidation, {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        organizationId: input.organizationId,
+        channel: 'WHATSAPP',
+        privacyChannel: input.eligibility.privacy.decision.channel,
+        subjectRef: input.eligibility.privacy.subjectRef,
+        purposeId: input.purposeId,
+        requester: input.actorPrincipalId,
+        executionId: `${input.executionId}:privacy-pre-send:${attemptCount}`,
+        correlationId: input.correlationId,
+        evidence: [
+          'whatsapp:privacy-pre-send',
+          `whatsapp:message:${input.message.messageId}`,
+          `whatsapp:privacy-proof:${input.eligibility.privacy.executionId}`,
+        ],
+      });
+    } catch (error) {
+      if (!isPrivacyRevalidationError(error)) throw error;
+      await this.deps.transport.updateDispatch({
+        ...input,
+        dispatchId: dispatch.dispatchId,
+        expectedState: 'PREPARED',
+        state: 'FAILED',
+        attemptCount: dispatch.attemptCount,
+        nextRetryAt: null,
+        lastErrorCode: 'WHATSAPP_PRIVACY_REVALIDATION_BLOCKED',
+        idempotencyKey: `${input.idempotencyKey}:privacy-blocked:${attemptCount}`,
+        evidence: [...input.evidence, 'whatsapp:privacy-pre-send:blocked'],
+        now,
+      });
+      throw new Error('WHATSAPP_PRIVACY_REVALIDATION_BLOCKED');
+    }
+
     const submitted = await this.deps.transport.updateDispatch({
       ...input,
       dispatchId: dispatch.dispatchId,
@@ -973,6 +1013,13 @@ function classifyProviderFailure(
     nextRetryAt: null,
     errorCode: 'WHATSAPP_PROVIDER_OUTCOME_UNCERTAIN',
   };
+}
+
+function isPrivacyRevalidationError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_')
+  );
 }
 
 function readbackFromDispatch(
