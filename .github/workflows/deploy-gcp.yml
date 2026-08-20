@@ -24,6 +24,10 @@ on:
         description: Existing revision name for an explicit rollback operation
         required: false
         type: string
+      rollback_compatibility_ref:
+        description: Evidence that the target revision is compatible with the current schema
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -53,6 +57,8 @@ jobs:
       GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
       GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
       PRODUCTION_GCP_PROJECT_ID: ${{ vars.PRODUCTION_GCP_PROJECT_ID }}
+      PRODUCTION_GCP_PROJECT_NUMBER: ${{ vars.PRODUCTION_GCP_PROJECT_NUMBER }}
+      PRODUCTION_GCP_REGION: ${{ vars.PRODUCTION_GCP_REGION }}
       PRODUCTION_GCP_CLOUD_SQL_INSTANCE: ${{ vars.PRODUCTION_GCP_CLOUD_SQL_INSTANCE }}
       PRODUCTION_GCP_CLOUD_RUN_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_SERVICE }}
       PRODUCTION_GCP_DATABASE_URL_SECRET: ${{ vars.PRODUCTION_GCP_DATABASE_URL_SECRET }}
@@ -61,6 +67,15 @@ jobs:
       PRODUCTION_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_RUNTIME_SERVICE_ACCOUNT }}
       STAGING_DATABASE_ISOLATION_MODE: ${{ vars.STAGING_DATABASE_ISOLATION_MODE }}
       STAGING_DATABASE_ISOLATION_APPROVAL_REF: ${{ vars.STAGING_DATABASE_ISOLATION_APPROVAL_REF }}
+      GCP_META_ACCESS_TOKEN_SECRET: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET }}
+      GCP_META_APP_SECRET: ${{ vars.GCP_META_APP_SECRET }}
+      GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET }}
+      GCP_SENDGRID_API_KEY_SECRET: ${{ vars.GCP_SENDGRID_API_KEY_SECRET }}
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}
+      GCP_AG01_MODEL_API_KEY_SECRET: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET }}
       TOCA_DEFAULT_TENANT_ID: ${{ vars.TOCA_DEFAULT_TENANT_ID || 'toca' }}
       TOCA_DEFAULT_WORKSPACE_ID: ${{ vars.TOCA_DEFAULT_WORKSPACE_ID || 'toca' }}
       TOCA_DEFAULT_ORGANIZATION_ID: ${{ vars.TOCA_DEFAULT_ORGANIZATION_ID || 'toca' }}
@@ -92,11 +107,18 @@ jobs:
         with:
           version: 10.15.0
 
-      - name: Setup Node
+      - name: Setup Node for deploy
+        if: inputs.operation == 'deploy'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: ${{ inputs.operation == 'deploy' && 'pnpm' || '' }}
+          cache: pnpm
+
+      - name: Setup Node for control operation
+        if: inputs.operation != 'deploy'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
 
       - name: Install and run exact-head Quality gate
         if: inputs.operation == 'deploy'
@@ -107,6 +129,10 @@ jobs:
 
       - name: Prove environment isolation before any GCP access
         run: node scripts/validate-gcp-deploy-environment.mjs
+
+      - name: Verify hardening contract for emergency control
+        if: inputs.operation != 'deploy'
+        run: node scripts/platform-hardening-check.mjs
 
       - name: Fail closed on unverified provider activation
         if: inputs.operation == 'deploy'
@@ -148,7 +174,23 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Activate emergency kill switch
+      - name: Refuse implicit mutation kill-switch bypass
+        if: inputs.operation == 'deploy' || inputs.operation == 'rollback'
+        run: |
+          set -euo pipefail
+          if ! gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json > /tmp/current-service.json 2>/dev/null; then
+            exit 0
+          fi
+          CURRENT_KILL_SWITCH="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value][0] // "false"' /tmp/current-service.json)"
+          if [[ "$CURRENT_KILL_SWITCH" == true ]]; then
+            echo 'Mutation kill switch is active. Clear it explicitly before deploy or rollback.' >&2
+            exit 1
+          fi
+
+      - name: Activate emergency mutation kill switch
         if: inputs.operation == 'kill_switch'
         run: |
           set -euo pipefail
@@ -156,12 +198,17 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --update-env-vars TOCA_PLATFORM_KILL_SWITCH=true
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-latest
           gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
-            --format='value(spec.template.spec.containers[0].env[name=TOCA_PLATFORM_KILL_SWITCH].value)' | grep -Fx true
+            --format=json > /tmp/kill-switch-service.json
+          jq -e '[.spec.template.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value][0] == "true"' /tmp/kill-switch-service.json >/dev/null
 
-      - name: Clear emergency kill switch
+      - name: Clear emergency mutation kill switch
         if: inputs.operation == 'clear_kill_switch'
         run: |
           set -euo pipefail
@@ -169,26 +216,39 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --update-env-vars TOCA_PLATFORM_KILL_SWITCH=false
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-latest
           gcloud run services describe "$GCP_CLOUD_RUN_SERVICE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
-            --format='value(spec.template.spec.containers[0].env[name=TOCA_PLATFORM_KILL_SWITCH].value)' | grep -Fx false
+            --format=json > /tmp/kill-switch-service.json
+          jq -e '[.spec.template.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value][0] == "false"' /tmp/kill-switch-service.json >/dev/null
 
       - name: Roll back to an explicit known revision
         if: inputs.operation == 'rollback'
         env:
           ROLLBACK_REVISION: ${{ inputs.rollback_revision }}
+          ROLLBACK_COMPATIBILITY_REF: ${{ inputs.rollback_compatibility_ref }}
         run: |
           set -euo pipefail
           test -n "$ROLLBACK_REVISION" || { echo 'rollback_revision is required' >&2; exit 1; }
-          gcloud run revisions describe "$ROLLBACK_REVISION" \
+          test -n "$ROLLBACK_COMPATIBILITY_REF" || { echo 'rollback_compatibility_ref is required' >&2; exit 1; }
+          gcloud run revisions list \
             --service "$GCP_CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --filter "metadata.name=${ROLLBACK_REVISION}" \
+            --format='value(metadata.name)' | grep -Fx "$ROLLBACK_REVISION"
+          gcloud run revisions describe "$ROLLBACK_REVISION" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" >/dev/null
           gcloud run services update-traffic "$GCP_CLOUD_RUN_SERVICE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --to-revisions "${ROLLBACK_REVISION}=100"
+          echo "ROLLBACK_COMPATIBILITY_REF=$ROLLBACK_COMPATIBILITY_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify Cloud SQL backup and PITR controls
         if: inputs.operation == 'deploy'
@@ -242,6 +302,7 @@ jobs:
             "MCP_ENABLED=true"
             "TOCA_DEPLOY_ENVIRONMENT=${{ inputs.environment }}"
             "TOCA_RELEASE_SHA=${GITHUB_SHA}"
+            "TOCA_PLATFORM_KILL_SWITCH=false"
             "TOCA_DEFAULT_TENANT_ID=${TOCA_DEFAULT_TENANT_ID}"
             "TOCA_DEFAULT_WORKSPACE_ID=${TOCA_DEFAULT_WORKSPACE_ID}"
             "TOCA_DEFAULT_ORGANIZATION_ID=${TOCA_DEFAULT_ORGANIZATION_ID}"
@@ -284,18 +345,18 @@ jobs:
             append_env META_REDIRECT_URI "${{ vars.META_REDIRECT_URI }}"
             append_env META_REQUESTED_SCOPES "${{ vars.META_REQUESTED_SCOPES }}"
             append_env META_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
-            require_secret TOCA_SECRET_META_ACCESS_TOKEN "${{ vars.GCP_META_ACCESS_TOKEN_SECRET }}" "${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION || 'latest' }}" GCP_META_ACCESS_TOKEN_SECRET
+            require_secret TOCA_SECRET_META_ACCESS_TOKEN "$GCP_META_ACCESS_TOKEN_SECRET" "${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION || 'latest' }}" GCP_META_ACCESS_TOKEN_SECRET
           fi
           if [[ "$META_ENABLED" == true ]]; then
             append_env META_APP_SECRET_PROVIDER env
             append_env META_APP_SECRET_KEY TOCA_SECRET_META_APP_SECRET
             append_env META_TOKEN_STORE_PROVIDER "${{ vars.META_TOKEN_STORE_PROVIDER || 'memory' }}"
             append_env META_TOKEN_SECRET_ID "${{ vars.META_TOKEN_SECRET_ID }}"
-            require_secret TOCA_SECRET_META_APP_SECRET "${{ vars.GCP_META_APP_SECRET }}" "${{ vars.GCP_META_APP_SECRET_VERSION || 'latest' }}" GCP_META_APP_SECRET
+            require_secret TOCA_SECRET_META_APP_SECRET "$GCP_META_APP_SECRET" "${{ vars.GCP_META_APP_SECRET_VERSION || 'latest' }}" GCP_META_APP_SECRET
           fi
           if [[ "$META_WEBHOOK_ENABLED" == true ]]; then
             append_env META_WEBHOOK_VERIFY_TOKEN_KEY TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN
-            require_secret TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN "${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET }}" "${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION || 'latest' }}" GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET
+            require_secret TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET" "${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION || 'latest' }}" GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET
           fi
           if [[ "$WHATSAPP_ENABLED" == true ]]; then
             append_env WHATSAPP_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
@@ -316,7 +377,7 @@ jobs:
             append_env EMAIL_SENDGRID_REPLY_TO_EMAIL "${{ vars.EMAIL_SENDGRID_REPLY_TO_EMAIL }}"
             append_env EMAIL_SENDGRID_INBOUND_PARSE_ENABLED "${{ vars.EMAIL_SENDGRID_INBOUND_PARSE_ENABLED || 'false' }}"
             append_env EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED "${{ vars.EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED || 'false' }}"
-            require_secret TOCA_SECRET_SENDGRID_API_KEY "${{ vars.GCP_SENDGRID_API_KEY_SECRET }}" "${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION || 'latest' }}" GCP_SENDGRID_API_KEY_SECRET
+            require_secret TOCA_SECRET_SENDGRID_API_KEY "$GCP_SENDGRID_API_KEY_SECRET" "${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION || 'latest' }}" GCP_SENDGRID_API_KEY_SECRET
           fi
           if [[ "$GOOGLE_ADS_PHASE" != OFF ]]; then
             append_env GOOGLE_ADS_CUSTOMER_ID "${{ vars.GOOGLE_ADS_CUSTOMER_ID }}"
@@ -330,16 +391,16 @@ jobs:
             append_env GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_ID
             append_env GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET
             append_env GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN
-            require_secret TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN "${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}" "${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET
-            require_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_ID "${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}" "${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_CLIENT_ID_SECRET
-            require_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET "${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}" "${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET
-            require_secret TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN "${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}" "${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET
+            require_secret TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET" "${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET
+            require_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_ID "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET" "${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_CLIENT_ID_SECRET
+            require_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET" "${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET
+            require_secret TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET" "${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION || 'latest' }}" GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET
           fi
           if [[ "$AG01_MODEL_ENABLED" == true ]]; then
             append_env AG01_MODEL_API_KEY_ENV_KEY TOCA_SECRET_AG01_MODEL_API_KEY
             append_env AG01_MODEL_PROVIDER "${{ vars.AG01_MODEL_PROVIDER }}"
             append_env AG01_MODEL_NAME "${{ vars.AG01_MODEL_NAME }}"
-            require_secret TOCA_SECRET_AG01_MODEL_API_KEY "${{ vars.GCP_AG01_MODEL_API_KEY_SECRET }}" "${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION || 'latest' }}" GCP_AG01_MODEL_API_KEY_SECRET
+            require_secret TOCA_SECRET_AG01_MODEL_API_KEY "$GCP_AG01_MODEL_API_KEY_SECRET" "${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION || 'latest' }}" GCP_AG01_MODEL_API_KEY_SECRET
           fi
 
           { IFS='|'; echo "RUNTIME_ENV_VARS=^|^${ENV_ENTRIES[*]}"; } >> "$GITHUB_ENV"
