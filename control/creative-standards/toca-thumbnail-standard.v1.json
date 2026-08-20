@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.1",
+  "standardId": "TOCA_THUMBNAIL_V1",
+  "standardVersion": "1.1",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "ALL",
+    "channel": "ALL",
+    "format": "THUMBNAIL"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "canonicalDriveId": "1UR_LD8Gw4rlQkGsYh-VGW1ns8AzEx_m4fazpcCW-2wM",
+    "referenceSetStrategy": "OPERATION_SCOPED_ONLY_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
+  },
+  "rules": {
+    "realVenueAssetRequired": true,
+    "deterministicBrandInsertion": true,
+    "venueFidelityGateRequired": true,
+    "officialBrandAssetsOnly": true,
+    "aiLogoReconstructionForbidden": true,
+    "directGenerativeFinalizationForbidden": true,
+    "generativeExceptionRequiresOperationScopedReferenceSet": true,
+    "exactAssetBindingRequired": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true
+  }
+}
