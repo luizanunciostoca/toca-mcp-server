@@ -124,6 +124,7 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
     metaAdsWritesEnabled: true,
     googleAdsPhase: 'MANAGE',
     tocaManagedInstagramSchedulerEnabled: true,
+    crmSalesRuntimeEnabled: true,
   })
     .list()
     .map((definition) => [definition.name, definition] as const),
