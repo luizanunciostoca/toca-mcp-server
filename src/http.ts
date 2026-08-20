@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
+import { createRuntimeReadinessChecks } from './health/runtime-readiness.js';
 import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
 import { PostgresMetaWebhookEventStore } from './persistence/meta-webhook-event-store.js';
 import { createPostgresPool } from './persistence/postgres.js';
@@ -16,12 +17,24 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MCP_PORT/PORT must be an integer between 1 and 65535');
 }
 
-const metaWebhook = createMetaWebhookBoundary();
+const databasePool = config.DATABASE_URL
+  ? createPostgresPool({
+      connectionString: config.DATABASE_URL,
+      ssl: process.env.DATABASE_SSL === 'true',
+    })
+  : undefined;
+const readinessChecks = createRuntimeReadinessChecks({
+  config,
+  env: process.env,
+  ...(databasePool ? { pool: databasePool } : {}),
+});
+const metaWebhook = createMetaWebhookBoundary(databasePool);
 
 const server = createTocaHttpServer({
   onError: (error) => {
     console.error('HTTP request failed', error instanceof Error ? error.message : 'unknown error');
   },
+  readinessChecks,
   mcpEnabled: config.MCP_ENABLED,
   ...(metaRuntime
     ? {
@@ -36,7 +49,9 @@ server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
 
-function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
+function createMetaWebhookBoundary(
+  pool: ReturnType<typeof createPostgresPool> | undefined,
+): MetaWebhookHttpBoundary | undefined {
   if (!config.META_WEBHOOK_ENABLED) return undefined;
 
   if (
@@ -61,11 +76,13 @@ function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
     key: config.META_WEBHOOK_VERIFY_TOKEN_KEY,
   };
 
-  const eventStore = config.META_WEBHOOK_PERSISTENCE_ENABLED
-    ? new PostgresMetaWebhookEventStore(
-        createPostgresPool({ connectionString: config.DATABASE_URL as string }),
-      )
-    : undefined;
+  if (config.META_WEBHOOK_PERSISTENCE_ENABLED && !pool) {
+    throw new Error('Meta webhook persistence requires the shared database pool');
+  }
+  const eventStore =
+    config.META_WEBHOOK_PERSISTENCE_ENABLED && pool
+      ? new PostgresMetaWebhookEventStore(pool)
+      : undefined;
 
   return {
     resolveAppSecret: () => resolver.resolve(appSecretReference),
