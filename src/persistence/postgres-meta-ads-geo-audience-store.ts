@@ -16,6 +16,8 @@ interface GeoAudienceRow {
   readonly optimization_goal: string;
   readonly targeting_spec: unknown;
   readonly observed_at: Date | string;
+  readonly hour_bucket: Date | string;
+  readonly quality_confidence: string | number;
 }
 
 export class PostgresMetaAdsGeoAudienceStore implements MetaAdsGeoAudienceHistoryStore {
@@ -25,8 +27,10 @@ export class PostgresMetaAdsGeoAudienceStore implements MetaAdsGeoAudienceHistor
     await this.pool.query(
       `insert into meta_ads_geo_audience_samples (
          tenant_id, ad_account_id, geo_key, lower_bound, upper_bound, midpoint,
-         estimate_ready, optimization_goal, targeting_spec, observed_at
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::timestamptz)
+         estimate_ready, optimization_goal, targeting_spec, observed_at, hour_bucket,
+         quality_confidence
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::timestamptz,
+                 $11::timestamptz, $12)
        on conflict (tenant_id, ad_account_id, geo_key, observed_at) do nothing`,
       [
         sample.tenantId,
@@ -39,6 +43,8 @@ export class PostgresMetaAdsGeoAudienceStore implements MetaAdsGeoAudienceHistor
         sample.optimizationGoal,
         JSON.stringify(sample.targetingSpec),
         sample.observedAt,
+        sample.hourBucket,
+        sample.qualityConfidence,
       ],
     );
   }
@@ -49,7 +55,8 @@ export class PostgresMetaAdsGeoAudienceStore implements MetaAdsGeoAudienceHistor
     const limit = normalizeLimit(query.limit ?? 1000);
     const result = await this.pool.query<GeoAudienceRow>(
       `select tenant_id, ad_account_id, geo_key, lower_bound, upper_bound, midpoint,
-              estimate_ready, optimization_goal, targeting_spec, observed_at
+              estimate_ready, optimization_goal, targeting_spec, observed_at, hour_bucket,
+              quality_confidence
        from meta_ads_geo_audience_samples
        where tenant_id = $1
          and ad_account_id = $2
@@ -75,6 +82,8 @@ function fromRow(row: GeoAudienceRow): MetaAdsGeoAudienceSample {
     optimizationGoal: row.optimization_goal,
     targetingSpec: objectRecord(row.targeting_spec),
     observedAt: normalizeTimestamp(row.observed_at),
+    hourBucket: normalizeTimestamp(row.hour_bucket),
+    qualityConfidence: confidenceNumber(row.quality_confidence),
   };
 }
 
@@ -88,6 +97,14 @@ function normalizeLimit(value: number): number {
 function finiteNumber(value: string | number, code: string): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) throw new Error(code);
+  return parsed;
+}
+
+function confidenceNumber(value: string | number): number {
+  const parsed = finiteNumber(value, 'META_ADS_GEO_HISTORY_CONFIDENCE_INVALID');
+  if (parsed < 0 || parsed > 1) {
+    throw new Error('META_ADS_GEO_HISTORY_CONFIDENCE_INVALID');
+  }
   return parsed;
 }
 
