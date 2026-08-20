@@ -110,6 +110,21 @@ describe('production runtime readiness', () => {
     expect(report.status).toBe('not_ready');
     expect(report.checks).toContainEqual({ name: 'outbox', ok: false });
   });
+
+  it('fails readiness while the emergency platform kill switch is active', async () => {
+    const migrationsDirectory = await emptyMigrationsDirectory();
+    const report = await evaluateReadiness(
+      createRuntimeReadinessChecks({
+        config: testConfig(),
+        env: { ...baseEnv(), TOCA_PLATFORM_KILL_SWITCH: 'true' },
+        pool: fakePool(),
+        migrationsDirectory,
+      }),
+    );
+
+    expect(report.status).toBe('not_ready');
+    expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: false });
+  });
 });
 
 function baseEnv(): NodeJS.ProcessEnv {
@@ -156,7 +171,10 @@ function fakePool(
         ? (values?.[0] as readonly string[])
         : [];
       return {
-        rows: tableNames.map((tableName) => ({ table_name: tableName, relation: tableName })),
+        rows: tableNames.map((tableName) => ({
+          table_name: tableName,
+          relation: tableName,
+        })),
         rowCount: tableNames.length,
       };
     }
