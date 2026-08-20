@@ -41,14 +41,17 @@ export class TenantPolicyOverlay {
         ...(request.providerId ? { providerId: request.providerId } : {}),
       });
     } catch (error) {
-      return deny(error instanceof TenantIsolationError ? error.code : 'TENANT_CAPABILITY_UNAVAILABLE');
+      return deny(
+        error instanceof TenantIsolationError ? error.code : 'TENANT_CAPABILITY_UNAVAILABLE',
+      );
     }
     if (!availability.available) return deny(availability.reason);
 
     const policyBindings = configuration.policies
       .filter(
         (binding) =>
-          binding.allowedRiskClasses === null || binding.allowedRiskClasses.includes(request.riskClass),
+          binding.allowedRiskClasses === null ||
+          binding.allowedRiskClasses.includes(request.riskClass),
       )
       .sort((left, right) => left.policyId.localeCompare(right.policyId));
     if (policyBindings.length === 0) return deny('TENANT_POLICY_NOT_CONFIGURED');

@@ -85,7 +85,9 @@ export class TenantCredentialResolver {
     };
   }
 
-  private async requireTenantConfiguration(identity: ExecutionIdentity): Promise<TenantConfiguration> {
+  private async requireTenantConfiguration(
+    identity: ExecutionIdentity,
+  ): Promise<TenantConfiguration> {
     if (identity.authorization.tenantId !== identity.principal.tenantId) {
       throw new TenantIsolationError('AUTHORIZATION_TENANT_MISMATCH');
     }

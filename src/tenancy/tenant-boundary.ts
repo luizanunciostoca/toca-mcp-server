@@ -72,7 +72,9 @@ export class TenantCapabilityAvailabilityResolver {
     try {
       assertSameTenantBoundary(identityScope, configuration);
     } catch (error) {
-      return unavailable(error instanceof TenantIsolationError ? error.code : 'TENANT_SCOPE_INVALID');
+      return unavailable(
+        error instanceof TenantIsolationError ? error.code : 'TENANT_SCOPE_INVALID',
+      );
     }
     if (configuration.status !== 'ACTIVE') return unavailable('TENANT_SUSPENDED');
     if (configuration.deniedCapabilityIds.includes(input.capabilityId)) {

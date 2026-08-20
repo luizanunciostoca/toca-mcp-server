@@ -43,7 +43,10 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
     'TENANT_CREATIVE_TRUTH_REGISTRY_REQUIRED',
   );
   requireNonEmpty(configuration.assets.assetRegistryResourceId, 'TENANT_ASSET_REGISTRY_REQUIRED');
-  requireNonEmpty(configuration.analytics.analyticsNamespace, 'TENANT_ANALYTICS_NAMESPACE_REQUIRED');
+  requireNonEmpty(
+    configuration.analytics.analyticsNamespace,
+    'TENANT_ANALYTICS_NAMESPACE_REQUIRED',
+  );
 
   const providerIds = new Set<string>();
   for (const provider of configuration.providers) {
@@ -101,7 +104,10 @@ export function validateTenantConfiguration(configuration: TenantConfiguration):
     if (!/^[A-Z]{3}$/.test(budget.currency)) {
       throw new TenantIsolationError('TENANT_BUDGET_CURRENCY_INVALID');
     }
-    if (!Number.isSafeInteger(budget.maxSingleOperationMinor) || budget.maxSingleOperationMinor < 0) {
+    if (
+      !Number.isSafeInteger(budget.maxSingleOperationMinor) ||
+      budget.maxSingleOperationMinor < 0
+    ) {
       throw new TenantIsolationError('TENANT_BUDGET_LIMIT_INVALID');
     }
     requireEvidence(budget.evidence, 'TENANT_BUDGET_EVIDENCE_REQUIRED');
@@ -167,7 +173,9 @@ function ownedResourceKeys(configuration: TenantConfiguration): readonly string[
     keys.add(`secret:${credential.secretReference.provider}:${credential.secretReference.key}`);
   }
   for (const campaign of configuration.campaigns) {
-    keys.add(`campaign:${campaign.providerId}:${campaign.connectedAccountId}:${campaign.campaignId}`);
+    keys.add(
+      `campaign:${campaign.providerId}:${campaign.connectedAccountId}:${campaign.campaignId}`,
+    );
   }
   for (const policy of configuration.policies) {
     keys.add(`policy:${policy.policyResourceId}`);

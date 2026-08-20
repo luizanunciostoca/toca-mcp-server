@@ -5,12 +5,18 @@ const tenancyMigration = readFileSync(
   new URL('../migrations/027_multi_tenant_foundation.sql', import.meta.url),
   'utf8',
 );
-const crmMigration = readFileSync(new URL('../migrations/012_crm_core_records.sql', import.meta.url), 'utf8');
+const crmMigration = readFileSync(
+  new URL('../migrations/012_crm_core_records.sql', import.meta.url),
+  'utf8',
+);
 const workflowMigration = readFileSync(
   new URL('../migrations/007_durable_workflow_persistence.sql', import.meta.url),
   'utf8',
 );
-const eventMigration = readFileSync(new URL('../migrations/011_event_record.sql', import.meta.url), 'utf8');
+const eventMigration = readFileSync(
+  new URL('../migrations/011_event_record.sql', import.meta.url),
+  'utf8',
+);
 const attributionMigration = readFileSync(
   new URL('../migrations/013_measurement_ticketing_attribution.sql', import.meta.url),
   'utf8',
@@ -47,10 +53,17 @@ describe('multi-tenant persistence contract', () => {
   });
 
   it('adds tenant ownership to legacy scheduler, publication, audit and approval roots', () => {
-    for (const table of ['scheduled_jobs', 'provider_publications', 'audit_events', 'approval_records']) {
+    for (const table of [
+      'scheduled_jobs',
+      'provider_publications',
+      'audit_events',
+      'approval_records',
+    ]) {
       expect(tenancyMigration).toContain(`alter table ${table}`);
     }
-    expect(tenancyMigration).toContain("add column if not exists tenant_id text not null default 'toca'");
+    expect(tenancyMigration).toContain(
+      "add column if not exists tenant_id text not null default 'toca'",
+    );
   });
 
   it('preserves append-only audit history while enforcing tenant on new writes', () => {
