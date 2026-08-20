@@ -1,3 +1,6 @@
+export const SCHEDULER_STALE_RUNNING_AFTER_MS = 10 * 60 * 1000;
+export const SCHEDULER_STALE_RECOVERY_MARKER = 'WORKER_STALE_RUNNING_RECOVERED';
+
 export type ScheduledJobStatus = 'SCHEDULED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED';
 
 export interface ScheduledJob<TPayload = unknown> {
@@ -23,6 +26,7 @@ export interface Scheduler {
   claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]>;
   markSucceeded(id: string): Promise<void>;
   markFailed(id: string, normalizedError: string): Promise<void>;
+  retryAfterFailure?(id: string, normalizedError: string, retryAt: string): Promise<void>;
 }
 
 export interface ReconciliationResult {

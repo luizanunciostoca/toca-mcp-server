@@ -17,7 +17,7 @@ class MemoryDeadLetters implements DeadLetterSink {
 }
 
 describe('worker retry chain', () => {
-  it('stops after the configured logical attempt count', async () => {
+  it('stops after the configured logical attempt count without creating retry rows', async () => {
     const scheduler = new InMemoryScheduler();
     const deadLetters = new MemoryDeadLetters();
     let now = new Date('2026-08-09T12:00:00.000Z');
@@ -47,13 +47,21 @@ describe('worker retry chain', () => {
     });
 
     expect(await worker.runOnce()).toBe(1);
+    expect(await scheduler.list()).toHaveLength(1);
     now = new Date('2026-08-09T12:00:02.000Z');
     expect(await worker.runOnce()).toBe(1);
+    expect(await scheduler.list()).toHaveLength(1);
     now = new Date('2026-08-09T12:00:05.000Z');
     expect(await worker.runOnce()).toBe(1);
 
     expect(deadLetters.records).toHaveLength(1);
-    expect(deadLetters.records[0]).toMatchObject({ attempts: 3, toolName: 'test.fail' });
+    expect(deadLetters.records[0]).toMatchObject({
+      attempts: 3,
+      originalJobId: 'original',
+      toolName: 'test.fail',
+    });
+    expect(await scheduler.get('original')).toMatchObject({ status: 'FAILED', attempts: 3 });
+    expect(await scheduler.list()).toHaveLength(1);
     expect(await worker.runOnce()).toBe(0);
   });
 });

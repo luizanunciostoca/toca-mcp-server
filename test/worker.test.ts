@@ -44,12 +44,12 @@ function createWorker(
     logger,
     retry: { maxAttempts, baseDelayMs: 1_000, maxDelayMs: 10_000 },
     now: () => new Date('2026-08-09T12:00:00.000Z'),
-    createId: () => 'retry-id',
+    createId: () => 'dead-letter-id',
   });
 }
 
 describe('SchedulerWorker', () => {
-  it('schedules a retry before the maximum attempt count', async () => {
+  it('reschedules the same durable job atomically before the maximum attempt count', async () => {
     const scheduler = new InMemoryScheduler();
     const deadLetters = new MemoryDeadLetters();
     await scheduler.schedule({
@@ -63,12 +63,14 @@ describe('SchedulerWorker', () => {
 
     const worker = createWorker(scheduler, deadLetters, 3);
     expect(await worker.runOnce()).toBe(1);
-    expect((await scheduler.get('job-1'))?.status).toBe('FAILED');
-    expect(await scheduler.get('retry-id')).toMatchObject({
+    expect(await scheduler.get('job-1')).toMatchObject({
       status: 'SCHEDULED',
-      idempotencyKey: 'key-1:retry:1',
+      attempts: 1,
+      idempotencyKey: 'key-1',
       runAt: '2026-08-09T12:00:01.000Z',
+      lastError: 'Error: boom',
     });
+    expect(await scheduler.list()).toHaveLength(1);
     expect(deadLetters.records).toHaveLength(0);
   });
 
@@ -83,32 +85,17 @@ describe('SchedulerWorker', () => {
       timezone: 'America/Bahia',
       idempotencyKey: 'key-2',
     });
-    await scheduler.claimDue('2026-08-09T12:00:00.000Z', 1);
-    await scheduler.markFailed('job-2', 'first failure');
-    await scheduler.schedule({
-      id: 'job-3',
-      toolName: 'test.fail',
-      payload: { x: 2 },
-      runAt: '2026-08-09T11:59:00.000Z',
-      timezone: 'America/Bahia',
-      idempotencyKey: 'key-2:retry:1',
-    });
-    await scheduler.claimDue('2026-08-09T12:00:00.000Z', 1);
-    await scheduler.markFailed('job-3', 'second failure');
-    await scheduler.schedule({
-      id: 'job-final',
-      toolName: 'test.fail',
-      payload: { x: 2 },
-      runAt: '2026-08-09T11:59:00.000Z',
-      timezone: 'America/Bahia',
-      idempotencyKey: 'key-2:retry:2',
-    });
 
     const worker = createWorker(scheduler, deadLetters, 1);
     expect(await worker.runOnce()).toBe(1);
+    expect(await scheduler.get('job-2')).toMatchObject({
+      status: 'FAILED',
+      attempts: 1,
+      lastError: 'Error: boom',
+    });
     expect(deadLetters.records).toHaveLength(1);
     expect(deadLetters.records[0]).toMatchObject({
-      originalJobId: 'job-final',
+      originalJobId: 'job-2',
       toolName: 'test.fail',
       lastError: 'Error: boom',
     });
