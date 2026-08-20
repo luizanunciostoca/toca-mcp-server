@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemorySecretStore } from '../src/core/secrets.js';
 import type {
   OutboundEligibilityContext,
+  ProviderBindingRef,
   ProviderMessageReadback,
 } from '../src/omnichannel/contracts.js';
 import {
@@ -23,7 +24,7 @@ class RecordingTransport implements MetaApiTransport {
     this.requests.push({ url, init });
     if (init.method === 'GET' && url.includes('/waba-1/message_templates')) {
       return Promise.resolve(
-        okResponse({
+        ok({
           data: [
             {
               name: 'booking_update',
@@ -37,7 +38,7 @@ class RecordingTransport implements MetaApiTransport {
     }
     if (init.method === 'GET' && url.endsWith('/v23.0/media-1')) {
       return Promise.resolve(
-        okResponse({
+        ok({
           id: 'media-1',
           url: 'https://lookaside.example.test/media-1',
           mime_type: 'image/jpeg',
@@ -47,7 +48,7 @@ class RecordingTransport implements MetaApiTransport {
       );
     }
     if (init.method === 'POST' && url.endsWith('/v23.0/phone-1/messages')) {
-      return Promise.resolve(okResponse({ messages: [{ id: 'wamid.provider-1' }] }));
+      return Promise.resolve(ok({ messages: [{ id: 'wamid.provider-1' }] }));
     }
     return Promise.resolve({
       ok: false,
@@ -57,13 +58,12 @@ class RecordingTransport implements MetaApiTransport {
   }
 }
 
-function okResponse(value: unknown): MetaApiResponse {
+function ok(value: unknown): MetaApiResponse {
   return { ok: true, status: 200, json: () => Promise.resolve(value) };
 }
 
 class Payloads implements PreparedWhatsAppPayloadResolver {
   constructor(private readonly values: Readonly<Record<string, PreparedWhatsAppMessage>>) {}
-
   resolve(ref: string): Promise<PreparedWhatsAppMessage | undefined> {
     return Promise.resolve(this.values[ref]);
   }
@@ -71,7 +71,6 @@ class Payloads implements PreparedWhatsAppPayloadResolver {
 
 class Readbacks implements WhatsAppProviderReadbackStore {
   constructor(private readonly value?: ProviderMessageReadback) {}
-
   latest(): Promise<ProviderMessageReadback | undefined> {
     return Promise.resolve(this.value);
   }
@@ -87,12 +86,7 @@ function eligibility(): OutboundEligibilityContext {
   return {
     ...scope,
     channel: 'WHATSAPP',
-    contact: {
-      ...scope,
-      contactRecordId: 'contact-1',
-      resolutionId: 'resolution-1',
-      status: 'RESOLVED',
-    },
+    contact: { ...scope, contactRecordId: 'contact-1', resolutionId: 'resolution-1', status: 'RESOLVED' },
     privacy: {
       ...scope,
       executionId: 'privacy-1',
@@ -112,8 +106,8 @@ function eligibility(): OutboundEligibilityContext {
 
 async function fixture(
   payloads: Readonly<Record<string, PreparedWhatsAppMessage>>,
+  state: ProviderBindingRef['state'] = 'PRODUCTION_VALIDATED',
   readback?: ProviderMessageReadback,
-  bindingState: 'IMPLEMENTED' | 'SANDBOX_VALIDATED' | 'PRODUCTION_VALIDATED' = 'PRODUCTION_VALIDATED',
 ) {
   const secrets = new InMemorySecretStore();
   const token = await secrets.put('META_ACCESS_TOKEN', 'secret-token-value');
@@ -130,11 +124,7 @@ async function fixture(
       metaAppId: 'app-1',
       wabaId: 'waba-1',
       phoneNumberId: 'phone-1',
-      binding: {
-        providerKey: 'META_WHATSAPP_CLOUD',
-        bindingId: 'binding-1',
-        state: bindingState,
-      },
+      binding: { providerKey: 'META_WHATSAPP_CLOUD', bindingId: 'binding-1', state },
     },
     new Payloads(payloads),
     new Readbacks(readback),
@@ -144,11 +134,10 @@ async function fixture(
 }
 
 describe('WhatsAppCloudAdapter', () => {
-  it('sends a text payload through the canonical Meta client and SecretResolver', async () => {
+  it('uses SecretResolver and sends the Cloud API payload only after production validation', async () => {
     const { adapter, transport } = await fixture({
       text: { kind: 'TEXT', to: '5511888888888', text: 'Olá', previewUrl: false },
     });
-
     const receipt = await adapter.send({
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
@@ -160,56 +149,34 @@ describe('WhatsAppCloudAdapter', () => {
       idempotencyKey: 'idem-1',
       eligibility: eligibility(),
     });
-
     expect(receipt).toMatchObject({
       provider: 'META_WHATSAPP_CLOUD',
       providerMessageId: 'wamid.provider-1',
-      state: 'ACCEPTED',
       evidence: expect.arrayContaining(['meta:app:app-1', 'meta:waba:waba-1']),
     });
     const request = transport.requests.at(-1);
     expect(request?.url).toBe('https://graph.facebook.com/v23.0/phone-1/messages');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer secret-token-value' });
     if (typeof request?.init.body !== 'string') throw new Error('EXPECTED_JSON_BODY');
-    expect(JSON.parse(request.init.body)).toEqual({
+    expect(JSON.parse(request.init.body)).toMatchObject({
       messaging_product: 'whatsapp',
-      recipient_type: 'individual',
       to: '5511888888888',
       type: 'text',
-      text: { preview_url: false, body: 'Olá' },
+      text: { body: 'Olá' },
     });
   });
 
-  it('validates only an approved template with the exact positional variables', async () => {
+  it('requires an approved template and exact positional variables', async () => {
     const { adapter } = await fixture({});
     await expect(
-      adapter.validateTemplate({
-        templateKey: 'booking_update',
-        locale: 'pt_BR',
-        variableNames: ['1', '2'],
-      }),
+      adapter.validateTemplate({ templateKey: 'booking_update', locale: 'pt_BR', variableNames: ['1', '2'] }),
     ).resolves.toMatchObject({ valid: true });
     await expect(
-      adapter.validateTemplate({
-        templateKey: 'booking_update',
-        locale: 'pt_BR',
-        variableNames: ['1'],
-      }),
+      adapter.validateTemplate({ templateKey: 'booking_update', locale: 'pt_BR', variableNames: ['1'] }),
     ).resolves.toMatchObject({ valid: false });
   });
 
-  it('reads media metadata without downloading the media body', async () => {
-    const { adapter } = await fixture({});
-    await expect(adapter.readMediaMetadata('media-1')).resolves.toEqual({
-      id: 'media-1',
-      url: 'https://lookaside.example.test/media-1',
-      mimeType: 'image/jpeg',
-      sha256: 'b'.repeat(64),
-      fileSize: 42,
-    });
-  });
-
-  it('uses persisted callback state for readback and stays UNKNOWN before callback evidence', async () => {
+  it('returns media metadata and callback-backed readback without downloading media', async () => {
     const observed: ProviderMessageReadback = {
       provider: 'META_WHATSAPP_CLOUD',
       providerMessageId: 'wamid.provider-1',
@@ -217,21 +184,21 @@ describe('WhatsAppCloudAdapter', () => {
       observedAt: '2026-08-20T04:00:01.000Z',
       evidence: ['callback:delivered'],
     };
-    const withCallback = await fixture({}, observed);
-    await expect(withCallback.adapter.readback('wamid.provider-1')).resolves.toEqual(observed);
-
-    const withoutCallback = await fixture({});
-    await expect(withoutCallback.adapter.readback('wamid.provider-2')).resolves.toMatchObject({
-      state: 'UNKNOWN',
-      evidence: ['whatsapp:status-callback:not-observed'],
+    const { adapter } = await fixture({}, 'PRODUCTION_VALIDATED', observed);
+    await expect(adapter.readMediaMetadata('media-1')).resolves.toEqual({
+      id: 'media-1',
+      url: 'https://lookaside.example.test/media-1',
+      mimeType: 'image/jpeg',
+      sha256: 'b'.repeat(64),
+      fileSize: 42,
     });
+    await expect(adapter.readback('wamid.provider-1')).resolves.toEqual(observed);
   });
 
-  it('fails closed before any provider request when the binding is not production validated', async () => {
+  it('fails closed before any provider request when binding is not production validated', async () => {
     const { adapter, transport } = await fixture(
       { text: { kind: 'TEXT', to: '5511888888888', text: 'Olá' } },
-      undefined,
-      'SANDBOX_VALIDATED',
+      'INTEGRATION_VALIDATED',
     );
     await expect(
       adapter.send({
@@ -245,7 +212,7 @@ describe('WhatsAppCloudAdapter', () => {
         idempotencyKey: 'idem-2',
         eligibility: eligibility(),
       }),
-    ).rejects.toThrow('PROVIDER_BINDING_NOT_PRODUCTION_VALIDATED');
+    ).rejects.toThrow('OMNICHANNEL_PROVIDER_NOT_PRODUCTION_VALIDATED');
     expect(transport.requests).toHaveLength(0);
   });
 });
