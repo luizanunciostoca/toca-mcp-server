@@ -145,11 +145,7 @@ requireContains(
   'verifyAuditLedger',
   'AUDIT_INTEGRITY_VERIFIER_MISSING',
 );
-requireContains(
-  'src/core/operational-observability.ts',
-  'correlationId',
-  'CORRELATION_ID_MISSING',
-);
+requireContains('src/core/operational-observability.ts', 'correlationId', 'CORRELATION_ID_MISSING');
 requireContains(
   'src/core/structured-logger.ts',
   'JSON.stringify',
