@@ -6,12 +6,7 @@
   "coordinationRound": "2026-08-20T02:32:00-03:00",
   "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
   "observedMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
-  "evidenceStates": [
-    "IMPLEMENTED",
-    "CI_VERIFIED",
-    "PROVIDER_VERIFIED",
-    "PRODUCTION_VERIFIED"
-  ],
+  "evidenceStates": ["IMPLEMENTED", "CI_VERIFIED", "PROVIDER_VERIFIED", "PRODUCTION_VERIFIED"],
   "rules": {
     "liveMainIsNextBaseline": true,
     "exactHeadEvidenceRequired": true,
@@ -107,7 +102,11 @@
       "evidenceState": null,
       "dependencies": ["NEXT-004", "NEXT-010", "NEXT-016"],
       "providerEvidenceRequired": true,
-      "reuse": ["existing omnichannel contracts", "existing durable workflow", "existing audit/outbox"]
+      "reuse": [
+        "existing omnichannel contracts",
+        "existing durable workflow",
+        "existing audit/outbox"
+      ]
     },
     {
       "id": "NEXT-006",
@@ -166,7 +165,9 @@
       "migration": "023_crm_sales_engine.sql",
       "dependencies": [],
       "providerEvidenceRequired": false,
-      "blockers": ["remove .github/workflows/crm-sales-catalog-one-shot.yml and rerun exact-head gates"]
+      "blockers": [
+        "remove .github/workflows/crm-sales-catalog-one-shot.yml and rerun exact-head gates"
+      ]
     },
     {
       "id": "NEXT-009",
@@ -264,7 +265,9 @@
       "observedHeadSha": "579e6e402e860c20ce428277c836f5ae9488a857",
       "dependencies": ["NEXT-002", "NEXT-013"],
       "providerEvidenceRequired": true,
-      "notes": ["exact-head Quality and PostgreSQL E2E were still in progress at coordinator readback"]
+      "notes": [
+        "exact-head Quality and PostgreSQL E2E were still in progress at coordinator readback"
+      ]
     },
     {
       "id": "NEXT-018",
@@ -274,7 +277,9 @@
       "pr": 28,
       "dependencies": ["NEXT-013"],
       "providerEvidenceRequired": true,
-      "notes": ["no activation for testing; live OAuth/account READ evidence required before provider promotion"]
+      "notes": [
+        "no activation for testing; live OAuth/account READ evidence required before provider promotion"
+      ]
     },
     {
       "id": "NEXT-019",
@@ -298,7 +303,10 @@
       "migration": null,
       "dependencies": [],
       "providerEvidenceRequired": true,
-      "notes": ["CodeQL passed; SBOM was skipped after security failure", "Drive anyone-with-link ACL remains governance review item"]
+      "notes": [
+        "CodeQL passed; SBOM was skipped after security failure",
+        "Drive anyone-with-link ACL remains governance review item"
+      ]
     },
     {
       "id": "NEXT-021",
@@ -364,7 +372,10 @@
       "migration": "027_multi_tenant_foundation.sql",
       "dependencies": ["NEXT-008", "NEXT-010", "NEXT-023"],
       "providerEvidenceRequired": false,
-      "blockers": ["migration 027 collides with intended WhatsApp PR #31", "body exact evidence is stale and must follow live head"]
+      "blockers": [
+        "migration 027 collides with intended WhatsApp PR #31",
+        "body exact evidence is stale and must follow live head"
+      ]
     },
     {
       "id": "NEXT-026",

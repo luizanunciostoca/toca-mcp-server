@@ -20,38 +20,38 @@ Valid lifecycle:
 
 ## Frozen V1 evidence
 
-| Claim | State | Evidence |
-| --- | --- | --- |
-| V1 release identity | `PRODUCTION_VERIFIED` | `abfb09b17e90c83790e803dcda091c8142c7407f` |
-| Canonical V1 state | `PRODUCTION_VERIFIED` | `docs/operations/v1-canonical-state-2026-08-20.md` |
-| Final V1 hosted closeout | `PRODUCTION_VERIFIED` | `docs/operations/v1-final-closeout-2026-08-20.md` |
-| Final runtime redeploy | `PRODUCTION_VERIFIED` | run `32325385858` |
-| Final hosted production readback | `PRODUCTION_VERIFIED` | run `32325385886` |
-| Sanitized final readback artifact | `PRODUCTION_VERIFIED` | artifact `9393447493` |
+| Claim                             | State                 | Evidence                                           |
+| --------------------------------- | --------------------- | -------------------------------------------------- |
+| V1 release identity               | `PRODUCTION_VERIFIED` | `abfb09b17e90c83790e803dcda091c8142c7407f`         |
+| Canonical V1 state                | `PRODUCTION_VERIFIED` | `docs/operations/v1-canonical-state-2026-08-20.md` |
+| Final V1 hosted closeout          | `PRODUCTION_VERIFIED` | `docs/operations/v1-final-closeout-2026-08-20.md`  |
+| Final runtime redeploy            | `PRODUCTION_VERIFIED` | run `32325385858`                                  |
+| Final hosted production readback  | `PRODUCTION_VERIFIED` | run `32325385886`                                  |
+| Sanitized final readback artifact | `PRODUCTION_VERIFIED` | artifact `9393447493`                              |
 
 V1 evidence is immutable and is not invalidated by Next Version work.
 
 ## Next Version exact-head matrix
 
-| PR | Feature | Exact head observed | Evidence state | Quality | PostgreSQL / specialized | Provider evidence / caveat |
-| --- | --- | --- | --- | --- | --- | --- |
-| #14 | Creative Truth | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c` | `CI_VERIFIED` | `32335049796` PASS | `32335049795` PASS | no provider mutation required for CI claim |
-| #15 | Demand Intelligence | `ee7cb048b01e6859beb949b9d049f218b8e31f56` | `PROVIDER_VERIFIED` READ only | `32333934188` PASS | `32333934183` PASS | provider READ `32333785052`; artifact `9393934030`; `writeExecuted=false` |
-| #16 | Photo-to-Video | `c0b23b573bec4de42746de2915e92daa36532a7b` | `CI_VERIFIED` | `32335823551` PASS | no new migration | stacked on #14; provider promotion blocked by rights/likeness/approval |
-| #18 | Asset Intelligence | `1bfa2680b1d661d865c7901303bf3c3d75dc6235` | `CI_VERIFIED` | `32334357073` PASS | `32334357088` PASS | migration collision prevents merge readiness |
-| #19 | Privacy / LGPD | `a63458971fc6971c97c7221da02c61b8bb085e21` | `CI_VERIFIED` | exact validator `32334687755` PASS; integration `32334417380` PASS | no new migration | no provider claim |
-| #20 | Platform Hardening | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494` | `IMPLEMENTED` | `32334666158` PASS | Security `32334666190` FAIL | candidate-container scan and dependency review failed; CodeQL passed |
-| #21 | AG-01 | `20d55bf0de8368378380dcb3b3ba65b460b26b0e` | `CI_VERIFIED`, merge hold | `32335887999` PASS | `32335888008` PASS | repair workflow remains in diff; no provider promotion |
-| #22 | CRM / Sales | `8fa24ba0e5dfb3708f77dab1596d609d37d10755` | `CI_VERIFIED`, merge hold | `32336063124` PASS | `32336063161` PASS | one-shot workflow remains; canonical Conversation/Message owner |
-| #23 | Email / SendGrid | `5aa954c82912cb48e022575e64b0ec7aa6d9443f` | `IMPLEMENTED` | no current normal full Quality claim | `32335836596` PG PASS; Email Gate `32335836602` overall FAIL | Email-owned subgraph passes; stacked repo typecheck fails; sender/domain/provider config absent |
-| #24 | Social Engagement | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b` | `CI_VERIFIED` | `32334785013` PASS | `32334784974` PASS | new full feature not provider-promoted; activation waits #19/#22 |
-| #25 | WhatsApp duplicate candidate | `d36fde463f89f9ad49fcf1858097501ed7815674` | `CI_VERIFIED`, architecture hold | `32335362897` PASS | `32335362899` PASS | duplicate Conversation/Message ownership; candidate superseded after preservation review |
-| #26 | R31 / Learning | `0e58fd3f109c31986d0ef854f88bfa02ecf01c16` | `IMPLEMENTED` | `32336012297` FAIL Format | `32336012300` PASS | no provider write required for learning engine |
-| #27 | Analytics / Capacity | `9639cc8056d62551ceb298488eabefd213cfa11d` | `IMPLEMENTED` | `32336060637` FAIL Format | base PG `32336060639` PASS; dedicated analytics PG `32336060638` FAIL | read-only feature; dedicated functional E2E still failing |
-| #28 | Paid Media / Google Ads | `579e6e402e860c20ce428277c836f5ae9488a857` | `IMPLEMENTED` snapshot | `32336319196` in progress at readback | `32336319232` in progress at readback | Google Ads provider verification pending; no activation for testing |
-| #29 | Human Control Center | `6976825a18b5cc1179ef8e73d72e135705508030` | `CI_VERIFIED` | `32335977430` PASS | no migration | no direct provider write; dependency panels fail closed |
-| #30 | Multi-tenant foundation | `7677495c0d54c63354645c78ee86a0d502ced924` | `IMPLEMENTED` | `32336071267` FAIL Format | `32336071284` PASS | no provider claim; migration collision 027 |
-| #31 | WhatsApp intended owner | `5eee722e2589b746786906fd3bd9eebc1032295a` | `IMPLEMENTED` | `32336105089` FAIL Format | `32336105114` PASS | temp workflow + stale CRM stack + migration collision + WABA/scopes/readback blocker |
+| PR  | Feature                      | Exact head observed                        | Evidence state                   | Quality                                                            | PostgreSQL / specialized                                              | Provider evidence / caveat                                                                      |
+| --- | ---------------------------- | ------------------------------------------ | -------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| #14 | Creative Truth               | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c` | `CI_VERIFIED`                    | `32335049796` PASS                                                 | `32335049795` PASS                                                    | no provider mutation required for CI claim                                                      |
+| #15 | Demand Intelligence          | `ee7cb048b01e6859beb949b9d049f218b8e31f56` | `PROVIDER_VERIFIED` READ only    | `32333934188` PASS                                                 | `32333934183` PASS                                                    | provider READ `32333785052`; artifact `9393934030`; `writeExecuted=false`                       |
+| #16 | Photo-to-Video               | `c0b23b573bec4de42746de2915e92daa36532a7b` | `CI_VERIFIED`                    | `32335823551` PASS                                                 | no new migration                                                      | stacked on #14; provider promotion blocked by rights/likeness/approval                          |
+| #18 | Asset Intelligence           | `1bfa2680b1d661d865c7901303bf3c3d75dc6235` | `CI_VERIFIED`                    | `32334357073` PASS                                                 | `32334357088` PASS                                                    | migration collision prevents merge readiness                                                    |
+| #19 | Privacy / LGPD               | `a63458971fc6971c97c7221da02c61b8bb085e21` | `CI_VERIFIED`                    | exact validator `32334687755` PASS; integration `32334417380` PASS | no new migration                                                      | no provider claim                                                                               |
+| #20 | Platform Hardening           | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494` | `IMPLEMENTED`                    | `32334666158` PASS                                                 | Security `32334666190` FAIL                                           | candidate-container scan and dependency review failed; CodeQL passed                            |
+| #21 | AG-01                        | `20d55bf0de8368378380dcb3b3ba65b460b26b0e` | `CI_VERIFIED`, merge hold        | `32335887999` PASS                                                 | `32335888008` PASS                                                    | repair workflow remains in diff; no provider promotion                                          |
+| #22 | CRM / Sales                  | `8fa24ba0e5dfb3708f77dab1596d609d37d10755` | `CI_VERIFIED`, merge hold        | `32336063124` PASS                                                 | `32336063161` PASS                                                    | one-shot workflow remains; canonical Conversation/Message owner                                 |
+| #23 | Email / SendGrid             | `5aa954c82912cb48e022575e64b0ec7aa6d9443f` | `IMPLEMENTED`                    | no current normal full Quality claim                               | `32335836596` PG PASS; Email Gate `32335836602` overall FAIL          | Email-owned subgraph passes; stacked repo typecheck fails; sender/domain/provider config absent |
+| #24 | Social Engagement            | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b` | `CI_VERIFIED`                    | `32334785013` PASS                                                 | `32334784974` PASS                                                    | new full feature not provider-promoted; activation waits #19/#22                                |
+| #25 | WhatsApp duplicate candidate | `d36fde463f89f9ad49fcf1858097501ed7815674` | `CI_VERIFIED`, architecture hold | `32335362897` PASS                                                 | `32335362899` PASS                                                    | duplicate Conversation/Message ownership; candidate superseded after preservation review        |
+| #26 | R31 / Learning               | `0e58fd3f109c31986d0ef854f88bfa02ecf01c16` | `IMPLEMENTED`                    | `32336012297` FAIL Format                                          | `32336012300` PASS                                                    | no provider write required for learning engine                                                  |
+| #27 | Analytics / Capacity         | `9639cc8056d62551ceb298488eabefd213cfa11d` | `IMPLEMENTED`                    | `32336060637` FAIL Format                                          | base PG `32336060639` PASS; dedicated analytics PG `32336060638` FAIL | read-only feature; dedicated functional E2E still failing                                       |
+| #28 | Paid Media / Google Ads      | `579e6e402e860c20ce428277c836f5ae9488a857` | `IMPLEMENTED` snapshot           | `32336319196` in progress at readback                              | `32336319232` in progress at readback                                 | Google Ads provider verification pending; no activation for testing                             |
+| #29 | Human Control Center         | `6976825a18b5cc1179ef8e73d72e135705508030` | `CI_VERIFIED`                    | `32335977430` PASS                                                 | no migration                                                          | no direct provider write; dependency panels fail closed                                         |
+| #30 | Multi-tenant foundation      | `7677495c0d54c63354645c78ee86a0d502ced924` | `IMPLEMENTED`                    | `32336071267` FAIL Format                                          | `32336071284` PASS                                                    | no provider claim; migration collision 027                                                      |
+| #31 | WhatsApp intended owner      | `5eee722e2589b746786906fd3bd9eebc1032295a` | `IMPLEMENTED`                    | `32336105089` FAIL Format                                          | `32336105114` PASS                                                    | temp workflow + stale CRM stack + migration collision + WABA/scopes/readback blocker            |
 
 ## Evidence-specific notes
 

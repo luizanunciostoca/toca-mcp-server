@@ -14,26 +14,26 @@ Round: 2026-08-20 02:32 America/Bahia
 
 ## Feature PR map — live round snapshot
 
-| PR | Feature | Head observed | State | Migration | Current disposition |
-| --- | --- | --- | --- | --- | --- |
-| #14 | Creative Truth | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c` | `CI_VERIFIED` | none | mergeable, non-Draft; Quality `32335049796`, PG `32335049795` |
-| #15 | Demand Intelligence | `ee7cb048b01e6859beb949b9d049f218b8e31f56` | `PROVIDER_VERIFIED` READ only | `022_meta_ads_geo_demand_intelligence.sql` | Quality `32333934188`, PG `32333934183`, provider READ `32333785052`; no write |
-| #16 | Photo-to-Video | `c0b23b573bec4de42746de2915e92daa36532a7b` | `CI_VERIFIED` | none | stacked on #14; Quality `32335823551`; retarget/revalidate after #14 merge |
-| #17 | Coordinator | `cb04de63e51da88ab68df2aa44cb814a797cb724` before this round | `CI_VERIFIED` historical exact head | none | control-plane artifacts are being refreshed in this round |
-| #18 | Asset Intelligence | `1bfa2680b1d661d865c7901303bf3c3d75dc6235` | `CI_VERIFIED` | `022_asset_intelligence_content_supply.sql` | Quality `32334357073`, PG `32334357088`; blocked by `022` collision with #15 |
-| #19 | Privacy / LGPD | `a63458971fc6971c97c7221da02c61b8bb085e21` | `CI_VERIFIED` | none | exact validator `32334687755`, integration Quality `32334417380`; canonical consent/suppression authority |
-| #20 | Platform Hardening | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494` | `IMPLEMENTED` | none | Quality `32334666158` green; Security `32334666190` red at container scan + dependency review |
-| #21 | AG-01 runtime | `20d55bf0de8368378380dcb3b3ba65b460b26b0e` | `CI_VERIFIED`, merge hold | `026_ag01_orchestrator_runtime.sql` | Quality `32335887999`, PG `32335888008`; forbidden repair workflow remains; depends #20/#22/#26 |
-| #22 | CRM / Sales / Conversation / Message | `8fa24ba0e5dfb3708f77dab1596d609d37d10755` | `CI_VERIFIED`, merge hold | `023_crm_sales_engine.sql` | Quality `32336063124`, PG `32336063161`; forbidden one-shot workflow remains; canonical message owner |
-| #23 | Email / SendGrid | `5aa954c82912cb48e022575e64b0ec7aa6d9443f` | `IMPLEMENTED` | `024_email_provider_runtime.sql` | PG `32335836596` green; Email Gate `32335836602` red only at stacked repo typecheck; stale parent; external provider config missing |
-| #24 | Social Engagement → CRM | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b` | `CI_VERIFIED` | none | Quality `32334785013`, PG `32334784974`; activation waits #19/#22 |
-| #25 | WhatsApp duplicate candidate | `d36fde463f89f9ad49fcf1858097501ed7815674` | `CI_VERIFIED` but architecture hold | `024_crm_communication_records.sql` | defines duplicate Conversation/Message model; compare unique behavior then supersede in favor of #31 |
-| #26 | R31 / Learning / Experimentation | `0e58fd3f109c31986d0ef854f88bfa02ecf01c16` | `IMPLEMENTED` | `025_marketing_autopilot_r31_learning.sql` | PG `32336012300` green; Quality `32336012297` fails Format |
-| #27 | Analytics / Capacity | `9639cc8056d62551ceb298488eabefd213cfa11d` | `IMPLEMENTED` | none | base PG `32336060639` green; Quality `32336060637` fails Format; dedicated analytics PG `32336060638` fails functional test |
-| #28 | Paid Media / Google Ads | `579e6e402e860c20ce428277c836f5ae9488a857` | `IMPLEMENTED` snapshot | none | mergeable false at readback; Quality `32336319196` and PG `32336319232` were still in progress; provider evidence pending |
-| #29 | Human Control Center | `6976825a18b5cc1179ef8e73d72e135705508030` | `CI_VERIFIED` | none | Quality `32335977430`; same MCP server; dependency panels fail closed |
-| #30 | Multi-tenant foundation | `7677495c0d54c63354645c78ee86a0d502ced924` | `IMPLEMENTED` | `027_multi_tenant_foundation.sql` | PG `32336071284` green; Quality `32336071267` fails Format; `027` collision with #31 |
-| #31 | WhatsApp intended owner | `5eee722e2589b746786906fd3bd9eebc1032295a` | `IMPLEMENTED` | `027_whatsapp_provider_runtime.sql` | PG `32336105114` green; Quality `32336105089` fails Format; temp workflow + stale #22 stack + `027` collision + provider blocker |
+| PR  | Feature                              | Head observed                                                | State                               | Migration                                   | Current disposition                                                                                                                 |
+| --- | ------------------------------------ | ------------------------------------------------------------ | ----------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| #14 | Creative Truth                       | `de3ec2f6f208efea9ce8fb1146c92abcfd9e8f7c`                   | `CI_VERIFIED`                       | none                                        | mergeable, non-Draft; Quality `32335049796`, PG `32335049795`                                                                       |
+| #15 | Demand Intelligence                  | `ee7cb048b01e6859beb949b9d049f218b8e31f56`                   | `PROVIDER_VERIFIED` READ only       | `022_meta_ads_geo_demand_intelligence.sql`  | Quality `32333934188`, PG `32333934183`, provider READ `32333785052`; no write                                                      |
+| #16 | Photo-to-Video                       | `c0b23b573bec4de42746de2915e92daa36532a7b`                   | `CI_VERIFIED`                       | none                                        | stacked on #14; Quality `32335823551`; retarget/revalidate after #14 merge                                                          |
+| #17 | Coordinator                          | `cb04de63e51da88ab68df2aa44cb814a797cb724` before this round | `CI_VERIFIED` historical exact head | none                                        | control-plane artifacts are being refreshed in this round                                                                           |
+| #18 | Asset Intelligence                   | `1bfa2680b1d661d865c7901303bf3c3d75dc6235`                   | `CI_VERIFIED`                       | `022_asset_intelligence_content_supply.sql` | Quality `32334357073`, PG `32334357088`; blocked by `022` collision with #15                                                        |
+| #19 | Privacy / LGPD                       | `a63458971fc6971c97c7221da02c61b8bb085e21`                   | `CI_VERIFIED`                       | none                                        | exact validator `32334687755`, integration Quality `32334417380`; canonical consent/suppression authority                           |
+| #20 | Platform Hardening                   | `ccfde23ebe55b3fcf76b661fe1d9f9603e4cb494`                   | `IMPLEMENTED`                       | none                                        | Quality `32334666158` green; Security `32334666190` red at container scan + dependency review                                       |
+| #21 | AG-01 runtime                        | `20d55bf0de8368378380dcb3b3ba65b460b26b0e`                   | `CI_VERIFIED`, merge hold           | `026_ag01_orchestrator_runtime.sql`         | Quality `32335887999`, PG `32335888008`; forbidden repair workflow remains; depends #20/#22/#26                                     |
+| #22 | CRM / Sales / Conversation / Message | `8fa24ba0e5dfb3708f77dab1596d609d37d10755`                   | `CI_VERIFIED`, merge hold           | `023_crm_sales_engine.sql`                  | Quality `32336063124`, PG `32336063161`; forbidden one-shot workflow remains; canonical message owner                               |
+| #23 | Email / SendGrid                     | `5aa954c82912cb48e022575e64b0ec7aa6d9443f`                   | `IMPLEMENTED`                       | `024_email_provider_runtime.sql`            | PG `32335836596` green; Email Gate `32335836602` red only at stacked repo typecheck; stale parent; external provider config missing |
+| #24 | Social Engagement → CRM              | `dedcf3d78786ab35c5b0fdb25e76f15bdbb8497b`                   | `CI_VERIFIED`                       | none                                        | Quality `32334785013`, PG `32334784974`; activation waits #19/#22                                                                   |
+| #25 | WhatsApp duplicate candidate         | `d36fde463f89f9ad49fcf1858097501ed7815674`                   | `CI_VERIFIED` but architecture hold | `024_crm_communication_records.sql`         | defines duplicate Conversation/Message model; compare unique behavior then supersede in favor of #31                                |
+| #26 | R31 / Learning / Experimentation     | `0e58fd3f109c31986d0ef854f88bfa02ecf01c16`                   | `IMPLEMENTED`                       | `025_marketing_autopilot_r31_learning.sql`  | PG `32336012300` green; Quality `32336012297` fails Format                                                                          |
+| #27 | Analytics / Capacity                 | `9639cc8056d62551ceb298488eabefd213cfa11d`                   | `IMPLEMENTED`                       | none                                        | base PG `32336060639` green; Quality `32336060637` fails Format; dedicated analytics PG `32336060638` fails functional test         |
+| #28 | Paid Media / Google Ads              | `579e6e402e860c20ce428277c836f5ae9488a857`                   | `IMPLEMENTED` snapshot              | none                                        | mergeable false at readback; Quality `32336319196` and PG `32336319232` were still in progress; provider evidence pending           |
+| #29 | Human Control Center                 | `6976825a18b5cc1179ef8e73d72e135705508030`                   | `CI_VERIFIED`                       | none                                        | Quality `32335977430`; same MCP server; dependency panels fail closed                                                               |
+| #30 | Multi-tenant foundation              | `7677495c0d54c63354645c78ee86a0d502ced924`                   | `IMPLEMENTED`                       | `027_multi_tenant_foundation.sql`           | PG `32336071284` green; Quality `32336071267` fails Format; `027` collision with #31                                                |
+| #31 | WhatsApp intended owner              | `5eee722e2589b746786906fd3bd9eebc1032295a`                   | `IMPLEMENTED`                       | `027_whatsapp_provider_runtime.sql`         | PG `32336105114` green; Quality `32336105089` fails Format; temp workflow + stale #22 stack + `027` collision + provider blocker    |
 
 All evidence belongs only to the exact listed head. A later commit invalidates merge-readiness evidence until fresh gates pass.
 
@@ -69,17 +69,17 @@ Observed `main` still ends at `021_r29_video_artifacts.sql`.
 
 Current branch reservations:
 
-| Number | PR | File | Coordination state |
-| --- | --- | --- | --- |
-| 022 | #15 | `022_meta_ads_geo_demand_intelligence.sql` | canonical current owner for next migration |
-| 022 | #18 | `022_asset_intelligence_content_supply.sql` | **collision; must renumber before merge** |
-| 023 | #22 | `023_crm_sales_engine.sql` | reserved by canonical CRM workstream |
-| 024 | #23 | `024_email_provider_runtime.sql` | stacked Email reservation |
-| 024 | #25 | `024_crm_communication_records.sql` | duplicate-domain collision; #25 is superseded candidate |
-| 025 | #26 | `025_marketing_autopilot_r31_learning.sql` | current reservation |
-| 026 | #21 | `026_ag01_orchestrator_runtime.sql` | current reservation |
-| 027 | #30 | `027_multi_tenant_foundation.sql` | current reservation |
-| 027 | #31 | `027_whatsapp_provider_runtime.sql` | **collision; must reserialize** |
+| Number | PR  | File                                        | Coordination state                                      |
+| ------ | --- | ------------------------------------------- | ------------------------------------------------------- |
+| 022    | #15 | `022_meta_ads_geo_demand_intelligence.sql`  | canonical current owner for next migration              |
+| 022    | #18 | `022_asset_intelligence_content_supply.sql` | **collision; must renumber before merge**               |
+| 023    | #22 | `023_crm_sales_engine.sql`                  | reserved by canonical CRM workstream                    |
+| 024    | #23 | `024_email_provider_runtime.sql`            | stacked Email reservation                               |
+| 024    | #25 | `024_crm_communication_records.sql`         | duplicate-domain collision; #25 is superseded candidate |
+| 025    | #26 | `025_marketing_autopilot_r31_learning.sql`  | current reservation                                     |
+| 026    | #21 | `026_ag01_orchestrator_runtime.sql`         | current reservation                                     |
+| 027    | #30 | `027_multi_tenant_foundation.sql`           | current reservation                                     |
+| 027    | #31 | `027_whatsapp_provider_runtime.sql`         | **collision; must reserialize**                         |
 
 Do not renumber blindly while the merge queue is moving. Immediately before each migration-bearing PR enters integration, re-read live `main` plus all earlier queued migrations and assign a monotonically correct number. A renumber is a material commit and requires fresh exact-head Quality + PostgreSQL E2E.
 
