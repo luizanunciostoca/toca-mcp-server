@@ -1,212 +1,194 @@
 # TOCA OS Next Version — Roadmap
 
 Status: **ACTIVE COORDINATION**  
-Round: 2026-08-20 02:32 America/Bahia
+Round: 2026-08-20 02:50 America/Bahia
 
-This roadmap coordinates implementation. It does not authorize side effects and does not replace canonical Google Drive business policy.
+This roadmap coordinates implementation. It does not authorize provider/business side effects and does not replace canonical TOCA_OS business policy in Google Drive.
 
-## Guardrails
+## Permanent guardrails
 
-- V1 remains frozen at `abfb09b17e90c83790e803dcda091c8142c7407f` and `PRODUCTION_VERIFIED`.
-- Live `main` is the technical baseline for every new or refreshed integration decision.
-- Reuse existing TOCA Core, MCP, CRM, scheduler, durable workflows, Policy Engine, Approval Engine, idempotency, outbox, audit and EventRecord.
-- PR #22 is the canonical owner of commercial `ConversationRecord` / `MessageRecord`.
-- Only one WhatsApp workstream may survive; #31 is the intended owner after preserving unique useful behavior from #25.
-- No provider write is used merely as a test.
+- V1 is frozen at `abfb09b17e90c83790e803dcda091c8142c7407f` and remains `PRODUCTION_VERIFIED`.
+- Live `main` is the dynamic technical baseline.
+- Reuse existing TOCA Core, MCP, CRM, scheduler, durable workflow, Policy, Approval, idempotency, Transactional Outbox, Audit Ledger and EventRecord.
+- PR #22 is the single commercial `ConversationRecord` / `MessageRecord` authority.
+- PR #33 is the single Attribution / Revenue Intelligence workstream.
+- WhatsApp must converge from #31/#36 into one final workstream; branch recency alone does not establish ownership.
+- Migrations are globally serialized against the actual approved merge queue.
+- Temporary/one-shot/repair/formatter workflows never survive in a merge-ready final tree.
 - Exact-head evidence is mandatory for every promotion state.
-- Temporary/one-shot/repair workflows must not exist in the final merge-ready tree.
-- Migrations are globally serialized against the actual merge queue.
+- No provider write/send/activation/payment is executed merely as a validation technique.
 
-## Phase 0 — Coordination and convergence
+## Wave 0 — Central control plane
 
-### P0.1 Control plane
+**#17 coordinator** continuously maintains:
 
-- Maintain `V1_BASE_SHA` as immutable release identity.
-- Maintain `control/next-version-feature-registry.v1.json`.
-- Maintain PR/branch/dependency/evidence tracker.
-- Maintain release/evidence index continuously.
-- Re-read `main`, open PRs, heads, migrations and workflows before every integration decision.
-- Mark stale/superseded branches as non-merge sources only after unique required behavior is deliberately compared and preserved.
+- immutable `V1_BASE_SHA` and live main baseline;
+- Feature Registry;
+- Master Tracker;
+- Evidence Index;
+- ownership decisions;
+- migration serialization;
+- stale/superseded/temporary PR classification;
+- dependency-based merge order.
 
-### P0.2 Current creative and demand wave
+Every material coordinator update must itself finish with exact-head Quality green and no temporary helper remaining in the diff.
 
-1. **#14 Creative Truth** — current exact head is CI green and non-Draft.
-2. **#15 Demand Intelligence** — current exact head is provider-verified for the READ boundary and owns migration `022` in the current queue.
-3. **#16 Photo-to-Video** — CI green but stacked; after #14 merges, retarget/rebase to resulting `main`, verify the net child diff and rerun exact-head Quality.
-4. **#18 Asset Intelligence** — CI green but blocked by its conflicting `022`; renumber only after the preceding migration queue is fixed, then rerun Quality + PostgreSQL E2E.
+## Wave 1 — Transversal authorities and current proven inputs
 
-No provider mutation is introduced merely to promote these branches.
+### Privacy / #19
 
-## Phase 1 — Transversal governance and business state
+Land/revalidate #19 early because outbound Email, WhatsApp, Social Engagement and future nurture depend on a single consent/suppression authority.
 
-### P1.1 Privacy
+### Creative Truth / #14 and Demand / #15
 
-**#19 Privacy / LGPD** is the canonical transversal consent/suppression authority for downstream outbound channels. Provider opt-out observations may reconcile canonical suppression, but provider opt-in never fabricates business consent.
+- #14 is currently CI-verified and non-Draft.
+- #15 is CI-verified plus provider-verified for its READ boundary, with `writeExecuted=false`, and currently owns migration `022` in the proposed queue.
+- #16 remains stacked on #14; after #14 merges, retarget/rebase and rerun exact-head Quality.
+- #18 Asset Intelligence is CI-verified but must not merge with its conflicting `022`; renumber only when its real predecessor sequence is established, then rerun Quality + PostgreSQL E2E.
 
-### P1.2 Platform hardening
+## Wave 2 — Security and canonical CRM
 
-**#20 Platform Hardening** remains a hard prerequisite for AG-01 and broad autonomous operation. Normal Quality is green, but Security Supply Chain must be fully green before the hardening front is considered CI-verified for its declared scope.
+### Platform Hardening / #20
 
-Current security blocker: candidate-container scan and dependency review fail; CodeQL passes.
+Normal Quality is green, but Security Supply Chain is not. Candidate-container scan and dependency review must be fixed without weakening the gate. #20 remains a hard prerequisite for broad AG-01/autonomous operation.
 
-### P1.3 CRM / Sales / Conversation / Message
+### CRM / #22
 
-**#22 Advanced CRM** is the canonical owner for:
+#22 is now clean and CI-verified at its current exact head. It owns:
 
-- Contact → Lead → Opportunity expansion;
-- sales pipeline state;
-- `ConversationRecord`;
-- `MessageRecord`;
-- sales activity / next action / qualification / score / attribution support;
-- canonical PostgreSQL persistence, idempotency, audit and outbox integration.
+- advanced CRM / sales pipeline;
+- canonical Conversation/Message;
+- deterministic qualification/scoring;
+- sales activity/next action/SLA;
+- PostgreSQL persistence over existing CRM/outbox/audit foundations.
 
-Its current code gates are green, but `.github/workflows/crm-sales-catalog-one-shot.yml` remains in the diff. Remove it and rerun exact-head Quality + PostgreSQL E2E before merge readiness.
+No downstream provider may define a second commercial communication ledger. If #15 or another earlier hotspot PR changes `main`, refresh #22 and rerun exact-head Quality + PostgreSQL E2E before merge.
 
-No channel PR may introduce a second commercial Conversation/Message ledger.
+## Wave 3 — Email, Attribution/Revenue and Learning
 
-## Phase 2 — Channels and external AG-01
+### Email / #23
 
-### P2.1 Email
+#23 reuses #22 Conversation/Message and #19 Privacy. Its prior clean head had Quality + Email Provider Gate + PostgreSQL E2E green, but the active branch advanced again during this round, so only the new active SHA's gates count.
 
-**#23 Email / SendGrid** remains stacked on #22 and also depends on #19. Its own Email subgraph passes, but the overall provider gate is red because the parent snapshot was stale. Required sequence:
+CI readiness and provider readiness remain separate. Production/provider promotion additionally requires real sender/domain/SPF/DKIM/DMARC/secret/webhook/readback/delivery/bounce/complaint/unsubscribe evidence. No Email is sent solely to obtain a green state.
 
-1. clean/stabilize #22;
-2. restack #23 on the exact final #22 head;
-3. rerun normal Quality + Email Provider Gate + PostgreSQL E2E;
-4. configure real sender/domain/SPF/DKIM/DMARC/secrets without bypassing fail-closed binding;
-5. obtain controlled provider read/readback/delivery evidence only under policy/approval;
-6. promote provider state only after the matching evidence exists.
+### Attribution / Revenue / #33
 
-### P2.2 WhatsApp
+#33 is the canonical workstream and is CI-verified on its current exact head. Revenue is established only by confirmed provider-backed `TICKETING | CHECKOUT | PAYMENT | ORDER` evidence. DMs, clicks, UTMs, sessions and opportunity values remain acquisition/intent lineage only.
 
-Two competing branches exist. The canonical convergence path is:
+Migration `028_attribution_revenue_feedback.sql` is unique in the current snapshot but must be renumbered if the final predecessor queue changes.
 
-1. compare #25 and #31 deliberately;
-2. preserve any unique useful provider/webhook/throttle/retry behavior from #25;
-3. keep #22 as the commercial Conversation/Message owner;
-4. use #31 as the intended provider workstream because its WhatsApp persistence is transport-sidecar state referencing canonical CRM IDs;
-5. remove #31 `.github/workflows/format-whatsapp-stack-once.yml`;
-6. refresh #31 onto the exact clean #22 head and #19 Privacy boundary;
-7. resolve its migration collision globally;
-8. rerun exact-head Quality + PostgreSQL E2E;
-9. obtain WABA/scopes/Phone Number ID/template/callback/readback evidence before provider promotion.
+### R31 / #26
 
-PR #25 is a superseded candidate only after preservation review; do not merge its duplicate CRM communication model.
+#26 is now CI-verified and clean. It remains recommendation/evidence oriented and performs no unrestricted provider/financial write. Where the final architecture consumes #33 revenue/feedback evidence, integrate #33 before the corresponding R31 wiring and rerun #26 after any material rebase/integration change.
 
-### P2.3 AG-01
+## Wave 4 — AG-01, social, analytics and paid media
 
-**#21 AG-01** remains external to the MCP's deterministic provider-execution role and must reuse TOCA Core execution, Approval/Policy, CRM IDs, audit/outbox and R31 handoff.
+### AG-01 / #21
 
-Before merge readiness:
+#21 is now clean and CI-verified, and avoids shared runtime hotspots. It still depends on:
 
-- remove `.github/workflows/ag01-type-repair.yml`;
-- land/reconcile #20 hardening;
-- reconcile canonical #22 MessageRecord lineage;
-- reconcile #26 learning handoff without copying the learning engine;
-- reserialize migration number if earlier migrations move;
-- rerun exact-head Quality + PostgreSQL E2E.
+- #20 hardening being truly green for its declared security scope;
+- #22 final canonical MessageRecord lineage;
+- #26 final learning handoff.
 
-## Phase 3 — Learning, analytics and attribution
+After predecessors land, refresh AG-01, revalidate migration numbering and rerun exact-head Quality + PostgreSQL E2E. Provider-side execution remains gated by existing Core/Policy/Approval/readback paths.
 
-### P3.1 R31 / Marketing Autopilot
+### Social Engagement / #24
 
-**#26** owns the current R31 learning/experimentation front and reuses the existing scheduler/worker rather than creating another scheduler. Its PostgreSQL E2E is green, but Quality fails at Format. Fix formatting without weakening gates, then rerun the full exact-head suite.
+#24 is CI-verified. Activation waits #19 Privacy + #22 canonical Message/Conversation. Keep existing Meta webhook idempotency and fail closed to Human Required / Suggest Only where policy/consent/approval does not authorize automatic reply.
 
-R31 remains recommendation/evidence driven. It does not perform direct provider or financial writes.
+### Analytics / Capacity / #27
 
-### P3.2 Analytics / Capacity
+Both PostgreSQL suites are green on the current head, including dedicated Analytics Capacity E2E, but Quality currently fails at Format. Fix formatting without relaxing gates and rerun full Quality. Missing data sources remain `UNAVAILABLE`, never silently zero.
 
-**#27** provides read-only Analytics and Capacity read models over existing Measurement/CRM/Ticketing/Publication/Audit data. Current blockers:
+### Paid Media / Google Ads / #28
 
-- Quality fails at Format;
-- dedicated Analytics Capacity PostgreSQL E2E fails its functional execution step.
+Current PostgreSQL E2E passes, but Quality fails at Format. Fix and rerun. Continue consuming #15 Demand, #33 Attribution/Revenue and #27 Capacity through typed inputs rather than reimplementing them.
 
-Both must pass before CI verification. Missing sources remain unavailable rather than zero.
+Google Ads provider promotion requires real OAuth/developer-token/account READ/readback evidence. `ACTIVATE` stays separately gated and is never used just to test the integration.
 
-### P3.3 Conversion / attribution
+## Wave 5 — Human control, tenancy and WhatsApp convergence
 
-Continue only as canonical extensions of existing Measurement/CRM/ticketing roots. `WON` and realized revenue require external conversion/ticketing/payment evidence where applicable; never infer them from a DM, offer, click or checkout-start alone.
+### Human Control Center / #29
 
-## Phase 4 — Closed-loop paid media and social
+#29 is CI-verified, stays on the same MCP server and emits governed AG-01 intent rather than writing providers directly. Dependency cards remain fail-closed until the corresponding Core reads exist. Refresh after predecessor merges if the Core surface changes.
 
-### P4.1 Social Engagement
+### Multi-tenant foundation / #30
 
-**#24** is CI-verified but activation depends on #19 Privacy and #22 canonical Conversation/Message. Refresh it after those predecessors land, preserve existing Meta webhook idempotency and execute no automatic reply unless the established policy/consent/approval gates allow it.
+#30 is CI-verified and reuses existing identity/RBAC/ConnectedAccount/SecretResolver/Policy/Approval semantics. It does not create a second control plane. Its remaining structural blocker is migration `027` collision with the WhatsApp lane plus the fact that predecessor domain schemas are still moving.
 
-### P4.2 Paid Media / Google Ads
+Immediately before integration, establish the real migration order, renumber if needed and rerun exact-head Quality + PostgreSQL E2E after any renumber/rebase.
 
-**#28** is the active Paid Media/Google Ads workstream. It must continue to consume #15 Demand through typed input and attribution/revenue evidence rather than recreate either domain.
+### WhatsApp / #31 and #36
 
-At this round's readback, head `579e6e402e860c20ce428277c836f5ae9488a857` had Quality `32336319196` and PostgreSQL `32336319232` still in progress and was not mergeable. Re-read before any decision.
+#25 is correctly closed unmerged because it carried an obsolete duplicate CRM communication model. The active conflict is now #31 versus #36, both stacked on canonical #22.
 
-Google Ads `ACTIVATE` remains a separate governed capability and must never be activated merely as a validation technique.
+Neither wins by being older or newer. Converge into one branch preserving the strongest semantics:
 
-## Phase 5 — Human control, tenancy and operability
+- from #31: explicit runtime audit evidence, recipient-to-canonical-Contact channel validation, ambiguity-aware CRM resolution and sales activity for human handoff;
+- from #36: provider media metadata readback and unmatched-status workflow handoff;
+- from both: canonical Message/Conversation IDs, Privacy/Policy/Approval gate, throttle, retry/idempotency, 24h service window, approved templates, callbacks/readback, dead-letter/human handoff, existing Meta HMAC boundary and existing Outbox/Audit persistence.
 
-### P5.1 Human Control Center
+Both current candidates have PostgreSQL E2E green but Quality red at Lint. After semantic consolidation there must be exactly one WhatsApp merge source. Resolve the `027` migration collision with #30, rerun Quality + PostgreSQL E2E and only then pursue WABA/scopes/Phone Number ID/template/callback/readback provider evidence.
 
-**#29** is CI-verified and remains on the same MCP server. The UI emits governed AG-01 intent rather than writing provider/business state directly. Cards that depend on unavailable Core reads remain fail-closed.
+## Migration serialization
 
-After predecessor merges, reconcile cards against the current registry/runtime and rerun exact-head Quality if the branch changes.
+Observed `main` ends at `021_r29_video_artifacts.sql` in this round. Active collision points are:
 
-### P5.2 Multi-tenant foundation
+- `022`: #15 vs #18;
+- `027`: #30 vs the final WhatsApp branch.
 
-**#30** reuses existing identity/RBAC/ConnectedAccount/SecretResolver/policy/approval semantics and must not become a second control plane. Current blockers:
+The old #25 `024` collision is gone because #25 is closed unmerged. #23 currently reserves `024`, #26 `025`, #21 `026`, and #33 `028`, subject to the real integration sequence.
 
-- current live head is format-red;
-- migration `027` collides with #31;
-- dependent CRM/AG-01/asset domains are still moving.
+Before every migration-bearing integration:
 
-Before merge, reserialize the migration against the actual predecessor set and rerun Quality + PostgreSQL E2E on the exact final head.
+1. re-read live `main` migrations;
+2. list earlier approved migration-bearing PRs in actual merge order;
+3. assign the next monotonic number;
+4. update references/tests/docs;
+5. rerun full exact-head Quality + PostgreSQL E2E;
+6. never force another branch around a conflicting number.
 
-### P5.3 Security / observability / DR
+## Current governed merge order
 
-Extend #20's platform contracts and existing Foundation/SLO/Cloud SQL recovery evidence. Do not introduce a second observability backend or a separate DR state authority.
+No automatic merge is authorized. Current dependency-based order:
 
-## Migration serialization rule
+1. #17 control plane after final exact-head Quality.
+2. #19 Privacy.
+3. #14 Creative Truth.
+4. #15 Demand Intelligence / migration `022`.
+5. #20 after Security Supply Chain is fully green.
+6. #22 CRM/Sales / migration `023`, refreshed after earlier hotspot merges if needed.
+7. #16 after #14 merge + retarget/revalidation.
+8. #23 Email / migration `024`, after #19/#22 and exact active-head gates.
+9. #33 Attribution/Revenue after applicable CRM integration + global migration serialization.
+10. #26 R31/Learning after #33 if final feedback wiring is included.
+11. #21 AG-01 after #20/#22/#26.
+12. #24 Social Engagement after #19/#22 and refresh.
+13. #27 Analytics/Capacity after Quality is green.
+14. #28 Paid Media/Google Ads after #15/#33/#27 and Quality is green.
+15. #29 Human Control Center after dependency cards are reconciled.
+16. #18 Asset Intelligence after resolving `022` and Creative Truth integration, with post-renumber gates.
+17. #30 Multi-tenant after predecessor schemas/migrations stabilize.
+18. one converged WhatsApp branch from #31/#36 after #22/#19, migration serialization and fresh exact-head gates.
+19. Dependabot #1–#6 remain separate maintenance work.
 
-Observed `main` ends at `021_r29_video_artifacts.sql` in this round. Current open-branch collisions include `022`, `024` and `027`.
+Recompute after every merge, rebase, renumber or material head change.
 
-The coordinator does **not** assign numbers by PR creation time alone. Immediately before a migration-bearing PR enters the merge queue:
+## Safe parallel work
 
-1. read live `main` migrations;
-2. read all earlier migration-bearing PRs in the approved merge order;
-3. assign the next monotonically correct number;
-4. update all references/tests/docs;
-5. rerun exact-head Quality + PostgreSQL E2E;
-6. never merge a branch whose migration number collides or would later create out-of-order production application.
+May proceed without creating competing authorities:
 
-## Shared-hotspot policy
+- capability/data-governance reconciliation;
+- Email/WhatsApp provider configuration and read-only preflight preparation, without real send solely for testing;
+- real conversion/ticketing/checkout evidence adapters feeding #33 through existing Measurement/CRM roots;
+- observability/DR tests extending #20;
+- cross-domain integration tests proving #22 MessageRecord reuse by Email/WhatsApp/Social/AG-01;
+- migration-queue inspection tooling that never mutates feature branches automatically.
 
-Before modifying any of these files, inspect parallel PRs and isolate integration changes when possible:
+Do not open another CRM, Conversation/Message model, WhatsApp implementation, Email implementation, scheduler, Policy Engine, Approval Engine, attribution system, MCP or parallel persistence authority.
 
-- `src/server.ts`
-- `src/registry.ts`
-- `src/mcp/runtime-capability-resolver.ts`
-- `src/mcp/core-execution.ts`
-- `src/http-server.ts`
-- `scripts/architecture-check.mjs`
-- `package.json`
-- permanent CI workflows
+## Merge-ready definition
 
-Current hotspots are especially concentrated in #15, #22, #25 and #29. The #14/#16 pair is a parent-child stack and must preserve both parent semantics and child extensions.
-
-## Definition of a merge-ready Next Version PR
-
-A PR is merge-ready only when:
-
-- refreshed from the live intended base;
-- 0-behind its intended base or correctly stacked on the exact parent;
-- mergeable;
-- free of temporary/diagnostic/repair/one-shot workflow residue;
-- free of duplicate domain ownership;
-- migration number is globally consistent;
-- Quality is green on the exact final HEAD;
-- PostgreSQL E2E is green where persistence/migrations are involved;
-- restart/retry/idempotency evidence is present when applicable;
-- provider READ/readback evidence matches the claimed evidence state;
-- provider/business side effects were not executed solely to manufacture evidence;
-- dependencies and merge order are documented;
-- no evidence state is overstated.
-
-No automatic merge to `main` is authorized by this roadmap.
+A Next Version PR is merge-ready only when it is on the correct current base/stack, mergeable, free of duplicate ownership and temporary workflows, globally migration-consistent, exact-head Quality green, PostgreSQL E2E green when applicable, retry/idempotency evidence present when applicable, provider readback matches any provider claim, and no evidence state is overstated.
