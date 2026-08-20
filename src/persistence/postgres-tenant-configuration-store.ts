@@ -739,10 +739,13 @@ function nullableStringArray(value: unknown, code: string): readonly string[] | 
 }
 
 function stringArray(value: unknown, code: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || !entry.trim())) {
-    throw new TenantIsolationError(code);
+  if (!Array.isArray(value)) throw new TenantIsolationError(code);
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !entry.trim()) throw new TenantIsolationError(code);
+    result.push(entry);
   }
-  return value;
+  return result;
 }
 
 function safeInteger(value: string | number, code: string): number {
