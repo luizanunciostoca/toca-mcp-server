@@ -209,9 +209,7 @@ function crm(overrides: Partial<CrmCoreStore> = {}): CrmCoreStore {
 
 function service() {
   const recordRevenueEvidence = vi.fn(async (_context, input) =>
-    revenueEvidence(
-      input.status as RevenueEvidenceRecord['status'],
-    ),
+    revenueEvidence(input.status as RevenueEvidenceRecord['status']),
   );
   const captureTouchpoint = vi.fn(async () => ({ touchpointId: 'touch-1' }));
   const confirmOpportunityWon = vi.fn();
@@ -266,7 +264,9 @@ describe('commerce provider boundary', () => {
 
     expect(result.status).toBe('REVENUE_RECORDED');
     expect(attributionRevenue.recordRevenueEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ evidence: expect.arrayContaining(['provider-readback:payment-1']) }),
+      expect.objectContaining({
+        evidence: expect.arrayContaining(['provider-readback:payment-1']),
+      }),
       expect.objectContaining({ status: 'CONFIRMED', opportunityId: 'opp-1' }),
     );
   });
@@ -289,21 +289,24 @@ describe('commerce provider boundary', () => {
     ['CANCELED', 'CANCELED'],
     ['REFUNDED', 'REFUNDED'],
     ['CHARGEBACK', 'REFUNDED'],
-  ] as const)('maps %s readback without inventing a financial state', async (providerStatus, revenueStatus) => {
-    const attributionRevenue = service();
-    const coordinator = new CommerceProviderRevenueCoordinator(
-      adapter(readback(providerStatus)),
-      crm(),
-      attributionRevenue.value,
-    );
+  ] as const)(
+    'maps %s readback without inventing a financial state',
+    async (providerStatus, revenueStatus) => {
+      const attributionRevenue = service();
+      const coordinator = new CommerceProviderRevenueCoordinator(
+        adapter(readback(providerStatus)),
+        crm(),
+        attributionRevenue.value,
+      );
 
-    await coordinator.ingestWebhook(context, envelope);
+      await coordinator.ingestWebhook(context, envelope);
 
-    expect(attributionRevenue.recordRevenueEvidence).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ status: revenueStatus }),
-    );
-  });
+      expect(attributionRevenue.recordRevenueEvidence).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: revenueStatus }),
+      );
+    },
+  );
 
   it('deduplicates duplicate webhook processing with a deterministic idempotency key', async () => {
     const value = readback('PAID');

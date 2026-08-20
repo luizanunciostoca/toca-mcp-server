@@ -142,7 +142,11 @@ export class CommerceProviderRevenueCoordinator {
       paymentReference: readback.paymentReference,
       checkoutReference: readback.checkoutReference,
       conversationId: readback.attribution.conversationId,
-      idempotencyKey: commerceIdempotencyKey('revenue', readback, resolution.opportunity.opportunityId),
+      idempotencyKey: commerceIdempotencyKey(
+        'revenue',
+        readback,
+        resolution.opportunity.opportunityId,
+      ),
     });
     return {
       status: 'REVENUE_RECORDED',
@@ -176,7 +180,11 @@ export class CommerceProviderRevenueCoordinator {
       {
         opportunityId: opportunity.opportunityId,
         expectedVersion: opportunity.version,
-        idempotencyKey: commerceIdempotencyKey('won', ingestion.readback, opportunity.opportunityId),
+        idempotencyKey: commerceIdempotencyKey(
+          'won',
+          ingestion.readback,
+          opportunity.opportunityId,
+        ),
         feedbackIdempotencyKey: commerceIdempotencyKey(
           'feedback',
           ingestion.readback,
@@ -240,7 +248,10 @@ export async function resolveCommerceOpportunity(
 ): Promise<CommerceOpportunityResolution> {
   const explicitOpportunityId = nullableText(readback.attribution.opportunityId);
   if (explicitOpportunityId) {
-    const opportunity = await crm.getOpportunity({ ...scope, opportunityId: explicitOpportunityId });
+    const opportunity = await crm.getOpportunity({
+      ...scope,
+      opportunityId: explicitOpportunityId,
+    });
     if (!opportunity) {
       return { status: 'UNMATCHED', reason: 'UNKNOWN_OPPORTUNITY', contactId: null };
     }
@@ -263,12 +274,20 @@ export async function resolveCommerceOpportunity(
   }
   const email = nullableText(readback.customer.email);
   if (email) {
-    const contact = await crm.findContactByChannel({ ...scope, channelType: 'EMAIL', value: email });
+    const contact = await crm.findContactByChannel({
+      ...scope,
+      channelType: 'EMAIL',
+      value: email,
+    });
     if (contact) candidateContactIds.add(contact.contactId);
   }
   const phone = nullableText(readback.customer.phone);
   if (phone) {
-    const contact = await crm.findContactByChannel({ ...scope, channelType: 'PHONE', value: phone });
+    const contact = await crm.findContactByChannel({
+      ...scope,
+      channelType: 'PHONE',
+      value: phone,
+    });
     if (contact) candidateContactIds.add(contact.contactId);
   }
 
@@ -340,14 +359,20 @@ function revenueEvidenceStatus(readback: CommerceProviderReadback): RevenueEvide
 
 function validateProviderReadback(
   provider: string,
-  event: { readonly providerEventId: string; readonly source: string; readonly externalReference: string },
+  event: {
+    readonly providerEventId: string;
+    readonly source: string;
+    readonly externalReference: string;
+  },
   readback: CommerceProviderReadback,
 ): void {
-  if (readback.provider !== provider) throw new Error('COMMERCE_PROVIDER_READBACK_PROVIDER_MISMATCH');
+  if (readback.provider !== provider)
+    throw new Error('COMMERCE_PROVIDER_READBACK_PROVIDER_MISMATCH');
   if (readback.providerEventId !== event.providerEventId) {
     throw new Error('COMMERCE_PROVIDER_READBACK_EVENT_MISMATCH');
   }
-  if (readback.source !== event.source) throw new Error('COMMERCE_PROVIDER_READBACK_SOURCE_MISMATCH');
+  if (readback.source !== event.source)
+    throw new Error('COMMERCE_PROVIDER_READBACK_SOURCE_MISMATCH');
   if (readback.externalReference !== event.externalReference) {
     throw new Error('COMMERCE_PROVIDER_READBACK_REFERENCE_MISMATCH');
   }
@@ -396,7 +421,9 @@ function extendEvidence(
 ): MeasurementOperationContext {
   return {
     ...context,
-    evidence: [...new Set([...context.evidence, ...evidence].map((value) => value.trim()).filter(Boolean))],
+    evidence: [
+      ...new Set([...context.evidence, ...evidence].map((value) => value.trim()).filter(Boolean)),
+    ],
   };
 }
 
