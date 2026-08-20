@@ -27,9 +27,21 @@ function requireContains(path, expected, code) {
   if (!content?.includes(expected)) failures.push(`${code}:${path}:${expected}`);
 }
 
-requireContains('.github/workflows/quality.yml', 'node scripts/platform-hardening-check.mjs', 'QUALITY_HARDENING_GATE_MISSING');
-requireContains('.github/workflows/quality.yml', 'pnpm architecture:check', 'QUALITY_ARCHITECTURE_GATE_MISSING');
-requireContains('.github/workflows/quality.yml', 'pnpm typecheck', 'QUALITY_TYPECHECK_GATE_MISSING');
+requireContains(
+  '.github/workflows/quality.yml',
+  'node scripts/platform-hardening-check.mjs',
+  'QUALITY_HARDENING_GATE_MISSING',
+);
+requireContains(
+  '.github/workflows/quality.yml',
+  'pnpm architecture:check',
+  'QUALITY_ARCHITECTURE_GATE_MISSING',
+);
+requireContains(
+  '.github/workflows/quality.yml',
+  'pnpm typecheck',
+  'QUALITY_TYPECHECK_GATE_MISSING',
+);
 requireContains('.github/workflows/quality.yml', 'pnpm test', 'QUALITY_TEST_GATE_MISSING');
 requireContains('.github/workflows/quality.yml', 'pnpm build', 'QUALITY_BUILD_GATE_MISSING');
 
@@ -44,18 +56,34 @@ for (const action of [
 ]) {
   requireContains(securityWorkflowPath, action, 'SECURITY_SCANNER_MISSING');
 }
-requireContains(securityWorkflowPath, 'pnpm audit --audit-level high', 'VULNERABILITY_AUDIT_MISSING');
+requireContains(
+  securityWorkflowPath,
+  'pnpm audit --audit-level high',
+  'VULNERABILITY_AUDIT_MISSING',
+);
 requireContains(securityWorkflowPath, "format: 'cyclonedx'", 'SBOM_GENERATION_MISSING');
 requireContains(securityWorkflowPath, 'docker build', 'CONTAINER_BUILD_MISSING');
 requireContains(securityWorkflowPath, "scan-type: 'image'", 'CONTAINER_SCAN_MISSING');
 
 const deployPath = '.github/workflows/deploy-gcp.yml';
 const deploy = await readFile(deployPath, 'utf8');
-if (!deploy.includes('projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp'))
+if (
+  !deploy.includes(
+    'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp',
+  )
+)
   failures.push('WIF_IMMUTABLE_PROVIDER_ID_MISSING');
-if (!deploy.includes('GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com'))
+if (
+  !deploy.includes(
+    'GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+  )
+)
   failures.push('DEPLOY_IDENTITY_MISSING');
-if (!deploy.includes('GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'))
+if (
+  !deploy.includes(
+    'GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+  )
+)
   failures.push('RUNTIME_IDENTITY_MISSING');
 if (deploy.includes('GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-runtime@'))
   failures.push('DEPLOY_RUNTIME_IDENTITY_COLLISION');
@@ -63,9 +91,21 @@ if (!deploy.includes('--update-secrets')) failures.push('SECRET_MANAGER_REFERENC
 if (deploy.includes('credentials_json:')) failures.push('LONG_LIVED_GCP_KEY_FORBIDDEN');
 
 requireContains('Dockerfile', 'USER node', 'CONTAINER_NON_ROOT_USER_MISSING');
-requireContains('src/core/audit-ledger.ts', 'verifyAuditLedger', 'AUDIT_INTEGRITY_VERIFIER_MISSING');
-requireContains('src/core/operational-observability.ts', 'correlationId', 'CORRELATION_ID_MISSING');
-requireContains('src/core/structured-logger.ts', 'JSON.stringify', 'STRUCTURED_JSON_LOGGING_MISSING');
+requireContains(
+  'src/core/audit-ledger.ts',
+  'verifyAuditLedger',
+  'AUDIT_INTEGRITY_VERIFIER_MISSING',
+);
+requireContains(
+  'src/core/operational-observability.ts',
+  'correlationId',
+  'CORRELATION_ID_MISSING',
+);
+requireContains(
+  'src/core/structured-logger.ts',
+  'JSON.stringify',
+  'STRUCTURED_JSON_LOGGING_MISSING',
+);
 
 const alerts = JSON.parse(files.get('infra/observability/platform-hardening-alerts.json'));
 const dashboard = JSON.parse(files.get('infra/observability/platform-hardening-dashboard.json'));
@@ -112,7 +152,8 @@ for (const scenario of [
   'expired_token',
   'quota_exceeded',
 ]) {
-  if (!drillContract.includes(`'${scenario}'`)) failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
+  if (!drillContract.includes(`'${scenario}'`))
+    failures.push(`DRILL_SCENARIO_MISSING:${scenario}`);
 }
 if (!drillContract.includes('destructiveProviderMutationAllowed: false'))
   failures.push('DRILL_DESTRUCTIVE_MUTATION_GUARD_MISSING');
