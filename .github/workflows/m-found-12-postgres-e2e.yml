@@ -11,6 +11,7 @@ on:
       - 'test/r29-video-postgres-e2e.test.ts'
       - 'test/r29-video-core-runtime.test.ts'
       - 'test/crm-sales-postgres-e2e.test.ts'
+      - 'test/whatsapp-provider-postgres-e2e.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'src/content/**'
@@ -19,6 +20,8 @@ on:
       - 'src/events/**'
       - 'src/workflow/**'
       - 'src/crm/**'
+      - 'src/omnichannel/**'
+      - 'src/providers/whatsapp/**'
       - 'src/scheduler/**'
       - 'src/worker/**'
 
@@ -68,11 +71,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, worker restart safety and Video/R29 E2E
+      - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, WhatsApp, worker restart safety and Video/R29 E2E
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
           test/crm-sales-postgres-e2e.test.ts
+          test/whatsapp-provider-postgres-e2e.test.ts
           test/foundation-worker-postgres-e2e.test.ts
           test/r29-video-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
