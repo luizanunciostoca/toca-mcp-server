@@ -1,0 +1,99 @@
+name: Tenant Approval Test Fix Helper
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/tenant-approval-test-fix-helper.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/tenant-approval-control-center-20260820
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Update stable Core surface expectations
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          p = Path('tests/m-found-11-core-surface.test.ts')
+          text = p.read_text()
+          old = """    expect(CORE_MCP_TOOL_NAMES).toHaveLength(12);
+              expect(new Set(CORE_MCP_TOOL_NAMES).size).toBe(12);
+              expect(CORE_MCP_TOOL_NAMES).toEqual([
+                'toca.system.health',
+                'toca.capabilities.search',
+                'toca.capabilities.describe',
+                'toca.workflow.create',
+                'toca.workflow.get',
+                'toca.workflow.advance',
+                'toca.approval.request',
+                'toca.approval.get',
+          """
+          new = """    expect(CORE_MCP_TOOL_NAMES).toHaveLength(13);
+              expect(new Set(CORE_MCP_TOOL_NAMES).size).toBe(13);
+              expect(CORE_MCP_TOOL_NAMES).toEqual([
+                'toca.system.health',
+                'toca.capabilities.search',
+                'toca.capabilities.describe',
+                'toca.workflow.create',
+                'toca.workflow.get',
+                'toca.workflow.advance',
+                'toca.approval.request',
+                'toca.approval.list',
+                'toca.approval.get',
+          """
+          if text.count(old) != 1:
+              raise SystemExit(f'm-found surface expectation match count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_admin = "resolveIdentity: () => adminIdentity(),"
+          new_admin = "resolveIdentity: () => adminIdentity('test:admin', 'toca'),"
+          if text.count(old_admin) != 1:
+              raise SystemExit(f'admin identity expectation match count={text.count(old_admin)}')
+          p.write_text(text.replace(old_admin, new_admin, 1))
+
+          p = Path('test/r29-video-core-runtime.test.ts')
+          text = p.read_text()
+          old = """  it('keeps the public MCP facade fixed at the 12 TOCA Core tools', () => {
+              expect(CORE_MCP_TOOL_NAMES).toHaveLength(12);
+          """
+          new = """  it('keeps the public MCP facade explicit while allowing governed Core reads', () => {
+              expect(CORE_MCP_TOOL_NAMES).toHaveLength(13);
+          """
+          if text.count(old) != 1:
+              raise SystemExit(f'r29 surface expectation match count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write tests/m-found-11-core-surface.test.ts test/r29-video-core-runtime.test.ts
+          pnpm exec vitest run tests/m-found-11-core-surface.test.ts test/r29-video-core-runtime.test.ts
+          pnpm typecheck
+      - name: Commit validated test contract update
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git add tests/m-found-11-core-surface.test.ts test/r29-video-core-runtime.test.ts
+          git commit -m 'test(core): update surface contract for approval list'
+          git push origin HEAD:feat/tenant-approval-control-center-20260820
