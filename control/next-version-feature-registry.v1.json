@@ -1,0 +1,269 @@
+{
+  "schemaVersion": "1.0",
+  "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
+  "registryVersion": "1.0",
+  "status": "ACTIVE_COORDINATION",
+  "v1BaseSha": "abfb09b17e90c83790e803dcda091c8142c7407f",
+  "roundStartMainSha": "cd99521c8842268c5e1fb9e5efe58f9f6680ddf0",
+  "evidenceStates": [
+    "IMPLEMENTED",
+    "CI_VERIFIED",
+    "PROVIDER_VERIFIED",
+    "PRODUCTION_VERIFIED"
+  ],
+  "rules": {
+    "liveMainIsNextBaseline": true,
+    "exactHeadEvidenceRequired": true,
+    "noAutomaticMerge": true,
+    "noSecondMcp": true,
+    "noSecondCrm": true,
+    "noSecondScheduler": true,
+    "noSecondApprovalEngine": true,
+    "noSecondPolicyEngine": true,
+    "noProviderBypass": true,
+    "reuseExistingIdempotencyOutboxAudit": true
+  },
+  "features": [
+    {
+      "id": "NEXT-001",
+      "name": "Creative Truth / Venue Fidelity",
+      "planningState": "IN_PROGRESS",
+      "evidenceState": "CI_VERIFIED",
+      "evidenceHeadSha": "6bc92c6e652da7732ae663ccb1e0e752c35349f6",
+      "pr": 14,
+      "branch": "recovery/creative-truth-20260819",
+      "dependencies": [],
+      "revalidationRequired": true,
+      "providerEvidenceRequired": false,
+      "reuse": [
+        "existing Instagram publication pipeline",
+        "existing Google Drive/Sheets canonical assets",
+        "existing policy/approval boundaries"
+      ]
+    },
+    {
+      "id": "NEXT-002",
+      "name": "Morro Demand Intelligence",
+      "planningState": "IN_PROGRESS",
+      "evidenceState": "CI_VERIFIED",
+      "evidenceHeadSha": "a1dd29a640daf7ba7a58364ce1f7c9fce8226643",
+      "pr": 15,
+      "branch": "recovery/meta-ads-demand-intelligence-20260819",
+      "dependencies": [],
+      "revalidationRequired": true,
+      "providerEvidenceRequired": true,
+      "migration": "022_meta_ads_geo_demand_intelligence.sql",
+      "reuse": [
+        "existing Meta Ads read provider",
+        "existing governed Meta Ads write/readback path",
+        "existing PostgreSQL",
+        "existing budget guardrails"
+      ]
+    },
+    {
+      "id": "NEXT-003",
+      "name": "Photo-to-Video governed routes",
+      "planningState": "IN_PROGRESS",
+      "evidenceState": "CI_VERIFIED",
+      "evidenceHeadSha": "8a99c9059627c76eec59f259308138758177d303",
+      "pr": 16,
+      "branch": "recovery/photo-to-video-20260819",
+      "dependencies": ["NEXT-001"],
+      "stackedOnPr": 14,
+      "revalidationRequired": true,
+      "providerEvidenceRequired": true,
+      "reuse": [
+        "Creative Truth parent policy",
+        "existing GCS publication asset boundary",
+        "existing Drive/Sheets registries",
+        "existing publication approval path"
+      ]
+    },
+    {
+      "id": "NEXT-004",
+      "name": "AG-01 external orchestrator runtime",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-020"],
+      "providerEvidenceRequired": true,
+      "architectureBoundary": "separate orchestrator runtime; TOCA MCP remains deterministic executor",
+      "reuse": ["32 canonical routes", "TOCA MCP typed tools", "existing identity and audit model"]
+    },
+    {
+      "id": "NEXT-005",
+      "name": "TOCA Omnichannel Gateway",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-004", "NEXT-010"],
+      "providerEvidenceRequired": true,
+      "reuse": ["existing durable workflows", "existing idempotency", "existing outbox/audit"]
+    },
+    {
+      "id": "NEXT-006",
+      "name": "WhatsApp Business real provider",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-005", "NEXT-016"],
+      "providerEvidenceRequired": true,
+      "promotionPath": ["READ_VERIFY", "PREPARE", "CONTROLLED_SEND", "PRODUCTION_SEND"]
+    },
+    {
+      "id": "NEXT-007",
+      "name": "Email real provider",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-005", "NEXT-016"],
+      "providerEvidenceRequired": true,
+      "reuse": ["MessageRecord model", "suppression/consent policy", "outbox/audit"]
+    },
+    {
+      "id": "NEXT-008",
+      "name": "CRM and Sales Engine expansion",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-016"],
+      "providerEvidenceRequired": false,
+      "reuse": ["ContactRecord", "LeadRecord", "OpportunityRecord", "existing PostgreSQL", "existing outbox/audit"]
+    },
+    {
+      "id": "NEXT-009",
+      "name": "Canonical sales pipeline",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008"],
+      "providerEvidenceRequired": false
+    },
+    {
+      "id": "NEXT-010",
+      "name": "Conversation and Message records",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008"],
+      "providerEvidenceRequired": false,
+      "reuse": ["CRM Core", "EventRecord", "existing identity/correlation model"]
+    },
+    {
+      "id": "NEXT-011",
+      "name": "Deterministic lead scoring",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-010"],
+      "providerEvidenceRequired": false
+    },
+    {
+      "id": "NEXT-012",
+      "name": "Durable follow-up and nurture",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-009", "NEXT-010", "NEXT-016"],
+      "providerEvidenceRequired": true,
+      "reuse": ["existing durable workflow", "existing scheduler", "existing consent/suppression policy"]
+    },
+    {
+      "id": "NEXT-013",
+      "name": "Attribution and Revenue Intelligence",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-010"],
+      "providerEvidenceRequired": true
+    },
+    {
+      "id": "NEXT-014",
+      "name": "Marketing Autopilot R19 closed loop",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-001", "NEXT-002", "NEXT-013"],
+      "providerEvidenceRequired": true,
+      "reuse": ["existing scheduler", "existing content registry", "existing publication workflow"]
+    },
+    {
+      "id": "NEXT-015",
+      "name": "Social Engagement R30 to CRM",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-010", "NEXT-016"],
+      "providerEvidenceRequired": true
+    },
+    {
+      "id": "NEXT-016",
+      "name": "Privacy / LGPD policy expansion",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": [],
+      "providerEvidenceRequired": false,
+      "reuse": ["existing R16 privacy policy authority", "existing suppression and approval concepts"]
+    },
+    {
+      "id": "NEXT-017",
+      "name": "Meta Ads closed-loop optimization",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-002", "NEXT-013"],
+      "providerEvidenceRequired": true,
+      "reuse": ["V1 READ_PREPARE_CREATE_PAUSED_READBACK path", "existing budget guardrails"]
+    },
+    {
+      "id": "NEXT-018",
+      "name": "Google Ads real provider",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-013"],
+      "providerEvidenceRequired": true
+    },
+    {
+      "id": "NEXT-019",
+      "name": "Sales conversion / ticketing / checkout evidence",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-013"],
+      "providerEvidenceRequired": true
+    },
+    {
+      "id": "NEXT-020",
+      "name": "Security and supply-chain hardening",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": [],
+      "providerEvidenceRequired": true,
+      "notes": [
+        "main protection is currently verified by V1 closeout",
+        "Drive anyone-with-link exposure remains a governance review item"
+      ]
+    },
+    {
+      "id": "NEXT-021",
+      "name": "Growth and Sales observability",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-008", "NEXT-013"],
+      "providerEvidenceRequired": true,
+      "reuse": ["existing Foundation/SLO telemetry"]
+    },
+    {
+      "id": "NEXT-022",
+      "name": "DR coverage for Next Version state",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-005", "NEXT-008", "NEXT-010", "NEXT-013"],
+      "providerEvidenceRequired": true,
+      "reuse": ["existing Cloud SQL backup/PITR/runbooks", "existing DR evidence model"]
+    },
+    {
+      "id": "NEXT-023",
+      "name": "Capability and data governance",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": [],
+      "providerEvidenceRequired": false,
+      "reuse": ["existing 32 routes", "existing capability registry", "existing policy engine"]
+    },
+    {
+      "id": "NEXT-024",
+      "name": "R31 governed learning loop",
+      "planningState": "PLANNED",
+      "evidenceState": null,
+      "dependencies": ["NEXT-013", "NEXT-014", "NEXT-021"],
+      "providerEvidenceRequired": false
+    }
+  ]
+}
