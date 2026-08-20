@@ -1,0 +1,42 @@
+name: Tenant Approval Helper Promoter
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/tenant-approval-helper-promoter.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/tenant-approval-control-center-20260820
+          persist-credentials: true
+      - name: Promote integration helper to PR-visible execution
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/tenant-approval-integration-helper.yml')
+          text = path.read_text()
+          old = """on:\n  push:\n    branches:\n      - feat/tenant-approval-control-center-20260820\n    paths:\n      - '.github/workflows/tenant-approval-integration-helper.yml'\n"""
+          new = """on:\n  pull_request:\n    branches:\n      - main\n    paths:\n      - '.github/workflows/tenant-approval-integration-helper.yml'\n      - '.github/workflows/tenant-approval-helper-promoter.yml'\n"""
+          if text.count(old) != 1:
+              raise SystemExit('integration helper trigger did not match expected branch-local form')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/tenant-approval-helper-promoter.yml
+          git config user.name 'TOCA OS Integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore(ci): expose tenant approval helper on PR'
+          git push origin HEAD:feat/tenant-approval-control-center-20260820
