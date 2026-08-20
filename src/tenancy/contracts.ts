@@ -1,3 +1,4 @@
+import type { AuthorizationRole } from '../core/identity.js';
 import type { SecretReference } from '../core/secrets.js';
 import type { RiskClass } from '../core/tool-registry.js';
 import type { RouteId } from '../governance/types.js';
@@ -69,6 +70,17 @@ export interface TenantApprovalChainBinding {
   readonly evidence: readonly string[];
 }
 
+export interface TenantRbacGrant {
+  readonly grantId: string;
+  readonly principalId: string;
+  readonly role: AuthorizationRole;
+  readonly allowedRouteIds: readonly RouteId[] | null;
+  readonly allowedCapabilityIds: readonly string[] | null;
+  readonly allowedTargetAccounts: readonly string[] | null;
+  readonly enabled: boolean;
+  readonly evidence: readonly string[];
+}
+
 export interface TenantAssetRegistryBinding {
   readonly assetRegistryResourceId: string;
   readonly evidence: readonly string[];
@@ -99,6 +111,7 @@ export interface TenantConfiguration extends TenantScope {
   readonly budgets: readonly TenantBudgetEnvelope[];
   readonly policies: readonly TenantPolicyBinding[];
   readonly approvalChains: readonly TenantApprovalChainBinding[];
+  readonly rbacGrants: readonly TenantRbacGrant[];
   readonly assets: TenantAssetRegistryBinding;
   readonly analytics: TenantAnalyticsBinding;
   readonly quotas: readonly TenantQuota[];
