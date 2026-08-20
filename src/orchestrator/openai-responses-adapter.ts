@@ -100,8 +100,10 @@ export class OpenAiResponsesDecisionAdapter implements Ag01DecisionModelAdapter 
         const responseBody = (await response.json()) as OpenAiResponseBody;
         const responseId = requireString(responseBody.id, 'AG01_MODEL_RESPONSE_ID_MISSING');
         const responseModel = requireString(responseBody.model, 'AG01_MODEL_RESPONSE_MODEL_MISSING');
-        if (responseBody.status !== 'completed') {
-          throw new Error(`AG01_MODEL_RESPONSE_INCOMPLETE:${String(responseBody.status ?? 'unknown')}`);
+        const responseStatus =
+          typeof responseBody.status === 'string' ? responseBody.status : 'unknown';
+        if (responseStatus !== 'completed') {
+          throw new Error(`AG01_MODEL_RESPONSE_INCOMPLETE:${responseStatus}`);
         }
         const outputText = extractOutputText(responseBody);
         let rawDecision: unknown;
@@ -196,9 +198,7 @@ function buildRequestBody(
 
   const artifacts = [...input.registry.resources.values()]
     .filter((resource) => resource.status === 'ACTIVE_CANONICAL')
-    .filter((resource) =>
-      /^(SOP-|TPL-|PIPE-|ENGINE-|DOC-)/.test(resource.resourceId),
-    )
+    .filter((resource) => /^(SOP-|TPL-|PIPE-|ENGINE-|DOC-)/.test(resource.resourceId))
     .map((resource) => ({
       resourceId: resource.resourceId,
       title: resource.title,
