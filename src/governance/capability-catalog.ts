@@ -122,8 +122,11 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
     instagramReadsEnabled: true,
     metaAdsReadsEnabled: true,
     metaAdsWritesEnabled: true,
+    paidMediaDecisionEnabled: true,
     googleAdsPhase: 'MANAGE',
+    googleAdsActivateEnabled: true,
     tocaManagedInstagramSchedulerEnabled: true,
+    crmSalesRuntimeEnabled: true,
   })
     .list()
     .map((definition) => [definition.name, definition] as const),
@@ -294,9 +297,14 @@ function config(capabilityId: string): readonly string[] {
   if (/^google_ads\./.test(capabilityId)) {
     return [
       'GOOGLE_ADS_PHASE',
+      'GOOGLE_ADS_ACTIVATE_ENABLED',
       'GOOGLE_ADS_CUSTOMER_ID',
       'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
       'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+      'GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY',
+      'GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY',
+      'GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY',
+      'GOOGLE_ADS_OAUTH_TOKEN_ENDPOINT',
       'GOOGLE_ADS_ALLOWED_CUSTOMER_ID',
       'GOOGLE_ADS_ALLOWED_CURRENCY',
       'GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS',

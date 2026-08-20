@@ -5,11 +5,16 @@ export const PRIVACY_ROUTE_ID = 'R16' as const;
 
 export const PRIVACY_CAPABILITY_IDS = [
   'privacy.purpose.resolve',
+  'privacy.communication.resolve',
   'privacy.legal_basis.record',
   'privacy.consent.record',
   'privacy.consent.revoke',
+  'privacy.opt_out.record',
   'privacy.suppression.check',
+  'privacy.suppression.record',
   'privacy.preference.update',
+  'privacy.provider_consent.reconcile',
+  'privacy.pii.access.evaluate',
   'privacy.retention.apply',
   'privacy.subject_request.create',
   'privacy.subject_request.status',
@@ -28,6 +33,21 @@ export type LegalBasisReviewStatus = 'APPROVED' | 'PENDING';
 export type ConsentState = 'GRANTED' | 'DENIED';
 export type PreferenceState = 'ALLOW' | 'DENY';
 export type RetentionAction = 'HOLD' | 'REVIEW' | 'DELETE' | 'ANONYMIZE';
+export type PrivacyIdentityState = 'RESOLVED' | 'AMBIGUOUS' | 'UNKNOWN';
+export type CommunicationPolicyState = 'ALLOWED' | 'BLOCKED' | 'UNKNOWN_BLOCKED';
+export type ProviderConsentState =
+  'OPTED_IN' | 'OPTED_OUT' | 'UNSUBSCRIBED' | 'BOUNCED' | 'COMPLAINT' | 'UNKNOWN';
+export type SuppressionReason =
+  | 'USER_OPT_OUT'
+  | 'PROVIDER_OPT_OUT'
+  | 'PROVIDER_UNSUBSCRIBED'
+  | 'PROVIDER_BOUNCED'
+  | 'PROVIDER_COMPLAINT'
+  | 'POLICY'
+  | 'LEGAL'
+  | 'MANUAL';
+export type PiiClassification = 'PUBLIC' | 'INTERNAL' | 'PERSONAL' | 'SENSITIVE';
+export type PiiAuthorizationState = 'AUTHORIZED' | 'DENIED' | 'UNKNOWN';
 
 export interface PrivacyScope {
   readonly tenantId: string;
@@ -63,11 +83,16 @@ export type PrivacySubjectRequestStatus = (typeof PRIVACY_SUBJECT_REQUEST_STATUS
 
 export const PRIVACY_LEDGER_EVENT_TYPES = [
   'PURPOSE_RESOLVED',
+  'COMMUNICATION_POLICY_RESOLVED',
   'LEGAL_BASIS_RECORDED',
   'CONSENT_RECORDED',
   'CONSENT_REVOKED',
+  'OPT_OUT_RECORDED',
   'SUPPRESSION_CHECKED',
+  'SUPPRESSION_RECORDED',
   'PREFERENCE_UPDATED',
+  'PROVIDER_CONSENT_RECONCILED',
+  'PII_ACCESS_EVALUATED',
   'RETENTION_APPLIED',
   'SUBJECT_REQUEST_CREATED',
   'SUBJECT_REQUEST_STATUS_CHANGED',
@@ -85,12 +110,21 @@ export interface PrivacyExecutionContext extends PrivacyScope {
   readonly evidence: readonly string[];
 }
 
+export interface PrivacyCommunicationPolicy {
+  readonly channels: readonly string[];
+  readonly consentRequired: boolean;
+  readonly preferenceRequired: boolean;
+  readonly prohibited: boolean;
+  readonly validUntil: string | null;
+}
+
 export interface PrivacyPurposeDefinition extends PrivacyScope {
   readonly purposeId: string;
   readonly description: string;
   readonly policyRef: string;
   readonly active: boolean;
   readonly evidence: readonly string[];
+  readonly communication?: PrivacyCommunicationPolicy;
 }
 
 export interface PrivacyPurposeRegistry {
@@ -183,6 +217,45 @@ export interface SuppressionDecision {
   readonly reasons: readonly string[];
   readonly purposeId: string;
   readonly channel: string;
+}
+
+export interface PrivacyContactReference {
+  readonly subjectRef: string | null;
+  readonly identityState: PrivacyIdentityState;
+}
+
+export interface CommunicationPolicyDecision {
+  readonly state: CommunicationPolicyState;
+  readonly allowed: boolean;
+  readonly blocked: boolean;
+  readonly reasons: readonly string[];
+  readonly purposeId: string;
+  readonly channel: string;
+  readonly policyRef: string | null;
+}
+
+export interface ProviderConsentObservation {
+  readonly provider: string;
+  readonly providerSubjectRef: string;
+  readonly state: ProviderConsentState;
+  readonly observedAt: string;
+  readonly providerEvidenceRef: string;
+}
+
+export interface PiiAuthorizationDecision {
+  readonly state: PiiAuthorizationState;
+  readonly decisionRef: string | null;
+  readonly allowedClassifications: readonly PiiClassification[];
+  readonly allowedFields: readonly string[];
+}
+
+export interface PiiAccessDecision {
+  readonly state: 'ALLOWED' | 'MINIMIZED' | 'DENIED' | 'UNKNOWN_BLOCKED';
+  readonly allowed: boolean;
+  readonly classification: PiiClassification;
+  readonly exposedFields: readonly string[];
+  readonly omittedFields: readonly string[];
+  readonly reasons: readonly string[];
 }
 
 export interface SubjectRequestSnapshot extends PrivacyScope {

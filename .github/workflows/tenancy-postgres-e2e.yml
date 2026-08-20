@@ -1,0 +1,61 @@
+name: Tenancy PostgreSQL E2E
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/031_multi_tenant_foundation.sql'
+      - 'src/tenancy/**'
+      - 'src/persistence/postgres-tenant-configuration-store.ts'
+      - 'test/tenant-configuration-postgres-e2e.test.ts'
+      - '.github/workflows/tenancy-postgres-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenancy-postgres-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tenant-postgres-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: toca
+          POSTGRES_PASSWORD: toca-tenancy-local-only
+          POSTGRES_DB: toca_tenancy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U toca -d toca_tenancy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://toca:toca-tenancy-local-only@127.0.0.1:5432/toca_tenancy
+      DATABASE_SSL: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply real repository migrations
+        run: pnpm migrate
+      - name: Execute tenant restart and cross-tenant isolation E2E
+        run: pnpm exec vitest run test/tenant-configuration-postgres-e2e.test.ts
+      - name: Verify no migration drift was introduced during execution
+        run: pnpm migrate

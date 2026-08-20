@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "SUNSET_AD_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "META_ADS",
+    "format": "AD_CREATIVE"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
+  },
+  "canvases": [
+    { "width": 1080, "height": 1350, "aspectRatio": "4:5" },
+    { "width": 1080, "height": 1080, "aspectRatio": "1:1" },
+    { "width": 1080, "height": 1920, "aspectRatio": "9:16" }
+  ],
+  "palette": {
+    "sunGlow": "#FFC84A",
+    "sunsetOrange": "#FF7A00",
+    "deepOrange": "#E65A00",
+    "amber": "#C9792B",
+    "deepBrown": "#3A1C0F",
+    "white": "#FFFFFF",
+    "translucentBlack": "rgba(0,0,0,0.52)"
+  },
+  "visualEssence": ["SOLAR", "PREMIUM", "REAL", "CONVERSION_ORIENTED"],
+  "photography": {
+    "realVenueVerifiedAssetRequired": true,
+    "marketingReadyMasterRequired": true,
+    "syntheticVenueReplacementForbidden": true
+  },
+  "hierarchy": ["HOOK_OR_HEADLINE", "VALUE_PROPOSITION", "CTA", "FUNCTIONAL_INFO", "BRAND_FOOTER"],
+  "conversionRules": {
+    "singlePrimaryCta": true,
+    "shortCopyPreferred": true,
+    "priceOrOfferRequiresConfirmedSource": true,
+    "urgencyClaimRequiresConfirmedSource": true,
+    "eventTimeRequiresConfirmedSource": true
+  },
+  "brand": {
+    "deterministicBrandInsertion": true,
+    "aiLogoReconstructionForbidden": true,
+    "partnerLogosOnlyWhenCampaignRequires": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true,
+    "rejectOn": [
+      "AI_RECREATED_LOGO",
+      "UNVERIFIED_VENUE",
+      "SYNTHETIC_VENUE_REPLACEMENT",
+      "ARCHITECTURE_DRIFT",
+      "ASSET_LINEAGE_MISSING",
+      "UNVERIFIED_CLAIM",
+      "MULTIPLE_PRIMARY_CTAS",
+      "TEXT_ILLEGIBLE",
+      "WRONG_DIMENSIONS"
+    ]
+  },
+  "referencePolicy": {
+    "syntheticExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
+    "neverVenueEvidence": true
+  }
+}

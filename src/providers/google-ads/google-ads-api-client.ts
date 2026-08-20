@@ -1,10 +1,18 @@
 import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 
+export interface GoogleAdsOAuthRefreshConfig {
+  readonly clientIdRef: SecretReference;
+  readonly clientSecretRef: SecretReference;
+  readonly refreshTokenRef: SecretReference;
+  readonly tokenEndpoint?: string;
+}
+
 export interface GoogleAdsApiClientConfig {
   readonly apiVersion?: string;
   readonly customerId: string;
   readonly loginCustomerId?: string;
-  readonly accessTokenRef: SecretReference;
+  readonly accessTokenRef?: SecretReference;
+  readonly oauthRefresh?: GoogleAdsOAuthRefreshConfig;
   readonly developerTokenRef: SecretReference;
   readonly apiBaseUrl?: string;
 }
@@ -23,10 +31,16 @@ export interface GoogleAdsApiClient {
   ): Promise<GoogleAdsApiResponse<Record<string, unknown>>>;
 }
 
+interface CachedOAuthToken {
+  readonly value: string;
+  readonly refreshAfterMs: number;
+}
+
 export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
   readonly #apiVersion: string;
   readonly #apiBaseUrl: string;
   readonly #customerId: string;
+  #cachedOAuthToken: CachedOAuthToken | undefined;
 
   constructor(
     private readonly config: GoogleAdsApiClientConfig,
@@ -36,6 +50,11 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     this.#apiVersion = config.apiVersion ?? 'v25';
     this.#apiBaseUrl = (config.apiBaseUrl ?? 'https://googleads.googleapis.com').replace(/\/$/, '');
     this.#customerId = normalizeCustomerId(config.customerId);
+    const hasStaticToken = config.accessTokenRef !== undefined;
+    const hasRefreshCredentials = config.oauthRefresh !== undefined;
+    if (hasStaticToken === hasRefreshCredentials) {
+      throw new Error('GOOGLE_ADS_EXACTLY_ONE_AUTH_MODE_REQUIRED');
+    }
   }
 
   listAccessibleCustomers(): Promise<GoogleAdsApiResponse<{ resourceNames?: string[] }>> {
@@ -66,13 +85,62 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     return this.request(path, body);
   }
 
+  private async accessToken(): Promise<string> {
+    if (this.config.accessTokenRef) return this.secrets.resolve(this.config.accessTokenRef);
+    if (this.#cachedOAuthToken && Date.now() < this.#cachedOAuthToken.refreshAfterMs) {
+      return this.#cachedOAuthToken.value;
+    }
+    const oauth = this.config.oauthRefresh;
+    if (!oauth) throw new Error('GOOGLE_ADS_OAUTH_REFRESH_CONFIG_REQUIRED');
+    const [clientId, clientSecret, refreshToken] = await Promise.all([
+      this.secrets.resolve(oauth.clientIdRef),
+      this.secrets.resolve(oauth.clientSecretRef),
+      this.secrets.resolve(oauth.refreshTokenRef),
+    ]);
+    const response = await this.fetchImpl(
+      oauth.tokenEndpoint ?? 'https://oauth2.googleapis.com/token',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token',
+        }),
+      },
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      access_token?: unknown;
+      expires_in?: unknown;
+      error?: unknown;
+    };
+    if (!response.ok) {
+      const errorCode =
+        typeof payload.error === 'string' ? payload.error : `HTTP_${response.status}`;
+      throw new Error(`GOOGLE_ADS_OAUTH_ERROR:${errorCode}`);
+    }
+    if (typeof payload.access_token !== 'string' || payload.access_token.length === 0) {
+      throw new Error('GOOGLE_ADS_OAUTH_ACCESS_TOKEN_MISSING');
+    }
+    const expiresInSeconds =
+      typeof payload.expires_in === 'number' && Number.isFinite(payload.expires_in)
+        ? Math.max(60, payload.expires_in)
+        : 3_600;
+    this.#cachedOAuthToken = {
+      value: payload.access_token,
+      refreshAfterMs: Date.now() + Math.max(0, expiresInSeconds - 60) * 1_000,
+    };
+    return payload.access_token;
+  }
+
   private async request<T>(
     path: string,
     body?: Record<string, unknown>,
     method: 'GET' | 'POST' = 'POST',
   ): Promise<GoogleAdsApiResponse<T>> {
     const [accessToken, developerToken] = await Promise.all([
-      this.secrets.resolve(this.config.accessTokenRef),
+      this.accessToken(),
       this.secrets.resolve(this.config.developerTokenRef),
     ]);
     const response = await this.fetchImpl(`${this.#apiBaseUrl}/${this.#apiVersion}${path}`, {

@@ -293,6 +293,8 @@ describe('Google Ads R28 phase registry', () => {
   it('exposes capabilities only as their rollout phase is reached', () => {
     const readOnly = createToolRegistry({ googleAdsPhase: 'READ_ONLY' });
     expect(readOnly.get('google_ads.account.inspect')).toBeDefined();
+    expect(readOnly.get('google_ads.account.verify')).toBeDefined();
+    expect(readOnly.get('google_ads.customers.discover')).toBeDefined();
     expect(readOnly.get('google_ads.campaign.prepare')).toBeUndefined();
 
     const prepare = createToolRegistry({ googleAdsPhase: 'PREPARE' });
@@ -307,7 +309,10 @@ describe('Google Ads R28 phase registry', () => {
     expect(readback.get('google_ads.campaign.readback')).toBeDefined();
     expect(readback.get('google_ads.campaign.activate')).toBeUndefined();
 
-    const manage = createToolRegistry({ googleAdsPhase: 'MANAGE' });
+    const manage = createToolRegistry({
+      googleAdsPhase: 'MANAGE',
+      googleAdsActivateEnabled: true,
+    });
     expect(manage.get('google_ads.campaign.activate')).toMatchObject({
       riskClass: 'FINANCIAL_IMPACT',
       capabilityStatus: 'IMPLEMENTED',

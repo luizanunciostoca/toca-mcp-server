@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
+import { creativeTruthPublicationBindingSchema } from '../contracts/creative-truth.js';
 import type { Scheduler, ScheduledJob } from '../scheduler/scheduler-contracts.js';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
@@ -17,6 +18,11 @@ const instagramPublishRequestSchema = z.object({
   caption: z.string().optional(),
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  creativeTruthBinding: creativeTruthPublicationBindingSchema.optional(),
+  publicationAssetSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/i)
+    .optional(),
 });
 
 export class InstagramPublicationJobScheduler {
@@ -102,5 +108,11 @@ export function parseInstagramPublishRequest(value: unknown): InstagramPublishRe
     correlationId: parsed.correlationId,
     idempotencyKey: parsed.idempotencyKey,
     ...(parsed.caption !== undefined ? { caption: parsed.caption } : {}),
+    ...(parsed.creativeTruthBinding !== undefined
+      ? { creativeTruthBinding: parsed.creativeTruthBinding }
+      : {}),
+    ...(parsed.publicationAssetSha256 !== undefined
+      ? { publicationAssetSha256: parsed.publicationAssetSha256 }
+      : {}),
   };
 }

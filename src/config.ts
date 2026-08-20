@@ -39,6 +39,7 @@ const configSchema = z
     GOOGLE_ADS_PHASE: z
       .enum(['OFF', 'READ_ONLY', 'PREPARE', 'CREATE_PAUSED', 'READBACK', 'MANAGE'])
       .default('OFF'),
+    GOOGLE_ADS_ACTIVATE_ENABLED: booleanFromEnv,
     GOOGLE_ADS_API_VERSION: z
       .string()
       .trim()
@@ -55,6 +56,13 @@ const configSchema = z
       .regex(/^\d{3}-?\d{3}-?\d{4}$/)
       .optional(),
     GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_ADS_OAUTH_TOKEN_ENDPOINT: z
+      .string()
+      .url()
+      .default('https://oauth2.googleapis.com/token'),
     GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     GOOGLE_ADS_ALLOWED_CUSTOMER_ID: z
       .string()
@@ -184,7 +192,6 @@ const configSchema = z
     if (config.GOOGLE_ADS_PHASE !== 'OFF') {
       const requiredGoogleAdsFields = [
         'GOOGLE_ADS_CUSTOMER_ID',
-        'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
         'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
         'GOOGLE_ADS_ALLOWED_CUSTOMER_ID',
         'GOOGLE_ADS_ALLOWED_CURRENCY',
@@ -201,6 +208,31 @@ const configSchema = z
           });
         }
       }
+
+      const oauthFields = [
+        config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY,
+        config.GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY,
+        config.GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY,
+      ];
+      const oauthConfigured = oauthFields.every(Boolean);
+      const oauthPartiallyConfigured = oauthFields.some(Boolean) && !oauthConfigured;
+      if (oauthPartiallyConfigured) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY'],
+          message: 'Google Ads OAuth refresh credential references must be configured together',
+        });
+      }
+      const staticAccessConfigured = Boolean(config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY);
+      if (staticAccessConfigured === oauthConfigured) {
+        context.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY'],
+          message:
+            'Configure exactly one Google Ads auth mode: static access token or OAuth refresh',
+        });
+      }
+
       if (
         config.GOOGLE_ADS_CUSTOMER_ID &&
         config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID &&
@@ -228,6 +260,13 @@ const configSchema = z
           code: 'custom',
           path: ['DATABASE_URL'],
           message: 'DATABASE_URL is required from GOOGLE_ADS_PHASE=CREATE_PAUSED onward',
+        });
+      }
+      if (config.GOOGLE_ADS_ACTIVATE_ENABLED && config.GOOGLE_ADS_PHASE !== 'MANAGE') {
+        context.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_ADS_ACTIVATE_ENABLED'],
+          message: 'GOOGLE_ADS_ACTIVATE_ENABLED requires GOOGLE_ADS_PHASE=MANAGE',
         });
       }
     }
@@ -418,19 +457,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
   }
 
   if (config.GOOGLE_ADS_PHASE !== 'OFF') {
-    if (!config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY || !config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY) {
-      throw new Error('Google Ads secret references are required when GOOGLE_ADS_PHASE is not OFF');
+    if (!config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY) {
+      throw new Error(
+        'Google Ads developer token reference is required when GOOGLE_ADS_PHASE is not OFF',
+      );
     }
-    assertReferencedSecret(
-      env,
-      config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY,
-      'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
-    );
     assertReferencedSecret(
       env,
       config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY,
       'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
     );
+    if (config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY) {
+      assertReferencedSecret(
+        env,
+        config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY,
+        'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+      );
+    } else {
+      const refreshFields = [
+        ['GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY', config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY],
+        ['GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY', config.GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY],
+        ['GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY', config.GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY],
+      ] as const;
+      for (const [source, key] of refreshFields) {
+        if (!key) throw new Error(`${source} is required for Google Ads OAuth refresh mode`);
+        assertReferencedSecret(env, key, source);
+      }
+    }
   }
 
   return config;
