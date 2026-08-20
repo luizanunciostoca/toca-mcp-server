@@ -22,23 +22,29 @@ class RecordingTransport implements MetaApiTransport {
   request(url: string, init: RequestInit): Promise<MetaApiResponse> {
     this.requests.push({ url, init });
     if (init.method === 'GET' && url.includes('/waba-1/message_templates')) {
-      return Promise.resolve(okResponse({
-        data: [{
-          name: 'booking_update',
-          status: 'APPROVED',
-          language: 'pt_BR',
-          components: [{ type: 'BODY', text: 'Olá {{1}}, reserva {{2}}.' }],
-        }],
-      }));
+      return Promise.resolve(
+        okResponse({
+          data: [
+            {
+              name: 'booking_update',
+              status: 'APPROVED',
+              language: 'pt_BR',
+              components: [{ type: 'BODY', text: 'Olá {{1}}, reserva {{2}}.' }],
+            },
+          ],
+        }),
+      );
     }
     if (init.method === 'GET' && url.endsWith('/v23.0/media-1')) {
-      return Promise.resolve(okResponse({
-        id: 'media-1',
-        url: 'https://lookaside.example.test/media-1',
-        mime_type: 'image/jpeg',
-        sha256: 'b'.repeat(64),
-        file_size: 42,
-      }));
+      return Promise.resolve(
+        okResponse({
+          id: 'media-1',
+          url: 'https://lookaside.example.test/media-1',
+          mime_type: 'image/jpeg',
+          sha256: 'b'.repeat(64),
+          file_size: 42,
+        }),
+      );
     }
     if (init.method === 'POST' && url.endsWith('/v23.0/phone-1/messages')) {
       return Promise.resolve(okResponse({ messages: [{ id: 'wamid.provider-1' }] }));
