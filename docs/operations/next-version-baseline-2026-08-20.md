@@ -11,17 +11,17 @@ Status: **ACTIVE COORDINATION BASELINE**
   - `docs/operations/v1-canonical-state-2026-08-20.md`
   - `docs/operations/v1-final-closeout-2026-08-20.md`
 
-`V1_BASE_SHA` is immutable release identity. Later documentation-only commits on `main` do not change the V1 production release SHA.
+`V1_BASE_SHA` is the immutable V1 application/release identity. The later documentation-only `main` closeout commit does not change the production release SHA.
 
 ## Next Version baseline
 
-At coordinator round start:
+Coordinator readback on 2026-08-20:
 
 - canonical branch: `main`
 - observed `main` SHA: `cd99521c8842268c5e1fb9e5efe58f9f6680ddf0`
 - observed commit: `docs(v1): close final production verification`
 
-Rule: **the live `main` ref is the baseline for every Next Version branch.** This document records the round-start readback only; before merge/rebase decisions, re-read `main` and do not assume this SHA remains current.
+Rule: **the live `main` ref is the baseline for every Next Version branch.** Re-read it before every integration or merge decision.
 
 ## Mandatory architecture
 
@@ -45,24 +45,27 @@ Only these promotion states are valid:
 
 Evidence is exact-head scoped. A branch update, rebase or conflict-resolution commit invalidates prior CI evidence for merge purposes until the new exact HEAD is revalidated.
 
-## Current feature PRs
+## Current feature PRs — refreshed state
 
-| PR | Feature | Branch | Relationship | Round-start head | Round-start status |
+| PR | Feature | Branch / base | Current head | Base relation | Exact-head evidence |
 | --- | --- | --- | --- | --- | --- |
-| #14 | Creative Truth / Venue Fidelity | `recovery/creative-truth-20260819` | base `main` | `6bc92c6e652da7732ae663ccb1e0e752c35349f6` | Draft, mergeable, 1 behind round-start main |
-| #15 | Morro Demand Intelligence | `recovery/meta-ads-demand-intelligence-20260819` | base `main` | `a1dd29a640daf7ba7a58364ce1f7c9fce8226643` | Draft, mergeable, 1 behind round-start main |
-| #16 | Photo-to-Video | `recovery/photo-to-video-20260819` | stacked on #14 | `8a99c9059627c76eec59f259308138758177d303` | Draft, mergeable against parent; parent 1 behind main |
+| #14 | Creative Truth / Venue Fidelity | `recovery/creative-truth-20260819` -> `main` | `2843e9544c0bb0eb15affeba6d7abdc0b286f515` | 0-behind `cd99521c...` | Quality `32333328028` PASS; PostgreSQL E2E `32333328092` PASS |
+| #15 | Morro Demand Intelligence | `recovery/meta-ads-demand-intelligence-20260819` -> `main` | `84e96652db604a8ac1ea258d868c4f5ce2994ad8` | 0-behind `cd99521c...` | Quality `32333311073` PASS; PostgreSQL E2E `32333311077` PASS |
+| #16 | Photo-to-Video | `recovery/photo-to-video-20260819` -> #14 branch | `99edf42d06dc70958ac9791a79c00e877e82c4ad` | 0-behind #14 head `2843e954...` | Quality `32333405034` PASS |
 
-Obsolete textual holds referring to V1 closeout / PR #13 are not valid Next Version blockers and must not remain as merge conditions.
+Obsolete textual holds referring to V1 closeout / PR #13 were removed from PR merge conditions.
 
-## Synchronization rule
+## Migration state
 
-1. Re-read live `main`.
-2. Update #14 and #15 independently from live `main`.
-3. Run fresh exact-head Quality; run PostgreSQL E2E when persistence/migration is involved.
-4. Update #16 only after #14 has its refreshed head.
-5. Revalidate #16 on the refreshed parent head.
-6. Never merge #16 independently of #14.
+Current `main` migration sequence reaches `021_r29_video_artifacts.sql`. PR #15 introduces `022_meta_ads_geo_demand_intelligence.sql`; no competing `022` exists on the observed `main` or the other current feature PRs. Recheck this immediately before any later integration because migration numbering is globally serialized.
+
+## Current synchronization result
+
+- #14 is 0-behind current observed `main` and exact-head CI is green.
+- #15 is 0-behind current observed `main` and exact-head Quality + PostgreSQL E2E are green.
+- #16 is correctly restacked on the refreshed #14 and exact-head Quality is green.
+- #16 must never merge independently of #14.
+- #15 remains an independent lane but touches shared runtime hotspots; its order must be recomputed after any change to `main`.
 
 ## Canonical coordination artifacts
 
