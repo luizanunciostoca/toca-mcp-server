@@ -208,7 +208,9 @@ export function resolveRequiredResources(
   });
 }
 
-function parseRoutes(rows: readonly (readonly unknown[])[]): ReadonlyMap<RouteId, TocaOsRouteRegistryEntry> {
+function parseRoutes(
+  rows: readonly (readonly unknown[])[],
+): ReadonlyMap<RouteId, TocaOsRouteRegistryEntry> {
   const objects = rowsToObjects(rows, 'AG01_TOCA_OS_ROUTING_REGISTRY_HEADER_INVALID');
   const routes = new Map<RouteId, TocaOsRouteRegistryEntry>();
   for (const row of objects) {
@@ -353,8 +355,11 @@ function pipe(value: unknown): string[] {
 }
 
 function text(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  return String(value).trim();
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value).trim();
+  }
+  return '';
 }
 
 function requiredText(value: unknown, errorCode: string): string {
