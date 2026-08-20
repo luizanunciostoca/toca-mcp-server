@@ -31,12 +31,8 @@ export interface OutboundPrivacyRevalidationPort {
  * Adapter over the existing PrivacyGovernanceService. It intentionally owns no
  * state and creates no second consent/suppression ledger.
  */
-export class CanonicalOutboundPrivacyRevalidationPort
-  implements OutboundPrivacyRevalidationPort
-{
-  constructor(
-    private readonly privacy: Pick<PrivacyGovernanceService, 'canContact'>,
-  ) {}
+export class CanonicalOutboundPrivacyRevalidationPort implements OutboundPrivacyRevalidationPort {
+  constructor(private readonly privacy: Pick<PrivacyGovernanceService, 'canContact'>) {}
 
   revalidate(input: OutboundPrivacyRevalidationInput): Promise<CommunicationPolicyDecision> {
     const privacyChannel = requireText(
@@ -56,10 +52,7 @@ export class CanonicalOutboundPrivacyRevalidationPort
       ),
       requester: requireText(input.requester, 'OMNICHANNEL_PRIVACY_REQUESTER_REQUIRED'),
       executionId: requireText(input.executionId, 'OMNICHANNEL_PRIVACY_EXECUTION_REQUIRED'),
-      correlationId: requireText(
-        input.correlationId,
-        'OMNICHANNEL_PRIVACY_CORRELATION_REQUIRED',
-      ),
+      correlationId: requireText(input.correlationId, 'OMNICHANNEL_PRIVACY_CORRELATION_REQUIRED'),
       evidence: input.evidence,
     };
 
