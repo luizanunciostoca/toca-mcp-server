@@ -4,6 +4,7 @@ import { ToolRegistry } from '../src/core/tool-registry.js';
 import type { CoreCapabilityRuntimeResolver } from '../src/mcp/core-execution.js';
 import {
   CONTROL_CENTER_PANEL_IDS,
+  buildControlCenterHtml,
   buildControlCenterPanels,
 } from '../src/mcp/human-control-center.js';
 
@@ -49,7 +50,7 @@ describe('Human Control Center governed surface', () => {
     expect(panels.map((panel) => panel.id)).toEqual(CONTROL_CENTER_PANEL_IDS);
   });
 
-  it('fails closed for pending approval listing because current Core has no tenant-safe list tool', () => {
+  it('fails closed for pending approval listing when the tenant-scoped list store is unavailable', () => {
     const panel = build().find((candidate) => candidate.id === 'pending-approvals');
     expect(panel).toMatchObject({ state: 'PARTIAL' });
     expect(panel?.sources).toEqual(
@@ -58,7 +59,36 @@ describe('Human Control Center governed surface', () => {
         expect.objectContaining({ id: 'toca.approval.get', available: true }),
       ]),
     );
-    expect(panel?.dependency).toContain('tenant-safe approval list');
+    expect(panel?.dependency).toContain('tenant-scoped ApprovalStore');
+  });
+
+  it('marks pending approvals ready only when the tenant-scoped approval list store is available', () => {
+    const runtime = runtimeHarness([]);
+    const panels = buildControlCenterPanels({
+      ...runtime,
+      approvalStoreAvailable: true,
+      approvalListAvailable: true,
+      workflowStoreAvailable: true,
+      auditStoreAvailable: true,
+      eventStoreAvailable: true,
+    });
+    const panel = panels.find((candidate) => candidate.id === 'pending-approvals');
+    expect(panel).toMatchObject({ state: 'READY', dependency: null });
+    expect(panel?.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'toca.approval.list', available: true }),
+        expect.objectContaining({ id: 'toca.approval.get', available: true }),
+      ]),
+    );
+  });
+
+  it('keeps Control Center approval reads aligned with the singular status Core contract', () => {
+    const html = buildControlCenterHtml();
+    expect(html).toContain("callTool('toca.approval.list',{status:'REQUESTED',limit:50})");
+    expect(html).toContain(
+      "callTool('toca.approval.list',{status:'FAILED_REVIEW_REQUIRED',limit:50})",
+    );
+    expect(html).not.toContain("statuses:['REQUESTED'");
   });
 
   it('marks publication and dead-letter panels ready only when their existing Core capabilities are bound', () => {
