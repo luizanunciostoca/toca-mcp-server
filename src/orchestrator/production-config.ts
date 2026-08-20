@@ -1,12 +1,8 @@
 import * as z from 'zod/v4';
-import {
-  AUTHORIZATION_ROLES,
-  type AuthorizationRole,
-} from '../core/identity.js';
+import { AUTHORIZATION_ROLES, type AuthorizationRole } from '../core/identity.js';
 import { isRouteId, type RouteId } from '../governance/types.js';
 
-const positiveInteger = (fallback: number) =>
-  z.coerce.number().int().positive().default(fallback);
+const positiveInteger = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -96,8 +92,7 @@ export function loadAg01ProductionConfig(
   return {
     nodeEnv: value.NODE_ENV,
     databaseUrl: value.DATABASE_URL,
-    host:
-      value.AG01_HOST ?? (value.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'),
+    host: value.AG01_HOST ?? (value.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'),
     port: value.PORT,
     openAiBaseUrl: value.AG01_OPENAI_BASE_URL.replace(/\/$/, ''),
     openAiApiKeyEnvKey: value.AG01_OPENAI_API_KEY_ENV_KEY,
@@ -152,11 +147,7 @@ function csv(raw: string): string[] {
     .filter(Boolean);
 }
 
-function requireReferencedSecret(
-  env: NodeJS.ProcessEnv,
-  key: string,
-  source: string,
-): void {
+function requireReferencedSecret(env: NodeJS.ProcessEnv, key: string, source: string): void {
   if (!env[key]?.trim()) {
     throw new Error(`Missing environment secret referenced by ${source}: ${key}`);
   }
