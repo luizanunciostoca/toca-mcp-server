@@ -77,7 +77,15 @@ async function routeRequest(
 
   if (method === 'POST' && url.pathname === '/v1/orchestrator/execute') {
     const input = executeSchema.parse(await readJsonBody(request));
-    const result = await runtime.execute(input);
+    const result = await runtime.execute({
+      idempotencyKey: input.idempotencyKey,
+      message: input.message,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+      ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+      ...(input.causationId !== undefined ? { causationId: input.causationId } : {}),
+      ...(input.routeHint ? { routeHint: input.routeHint } : {}),
+    });
     response.setHeader('x-correlation-id', result.orchestration.correlationId);
     writeJson(response, statusForOrchestration(result.orchestration.status), result);
     log('ag01.request.completed', {
@@ -118,8 +126,15 @@ async function routeRequest(
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  for await (const rawChunk of request) {
+    const chunk: unknown = rawChunk;
+    const buffer =
+      typeof chunk === 'string'
+        ? Buffer.from(chunk, 'utf8')
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk)
+          : null;
+    if (!buffer) throw new HttpBoundaryError(400, 'invalid_request_body_chunk');
     size += buffer.length;
     if (size > MAX_BODY_BYTES) throw new HttpBoundaryError(413, 'request_body_too_large');
     chunks.push(buffer);
