@@ -22,6 +22,11 @@ import type {
   EmailRateLimitPolicy,
   EmailThreadBinding,
 } from '../src/omnichannel/email-runtime.js';
+import type {
+  OutboundPrivacyRevalidationInput,
+  OutboundPrivacyRevalidationPort,
+} from '../src/omnichannel/privacy-runtime-gate.js';
+import type { CommunicationPolicyDecision } from '../src/privacy/contracts.js';
 
 const scope = {
   tenantId: 'tenant-1',
@@ -162,6 +167,26 @@ class StubProvider implements EmailProviderAdapter {
   }
 }
 
+class StubOutboundPrivacy implements OutboundPrivacyRevalidationPort {
+  readonly calls: OutboundPrivacyRevalidationInput[] = [];
+  state: CommunicationPolicyDecision['state'] = 'ALLOWED';
+  reasons: readonly string[] = [];
+
+  revalidate(input: OutboundPrivacyRevalidationInput): Promise<CommunicationPolicyDecision> {
+    this.calls.push(input);
+    const allowed = this.state === 'ALLOWED';
+    return Promise.resolve({
+      state: this.state,
+      allowed,
+      blocked: !allowed,
+      reasons: this.reasons,
+      purposeId: input.purposeId,
+      channel: input.privacyChannel,
+      policyRef: 'policy:reservation-followup',
+    });
+  }
+}
+
 function buildSendInput(now = '2026-08-20T05:00:00.000Z') {
   return {
     ...scope,
@@ -186,6 +211,10 @@ function buildSendInput(now = '2026-08-20T05:00:00.000Z') {
       approvalId: 'approval-1',
       status: 'APPROVED' as const,
     },
+    privacySubjectRef: 'subject:email:contact-1',
+    privacyChannel: 'EMAIL',
+    executionId: 'email-send-exec-1',
+    actorPrincipalId: 'principal:email-runtime',
     idempotencyKey: 'idem-1',
     internetMessageId: '<msg-1@mail.example.com>',
     rateLimitBucketKey: 'outbound-default',
@@ -194,12 +223,20 @@ function buildSendInput(now = '2026-08-20T05:00:00.000Z') {
   };
 }
 
+function coordinator(
+  provider: StubProvider,
+  store: MemoryEmailStore,
+  privacy = new StubOutboundPrivacy(),
+): EmailDispatchCoordinator {
+  return new EmailDispatchCoordinator(provider, store, privacy);
+}
+
 describe('EmailDispatchCoordinator', () => {
   it('persists accepted dispatch and canonical conversation thread binding', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    const result = await coordinator.send(buildSendInput());
+    const runtime = coordinator(provider, store);
+    const result = await runtime.send(buildSendInput());
     expect(result.accepted).toBe(true);
     expect(result.reused).toBe(false);
     expect(result.dispatch.messageId).toBe(message.messageId);
@@ -214,9 +251,9 @@ describe('EmailDispatchCoordinator', () => {
   it('does not send twice for the same idempotency key', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    await coordinator.send(buildSendInput());
-    const second = await coordinator.send(buildSendInput('2026-08-20T05:00:05.000Z'));
+    const runtime = coordinator(provider, store);
+    await runtime.send(buildSendInput());
+    const second = await runtime.send(buildSendInput('2026-08-20T05:00:05.000Z'));
     expect(second.reused).toBe(true);
     expect(second.accepted).toBe(true);
     expect(provider.sendCount).toBe(1);
@@ -230,11 +267,48 @@ describe('EmailDispatchCoordinator', () => {
       retryAt: '2026-08-20T05:01:00.000Z',
     };
     const provider = new StubProvider();
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    const result = await coordinator.send(buildSendInput());
+    const privacy = new StubOutboundPrivacy();
+    const result = await coordinator(provider, store, privacy).send(buildSendInput());
     expect(result.dispatch.state).toBe('DEFERRED');
     expect(result.dispatch.nextRetryAt).toBe('2026-08-20T05:01:00.000Z');
     expect(provider.sendCount).toBe(0);
+    expect(privacy.calls).toHaveLength(0);
+  });
+
+  it('revalidates Privacy immediately before provider execution and blocks revoked consent', async () => {
+    const store = new MemoryEmailStore();
+    const provider = new StubProvider();
+    const privacy = new StubOutboundPrivacy();
+    privacy.state = 'BLOCKED';
+    privacy.reasons = ['CONSENT_DENIED'];
+
+    const result = await coordinator(provider, store, privacy).send(buildSendInput());
+
+    expect(result.accepted).toBe(false);
+    expect(result.dispatch.state).toBe('FAILED');
+    expect(result.dispatch.lastError).toBe('EMAIL_PRIVACY_REVALIDATION_BLOCKED');
+    expect(provider.sendCount).toBe(0);
+    expect(privacy.calls).toHaveLength(1);
+    expect(privacy.calls[0]).toMatchObject({
+      subjectRef: 'subject:email:contact-1',
+      purposeId: 'reservation-followup',
+      privacyChannel: 'EMAIL',
+    });
+    expect(privacy.calls[0]?.executionId).toBe('email-send-exec-1:privacy-pre-send:1');
+  });
+
+  it('blocks unsubscribe/complaint suppression before Email and never calls provider', async () => {
+    for (const reason of ['PROVIDER_UNSUBSCRIBED', 'PROVIDER_COMPLAINT'] as const) {
+      const store = new MemoryEmailStore();
+      const provider = new StubProvider();
+      const privacy = new StubOutboundPrivacy();
+      privacy.state = 'BLOCKED';
+      privacy.reasons = [reason];
+      const result = await coordinator(provider, store, privacy).send(buildSendInput());
+      expect(result.accepted).toBe(false);
+      expect(result.dispatch.lastError).toBe('EMAIL_PRIVACY_REVALIDATION_BLOCKED');
+      expect(provider.sendCount).toBe(0);
+    }
   });
 
   it('schedules bounded retry for transient SendGrid failures', async () => {
@@ -246,19 +320,43 @@ describe('EmailDispatchCoordinator', () => {
         retryAfterMs: 5_000,
       },
     );
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    const result = await coordinator.send(buildSendInput());
+    const runtime = coordinator(provider, store);
+    const result = await runtime.send(buildSendInput());
     expect(result.dispatch.state).toBe('DEFERRED');
     expect(result.dispatch.attemptCount).toBe(1);
     expect(result.dispatch.nextRetryAt).toBe('2026-08-20T05:00:05.000Z');
+  });
+
+  it('revalidates Privacy again when a deferred retry becomes due', async () => {
+    const store = new MemoryEmailStore();
+    const provider = new StubProvider();
+    const privacy = new StubOutboundPrivacy();
+    provider.sendError = Object.assign(new Error('SENDGRID_MAIL_SEND_FAILED:429:provider-rejected'), {
+      retryAfterMs: 5_000,
+    });
+    const runtime = coordinator(provider, store, privacy);
+    const first = await runtime.send(buildSendInput());
+    expect(first.dispatch.state).toBe('DEFERRED');
+    expect(privacy.calls).toHaveLength(1);
+
+    provider.sendError = null;
+    privacy.state = 'BLOCKED';
+    privacy.reasons = ['CONSENT_DENIED'];
+    const second = await runtime.send(buildSendInput('2026-08-20T05:00:05.000Z'));
+
+    expect(second.dispatch.state).toBe('FAILED');
+    expect(second.dispatch.lastError).toBe('EMAIL_PRIVACY_REVALIDATION_BLOCKED');
+    expect(provider.sendCount).toBe(1);
+    expect(privacy.calls).toHaveLength(2);
+    expect(privacy.calls[1]?.executionId).toBe('email-send-exec-1:privacy-pre-send:2');
   });
 
   it('falls back to exponential retry when provider Retry-After is absent', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
     provider.sendError = new Error('SENDGRID_MAIL_SEND_FAILED:500:provider-rejected');
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    const result = await coordinator.send(buildSendInput());
+    const runtime = coordinator(provider, store);
+    const result = await runtime.send(buildSendInput());
     expect(result.dispatch.state).toBe('DEFERRED');
     expect(result.dispatch.nextRetryAt).toBe('2026-08-20T05:00:01.000Z');
   });
@@ -266,9 +364,9 @@ describe('EmailDispatchCoordinator', () => {
   it('reconciles independent provider readback into the dispatch state', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    await coordinator.send(buildSendInput());
-    const result = await coordinator.readback({
+    const runtime = coordinator(provider, store);
+    await runtime.send(buildSendInput());
+    const result = await runtime.readback({
       ...scope,
       providerMessageRef: 'sg-msg-1',
       now: '2026-08-20T05:02:00.000Z',
@@ -282,8 +380,7 @@ describe('EmailProviderEventProcessor', () => {
   it('reconciles complaint into canonical Privacy and stores only signed provider evidence', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    const coordinator = new EmailDispatchCoordinator(provider, store);
-    await coordinator.send(buildSendInput());
+    await coordinator(provider, store).send(buildSendInput());
 
     const reconciled: unknown[] = [];
     const privacy: EmailPrivacyReconciliationPort = {
@@ -331,7 +428,7 @@ describe('EmailProviderEventProcessor', () => {
   it('drops open/click engagement evidence when Privacy or Policy does not authorize tracking', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    await new EmailDispatchCoordinator(provider, store).send(buildSendInput());
+    await coordinator(provider, store).send(buildSendInput());
     const privacy: EmailPrivacyReconciliationPort = {
       reconcileProviderSignal() {
         return Promise.resolve();
@@ -376,7 +473,7 @@ describe('EmailProviderEventProcessor', () => {
   it('deduplicates provider events using provider event IDs', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    await new EmailDispatchCoordinator(provider, store).send(buildSendInput());
+    await coordinator(provider, store).send(buildSendInput());
     const privacy: EmailPrivacyReconciliationPort = {
       reconcileProviderSignal() {
         return Promise.resolve();
