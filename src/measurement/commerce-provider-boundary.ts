@@ -12,7 +12,7 @@ import type {
   RevenueEvidenceRecord,
   RevenueEvidenceStatus,
 } from './attribution-revenue.js';
-import { AttributionRevenueService } from './attribution-revenue-service.js';
+import type { AttributionRevenueService } from './attribution-revenue-service.js';
 import type { MeasurementOperationContext } from './service.js';
 
 export type CommerceOpportunityResolution =

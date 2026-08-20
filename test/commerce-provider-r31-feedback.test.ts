@@ -268,11 +268,7 @@ describe('commerce provider R31 feedback', () => {
       attribution: { ...paidReadback.attribution, eventId: 'event-other' },
     } satisfies CommerceProviderReadback;
 
-    const resolution = await resolveCommerceOpportunity(
-      crmWithOpportunity(),
-      scope,
-      mismatched,
-    );
+    const resolution = await resolveCommerceOpportunity(crmWithOpportunity(), scope, mismatched);
 
     expect(resolution).toEqual({
       status: 'UNMATCHED',

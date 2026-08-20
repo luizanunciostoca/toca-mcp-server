@@ -171,21 +171,21 @@ function revenueEvidence(status: RevenueEvidenceRecord['status']): RevenueEviden
 }
 
 type CrmOverrides = Partial<
-  Pick<CrmCoreStore, 'getContact' | 'findContactByChannel' | 'getOpportunity' | 'listOpportunitiesForContact'>
+  Pick<
+    CrmCoreStore,
+    'getContact' | 'findContactByChannel' | 'getOpportunity' | 'listOpportunitiesForContact'
+  >
 >;
 
 function crm(overrides: CrmOverrides = {}): CrmCoreStore {
   const getContact = vi.fn((input: Parameters<CrmCoreStore['getContact']>[0]) =>
     Promise.resolve(input.contactId === contact.contactId ? contact : undefined),
   );
-  const findContactByChannel = vi.fn(
-    (input: Parameters<CrmCoreStore['findContactByChannel']>[0]) =>
-      Promise.resolve(input.value === 'buyer@example.com' ? contact : undefined),
+  const findContactByChannel = vi.fn((input: Parameters<CrmCoreStore['findContactByChannel']>[0]) =>
+    Promise.resolve(input.value === 'buyer@example.com' ? contact : undefined),
   );
   const getOpportunity = vi.fn((input: Parameters<CrmCoreStore['getOpportunity']>[0]) =>
-    Promise.resolve(
-      input.opportunityId === opportunity.opportunityId ? opportunity : undefined,
-    ),
+    Promise.resolve(input.opportunityId === opportunity.opportunityId ? opportunity : undefined),
   );
   const listOpportunitiesForContact = vi.fn(
     (input: Parameters<CrmCoreStore['listOpportunitiesForContact']>[0]) =>
