@@ -58,6 +58,10 @@ Migration `023_crm_sales_engine.sql` adds the advanced CRM tables and foreign-ke
 
 No WhatsApp or Email provider is implemented by this PR. `MessageRecord` keeps provider-neutral references/digests so Omnichannel can integrate later without bypassing the CRM/Core boundary.
 
+## Integration trigger audit
+
+The final catalog alignment is applied through a native Git ref update so the temporary one-shot can execute and remove itself; no temporary workflow is allowed in the resulting tree.
+
 ## Required evidence before promotion
 
 - Format
