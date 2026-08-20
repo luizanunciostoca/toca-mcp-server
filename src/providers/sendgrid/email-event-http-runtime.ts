@@ -224,7 +224,10 @@ export async function createSendGridEventHttpRuntime(
 }
 
 export class PostgresSendGridWebhookDispatchResolver {
-  constructor(private readonly pool: pg.Pool, private readonly store: PostgresEmailRuntimeStore) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly store: PostgresEmailRuntimeStore,
+  ) {}
 
   async resolve(input: {
     readonly providerMessageRef: string;
@@ -301,7 +304,10 @@ class PostgresEmailProviderEventContextPort implements EmailProviderEventContext
 }
 
 class PostgresEmailPrivacyReconciliationPort implements EmailPrivacyReconciliationPort {
-  constructor(private readonly pool: pg.Pool, private readonly privacy: PrivacyGovernanceService) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly privacy: PrivacyGovernanceService,
+  ) {}
 
   async reconcileProviderSignal(
     input: Parameters<EmailPrivacyReconciliationPort['reconcileProviderSignal']>[0],
