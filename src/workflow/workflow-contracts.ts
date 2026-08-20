@@ -213,6 +213,7 @@ export interface WorkflowStore {
     readonly workerId: string;
     readonly now: string;
     readonly limit: number;
+    readonly workflowId?: string;
   }): Promise<readonly WorkflowStepClaim[]>;
   completeStep(input: {
     readonly workflowId: string;
