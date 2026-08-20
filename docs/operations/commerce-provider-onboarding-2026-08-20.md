@@ -4,7 +4,7 @@
 
 `BOUNDARY_IMPLEMENTED / PROVIDER_NOT_SELECTED / PROVIDER_VERIFIED=false / PRODUCTION_VERIFIED=false`
 
-Baseline revalidated before this workstream: `main@e682526f189d7f674a140377533bb8f8ec93427b`.
+Final integration baseline revalidated and synchronized before exact-head gates: `main@47348e0608bd3936fc1419fa495e8b6761489934`.
 
 No provider adapter is registered in runtime by this change. No provider credential is assumed, no webhook endpoint is exposed, and no synthetic fixture is production evidence.
 
