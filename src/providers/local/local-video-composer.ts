@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,23 @@ export interface VerifiedVideoShotInput {
   readonly fidelityEvidence?: FidelityEvidence;
 }
 
+export type DeterministicVideoOverlayRole =
+  'HEADLINE' | 'CTA' | 'CAPTION' | 'SUBTITLE' | 'END_CARD';
+
+export interface DeterministicVideoOverlayInput {
+  readonly overlayId: string;
+  readonly role: DeterministicVideoOverlayRole;
+  readonly bytes: Uint8Array;
+  readonly sha256: string;
+  readonly contentType: 'image/png' | 'image/jpeg' | 'image/webp';
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface LocalVideoComposeInput {
   readonly contentItemId: string;
   readonly creativeId: string;
@@ -43,9 +61,19 @@ export interface LocalVideoComposeInput {
   readonly shots: readonly VerifiedVideoShotInput[];
   readonly requiredBrands: readonly string[];
   readonly brandAssets: readonly OfficialBrandAssetInput[];
+  readonly overlays?: readonly DeterministicVideoOverlayInput[];
+  readonly brandPosition?: 'TOP_CENTER' | 'BOTTOM_CENTER';
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references?: readonly VenueReference[];
   readonly createdAt?: string;
+}
+
+export interface LocalVideoOverlayBinding {
+  readonly overlayId: string;
+  readonly role: DeterministicVideoOverlayRole;
+  readonly sha256: string;
+  readonly startMs: number;
+  readonly endMs: number;
 }
 
 export interface LocalVideoComposeResult {
@@ -54,6 +82,8 @@ export interface LocalVideoComposeResult {
   readonly outputSha256: string;
   readonly dimensions: '1080x1920';
   readonly manifest: DeterministicRenderManifest;
+  readonly overlayBindings: readonly LocalVideoOverlayBinding[];
+  readonly brandPosition: 'TOP_CENTER' | 'BOTTOM_CENTER';
   readonly provider: 'LOCAL_FFMPEG';
   readonly pipelineVersion: 'local-video-composer-v1';
   readonly readyForReview: true;
@@ -114,6 +144,7 @@ export class LocalVideoComposer {
     const concatPath = join(workspace, 'concat.txt');
     const outputPath = join(workspace, 'creative.mp4');
     const logoPaths: string[] = [];
+    const overlayPaths: string[] = [];
 
     try {
       const shotPaths: string[] = [];
@@ -134,9 +165,15 @@ export class LocalVideoComposer {
         logoPaths.push(path);
       }
 
+      for (const [index, overlay] of (input.overlays ?? []).entries()) {
+        const path = join(workspace, `overlay-${index}${imageExtension(overlay.contentType)}`);
+        await writeFile(path, overlay.bytes);
+        overlayPaths.push(path);
+      }
+
       await this.commandRunner(
         this.binary,
-        buildFfmpegArgs(input, concatPath, outputPath, logoPaths),
+        buildFfmpegArgs(input, concatPath, outputPath, logoPaths, overlayPaths),
       );
       const outputBytes = await readFile(outputPath);
       const qualityGate = evaluateQualityGate(isMp4(outputBytes), {
@@ -144,6 +181,8 @@ export class LocalVideoComposer {
         outputContentType: 'video/mp4',
         deterministicComposition: true,
         sourceShotCount: input.shots.length,
+        deterministicOverlayCount: input.overlays?.length ?? 0,
+        overlayPixelsHashBound: true,
       });
       requireGatePassed(qualityGate);
 
@@ -166,6 +205,14 @@ export class LocalVideoComposer {
         gates: [brandGate, venueGate, qualityGate],
         createdAt,
       };
+      const overlayBindings = (input.overlays ?? []).map((overlay) => ({
+        overlayId: overlay.overlayId,
+        role: overlay.role,
+        sha256: overlay.sha256.toLowerCase(),
+        startMs: overlay.startMs,
+        endMs: overlay.endMs,
+      }));
+      const brandPosition = input.brandPosition ?? 'BOTTOM_CENTER';
 
       return {
         outputBytes,
@@ -173,6 +220,8 @@ export class LocalVideoComposer {
         outputSha256,
         dimensions: '1080x1920',
         manifest,
+        overlayBindings,
+        brandPosition,
         provider: 'LOCAL_FFMPEG',
         pipelineVersion: 'local-video-composer-v1',
         readyForReview: true,
@@ -203,20 +252,34 @@ function buildFfmpegArgs(
   concatPath: string,
   outputPath: string,
   logoPaths: readonly string[],
+  overlayPaths: readonly string[],
 ): string[] {
   const args: string[] = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath];
   for (const logoPath of logoPaths) args.push('-loop', '1', '-i', logoPath);
+  for (const overlayPath of overlayPaths) args.push('-loop', '1', '-i', overlayPath);
 
   let chain = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base]';
   let previous = 'base';
   const logoCount = Math.max(logoPaths.length, 1);
   const slotWidth = Math.floor(900 / logoCount);
+  const brandY = (input.brandPosition ?? 'BOTTOM_CENTER') === 'TOP_CENTER' ? 90 : 1740;
   for (const [index] of logoPaths.entries()) {
     const logoLabel = `logo${index}`;
     const outputLabel = `v${index}`;
     const x = 90 + index * slotWidth + Math.floor(slotWidth * 0.1);
     chain += `;[${index + 1}:v]scale=${Math.floor(slotWidth * 0.72)}:-1[${logoLabel}]`;
-    chain += `;[${previous}][${logoLabel}]overlay=${x}:1740:format=auto[${outputLabel}]`;
+    chain += `;[${previous}][${logoLabel}]overlay=${x}:${brandY}:format=auto[${outputLabel}]`;
+    previous = outputLabel;
+  }
+
+  for (const [index, overlay] of (input.overlays ?? []).entries()) {
+    const inputIndex = 1 + logoPaths.length + index;
+    const overlayLabel = `overlay${index}`;
+    const outputLabel = `ov${index}`;
+    const startSeconds = millisecondsToSeconds(overlay.startMs);
+    const endSeconds = millisecondsToSeconds(overlay.endMs);
+    chain += `;[${inputIndex}:v]scale=${overlay.width}:${overlay.height}[${overlayLabel}]`;
+    chain += `;[${previous}][${overlayLabel}]overlay=${overlay.x}:${overlay.y}:enable='between(t,${startSeconds},${endSeconds})'[${outputLabel}]`;
     previous = outputLabel;
   }
 
@@ -269,6 +332,39 @@ function validateInput(input: LocalVideoComposeInput): void {
   if (input.requiredBrands.length === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_BRAND_ASSET_MISSING', false);
   }
+  for (const overlay of input.overlays ?? []) {
+    if (
+      !overlay.overlayId.trim() ||
+      overlay.bytes.byteLength === 0 ||
+      !/^[a-f0-9]{64}$/i.test(overlay.sha256) ||
+      createHash('sha256').update(overlay.bytes).digest('hex') !== overlay.sha256.toLowerCase()
+    ) {
+      throw new ExecutionError(
+        'SOURCE_IMAGE_BINDING_FAILURE',
+        'VIDEO_OVERLAY_HASH_BINDING_INVALID',
+        false,
+      );
+    }
+    if (
+      !Number.isInteger(overlay.startMs) ||
+      !Number.isInteger(overlay.endMs) ||
+      overlay.startMs < 0 ||
+      overlay.endMs <= overlay.startMs
+    ) {
+      throw new ExecutionError('QUALITY_GATE_FAILED', 'VIDEO_OVERLAY_TIME_RANGE_INVALID', false);
+    }
+    if (
+      ![overlay.x, overlay.y, overlay.width, overlay.height].every(Number.isInteger) ||
+      overlay.x < 0 ||
+      overlay.y < 0 ||
+      overlay.width <= 0 ||
+      overlay.height <= 0 ||
+      overlay.x + overlay.width > 1080 ||
+      overlay.y + overlay.height > 1920
+    ) {
+      throw new ExecutionError('QUALITY_GATE_FAILED', 'VIDEO_OVERLAY_SAFE_AREA_INVALID', false);
+    }
+  }
 }
 
 function sourceAssetIdsFor(input: LocalVideoComposeInput): string[] {
@@ -293,10 +389,14 @@ function videoExtension(contentType: VerifiedVideoShotInput['contentType']): str
   return '.mp4';
 }
 
-function imageExtension(contentType: OfficialBrandAssetInput['contentType']): string {
+function imageExtension(contentType: DeterministicVideoOverlayInput['contentType']): string {
   if (contentType === 'image/png') return '.png';
   if (contentType === 'image/webp') return '.webp';
   return '.jpg';
+}
+
+function millisecondsToSeconds(milliseconds: number): string {
+  return (milliseconds / 1000).toFixed(3);
 }
 
 function escapeConcatPath(path: string): string {

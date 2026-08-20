@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import type { BrandAsset, CreativeStandard, VenueAsset } from '../src/contracts/creative-truth.js';
@@ -49,8 +50,11 @@ const toca: BrandAsset = {
   aiReconstructionAllowed: false,
 };
 
+const overlayBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+const overlaySha256 = createHash('sha256').update(overlayBytes).digest('hex');
+
 describe('LocalVideoComposer', () => {
-  it('builds a deterministic video from verified shots and official logo files', async () => {
+  it('builds a deterministic video from verified shots, official logos and hash-bound overlays', async () => {
     const runner = vi.fn((command: string, args: readonly string[]) => {
       void command;
       const outputPath = args.at(-1);
@@ -83,6 +87,22 @@ describe('LocalVideoComposer', () => {
           driveFileId: toca.driveFileId,
         },
       ],
+      brandPosition: 'TOP_CENTER',
+      overlays: [
+        {
+          overlayId: 'headline-1',
+          role: 'HEADLINE',
+          bytes: overlayBytes,
+          sha256: overlaySha256,
+          contentType: 'image/png',
+          startMs: 100,
+          endMs: 500,
+          x: 120,
+          y: 300,
+          width: 840,
+          height: 220,
+        },
+      ],
       createdAt: '2026-08-17T22:00:00-03:00',
     });
 
@@ -90,8 +110,23 @@ describe('LocalVideoComposer', () => {
     expect(result.manifest.sourceAssetIds).toEqual(['SUN-0244']);
     expect(result.manifest.brandAssetIds).toEqual(['BRAND-TOCA-WHITE-V1']);
     expect(result.manifest.gates.every((gate) => gate.status === 'PASSED')).toBe(true);
+    expect(result.brandPosition).toBe('TOP_CENTER');
+    expect(result.overlayBindings).toEqual([
+      {
+        overlayId: 'headline-1',
+        role: 'HEADLINE',
+        sha256: overlaySha256,
+        startMs: 100,
+        endMs: 500,
+      },
+    ]);
     const commandArgs = runner.mock.calls[0]?.[1] ?? [];
-    expect(commandArgs.join(' ')).toContain('logo-0');
+    const command = commandArgs.join(' ');
+    expect(command).toContain('logo-0');
+    expect(command).toContain('overlay-0');
+    expect(command).toContain("enable='between(t,0.100,0.500)'");
+    expect(command).toContain('overlay=');
+    expect(command).toContain(':90:format=auto');
   });
 
   it('rejects a video shot that is not venue verified before ffmpeg runs', async () => {
@@ -123,6 +158,100 @@ describe('LocalVideoComposer', () => {
         ],
       }),
     ).rejects.toThrow('FAILED_NO_VENUE_VERIFIED_ASSET');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects changed overlay bytes before ffmpeg runs', async () => {
+    const runner = vi.fn(() => Promise.resolve());
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-3',
+        creativeId: 'CREATIVE-VIDEO-3',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        shots: [
+          {
+            shotId: 'SHOT-3',
+            venueAsset: venue,
+            videoBytes: Uint8Array.from([1, 2, 3, 4]),
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [
+          {
+            registry: toca,
+            bytes: Uint8Array.from([10, 11, 12]),
+            contentType: 'image/png',
+            driveFileId: toca.driveFileId,
+          },
+        ],
+        overlays: [
+          {
+            overlayId: 'subtitle-1',
+            role: 'SUBTITLE',
+            bytes: Uint8Array.from([9, 9, 9]),
+            sha256: overlaySha256,
+            contentType: 'image/png',
+            startMs: 0,
+            endMs: 1_000,
+            x: 120,
+            y: 1500,
+            width: 840,
+            height: 160,
+          },
+        ],
+      }),
+    ).rejects.toThrow('VIDEO_OVERLAY_HASH_BINDING_INVALID');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects overlays outside the 1080x1920 safe frame', async () => {
+    const runner = vi.fn(() => Promise.resolve());
+    const composer = new LocalVideoComposer(runner);
+
+    await expect(
+      composer.compose({
+        contentItemId: 'CONTENT-VIDEO-4',
+        creativeId: 'CREATIVE-VIDEO-4',
+        standard,
+        creativeMode: 'REAL_COMPOSITE',
+        shots: [
+          {
+            shotId: 'SHOT-4',
+            venueAsset: venue,
+            videoBytes: Uint8Array.from([1, 2, 3, 4]),
+            contentType: 'video/mp4',
+          },
+        ],
+        requiredBrands: ['TOCA_DO_MORCEGO'],
+        brandAssets: [
+          {
+            registry: toca,
+            bytes: Uint8Array.from([10, 11, 12]),
+            contentType: 'image/png',
+            driveFileId: toca.driveFileId,
+          },
+        ],
+        overlays: [
+          {
+            overlayId: 'cta-1',
+            role: 'CTA',
+            bytes: overlayBytes,
+            sha256: overlaySha256,
+            contentType: 'image/png',
+            startMs: 0,
+            endMs: 1_000,
+            x: 1000,
+            y: 1800,
+            width: 200,
+            height: 200,
+          },
+        ],
+      }),
+    ).rejects.toThrow('VIDEO_OVERLAY_SAFE_AREA_INVALID');
     expect(runner).not.toHaveBeenCalled();
   });
 });

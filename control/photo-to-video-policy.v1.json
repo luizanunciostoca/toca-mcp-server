@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1.2",
+  "policyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
+  "policyVersion": "1.2",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "brandScope": "TOCA_DO_MORCEGO",
+  "routes": {
+    "REAL_PHOTO_TO_MOTION_VIDEO": {
+      "enabled": true,
+      "sourceImageRequired": true,
+      "marketingReadyMasterRequired": true,
+      "rightsEvidenceRequired": true,
+      "sceneExpansionAllowed": false,
+      "architecturalInventionAllowed": false,
+      "aiLogoGenerationAllowed": false,
+      "provider": "LOCAL_FFMPEG",
+      "postGenerationReviewRequired": true
+    },
+    "GENERATIVE_SCENE_CONTINUATION_VIDEO": {
+      "enabled": true,
+      "sourceImageRequired": true,
+      "marketingReadyMasterRequired": true,
+      "rightsEvidenceRequired": true,
+      "explicitApprovalRequired": true,
+      "sourceImageShaBindingRequired": true,
+      "likenessConsentRequiredWhenPeoplePresent": true,
+      "architecturalInventionAllowed": false,
+      "environmentDriftAllowed": false,
+      "aiLogoGenerationAllowed": false,
+      "provider": "OPENAI_VIDEO_API",
+      "allowedModels": ["sora-2", "sora-2-pro"],
+      "postGenerationHumanReviewRequired": true,
+      "sceneContinuationFidelityGateRequired": true
+    }
+  },
+  "reviewBoundary": {
+    "durableCandidateArtifactRequired": true,
+    "candidateArtifactSha256Required": true,
+    "artifactReadbackRequiredBeforeFinalization": true,
+    "canonicalSourceDriveBytesRevalidatedAtFinalization": true,
+    "officialHeroBrandDriveBytesRevalidatedAtFinalization": true,
+    "heroBrandAssetIdDriveIdAndShaBoundInCandidate": true,
+    "thePartyEditionIntentEnvironmentBoundInCandidate": true,
+    "reviewTimestampMustFollowCandidateAndNotExceedTrustedFinalizationTime": true,
+    "sourceImageComparedRequired": true,
+    "durableEvidenceRefRequired": true,
+    "architectureDriftMustBeFalse": true,
+    "environmentDriftMustBeFalse": true,
+    "aiLogoReconstructionDetectedMustBeFalse": true
+  },
+  "publicationBoundary": {
+    "exactFinalAssetSha256Required": true,
+    "durableFinalArtifactRefRequired": true,
+    "publicationMayNotRebuildCreative": true,
+    "prepareMayNotRebuildCreative": true,
+    "publicationAuthorizedByGeneration": false,
+    "publicationAuthorizedByFinalization": false
+  },
+  "fullSyntheticVenueVideoWithoutSourceImage": "UNSUPPORTED_V1",
+  "futureProductOnboarding": "REGISTRY_DRIVEN_NO_RUNTIME_CODE_CHANGE"
+}
