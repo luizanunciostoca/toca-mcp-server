@@ -2,6 +2,7 @@ import { EnvironmentSecretResolver } from '../src/core/environment-secret-resolv
 import {
   SendGridEmailProvider,
   validateSendGridDns,
+  validateSendGridInboundMx,
   type SendGridPreparedCampaignResolver,
 } from '../src/providers/sendgrid/email-provider.js';
 import { loadSendGridRuntimeConfig } from '../src/providers/sendgrid/runtime-config.js';
@@ -19,15 +20,19 @@ const resolver: SendGridPreparedCampaignResolver = {
 };
 
 const provider = new SendGridEmailProvider(loaded.config, resolver);
-const [providerReadback, dnsReadback] = await Promise.all([
+const [providerReadback, dnsReadback, inboundMxReadback] = await Promise.all([
   provider.validateCredentialsAndDomain(),
   validateSendGridDns({
     sendingDomain: loaded.config.sendingDomain,
     expectedDkimRecords: loaded.expectedDkimRecords,
     expectedSpfInclude: loaded.expectedSpfInclude,
   }),
+  loaded.config.inboundParseEnabled && loaded.config.inboundParseHostname
+    ? validateSendGridInboundMx(loaded.config.inboundParseHostname)
+    : Promise.resolve(null),
 ]);
 
+const inboundEnabled = loaded.config.inboundParseEnabled === true;
 const gates = {
   credentials: providerReadback.valid,
   sender_domain_found: providerReadback.authenticatedDomainFound,
@@ -36,7 +41,10 @@ const gates = {
   dkim: dnsReadback.dkim === 'PASS',
   dmarc: dnsReadback.dmarc === 'PASS',
   event_webhook_signature_key: Boolean(loaded.config.eventWebhookPublicKeyPem?.trim()),
-  inbound_parse_signature_key: Boolean(loaded.config.inboundParsePublicKeyPem?.trim()),
+  inbound_parse_hostname: !inboundEnabled || Boolean(loaded.config.inboundParseHostname?.trim()),
+  inbound_parse_signature_key:
+    !inboundEnabled || Boolean(loaded.config.inboundParsePublicKeyPem?.trim()),
+  inbound_parse_mx: !inboundEnabled || inboundMxReadback?.mx === 'PASS',
   independent_provider_readback: loaded.config.emailActivityReadbackEnabled === true,
 };
 const pass = Object.values(gates).every(Boolean);
@@ -50,7 +58,11 @@ console.log(
       binding_state: loaded.config.bindingState,
       pass,
       gates,
-      evidence: [...providerReadback.evidence, ...dnsReadback.evidence],
+      evidence: [
+        ...providerReadback.evidence,
+        ...dnsReadback.evidence,
+        ...(inboundMxReadback?.evidence ?? []),
+      ],
       safety: {
         sent_email: false,
         mutated_dns: false,

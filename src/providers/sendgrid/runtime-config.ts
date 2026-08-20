@@ -49,6 +49,12 @@ export async function loadSendGridRuntimeConfig(input: {
     bindingId: requiredEnv(env, 'EMAIL_SENDGRID_BINDING_ID', 'EMAIL_SENDGRID_BINDING_ID_REQUIRED'),
     bindingState,
     eventWebhookPublicKeyPem: nullableEnv(env.EMAIL_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_PEM),
+    inboundParseEnabled: parseBoolean(
+      env.EMAIL_SENDGRID_INBOUND_PARSE_ENABLED,
+      false,
+      'EMAIL_SENDGRID_INBOUND_PARSE_ENABLED_INVALID',
+    ),
+    inboundParseHostname: nullableEnv(env.EMAIL_SENDGRID_INBOUND_PARSE_HOSTNAME),
     inboundParsePublicKeyPem: nullableEnv(env.EMAIL_SENDGRID_INBOUND_PARSE_PUBLIC_KEY_PEM),
     emailActivityReadbackEnabled: parseBoolean(
       env.EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED,

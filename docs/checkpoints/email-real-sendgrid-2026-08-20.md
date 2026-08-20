@@ -42,7 +42,7 @@ Outbound execution remains gated by the existing Omnichannel contracts for resol
 - Delivery lifecycle: prepared, submitted, accepted, processed, delivered, deferred, bounced, complaint, unsubscribed, dropped, failed and unknown.
 - Provider suppression readback for global unsubscribe, bounce and spam report.
 - Durable dispatch idempotency enforced before provider execution.
-- Bounded exponential retry/defer for transient provider failures.
+- Bounded exponential retry with provider `Retry-After` honored for transient failures.
 - Durable PostgreSQL rate-limit buckets enforced before provider execution.
 - Attachment metadata/digest/reference persistence and validation.
 - Reputation/statistics readback.
@@ -87,7 +87,7 @@ The preflight must return `pass: true` for all of the following:
 6. DKIM evidence passes against the configured provider records.
 7. DMARC exists and passes the DNS check.
 8. Event Webhook public key is configured.
-9. Inbound Parse public key is configured when inbound email is enabled.
+9. When inbound email is enabled, its receiving hostname is configured, MX resolves to `mx.sendgrid.net`, and the Inbound Parse signing key is configured.
 10. Independent Email Activity readback is enabled.
 
 The preflight sends no email, changes no DNS records and changes no suppression state.

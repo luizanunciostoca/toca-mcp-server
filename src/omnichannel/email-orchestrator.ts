@@ -220,7 +220,11 @@ export class EmailDispatchCoordinator {
       let state: EmailDeliveryState = 'FAILED';
       let nextRetryAt: string | null = null;
       if (retryable && attemptCount < retryPolicy.maximumAttempts) {
-        const delayMs = computeEmailRetryDelayMs(attemptCount, null, retryPolicy);
+        const delayMs = computeEmailRetryDelayMs(
+          attemptCount,
+          providerRetryAfterMs(error),
+          retryPolicy,
+        );
         state = 'DEFERRED';
         nextRetryAt = new Date(nowMs + delayMs).toISOString();
       }
@@ -511,6 +515,12 @@ function isRetryableProviderSendError(error: unknown): boolean {
     /SENDGRID_MAIL_SEND_FAILED:(429|5\d\d):/.test(error.message) ||
     /ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT/.test(error.message)
   );
+}
+
+function providerRetryAfterMs(error: unknown): number | null {
+  if (!error || typeof error !== 'object' || !('retryAfterMs' in error)) return null;
+  const value = (error as { readonly retryAfterMs?: unknown }).retryAfterMs;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function safeErrorCode(error: unknown): string {

@@ -144,6 +144,67 @@ describe('SendGrid email provider', () => {
     expect(receipt.state).toBe('ACCEPTED');
   });
 
+  it('preserves Retry-After from transient provider rejection', async () => {
+    const provider = new SendGridEmailProvider(
+      productionConfig,
+      resolver,
+      fakeFetchReturning(
+        new Response('{"errors":[{"message":"rate limited"}]}', {
+          status: 429,
+          headers: { 'Retry-After': '7' },
+        }),
+      ),
+    );
+    await expect(
+      provider.sendCampaign({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        organizationId: 'org-1',
+        correlationId: 'corr-1',
+        preparedCampaignRef: 'prepared-1',
+        eligibilitySnapshot: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          snapshotId: 'audience-1',
+          purposeId: 'reservation-followup',
+          resolvedContactCount: 1,
+          ambiguousContactCount: 0,
+          unresolvedContactCount: 0,
+          privacyUnknownBlockedCount: 0,
+          privacySuppressedCount: 0,
+          policyDeniedCount: 0,
+        },
+        approval: {
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+          organizationId: 'org-1',
+          correlationId: 'corr-1',
+          approvalId: 'approval-1',
+          status: 'APPROVED',
+        },
+        idempotencyKey: 'idem-retry-after',
+      }),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 7_000 });
+  });
+
+  it('requires inbound hostname and signing key only when inbound parse is enabled', () => {
+    expect(() =>
+      validateSendGridConfig({ ...productionConfig, inboundParseEnabled: false }),
+    ).not.toThrow();
+    expect(() =>
+      validateSendGridConfig({ ...productionConfig, inboundParseEnabled: true }),
+    ).toThrow('SENDGRID_INBOUND_PARSE_HOSTNAME_REQUIRED');
+    expect(() =>
+      validateSendGridConfig({
+        ...productionConfig,
+        inboundParseEnabled: true,
+        inboundParseHostname: 'inbound.mail.example.com',
+      }),
+    ).toThrow('SENDGRID_INBOUND_PARSE_PUBLIC_KEY_REQUIRED');
+  });
+
   it('fails closed when independent Email Activity readback is not enabled', async () => {
     const provider = new SendGridEmailProvider(
       productionConfig,

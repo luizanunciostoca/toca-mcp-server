@@ -29,6 +29,8 @@ export interface SendGridConfig {
   readonly bindingId: string;
   readonly bindingState: ProviderBindingRef['state'];
   readonly eventWebhookPublicKeyPem?: string | null;
+  readonly inboundParseEnabled?: boolean;
+  readonly inboundParseHostname?: string | null;
   readonly inboundParsePublicKeyPem?: string | null;
   readonly emailActivityReadbackEnabled?: boolean;
 }
@@ -137,6 +139,17 @@ export interface SendGridInboundParseEnvelope {
 
 type FetchLike = typeof fetch;
 
+export class SendGridHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs: number | null,
+    readonly providerBodyEvidence: string,
+  ) {
+    super(`SENDGRID_MAIL_SEND_FAILED:${status}:provider-rejected`);
+    this.name = 'SendGridHttpError';
+  }
+}
+
 export class SendGridEmailProvider implements EmailProviderAdapter {
   readonly binding: ProviderBindingRef;
   private readonly apiBaseUrl: string;
@@ -177,8 +190,10 @@ export class SendGridEmailProvider implements EmailProviderAdapter {
       body: JSON.stringify(payload),
     });
     if (response.status !== 202) {
-      throw new Error(
-        `SENDGRID_MAIL_SEND_FAILED:${response.status}:${await safeResponseText(response)}`,
+      throw new SendGridHttpError(
+        response.status,
+        parseRetryAfterMs(response.headers.get('retry-after')),
+        await safeResponseText(response),
       );
     }
     const providerMessageId = response.headers.get('x-message-id')?.trim();
@@ -569,6 +584,36 @@ export async function validateSendGridDns(input: {
   return { domain, spf, dkim, dmarc, evidence };
 }
 
+export async function validateSendGridInboundMx(hostname: string): Promise<{
+  readonly hostname: string;
+  readonly mx: 'PASS' | 'FAIL';
+  readonly evidence: readonly string[];
+}> {
+  const normalizedHostname = normalizeDomain(hostname);
+  try {
+    const records = await dns.resolveMx(normalizedHostname);
+    const matching = records.filter(
+      (record) => normalizeDomain(record.exchange) === 'mx.sendgrid.net',
+    );
+    const passed = matching.length > 0;
+    return {
+      hostname: normalizedHostname,
+      mx: passed ? 'PASS' : 'FAIL',
+      evidence: [
+        `dns:inbound-mx:${passed ? 'PASS' : 'FAIL'}:${
+          records.map((record) => `${record.priority}:${record.exchange}`).join(',') || 'missing'
+        }`,
+      ],
+    };
+  } catch (error) {
+    return {
+      hostname: normalizedHostname,
+      mx: 'FAIL',
+      evidence: [`dns:inbound-mx:FAIL:${errorCode(error)}`],
+    };
+  }
+}
+
 export function validateSendGridConfig(config: SendGridConfig): void {
   requireText(config.apiKey, 'SENDGRID_API_KEY_REQUIRED');
   const sendingDomain = normalizeDomain(config.sendingDomain);
@@ -580,6 +625,15 @@ export function validateSendGridConfig(config: SendGridConfig): void {
   requireText(config.fromName, 'SENDGRID_FROM_NAME_REQUIRED');
   requireText(config.bindingId, 'SENDGRID_BINDING_ID_REQUIRED');
   if (config.replyToEmail) normalizeEmailAddress(config.replyToEmail);
+  if (config.inboundParseEnabled) {
+    if (!config.inboundParseHostname?.trim()) {
+      throw new Error('SENDGRID_INBOUND_PARSE_HOSTNAME_REQUIRED');
+    }
+    normalizeDomain(config.inboundParseHostname);
+    if (!config.inboundParsePublicKeyPem?.trim()) {
+      throw new Error('SENDGRID_INBOUND_PARSE_PUBLIC_KEY_REQUIRED');
+    }
+  }
   if (config.apiBaseUrl && !/^https:\/\//i.test(config.apiBaseUrl)) {
     throw new Error('SENDGRID_API_BASE_URL_INVALID');
   }
@@ -679,6 +733,15 @@ async function safeResponseText(response: Response): Promise<string> {
   } catch {
     return 'unreadable-response';
   }
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value?.trim()) return null;
+  const normalized = value.trim();
+  if (/^\d+$/.test(normalized)) return Number.parseInt(normalized, 10) * 1_000;
+  const dateMs = Date.parse(normalized);
+  if (!Number.isFinite(dateMs)) return null;
+  return Math.max(0, dateMs - Date.now());
 }
 
 function errorCode(error: unknown): string {

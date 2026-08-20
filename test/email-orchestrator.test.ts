@@ -240,11 +240,26 @@ describe('EmailDispatchCoordinator', () => {
   it('schedules bounded retry for transient SendGrid failures', async () => {
     const store = new MemoryEmailStore();
     const provider = new StubProvider();
-    provider.sendError = new Error('SENDGRID_MAIL_SEND_FAILED:429:rate-limited');
+    provider.sendError = Object.assign(
+      new Error('SENDGRID_MAIL_SEND_FAILED:429:provider-rejected'),
+      {
+        retryAfterMs: 5_000,
+      },
+    );
     const coordinator = new EmailDispatchCoordinator(provider, store);
     const result = await coordinator.send(buildSendInput());
     expect(result.dispatch.state).toBe('DEFERRED');
     expect(result.dispatch.attemptCount).toBe(1);
+    expect(result.dispatch.nextRetryAt).toBe('2026-08-20T05:00:05.000Z');
+  });
+
+  it('falls back to exponential retry when provider Retry-After is absent', async () => {
+    const store = new MemoryEmailStore();
+    const provider = new StubProvider();
+    provider.sendError = new Error('SENDGRID_MAIL_SEND_FAILED:500:provider-rejected');
+    const coordinator = new EmailDispatchCoordinator(provider, store);
+    const result = await coordinator.send(buildSendInput());
+    expect(result.dispatch.state).toBe('DEFERRED');
     expect(result.dispatch.nextRetryAt).toBe('2026-08-20T05:00:01.000Z');
   });
 
