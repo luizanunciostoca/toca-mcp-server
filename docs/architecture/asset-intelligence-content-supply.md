@@ -149,6 +149,8 @@ Tables:
 
 The persistence implementation is `PostgresAssetIntelligenceStore`.
 
+The permanent PostgreSQL E2E suite validates migration application, exact-dedupe readback, usage idempotency and process-restart durability for this store.
+
 ## Relationship to existing media ranking
 
 The existing Google Sheets adapter and `ASSET_RANKING_POLICY` ranking implementation remain authoritative for their current business-ranking contract. This Asset Intelligence layer does not hardcode or replace those business weights.
