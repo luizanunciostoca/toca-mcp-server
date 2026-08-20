@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "dashboardId": "toca-platform-hardening-next",
+  "routeIds": ["R25", "R31"],
+  "title": "TOCA OS Platform Hardening — Next Version",
+  "panels": [
+    { "id": "publication", "signals": ["publication.verified_terminal_success_ratio"] },
+    { "id": "workflow", "signals": ["workflow.terminal_success_ratio"] },
+    { "id": "provider-readback", "signals": ["provider.readback_verified_ratio"] },
+    { "id": "lead-ingestion", "signals": ["lead.ingestion_success_ratio", "lead.first_response_p95_seconds"] },
+    { "id": "webhook", "signals": ["webhook.accepted_success_ratio"] },
+    { "id": "outbox-retry-dead-letter", "signals": ["outbox.oldest_pending_age_seconds", "retry.exhausted_count", "dead_letter.pending_count"] },
+    { "id": "crm-attribution", "signals": ["crm.durable_write_success_ratio", "attribution.durable_write_success_ratio"] },
+    { "id": "future-provider-readiness", "signals": ["whatsapp.delivery_verified_ratio", "email.delivery_verified_ratio"], "inactiveUntilProviderVerified": true },
+    { "id": "r31", "signals": ["r31.feedback_loop_success_ratio"] }
+  ],
+  "requiredDimensions": ["correlation_id", "execution_id", "tenant_id", "route_id", "provider", "status"],
+  "sourcePlane": "operational_signals",
+  "notes": "Declarative dashboard contract. Provider provisioning/readback is a separate evidence step and must not be inferred from this file."
+}
