@@ -1,9 +1,9 @@
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "standardId": "SUNSET_STORY_V1",
-  "standardVersion": "1.1",
+  "standardVersion": "1.2",
   "status": "ACTIVE_CANONICAL",
-  "validatedAt": "2026-08-17",
+  "validatedAt": "2026-08-20",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
     "operation": "SUNSET",
@@ -18,7 +18,8 @@
     "originalReferencesFolderId": "1mT4NJdY4wQfbTP580lxvmJC9IbH-3ttz",
     "derivedExamplesFolderId": "1oFEJBYjyZKPCLsnHfnbMul7hIv9N2BwK",
     "referenceSetId": "SUNSET_STORY_REFERENCE_SET_20260817",
-    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_V1"
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
   },
   "canvas": {
     "width": 1080,
@@ -37,7 +38,7 @@
   "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN", "REAL"],
   "photography": {
     "venueVerifiedRequired": true,
-    "masterStatusRequired": "MARKETING_READY",
+    "masterStatusRequired": "VENUE_VERIFIED_MARKETING_READY",
     "preferredThemes": [
       "PEOPLE_GOLDEN_HOUR",
       "SOCIAL_INTERACTION",
@@ -111,7 +112,8 @@
     "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
     "defaultModes": ["REAL_COMPOSITE", "REAL_PLUS_ENHANCEMENT"],
     "generativeExceptionRequiresExplicitApproval": true,
-    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_V1",
+    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "crossOperationReferenceReuse": "FORBIDDEN",
     "venueFidelityGateRequired": true,
     "brandIntegrityGateRequired": true,
     "qualityGateRequired": true,
