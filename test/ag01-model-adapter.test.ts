@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
-import type { SecretReference, SecretResolver } from '../src/core/secrets.js';
+import type { SecretResolver } from '../src/core/secrets.js';
 import { getRouteDefinition } from '../src/governance/route-catalog.js';
 import { ROUTE_IDS } from '../src/governance/types.js';
 import { OpenAiResponsesDecisionAdapter } from '../src/orchestrator/openai-responses-adapter.js';
@@ -18,7 +18,7 @@ const identity = createTrustedServiceExecutionIdentity({
 });
 
 class StaticSecrets implements SecretResolver {
-  resolve(_reference: SecretReference): Promise<string> {
+  resolve(): Promise<string> {
     return Promise.resolve('test-secret');
   }
 }
@@ -130,9 +130,11 @@ function adapter(fetchFn: typeof fetch, overrides: { timeoutMs?: number; maxRetr
 describe('AG-01 OpenAI Responses adapter', () => {
   it('uses Responses API with strict JSON Schema structured output', async () => {
     let requestBody: unknown;
-    const fetchFn: typeof fetch = async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body)) as unknown;
-      return completedResponse();
+    const fetchFn: typeof fetch = (url, init) => {
+      void url;
+      if (typeof init?.body !== 'string') throw new Error('TEST_EXPECTED_STRING_BODY');
+      requestBody = JSON.parse(init.body) as unknown;
+      return Promise.resolve(completedResponse());
     };
     const result = await adapter(fetchFn).decide(input());
     expect(result.decision.routeId).toBe('R17');
@@ -145,21 +147,23 @@ describe('AG-01 OpenAI Responses adapter', () => {
   });
 
   it('fails closed on malformed structured output', async () => {
-    const fetchFn: typeof fetch = async () => completedResponse('{not-json');
+    const fetchFn: typeof fetch = () => Promise.resolve(completedResponse('{not-json'));
     await expect(adapter(fetchFn).decide(input())).rejects.toThrow(
       'AG01_MODEL_STRUCTURED_OUTPUT_INVALID_JSON',
     );
   });
 
   it('times out a model request without executing any capability', async () => {
-    const fetchFn: typeof fetch = (_url, init) =>
-      new Promise((_resolve, reject) => {
+    const fetchFn: typeof fetch = (url, init) => {
+      void url;
+      return new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           const error = new Error('aborted');
           error.name = 'AbortError';
           reject(error);
         });
       });
+    };
     await expect(adapter(fetchFn, { timeoutMs: 1 }).decide(input())).rejects.toThrow(
       'AG01_MODEL_TIMEOUT',
     );
@@ -167,9 +171,11 @@ describe('AG-01 OpenAI Responses adapter', () => {
 
   it('retries a transient provider failure and succeeds within the configured budget', async () => {
     let calls = 0;
-    const fetchFn: typeof fetch = async () => {
+    const fetchFn: typeof fetch = () => {
       calls += 1;
-      return calls === 1 ? new Response('{}', { status: 503 }) : completedResponse();
+      return Promise.resolve(
+        calls === 1 ? new Response('{}', { status: 503 }) : completedResponse(),
+      );
     };
     const result = await adapter(fetchFn, { maxRetries: 1 }).decide(input());
     expect(result.decision.routeId).toBe('R17');
