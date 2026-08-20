@@ -22,7 +22,6 @@ import {
   type CreateConversationInput,
   type CrmSalesStore,
   type LeadScoreObservation,
-  type LeadSlaRecord,
   type MessageRecord,
   type NextActionRecord,
   type PipelineQueryInput,
@@ -293,7 +292,11 @@ export class PostgresCrmSalesStore implements CrmSalesStore {
       return {
         state: 'AMBIGUOUS',
         canonicalContactId: null,
-        candidates: candidates.map(({ verified: _verified, ...candidate }) => candidate),
+        candidates: candidates.map((candidate) => ({
+          contactId: candidate.contactId,
+          matchedChannels: candidate.matchedChannels,
+          mergedIntoContactId: candidate.mergedIntoContactId,
+        })),
         evidence,
       };
     }
