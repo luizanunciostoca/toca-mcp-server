@@ -89,94 +89,91 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
     }
   });
 
-  it(
-    'commits terminal failure and dead letter together and reconciles a legacy partial terminal state',
-    async () => {
-      const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const atomicJobId = `foundation-dead-letter-${suffix}`;
-      const legacyJobId = `foundation-dead-letter-legacy-${suffix}`;
-      const pool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
+  it('commits terminal failure and dead letter together and reconciles a legacy partial terminal state', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const atomicJobId = `foundation-dead-letter-${suffix}`;
+    const legacyJobId = `foundation-dead-letter-legacy-${suffix}`;
+    const pool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
 
-      try {
-        const scheduler = new PostgresScheduler(pool);
-        const deadLetters = new PostgresDeadLetterSink(pool);
-        await scheduler.schedule({
-          id: atomicJobId,
-          toolName: TOOL,
-          payload: { proof: 'atomic-dead-letter' },
-          runAt: '2026-08-17T21:00:00.000Z',
-          timezone: 'America/Bahia',
-          idempotencyKey: `foundation-dlq-key-${suffix}`,
-        });
-        const claimed = await scheduler.claimDue('2026-08-17T21:00:01.000Z', 1, TOOL);
-        const job = claimed[0];
-        if (!job) throw new Error('FOUNDATION_DEAD_LETTER_CLAIM_MISSING');
+    try {
+      const scheduler = new PostgresScheduler(pool);
+      const deadLetters = new PostgresDeadLetterSink(pool);
+      await scheduler.schedule({
+        id: atomicJobId,
+        toolName: TOOL,
+        payload: { proof: 'atomic-dead-letter' },
+        runAt: '2026-08-17T21:00:00.000Z',
+        timezone: 'America/Bahia',
+        idempotencyKey: `foundation-dlq-key-${suffix}`,
+      });
+      const claimed = await scheduler.claimDue('2026-08-17T21:00:01.000Z', 1, TOOL);
+      const job = claimed[0];
+      if (!job) throw new Error('FOUNDATION_DEAD_LETTER_CLAIM_MISSING');
 
-        const record = {
-          id: `foundation-dlq-${suffix}`,
-          originalJobId: atomicJobId,
-          toolName: TOOL,
-          payload: job.payload,
-          attempts: job.attempts,
-          lastError: 'Error: retry budget exhausted',
-          failedAt: '2026-08-17T21:00:02.000Z',
-        } as const;
-        await deadLetters.finalize(job, record);
-        await deadLetters.finalize(job, record);
+      const record = {
+        id: `foundation-dlq-${suffix}`,
+        originalJobId: atomicJobId,
+        toolName: TOOL,
+        payload: job.payload,
+        attempts: job.attempts,
+        lastError: 'Error: retry budget exhausted',
+        failedAt: '2026-08-17T21:00:02.000Z',
+      } as const;
+      await deadLetters.finalize(job, record);
+      await deadLetters.finalize(job, record);
 
-        expect(await scheduler.get(atomicJobId)).toMatchObject({
-          status: 'FAILED',
-          lastError: record.lastError,
-        });
-        const deadLetterRows = await pool.query<{ count: string }>(
-          'select count(*)::text as count from dead_letter_jobs where original_job_id = $1',
-          [atomicJobId],
-        );
-        expect(deadLetterRows.rows[0]?.count).toBe('1');
+      expect(await scheduler.get(atomicJobId)).toMatchObject({
+        status: 'FAILED',
+        lastError: record.lastError,
+      });
+      const deadLetterRows = await pool.query<{ count: string }>(
+        'select count(*)::text as count from dead_letter_jobs where original_job_id = $1',
+        [atomicJobId],
+      );
+      expect(deadLetterRows.rows[0]?.count).toBe('1');
 
-        await scheduler.schedule({
-          id: legacyJobId,
-          toolName: TOOL,
-          payload: { proof: 'legacy-partial-terminal' },
-          runAt: '2026-08-17T21:10:00.000Z',
-          timezone: 'America/Bahia',
-          idempotencyKey: `foundation-legacy-dlq-key-${suffix}`,
-        });
-        const legacyClaim = await scheduler.claimDue('2026-08-17T21:10:01.000Z', 1, TOOL);
-        const legacyJob = legacyClaim[0];
-        if (!legacyJob) throw new Error('FOUNDATION_LEGACY_DEAD_LETTER_CLAIM_MISSING');
-        await pool.query(
-          `insert into dead_letter_jobs
+      await scheduler.schedule({
+        id: legacyJobId,
+        toolName: TOOL,
+        payload: { proof: 'legacy-partial-terminal' },
+        runAt: '2026-08-17T21:10:00.000Z',
+        timezone: 'America/Bahia',
+        idempotencyKey: `foundation-legacy-dlq-key-${suffix}`,
+      });
+      const legacyClaim = await scheduler.claimDue('2026-08-17T21:10:01.000Z', 1, TOOL);
+      const legacyJob = legacyClaim[0];
+      if (!legacyJob) throw new Error('FOUNDATION_LEGACY_DEAD_LETTER_CLAIM_MISSING');
+      await pool.query(
+        `insert into dead_letter_jobs
             (id, original_job_id, tool_name, payload, attempts, last_error, failed_at)
            values ($1, $2, $3, $4::jsonb, $5, $6, $7::timestamptz)`,
-          [
-            `foundation-legacy-dlq-${suffix}`,
-            legacyJobId,
-            TOOL,
-            JSON.stringify(legacyJob.payload),
-            legacyJob.attempts,
-            'Error: legacy terminal write completed before source transition',
-            '2026-08-17T21:10:02.000Z',
-          ],
-        );
-        await pool.query(
-          `update scheduled_jobs
+        [
+          `foundation-legacy-dlq-${suffix}`,
+          legacyJobId,
+          TOOL,
+          JSON.stringify(legacyJob.payload),
+          legacyJob.attempts,
+          'Error: legacy terminal write completed before source transition',
+          '2026-08-17T21:10:02.000Z',
+        ],
+      );
+      await pool.query(
+        `update scheduled_jobs
            set updated_at = '2026-08-17T20:50:00.000Z'::timestamptz
            where id = $1`,
-          [legacyJobId],
-        );
+        [legacyJobId],
+      );
 
-        expect(await scheduler.claimDue('2026-08-17T21:10:03.000Z', 1, TOOL)).toHaveLength(0);
-        expect(await scheduler.get(legacyJobId)).toMatchObject({ status: 'FAILED' });
-      } finally {
-        await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [
-          [atomicJobId, legacyJobId],
-        ]);
-        await pool.query('delete from scheduled_jobs where id = any($1::text[])', [
-          [atomicJobId, legacyJobId],
-        ]);
-        await pool.end();
-      }
-    },
-  );
+      expect(await scheduler.claimDue('2026-08-17T21:10:03.000Z', 1, TOOL)).toHaveLength(0);
+      expect(await scheduler.get(legacyJobId)).toMatchObject({ status: 'FAILED' });
+    } finally {
+      await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [
+        [atomicJobId, legacyJobId],
+      ]);
+      await pool.query('delete from scheduled_jobs where id = any($1::text[])', [
+        [atomicJobId, legacyJobId],
+      ]);
+      await pool.end();
+    }
+  });
 });
