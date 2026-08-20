@@ -53,9 +53,20 @@ export class TenantCredentialResolver {
       throw new TenantIsolationError('TENANT_CAPABILITY_NOT_ALLOWED');
     }
 
-    const provider = configuration.providers.find(
-      (candidate) => candidate.providerId === input.providerId && candidate.enabled,
+    const providerCandidates = configuration.providers.filter(
+      (candidate) =>
+        candidate.providerId === input.providerId &&
+        candidate.enabled &&
+        (input.expectation.targetAccount === undefined ||
+          candidate.connectedAccountId === input.expectation.targetAccount),
     );
+    if (providerCandidates.length === 0) {
+      throw new TenantIsolationError('TENANT_PROVIDER_UNAVAILABLE');
+    }
+    if (providerCandidates.length > 1) {
+      throw new TenantIsolationError('TENANT_PROVIDER_ACCOUNT_AMBIGUOUS');
+    }
+    const provider = providerCandidates[0];
     if (!provider) throw new TenantIsolationError('TENANT_PROVIDER_UNAVAILABLE');
     if (provider.allowedCapabilityIds && !provider.allowedCapabilityIds.includes(capabilityId)) {
       throw new TenantIsolationError('TENANT_PROVIDER_CAPABILITY_NOT_ALLOWED');
