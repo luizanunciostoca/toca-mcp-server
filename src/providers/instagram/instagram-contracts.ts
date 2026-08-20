@@ -66,6 +66,8 @@ export interface InstagramPublishRequest {
   readonly correlationId: string;
   readonly idempotencyKey: string;
   readonly creativeTruthBinding?: CreativeTruthPublicationBinding;
+  /** SHA-256 computed from the exact staged publication bytes before provider execution. */
+  readonly publicationAssetSha256?: string;
 }
 
 export interface InstagramPublishResult {
