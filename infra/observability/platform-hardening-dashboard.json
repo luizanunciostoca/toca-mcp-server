@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "dashboardId": "toca-platform-hardening-next",
   "routeIds": ["R25", "R31"],
   "title": "TOCA OS Platform Hardening — Next Version",
   "panels": [
+    {
+      "id": "http-runtime",
+      "signals": ["http.request_rate", "http.request_error_ratio", "http.request_p95_seconds"],
+      "sourcePlane": "cloud_run_native"
+    },
     {
       "id": "publication",
       "signals": ["publication.verified_terminal_success_ratio"]
@@ -14,7 +19,7 @@
     },
     {
       "id": "provider-readback",
-      "signals": ["provider.readback_verified_ratio"]
+      "signals": ["provider.readback_verified_ratio", "provider.error_count"]
     },
     {
       "id": "lead-ingestion",
@@ -22,19 +27,33 @@
     },
     {
       "id": "webhook",
-      "signals": ["webhook.accepted_success_ratio"]
+      "signals": ["webhook.accepted_success_ratio", "webhook.failure_count"]
     },
     {
       "id": "outbox-retry-dead-letter",
       "signals": [
         "outbox.oldest_pending_age_seconds",
         "retry.exhausted_count",
-        "dead_letter.pending_count"
+        "dead_letter.pending_count",
+        "queue.backlog_count"
       ]
     },
     {
+      "id": "ag01",
+      "signals": ["ag01.failure_count"]
+    },
+    {
+      "id": "approval",
+      "signals": ["approval.decision_p95_seconds"]
+    },
+    {
       "id": "crm-attribution",
-      "signals": ["crm.durable_write_success_ratio", "attribution.durable_write_success_ratio"]
+      "signals": [
+        "crm.durable_write_success_ratio",
+        "crm.error_count",
+        "attribution.durable_write_success_ratio",
+        "revenue_attribution.error_count"
+      ]
     },
     {
       "id": "future-provider-readiness",
@@ -47,6 +66,8 @@
     }
   ],
   "requiredDimensions": [
+    "environment",
+    "revision",
     "correlation_id",
     "execution_id",
     "tenant_id",
@@ -54,6 +75,6 @@
     "provider",
     "status"
   ],
-  "sourcePlane": "operational_signals",
-  "notes": "Declarative dashboard contract. Provider provisioning/readback is a separate evidence step and must not be inferred from this file."
+  "sourcePlanes": ["cloud_run_native", "operational_signals"],
+  "notes": "Cloud Run native request metrics cover rate/error/latency; canonical application signals remain in operational_signals. Provider-specific panels stay inactive until provider verification."
 }

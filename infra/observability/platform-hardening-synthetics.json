@@ -1,17 +1,24 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "checkSetId": "toca-platform-hardening-next",
   "safety": {
     "realSideEffectsForTesting": false,
     "destructiveOperations": false,
-    "providerMutationAllowed": false
+    "providerMutationAllowed": false,
+    "controlPlaneNotificationDeliveryAllowed": true
   },
   "checks": [
     {
       "id": "runtime-readiness",
       "mode": "READ_ONLY",
-      "assertion": "runtime accepts authenticated health/readiness inspection",
+      "assertion": "authenticated /healthz returns process liveness and /readyz returns 200 only when every mandatory dependency is ready",
       "frequencyMinutes": 5
+    },
+    {
+      "id": "candidate-readiness-before-traffic",
+      "mode": "READ_ONLY",
+      "assertion": "tagged Cloud Run candidate passes authenticated /healthz and /readyz before any traffic promotion",
+      "frequencyMinutes": 0
     },
     {
       "id": "audit-integrity",
@@ -22,7 +29,7 @@
     {
       "id": "outbox-lag",
       "mode": "INTERNAL_CONTRACT",
-      "assertion": "oldest pending Outbox age remains within SLO",
+      "assertion": "oldest pending Outbox age remains within SLO and dead-letter state is incident-classified",
       "frequencyMinutes": 5
     },
     {
@@ -48,6 +55,14 @@
       "mode": "READ_ONLY",
       "assertion": "attribution durable records are readable through the governed core",
       "frequencyMinutes": 15
+    },
+    {
+      "id": "alert-firing-delivery-readback",
+      "mode": "CONTROL_PLANE",
+      "assertion": "controlled synthetic signal opens the intended Cloud Monitoring incident, delivers through configured real notification channels, is independently read back, and temporary proof resources are cleaned up",
+      "frequencyMinutes": 0,
+      "activationGate": "RELEASE_VALIDATION",
+      "reuseVerifiedBaselineEvidence": "docs/operations/alerts-production-verification-2026-08-16.md"
     }
   ],
   "futureChecks": [
@@ -58,6 +73,11 @@
     },
     {
       "id": "email-provider-read",
+      "enabled": false,
+      "activationGate": "PROVIDER_VERIFIED"
+    },
+    {
+      "id": "google-ads-provider-read",
       "enabled": false,
       "activationGate": "PROVIDER_VERIFIED"
     },
