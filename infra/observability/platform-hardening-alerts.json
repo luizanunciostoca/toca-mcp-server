@@ -119,10 +119,7 @@
       "enabled": false
     }
   ],
-  "mandatoryExistingPolicies": [
-    "AUDIT_LEDGER_INTEGRITY_FAILED",
-    "OUTBOX_DELIVERY_STALLED"
-  ],
+  "mandatoryExistingPolicies": ["AUDIT_LEDGER_INTEGRITY_FAILED", "OUTBOX_DELIVERY_STALLED"],
   "runbook": "docs/operations/observability-incident-runbook.md",
   "notes": "Declarative alert contract only. Activation and managed-provider firing/readback require separate provider evidence."
 }
