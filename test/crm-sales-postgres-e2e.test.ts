@@ -170,9 +170,9 @@ postgresDescribe('CRM Sales Engine PostgreSQL E2E', () => {
          evidence, created_at
        ) values (
          $1, $2, $3, $4, $5, $6, $7, $8, null, 'ORDER', 'crm-sales-e2e',
-         $9, $10, $11, 'CONFIRMED', $12::timestamptz, $13::timestamptz,
+         $9, $10, $11, 'CONFIRMED', $12::timestamptz, $12::timestamptz,
          'BRL', 250000, 250000, null, null, $11,
-         $14, $15, $16, $17, $18::jsonb, $12::timestamptz
+         $13, $14, $15, $16, $17::jsonb, $12::timestamptz
        )`,
       [
         `revenue-evidence-won-${suffix}`,
