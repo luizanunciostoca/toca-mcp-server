@@ -1,8 +1,13 @@
 import type { ConnectedAccount } from '../core/connected-account.js';
 import type { ConnectedAccountStore } from '../core/connected-account-store.js';
-import type { ExecutionIdentity } from '../core/identity.js';
+import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
 import type { SecretResolver } from '../core/secrets.js';
-import type { TenantConfiguration, TenantConfigurationStore, TenantScope } from './contracts.js';
+import type {
+  TenantBoundaryExpectation,
+  TenantConfiguration,
+  TenantConfigurationStore,
+  TenantScope,
+} from './contracts.js';
 import { assertSameTenantBoundary, TenantIsolationError } from './tenant-configuration.js';
 
 export interface ResolvedTenantProviderAccess {
@@ -22,21 +27,32 @@ export class TenantCredentialResolver {
   async resolve(input: {
     readonly identity: ExecutionIdentity;
     readonly providerId: string;
-    readonly capabilityId: string;
+    readonly expectation: TenantBoundaryExpectation;
   }): Promise<ResolvedTenantProviderAccess> {
     const configuration = await this.requireTenantConfiguration(input.identity);
     if (configuration.status !== 'ACTIVE') {
       throw new TenantIsolationError('TENANT_SUSPENDED');
     }
 
+    const authorization = authorizeExecution(input.identity, input.expectation);
+    if (!authorization.allowed) throw new TenantIsolationError(authorization.reason);
+
+    const capabilityId = input.expectation.capabilityId;
+    if (configuration.deniedCapabilityIds.includes(capabilityId)) {
+      throw new TenantIsolationError('TENANT_CAPABILITY_DENIED');
+    }
+    if (
+      configuration.allowedCapabilityIds &&
+      !configuration.allowedCapabilityIds.includes(capabilityId)
+    ) {
+      throw new TenantIsolationError('TENANT_CAPABILITY_NOT_ALLOWED');
+    }
+
     const provider = configuration.providers.find(
       (candidate) => candidate.providerId === input.providerId && candidate.enabled,
     );
     if (!provider) throw new TenantIsolationError('TENANT_PROVIDER_UNAVAILABLE');
-    if (
-      provider.allowedCapabilityIds &&
-      !provider.allowedCapabilityIds.includes(input.capabilityId)
-    ) {
+    if (provider.allowedCapabilityIds && !provider.allowedCapabilityIds.includes(capabilityId)) {
       throw new TenantIsolationError('TENANT_PROVIDER_CAPABILITY_NOT_ALLOWED');
     }
 
@@ -49,7 +65,7 @@ export class TenantCredentialResolver {
     }
     if (
       credential.allowedCapabilityIds &&
-      !credential.allowedCapabilityIds.includes(input.capabilityId)
+      !credential.allowedCapabilityIds.includes(capabilityId)
     ) {
       throw new TenantIsolationError('TENANT_CREDENTIAL_CAPABILITY_NOT_ALLOWED');
     }
