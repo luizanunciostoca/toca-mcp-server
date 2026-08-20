@@ -53,7 +53,9 @@ export function createRuntimeReadinessChecks(
       );
       const appliedVersions = new Set(applied.rows.map((row) => row.version));
       const missing = repositoryMigrations.filter((version) => !appliedVersions.has(version));
-      if (missing.length > 0) throw new Error(`READINESS_MIGRATIONS_PENDING:${missing.join(',')}`);
+      if (missing.length > 0) {
+        throw new Error(`READINESS_MIGRATIONS_PENDING:${missing.join(',')}`);
+      }
     }),
     namedCheck('schema', async () => {
       const pool = requiredPool(options.pool);
@@ -65,8 +67,12 @@ export function createRuntimeReadinessChecks(
            from unnest($1::text[]) as required(table_name)`,
         [REQUIRED_TABLES],
       );
-      const missing = result.rows.filter((row) => row.relation === null).map((row) => row.table_name);
-      if (missing.length > 0) throw new Error(`READINESS_SCHEMA_MISSING:${missing.join(',')}`);
+      const missing = result.rows
+        .filter((row) => row.relation === null)
+        .map((row) => row.table_name);
+      if (missing.length > 0) {
+        throw new Error(`READINESS_SCHEMA_MISSING:${missing.join(',')}`);
+      }
     }),
     namedCheck('audit', async () => {
       const pool = requiredPool(options.pool);
@@ -167,7 +173,10 @@ export function createRuntimeReadinessChecks(
         'READINESS_EMAIL_BINDING_NOT_PRODUCTION_VALIDATED',
       );
       requireText(env.EMAIL_SENDGRID_BINDING_ID, 'READINESS_EMAIL_BINDING_ID_REQUIRED');
-      requireText(env.EMAIL_SENDGRID_SENDING_DOMAIN, 'READINESS_EMAIL_SENDING_DOMAIN_REQUIRED');
+      requireText(
+        env.EMAIL_SENDGRID_SENDING_DOMAIN,
+        'READINESS_EMAIL_SENDING_DOMAIN_REQUIRED',
+      );
       requireText(env.EMAIL_SENDGRID_FROM_EMAIL, 'READINESS_EMAIL_FROM_REQUIRED');
     }),
     namedCheck('google_ads', async () => {
@@ -222,7 +231,11 @@ function assertProviderCredentials(config: RuntimeConfig, env: NodeJS.ProcessEnv
       requireReferencedSecret(env, config.META_APP_SECRET_KEY, 'META_APP_SECRET_KEY');
     }
     if (config.META_WEBHOOK_ENABLED) {
-      requireReferencedSecret(env, config.META_WEBHOOK_VERIFY_TOKEN_KEY, 'META_WEBHOOK_VERIFY_TOKEN_KEY');
+      requireReferencedSecret(
+        env,
+        config.META_WEBHOOK_VERIFY_TOKEN_KEY,
+        'META_WEBHOOK_VERIFY_TOKEN_KEY',
+      );
     }
   }
 
@@ -246,7 +259,11 @@ function assertProviderCredentials(config: RuntimeConfig, env: NodeJS.ProcessEnv
       'GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY',
     );
     if (config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY) {
-      requireReferencedSecret(env, config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY, 'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY');
+      requireReferencedSecret(
+        env,
+        config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY,
+        'GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY',
+      );
     } else {
       requireReferencedSecret(
         env,
@@ -284,7 +301,9 @@ function requireReferencedSecret(
   source: string,
 ): void {
   const normalizedKey = requireText(key, `READINESS_${source}_REQUIRED`);
-  if (!env[normalizedKey]?.trim()) throw new Error(`READINESS_SECRET_MISSING:${source}:${normalizedKey}`);
+  if (!env[normalizedKey]?.trim()) {
+    throw new Error(`READINESS_SECRET_MISSING:${source}:${normalizedKey}`);
+  }
 }
 
 function requireExact(value: string | undefined, expected: string, errorCode: string): void {
@@ -307,6 +326,8 @@ function booleanFlag(value: string | undefined, fallback: boolean): boolean {
 function positiveInteger(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error('READINESS_POSITIVE_INTEGER_INVALID');
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error('READINESS_POSITIVE_INTEGER_INVALID');
+  }
   return parsed;
 }
