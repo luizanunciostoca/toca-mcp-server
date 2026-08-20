@@ -1,4 +1,9 @@
-export const PLATFORM_SLO_KINDS = ['RATIO', 'LATENCY_SECONDS', 'LAG_SECONDS', 'BACKLOG'] as const;
+export const PLATFORM_SLO_KINDS = [
+  'RATIO',
+  'LATENCY_SECONDS',
+  'LAG_SECONDS',
+  'BACKLOG',
+] as const;
 export type PlatformSloKind = (typeof PLATFORM_SLO_KINDS)[number];
 
 export const PLATFORM_SLO_COMPARATORS = ['GTE', 'LTE'] as const;
@@ -231,8 +236,10 @@ export function validatePlatformSloCatalog(
       throw new Error(`PLATFORM_SLO_WINDOW_INVALID:${definition.id}`);
     if (definition.kind === 'RATIO' && definition.target > 1)
       throw new Error(`PLATFORM_SLO_RATIO_TARGET_INVALID:${definition.id}`);
-    if (!definition.signal.trim()) throw new Error(`PLATFORM_SLO_SIGNAL_REQUIRED:${definition.id}`);
-    if (!definition.runbook.trim()) throw new Error(`PLATFORM_SLO_RUNBOOK_REQUIRED:${definition.id}`);
+    if (!definition.signal.trim())
+      throw new Error(`PLATFORM_SLO_SIGNAL_REQUIRED:${definition.id}`);
+    if (!definition.runbook.trim())
+      throw new Error(`PLATFORM_SLO_RUNBOOK_REQUIRED:${definition.id}`);
   }
 
   for (const requiredId of PLATFORM_SLO_IDS) {
