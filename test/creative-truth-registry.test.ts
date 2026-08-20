@@ -4,12 +4,21 @@ import type { SpreadsheetValuesClient } from '../src/providers/google-sheets/med
 
 function clientFor(ranges: Readonly<Record<string, readonly (readonly unknown[])[]>>) {
   const readRange = vi.fn(
-    async (_spreadsheetId: string, range: string): Promise<readonly (readonly unknown[])[]> =>
-      ranges[range] ?? [],
+    (
+      spreadsheetId: string,
+      range: string,
+    ): Promise<readonly (readonly unknown[])[]> => {
+      void spreadsheetId;
+      return Promise.resolve(ranges[range] ?? []);
+    },
   );
   const appendRow = vi.fn(
-    async (_spreadsheetId: string, _range: string, _values: readonly unknown[]): Promise<void> =>
-      undefined,
+    (spreadsheetId: string, range: string, values: readonly unknown[]): Promise<void> => {
+      void spreadsheetId;
+      void range;
+      void values;
+      return Promise.resolve();
+    },
   );
   return {
     client: { readRange, appendRow } satisfies SpreadsheetValuesClient,
