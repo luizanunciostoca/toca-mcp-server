@@ -1,0 +1,35 @@
+name: TEMP Demand Intelligence recovery format
+
+on:
+  push:
+    branches:
+      - recovery/meta-ads-demand-intelligence-20260819
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout recovery branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Format recovered delta with canonical Prettier
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA Recovery Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          npm install --global pnpm@10.15.0
+          pnpm install --frozen-lockfile
+          git fetch origin main
+          mapfile -t FILES < <(git diff --name-only origin/main...HEAD | grep -E '\.(ts|mjs|json|md|sql|ya?ml)$' || true)
+          test "${#FILES[@]}" -gt 0
+          pnpm exec prettier --write "${FILES[@]}"
+          git rm .github/workflows/temp-demand-recovery-format.yml
+          git add -A
+          git diff --cached --check
+          git commit -m 'style(meta-ads): format recovered Demand Intelligence delta'
+          git push origin HEAD:recovery/meta-ads-demand-intelligence-20260819
