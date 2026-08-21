@@ -1,21 +1,22 @@
 name: Temporary Marketing Autopilot Formatter
 
 on:
-  push:
-    branches:
-      - codex/marketing-autopilot-closed-loop
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   format:
+    if: github.event.pull_request.number == 47
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout head branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: true
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
