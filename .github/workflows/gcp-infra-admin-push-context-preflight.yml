@@ -10,10 +10,12 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
 
 env:
   CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
   PROJECT_ID: toca-mcp-production
+  ORGANIZATION_ID: '995529283213'
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
@@ -38,25 +40,75 @@ jobs:
           service_account: ${{ env.INFRA_ADMIN_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - name: Probe authority read-only
+        id: probe
         shell: bash
         run: |
-          set -u -o pipefail
-          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
-          echo "GITHUB_REF=$GITHUB_REF"
-          if gcloud auth print-access-token >/dev/null 2>/tmp/token.err; then
-            echo 'INFRA_ADMIN_PUSH_TOKEN=PASS'
-          else
-            echo 'INFRA_ADMIN_PUSH_TOKEN=FAIL'
-            cat /tmp/token.err
-            exit 1
+          set +e
+          TOKEN_STATUS=FAIL
+          PROJECT_COUNT=0
+          ORG_COUNT=0
+          BILLING_COUNT=0
+          PROJECT_CREATE=NO
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token 2>/tmp/token.err)"
+          if [ -n "$ACCESS_TOKEN" ]; then
+            TOKEN_STATUS=PASS
+            PROJECT_COUNT="$(gcloud projects list --format='value(projectId)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+            ORG_COUNT="$(gcloud organizations list --format='value(name)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+            BILLING_COUNT="$(gcloud billing accounts list --format='value(name)' 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+            BODY='{"permissions":["resourcemanager.projects.create"]}'
+            HTTP_CODE="$(curl -sS -o /tmp/org-perms.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data "$BODY" \
+              "https://cloudresourcemanager.googleapis.com/v3/organizations/$ORGANIZATION_ID:testIamPermissions")"
+            if [ "$HTTP_CODE" = '200' ] && jq -e '.permissions[]? == "resourcemanager.projects.create"' /tmp/org-perms.json >/dev/null 2>&1; then
+              PROJECT_CREATE=YES
+            fi
           fi
-          echo 'PROJECTS_BEGIN'
-          gcloud projects list --format='value(projectId,projectNumber)' || true
-          echo 'PROJECTS_END'
-          echo 'ORGS_BEGIN'
-          gcloud organizations list --format='value(name,displayName)' || true
-          echo 'ORGS_END'
-          echo 'BILLING_BEGIN'
-          gcloud billing accounts list --format='value(name,displayName,open)' || true
-          echo 'BILLING_END'
-          echo 'INFRA_ADMIN_PUSH_CONTEXT_PREFLIGHT=PASS'
+
+          echo "token_status=$TOKEN_STATUS" >> "$GITHUB_OUTPUT"
+          echo "project_count=$PROJECT_COUNT" >> "$GITHUB_OUTPUT"
+          echo "org_count=$ORG_COUNT" >> "$GITHUB_OUTPUT"
+          echo "billing_count=$BILLING_COUNT" >> "$GITHUB_OUTPUT"
+          echo "project_create=$PROJECT_CREATE" >> "$GITHUB_OUTPUT"
+          echo "event_name=$GITHUB_EVENT_NAME" >> "$GITHUB_OUTPUT"
+          echo "git_ref=$GITHUB_REF" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Publish sanitized evidence to issue 70
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKEN_STATUS: ${{ steps.probe.outputs.token_status }}
+          PROJECT_COUNT: ${{ steps.probe.outputs.project_count }}
+          ORG_COUNT: ${{ steps.probe.outputs.org_count }}
+          BILLING_COUNT: ${{ steps.probe.outputs.billing_count }}
+          PROJECT_CREATE: ${{ steps.probe.outputs.project_create }}
+          EVENT_NAME: ${{ steps.probe.outputs.event_name }}
+          GIT_REF: ${{ steps.probe.outputs.git_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMENT=$(cat <<EOF
+          INFRA-ADMIN PUSH-CONTEXT PREFLIGHT — 2026-08-21
+
+          Read-only. No GCP/IAM mutation executed.
+
+          - event: \`$EVENT_NAME\`
+          - ref: \`$GIT_REF\`
+          - \`INFRA_ADMIN_PUSH_TOKEN=$TOKEN_STATUS\`
+          - \`VISIBLE_PROJECT_COUNT=$PROJECT_COUNT\`
+          - \`VISIBLE_ORG_COUNT=$ORG_COUNT\`
+          - \`VISIBLE_BILLING_ACCOUNT_COUNT=$BILLING_COUNT\`
+          - \`ORG_PROJECT_CREATE=$PROJECT_CREATE\`
+          - frozen candidate: \`$CANDIDATE_SHA\`
+
+          \`PLATFORM_READY_FOR_STAGING=NO\` unless a separate live isolation proof later passes.
+          EOF
+          )
+          jq -n --arg body "$COMMENT" '{body:$body}' >/tmp/comment.json
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-binary @/tmp/comment.json \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/70/comments" >/dev/null
