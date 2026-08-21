@@ -146,8 +146,17 @@ jobs:
           MCP_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
         run: |
           set -euo pipefail
-          READY_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/mcp-readyz.json --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz")"
-          HEALTH_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/mcp-healthz.txt --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz")"
+          retry_get() {
+            path="$1"; output="$2"; status=000
+            for attempt in $(seq 1 15); do
+              status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL$path" || true)"
+              [[ "$status" == 200 ]] && break
+              sleep 4
+            done
+            printf '%s' "$status"
+          }
+          READY_STATUS="$(retry_get /readyz staging-acceptance-evidence/mcp-readyz.json)"
+          HEALTH_STATUS="$(retry_get /healthz staging-acceptance-evidence/mcp-healthz.txt)"
           test "$READY_STATUS" = 200
           test "$HEALTH_STATUS" = 200
           jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' staging-acceptance-evidence/mcp-readyz.json >/dev/null
@@ -169,8 +178,17 @@ jobs:
           WEBHOOK_TOKEN: ${{ steps.webhook_token.outputs.id_token }}
         run: |
           set -euo pipefail
-          READY_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/webhook-readyz.json --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/readyz")"
-          HEALTH_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/webhook-healthz.txt --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/healthz")"
+          retry_get() {
+            path="$1"; output="$2"; status=000
+            for attempt in $(seq 1 15); do
+              status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL$path" || true)"
+              [[ "$status" == 200 ]] && break
+              sleep 4
+            done
+            printf '%s' "$status"
+          }
+          READY_STATUS="$(retry_get /readyz staging-acceptance-evidence/webhook-readyz.json)"
+          HEALTH_STATUS="$(retry_get /healthz staging-acceptance-evidence/webhook-healthz.txt)"
           MCP_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/mcp" || true)"
           OAUTH_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/oauth/meta/start" || true)"
           test "$READY_STATUS" = 200
