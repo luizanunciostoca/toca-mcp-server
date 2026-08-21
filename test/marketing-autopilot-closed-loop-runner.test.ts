@@ -92,7 +92,9 @@ class RecordingStages implements MarketingAutopilotStageExecutor {
   }
 }
 
-function defaultStageResult(stage: MarketingAutopilotStageContext['stage']): MarketingAutopilotStageResult {
+function defaultStageResult(
+  stage: MarketingAutopilotStageContext['stage'],
+): MarketingAutopilotStageResult {
   if (stage === 'PLAN') {
     return {
       output: {
@@ -140,7 +142,9 @@ function createRunner(input: {
     stageExecutor: stages,
     workerId: 'autopilot-test-worker',
     now: () => NOW,
-    ...(input.staleClaimAfterMs === undefined ? {} : { staleClaimAfterMs: input.staleClaimAfterMs }),
+    ...(input.staleClaimAfterMs === undefined
+      ? {}
+      : { staleClaimAfterMs: input.staleClaimAfterMs }),
   });
   return { runner, store, core, stages };
 }
@@ -189,7 +193,10 @@ function approvalRecord(capabilityId: string, correlationId: string): ApprovalRe
   };
 }
 
-function count(calls: readonly MarketingAutopilotClosedLoopStage[], stage: MarketingAutopilotClosedLoopStage) {
+function count(
+  calls: readonly MarketingAutopilotClosedLoopStage[],
+  stage: MarketingAutopilotClosedLoopStage,
+) {
   return calls.filter((item) => item === stage).length;
 }
 
@@ -206,7 +213,11 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
     expect(partial.stage).toBe('CREATIVE_TRUTH');
 
     const restarted = createRunner({ store: first.store, core: first.core, stages: first.stages });
-    const completed = await restarted.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW });
+    const completed = await restarted.runner.wake({
+      workflowId: checkpoint.workflowId,
+      identity,
+      now: NOW,
+    });
 
     expect(completed.status).toBe('SUCCEEDED');
     expect(count(first.stages.calls, 'OBSERVE')).toBe(1);
@@ -219,7 +230,11 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
     setup.core.approvalRequired = true;
     const checkpoint = await start(setup.runner, 'approval');
 
-    const waiting = await setup.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW });
+    const waiting = await setup.runner.wake({
+      workflowId: checkpoint.workflowId,
+      identity,
+      now: NOW,
+    });
     expect(waiting.status).toBe('WAITING');
     expect(waiting.stage).toBe('APPROVAL');
     expect(waiting.waitingApprovalId).toBe('approval-autopilot-1');
@@ -227,7 +242,11 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
     expect(setup.core.executeCalls).toBe(0);
 
     setup.core.approve();
-    const completed = await setup.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW });
+    const completed = await setup.runner.wake({
+      workflowId: checkpoint.workflowId,
+      identity,
+      now: NOW,
+    });
     expect(completed.status).toBe('SUCCEEDED');
     expect(setup.core.requestApprovalCalls).toBe(1);
     expect(setup.core.executeCalls).toBe(1);
@@ -242,11 +261,17 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
       setup.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW }),
     ).rejects.toThrow('PROVIDER_TEMPORARY_FAILURE');
     const failed = await setup.store.get(checkpoint.workflowId);
-    expect(failed?.steps.find((step) => step.name === 'SCHEDULE_OR_PUBLISH')?.status).toBe('FAILED');
+    expect(failed?.steps.find((step) => step.name === 'SCHEDULE_OR_PUBLISH')?.status).toBe(
+      'FAILED',
+    );
     expect(count(setup.stages.calls, 'READBACK')).toBe(0);
     expect(count(setup.stages.calls, 'LEARN')).toBe(0);
 
-    const completed = await setup.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW });
+    const completed = await setup.runner.wake({
+      workflowId: checkpoint.workflowId,
+      identity,
+      now: NOW,
+    });
     expect(completed.status).toBe('SUCCEEDED');
     expect(setup.core.executeCalls).toBe(2);
     expect(count(setup.stages.calls, 'PLAN')).toBe(1);
@@ -303,7 +328,11 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
     expect(duplicateStart.workflowId).toBe(first.workflowId);
 
     const completed = await setup.runner.wake({ workflowId: first.workflowId, identity, now: NOW });
-    const duplicateWake = await setup.runner.wake({ workflowId: first.workflowId, identity, now: NOW });
+    const duplicateWake = await setup.runner.wake({
+      workflowId: first.workflowId,
+      identity,
+      now: NOW,
+    });
     expect(completed.status).toBe('SUCCEEDED');
     expect(duplicateWake.status).toBe('SUCCEEDED');
     expect(setup.core.executeCalls).toBe(1);
@@ -325,7 +354,10 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
 
   it('blocks NEXT_RECOMMENDATION when LEARN returns no evidence', async () => {
     const setup = createRunner({});
-    setup.stages.overrides.set('LEARN', { output: { learningOutcomeId: 'learning:no-evidence' }, evidence: [] });
+    setup.stages.overrides.set('LEARN', {
+      output: { learningOutcomeId: 'learning:no-evidence' },
+      evidence: [],
+    });
     const checkpoint = await start(setup.runner, 'learning-evidence-absent');
 
     await expect(
@@ -372,7 +404,10 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
       createdAt: NOW,
     } as RevenueEvidenceRecord;
     setup.stages.overrides.set('MEASURE', {
-      output: { measurementRefs: ['measurement:invalid-revenue'], revenueEvidence: [invalidRevenue] },
+      output: {
+        measurementRefs: ['measurement:invalid-revenue'],
+        revenueEvidence: [invalidRevenue],
+      },
       evidence: ['measurement:invalid-revenue'],
     });
     const checkpoint = await start(setup.runner, 'revenue-provider-backed');
@@ -402,7 +437,12 @@ describe('MarketingAutopilotClosedLoopRunner', () => {
       NOW,
     );
     const checkpoint = await start(setup.runner, 'claim-scope');
-    await setup.runner.wake({ workflowId: checkpoint.workflowId, identity, now: NOW, maxStages: 1 });
+    await setup.runner.wake({
+      workflowId: checkpoint.workflowId,
+      identity,
+      now: NOW,
+      maxStages: 1,
+    });
 
     const unrelated = await setup.store.get('aaa-unrelated-workflow');
     expect(unrelated?.steps[0]?.status).toBe('READY');

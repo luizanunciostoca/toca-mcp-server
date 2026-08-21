@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ExecutionIdentity } from '../core/identity.js';
 import type { ApprovalRecord } from '../governance/approval-governance.js';
-import type {
-  RevenueEvidenceRecord,
-} from '../measurement/attribution-revenue-contracts.js';
+import type { RevenueEvidenceRecord } from '../measurement/attribution-revenue-contracts.js';
 import { validateRevenueEvidence } from '../measurement/attribution-revenue-contracts.js';
 import type { CoreCapabilityGateway } from '../orchestrator/contracts.js';
 import type {
@@ -31,10 +29,7 @@ export interface MarketingAutopilotStageResult {
 
 export interface MarketingAutopilotStageContext {
   readonly workflowId: string;
-  readonly stage: Exclude<
-    MarketingAutopilotClosedLoopStage,
-    'APPROVAL' | 'SCHEDULE_OR_PUBLISH'
-  >;
+  readonly stage: Exclude<MarketingAutopilotClosedLoopStage, 'APPROVAL' | 'SCHEDULE_OR_PUBLISH'>;
   readonly idempotencyKey: string;
   readonly correlationId: string;
   readonly identity: ExecutionIdentity;
@@ -106,7 +101,10 @@ export class MarketingAutopilotClosedLoopRunner {
     this.#coreGateway = options.coreGateway;
     this.#stageExecutor = options.stageExecutor;
     this.#workerId = options.workerId ?? 'marketing-autopilot-closed-loop';
-    this.#maxStagesPerWake = positiveInteger(options.maxStagesPerWake ?? 13, 'AUTOPILOT_MAX_STAGES_INVALID');
+    this.#maxStagesPerWake = positiveInteger(
+      options.maxStagesPerWake ?? 13,
+      'AUTOPILOT_MAX_STAGES_INVALID',
+    );
     this.#staleClaimAfterMs = positiveInteger(
       options.staleClaimAfterMs ?? 5 * 60_000,
       'AUTOPILOT_STALE_CLAIM_WINDOW_INVALID',
@@ -124,10 +122,9 @@ export class MarketingAutopilotClosedLoopRunner {
     requireText(input.idempotencyKey, 'AUTOPILOT_IDEMPOTENCY_KEY_REQUIRED');
     requireText(input.correlationId, 'AUTOPILOT_CORRELATION_ID_REQUIRED');
     assertIdentityScope(input.identity);
-    const workflowId = input.workflowId ?? buildMarketingAutopilotWorkflowId(
-      input.identity.principal.tenantId,
-      input.idempotencyKey,
-    );
+    const workflowId =
+      input.workflowId ??
+      buildMarketingAutopilotWorkflowId(input.identity.principal.tenantId, input.idempotencyKey);
     requireText(workflowId, 'AUTOPILOT_WORKFLOW_ID_REQUIRED');
 
     const snapshot = await this.#workflowStore.create(
@@ -196,16 +193,23 @@ export class MarketingAutopilotClosedLoopRunner {
       const stage = stageForStep(step);
       try {
         if (stage === 'APPROVAL') {
-          const result = await this.#executeApproval(claimedSnapshot, step, claim.executionId, input.identity, now);
+          const result = await this.#executeApproval(
+            claimedSnapshot,
+            step,
+            claim.executionId,
+            input.identity,
+            now,
+          );
           snapshot = result;
           executed += 1;
           if (snapshot.instance.status === 'WAITING') break;
           continue;
         }
 
-        const result = stage === 'SCHEDULE_OR_PUBLISH'
-          ? await this.#executeCoreAction(claimedSnapshot, input.identity)
-          : await this.#executeDomainStage(stage, claimedSnapshot, input.identity, now);
+        const result =
+          stage === 'SCHEDULE_OR_PUBLISH'
+            ? await this.#executeCoreAction(claimedSnapshot, input.identity)
+            : await this.#executeDomainStage(stage, claimedSnapshot, input.identity, now);
         this.#assertStageResult(stage, result, claimedSnapshot);
         snapshot = await this.#workflowStore.completeStep({
           workflowId: input.workflowId,
@@ -252,7 +256,10 @@ export class MarketingAutopilotClosedLoopRunner {
         workflowId: snapshot.instance.workflowId,
         stepId: step.stepId,
         executionId,
-        output: { approvalRequired: false, canonicalCapabilityId: inspection.canonicalCapabilityId },
+        output: {
+          approvalRequired: false,
+          canonicalCapabilityId: inspection.canonicalCapabilityId,
+        },
         evidence: [`core:approval:not-required:${inspection.canonicalCapabilityId}`],
         now,
       });
@@ -462,7 +469,10 @@ export class MarketingAutopilotClosedLoopRunner {
     return this.#retryRecoverableFailure(snapshot, now);
   }
 
-  async #retryRecoverableFailure(snapshot: WorkflowSnapshot, now: string): Promise<WorkflowSnapshot> {
+  async #retryRecoverableFailure(
+    snapshot: WorkflowSnapshot,
+    now: string,
+  ): Promise<WorkflowSnapshot> {
     const failed = snapshot.steps.find((step) => step.status === 'FAILED');
     if (!failed || failed.attempts >= failed.maxAttempts) return snapshot;
     if (failed.errorCode?.endsWith('REQUIRES_REVIEW')) return snapshot;
@@ -481,14 +491,22 @@ export class MarketingAutopilotClosedLoopRunner {
   }
 }
 
-export function buildMarketingAutopilotWorkflowId(tenantId: string, idempotencyKey: string): string {
+export function buildMarketingAutopilotWorkflowId(
+  tenantId: string,
+  idempotencyKey: string,
+): string {
   requireText(tenantId, 'AUTOPILOT_TENANT_ID_REQUIRED');
   requireText(idempotencyKey, 'AUTOPILOT_IDEMPOTENCY_KEY_REQUIRED');
-  const digest = createHash('sha256').update(`${tenantId}:${idempotencyKey}`).digest('hex').slice(0, 24);
+  const digest = createHash('sha256')
+    .update(`${tenantId}:${idempotencyKey}`)
+    .digest('hex')
+    .slice(0, 24);
   return `marketing-autopilot:${digest}`;
 }
 
-export function projectMarketingAutopilotCheckpoint(snapshot: WorkflowSnapshot): MarketingAutopilotCheckpoint {
+export function projectMarketingAutopilotCheckpoint(
+  snapshot: WorkflowSnapshot,
+): MarketingAutopilotCheckpoint {
   const current = snapshot.steps.find((step) => !['SUCCEEDED', 'SKIPPED'].includes(step.status));
   const stage = current ? stageForStep(current) : 'NEXT_RECOMMENDATION';
   return {
@@ -496,7 +514,9 @@ export function projectMarketingAutopilotCheckpoint(snapshot: WorkflowSnapshot):
     checkpointRef: `workflow:${snapshot.instance.workflowId}:v${snapshot.instance.version}`,
     stage,
     status: snapshot.instance.status,
-    waitingApprovalId: approvalTask(snapshot) ? approvalIdFromTask(approvalTask(snapshot)!.payload) : null,
+    waitingApprovalId: approvalTask(snapshot)
+      ? approvalIdFromTask(approvalTask(snapshot)!.payload)
+      : null,
     evidence: cycleEvidence(snapshot),
   };
 }
@@ -526,7 +546,10 @@ function cycleEvidence(snapshot: WorkflowSnapshot): MarketingAutopilotCycleEvide
   };
 }
 
-function evidenceFor(snapshot: WorkflowSnapshot, stage: MarketingAutopilotClosedLoopStage): readonly string[] {
+function evidenceFor(
+  snapshot: WorkflowSnapshot,
+  stage: MarketingAutopilotClosedLoopStage,
+): readonly string[] {
   return snapshot.steps.find((step) => step.name === stage)?.evidence ?? [];
 }
 
@@ -572,8 +595,12 @@ function requireApprovalId(snapshot: WorkflowSnapshot): string {
   return approvalIdFromTask(task.payload);
 }
 
-function approvalTask(snapshot: WorkflowSnapshot): WorkflowSnapshot['humanTasks'][number] | undefined {
-  return snapshot.humanTasks.find((task) => task.taskId === approvalTaskId(snapshot.instance.workflowId));
+function approvalTask(
+  snapshot: WorkflowSnapshot,
+): WorkflowSnapshot['humanTasks'][number] | undefined {
+  return snapshot.humanTasks.find(
+    (task) => task.taskId === approvalTaskId(snapshot.instance.workflowId),
+  );
 }
 
 function approvalTaskId(workflowId: string): string {
@@ -588,7 +615,11 @@ function approvalIdFromTask(payload: unknown): string {
 }
 
 function approvalEvidence(approval: ApprovalRecord): readonly string[] {
-  return [...new Set([`approval:${approval.approvalId}`, ...approval.evidence].filter((value) => value.trim()))];
+  return [
+    ...new Set(
+      [`approval:${approval.approvalId}`, ...approval.evidence].filter((value) => value.trim()),
+    ),
+  ];
 }
 
 function readbackOutput(output: unknown): {
@@ -598,7 +629,10 @@ function readbackOutput(output: unknown): {
   const record = asRecord(output, 'AUTOPILOT_READBACK_OUTPUT_INVALID');
   return {
     providerBacked: record.providerBacked === true,
-    providerReadbackRefs: stringArray(record.providerReadbackRefs, 'AUTOPILOT_PROVIDER_READBACK_REFS_INVALID'),
+    providerReadbackRefs: stringArray(
+      record.providerReadbackRefs,
+      'AUTOPILOT_PROVIDER_READBACK_REFS_INVALID',
+    ),
   };
 }
 
@@ -665,7 +699,8 @@ function requireEvidence(values: readonly string[], code: string): void {
 }
 
 function stringArray(value: unknown, code: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error(code);
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+    throw new Error(code);
   return value as string[];
 }
 
