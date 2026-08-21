@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
+import { createRuntimeReadinessChecks } from './health/runtime-readiness.js';
 import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
 import { PostgresMetaWebhookEventStore } from './persistence/meta-webhook-event-store.js';
 import { createPostgresPool } from './persistence/postgres.js';
@@ -20,6 +21,14 @@ const SENDGRID_MAX_EVENT_WEBHOOK_BYTES = 2 * 1024 * 1024;
 
 const config = loadConfig();
 const metaRuntime = createMetaHttpRuntime(config, process.env);
+const readinessPool = config.DATABASE_URL
+  ? createPostgresPool({ connectionString: config.DATABASE_URL })
+  : undefined;
+const readinessChecks = createRuntimeReadinessChecks({
+  config,
+  env: process.env,
+  ...(readinessPool ? { pool: readinessPool } : {}),
+});
 const host =
   process.env.MCP_HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const port = Number.parseInt(process.env.MCP_PORT ?? process.env.PORT ?? '3000', 10);
@@ -36,6 +45,7 @@ const baseServer = createTocaHttpServer({
   onError: (error) => {
     console.error('HTTP request failed', error instanceof Error ? error.message : 'unknown error');
   },
+  readinessChecks,
   mcpEnabled: config.MCP_ENABLED,
   ...(metaRuntime
     ? {
