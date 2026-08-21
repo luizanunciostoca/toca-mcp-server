@@ -1,0 +1,65 @@
+name: GCP Direct WIF Authority Preflight
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-direct-wif-authority-preflight.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROD_PROJECT_ID: toca-mcp-production
+  PROD_PROJECT_NUMBER: '990081828836'
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  direct-wif:
+    name: Read-only direct WIF principal authority preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate as direct workload identity principal
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Probe direct federated principal read authority only
+        shell: bash
+        run: |
+          set -u -o pipefail
+          echo 'DIRECT_WIF_TOKEN_BEGIN'
+          if gcloud auth print-access-token >/dev/null 2>&1; then
+            echo 'DIRECT_WIF_TOKEN=PASS'
+          else
+            echo 'DIRECT_WIF_TOKEN=FAIL'
+          fi
+          echo 'DIRECT_WIF_TOKEN_END'
+
+          echo 'DIRECT_WIF_PROJECT_DESCRIBE_BEGIN'
+          gcloud projects describe "$PROD_PROJECT_ID" --format='value(projectId,projectNumber,parent.type,parent.id)' || true
+          echo 'DIRECT_WIF_PROJECT_DESCRIBE_END'
+
+          echo 'DIRECT_WIF_PROJECTS_BEGIN'
+          gcloud projects list --format='value(projectId,projectNumber)' || true
+          echo 'DIRECT_WIF_PROJECTS_END'
+
+          echo 'DIRECT_WIF_ORGS_BEGIN'
+          gcloud organizations list --format='value(name,displayName)' || true
+          echo 'DIRECT_WIF_ORGS_END'
+
+          echo 'DIRECT_WIF_BILLING_BEGIN'
+          gcloud billing accounts list --format='value(name,displayName,open)' || true
+          echo 'DIRECT_WIF_BILLING_END'
+
+          echo 'DIRECT_WIF_AUTHORITY_PREFLIGHT_READ_ONLY=true'
