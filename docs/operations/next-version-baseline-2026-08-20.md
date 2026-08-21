@@ -71,7 +71,9 @@ The absence of a #55 PostgreSQL run must not be rewritten as PASS. Database/doma
 
 The current TOCA_OS capability catalog contains the R28 Google Ads family, including customer discovery, account verification/inspection, campaigns, insights, prepare, targeting validation, create-paused, readback and manage operations. The R28 routing registry is provider-neutral for Meta Ads + Google Ads.
 
-This resolves the historical catalog/routing drift recorded by the old #46 text. It does **not** constitute Google Ads provider evidence. Current provider/production lifecycle states remain unpromoted.
+This resolves the historical Google Ads catalog/routing drift recorded by the old #46 text. It does **not** constitute Google Ads provider evidence. Current provider/production lifecycle states remain unpromoted.
+
+A separate Omnichannel drift remains: the code manifest defines operational `whatsapp.*`, `email.*` and `nurture.*` capability IDs, but the current TOCA_OS CAPABILITIES sheet has no matching operational rows. Searches for WhatsApp/Email currently resolve only copy-generation capabilities, and `nurture` returns no capability row. Because TOCA_OS is the canonical business catalog, Front B must reconcile the intended operational capability surface with Drive while it completes runtime composition. This is a governance blocker, not permission to invent rows solely to make a checklist green.
 
 ## Active convergence blockers
 
@@ -87,7 +89,7 @@ Live Secret Manager/IAM/provider evidence and real Google Ads provider read/writ
 
 Email and WhatsApp provider engines exist and contain strong pre-send Privacy/readback/retry/idempotency behavior. However the current omnichannel capability manifest still marks WhatsApp, Email and Nurture capabilities `SPECIFIED`, `runtimeExposed=false`, and `productionExecutionAllowed=false`.
 
-The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path plus durable nurture using existing CRM `NextActionRecord`, Workflow and Scheduler authorities. No second Omnichannel or scheduler is permitted.
+The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path plus durable nurture using existing CRM `NextActionRecord`, Workflow and Scheduler authorities. The operational capability surface must simultaneously be reconciled to TOCA_OS Drive. No second Omnichannel or scheduler is permitted.
 
 ### C — Platform Readiness
 
@@ -97,8 +99,8 @@ Actual GitHub Environment/GCP values have not yet been proven by this coordinati
 
 ### D — Governance / Closeout prep
 
-This branch replaces obsolete #17 coordination content with live-state artifacts only. Final closeout remains prohibited until production and reliability evidence exist.
+This branch replaces obsolete #17 coordination content with live-state artifacts only. Google Ads catalog drift is reconciled; operational Omnichannel catalog drift is not. Final closeout remains prohibited until runtime/catalog convergence plus production and reliability evidence exist.
 
 ## Freeze rule
 
-Do not freeze a candidate SHA while A or B has unresolved code-composition blockers. After both converge and exact-head CI is green, re-read `main`, verify migration sequence and shared hotspots, then freeze exactly one candidate SHA for staging.
+Do not freeze a candidate SHA while A or B has unresolved code-composition or canonical-catalog blockers. After both converge and exact-head CI is green, re-read `main`, verify migration sequence and shared hotspots, then freeze exactly one candidate SHA for staging.
