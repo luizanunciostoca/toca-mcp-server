@@ -4,6 +4,7 @@ import { ROUTE_IDS } from '../governance/types.js';
 import type { Ag01ProductionRuntime } from './production-runtime.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const FOLLOWUP_TICK_LIMIT = 100;
 const executeSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(300).optional(),
@@ -72,6 +73,26 @@ async function routeRequest(
         version: runtime.serviceVersion,
       });
     }
+    return;
+  }
+
+  if (url.pathname === '/v1/orchestrator/followups/tick') {
+    if (method !== 'POST') {
+      response.setHeader('allow', 'POST');
+      writeJson(response, 405, { error: 'method_not_allowed' });
+      return;
+    }
+    const result = await runtime.followups.tick(FOLLOWUP_TICK_LIMIT);
+    writeJson(response, 200, {
+      status: 'ok',
+      firedTimerCount: result.firedTimerIds.length,
+      processedWorkflowCount: result.processedWorkflowIds.length,
+    });
+    log('ag01.followups.tick.completed', {
+      firedTimerCount: result.firedTimerIds.length,
+      processedWorkflowCount: result.processedWorkflowIds.length,
+      durationMs: Date.now() - startedAt,
+    });
     return;
   }
 

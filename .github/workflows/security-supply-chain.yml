@@ -27,12 +27,18 @@ jobs:
   vulnerability-secret-container-sbom:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${CANDIDATE_SHA}"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -66,13 +72,13 @@ jobs:
           exit-code: '1'
 
       - name: Build immutable candidate container
-        run: docker build --pull -t "toca-mcp:${GITHUB_SHA}" .
+        run: docker build --pull -t "toca-mcp:${CANDIDATE_SHA}" .
 
       - name: Scan candidate container
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'image'
-          image-ref: 'toca-mcp:${{ github.sha }}'
+          image-ref: 'toca-mcp:${{ env.CANDIDATE_SHA }}'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: '1'
@@ -81,19 +87,19 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'image'
-          image-ref: 'toca-mcp:${{ github.sha }}'
+          image-ref: 'toca-mcp:${{ env.CANDIDATE_SHA }}'
           format: 'cyclonedx'
           output: 'toca-mcp-sbom.cdx.json'
           exit-code: '0'
 
       - name: Build immutable AG-01 orchestrator candidate
-        run: docker build --pull --file Dockerfile.orchestrator -t "toca-ag01:${GITHUB_SHA}" .
+        run: docker build --pull --file Dockerfile.orchestrator -t "toca-ag01:${CANDIDATE_SHA}" .
 
       - name: Scan AG-01 orchestrator candidate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'image'
-          image-ref: 'toca-ag01:${{ github.sha }}'
+          image-ref: 'toca-ag01:${{ env.CANDIDATE_SHA }}'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: '1'
@@ -102,7 +108,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'image'
-          image-ref: 'toca-ag01:${{ github.sha }}'
+          image-ref: 'toca-ag01:${{ env.CANDIDATE_SHA }}'
           format: 'cyclonedx'
           output: 'toca-ag01-sbom.cdx.json'
           exit-code: '0'
@@ -110,7 +116,7 @@ jobs:
       - name: Upload SBOM evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: toca-container-sboms-${{ github.sha }}
+          name: toca-container-sboms-${{ env.CANDIDATE_SHA }}
           path: |
             toca-mcp-sbom.cdx.json
             toca-ag01-sbom.cdx.json
@@ -125,10 +131,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7

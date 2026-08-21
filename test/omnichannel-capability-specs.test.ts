@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { createToolRegistry } from '../src/registry.js';
 import { CAPABILITY_CATALOG } from '../src/governance/capability-catalog.js';
 import { OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES } from '../src/governance/omnichannel-capability-contracts.js';
 import {
@@ -8,6 +7,7 @@ import {
   OMNICHANNEL_DEPENDENCY_BLOCKERS,
   validateOmnichannelCapabilitySpecs,
 } from '../src/omnichannel/capability-specs.js';
+import { createToolRegistry } from '../src/registry.js';
 
 function requireOmnichannelContract(capabilityId: string) {
   const contract = OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
@@ -15,7 +15,7 @@ function requireOmnichannelContract(capabilityId: string) {
   return contract;
 }
 
-describe('omnichannel capability specifications after canonical Privacy integration', () => {
+describe('omnichannel capability specifications after canonical outbound composition', () => {
   it('keeps only the four reconciled channel capabilities in the canonical catalog', () => {
     expect(() => validateOmnichannelCapabilitySpecs()).not.toThrow();
     expect(OMNICHANNEL_CAPABILITY_IDS).toHaveLength(18);
@@ -33,17 +33,15 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     }
   });
 
-  it('exposes only the two provider-event readbacks while sends remain catalog-only', () => {
+  it('exposes both outbound sends as IMPLEMENTED while production execution remains disabled', () => {
     expect(OMNICHANNEL_DEPENDENCY_BLOCKERS).toEqual([]);
     for (const spec of OMNICHANNEL_CAPABILITY_SPECS) {
       const readback = spec.capabilityId.endsWith('.readback');
-      const plannedSend =
-        spec.capabilityId === 'email.campaign.send' ||
-        spec.capabilityId === 'whatsapp.message.send';
-      expect(spec.lifecycleStatus).toBe(
-        readback ? 'IMPLEMENTED' : plannedSend ? 'PLANNED' : 'SPECIFIED',
-      );
-      expect(spec.runtimeExposed).toBe(readback);
+      const outboundSend =
+        spec.capabilityId === 'whatsapp.message.send' ||
+        spec.capabilityId === 'email.campaign.send';
+      expect(spec.lifecycleStatus).toBe(readback || outboundSend ? 'IMPLEMENTED' : 'SPECIFIED');
+      expect(spec.runtimeExposed).toBe(readback || outboundSend);
       expect(spec.productionExecutionAllowed).toBe(readback);
       expect(spec.blockedBy).toEqual([]);
     }
@@ -74,7 +72,7 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     }
   });
 
-  it('registers only the two readbacks when the omnichannel readback runtime is bound', () => {
+  it('registers provider readbacks and both outbound send bindings through the reconciled surface', () => {
     const runtimeIds = new Set(
       createToolRegistry({
         instagramReadsEnabled: true,
@@ -88,11 +86,15 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     );
 
     for (const capabilityId of OMNICHANNEL_CAPABILITY_IDS) {
-      expect(runtimeIds.has(capabilityId)).toBe(capabilityId.endsWith('.readback'));
+      expect(runtimeIds.has(capabilityId)).toBe(
+        capabilityId.endsWith('.readback') ||
+          capabilityId === 'whatsapp.message.send' ||
+          capabilityId === 'email.campaign.send',
+      );
     }
   });
 
-  it('makes external sends explicit, approval-gated and idempotent while keeping runtime disabled', () => {
+  it('keeps external sends explicit, approval-gated and idempotent without production promotion', () => {
     for (const capabilityId of ['whatsapp.message.send', 'email.campaign.send'] as const) {
       const contract = requireOmnichannelContract(capabilityId);
       expect(contract).toMatchObject({
@@ -106,6 +108,10 @@ describe('omnichannel capability specifications after canonical Privacy integrat
         permission_requirements: [],
       });
       expect(contract.provider).not.toContain('unbound');
+      expect(
+        CAPABILITY_CATALOG.find((definition) => definition.capability_id === capabilityId)
+          ?.lifecycle_status,
+      ).toBe('IMPLEMENTED');
     }
   });
 
