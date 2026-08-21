@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { EnvironmentSecretResolver } from '../core/secrets.js';
 import { ToolRegistry } from '../core/tool-registry.js';
 import { registerPrivacyAuditCapabilities } from '../privacy/capability-registry.js';
 import type {
@@ -19,6 +20,8 @@ import {
   createAg01ProductionRuntime,
   type Ag01ProductionRuntime,
 } from '../orchestrator/production-runtime.js';
+import { MetaApiClient } from '../providers/meta/meta-api-client.js';
+import { discoverWhatsAppAssets } from '../providers/whatsapp/whatsapp-asset-discovery.js';
 import type { WhatsAppWebhookEvent } from '../providers/whatsapp/whatsapp-cloud-webhook.js';
 import {
   CanonicalWhatsAppPrivacyLifecycle,
@@ -32,6 +35,8 @@ import {
 const DEFAULT_PURPOSE_ID = 'customer-service';
 const DEFAULT_POLICY_REF = 'toca-os:privacy:customer-service';
 const DEFAULT_ACTOR_PRINCIPAL_ID = 'service:whatsapp-webhook';
+const DEFAULT_META_GRAPH_BASE_URL = 'https://graph.facebook.com';
+const DEFAULT_META_GRAPH_API_VERSION = 'v24.0';
 
 export interface WhatsAppHttpCompositionOptions {
   readonly pool: pg.Pool;
@@ -45,19 +50,19 @@ export interface WhatsAppHttpComposition {
 /**
  * Canonical production composition for Meta WhatsApp webhook ingress.
  *
- * The provider webhook is already signature-verified by the shared Meta HTTP
- * boundary before events reach this runtime. This composition owns no second
- * CRM, Privacy or workflow model: it persists into the canonical CRM/WhatsApp
- * transport stores, records Privacy preference changes in the canonical ledger,
- * and forwards non-handoff inbound text to the existing durable AG-01 runtime.
+ * The provider webhook is signature-verified by the shared Meta HTTP boundary
+ * before events reach this runtime. Provider asset IDs are discovered from the
+ * already registered Meta token whenever they are not explicitly selected.
+ * Discovery is fail-closed on ambiguity and never guesses a Business, WABA or
+ * phone number. CRM, Privacy and AG-01 remain the only domain authorities.
  */
-export function createWhatsAppHttpComposition(
+export async function createWhatsAppHttpComposition(
   options: WhatsAppHttpCompositionOptions,
-): WhatsAppHttpComposition | undefined {
+): Promise<WhatsAppHttpComposition | undefined> {
   const env = options.env ?? process.env;
   if (!enabled(env.WHATSAPP_RUNTIME_ENABLED)) return undefined;
 
-  const binding = bindingFromEnv(env);
+  const binding = await bindingFromProvider(env);
   const privacyRegistry = new ToolRegistry();
   registerPrivacyAuditCapabilities(privacyRegistry);
   const privacy = new PrivacyGovernanceService({
@@ -174,7 +179,7 @@ const FAIL_CLOSED_PRIVACY_DATA_GATEWAY: PrivacyDataGateway = {
   },
 };
 
-function bindingFromEnv(env: NodeJS.ProcessEnv): WhatsAppScopeBinding {
+async function bindingFromProvider(env: NodeJS.ProcessEnv): Promise<WhatsAppScopeBinding> {
   const tenantId = required(env.TOCA_DEFAULT_TENANT_ID ?? 'toca', 'WHATSAPP_TENANT_ID_REQUIRED');
   const workspaceId = required(
     env.TOCA_DEFAULT_WORKSPACE_ID ?? tenantId,
@@ -184,13 +189,31 @@ function bindingFromEnv(env: NodeJS.ProcessEnv): WhatsAppScopeBinding {
     env.TOCA_DEFAULT_ORGANIZATION_ID ?? tenantId,
     'WHATSAPP_ORGANIZATION_ID_REQUIRED',
   );
+  const accessTokenEnvKey = required(
+    env.META_ACCESS_TOKEN_ENV_KEY,
+    'WHATSAPP_META_ACCESS_TOKEN_ENV_KEY_REQUIRED',
+  );
+  const api = new MetaApiClient(
+    {
+      graphBaseUrl: env.META_GRAPH_BASE_URL?.trim() || DEFAULT_META_GRAPH_BASE_URL,
+      apiVersion: env.META_GRAPH_API_VERSION?.trim() || DEFAULT_META_GRAPH_API_VERSION,
+    },
+    new EnvironmentSecretResolver(env),
+    { provider: 'env', key: accessTokenEnvKey },
+  );
+  const assets = await discoverWhatsAppAssets(api, {
+    businessId: optional(env.WHATSAPP_BUSINESS_ID),
+    wabaId: optional(env.WHATSAPP_WABA_ID),
+    phoneNumberId: optional(env.WHATSAPP_PHONE_NUMBER_ID),
+  });
+
   return {
     tenantId,
     workspaceId,
     organizationId,
     metaAppId: required(env.META_APP_ID, 'WHATSAPP_META_APP_ID_REQUIRED'),
-    wabaId: required(env.WHATSAPP_WABA_ID, 'WHATSAPP_WABA_ID_REQUIRED'),
-    phoneNumberId: required(env.WHATSAPP_PHONE_NUMBER_ID, 'WHATSAPP_PHONE_NUMBER_ID_REQUIRED'),
+    wabaId: assets.wabaId,
+    phoneNumberId: assets.phoneNumberId,
     purposeId: required(
       env.WHATSAPP_PURPOSE_ID ?? DEFAULT_PURPOSE_ID,
       'WHATSAPP_PURPOSE_ID_REQUIRED',
@@ -219,6 +242,11 @@ function assertAg01Scope(binding: WhatsAppScopeBinding, ag01: Ag01ProductionRunt
 
 function enabled(value: string | undefined): boolean {
   return value?.trim().toLowerCase() === 'true';
+}
+
+function optional(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized || null;
 }
 
 function required(value: string | undefined, code: string): string {
