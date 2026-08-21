@@ -3,8 +3,6 @@ import type { JsonSchemaNode, JsonSchemaReference } from './types.js';
 
 const text: JsonSchemaNode = { type: 'string', minLength: 1 };
 const isoTimestamp: JsonSchemaNode = { type: 'string', format: 'date-time', minLength: 1 };
-const nonNegativeInteger: JsonSchemaNode = { type: 'integer', minimum: 0 };
-
 const scopeProperties = {
   tenant_id: text,
   workspace_id: text,
@@ -191,6 +189,7 @@ const whatsappSendInput = inputSchema(
   {
     ...singleRecipientEligibilityProperties,
     ...approvalProperties,
+    message_id: text,
     prepared_message_id: text,
     idempotency_key: text,
   },
@@ -198,6 +197,7 @@ const whatsappSendInput = inputSchema(
     ...singleRecipientEligibilityRequired,
     'approval_id',
     'approval_status',
+    'message_id',
     'prepared_message_id',
     'idempotency_key',
   ],
@@ -322,6 +322,7 @@ const emailCampaignSendInput = inputSchema(
   {
     ...audienceEligibilityProperties,
     ...approvalProperties,
+    message_id: text,
     prepared_campaign_id: text,
     idempotency_key: text,
   },
@@ -329,6 +330,7 @@ const emailCampaignSendInput = inputSchema(
     ...audienceEligibilityRequired,
     'approval_id',
     'approval_status',
+    'message_id',
     'prepared_campaign_id',
     'idempotency_key',
   ],
@@ -353,20 +355,14 @@ const emailDeliveryReadbackOutput = outputSchema(
   'email.delivery.readback',
   {
     provider_dispatch_id: text,
-    delivered_count: nonNegativeInteger,
-    failed_count: nonNegativeInteger,
-    suppressed_count: nonNegativeInteger,
+    state: {
+      type: 'string',
+      enum: ['QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'REJECTED', 'UNKNOWN'],
+    },
     observed_at: isoTimestamp,
     evidence: { type: 'array', items: text, minItems: 1 },
   },
-  [
-    'provider_dispatch_id',
-    'delivered_count',
-    'failed_count',
-    'suppressed_count',
-    'observed_at',
-    'evidence',
-  ],
+  ['provider_dispatch_id', 'state', 'observed_at', 'evidence'],
 );
 
 function emailEngagementIngestInput(capabilityId: string): JsonSchemaReference {
@@ -484,7 +480,9 @@ const nurtureOutcomeOutput = outputSchema(
   ['outcome_record_id', 'state'],
 );
 
-export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
+export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES: Readonly<
+  Record<string, CapabilityContractOverride>
+> = {
   'whatsapp.contact.resolve': explicit({
     description:
       'Resolve a WhatsApp identity to one canonical ContactRecord without guessing across ambiguous matches.',
@@ -551,8 +549,8 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     risk_class: 'WRITE_EXTERNAL',
     side_effects: true,
     approval_required: true,
-    idempotent: false,
-    provider: 'WhatsApp provider adapter (unbound)',
+    idempotent: true,
+    provider: 'Meta WhatsApp Cloud API',
     operation: 'message.send',
     authentication_mode: 'UNKNOWN',
     input_schema: whatsappSendInput,
@@ -566,9 +564,9 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     side_effects: false,
     approval_required: false,
     idempotent: true,
-    provider: 'WhatsApp provider adapter (unbound)',
-    operation: 'message.readback',
-    authentication_mode: 'UNKNOWN',
+    provider: 'Meta WhatsApp Cloud API',
+    operation: 'provider_event.readback',
+    authentication_mode: 'INTERNAL',
     input_schema: whatsappReadbackInput,
     output_schema: whatsappReadbackOutput,
     verification_method: 'PROVIDER_READBACK',
@@ -640,8 +638,8 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     risk_class: 'WRITE_EXTERNAL',
     side_effects: true,
     approval_required: true,
-    idempotent: false,
-    provider: 'Email provider adapter (unbound)',
+    idempotent: true,
+    provider: 'Twilio SendGrid',
     operation: 'campaign.send',
     authentication_mode: 'UNKNOWN',
     input_schema: emailCampaignSendInput,
@@ -655,9 +653,9 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     side_effects: false,
     approval_required: false,
     idempotent: true,
-    provider: 'Email provider adapter (unbound)',
-    operation: 'delivery.readback',
-    authentication_mode: 'UNKNOWN',
+    provider: 'Twilio SendGrid',
+    operation: 'provider_event.readback',
+    authentication_mode: 'INTERNAL',
     input_schema: emailDeliveryReadbackInput,
     output_schema: emailDeliveryReadbackOutput,
     verification_method: 'PROVIDER_READBACK',

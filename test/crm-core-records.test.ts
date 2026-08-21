@@ -128,7 +128,7 @@ describe('M-FOUND-10 CRM core record invariants', () => {
     );
   });
 
-  it('preserves the exact R10 compatibility catalog without creating duplicate CRM capabilities', () => {
+  it('preserves R10 CRM compatibility while adding canonical WhatsApp channel capabilities', () => {
     expect(ROUTE_CAPABILITY_IDS.R10).toEqual([
       'sales.lead.create',
       'sales.lead.qualify',
@@ -149,6 +149,8 @@ describe('M-FOUND-10 CRM core record invariants', () => {
       'sales.stage.move',
       'sales.win_loss.record',
       'sales.report.generate',
+      'whatsapp.message.send',
+      'whatsapp.message.readback',
     ]);
   });
 

@@ -12,6 +12,8 @@ import { registerTocaControlCenterSurface } from './mcp/human-control-center.js'
 import type { InstagramCorePublicationRuntime } from './mcp/instagram-publication-runtime.js';
 import { resolvePaidMediaRuntimeBinding } from './mcp/paid-media-runtime.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
+import { resolveOmnichannelReadbackRuntimeBinding } from './mcp/omnichannel-readback-runtime.js';
+import { PostgresOmnichannelProviderEventReadback } from './omnichannel/provider-event-readback.js';
 import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
 import { PostgresCrmCoreStore } from './persistence/postgres-crm-core-store.js';
 import { PostgresCrmSalesStore } from './persistence/postgres-crm-sales-store.js';
@@ -144,6 +146,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
     videoContentRuntimeEnabled: Boolean(pool),
     crmSalesRuntimeEnabled: Boolean(pool),
+    omnichannelReadbacksEnabled: Boolean(pool),
   });
   const createMetaClient = () => {
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
@@ -339,6 +342,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const crmCore = pool ? new PostgresCrmCoreStore(pool) : undefined;
   const crmSales = pool ? new PostgresCrmSalesStore(pool) : undefined;
   const crmSalesReadback = pool ? new PostgresCrmSalesPersistenceReadback(pool) : undefined;
+  const omnichannelReadback = pool ? new PostgresOmnichannelProviderEventReadback(pool) : undefined;
   const googleAdsTargetAccount =
     googleAds && config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID
       ? config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID.replaceAll('-', '')
@@ -366,7 +370,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       ...(googleAdsApi ? { googleAdsDiscoveryClient: googleAdsApi } : {}),
       ...(googleAdsAccountVerifier ? { googleAdsAccountVerifier } : {}),
       ...(googleAdsTargetAccount ? { googleAdsTargetAccount } : {}),
-    }) ?? standardRuntimeResolver(capabilityId);
+    }) ??
+    resolveOmnichannelReadbackRuntimeBinding(capabilityId, omnichannelReadback) ??
+    standardRuntimeResolver(capabilityId);
 
   const workflowStore = pool ? new PostgresWorkflowStore(pool) : undefined;
   const approvalStore = pool ? new PostgresApprovalStore(pool) : undefined;
