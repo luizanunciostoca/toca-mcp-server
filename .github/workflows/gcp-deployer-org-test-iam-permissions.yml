@@ -1,0 +1,49 @@
+name: GCP Deployer Organization Test IAM Permissions
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-deployer-org-test-iam-permissions.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  ORGANIZATION_ID: '995529283213'
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  test-permissions:
+    name: Read-only org testIamPermissions for deployer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Test organization permissions without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          BODY='{"permissions":["resourcemanager.projects.create","resourcemanager.projects.get","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","resourcemanager.organizations.get","resourcemanager.organizations.getIamPolicy"]}'
+          HTTP_CODE="$(curl -sS -o /tmp/iam.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$BODY" \
+            "https://cloudresourcemanager.googleapis.com/v3/organizations/$ORGANIZATION_ID:testIamPermissions")"
+          echo "TEST_IAM_HTTP=$HTTP_CODE"
+          jq -c '{permissions:(.permissions // [])}' /tmp/iam.json || cat /tmp/iam.json
+          test "$HTTP_CODE" = '200'
+          echo 'ORG_TEST_IAM_PERMISSIONS_COMPLETE=true'
