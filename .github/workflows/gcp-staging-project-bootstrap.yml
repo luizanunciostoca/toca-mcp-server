@@ -11,44 +11,91 @@ permissions:
 
 env:
   CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROD_PROJECT_ID: toca-mcp-production
+  PROD_PROJECT_NUMBER: '990081828836'
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_PROJECT_ID: toca-mcp-next-staging
+  STAGING_PROJECT_NUMBER: '729069789107'
+  STAGING_WIF_POOL: github-staging
+  STAGING_WIF_PROVIDER: github-toca-mcp-staging
+  STAGING_DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  IMMUTABLE_SUBJECT: repo:luizanunciostoca@318748875/toca-mcp-server@1339919100:environment:staging
+  LEGACY_SUBJECT: repo:luizanunciostoca/toca-mcp-server:environment:staging
 
 jobs:
-  oidc-claims:
-    name: Discover staging GitHub OIDC claims read-only
+  repair-staging-wif:
+    name: Repair staging WIF immutable subject binding
     runs-on: ubuntu-latest
-    environment: staging
+    environment: infrastructure-admin
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
-      - name: Assert exact frozen candidate
-        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-      - name: Request and decode selected OIDC claims only
+      - name: Assert frozen candidate and isolated target
         shell: bash
         run: |
           set -euo pipefail
-          RESPONSE="$(curl -fsS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=staging-claim-discovery")"
-          TOKEN="$(printf '%s' "$RESPONSE" | jq -r '.value')"
-          test -n "$TOKEN"
-          PAYLOAD="$(printf '%s' "$TOKEN" | cut -d. -f2)"
-          OIDC_PAYLOAD="$PAYLOAD" python3 - <<'PY'
-          import base64, json, os
-          raw = os.environ['OIDC_PAYLOAD']
-          raw += '=' * ((4 - len(raw) % 4) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(raw.encode()))
-          selected = {k: claims.get(k) for k in [
-              'iss','aud','sub','repository','repository_id','repository_owner',
-              'repository_owner_id','environment','event_name','ref','ref_type',
-              'workflow_ref','workflow_sha','job_workflow_ref'
-          ]}
-          print(json.dumps(selected, sort_keys=True))
-          assert selected['repository_id'] == '1339919100'
-          assert selected['repository_owner_id'] == '318748875'
-          assert selected['environment'] == 'staging'
-          PY
-          unset TOKEN PAYLOAD RESPONSE
-          echo 'STAGING_OIDC_CLAIMS_DISCOVERY=PASS'
-          echo 'RAW_OIDC_TOKEN_EXPOSED=NO'
-          echo 'GCP_MUTATION_EXECUTED=NO'
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
+          test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Apply exact immutable GitHub subject to staging WIF only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
+          gcloud iam service-accounts describe "$STAGING_DEPLOYER_SA" --project="$STAGING_PROJECT_ID" >/dev/null
+
+          CONDITION="assertion.repository_id=='1339919100' && assertion.repository_owner_id=='318748875' && assertion.environment=='staging' && assertion.sub=='${IMMUTABLE_SUBJECT}'"
+          gcloud iam workload-identity-pools providers update-oidc "$STAGING_WIF_PROVIDER" \
+            --workload-identity-pool="$STAGING_WIF_POOL" \
+            --location=global \
+            --project="$STAGING_PROJECT_ID" \
+            --attribute-condition="$CONDITION" \
+            --quiet
+
+          IMMUTABLE_PRINCIPAL="principal://iam.googleapis.com/projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${STAGING_WIF_POOL}/subject/${IMMUTABLE_SUBJECT}"
+          LEGACY_PRINCIPAL="principal://iam.googleapis.com/projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${STAGING_WIF_POOL}/subject/${LEGACY_SUBJECT}"
+
+          gcloud iam service-accounts add-iam-policy-binding "$STAGING_DEPLOYER_SA" \
+            --project="$STAGING_PROJECT_ID" \
+            --member="$IMMUTABLE_PRINCIPAL" \
+            --role=roles/iam.workloadIdentityUser \
+            --condition=None \
+            --quiet >/dev/null
+
+          if gcloud iam service-accounts get-iam-policy "$STAGING_DEPLOYER_SA" --project="$STAGING_PROJECT_ID" --format=json | jq -e --arg p "$LEGACY_PRINCIPAL" '.bindings[]? | select(.role=="roles/iam.workloadIdentityUser") | (.members // []) | index($p) != null' >/dev/null; then
+            gcloud iam service-accounts remove-iam-policy-binding "$STAGING_DEPLOYER_SA" \
+              --project="$STAGING_PROJECT_ID" \
+              --member="$LEGACY_PRINCIPAL" \
+              --role=roles/iam.workloadIdentityUser \
+              --condition=None \
+              --quiet >/dev/null
+          fi
+
+          PROVIDER_JSON="$(gcloud iam workload-identity-pools providers describe "$STAGING_WIF_PROVIDER" --workload-identity-pool="$STAGING_WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" --format=json)"
+          test "$(printf '%s' "$PROVIDER_JSON" | jq -r '.attributeCondition')" = "$CONDITION"
+          test "$(printf '%s' "$PROVIDER_JSON" | jq -r '.attributeMapping["google.subject"]')" = assertion.sub
+          test "$(printf '%s' "$PROVIDER_JSON" | jq -r '.attributeMapping["attribute.repository_id"]')" = assertion.repository_id
+          test "$(printf '%s' "$PROVIDER_JSON" | jq -r '.attributeMapping["attribute.repository_owner_id"]')" = assertion.repository_owner_id
+
+          POLICY="$(gcloud iam service-accounts get-iam-policy "$STAGING_DEPLOYER_SA" --project="$STAGING_PROJECT_ID" --format=json)"
+          printf '%s' "$POLICY" | jq -e --arg p "$IMMUTABLE_PRINCIPAL" '.bindings[] | select(.role=="roles/iam.workloadIdentityUser") | (.members // []) | index($p) != null' >/dev/null
+          if printf '%s' "$POLICY" | jq -e --arg p "$LEGACY_PRINCIPAL" '.bindings[]? | select(.role=="roles/iam.workloadIdentityUser") | (.members // []) | index($p) != null' >/dev/null; then
+            echo 'FAIL: legacy staging WIF subject still bound' >&2
+            exit 1
+          fi
+
+          echo 'STAGING_WIF_IMMUTABLE_SUBJECT_REPAIR=PASS'
+          echo 'PRODUCTION_WIF_MUTATION_EXECUTED=NO'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_RUNTIME_MUTATION_EXECUTED=NO'
