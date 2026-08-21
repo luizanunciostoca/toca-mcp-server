@@ -15,6 +15,7 @@ env:
   PROD_PROJECT_NUMBER: '990081828836'
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  BILLING_ACCOUNT: 017F93-60A594-4271D6
 
 jobs:
   authority-preflight:
@@ -59,25 +60,14 @@ jobs:
           echo "PROJECT_TEST_IAM_HTTP=$PROJECT_HTTP"
           jq -c '{permissions:(.permissions // [])}' /tmp/project-perms.json || cat /tmp/project-perms.json
 
-          if [[ "$PARENT_TYPE" == organization && -n "$PARENT_ID" ]]; then
-            ORG_BODY='{"permissions":["resourcemanager.organizations.get","resourcemanager.projects.create","resourcemanager.projects.move"]}'
-            ORG_HTTP="$(curl -sS -o /tmp/org-perms.json -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $TOKEN" \
-              -H 'Content-Type: application/json' \
-              --data "$ORG_BODY" \
-              "https://cloudresourcemanager.googleapis.com/v3/organizations/${PARENT_ID}:testIamPermissions")"
-            echo "ORG_TEST_IAM_HTTP=$ORG_HTTP"
-            jq -c '{permissions:(.permissions // [])}' /tmp/org-perms.json || cat /tmp/org-perms.json
-          elif [[ "$PARENT_TYPE" == folder && -n "$PARENT_ID" ]]; then
-            FOLDER_BODY='{"permissions":["resourcemanager.projects.create","resourcemanager.projects.move"]}'
-            FOLDER_HTTP="$(curl -sS -o /tmp/folder-perms.json -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $TOKEN" \
-              -H 'Content-Type: application/json' \
-              --data "$FOLDER_BODY" \
-              "https://cloudresourcemanager.googleapis.com/v3/folders/${PARENT_ID}:testIamPermissions")"
-            echo "FOLDER_TEST_IAM_HTTP=$FOLDER_HTTP"
-            jq -c '{permissions:(.permissions // [])}' /tmp/folder-perms.json || cat /tmp/folder-perms.json
-          fi
+          ORG_BODY='{"permissions":["resourcemanager.organizations.get","resourcemanager.projects.create","resourcemanager.projects.move"]}'
+          ORG_HTTP="$(curl -sS -o /tmp/org-perms.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$ORG_BODY" \
+            "https://cloudresourcemanager.googleapis.com/v3/organizations/${PARENT_ID}:testIamPermissions")"
+          echo "ORG_TEST_IAM_HTTP=$ORG_HTTP"
+          jq -c '{permissions:(.permissions // [])}' /tmp/org-perms.json || cat /tmp/org-perms.json
 
           echo 'CLOUD_BILLING_API_STATE_BEGIN'
           gcloud services list --project "$PROD_PROJECT_ID" --enabled --filter='name:cloudbilling.googleapis.com' --format='value(name)' || true
@@ -86,6 +76,15 @@ jobs:
           echo 'PRODUCTION_BILLING_LINK_BEGIN'
           gcloud billing projects describe "$PROD_PROJECT_ID" --format='json(projectId,billingAccountName,billingEnabled)' || true
           echo 'PRODUCTION_BILLING_LINK_END'
+
+          BILLING_BODY='{"permissions":["billing.accounts.get","billing.accounts.getIamPolicy","billing.accounts.list","billing.resourceAssociations.create"]}'
+          BILLING_HTTP="$(curl -sS -o /tmp/billing-perms.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$BILLING_BODY" \
+            "https://cloudbilling.googleapis.com/v1/billingAccounts/${BILLING_ACCOUNT}:testIamPermissions")"
+          echo "BILLING_TEST_IAM_HTTP=$BILLING_HTTP"
+          jq -c '{permissions:(.permissions // [])}' /tmp/billing-perms.json || cat /tmp/billing-perms.json
 
           echo 'VISIBLE_BILLING_ACCOUNTS_BEGIN'
           gcloud billing accounts list --format='value(name,displayName,open)' || true
