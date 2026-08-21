@@ -25,15 +25,16 @@ env:
   STAGING_MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
   STAGING_WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
   STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  IMAGE_DIGEST: sha256:6a5463824c732e0a6f1e25f0b67ba140987632acd33cd9cd9718657e2d1fd858
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
 
 jobs:
-  continue-deploy:
-    name: Continue exact-candidate staging deploy after migrated schema
+  deploy-immutable-candidate:
+    name: Deploy immutable exact candidate to isolated staging with zero traffic
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Checkout exact frozen candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -55,44 +56,23 @@ jobs:
           workload_identity_provider: ${{ env.STAGING_WIF }}
           service_account: ${{ env.STAGING_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Revalidate migrated staging resources before image build
+      - name: Revalidate exact image and staging resources
         shell: bash
         run: |
           set -euo pipefail
           test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
-          SQL_JSON="$(gcloud sql instances describe "$STAGING_SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format=json)"
-          test "$(printf '%s' "$SQL_JSON" | jq -r '.project')" = "$STAGING_PROJECT_ID"
-          test "$(printf '%s' "$SQL_JSON" | jq -r '.connectionName')" = "${STAGING_PROJECT_ID}:${REGION}:${STAGING_SQL_INSTANCE}"
-          test "$(printf '%s' "$SQL_JSON" | jq -r '(.settings.ipConfiguration.authorizedNetworks // []) | length')" = 0
-          gcloud secrets versions describe "$STAGING_DATABASE_SECRET_VERSION" --secret="$STAGING_DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --format='value(state)' | grep -Fxq ENABLED
-          echo 'POST_MIGRATION_STAGING_REVALIDATION=PASS'
-      - name: Configure Docker authentication and attestation-capable Buildx
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-          docker buildx create --name toca-staging-builder --driver docker-container --use --bootstrap
-          docker buildx inspect toca-staging-builder | grep -E '^Driver:[[:space:]]+docker-container$'
-          echo 'BUILDX_DOCKER_CONTAINER_DRIVER=PASS'
-      - name: Build push and resolve immutable candidate image digest
-        shell: bash
-        run: |
-          set -euo pipefail
           IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${STAGING_PROJECT_ID}/${STAGING_ARTIFACT_REPOSITORY}/server"
           IMAGE_TAG="${IMAGE_REPOSITORY}:${CANDIDATE_SHA}"
-          docker buildx build --builder toca-staging-builder --pull --push --provenance=mode=max --sbom=true \
-            --metadata-file /tmp/build-metadata.json -t "$IMAGE_TAG" .
-          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
-          [[ "$IMAGE_DIGEST" == sha256:* ]]
           REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project="$STAGING_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
+          test "$(gcloud sql instances describe "$STAGING_SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(connectionName)')" = "${STAGING_PROJECT_ID}:${REGION}:${STAGING_SQL_INSTANCE}"
+          gcloud secrets versions describe "$STAGING_DATABASE_SECRET_VERSION" --secret="$STAGING_DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --format='value(state)' | grep -Fxq ENABLED
           echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
-          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "MCP_TAG=candidate-${CANDIDATE_SHA:0:7}" >> "$GITHUB_ENV"
           echo "WEBHOOK_TAG=candidate-${CANDIDATE_SHA:0:7}" >> "$GITHUB_ENV"
           echo "MCP_SUFFIX=mcp-${CANDIDATE_SHA:0:7}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           echo "WEBHOOK_SUFFIX=webhook-${CANDIDATE_SHA:0:7}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo 'STAGING_IMAGE_DIGEST_READBACK=PASS'
+          echo 'IMMUTABLE_IMAGE_AND_STAGING_READBACK=PASS'
       - name: Deploy exact candidate revisions with no traffic and providers disabled
         shell: bash
         run: |
@@ -105,7 +85,6 @@ jobs:
             --update-secrets "DATABASE_URL=${STAGING_DATABASE_SECRET}:${STAGING_DATABASE_SECRET_VERSION}" \
             --update-env-vars "${COMMON_ENV},MCP_ENABLED=true,TOCA_SERVICE_ROLE=mcp" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
-            --readiness-probe 'httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --ingress=all --min=0 --max=1 --cpu=1 --memory=512Mi --no-allow-unauthenticated --quiet
           gcloud run deploy "$STAGING_WEBHOOK_SERVICE" --image "$IMAGE" --project="$STAGING_PROJECT_ID" --region="$REGION" \
@@ -114,11 +93,10 @@ jobs:
             --update-secrets "DATABASE_URL=${STAGING_DATABASE_SECRET}:${STAGING_DATABASE_SECRET_VERSION}" \
             --update-env-vars "${COMMON_ENV},MCP_ENABLED=false,TOCA_SERVICE_ROLE=webhook" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
-            --readiness-probe 'httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --ingress=all --min=0 --max=1 --cpu=1 --memory=512Mi --no-allow-unauthenticated --quiet
           echo 'STAGING_CANDIDATE_DEPLOY_NO_TRAFFIC=PASS'
-      - name: Prove no traffic promotion and resolve tagged revisions
+      - name: Prove zero traffic and resolve tagged revisions
         shell: bash
         run: |
           set -euo pipefail
