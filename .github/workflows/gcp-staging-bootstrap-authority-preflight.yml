@@ -39,12 +39,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
           test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+      - id: base-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
           service_account: ${{ env.STAGING_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Resolve zero-traffic candidate URL and call health/readiness
+      - id: resolve
+        name: Resolve zero-traffic candidate target
         shell: bash
         run: |
           set -euo pipefail
@@ -55,11 +57,31 @@ jobs:
           CANDIDATE_URL="$(printf '%s' "$SERVICE_JSON" | jq -r --arg tag "$CANDIDATE_TAG" '.status.traffic[]? | select(.tag==$tag) | .url')"
           test -n "$SERVICE_URL"; test -n "$CANDIDATE_REVISION"; test -n "$CANDIDATE_URL"
           test "$(printf '%s' "$SERVICE_JSON" | jq -r --arg rev "$CANDIDATE_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0) > 0)] | length')" = 0
-          TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$STAGING_DEPLOYER_SA" --audiences="$SERVICE_URL")"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "candidate_url=$CANDIDATE_URL" >> "$GITHUB_OUTPUT"
+          echo "candidate_revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
+          echo 'CANDIDATE_TRAFFIC_PERCENT=0'
+      - id: id-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve.outputs.service_url }}
+          create_credentials_file: false
+      - name: Call candidate health and readiness with WIF-minted ID token
+        shell: bash
+        env:
+          TOKEN: ${{ steps.id-auth.outputs.id_token }}
+          CANDIDATE_URL: ${{ steps.resolve.outputs.candidate_url }}
+          CANDIDATE_REVISION: ${{ steps.resolve.outputs.candidate_revision }}
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"; test -n "$CANDIDATE_URL"; test -n "$CANDIDATE_REVISION"
           HEALTH_CODE="$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/healthz")"
           READY_CODE="$(curl --silent --show-error --output /tmp/ready.json --write-out '%{http_code}' -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/readyz")"
           echo "CANDIDATE_REVISION=$CANDIDATE_REVISION"
-          echo "CANDIDATE_TRAFFIC_PERCENT=0"
+          echo 'CANDIDATE_TRAFFIC_PERCENT=0'
           echo "HEALTH_HTTP=$HEALTH_CODE"
           cat /tmp/health.json
           echo
