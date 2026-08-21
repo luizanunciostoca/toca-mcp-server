@@ -19,10 +19,7 @@
       "projectId": "toca-mcp-next-staging",
       "projectNumber": "729069789107",
       "principal": "serviceAccount:toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
-      "allowedRoles": [
-        "roles/cloudsql.viewer",
-        "roles/monitoring.viewer"
-      ],
+      "allowedRoles": ["roles/cloudsql.viewer", "roles/monitoring.viewer"],
       "verification": {
         "cloudSqlBackupRead": true,
         "monitoringConfigurationRead": true
