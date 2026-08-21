@@ -14,20 +14,15 @@ const sourceSha = requiredEnv('SOURCE_SHA');
 const verificationId = requiredEnv('GOOGLE_ADS_VERIFICATION_ID');
 const runtimeIdentity = requiredEnv('RUNTIME_SERVICE_ACCOUNT');
 const allowedCurrency = requiredEnv('GOOGLE_ADS_ALLOWED_CURRENCY').toUpperCase();
-const maxDailyBudgetMicros = positiveInt(
-  requiredEnv('GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS'),
-);
-const currencyMinorUnitMicros = positiveInt(
-  requiredEnv('GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS'),
-);
+const maxDailyBudgetMicros = positiveInt(requiredEnv('GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS'));
+const currencyMinorUnitMicros = positiveInt(requiredEnv('GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS'));
 const allowedLocations = csv(requiredEnv('GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS'));
 const allowedLanguages = csv(optionalEnv('GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS'));
 const configuredCustomerId = optionalEnv('GOOGLE_ADS_CUSTOMER_ID');
 const configuredLoginCustomerId = optionalEnv('GOOGLE_ADS_LOGIN_CUSTOMER_ID');
 
 if (!/^[A-Z]{3}$/.test(allowedCurrency)) throw new Error('GOOGLE_ADS_VERIFY_CURRENCY_INVALID');
-if (allowedLocations.length === 0)
-  throw new Error('GOOGLE_ADS_VERIFY_LOCATION_ALLOWLIST_REQUIRED');
+if (allowedLocations.length === 0) throw new Error('GOOGLE_ADS_VERIFY_LOCATION_ALLOWLIST_REQUIRED');
 
 const secrets = new EnvSecretResolver(process.env);
 const developerTokenRef = envSecretRef(requiredEnv('GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY'));
@@ -46,8 +41,7 @@ const discoveryApi = new GoogleAdsRestApiClient(
 
 const discovery = await discoveryApi.listAccessibleCustomers();
 const accessibleCustomers = normalizeAccessibleCustomers(discovery);
-if (accessibleCustomers.length === 0)
-  throw new Error('GOOGLE_ADS_VERIFY_NO_ACCESSIBLE_CUSTOMERS');
+if (accessibleCustomers.length === 0) throw new Error('GOOGLE_ADS_VERIFY_NO_ACCESSIBLE_CUSTOMERS');
 
 const selectedCustomerId = selectCustomer(configuredCustomerId, accessibleCustomers);
 const loginCustomerId = configuredLoginCustomerId
@@ -78,9 +72,7 @@ const accountVerifier = new GoogleAdsAccountVerifier(api, {
 });
 const accountVerification = await accountVerifier.verifyAccount();
 if (!accountVerification.verified) {
-  throw new Error(
-    `GOOGLE_ADS_VERIFY_ACCOUNT_BLOCKED:${accountVerification.blockers.join(',')}`,
-  );
+  throw new Error(`GOOGLE_ADS_VERIFY_ACCOUNT_BLOCKED:${accountVerification.blockers.join(',')}`);
 }
 
 const provider = new GoogleAdsPaidMediaProvider(api, {
@@ -104,10 +96,7 @@ const validationPlan: GoogleAdsCampaignPlan = {
   currencyCode: allowedCurrency,
   campaignName: `TOCA | Provider Verify | ${verificationId}`,
   budgetName: `TOCA | Provider Verify Budget | ${verificationId}`,
-  dailyBudgetMicros: Math.min(
-    maxDailyBudgetMicros,
-    Math.max(currencyMinorUnitMicros, 1_000_000),
-  ),
+  dailyBudgetMicros: Math.min(maxDailyBudgetMicros, Math.max(currencyMinorUnitMicros, 1_000_000)),
   advertisingChannelType: 'SEARCH',
   targeting: {
     locationCriterionIds: allowedLocations,
@@ -196,7 +185,14 @@ function positiveInt(value: string): number {
 
 function csv(value: string | undefined): string[] {
   if (!value) return [];
-  return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function normalizeAccessibleCustomers(
