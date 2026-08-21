@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "1.3",
+  "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
+  "registryVersion": "1.3",
+  "status": "FINAL_CONVERGENCE",
+  "observedAt": "2026-08-20T23:22:00-03:00",
+  "observedMainSha": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
+  "candidateFrozen": false,
+  "stagingAuthorized": false,
+  "productionAuthorized": false,
+  "finalCloseoutAuthorized": false,
+  "rules": {
+    "liveMainMustBeRevalidatedBeforeMutation": true,
+    "exactHeadCiRequiredBeforeMerge": true,
+    "providerEvidenceSeparateFromCiEvidence": true,
+    "providerVerifiedRequiresRealProviderEvidence": true,
+    "productionVerifiedRequiresRealProductionEvidence": true,
+    "migrationNumbersGloballySerialized": true,
+    "existingMigrationNamesAreImmutableAfterMerge": true,
+    "noSecondMcp": true,
+    "noSecondCrm": true,
+    "noSecondPolicyEngine": true,
+    "noSecondApprovalEngine": true,
+    "noSecondWorkflowOrScheduler": true,
+    "noSecondPrivacy": true,
+    "noSecondAttribution": true,
+    "noSecondAg01": true,
+    "noSecondOmnichannel": true,
+    "commercialConversationMessageAuthority": "canonical CRM ConversationRecord/MessageRecord",
+    "runtimeCompositionAuthority": "existing src/server.ts + src/http.ts composition roots"
+  },
+  "currentMigrations": [
+    "022_meta_ads_geo_demand_intelligence.sql",
+    "023_crm_sales_engine.sql",
+    "024_email_provider_runtime.sql",
+    "025_marketing_autopilot_r31_learning.sql",
+    "026_ag01_orchestrator_runtime.sql",
+    "028_attribution_revenue_feedback.sql",
+    "029_asset_intelligence_content_supply.sql",
+    "030_whatsapp_provider_runtime.sql",
+    "031_multi_tenant_foundation.sql",
+    "032_tenant_scoped_approvals.sql"
+  ],
+  "migrationCoordination": {
+    "gap027": "INTENTIONAL_DO_NOT_RENUMBER_MERGED_MIGRATIONS",
+    "migratorIdentity": "exact migration filename in schema_migrations",
+    "nextMigration": "REVALIDATE_LIVE_MAIN_BEFORE_ASSIGNING"
+  },
+  "fronts": {
+    "A_PROVIDER_ONBOARDING_GOOGLE_ADS": {
+      "state": "BLOCKED_TECHNICAL_AND_EXTERNAL_EVIDENCE",
+      "mergedFoundationPrs": [54, 55],
+      "trackingPr": 46,
+      "providerVerified": false,
+      "productionVerified": false,
+      "blockers": [
+        "google_ads.customers.discover client supports credential-only discovery but canonical server/config composition still requires customer-bound configuration before binding the verifier",
+        "first controlled Google Ads CREATE_PAUSED cannot use normal Core bootstrap while sideEffectValidated is false and approval request requires PRODUCTION_VALIDATED",
+        "live Secret Manager/IAM/provider credential evidence not proven",
+        "no live Google Ads provider read/write/readback evidence recorded"
+      ]
+    },
+    "B_OMNICHANNEL_OUTBOUND_NURTURE": {
+      "state": "BLOCKED_RUNTIME_COMPOSITION",
+      "providerRuntimesPresent": true,
+      "providerVerified": false,
+      "productionVerified": false,
+      "blockers": [
+        "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
+        "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
+        "durable nurture must reuse canonical NextAction/Workflow/Scheduler authorities"
+      ]
+    },
+    "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
+      "state": "SOURCE_READY_RUNTIME_EVIDENCE_PENDING",
+      "replacementPr": 55,
+      "supersedesPr": 42,
+      "exactHead": "c3791176195edd392890fa02dbd93209b7bc785e",
+      "mergedMainSha": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
+      "sourceGates": {
+        "quality": "SUCCESS",
+        "securitySupplyChain": "SUCCESS",
+        "emailProviderGate": "SUCCESS",
+        "postgresE2E": "NOT_TRIGGERED_BY_PR_55_PATH_FILTER"
+      },
+      "stagingIsolationContract": "FAIL_CLOSED_DEDICATED_GCP_PROJECT_CLOUD_SQL_DB_SECRET_SERVICES_IDENTITIES_WIF",
+      "stagingVerified": false,
+      "productionVerified": false
+    },
+    "D_CANONICAL_GOVERNANCE_DRIVE_CLOSEOUT_PREP": {
+      "state": "IN_PROGRESS",
+      "legacyPr": 17,
+      "legacyPrMergeAllowed": false,
+      "replacementBranch": "coord/final-convergence-20260820",
+      "driveGoogleAdsCatalogReconciled": true,
+      "finalCloseoutAuthorized": false
+    }
+  },
+  "integrationGate": {
+    "candidateFreezeBlockedBy": [
+      "front A credential-first runtime composition gap",
+      "front B outbound/nurture runtime exposure/composition gap"
+    ],
+    "requiredSequenceAfterCodeConvergence": [
+      "freeze exact candidate SHA",
+      "revalidate Platform Readiness on final candidate",
+      "prove staging != production before any mutation",
+      "execute staging acceptance and collect evidence",
+      "execute controlled provider verification without lifecycle pre-promotion",
+      "promote production only with evidence",
+      "execute Reliability Verification",
+      "generate Final Closeout from production evidence only"
+    ]
+  }
+}
