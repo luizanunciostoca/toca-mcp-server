@@ -42,6 +42,13 @@ jobs:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.PROD_DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Enumerate projects visible to deployer
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'VISIBLE_PROJECTS_BEGIN'
+          gcloud projects list --format='value(projectId,projectNumber)' || true
+          echo 'VISIBLE_PROJECTS_END'
       - name: Read canonical production metadata
         shell: bash
         run: |
