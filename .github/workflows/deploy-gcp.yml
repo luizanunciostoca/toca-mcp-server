@@ -121,6 +121,7 @@ jobs:
       META_ADS_READ_ENABLED: ${{ vars.META_ADS_READ_ENABLED || 'false' }}
       META_ADS_WRITE_ENABLED: ${{ vars.META_ADS_WRITE_ENABLED || 'false' }}
       WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
+      WHATSAPP_BUSINESS_ID: ${{ vars.WHATSAPP_BUSINESS_ID }}
       WHATSAPP_PROVIDER_VERIFIED: ${{ vars.WHATSAPP_PROVIDER_VERIFIED || 'false' }}
       EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
       EMAIL_SENDGRID_PROVIDER_VERIFIED: ${{ vars.EMAIL_SENDGRID_PROVIDER_VERIFIED || 'false' }}
@@ -325,10 +326,12 @@ jobs:
             require_secret TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET" "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION"
           fi
           if [[ "$WHATSAPP_ENABLED" == true ]]; then
+            test -n "$WHATSAPP_BUSINESS_ID" || { echo 'WHATSAPP_BUSINESS_ID is required when WhatsApp is enabled' >&2; exit 1; }
             add_both WHATSAPP_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
             add_both WHATSAPP_BINDING_STATE "${{ vars.WHATSAPP_BINDING_STATE }}"
             add_both WHATSAPP_BINDING_ID "${{ vars.WHATSAPP_BINDING_ID }}"
             add_both WHATSAPP_META_APP_ID "${{ vars.WHATSAPP_META_APP_ID }}"
+            add_both WHATSAPP_BUSINESS_ID "$WHATSAPP_BUSINESS_ID"
             add_both WHATSAPP_WABA_ID "${{ vars.WHATSAPP_WABA_ID }}"
             add_both WHATSAPP_PHONE_NUMBER_ID "${{ vars.WHATSAPP_PHONE_NUMBER_ID }}"
           fi
