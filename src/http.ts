@@ -28,7 +28,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MCP_PORT/PORT must be an integer between 1 and 65535');
 }
 
-const whatsappRuntime = createWhatsAppWebhookRuntime();
+const whatsappRuntime = await createWhatsAppWebhookRuntime();
 const metaWebhook = createMetaWebhookBoundary(whatsappRuntime);
 const sendGridEventRuntime = await createEmailWebhookRuntime();
 
@@ -56,7 +56,7 @@ server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
 
-function createWhatsAppWebhookRuntime(): WhatsAppHttpComposition | undefined {
+async function createWhatsAppWebhookRuntime(): Promise<WhatsAppHttpComposition | undefined> {
   if (!isTrue(process.env.WHATSAPP_RUNTIME_ENABLED)) return undefined;
   if (!config.DATABASE_URL?.trim()) throw new Error('WHATSAPP_DATABASE_URL_REQUIRED');
   return createWhatsAppHttpComposition({
