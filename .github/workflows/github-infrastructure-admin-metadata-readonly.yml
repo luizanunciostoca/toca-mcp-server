@@ -1,0 +1,53 @@
+name: GitHub Infrastructure Admin Metadata Read-Only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/github-infrastructure-admin-metadata-readonly.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    name: Read-only hosted environment metadata
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 5
+    steps:
+      - name: Inspect environment secret and variable metadata only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECRET_URL="https://api.github.com/repositories/$REPOSITORY_ID/environments/infrastructure-admin/secrets"
+          VARIABLE_URL="https://api.github.com/repositories/$REPOSITORY_ID/environments/infrastructure-admin/variables"
+
+          SECRET_HTTP="$(curl -sS -o /tmp/secrets.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$SECRET_URL")"
+          VAR_HTTP="$(curl -sS -o /tmp/variables.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$VARIABLE_URL")"
+
+          echo "ENV_SECRET_METADATA_HTTP=$SECRET_HTTP"
+          if [ "$SECRET_HTTP" = '200' ]; then
+            jq -r '.secrets[]?.name' /tmp/secrets.json | sed 's/^/SECRET_NAME=/'
+          else
+            jq -c '{message:(.message // "unknown")}' /tmp/secrets.json || true
+          fi
+
+          echo "ENV_VARIABLE_METADATA_HTTP=$VAR_HTTP"
+          if [ "$VAR_HTTP" = '200' ]; then
+            jq -r '.variables[]?.name' /tmp/variables.json | sed 's/^/VARIABLE_NAME=/'
+          else
+            jq -c '{message:(.message // "unknown")}' /tmp/variables.json || true
+          fi
+          echo 'NO_SECRET_VALUES_READ=true'
