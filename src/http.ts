@@ -63,11 +63,12 @@ const baseServer = createTocaHttpServer({
   ...(metaWebhook ? { metaWebhook } : {}),
 });
 
-const server = sendGridEventRuntime || isWebhookService()
-  ? createServer((request, response) => {
-      void handleComposedHttpRequest(request, response, sendGridEventRuntime, baseServer);
-    })
-  : baseServer;
+const server =
+  sendGridEventRuntime || isWebhookService()
+    ? createServer((request, response) => {
+        void handleComposedHttpRequest(request, response, sendGridEventRuntime, baseServer);
+      })
+    : baseServer;
 
 server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
