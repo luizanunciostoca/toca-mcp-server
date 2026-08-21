@@ -82,6 +82,10 @@
       "blockers": [
         "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
         "TOCA_OS capability catalog currently has no matching operational whatsapp.* or email.* rows; observed whatsapp/email matches are copy-generation capabilities only",
+        "omnichannel capability contracts are not exported by src/governance/index.ts and are not part of the central capability catalog/runtime registration path",
+        "src/registry.ts has no Omnichannel registration option or whatsapp.*, email.* or nurture.* runtime tools",
+        "src/server.ts does not compose Email or WhatsApp outbound engines into the canonical runtime resolver",
+        "src/http.ts composes WhatsApp inbound and SendGrid event webhook/readback only; it does not expose outbound dispatch",
         "nurture.sequence.* must not be created by default because TOCA_OS already has IMPLEMENTED R10 sales.followup.create and sales.followup.schedule authorities; compose durable nurture over those first",
         "R10 route ownership is semantically drifted between routing metadata and its broad CRM/Sales capability family and must be reconciled through R21 before candidate freeze",
         "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
@@ -118,7 +122,7 @@
   "integrationGate": {
     "candidateFreezeBlockedBy": [
       "front A credential-first runtime composition gap",
-      "front B outbound runtime exposure/composition gap",
+      "front B outbound runtime registration and composition gap",
       "front B TOCA_OS operational channel capability catalog drift",
       "front B nurture manifest must converge on existing canonical R10 followup authorities",
       "R10 route ownership drift must be reconciled through R21 without creating a 33rd route"
