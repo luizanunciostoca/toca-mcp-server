@@ -70,10 +70,7 @@ async function listWabas(
   api: MetaApiClient,
   businessId: string,
 ): Promise<readonly ProviderAsset[]> {
-  const edges = [
-    'owned_whatsapp_business_accounts',
-    'client_whatsapp_business_accounts',
-  ] as const;
+  const edges = ['owned_whatsapp_business_accounts', 'client_whatsapp_business_accounts'] as const;
   const results = await Promise.allSettled(
     edges.map((edge) => api.get(`${businessId}/${edge}`, { fields: 'id,name', limit: '100' })),
   );
