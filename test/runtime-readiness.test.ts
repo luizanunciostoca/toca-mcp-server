@@ -152,27 +152,29 @@ function fakePool(
     readonly deadLetterCount?: number;
   } = {},
 ): pg.Pool {
-  const query = async (text: string, values?: readonly unknown[]) => {
+  const query = (text: string, values?: readonly unknown[]) => {
     if (text === 'select 1') {
-      if (options.databaseFailure) throw new Error('DATABASE_UNAVAILABLE');
-      return { rows: [], rowCount: 1 };
+      if (options.databaseFailure) return Promise.reject(new Error('DATABASE_UNAVAILABLE'));
+      return Promise.resolve({ rows: [], rowCount: 1 });
     }
     if (text.includes('select version from schema_migrations')) {
-      return {
+      return Promise.resolve({
         rows: (options.appliedMigrations ?? []).map((version) => ({ version })),
         rowCount: options.appliedMigrations?.length ?? 0,
-      };
+      });
     }
     if (text.includes('to_regclass')) {
       const tableNames = Array.isArray(values?.[0]) ? (values?.[0] as readonly string[]) : [];
-      return {
+      return Promise.resolve({
         rows: tableNames.map((tableName) => ({ table_name: tableName, relation: tableName })),
         rowCount: tableNames.length,
-      };
+      });
     }
-    if (text.includes('from audit_ledger_heads h')) return { rows: [], rowCount: 0 };
+    if (text.includes('from audit_ledger_heads h')) {
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    }
     if (text.includes('from event_outbox')) {
-      return {
+      return Promise.resolve({
         rows: [
           {
             oldest_pending_age_seconds: options.outboxLagSeconds ?? 0,
@@ -180,9 +182,9 @@ function fakePool(
           },
         ],
         rowCount: 1,
-      };
+      });
     }
-    return { rows: [], rowCount: 0 };
+    return Promise.resolve({ rows: [], rowCount: 0 });
   };
   return { query } as unknown as pg.Pool;
 }
