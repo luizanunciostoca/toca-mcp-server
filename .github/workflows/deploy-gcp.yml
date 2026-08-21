@@ -235,14 +235,50 @@ jobs:
           set -euo pipefail
           gcloud sql backups create --instance "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --description "pre-next-${GITHUB_SHA::12}"
 
-      - name: Apply repository migrations before traffic
+      - name: Start verified Cloud SQL Auth Proxy for repository database operations
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
-          export DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
-          export DATABASE_SSL="${{ vars.DATABASE_SSL || 'false' }}"
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location             "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"             --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432             "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}"             >/tmp/cloud-sql-proxy.log 2>&1 &
+          PROXY_PID=$!
+          echo "CLOUD_SQL_PROXY_PID=$PROXY_PID" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+              echo 'CLOUD_SQL_PROXY_READY=true'
+              exit 0
+            fi
+            if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+              echo 'Cloud SQL Auth Proxy exited before becoming ready' >&2
+              cat /tmp/cloud-sql-proxy.log >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'Cloud SQL Auth Proxy readiness timed out' >&2
+          cat /tmp/cloud-sql-proxy.log >&2
+          exit 1
+
+      - name: Apply repository migrations before traffic through authenticated proxy
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          RAW_DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
+          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
+            const url = new URL(process.env.RAW_DATABASE_URL);
+            url.hostname = "127.0.0.1";
+            url.port = "5432";
+            for (const key of ["host", "port", "ssl", "sslmode", "sslcert", "sslkey", "sslrootcert", "sslaccept"]) url.searchParams.delete(key);
+            process.stdout.write(url.toString());
+          ')"
+          unset RAW_DATABASE_URL
+          export DATABASE_SSL=false
           pnpm migrate
-          unset DATABASE_URL
+          unset DATABASE_URL DATABASE_SSL
 
       - name: Configure Docker auth
         if: inputs.operation == 'deploy'
@@ -446,16 +482,33 @@ jobs:
           [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Public webhook surface exposed a forbidden route' >&2; exit 1; }
           jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
 
-      - name: Capture database Audit Outbox Workflow Privacy and migration refs
+      - name: Capture database Audit Outbox Workflow Privacy and migration refs through authenticated proxy
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
-          export DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
-          export DATABASE_SSL="${{ vars.DATABASE_SSL || 'false' }}"
+          RAW_DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
+          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
+            const url = new URL(process.env.RAW_DATABASE_URL);
+            url.hostname = "127.0.0.1";
+            url.port = "5432";
+            for (const key of ["host", "port", "ssl", "sslmode", "sslcert", "sslkey", "sslrootcert", "sslaccept"]) url.searchParams.delete(key);
+            process.stdout.write(url.toString());
+          ')"
+          unset RAW_DATABASE_URL
+          export DATABASE_SSL=false
           export TOCA_RELEASE_SHA="$GITHUB_SHA"
           export TOCA_DEPLOY_ENVIRONMENT="${{ inputs.environment }}"
           node scripts/capture-platform-evidence.mjs platform-evidence/database-runtime.json
-          unset DATABASE_URL
+          unset DATABASE_URL DATABASE_SSL
+
+      - name: Stop Cloud SQL Auth Proxy
+        if: always() && inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          if [[ -n "${CLOUD_SQL_PROXY_PID:-}" ]] && kill -0 "$CLOUD_SQL_PROXY_PID" 2>/dev/null; then
+            kill "$CLOUD_SQL_PROXY_PID"
+            wait "$CLOUD_SQL_PROXY_PID" || true
+          fi
 
       - name: Capture non-secret deploy and provider evidence
         if: inputs.operation == 'deploy'
