@@ -232,7 +232,7 @@ function sendInput(): WhatsAppOutboundSendInput {
     executionId: 'wa-followup-exec-1',
     correlationId: 'correlation-wa-1',
     actorPrincipalId: 'principal:wa-runtime',
-    idempotencyKey: 'wa-followup-idempotency-1',
+    idempotencyKey: 'test-idem-1',
     evidence: ['test:scheduled-followup'],
     now,
   };
