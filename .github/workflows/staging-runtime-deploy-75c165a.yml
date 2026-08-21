@@ -1,0 +1,249 @@
+name: Staging Runtime Deploy 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-runtime-deploy-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  ARTIFACT_REPOSITORY: toca-mcp-staging
+  SQL_INSTANCE: toca-mcp-next-staging-db
+  DATABASE_SECRET: toca-next-staging-database-url
+  DATABASE_SECRET_VERSION: '1'
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact candidate and provider-disabled contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          mkdir -p runtime-evidence
+          printf '%s\n' "$CANDIDATE_SHA" > runtime-evidence/source-sha.txt
+          printf '%s\n' 'STAGING_PROVIDER_MODE=DISABLED' 'PRODUCTION_AUTHORIZED=NO' >> runtime-evidence/source-sha.txt
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and build exact candidate
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Revalidate live staging and capture current traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != 'toca-mcp-production'
+          test "$PROJECT_NUMBER" != '990081828836'
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          test "$(jq -r '.spec.template.spec.serviceAccountName' <<<"$MCP_JSON")" = "$MCP_RUNTIME_SA"
+          test "$(jq -r '.spec.template.spec.serviceAccountName' <<<"$WEBHOOK_JSON")" = "$WEBHOOK_RUNTIME_SA"
+          MCP_DEFAULT="$(jq -r '[.status.traffic[] | select((.percent // 0) == 100) | .revisionName][0] // empty' <<<"$MCP_JSON")"
+          WEBHOOK_DEFAULT="$(jq -r '[.status.traffic[] | select((.percent // 0) == 100) | .revisionName][0] // empty' <<<"$WEBHOOK_JSON")"
+          test -n "$MCP_DEFAULT"; test -n "$WEBHOOK_DEFAULT"
+          echo "MCP_DEFAULT_BEFORE=$MCP_DEFAULT" >> "$GITHUB_ENV"
+          echo "WEBHOOK_DEFAULT_BEFORE=$WEBHOOK_DEFAULT" >> "$GITHUB_ENV"
+          jq '.' <<<"$MCP_JSON" > runtime-evidence/mcp-before.json
+          jq '.' <<<"$WEBHOOK_JSON" > runtime-evidence/webhook-before.json
+          gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json > runtime-evidence/sql.json
+          jq -e '.settings.backupConfiguration.enabled == true and .settings.backupConfiguration.pointInTimeRecoveryEnabled == true' runtime-evidence/sql.json >/dev/null
+          echo 'PLATFORM_READY_FOR_STAGING=YES'
+
+      - name: Configure Docker and isolated Buildx builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker buildx create --name toca-staging-runtime-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Build attest push and verify immutable image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${CANDIDATE_SHA}"
+          docker buildx build --pull --push --provenance=mode=max --sbom=true --metadata-file /tmp/build-metadata.json -t "$IMAGE_TAG" .
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$IMAGE_DIGEST" == sha256:* ]]
+          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
+          echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          jq -n --arg tag "$IMAGE_TAG" --arg digest "$IMAGE_DIGEST" '{tag:$tag,digest:$digest}' > runtime-evidence/image.json
+
+      - name: Deploy MCP candidate with zero default traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_ENV='^|^NODE_ENV=production|MCP_ENABLED=true|TOCA_SERVICE_ROLE=mcp|TOCA_DEPLOY_ENVIRONMENT=staging|TOCA_RELEASE_SHA=75c165a044c6e79e9545328dd04a2a3e73d2e910|TOCA_PLATFORM_KILL_SWITCH=false|TOCA_DEFAULT_TENANT_ID=toca|TOCA_DEFAULT_WORKSPACE_ID=toca|TOCA_DEFAULT_ORGANIZATION_ID=toca|TOCA_READY_OUTBOX_MAX_LAG_SECONDS=300|META_ENABLED=false|META_PROVIDER_VERIFIED=false|META_WEBHOOK_ENABLED=false|META_WEBHOOK_PERSISTENCE_ENABLED=false|INSTAGRAM_READ_ENABLED=false|META_ADS_READ_ENABLED=false|META_ADS_WRITE_ENABLED=false|WHATSAPP_ENABLED=false|WHATSAPP_RUNTIME_ENABLED=false|WHATSAPP_PROVIDER_VERIFIED=false|EMAIL_SENDGRID_ENABLED=false|EMAIL_SENDGRID_PROVIDER_VERIFIED=false|GOOGLE_ADS_PHASE=OFF|GOOGLE_ADS_PROVIDER_VERIFIED=false|AG01_MODEL_ENABLED=false|AG01_MODEL_PROVIDER_VERIFIED=false|GCP_PROJECT_ID=toca-mcp-next-staging'
+          gcloud run deploy "$MCP_SERVICE" --image "$IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --revision-suffix 'mcp-75c165a-r1' --tag 'candidate-75c165a' --no-traffic \
+            --service-account "$MCP_RUNTIME_SA" \
+            --add-cloudsql-instances "${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
+            --update-secrets "DATABASE_URL=${DATABASE_SECRET}:${DATABASE_SECRET_VERSION}" \
+            --update-env-vars "$MCP_ENV" \
+            --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1
+
+      - id: mcp
+        name: Resolve MCP candidate and prove zero traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          REV="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .revisionName][0] // empty' <<<"$JSON")"
+          URL="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .url][0] // empty' <<<"$JSON")"
+          test -n "$REV"; test -n "$URL"
+          test "$(jq -r --arg r "$REV" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 0
+          test "$(jq -r --arg r "$MCP_DEFAULT_BEFORE" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 100
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          jq '.' <<<"$JSON" > runtime-evidence/mcp-deployed.json
+
+      - id: mcp_auth
+        name: Mint MCP candidate identity token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.mcp.outputs.url }}
+
+      - name: Smoke MCP candidate
+        shell: bash
+        env:
+          CANDIDATE_URL: ${{ steps.mcp.outputs.url }}
+          ID_TOKEN: ${{ steps.mcp_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/healthz" | tee runtime-evidence/mcp-healthz.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/readyz" | tee runtime-evidence/mcp-readyz.json
+          jq -e '.status == "ready" and (.checks | all(.ok == true))' runtime-evidence/mcp-readyz.json >/dev/null
+
+      - name: Deploy webhook candidate with zero default traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          WEBHOOK_ENV='^|^NODE_ENV=production|MCP_ENABLED=false|TOCA_SERVICE_ROLE=webhook|TOCA_DEPLOY_ENVIRONMENT=staging|TOCA_RELEASE_SHA=75c165a044c6e79e9545328dd04a2a3e73d2e910|TOCA_PLATFORM_KILL_SWITCH=false|TOCA_DEFAULT_TENANT_ID=toca|TOCA_DEFAULT_WORKSPACE_ID=toca|TOCA_DEFAULT_ORGANIZATION_ID=toca|TOCA_READY_OUTBOX_MAX_LAG_SECONDS=300|META_ENABLED=false|META_PROVIDER_VERIFIED=false|META_WEBHOOK_ENABLED=false|META_WEBHOOK_PERSISTENCE_ENABLED=false|INSTAGRAM_READ_ENABLED=false|META_ADS_READ_ENABLED=false|META_ADS_WRITE_ENABLED=false|WHATSAPP_ENABLED=false|WHATSAPP_RUNTIME_ENABLED=false|WHATSAPP_PROVIDER_VERIFIED=false|EMAIL_SENDGRID_ENABLED=false|EMAIL_SENDGRID_PROVIDER_VERIFIED=false|GOOGLE_ADS_PHASE=OFF|GOOGLE_ADS_PROVIDER_VERIFIED=false|AG01_MODEL_ENABLED=false|AG01_MODEL_PROVIDER_VERIFIED=false|GCP_PROJECT_ID=toca-mcp-next-staging'
+          gcloud run deploy "$WEBHOOK_SERVICE" --image "$IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --revision-suffix 'webhook-75c165a-r1' --tag 'candidate-75c165a' --no-traffic \
+            --service-account "$WEBHOOK_RUNTIME_SA" \
+            --add-cloudsql-instances "${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
+            --update-secrets "DATABASE_URL=${DATABASE_SECRET}:${DATABASE_SECRET_VERSION}" \
+            --update-env-vars "$WEBHOOK_ENV" \
+            --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1
+
+      - id: webhook
+        name: Resolve webhook candidate and prove zero traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          JSON="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          REV="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .revisionName][0] // empty' <<<"$JSON")"
+          URL="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .url][0] // empty' <<<"$JSON")"
+          test -n "$REV"; test -n "$URL"
+          test "$(jq -r --arg r "$REV" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 0
+          test "$(jq -r --arg r "$WEBHOOK_DEFAULT_BEFORE" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 100
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          jq '.' <<<"$JSON" > runtime-evidence/webhook-deployed.json
+
+      - id: webhook_auth
+        name: Mint webhook candidate identity token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.webhook.outputs.url }}
+
+      - name: Smoke webhook candidate and route confinement
+        shell: bash
+        env:
+          CANDIDATE_URL: ${{ steps.webhook.outputs.url }}
+          ID_TOKEN: ${{ steps.webhook_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/healthz" | tee runtime-evidence/webhook-healthz.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/readyz" | tee runtime-evidence/webhook-readyz.json
+          jq -e '.status == "ready" and (.checks | all(.ok == true))' runtime-evidence/webhook-readyz.json >/dev/null
+          MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/mcp")"
+          OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/oauth/meta/start")"
+          test "$MCP_STATUS" = 404
+          test "$OAUTH_STATUS" = 404
+          jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > runtime-evidence/route-confinement.json
+
+      - name: Final readback and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          test "$(jq -r --arg r '${{ steps.mcp.outputs.revision }}' '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$MCP_JSON")" = 0
+          test "$(jq -r --arg r "$MCP_DEFAULT_BEFORE" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$MCP_JSON")" = 100
+          test "$(jq -r --arg r '${{ steps.webhook.outputs.revision }}' '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$WEBHOOK_JSON")" = 0
+          test "$(jq -r --arg r "$WEBHOOK_DEFAULT_BEFORE" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$WEBHOOK_JSON")" = 100
+          jq -n --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" --arg mcp '${{ steps.mcp.outputs.revision }}' --arg webhook '${{ steps.webhook.outputs.revision }}' --arg mcpDefault "$MCP_DEFAULT_BEFORE" --arg webhookDefault "$WEBHOOK_DEFAULT_BEFORE" '{sourceSha:$sha,imageDigest:$digest,revisions:{mcp:$mcp,webhook:$webhook},defaultTraffic:{mcp:$mcpDefault,webhook:$webhookDefault},candidateTrafficPercent:0,providersEnabled:false,productionMutation:false,result:"PASS"}' > runtime-evidence/manifest.json
+          echo 'STAGING_RUNTIME_DEPLOY=PASS'
+          echo 'CANDIDATE_TRAFFIC_PERCENT=0'
+          echo 'STAGING_PROVIDER_MODE=DISABLED'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-runtime-75c165a-evidence
+          path: runtime-evidence
+          if-no-files-found: warn
+          retention-days: 30
