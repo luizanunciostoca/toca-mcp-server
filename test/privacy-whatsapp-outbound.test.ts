@@ -22,7 +22,9 @@ import type {
   WhatsAppRuntimeStore,
 } from '../src/omnichannel/whatsapp-runtime-contracts.js';
 import type { CommunicationPolicyDecision } from '../src/privacy/contracts.js';
-import type { PreparedWhatsAppPayloadResolver } from '../src/providers/whatsapp/whatsapp-cloud-adapter.js';
+import type {
+  PreparedWhatsAppPayloadResolver,
+} from '../src/providers/whatsapp/whatsapp-cloud-adapter.js';
 
 const scope = {
   tenantId: 'tenant-privacy-wa',
@@ -156,7 +158,8 @@ class MemoryWhatsAppStore {
 
   updateDispatch(input: UpdateWhatsAppDispatchInput): Promise<WhatsAppDispatchRecord> {
     if (!this.dispatch) throw new Error('TEST_DISPATCH_MISSING');
-    if (this.dispatch.state !== input.expectedState) throw new Error('TEST_DISPATCH_STATE_MISMATCH');
+    if (this.dispatch.state !== input.expectedState)
+      throw new Error('TEST_DISPATCH_STATE_MISMATCH');
     this.dispatch = {
       ...this.dispatch,
       state: input.state,
@@ -288,7 +291,9 @@ describe('WhatsApp outbound Privacy revalidation', () => {
       },
     );
 
-    await expect(runtime.send(sendInput())).rejects.toThrow('WHATSAPP_PRIVACY_REVALIDATION_BLOCKED');
+    await expect(runtime.send(sendInput())).rejects.toThrow(
+      'WHATSAPP_PRIVACY_REVALIDATION_BLOCKED',
+    );
 
     expect(provider.sendCount).toBe(0);
     expect(store.dispatch).toMatchObject({
