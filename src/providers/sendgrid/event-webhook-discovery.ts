@@ -44,8 +44,12 @@ export async function discoverSendGridEventWebhookPublicKey(
 
   const root = asRecord(await response.json());
   const rawWebhooks = Array.isArray(root.webhooks) ? root.webhooks : [];
-  const candidates = rawWebhooks.map(parseCandidate).filter((value): value is EventWebhookCandidate => value !== null);
-  const signedEnabled = candidates.filter((candidate) => candidate.enabled && candidate.publicKey);
+  const candidates = rawWebhooks
+    .map(parseCandidate)
+    .filter((value): value is EventWebhookCandidate => value !== null);
+  const signedEnabled = candidates.filter(
+    (candidate) => candidate.enabled && candidate.publicKey,
+  );
   const expectedUrl = normalizeOptionalUrl(options.expectedUrl ?? null);
   const matches = expectedUrl
     ? signedEnabled.filter((candidate) => normalizeUrl(candidate.url) === expectedUrl)
@@ -63,7 +67,10 @@ export async function discoverSendGridEventWebhookPublicKey(
   }
 
   const selected = matches[0]!;
-  const publicKey = requireText(selected.publicKey ?? undefined, 'SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_REQUIRED');
+  const publicKey = requireText(
+    selected.publicKey ?? undefined,
+    'SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_REQUIRED',
+  );
   return {
     webhookId: selected.id,
     url: selected.url,
