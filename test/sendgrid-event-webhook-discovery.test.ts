@@ -8,21 +8,29 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 describe('SendGrid Event Webhook discovery', () => {
   it('selects the only enabled signed webhook using only the API key', async () => {
     const requests: string[] = [];
-    const fetchImpl: typeof fetch = async (input) => {
-      requests.push(String(input));
-      return response({
-        webhooks: [
-          {
-            id: 'hook-1',
-            url: 'https://hooks.example.test/webhooks/sendgrid/events',
-            enabled: true,
-            public_key: '-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----',
-          },
-        ],
-      });
+    const fetchImpl: typeof fetch = (input) => {
+      requests.push(requestUrl(input));
+      return Promise.resolve(
+        response({
+          webhooks: [
+            {
+              id: 'hook-1',
+              url: 'https://hooks.example.test/webhooks/sendgrid/events',
+              enabled: true,
+              public_key: '-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----',
+            },
+          ],
+        }),
+      );
     };
 
     const result = await discoverSendGridEventWebhookPublicKey({
@@ -39,23 +47,25 @@ describe('SendGrid Event Webhook discovery', () => {
   });
 
   it('uses the expected URL to disambiguate and fails closed otherwise', async () => {
-    const fetchImpl: typeof fetch = async () =>
-      response({
-        webhooks: [
-          {
-            id: 'hook-a',
-            url: 'https://a.example.test/events',
-            enabled: true,
-            public_key: 'key-a',
-          },
-          {
-            id: 'hook-b',
-            url: 'https://b.example.test/events/',
-            enabled: true,
-            public_key: 'key-b',
-          },
-        ],
-      });
+    const fetchImpl: typeof fetch = () =>
+      Promise.resolve(
+        response({
+          webhooks: [
+            {
+              id: 'hook-a',
+              url: 'https://a.example.test/events',
+              enabled: true,
+              public_key: 'key-a',
+            },
+            {
+              id: 'hook-b',
+              url: 'https://b.example.test/events/',
+              enabled: true,
+              public_key: 'key-b',
+            },
+          ],
+        }),
+      );
 
     await expect(
       discoverSendGridEventWebhookPublicKey({ apiKey: 'test-api-key', fetchImpl }),
@@ -71,23 +81,25 @@ describe('SendGrid Event Webhook discovery', () => {
   });
 
   it('does not accept disabled or unsigned webhooks', async () => {
-    const fetchImpl: typeof fetch = async () =>
-      response({
-        webhooks: [
-          {
-            id: 'disabled',
-            url: 'https://example.test/disabled',
-            enabled: false,
-            public_key: 'key',
-          },
-          {
-            id: 'unsigned',
-            url: 'https://example.test/unsigned',
-            enabled: true,
-            public_key: null,
-          },
-        ],
-      });
+    const fetchImpl: typeof fetch = () =>
+      Promise.resolve(
+        response({
+          webhooks: [
+            {
+              id: 'disabled',
+              url: 'https://example.test/disabled',
+              enabled: false,
+              public_key: 'key',
+            },
+            {
+              id: 'unsigned',
+              url: 'https://example.test/unsigned',
+              enabled: true,
+              public_key: null,
+            },
+          ],
+        }),
+      );
 
     await expect(
       discoverSendGridEventWebhookPublicKey({ apiKey: 'test-api-key', fetchImpl }),
