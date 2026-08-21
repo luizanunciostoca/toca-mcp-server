@@ -47,9 +47,7 @@ export async function discoverSendGridEventWebhookPublicKey(
   const candidates = rawWebhooks
     .map(parseCandidate)
     .filter((value): value is EventWebhookCandidate => value !== null);
-  const signedEnabled = candidates.filter(
-    (candidate) => candidate.enabled && candidate.publicKey,
-  );
+  const signedEnabled = candidates.filter((candidate) => candidate.enabled && candidate.publicKey);
   const expectedUrl = normalizeOptionalUrl(options.expectedUrl ?? null);
   const matches = expectedUrl
     ? signedEnabled.filter((candidate) => normalizeUrl(candidate.url) === expectedUrl)
