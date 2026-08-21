@@ -13,10 +13,7 @@ if (!mcpUrl) throw new Error("STAGING_E2E_MCP_URL_REQUIRED");
 if (!mcpToken) throw new Error("STAGING_E2E_MCP_TOKEN_REQUIRED");
 if (!evidenceDir) throw new Error("STAGING_E2E_EVIDENCE_DIR_REQUIRED");
 
-const client = new Client(
-  { name: "toca-staging-e2e", version: "1.0.0" },
-  { versionNegotiation: { mode: "auto" } },
-);
+const client = new Client({ name: "toca-staging-e2e", version: "1.0.0" });
 const transport = new StreamableHTTPClientTransport(new URL(`${mcpUrl}/mcp`), {
   requestInit: { headers: { Authorization: `Bearer ${mcpToken}` } },
 });
@@ -48,6 +45,7 @@ try {
   const summary = {
     schemaVersion: "toca.staging.e2e.mcp-smoke.v1",
     transport: "streamable-http",
+    negotiation: "legacy-initialize",
     authenticated: true,
     toolCount: names.length,
     requiredTools: ["toca.system.health", "toca.capabilities.search"],
