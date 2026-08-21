@@ -1,0 +1,205 @@
+name: Staging Reliability Read-Only 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-reliability-readonly-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SQL_INSTANCE: toca-mcp-next-staging-db
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-r3
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-f1
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact candidate and canonical reliability contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          jq -e '.routing.minimumNotificationChannels == 2 and .routing.requireRedundantChannelFamilies == true and .routing.syntheticFiringRequiresReadback == true' infra/observability/platform-hardening-alerts.json >/dev/null
+          jq -e '.safety.realSideEffectsForTesting == false and .safety.destructiveOperations == false and .safety.providerMutationAllowed == false' infra/observability/platform-hardening-synthetics.json >/dev/null
+          jq -e '.providerChecks | all(.enabled == false)' infra/observability/platform-hardening-synthetics.json >/dev/null
+          jq -e '.requiredDimensions | index("environment") and index("service") and index("revision") and index("tenant_id")' infra/observability/platform-hardening-dashboard.json >/dev/null
+          mkdir -p reliability-evidence
+          echo 'CANONICAL_RELIABILITY_CONTRACT=PASS'
+
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Fail closed on staging identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != 'toca-mcp-production'
+          test "$PROJECT_NUMBER" != '990081828836'
+          printf '%s\n' "project=$PROJECT_ID" "projectNumber=$PROJECT_NUMBER" > reliability-evidence/staging-identity.txt
+          echo 'STAGING_IDENTITY=PASS'
+
+      - name: Read candidate Cloud Run state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > reliability-evidence/mcp-service.json
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > reliability-evidence/webhook-service.json
+          gcloud run revisions describe "$MCP_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > reliability-evidence/mcp-revision.json
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > reliability-evidence/webhook-revision.json
+          for pair in "mcp:$MCP_REVISION" "webhook:$WEBHOOK_REVISION"; do
+            kind="${pair%%:*}"; rev="${pair#*:}"; file="reliability-evidence/${kind}-service.json"
+            jq -e --arg rev "$rev" '[.status.traffic[]? | select(.revisionName==$rev and ((.percent // 0) > 0))] | length == 0' "$file" >/dev/null
+          done
+          jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' reliability-evidence/mcp-revision.json >/dev/null
+          jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' reliability-evidence/webhook-revision.json >/dev/null
+          echo 'CANDIDATE_RUNTIME_READBACK=PASS'
+          echo 'CANDIDATE_TRAFFIC_PERCENT=0'
+
+      - name: Read Cloud SQL DR posture
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json > reliability-evidence/cloudsql-instance.json
+          jq -e '.state == "RUNNABLE"' reliability-evidence/cloudsql-instance.json >/dev/null
+          jq -e '.settings.backupConfiguration.enabled == true' reliability-evidence/cloudsql-instance.json >/dev/null
+          jq -e '.settings.backupConfiguration.pointInTimeRecoveryEnabled == true' reliability-evidence/cloudsql-instance.json >/dev/null
+          jq -e '(.settings.backupConfiguration.transactionLogRetentionDays // 0) >= 7' reliability-evidence/cloudsql-instance.json >/dev/null
+          jq -e '(.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0) >= 7' reliability-evidence/cloudsql-instance.json >/dev/null
+          jq -e '(.settings.deletionProtectionEnabled // .deletionProtectionEnabled // false) == true' reliability-evidence/cloudsql-instance.json >/dev/null
+          echo 'CLOUD_SQL_DR_POSTURE=PASS'
+
+      - name: Read backup recency
+        id: backups
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          gcloud sql backups list --instance="$SQL_INSTANCE" --project="$PROJECT_ID" --format=json > reliability-evidence/cloudsql-backups.json 2>reliability-evidence/cloudsql-backups.err
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 ]]; then
+            echo 'CLOUD_SQL_BACKUP_READ=DENIED_OR_UNAVAILABLE'
+            cat reliability-evidence/cloudsql-backups.err >&2
+            echo 'backup_read=blocked' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SUCCESS_COUNT="$(jq '[.[] | select((.status // "") == "SUCCESSFUL")] | length' reliability-evidence/cloudsql-backups.json)"
+          test "$SUCCESS_COUNT" -ge 1
+          LATEST="$(jq -r '[.[] | select((.status // "") == "SUCCESSFUL") | (.endTime // .startTime // empty)] | map(select(length>0)) | sort | last // empty' reliability-evidence/cloudsql-backups.json)"
+          test -n "$LATEST"
+          now="$(date -u +%s)"
+          then="$(date -u -d "$LATEST" +%s)"
+          age=$((now-then))
+          echo "CLOUD_SQL_LATEST_SUCCESSFUL_BACKUP=$LATEST"
+          echo "CLOUD_SQL_LATEST_BACKUP_AGE_SECONDS=$age"
+          test "$age" -le 129600
+          echo 'CLOUD_SQL_BACKUP_RECENCY=PASS'
+          echo 'backup_read=pass' >> "$GITHUB_OUTPUT"
+
+      - name: Read Cloud Monitoring control plane
+        id: monitoring
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          api_get() {
+            name="$1"; url="$2"
+            code="$(curl --silent --show-error --output "reliability-evidence/${name}.json" --write-out '%{http_code}' -H "Authorization: Bearer $TOKEN" "$url" || true)"
+            echo "$code" > "reliability-evidence/${name}.http"
+            echo "${name^^}_HTTP=$code"
+          }
+          api_get alert_policies "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100"
+          api_get notification_channels "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100"
+          api_get uptime_checks "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs?pageSize=100"
+          api_get dashboards "https://monitoring.googleapis.com/v1/projects/${PROJECT_ID}/dashboards?pageSize=100"
+          unset TOKEN
+          blocked=0
+          for name in alert_policies notification_channels uptime_checks dashboards; do
+            code="$(cat "reliability-evidence/${name}.http")"
+            [[ "$code" == 200 ]] || blocked=1
+          done
+          if [[ $blocked -ne 0 ]]; then
+            echo 'MONITORING_READ_AUTHORITY=BLOCKED'
+            echo 'monitoring_read=blocked' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          policies="$(jq '.alertPolicies // [] | length' reliability-evidence/alert_policies.json)"
+          channels="$(jq '[.notificationChannels // [] | .[] | select(.enabled != false)] | length' reliability-evidence/notification_channels.json)"
+          families="$(jq '[.notificationChannels // [] | .[] | select(.enabled != false) | .type] | unique | length' reliability-evidence/notification_channels.json)"
+          uptimes="$(jq '.uptimeCheckConfigs // [] | length' reliability-evidence/uptime_checks.json)"
+          dashboards="$(jq '.dashboards // [] | length' reliability-evidence/dashboards.json)"
+          echo "STAGING_ALERT_POLICY_COUNT=$policies"
+          echo "STAGING_ENABLED_NOTIFICATION_CHANNEL_COUNT=$channels"
+          echo "STAGING_NOTIFICATION_CHANNEL_FAMILY_COUNT=$families"
+          echo "STAGING_UPTIME_CHECK_COUNT=$uptimes"
+          echo "STAGING_DASHBOARD_COUNT=$dashboards"
+          echo 'monitoring_read=pass' >> "$GITHUB_OUTPUT"
+          if [[ "$channels" -ge 2 && "$families" -ge 2 ]]; then
+            echo 'REDUNDANT_NOTIFICATION_CHANNELS=PASS'
+            echo 'channel_contract=pass' >> "$GITHUB_OUTPUT"
+          else
+            echo 'REDUNDANT_NOTIFICATION_CHANNELS=BLOCKED'
+            echo 'channel_contract=blocked' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reliability read-only decision
+        shell: bash
+        env:
+          BACKUP_READ: ${{ steps.backups.outputs.backup_read }}
+          MONITORING_READ: ${{ steps.monitoring.outputs.monitoring_read }}
+          CHANNEL_CONTRACT: ${{ steps.monitoring.outputs.channel_contract }}
+        run: |
+          set -euo pipefail
+          echo "BACKUP_READ=${BACKUP_READ:-unknown}"
+          echo "MONITORING_READ=${MONITORING_READ:-unknown}"
+          echo "CHANNEL_CONTRACT=${CHANNEL_CONTRACT:-unknown}"
+          echo 'PITR_WINDOW_READBACK=NOT_DIRECTLY_EXPOSED_BY_INSTANCE_DESCRIBE'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'ALERT_MUTATION_EXECUTED=NO'
+          echo 'DR_RESTORE_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+          if [[ "${BACKUP_READ:-}" != pass || "${MONITORING_READ:-}" != pass || "${CHANNEL_CONTRACT:-}" != pass ]]; then
+            echo 'RELIABILITY_LIVE_READBACK=BLOCKED'
+            exit 1
+          fi
+          echo 'RELIABILITY_LIVE_READBACK=PASS'
+
+      - name: Upload read-only reliability evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reliability-readonly-75c165a
+          path: reliability-evidence
+          if-no-files-found: error
+          retention-days: 30
