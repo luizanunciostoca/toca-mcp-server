@@ -8,6 +8,10 @@ import type {
   ProviderMessageReadback,
 } from './contracts.js';
 import {
+  requireFreshOutboundPrivacy,
+  type OutboundPrivacyRevalidationPort,
+} from './privacy-runtime-gate.js';
+import {
   DEFAULT_EMAIL_RETRY_POLICY,
   assertCanonicalEmailMessage,
   computeEmailRetryDelayMs,
@@ -66,6 +70,12 @@ export interface EmailSendInput extends CrmScope {
   readonly preparedCampaignRef: string;
   readonly eligibilitySnapshot: AudienceEligibilitySnapshot;
   readonly approval: ApprovalDecisionProof;
+  /** Opaque canonical Privacy subject reference; raw email addresses are forbidden. */
+  readonly privacySubjectRef: string;
+  /** Exact channel key used by the canonical Privacy purpose/ledger. */
+  readonly privacyChannel: string;
+  readonly executionId: string;
+  readonly actorPrincipalId: string;
   readonly idempotencyKey: string;
   readonly internetMessageId: string;
   readonly inReplyTo?: string | null;
@@ -113,6 +123,7 @@ export class EmailDispatchCoordinator {
   constructor(
     private readonly provider: EmailProviderAdapter,
     private readonly store: EmailDispatchOrchestrationStore,
+    private readonly privacy: OutboundPrivacyRevalidationPort,
   ) {}
 
   async send(input: EmailSendInput): Promise<EmailSendResult> {
@@ -166,6 +177,43 @@ export class EmailDispatchCoordinator {
     }
 
     const attemptCount = (existing?.attemptCount ?? 0) + 1;
+    try {
+      await requireFreshOutboundPrivacy(this.privacy, {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        organizationId: input.organizationId,
+        channel: 'EMAIL',
+        privacyChannel: requireText(input.privacyChannel, 'EMAIL_PRIVACY_CHANNEL_REQUIRED'),
+        subjectRef: requireOpaqueEmailPrivacySubject(input.privacySubjectRef),
+        purposeId: requireText(
+          input.eligibilitySnapshot.purposeId,
+          'EMAIL_PRIVACY_PURPOSE_REQUIRED',
+        ),
+        requester: requireText(input.actorPrincipalId, 'EMAIL_ACTOR_PRINCIPAL_REQUIRED'),
+        executionId: `${requireText(input.executionId, 'EMAIL_EXECUTION_ID_REQUIRED')}:privacy-pre-send:${attemptCount}`,
+        correlationId: input.correlationId,
+        evidence: [
+          'email:privacy-pre-send',
+          `email:message:${input.message.messageId}`,
+          `email:eligibility:${input.eligibilitySnapshot.snapshotId}`,
+        ],
+      });
+    } catch (error) {
+      if (!isPrivacyRevalidationError(error)) throw error;
+      const blocked = buildDispatch({
+        input,
+        provider: this.provider.binding.providerKey,
+        existing,
+        state: 'FAILED',
+        providerMessageRef: existing?.providerMessageRef ?? null,
+        attemptCount: existing?.attemptCount ?? 0,
+        nextRetryAt: null,
+        lastError: 'EMAIL_PRIVACY_REVALIDATION_BLOCKED',
+      });
+      await this.store.saveDispatch(blocked);
+      return { dispatch: blocked, reused: false, accepted: false };
+    }
+
     const prepared = buildDispatch({
       input,
       provider: this.provider.binding.providerKey,
@@ -527,6 +575,16 @@ function safeErrorCode(error: unknown): string {
   if (!(error instanceof Error)) return 'EMAIL_PROVIDER_ERROR_UNKNOWN';
   const normalized = error.message.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 240);
   return normalized || 'EMAIL_PROVIDER_ERROR_UNKNOWN';
+}
+
+function isPrivacyRevalidationError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_');
+}
+
+function requireOpaqueEmailPrivacySubject(value: string): string {
+  const normalized = requireText(value, 'EMAIL_PRIVACY_SUBJECT_REF_REQUIRED');
+  if (normalized.includes('@')) throw new Error('EMAIL_PRIVACY_SUBJECT_RAW_PII_FORBIDDEN');
+  return normalized;
 }
 
 function requireOpaqueProviderSubjectRef(value: string): string {
