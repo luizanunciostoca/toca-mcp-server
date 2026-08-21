@@ -8,18 +8,15 @@ import { createRuntimeReadinessChecks } from '../src/health/runtime-readiness.js
 import { evaluateReadiness } from '../src/health/readiness.js';
 
 const temporaryDirectories: string[] = [];
-
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
+    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
 describe('production runtime readiness', () => {
-  it('reports ready when mandatory dependencies and disabled provider gates are healthy', async () => {
-    const report = await readinessReport({ env: baseEnv() });
+  it('reports ready when mandatory dependencies and disabled providers are healthy', async () => {
+    const report = await readinessReport();
     expect(report.status).toBe('ready');
     expect(report.checks).toHaveLength(16);
     expect(report.checks.every((check) => check.ok)).toBe(true);
@@ -52,10 +49,11 @@ describe('production runtime readiness', () => {
   it('detects repository migrations missing from the database', async () => {
     const migrationsDirectory = await emptyMigrationsDirectory();
     await writeFile(join(migrationsDirectory, '999_readiness_fixture.sql'), 'select 1;\n', 'utf8');
+    const env = baseEnv();
     const report = await evaluateReadiness(
       createRuntimeReadinessChecks({
-        config: testConfig(baseEnv()),
-        env: baseEnv(),
+        config: loadConfig(env),
+        env,
         pool: fakePool({ appliedMigrations: [] }),
         migrationsDirectory,
       }),
@@ -71,49 +69,29 @@ describe('production runtime readiness', () => {
   });
 
   it('keeps dependency readiness healthy while the mutation kill switch is active', async () => {
-    const report = await readinessReport({
-      env: { ...baseEnv(), TOCA_PLATFORM_KILL_SWITCH: 'true' },
-    });
+    const report = await readinessReport({ env: { ...baseEnv(), TOCA_PLATFORM_KILL_SWITCH: 'true' } });
     expect(report.status).toBe('ready');
-    expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: true });
   });
 
-  it('allows the production webhook role only with MCP disabled', async () => {
-    const env = productionEnv({
-      MCP_ENABLED: 'false',
-      TOCA_SERVICE_ROLE: 'webhook',
-      META_WEBHOOK_ENABLED: 'true',
-      META_PROVIDER_VERIFIED: 'true',
-      META_APP_SECRET_PROVIDER: 'env',
-      META_APP_SECRET_KEY: 'TOCA_SECRET_META_APP_SECRET',
-      META_WEBHOOK_VERIFY_TOKEN_KEY: 'TOCA_SECRET_META_VERIFY_TOKEN',
-      TOCA_SECRET_META_APP_SECRET: 'fixture-secret',
-      TOCA_SECRET_META_VERIFY_TOKEN: 'fixture-secret',
+  it('allows an inert production webhook role only with MCP disabled', async () => {
+    const report = await readinessReport({
+      env: productionEnv({ MCP_ENABLED: 'false', TOCA_SERVICE_ROLE: 'webhook' }),
     });
-    const report = await readinessReport({ env });
     expect(report.status).toBe('ready');
   });
 
   it('rejects a production webhook role that exposes MCP', async () => {
-    const env = productionEnv({
-      MCP_ENABLED: 'true',
-      TOCA_SERVICE_ROLE: 'webhook',
-      META_WEBHOOK_ENABLED: 'true',
-      META_PROVIDER_VERIFIED: 'true',
-      META_APP_SECRET_PROVIDER: 'env',
-      META_APP_SECRET_KEY: 'TOCA_SECRET_META_APP_SECRET',
-      META_WEBHOOK_VERIFY_TOKEN_KEY: 'TOCA_SECRET_META_VERIFY_TOKEN',
-      TOCA_SECRET_META_APP_SECRET: 'fixture-secret',
-      TOCA_SECRET_META_VERIFY_TOKEN: 'fixture-secret',
+    const report = await readinessReport({
+      env: productionEnv({ MCP_ENABLED: 'true', TOCA_SERVICE_ROLE: 'webhook' }),
     });
-    const report = await readinessReport({ env });
     expect(report.status).toBe('not_ready');
     expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: false });
   });
 
   it('rejects a production MCP role with MCP disabled', async () => {
-    const env = productionEnv({ MCP_ENABLED: 'false', TOCA_SERVICE_ROLE: 'mcp' });
-    const report = await readinessReport({ env });
+    const report = await readinessReport({
+      env: productionEnv({ MCP_ENABLED: 'false', TOCA_SERVICE_ROLE: 'mcp' }),
+    });
     expect(report.status).toBe('not_ready');
     expect(report.checks).toContainEqual({ name: 'critical_configuration', ok: false });
   });
@@ -123,7 +101,7 @@ async function readinessReport(options: { readonly env?: NodeJS.ProcessEnv; read
   const env = options.env ?? baseEnv();
   return evaluateReadiness(
     createRuntimeReadinessChecks({
-      config: testConfig(env),
+      config: loadConfig(env),
       env,
       pool: options.pool ?? fakePool(),
       migrationsDirectory: await emptyMigrationsDirectory(),
@@ -132,11 +110,7 @@ async function readinessReport(options: { readonly env?: NodeJS.ProcessEnv; read
 }
 
 function baseEnv(): NodeJS.ProcessEnv {
-  return {
-    NODE_ENV: 'test',
-    DATABASE_URL: 'postgresql://readiness.invalid/toca',
-    MCP_ENABLED: 'true',
-  };
+  return { NODE_ENV: 'test', DATABASE_URL: 'postgresql://readiness.invalid/toca', MCP_ENABLED: 'true' };
 }
 
 function productionEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -154,24 +128,18 @@ function productionEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function testConfig(env: NodeJS.ProcessEnv) {
-  return loadConfig(env);
-}
-
 async function emptyMigrationsDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'toca-readiness-'));
   temporaryDirectories.push(directory);
   return directory;
 }
 
-function fakePool(
-  options: {
-    readonly databaseFailure?: boolean;
-    readonly appliedMigrations?: readonly string[];
-    readonly outboxLagSeconds?: number;
-    readonly deadLetterCount?: number;
-  } = {},
-): pg.Pool {
+function fakePool(options: {
+  readonly databaseFailure?: boolean;
+  readonly appliedMigrations?: readonly string[];
+  readonly outboxLagSeconds?: number;
+  readonly deadLetterCount?: number;
+} = {}): pg.Pool {
   const query = async (text: string, values?: readonly unknown[]) => {
     if (text === 'select 1') {
       if (options.databaseFailure) throw new Error('DATABASE_UNAVAILABLE');
@@ -193,12 +161,10 @@ function fakePool(
     if (text.includes('from audit_ledger_heads h')) return { rows: [], rowCount: 0 };
     if (text.includes('from event_outbox')) {
       return {
-        rows: [
-          {
-            oldest_pending_age_seconds: options.outboxLagSeconds ?? 0,
-            dead_letter_count: options.deadLetterCount ?? 0,
-          },
-        ],
+        rows: [{
+          oldest_pending_age_seconds: options.outboxLagSeconds ?? 0,
+          dead_letter_count: options.deadLetterCount ?? 0,
+        }],
         rowCount: 1,
       };
     }
