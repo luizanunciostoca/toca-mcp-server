@@ -174,6 +174,7 @@ jobs:
           DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e "const u=new URL(process.env.RAW_DATABASE_URL); u.hostname='127.0.0.1'; u.port='5432'; for (const k of ['host','ssl','sslmode','sslrootcert','sslcert','sslkey']) u.searchParams.delete(k); process.stdout.write(u.toString())")"
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+          echo "BASE_DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
           echo 'DATABASE_SSL=false' >> "$GITHUB_ENV"
 
           for attempt in $(seq 1 30); do
@@ -191,6 +192,7 @@ jobs:
           set -euo pipefail
           cp "$HARNESS_ROOT/.github/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
           cp "$HARNESS_ROOT/.github/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
+          cp "$HARNESS_ROOT/.github/staging-e2e/ephemeral-schema.ts" "$CANDIDATE_ROOT/staging-acceptance-ephemeral-schema.ts"
           cp "$HARNESS_ROOT/.github/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/staging-acceptance-recover-workflows.ts"
           cp "$HARNESS_ROOT/.github/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
 
@@ -208,7 +210,10 @@ jobs:
       - name: Verify current schema and quiescent acceptance window
         working-directory: candidate
         shell: bash
-        run: pnpm exec tsx staging-acceptance-db-preflight.ts
+        run: |
+          set -euo pipefail
+          pnpm exec tsx staging-acceptance-db-preflight.ts
+          cp "$EVIDENCE_DIR/database-preflight.json" "$EVIDENCE_DIR/public-database-preflight.json"
 
       - name: Prove migrations are current and idempotent twice
         working-directory: candidate
@@ -226,6 +231,30 @@ jobs:
             exit 1
           fi
           echo 'MIGRATIONS_CURRENT_AND_IDEMPOTENT=PASS'
+
+      - id: acceptance_schema
+        name: Create exact ephemeral acceptance schema
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec tsx staging-acceptance-ephemeral-schema.ts create
+
+      - name: Apply and verify exact migrations in ephemeral schema
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_COUNT="$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d '[:space:]')"
+          pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/ephemeral-migrate-apply.log"
+          APPLIED_COUNT="$(grep -c '^Applied migration ' "$EVIDENCE_DIR/ephemeral-migrate-apply.log" || true)"
+          test "$APPLIED_COUNT" = "$EXPECTED_COUNT"
+          pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/ephemeral-migrate-noop.log"
+          if grep -q '^Applied migration ' "$EVIDENCE_DIR/ephemeral-migrate-noop.log"; then
+            echo 'EPHEMERAL_MIGRATION_SECOND_PASS_WAS_NOT_A_NOOP'
+            exit 1
+          fi
+          pnpm exec tsx staging-acceptance-db-preflight.ts
+          cp "$EVIDENCE_DIR/database-preflight.json" "$EVIDENCE_DIR/ephemeral-database-preflight.json"
+          echo 'EPHEMERAL_SCHEMA_MIGRATIONS=PASS'
 
       - name: Run PostgreSQL acceptance contracts sequentially
         working-directory: candidate
@@ -308,7 +337,13 @@ jobs:
             --arg mcpRevision "$MCP_REVISION" \
             --arg webhookRevision "$WEBHOOK_REVISION" \
             --arg runUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            '{schemaVersion:"toca.staging.acceptance-e2e.v1",sourceSha:$sourceSha,sourceTree:$sourceTree,ociIndexDigest:$indexDigest,runtimeChildDigest:$childDigest,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},trafficPercent:100,migrations:{head:"033_omnichannel_prepared_content.sql",migration027Present:false,drift:false,idempotentRuns:2},contracts:["M-FOUND-12 durability","CRM sales lifecycle","WhatsApp persistence and replay","AG-01 checkpoint durability","attribution and revenue readback gate","tenant-scoped ApprovalRecord","immutable prepared content","human approval resume","timer resume","authenticated MCP read-only smoke"],providers:"DISABLED",googleAdsPhase:"OFF",sideEffectingProviderCall:"NO",providerMutation:"NO",trafficMutation:"NO",productionMutation:"NO",runUrl:$runUrl,result:"PASS"}' > "$EVIDENCE_DIR/manifest.json"
+            '{schemaVersion:"toca.staging.acceptance-e2e.v1",sourceSha:$sourceSha,sourceTree:$sourceTree,ociIndexDigest:$indexDigest,runtimeChildDigest:$childDigest,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},trafficPercent:100,migrations:{head:"033_omnichannel_prepared_content.sql",migration027Present:false,drift:false,publicNoopRuns:2,ephemeralApplyCount:27,ephemeralNoopRuns:1},testIsolation:"ephemeral-schema",contracts:["M-FOUND-12 durability","CRM sales lifecycle","WhatsApp persistence and replay","AG-01 checkpoint durability","attribution and revenue readback gate","tenant-scoped ApprovalRecord","immutable prepared content","human approval resume","timer resume","authenticated MCP read-only smoke"],providers:"DISABLED",googleAdsPhase:"OFF",sideEffectingProviderCall:"NO",providerMutation:"NO",trafficMutation:"NO",productionMutation:"NO",runUrl:$runUrl,result:"PASS"}' > "$EVIDENCE_DIR/manifest.json"
+
+      - name: Drop exact ephemeral acceptance schema
+        if: always() && steps.acceptance_schema.outputs.created == 'yes'
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec tsx staging-acceptance-ephemeral-schema.ts drop
 
       - name: Stop Cloud SQL proxy
         if: always()
