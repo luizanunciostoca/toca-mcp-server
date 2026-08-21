@@ -57,10 +57,31 @@ function validateStagingIsolation() {
   assertDistinct('GCP_PROJECT_ID', projectId, productionProjectId);
   assertDistinct('GCP_PROJECT_NUMBER', projectNumber, productionProjectNumber);
   assertDistinct(
+    'GCP_CLOUD_SQL_INSTANCE_NAME',
+    requireValue('GCP_CLOUD_SQL_INSTANCE'),
+    requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE'),
+  );
+  assertDistinct(
     'GCP_CLOUD_SQL_RESOURCE',
     `${projectId}:${region}:${requireValue('GCP_CLOUD_SQL_INSTANCE')}`,
     `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE')}`,
   );
+
+  for (const [label, stagingServiceName] of [
+    ['MCP_SERVICE', requireValue('GCP_CLOUD_RUN_MCP_SERVICE')],
+    ['WEBHOOK_SERVICE', requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE')],
+  ]) {
+    assertDistinct(
+      `${label}_NAME_VS_PRODUCTION_MCP`,
+      stagingServiceName,
+      requireValue('PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE'),
+    );
+    assertDistinct(
+      `${label}_NAME_VS_PRODUCTION_WEBHOOK`,
+      stagingServiceName,
+      requireValue('PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE'),
+    );
+  }
 
   const stagingMcp = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_MCP_SERVICE')}`;
   const stagingWebhook = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE')}`;
@@ -74,6 +95,11 @@ function validateStagingIsolation() {
     assertDistinct(`${label}_VS_PRODUCTION_WEBHOOK`, stagingService, productionWebhook);
   }
 
+  assertDistinct(
+    'GCP_DATABASE_URL_SECRET_ID',
+    requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET'),
+    requireProjectLocalSecretId('PRODUCTION_GCP_DATABASE_URL_SECRET'),
+  );
   assertDistinct(
     'GCP_DATABASE_URL_SECRET_RESOURCE',
     `${projectId}:${requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET')}`,
