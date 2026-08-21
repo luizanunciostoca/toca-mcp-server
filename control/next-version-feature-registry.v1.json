@@ -1,0 +1,331 @@
+{
+  "schema_version": "2.2",
+  "registry_id": "TOCA_OS_NEXT_CANONICAL_RECONCILIATION",
+  "registry_version": "2.2-precloseout",
+  "observed_at": "2026-08-20T23:21:00-03:00",
+  "observed_main_sha": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
+  "global_state": "CLOSEOUT_PENDING_PRODUCTION_EVIDENCE",
+  "coverage": {
+    "mode": "PRE_CLOSEOUT_RECONCILIATION_OVERLAY",
+    "business_catalog_authority": "Google Drive TOCA_OS",
+    "technical_authority": "GitHub main",
+    "final_flatten_required": true,
+    "note": "This preparation covers the current executable registry/spec surface and all closeout-critical drift. Final closeout must fully flatten every final Drive capability after production source freeze."
+  },
+  "authorities": {
+    "business": "TOCA_OS Google Drive",
+    "technical": "GitHub main",
+    "effective_runtime": "deployed binding/configuration readback",
+    "external_side_effect": "provider authoritative readback",
+    "environment": "GCP source/image/revision/migration/readiness evidence"
+  },
+  "state_model": [
+    "DOCUMENTED_NOT_IMPLEMENTED",
+    "IMPLEMENTED_NOT_REGISTERED",
+    "REGISTERED_NOT_BOUND",
+    "BOUND_PROVIDER_DISABLED",
+    "IMPLEMENTED",
+    "CI_VERIFIED",
+    "PROVIDER_CONFIGURED_NOT_VERIFIED",
+    "PROVIDER_VERIFIED",
+    "STAGING_VERIFIED",
+    "PRODUCTION_VERIFIED"
+  ],
+  "rules": {
+    "catalog_entry_does_not_prove_executability": true,
+    "implementation_does_not_prove_ci": true,
+    "ci_does_not_prove_provider": true,
+    "provider_configuration_does_not_prove_provider_verification": true,
+    "provider_verification_does_not_prove_staging_or_production": true,
+    "exact_head_evidence_required": true,
+    "no_capability_creation_for_catalog_cosmetics": true,
+    "no_provider_bypass": true,
+    "no_automatic_provider_promotion": true,
+    "no_second_crm_or_conversation_message_ledger": true,
+    "no_parallel_workflow_scheduler_policy_or_approval_engine": true,
+    "final_closeout_requires_production_evidence": true
+  },
+  "source_reconciliation": {
+    "provider_onboarding": {
+      "pr": 54,
+      "merged_main": "7e1fa75ab6ca08aeb10c81f373c76c08b8376ffb",
+      "state": "IMPLEMENTED",
+      "provider_promotion": false
+    },
+    "platform_readiness": {
+      "pr": 55,
+      "final_head": "c3791176195edd392890fa02dbd93209b7bc785e",
+      "merge_commit": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
+      "state": "CI_VERIFIED",
+      "ci": {
+        "quality_run": 32439330910,
+        "quality_job": 96646716691,
+        "quality": "SUCCESS_FORMAT_ARCHITECTURE_LINT_TYPECHECK_TEST_BUILD",
+        "security_run": 32439330928,
+        "security": "SUCCESS",
+        "email_provider_gate_run": 32439330916,
+        "email_provider_gate": "SUCCESS"
+      },
+      "staging_verified": false,
+      "production_verified": false,
+      "note": "PR #55 explicitly did not execute or declare production verified."
+    },
+    "legacy_readiness": {
+      "pr": 42,
+      "state": "SUPERSEDED_FOR_COORDINATION_BY_PR55",
+      "rule": "DO_NOT_MERGE_BLINDLY"
+    },
+    "google_ads_audit": {
+      "pr": 46,
+      "state": "HISTORICAL_AUDIT_PARTIALLY_STALE",
+      "rule": "retain blocker history only; no provider promotion"
+    },
+    "historical_coordinator": {
+      "pr": 17,
+      "state": "DO_NOT_MERGE_AS_IS",
+      "rule": "do not mark superseded until final-production replacement exists and passes exact-head CI"
+    }
+  },
+  "drive_reconciliation": {
+    "capability_catalog": {
+      "spreadsheet_id": "18IZgArLKFA7WgnhdJ9i9MleJknxwzeIJQQ_q1l4HLj4",
+      "readback": [
+        "ROUTES!A29:J29 => R28 PAID_MEDIA_CONTROLLED_LIFECYCLE, CAPABILITY_COUNT=79",
+        "ROUTES!A31:K31 => R30 SOCIAL_ENGAGEMENT_LIFECYCLE, PRIMARY_AGENT=AG-08, CAPABILITY_COUNT=25",
+        "ROUTES!A11:K11 => R10 COMERCIAL_PARCERIAS, PRIMARY_AGENT=AG-10, CAPABILITY_COUNT=19",
+        "CAPABILITIES!A643:V657 => seven runtime-backed sales.* rows IMPLEMENTED; sales.lead.qualify WRITE_REVERSIBLE; non-runtime rows remain PLANNED",
+        "CAPABILITIES!A747:V753 => seven paid_media.* rows IMPLEMENTED",
+        "CAPABILITIES!A754:V768 => fifteen google_ads.* rows IMPLEMENTED with phase-gated/default-OFF evidence and no provider/production promotion"
+      ],
+      "master_manual_replaced": false
+    },
+    "routing_registry": {
+      "spreadsheet_id": "1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU",
+      "readback": "ROUTING_REGISTRY!A29:V29 => R28 PAID_MEDIA_CONTROLLED_LIFECYCLE; Meta/Google provider selection; paused-first; Approval; provider readback; financial guardrails",
+      "provider_promotion_performed": false
+    }
+  },
+  "routes": [
+    {
+      "route_id": "R28",
+      "agent": "AG-09",
+      "sop_template": "TOCA_OS R28 + Core Policy/Approval + provider-specific contracts",
+      "capability_id": "GROUPED_IN_CAPABILITY_GROUPS",
+      "provider": "provider-neutral orchestration; Meta Marketing API and Google Ads API execution",
+      "risk": "MIXED_BY_CAPABILITY",
+      "side_effect": "MIXED_BY_CAPABILITY",
+      "approval_requirement": "REQUIRED_FOR_EXTERNAL_WRITE_AND_FINANCIAL_IMPACT",
+      "runtime_binding": "paid_media.* plus provider-specific Meta/Google bindings",
+      "tenant_scope": "tenant/workspace/organization + provider account/customer guardrails",
+      "provider_credential_requirement": "provider-specific",
+      "readback": "mandatory after external provider effects",
+      "audit": "REQUIRED",
+      "outbox": "REQUIRED_FOR_DURABLE_MUTATION",
+      "migration": null,
+      "ci_evidence": "main includes CI-verified #55 readiness; capability-specific exact-head evidence remains scoped separately",
+      "provider_evidence": "Google Ads not verified; final Meta provider scope must be refreshed",
+      "staging_evidence": null,
+      "production_evidence": null,
+      "rollback": "provider phase/binding disable + governed compensation + revision rollback",
+      "known_limitation": "No staging/production evidence yet.",
+      "state": "IMPLEMENTED"
+    },
+    {
+      "route_id": "R30",
+      "agent": "AG-08",
+      "sop_template": "TOCA_OS SOCIAL_ENGAGEMENT_LIFECYCLE",
+      "capability_id": "DRIVE_CANONICAL_SOCIAL_CAPABILITIES",
+      "provider": "Meta/Instagram social engagement",
+      "risk": "MIXED_BY_CAPABILITY",
+      "side_effect": "MIXED_BY_CAPABILITY",
+      "approval_requirement": "policy-driven for external action",
+      "runtime_binding": "canonical social engagement route",
+      "tenant_scope": "tenant/workspace/organization",
+      "provider_credential_requirement": true,
+      "readback": "provider confirmation/readback where applicable",
+      "audit": "REQUIRED",
+      "outbox": "REQUIRED_FOR_EXTERNAL_OR_DURABLE_MUTATION",
+      "migration": null,
+      "ci_evidence": "FINAL_ROUTE_EXACT_HEAD_ACCEPTANCE_PENDING",
+      "provider_evidence": null,
+      "staging_evidence": null,
+      "production_evidence": null,
+      "rollback": "stop further effects + governed reversal where supported + revision rollback",
+      "known_limitation": "ROUTE_ID_CONFLICT: Email/WhatsApp formal specs map to R30 in source although Drive R30 is Social Engagement. Do not insert transport specs into R30 until route authority is corrected.",
+      "state": "IMPLEMENTED"
+    },
+    {
+      "route_id": "R10",
+      "agent": "AG-10",
+      "sop_template": "TOCA_OS COMERCIAL_PARCERIAS + CRM/Workflow/Scheduler",
+      "capability_id": "GROUPED_IN_CAPABILITY_GROUPS",
+      "provider": "TOCA_OS+toca-mcp/PostgreSQL; downstream channel provider when sending",
+      "risk": "MIXED_BY_CAPABILITY",
+      "side_effect": "internal CRM/workflow plus separately governed downstream sends",
+      "approval_requirement": "policy-driven; external sends preserve Privacy/Approval gates",
+      "runtime_binding": "seven CRM/Sales tools; nurture specs non-runtime-exposed",
+      "tenant_scope": "tenant/workspace/organization",
+      "provider_credential_requirement": false,
+      "readback": "PostgreSQL/workflow checkpoint; provider readback for channel send",
+      "audit": "REQUIRED_FOR_MUTATION",
+      "outbox": "canonical transactional Outbox",
+      "migration": "existing CRM/Workflow migrations",
+      "ci_evidence": "FINAL_ROUTE_EXACT_HEAD_ACCEPTANCE_PENDING",
+      "provider_evidence": null,
+      "staging_evidence": null,
+      "production_evidence": null,
+      "rollback": "compensating CRM transition/pause/cancel/revision rollback",
+      "known_limitation": "Nurture formal surface remains REGISTERED_NOT_BOUND.",
+      "state": "IMPLEMENTED"
+    },
+    {
+      "route_id": null,
+      "agent": "AG-01",
+      "sop_template": "canonical Attribution/Revenue evidence contract",
+      "capability_id": null,
+      "provider": "UNRESOLVED_COMMERCE_PROVIDER",
+      "risk": "READ",
+      "side_effect": false,
+      "approval_requirement": "NONE_FOR_READBACK",
+      "runtime_binding": "provider-neutral evidence boundary only",
+      "tenant_scope": "tenant/workspace/organization + CRM/Attribution",
+      "provider_credential_requirement": true,
+      "readback": "authoritative TICKETING/CHECKOUT/PAYMENT/ORDER evidence",
+      "audit": "REQUIRED_WHEN_CONSUMED_AS_REVENUE_EVIDENCE",
+      "outbox": "REQUIRED_WHEN_DURABLE_REVENUE_EVENT_IS_EMITTED",
+      "migration": "existing attribution/revenue persistence",
+      "ci_evidence": "FINAL_ADAPTER_EXACT_HEAD_PENDING",
+      "provider_evidence": null,
+      "staging_evidence": null,
+      "production_evidence": null,
+      "rollback": "disable adapter and reject unverified revenue/WON promotion",
+      "known_limitation": "Provider identity/API/credential unresolved; no route/provider/capability invented.",
+      "state": "IMPLEMENTED_NOT_REGISTERED"
+    }
+  ],
+  "capability_groups": [
+    {
+      "group_id": "system_bootstrap",
+      "members": ["system.capabilities", "system.health"],
+      "fields": {"route_id":null,"agent":"system","sop_template":"src/registry.ts","provider":"system","risk":"READ","side_effect":false,"approval_requirement":"NONE","runtime_binding":"always registered","tenant_scope":"Core/process context","provider_credential_requirement":false,"readback":"internal response","audit":"Core audit where invoked","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"current source implementation","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"revert revision","known_limitation":"registration does not imply production","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "instagram_read",
+      "members": ["instagram.media.list", "instagram.insights.media", "instagram.insights.account"],
+      "fields": {"route_id":null,"agent":"AG-08 via AG-01","sop_template":"Instagram read SOP + src/registry.ts","provider":"Meta/Instagram","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_READ","runtime_binding":"instagramReadsEnabled","tenant_scope":"tenant/workspace/organization + account","provider_credential_requirement":true,"readback":"provider response","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":"FINAL_NEXT_REFRESH_REQUIRED","staging_evidence":null,"production_evidence":null,"rollback":"disable binding","known_limitation":"no historical provider evidence silently promoted","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "instagram_managed_scheduler",
+      "members": ["instagram.toca_schedule.prepare", "instagram.toca_schedule.create", "instagram.toca_schedule.reschedule", "instagram.toca_schedule.cancel", "instagram.toca_schedule.status", "instagram.toca_schedule.list"],
+      "fields": {"route_id":null,"agent":"AG-01","sop_template":"existing Scheduler SOP + src/registry.ts","provider":"toca-mcp","risk":"MIXED_BY_MEMBER","side_effect":"create/reschedule/cancel=true; others=false","approval_requirement":"REQUIRED_FOR_MUTATION","runtime_binding":"tocaManagedInstagramSchedulerEnabled","tenant_scope":"tenant/workspace/organization","provider_credential_requirement":false,"readback":"scheduler persistence/status","audit":"REQUIRED_FOR_MUTATION","outbox":"REQUIRED_FOR_DURABLE_MUTATION","migration":"existing Scheduler persistence","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"cancel/reschedule/revert revision","known_limitation":"source PRODUCTION_VALIDATED is not automatically PRODUCTION_VERIFIED","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "instagram_publication_planned",
+      "members": ["instagram.publish.image", "instagram.publish.carousel", "instagram.publish.reel", "instagram.publish.story", "instagram.publication.schedule", "instagram.publication.reschedule", "instagram.publication.cancel_scheduled", "instagram.publication.list_scheduled", "instagram.publication.status"],
+      "fields": {"route_id":null,"agent":"AG-01","sop_template":"src/registry.ts planned surface","provider":"Meta/Instagram+toca-mcp","risk":"MIXED_BY_MEMBER","side_effect":"MIXED_BY_MEMBER","approval_requirement":"REQUIRED_WHEN_SIDE_EFFECT","runtime_binding":"PLANNED by default; explicit config required for direct publication promotion","tenant_scope":"tenant/workspace/organization","provider_credential_requirement":true,"readback":"provider/scheduler when implemented","audit":"REQUIRED","outbox":"REQUIRED_FOR_MUTATION","migration":null,"ci_evidence":null,"provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"disable promotion/config","known_limitation":"no closeout promotion asserted","state":"DOCUMENTED_NOT_IMPLEMENTED"}
+    },
+    {
+      "group_id": "paid_media_provider_neutral",
+      "members": ["paid_media.experiment.plan", "paid_media.naming.build", "paid_media.budget.allocate", "paid_media.audience.plan", "paid_media.creative_rotation.plan", "paid_media.performance.assess", "paid_media.google_ads.autopilot_readiness"],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"TOCA_OS R28 + src/registry.ts","provider":"TOCA_OS+toca-mcp","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_READ","runtime_binding":"paidMediaDecisionEnabled","tenant_scope":"tenant/workspace/organization","provider_credential_requirement":false,"readback":"deterministic internal output","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"current source implementation; final environment acceptance pending","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"disable surface/revert revision","known_limitation":"planning does not imply provider state","state":"IMPLEMENTED","drive_rows":"CAPABILITIES!A747:V753"}
+    },
+    {
+      "group_id": "meta_ads_read",
+      "members": ["meta_ads.accounts.list", "meta_ads.campaigns.list", "meta_ads.adsets.list", "meta_ads.ads.list", "meta_ads.insights.get", "meta_ads.audience.inspect", "meta_ads.opportunity.detect", "meta_ads.budget.recommend"],
+      "fields": {"route_id":"R28","agent":"AG-09/AG-16 via AG-01","sop_template":"TOCA_OS R28","provider":"Meta Marketing API","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_READ","runtime_binding":"Meta reads enabled","tenant_scope":"tenant/workspace/organization + ad account","provider_credential_requirement":true,"readback":"provider response","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":"FINAL_NEXT_REFRESH_REQUIRED","staging_evidence":null,"production_evidence":null,"rollback":"disable binding","known_limitation":"historical evidence not automatically final Next","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "meta_ads_controlled_write",
+      "members": [
+        {"capability_id":"meta_ads.campaign.prepare_paused","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_PREPARE"},
+        {"capability_id":"meta_ads.campaign.create_paused","risk":"WRITE_EXTERNAL","side_effect":true,"approval_requirement":"REQUIRED"}
+      ],
+      "fields": {"route_id":"R28","agent":"AG-09/AG-16 via AG-01","sop_template":"TOCA_OS R28 + Core Policy/Approval","provider":"Meta Marketing API","runtime_binding":"explicit Meta write config/guardrails","tenant_scope":"tenant/workspace/organization + account allowlist","provider_credential_requirement":true,"readback":"REQUIRED_AFTER_MUTATION","audit":"REQUIRED","outbox":"REQUIRED_FOR_MUTATION","migration":null,"ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":"FINAL_NEXT_REFRESH_REQUIRED","staging_evidence":null,"production_evidence":null,"rollback":"governed pause/delete + disable write binding","known_limitation":"no final production promotion asserted","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "google_ads_read_only",
+      "members": ["google_ads.customers.discover", "google_ads.account.verify", "google_ads.account.inspect", "google_ads.campaigns.list", "google_ads.insights.get", "google_ads.conversion_actions.list", "google_ads.spend.monitor", "google_ads.conversions.monitor"],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"Google Ads READ_ONLY + Core","provider":"Google Ads API","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_READ","runtime_binding":"GOOGLE_ADS_PHASE>=READ_ONLY; default OFF","tenant_scope":"tenant/workspace/organization + customer guardrails","provider_credential_requirement":true,"readback":"provider response/request-id","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"implementation on main","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"GOOGLE_ADS_PHASE=OFF + revert revision","known_limitation":"no live customer/billing/permission/request-id evidence promoted","state":"BOUND_PROVIDER_DISABLED","drive_rows":"CAPABILITIES!A754:V761"}
+    },
+    {
+      "group_id": "google_ads_prepare",
+      "members": ["google_ads.campaign.prepare", "google_ads.targeting.validate"],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"Google Ads PREPARE + Core","provider":"Google Ads API","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_PREPARE","runtime_binding":"GOOGLE_ADS_PHASE>=PREPARE","tenant_scope":"tenant/workspace/organization + customer/guardrails","provider_credential_requirement":true,"readback":"no provider mutation","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"implementation on main","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"lower phase/OFF","known_limitation":"prepare does not prove mutation permission","state":"BOUND_PROVIDER_DISABLED","drive_rows":"CAPABILITIES!A762:V763"}
+    },
+    {
+      "group_id": "google_ads_create_paused",
+      "members": ["google_ads.campaign.create_paused"],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"Google Ads CREATE_PAUSED + Policy + Approval","provider":"Google Ads API","risk":"WRITE_EXTERNAL","side_effect":true,"approval_requirement":"REQUIRED","runtime_binding":"GOOGLE_ADS_PHASE>=CREATE_PAUSED; default disabled","tenant_scope":"tenant/workspace/organization + customer/budget/currency/location guardrails","provider_credential_requirement":true,"readback":"created resource must independently read back PAUSED","audit":"REQUIRED","outbox":"REQUIRED","migration":null,"ci_evidence":"implementation on main","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"governed pause/remove + phase OFF","known_limitation":"no controlled provider write evidence indexed; no activation for testing","state":"BOUND_PROVIDER_DISABLED","drive_rows":"CAPABILITIES!A764:V764"}
+    },
+    {
+      "group_id": "google_ads_readback",
+      "members": ["google_ads.campaign.readback"],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"Google Ads READBACK","provider":"Google Ads API","risk":"READ","side_effect":false,"approval_requirement":"NONE_FOR_READ","runtime_binding":"GOOGLE_ADS_PHASE>=READBACK","tenant_scope":"tenant/workspace/organization + customer/resource","provider_credential_requirement":true,"readback":"authoritative provider surface","audit":"Core audit","outbox":"NOT_REQUIRED","migration":null,"ci_evidence":"implementation on main","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"lower phase/OFF","known_limitation":"requires real resource id","state":"BOUND_PROVIDER_DISABLED","drive_rows":"CAPABILITIES!A765:V765"}
+    },
+    {
+      "group_id": "google_ads_manage",
+      "members": [
+        {"capability_id":"google_ads.campaign.activate","risk":"FINANCIAL_IMPACT","side_effect":true,"approval_requirement":"REQUIRED"},
+        {"capability_id":"google_ads.campaign.pause","risk":"WRITE_EXTERNAL","side_effect":true,"approval_requirement":"REQUIRED"},
+        {"capability_id":"google_ads.campaign.update_budget","risk":"FINANCIAL_IMPACT","side_effect":true,"approval_requirement":"REQUIRED"}
+      ],
+      "fields": {"route_id":"R28","agent":"AG-09 via AG-01","sop_template":"Google Ads MANAGE + Approval","provider":"Google Ads API","runtime_binding":"GOOGLE_ADS_PHASE>=MANAGE; activate additionally requires explicit enablement","tenant_scope":"tenant/workspace/organization + customer + financial guardrails","provider_credential_requirement":true,"readback":"REQUIRED_AFTER_EVERY_MUTATION","audit":"REQUIRED","outbox":"REQUIRED","migration":null,"ci_evidence":"implementation on main","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"governed pause/restore budget + phase OFF","known_limitation":"MANAGE is separate; CREATE_PAUSED never implies MANAGE","state":"BOUND_PROVIDER_DISABLED","drive_rows":"CAPABILITIES!A766:V768"}
+    },
+    {
+      "group_id": "video_content_runtime",
+      "members": ["video.brief.create", "video.storyboard.generate", "video.script.generate", "video.asset.select", "video.timeline.compose", "video.subtitle.generate", "video.caption.embed", "video.audio.normalize", "video.music_rights.validate", "video.safe_area.validate", "video.duration.validate", "video.thumbnail.generate", "video.export.reel", "video.export.story", "video.quality.validate", "content_item.version.create", "content_item.variant.create", "content_item.channel.adapt", "content_item.language.localize", "content_item.fact.validate", "content_item.rights.validate", "content_item.accessibility.validate", "content_item.event.link", "content_item.experiment.link", "content.repurpose.plan"],
+      "fields": {"route_id":null,"agent":"Content/Creative agents via AG-01","sop_template":"src/content/capability-contracts.ts + Content/Asset SOPs","provider":"TOCA_OS+toca-mcp","risk":"MIXED_BY_MEMBER","side_effect":"MIXED_BY_MEMBER","approval_requirement":"CONTRACT_SPECIFIC","runtime_binding":"videoContentRuntimeEnabled","tenant_scope":"tenant/workspace/organization + version lineage","provider_credential_requirement":false,"readback":"persisted artifact/state or schema/gate validation","audit":"REQUIRED","outbox":"REQUIRED_FOR_DURABLE_MUTATION","migration":"existing content/video persistence where applicable","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"supersede derivation/revert revision","known_limitation":"source status does not equal production verification","state":"IMPLEMENTED"}
+    },
+    {
+      "group_id": "crm_sales_runtime",
+      "members": [
+        {"capability_id":"sales.lead.enrich","risk":"READ","side_effect":false},
+        {"capability_id":"sales.lead.create","risk":"WRITE_REVERSIBLE","side_effect":true},
+        {"capability_id":"sales.lead.qualify","risk":"WRITE_REVERSIBLE","side_effect":true},
+        {"capability_id":"sales.pipeline.update","risk":"WRITE_REVERSIBLE","side_effect":true},
+        {"capability_id":"sales.followup.create","risk":"WRITE_REVERSIBLE","side_effect":true},
+        {"capability_id":"sales.followup.schedule","risk":"WRITE_REVERSIBLE","side_effect":true},
+        {"capability_id":"sales.report.generate","risk":"READ","side_effect":false}
+      ],
+      "fields": {"route_id":"R10","agent":"AG-10 via AG-01","sop_template":"TOCA_OS R10 + src/crm/runtime.ts","provider":"TOCA_OS+toca-mcp/PostgreSQL","approval_requirement":"policy-driven","runtime_binding":"crmSalesRuntimeEnabled + canonical CRM stores","tenant_scope":"tenant/workspace/organization","provider_credential_requirement":false,"readback":"PostgreSQL persistence","audit":"REQUIRED_FOR_MUTATION","outbox":"canonical transactional Outbox","migration":"existing CRM/Sales migrations","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"compensating transition/cancel next action/revert revision","known_limitation":"only runtime-backed Sales rows promoted; catalog-only Sales remains PLANNED","state":"IMPLEMENTED","drive_rows":"CAPABILITIES rows 643,644,645,646,647,652,657"}
+    },
+    {
+      "group_id": "whatsapp_formal_spec_surface",
+      "members": ["whatsapp.contact.resolve", "whatsapp.opt_in.verify", "whatsapp.template.validate", "whatsapp.message.prepare", "whatsapp.message.send", "whatsapp.message.readback", "whatsapp.conversation.ingest"],
+      "fields": {"route_id":"R30_IN_CODE_CONFLICTS_WITH_DRIVE","agent":"UNRESOLVED_ROUTE_OWNER; AG-01 orchestrates transport; Drive R30 primary AG-08","sop_template":"src/omnichannel/capability-specs.ts + CRM/Privacy","provider":"WhatsApp Cloud API","risk":"READ/PREPARE except send=WRITE_EXTERNAL","side_effect":"message.send only","approval_requirement":"REQUIRED_FOR_SEND + Privacy eligibility","runtime_binding":"formal specs SPECIFIED/runtimeExposed=false/productionExecutionAllowed=false; internal transport exists","tenant_scope":"tenant/workspace/organization/correlation","provider_credential_requirement":true,"readback":"internal provider status/readback; formal capability not ToolRegistry-bound","audit":"REQUIRED","outbox":"REQUIRED_FOR_MUTATION/ASYNC","migration":"existing WhatsApp persistence","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"disable runtime/provider binding + governed compensation","known_limitation":"ROUTE_ID_CONFLICT; #54 discovery support is not outbound provider evidence","state":"REGISTERED_NOT_BOUND","drive_rows":null}
+    },
+    {
+      "group_id": "email_formal_spec_surface",
+      "members": ["email.contact.resolve", "email.suppression.verify", "email.campaign.prepare", "email.campaign.send", "email.delivery.readback", "email.open.ingest", "email.click.ingest"],
+      "fields": {"route_id":"R30_IN_CODE_CONFLICTS_WITH_DRIVE","agent":"UNRESOLVED_ROUTE_OWNER; AG-01 orchestrates transport; Drive R30 primary AG-08","sop_template":"capability-specs.ts + email-orchestrator.ts + CRM/Privacy","provider":"SendGrid","risk":"READ/PREPARE except send=WRITE_EXTERNAL","side_effect":"campaign.send only","approval_requirement":"REQUIRED_FOR_SEND + Privacy/suppression","runtime_binding":"formal specs SPECIFIED/runtimeExposed=false/productionExecutionAllowed=false; internal coordinator exists","tenant_scope":"tenant/workspace/organization/correlation","provider_credential_requirement":true,"readback":"internal delivery/bounce/engagement records; formal capability not ToolRegistry-bound","audit":"REQUIRED","outbox":"REQUIRED_FOR_MUTATION/ASYNC","migration":"existing Email persistence","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":"NOT_VERIFIED","staging_evidence":null,"production_evidence":null,"rollback":"disable provider/retries + preserve CRM/Privacy","known_limitation":"ROUTE_ID_CONFLICT; signed-webhook discovery is not delivery verification","state":"REGISTERED_NOT_BOUND","drive_rows":null}
+    },
+    {
+      "group_id": "nurture_formal_spec_surface",
+      "members": ["nurture.sequence.create", "nurture.sequence.enroll", "nurture.sequence.pause", "nurture.sequence.outcome.record"],
+      "fields": {"route_id":"R10","agent":"AG-10 via AG-01","sop_template":"CRM/Workflow/Scheduler/Privacy + capability-specs.ts","provider":"TOCA_OS+toca-mcp + downstream channel provider","risk":"WRITE_REVERSIBLE workflow mutation","side_effect":true,"approval_requirement":"policy-driven; downstream send preserves channel gates","runtime_binding":"formal specs SPECIFIED/runtimeExposed=false; durable primitives exist","tenant_scope":"tenant/workspace/organization/correlation","provider_credential_requirement":false,"readback":"workflow checkpoint; provider readback for actual send","audit":"REQUIRED","outbox":"REQUIRED","migration":"existing Workflow/CRM migrations","ci_evidence":"FINAL_SCOPE_EXACT_HEAD_PENDING","provider_evidence":null,"staging_evidence":null,"production_evidence":null,"rollback":"pause sequence/cancel next action","known_limitation":"workflow durability does not imply channel provider verification","state":"REGISTERED_NOT_BOUND","drive_rows":null}
+    }
+  ],
+  "internal_runtime_components": [
+    {"component":"EmailDispatchCoordinator / Email runtime","refs":["src/omnichannel/email-orchestrator.ts","src/omnichannel/email-runtime.ts"],"state":"IMPLEMENTED_NOT_REGISTERED","note":"Internal Privacy/Approval/idempotency/send/readback implementation exists; formal email.* specs remain non-ToolRegistry-bound."},
+    {"component":"WhatsApp HTTP composition / transport runtime","refs":["src/omnichannel/whatsapp-http-composition.ts","src/omnichannel/whatsapp-runtime.ts"],"state":"IMPLEMENTED_NOT_REGISTERED","note":"Inbound/transport internals exist; formal whatsapp.* specs remain non-runtime-exposed and outbound provider evidence is not promoted."},
+    {"component":"Commerce authoritative evidence boundary","refs":["canonical Attribution/Revenue evidence contract"],"state":"IMPLEMENTED_NOT_REGISTERED","note":"No synthetic capability_id is created while provider identity/API/credential remain unresolved."}
+  ],
+  "closeout": {
+    "classification": "CLOSEOUT_PENDING_PRODUCTION_EVIDENCE",
+    "replacement_for_pr17_ready": false,
+    "pr17_may_be_marked_superseded": false,
+    "required_before_final_closeout": [
+      "final source SHA frozen",
+      "final exact-head CI for the closeout source/replacement",
+      "staging isolation proven before mutation",
+      "staging source/image/revision/migrations/readiness/tenant-isolation/E2E evidence",
+      "real provider evidence for every scope claimed PROVIDER_VERIFIED",
+      "production source/image/revisions/migrations/readiness evidence",
+      "ApprovalRecord/Audit/Outbox/provider request/resource refs for governed effects",
+      "SLO/alert firing/notification evidence",
+      "backup/PITR/isolated DR drill/RPO/RTO evidence",
+      "rollback execution/readback",
+      "final TOCA_OS reread and fully flattened registry rebuild"
+    ]
+  }
+}
