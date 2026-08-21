@@ -21,6 +21,7 @@ import {
   planExperiment,
 } from '../paid-media/decision-engine.js';
 import type { GoogleAdsAccountVerifier } from '../providers/google-ads/google-ads-account-verifier.js';
+import type { GoogleAdsApiClient } from '../providers/google-ads/google-ads-api-client.js';
 import type { CoreCapabilityRuntimeBinding } from './core-execution.js';
 
 const evidenceSchema = z.object({
@@ -148,6 +149,7 @@ const autopilotReadinessSchema = z.object({
 });
 
 export interface PaidMediaRuntimeServices {
+  readonly googleAdsDiscoveryClient?: GoogleAdsApiClient;
   readonly googleAdsAccountVerifier?: GoogleAdsAccountVerifier;
   readonly googleAdsTargetAccount?: string;
 }
@@ -161,6 +163,17 @@ function readBinding<TSchema extends z.ZodType>(
     inputSchema: schema,
     execute: (input) => Promise.resolve(execute(schema.parse(input))),
     ...(targetAccount ? { targetAccount: () => targetAccount } : {}),
+  };
+}
+
+async function discoverGoogleAdsCustomers(api: GoogleAdsApiClient) {
+  const response = await api.listAccessibleCustomers();
+  const resourceNames = (response.body.resourceNames ?? []).filter((name) =>
+    /^customers\/\d{10}$/.test(name),
+  );
+  return {
+    resourceNames,
+    ...(response.requestId ? { requestId: response.requestId } : {}),
   };
 }
 
@@ -317,6 +330,7 @@ export function resolvePaidMediaRuntimeBinding(
   capabilityId: string,
   services: PaidMediaRuntimeServices = {},
 ): CoreCapabilityRuntimeBinding | undefined {
+  const googleAdsDiscoveryClient = services.googleAdsDiscoveryClient;
   const googleAdsAccountVerifier = services.googleAdsAccountVerifier;
   switch (capabilityId) {
     case 'paid_media.experiment.plan':
@@ -340,12 +354,8 @@ export function resolvePaidMediaRuntimeBinding(
         googleAdsAutopilotReadiness(toAutopilotInput(input)),
       );
     case 'google_ads.customers.discover':
-      return googleAdsAccountVerifier
-        ? readBinding(
-            z.object({}),
-            () => googleAdsAccountVerifier.discoverCustomers(),
-            services.googleAdsTargetAccount,
-          )
+      return googleAdsDiscoveryClient
+        ? readBinding(z.object({}), () => discoverGoogleAdsCustomers(googleAdsDiscoveryClient))
         : undefined;
     case 'google_ads.account.verify':
       return googleAdsAccountVerifier
