@@ -100,6 +100,7 @@ jobs:
             jq -e --arg image "$RUNTIME_IMAGE" '.spec.containers[0].image == $image and .status.imageDigest == $image' "$file" >/dev/null
             jq -e --arg sa "$runtime_sa" '.spec.serviceAccountName == $sa' "$file" >/dev/null
             jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True") and any(.status.conditions[]?; .type=="ContainerHealthy" and .status=="True")' "$file" >/dev/null
+            jq -e '.spec.containers[0].startupProbe.httpGet.path == "/readyz" and .spec.containers[0].livenessProbe.httpGet.path == "/healthz"' "$file" >/dev/null
             jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] == [$sha]' "$file" >/dev/null
             jq -e '[.spec.containers[0].env[]? | select(.name | test("^(META_ENABLED|META_PROVIDER_VERIFIED|META_WEBHOOK_ENABLED|META_WEBHOOK_PERSISTENCE_ENABLED|INSTAGRAM_READ_ENABLED|META_ADS_READ_ENABLED|META_ADS_WRITE_ENABLED|WHATSAPP_ENABLED|WHATSAPP_RUNTIME_ENABLED|WHATSAPP_PROVIDER_VERIFIED|EMAIL_SENDGRID_ENABLED|EMAIL_SENDGRID_PROVIDER_VERIFIED|GOOGLE_ADS_PROVIDER_VERIFIED|AG01_MODEL_ENABLED|AG01_MODEL_PROVIDER_VERIFIED)$")) | .value] | all(. == "false")' "$file" >/dev/null
             jq -e '[.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value] == ["OFF"]' "$file" >/dev/null
@@ -156,11 +157,11 @@ jobs:
             printf '%s' "$status"
           }
           READY_STATUS="$(retry_get /readyz staging-acceptance-evidence/mcp-readyz.json)"
-          HEALTH_STATUS="$(retry_get /healthz staging-acceptance-evidence/mcp-healthz.txt)"
+          HEALTH_STATUS="$(retry_get /health staging-acceptance-evidence/mcp-health.txt)"
           test "$READY_STATUS" = 200
           test "$HEALTH_STATUS" = 200
           jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' staging-acceptance-evidence/mcp-readyz.json >/dev/null
-          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" '{readyz:($ready|tonumber),healthz:($health|tonumber),checks:16,result:"PASS"}' > staging-acceptance-evidence/mcp-smoke.json
+          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" '{readyz:($ready|tonumber),healthAlias:($health|tonumber),internalLiveness:"ContainerHealthy=True via /healthz",checks:16,result:"PASS"}' > staging-acceptance-evidence/mcp-smoke.json
 
       - id: webhook_token
         name: Mint webhook token for base service audience
@@ -188,7 +189,7 @@ jobs:
             printf '%s' "$status"
           }
           READY_STATUS="$(retry_get /readyz staging-acceptance-evidence/webhook-readyz.json)"
-          HEALTH_STATUS="$(retry_get /healthz staging-acceptance-evidence/webhook-healthz.txt)"
+          HEALTH_STATUS="$(retry_get /health staging-acceptance-evidence/webhook-health.txt)"
           MCP_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/mcp" || true)"
           OAUTH_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/oauth/meta/start" || true)"
           test "$READY_STATUS" = 200
@@ -196,7 +197,7 @@ jobs:
           test "$MCP_STATUS" = 404
           test "$OAUTH_STATUS" = 404
           jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' staging-acceptance-evidence/webhook-readyz.json >/dev/null
-          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{readyz:($ready|tonumber),healthz:($health|tonumber),mcp:($mcp|tonumber),oauthMetaStart:($oauth|tonumber),routeConfinement:"PASS",result:"PASS"}' > staging-acceptance-evidence/webhook-smoke.json
+          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{readyz:($ready|tonumber),healthAlias:($health|tonumber),internalLiveness:"ContainerHealthy=True via /healthz",mcp:($mcp|tonumber),oauthMetaStart:($oauth|tonumber),routeConfinement:"PASS",result:"PASS"}' > staging-acceptance-evidence/webhook-smoke.json
 
       - name: Re-authenticate staging deployer for final readback
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
