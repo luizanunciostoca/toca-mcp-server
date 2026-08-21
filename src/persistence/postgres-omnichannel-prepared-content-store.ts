@@ -118,6 +118,7 @@ function requireObject(value: unknown, code: string): Readonly<Record<string, un
 }
 
 function requireStringArray(value: unknown, code: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) throw new Error(code);
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string'))
+    throw new Error(code);
   return value as string[];
 }

@@ -1,12 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { CrmScope } from '../crm/crm-records.js';
 
-export const OMNICHANNEL_PREPARED_CONTENT_KINDS = [
-  'EMAIL_CAMPAIGN',
-  'WHATSAPP_MESSAGE',
-] as const;
-export type OmnichannelPreparedContentKind =
-  (typeof OMNICHANNEL_PREPARED_CONTENT_KINDS)[number];
+export const OMNICHANNEL_PREPARED_CONTENT_KINDS = ['EMAIL_CAMPAIGN', 'WHATSAPP_MESSAGE'] as const;
+export type OmnichannelPreparedContentKind = (typeof OMNICHANNEL_PREPARED_CONTENT_KINDS)[number];
 
 export interface OmnichannelPreparedContentRecord extends CrmScope {
   readonly preparedContentRef: string;
@@ -56,9 +52,14 @@ export function buildOmnichannelPreparedContentRecord(
   const evidence = normalizeEvidence(input.evidence);
   const contentSha256 = sha256(canonicalJson(payload));
   const scopeDigest = sha256(
-    [tenantId, workspaceId, organizationId, input.contentKind, String(schemaVersion), contentSha256].join(
-      '\u001f',
-    ),
+    [
+      tenantId,
+      workspaceId,
+      organizationId,
+      input.contentKind,
+      String(schemaVersion),
+      contentSha256,
+    ].join('\u001f'),
   );
   const createdAt = normalizeTimestamp(input.now ?? new Date().toISOString());
   return {
@@ -87,7 +88,8 @@ export function assertOmnichannelPreparedContentIntegrity(
     throw new Error('OMNICHANNEL_PREPARED_SCHEMA_VERSION_INVALID');
   }
   const expected = sha256(canonicalJson(normalizeJsonObject(record.payload)));
-  if (record.contentSha256 !== expected) throw new Error('OMNICHANNEL_PREPARED_CONTENT_HASH_MISMATCH');
+  if (record.contentSha256 !== expected)
+    throw new Error('OMNICHANNEL_PREPARED_CONTENT_HASH_MISMATCH');
   normalizeEvidence(record.evidence);
   normalizeTimestamp(record.createdAt);
 }

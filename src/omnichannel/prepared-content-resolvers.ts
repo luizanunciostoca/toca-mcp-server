@@ -69,10 +69,12 @@ function emailPayload(payload: Readonly<Record<string, unknown>>): SendGridPrepa
       payload.policy_tracking_allowed,
       'EMAIL_PREPARED_POLICY_TRACKING_REQUIRED',
     ),
-    ...(optionalStringArray(payload.cc, 'EMAIL_PREPARED_CC_INVALID') as readonly string[] | undefined
+    ...((optionalStringArray(payload.cc, 'EMAIL_PREPARED_CC_INVALID') as
+      readonly string[] | undefined)
       ? { cc: optionalStringArray(payload.cc, 'EMAIL_PREPARED_CC_INVALID') }
       : {}),
-    ...(optionalStringArray(payload.bcc, 'EMAIL_PREPARED_BCC_INVALID') as readonly string[] | undefined
+    ...((optionalStringArray(payload.bcc, 'EMAIL_PREPARED_BCC_INVALID') as
+      readonly string[] | undefined)
       ? { bcc: optionalStringArray(payload.bcc, 'EMAIL_PREPARED_BCC_INVALID') }
       : {}),
     ...(nullableString(payload.text, 'EMAIL_PREPARED_TEXT_INVALID') !== undefined
@@ -87,8 +89,10 @@ function emailPayload(payload: Readonly<Record<string, unknown>>): SendGridPrepa
     ...(optionalStringArray(payload.references, 'EMAIL_PREPARED_REFERENCES_INVALID')
       ? { references: optionalStringArray(payload.references, 'EMAIL_PREPARED_REFERENCES_INVALID') }
       : {}),
-    ...(optionalPositiveInteger(payload.suppression_group_id, 'EMAIL_PREPARED_SUPPRESSION_GROUP_INVALID') !==
-    undefined
+    ...(optionalPositiveInteger(
+      payload.suppression_group_id,
+      'EMAIL_PREPARED_SUPPRESSION_GROUP_INVALID',
+    ) !== undefined
       ? {
           unsubscribeGroupId: optionalPositiveInteger(
             payload.suppression_group_id,
@@ -96,11 +100,10 @@ function emailPayload(payload: Readonly<Record<string, unknown>>): SendGridPrepa
           ),
         }
       : {}),
-    ...(payload.attachments !== undefined
-      ? { attachments: attachments(payload.attachments) }
-      : {}),
+    ...(payload.attachments !== undefined ? { attachments: attachments(payload.attachments) } : {}),
   };
-  if (!result.text?.trim() && !result.html?.trim()) throw new Error('EMAIL_PREPARED_CONTENT_REQUIRED');
+  if (!result.text?.trim() && !result.html?.trim())
+    throw new Error('EMAIL_PREPARED_CONTENT_REQUIRED');
   return result;
 }
 
@@ -113,8 +116,10 @@ function whatsappPayload(payload: Readonly<Record<string, unknown>>): PreparedWh
       to,
       text: requireTextValue(payload.text, 'WHATSAPP_PREPARED_TEXT_REQUIRED'),
       ...(typeof payload.preview_url === 'boolean' ? { previewUrl: payload.preview_url } : {}),
-      ...(nullableString(payload.reply_to_provider_message_id, 'WHATSAPP_PREPARED_REPLY_INVALID') !==
-      undefined
+      ...(nullableString(
+        payload.reply_to_provider_message_id,
+        'WHATSAPP_PREPARED_REPLY_INVALID',
+      ) !== undefined
         ? {
             replyToProviderMessageId: nullableString(
               payload.reply_to_provider_message_id,
@@ -128,7 +133,10 @@ function whatsappPayload(payload: Readonly<Record<string, unknown>>): PreparedWh
     return {
       kind,
       to,
-      templateKey: requireTextValue(payload.template_key, 'WHATSAPP_PREPARED_TEMPLATE_KEY_REQUIRED'),
+      templateKey: requireTextValue(
+        payload.template_key,
+        'WHATSAPP_PREPARED_TEMPLATE_KEY_REQUIRED',
+      ),
       locale: requireTextValue(payload.locale, 'WHATSAPP_PREPARED_TEMPLATE_LOCALE_REQUIRED'),
       variables: templateVariables(payload.variables),
     };
@@ -154,8 +162,10 @@ function whatsappPayload(payload: Readonly<Record<string, unknown>>): PreparedWh
       ...(nullableString(payload.file_name, 'WHATSAPP_PREPARED_FILE_NAME_INVALID') !== undefined
         ? { fileName: nullableString(payload.file_name, 'WHATSAPP_PREPARED_FILE_NAME_INVALID') }
         : {}),
-      ...(nullableString(payload.reply_to_provider_message_id, 'WHATSAPP_PREPARED_REPLY_INVALID') !==
-      undefined
+      ...(nullableString(
+        payload.reply_to_provider_message_id,
+        'WHATSAPP_PREPARED_REPLY_INVALID',
+      ) !== undefined
         ? {
             replyToProviderMessageId: nullableString(
               payload.reply_to_provider_message_id,
@@ -172,17 +182,29 @@ function attachments(value: unknown): readonly SendGridAttachmentPayload[] {
   if (!Array.isArray(value)) throw new Error('EMAIL_PREPARED_ATTACHMENTS_INVALID');
   return value.map((entry) => {
     const item = objectValue(entry, 'EMAIL_PREPARED_ATTACHMENT_INVALID');
-    const disposition = requireTextValue(item.disposition, 'EMAIL_PREPARED_ATTACHMENT_DISPOSITION_REQUIRED');
+    const disposition = requireTextValue(
+      item.disposition,
+      'EMAIL_PREPARED_ATTACHMENT_DISPOSITION_REQUIRED',
+    );
     if (disposition !== 'attachment' && disposition !== 'inline') {
       throw new Error('EMAIL_PREPARED_ATTACHMENT_DISPOSITION_INVALID');
     }
     return {
-      contentBase64: requireTextValue(item.content_base64, 'EMAIL_PREPARED_ATTACHMENT_CONTENT_REQUIRED'),
+      contentBase64: requireTextValue(
+        item.content_base64,
+        'EMAIL_PREPARED_ATTACHMENT_CONTENT_REQUIRED',
+      ),
       fileName: requireTextValue(item.file_name, 'EMAIL_PREPARED_ATTACHMENT_NAME_REQUIRED'),
       contentType: requireTextValue(item.content_type, 'EMAIL_PREPARED_ATTACHMENT_TYPE_REQUIRED'),
       disposition,
-      ...(nullableString(item.content_id, 'EMAIL_PREPARED_ATTACHMENT_CONTENT_ID_INVALID') !== undefined
-        ? { contentId: nullableString(item.content_id, 'EMAIL_PREPARED_ATTACHMENT_CONTENT_ID_INVALID') }
+      ...(nullableString(item.content_id, 'EMAIL_PREPARED_ATTACHMENT_CONTENT_ID_INVALID') !==
+      undefined
+        ? {
+            contentId: nullableString(
+              item.content_id,
+              'EMAIL_PREPARED_ATTACHMENT_CONTENT_ID_INVALID',
+            ),
+          }
         : {}),
     };
   });
