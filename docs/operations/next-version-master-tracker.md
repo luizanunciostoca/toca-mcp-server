@@ -7,9 +7,9 @@ This tracker records coordination state only. It does not promote provider, stag
 | Front / gate | Current state | Merge/source authority | Blocking condition | Next evidence required |
 | --- | --- | --- | --- | --- |
 | A — Provider Onboarding + Google Ads | BLOCKED | existing Google Ads provider/client; #54/#55 merged; #46 audit draft | credential-only discovery is not reachable through canonical server/config composition; controlled write bootstrap cannot pre-promote lifecycle; live credentials/provider evidence absent | exact-head correction CI; live credential READ; controlled governed provider verification |
-| B — Omnichannel Outbound + Nurture | BLOCKED | existing Email/WhatsApp runtimes + CRM/Privacy/Workflow/Scheduler | capability manifest remains SPECIFIED and runtime exposure forbidden; durable nurture composition incomplete | exact-head composition PR CI + PostgreSQL/Email gates where applicable |
+| B — Omnichannel Outbound + Nurture | BLOCKED | existing Email/WhatsApp runtimes + CRM/Privacy/Workflow/Scheduler + TOCA_OS | capability manifest remains SPECIFIED and runtime exposure forbidden; durable nurture composition incomplete; TOCA_OS has no matching operational `whatsapp.*`/`email.*`/`nurture.*` rows | exact-head composition PR CI + canonical Drive reconciliation + PostgreSQL/Email gates where applicable |
 | C — Platform Readiness / GCP / SLO / DR | SOURCE READY, RUNTIME PENDING | #55 | actual staging environment isolation/resources not yet proven; candidate not frozen | final-candidate source revalidation then isolated staging deployment evidence |
-| D — Governance / Drive / Closeout prep | IN PROGRESS | this replacement branch + TOCA_OS Drive | final runtime still moving; no staging/production evidence | exact-head docs CI, Drive reconciliation, later production evidence |
+| D — Governance / Drive / Closeout prep | IN PROGRESS | this replacement branch + TOCA_OS Drive | Google Ads catalog reconciled; Omnichannel operational catalog still drifted; no staging/production evidence | exact-head docs CI, Omnichannel Drive reconciliation, later production evidence |
 | Candidate freeze | BLOCKED | live `main` after A/B | A/B unresolved | one exact candidate SHA after final merges |
 | Staging | NOT VERIFIED | #55 deployment contract | candidate not frozen and actual environment isolation unproven | project/DB/secret/service/identity/WIF readback before mutation |
 | Provider verification | NOT COMPLETE | provider-specific controlled boundaries | credentials/evidence incomplete; Google Ads bootstrap gap | provider READ/write/readback + Audit/Outbox/Approval evidence |
@@ -71,6 +71,7 @@ Code convergence is reached only when:
 - nurture survives restart and uses existing NextAction/Workflow/Scheduler;
 - opt-out/suppression before a due follow-up blocks the send;
 - capability lifecycle/runtime contracts match the actual implementation;
+- the intended operational WhatsApp/Email/Nurture capability set is represented in TOCA_OS or explicitly mapped to already-canonical IDs; no checklist-only capabilities are created;
 - exact-head source/PG/Email gates are green as applicable.
 
 ## Merge protocol
