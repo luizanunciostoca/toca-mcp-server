@@ -56,16 +56,40 @@ function validateStagingIsolation() {
 
   assertDistinct('GCP_PROJECT_ID', projectId, productionProjectId);
   assertDistinct('GCP_PROJECT_NUMBER', projectNumber, productionProjectNumber);
+
+  const stagingCloudSqlInstance = requireValue('GCP_CLOUD_SQL_INSTANCE');
+  const productionCloudSqlInstance = requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE');
+  assertDistinct(
+    'GCP_CLOUD_SQL_INSTANCE_NAME',
+    stagingCloudSqlInstance,
+    productionCloudSqlInstance,
+  );
   assertDistinct(
     'GCP_CLOUD_SQL_RESOURCE',
-    `${projectId}:${region}:${requireValue('GCP_CLOUD_SQL_INSTANCE')}`,
-    `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE')}`,
+    `${projectId}:${region}:${stagingCloudSqlInstance}`,
+    `${productionProjectId}:${productionRegion}:${productionCloudSqlInstance}`,
   );
 
-  const stagingMcp = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_MCP_SERVICE')}`;
-  const stagingWebhook = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE')}`;
-  const productionMcp = `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE')}`;
-  const productionWebhook = `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE')}`;
+  const stagingMcpServiceName = requireValue('GCP_CLOUD_RUN_MCP_SERVICE');
+  const stagingWebhookServiceName = requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE');
+  const productionMcpServiceName = requireValue('PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE');
+  const productionWebhookServiceName = requireValue('PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE');
+  for (const [label, stagingServiceName] of [
+    ['MCP_SERVICE', stagingMcpServiceName],
+    ['WEBHOOK_SERVICE', stagingWebhookServiceName],
+  ]) {
+    assertDistinct(`${label}_NAME_VS_PRODUCTION_MCP`, stagingServiceName, productionMcpServiceName);
+    assertDistinct(
+      `${label}_NAME_VS_PRODUCTION_WEBHOOK`,
+      stagingServiceName,
+      productionWebhookServiceName,
+    );
+  }
+
+  const stagingMcp = `${projectId}:${region}:${stagingMcpServiceName}`;
+  const stagingWebhook = `${projectId}:${region}:${stagingWebhookServiceName}`;
+  const productionMcp = `${productionProjectId}:${productionRegion}:${productionMcpServiceName}`;
+  const productionWebhook = `${productionProjectId}:${productionRegion}:${productionWebhookServiceName}`;
   for (const [label, stagingService] of [
     ['MCP_SERVICE', stagingMcp],
     ['WEBHOOK_SERVICE', stagingWebhook],
@@ -74,10 +98,19 @@ function validateStagingIsolation() {
     assertDistinct(`${label}_VS_PRODUCTION_WEBHOOK`, stagingService, productionWebhook);
   }
 
+  const stagingDatabaseSecretId = requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET');
+  const productionDatabaseSecretId = requireProjectLocalSecretId(
+    'PRODUCTION_GCP_DATABASE_URL_SECRET',
+  );
+  assertDistinct(
+    'GCP_DATABASE_URL_SECRET_ID',
+    stagingDatabaseSecretId,
+    productionDatabaseSecretId,
+  );
   assertDistinct(
     'GCP_DATABASE_URL_SECRET_RESOURCE',
-    `${projectId}:${requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET')}`,
-    `${productionProjectId}:${requireProjectLocalSecretId('PRODUCTION_GCP_DATABASE_URL_SECRET')}`,
+    `${projectId}:${stagingDatabaseSecretId}`,
+    `${productionProjectId}:${productionDatabaseSecretId}`,
   );
   assertDistinct(
     'GCP_WORKLOAD_IDENTITY_PROVIDER',
