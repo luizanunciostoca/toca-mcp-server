@@ -1,0 +1,119 @@
+name: Staging Migration Proof 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-migration-proof-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SQL_INSTANCE: toca-mcp-next-staging-db
+  DATABASE_SECRET: toca-next-staging-database-url
+  DATABASE_SECRET_VERSION: '1'
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          test ! -e migrations/027_*.sql
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -1)" = '033_omnichannel_prepared_content.sql'
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Revalidate isolated project
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != 'toca-mcp-production'
+          test "$PROJECT_NUMBER" != '990081828836'
+      - name: Start checksum-pinned Cloud SQL Auth Proxy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location 'https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.24.1/cloud-sql-proxy.linux.amd64' --output /tmp/cloud-sql-proxy
+          echo 'fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb  /tmp/cloud-sql-proxy' | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" >/tmp/cloud-sql-proxy.log 2>&1 &
+          echo "CLOUD_SQL_PROXY_PID=$!" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/cloud-sql-proxy.log >&2
+          exit 1
+      - name: Run migrations twice and prove exact migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_DATABASE_URL="$(gcloud secrets versions access "$DATABASE_SECRET_VERSION" --secret "$DATABASE_SECRET" --project "$PROJECT_ID")"
+          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
+            const url = new URL(process.env.RAW_DATABASE_URL);
+            url.hostname = "127.0.0.1";
+            url.port = "5432";
+            for (const key of ["host","port","ssl","sslmode","sslcert","sslkey","sslrootcert","sslaccept"]) url.searchParams.delete(key);
+            process.stdout.write(url.toString());
+          ')"
+          unset RAW_DATABASE_URL
+          export DATABASE_SSL=false
+          pnpm migrate
+          pnpm migrate
+          node --input-type=module <<'NODE'
+          import { readdir } from 'node:fs/promises';
+          import pg from 'pg';
+          const expected = (await readdir('migrations')).filter((f) => f.endsWith('.sql')).sort();
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: false });
+          const result = await pool.query('select version from schema_migrations order by version');
+          await pool.end();
+          const actual = result.rows.map((row) => row.version);
+          if (expected.at(-1) !== '033_omnichannel_prepared_content.sql') throw new Error(`unexpected local max: ${expected.at(-1)}`);
+          if (expected.some((v) => v.startsWith('027_'))) throw new Error('migration 027 exists locally');
+          if (actual.some((v) => v.startsWith('027_'))) throw new Error('migration 027 exists in staging DB');
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            const missing = expected.filter((v) => !actual.includes(v));
+            const extra = actual.filter((v) => !expected.includes(v));
+            throw new Error(`migration drift: missing=${JSON.stringify(missing)} extra=${JSON.stringify(extra)}`);
+          }
+          console.log(JSON.stringify({count: actual.length, max: actual.at(-1), gap027: false, drift: false}));
+          NODE
+          unset DATABASE_URL DATABASE_SSL
+          echo 'STAGING_MIGRATION_IDEMPOTENCY=PASS'
+          echo 'STAGING_MIGRATION_DRIFT=NONE'
+          echo 'MAX_MIGRATION=033_omnichannel_prepared_content.sql'
+          echo 'MIGRATION_027_PRESENT=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+      - name: Stop proxy
+        if: always()
+        run: |
+          if [[ -n "${CLOUD_SQL_PROXY_PID:-}" ]]; then kill "$CLOUD_SQL_PROXY_PID" 2>/dev/null || true; fi
