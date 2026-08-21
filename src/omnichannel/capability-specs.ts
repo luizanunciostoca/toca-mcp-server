@@ -40,10 +40,11 @@ const runtimeReadbackIds = new Set<OmnichannelCapabilityId>([
   'email.delivery.readback',
   'whatsapp.message.readback',
 ]);
-const canonicalPlannedIds = new Set<OmnichannelCapabilityId>([
-  'email.campaign.send',
+const runtimeImplementedIds = new Set<OmnichannelCapabilityId>([
+  ...runtimeReadbackIds,
   'whatsapp.message.send',
 ]);
+const canonicalPlannedIds = new Set<OmnichannelCapabilityId>(['email.campaign.send']);
 
 function primaryRouteId(capabilityId: OmnichannelCapabilityId): RouteId {
   if (capabilityId.startsWith('email.')) return 'R07';
@@ -52,7 +53,7 @@ function primaryRouteId(capabilityId: OmnichannelCapabilityId): RouteId {
 
 export const OMNICHANNEL_CAPABILITY_SPECS: readonly OmnichannelCapabilitySpec[] =
   OMNICHANNEL_CAPABILITY_IDS.map((capabilityId) => {
-    const runtimeExposed = runtimeReadbackIds.has(capabilityId);
+    const runtimeExposed = runtimeImplementedIds.has(capabilityId);
     return {
       capabilityId,
       primaryRouteId: primaryRouteId(capabilityId),
@@ -62,7 +63,7 @@ export const OMNICHANNEL_CAPABILITY_SPECS: readonly OmnichannelCapabilitySpec[] 
           ? 'PLANNED'
           : 'SPECIFIED',
       runtimeExposed,
-      productionExecutionAllowed: runtimeExposed,
+      productionExecutionAllowed: runtimeReadbackIds.has(capabilityId),
       blockedBy: OMNICHANNEL_DEPENDENCY_BLOCKERS,
     };
   });
@@ -79,13 +80,16 @@ export function validateOmnichannelCapabilitySpecs(): void {
     if (!OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[spec.capabilityId]) {
       throw new Error(`OMNICHANNEL_CONTRACT_MISSING:${spec.capabilityId}`);
     }
-    const readback = runtimeReadbackIds.has(spec.capabilityId);
-    const plannedSend = canonicalPlannedIds.has(spec.capabilityId);
-    const expectedLifecycle = readback ? 'IMPLEMENTED' : plannedSend ? 'PLANNED' : 'SPECIFIED';
+    const implemented = runtimeImplementedIds.has(spec.capabilityId);
+    const planned = canonicalPlannedIds.has(spec.capabilityId);
+    const expectedLifecycle = implemented ? 'IMPLEMENTED' : planned ? 'PLANNED' : 'SPECIFIED';
     if (spec.lifecycleStatus !== expectedLifecycle) {
       throw new Error(`OMNICHANNEL_LIFECYCLE_DRIFT:${spec.capabilityId}`);
     }
-    if (spec.runtimeExposed !== readback || spec.productionExecutionAllowed !== readback) {
+    if (
+      spec.runtimeExposed !== implemented ||
+      spec.productionExecutionAllowed !== runtimeReadbackIds.has(spec.capabilityId)
+    ) {
       throw new Error(`OMNICHANNEL_RUNTIME_EXPOSURE_DRIFT:${spec.capabilityId}`);
     }
     if (spec.blockedBy.length !== 0) {

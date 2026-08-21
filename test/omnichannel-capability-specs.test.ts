@@ -33,17 +33,16 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     }
   });
 
-  it('exposes only the two provider-event readbacks while sends remain catalog-only', () => {
+  it('exposes WhatsApp send as IMPLEMENTED while production execution remains disabled', () => {
     expect(OMNICHANNEL_DEPENDENCY_BLOCKERS).toEqual([]);
     for (const spec of OMNICHANNEL_CAPABILITY_SPECS) {
       const readback = spec.capabilityId.endsWith('.readback');
-      const plannedSend =
-        spec.capabilityId === 'email.campaign.send' ||
-        spec.capabilityId === 'whatsapp.message.send';
+      const whatsappSend = spec.capabilityId === 'whatsapp.message.send';
+      const emailSend = spec.capabilityId === 'email.campaign.send';
       expect(spec.lifecycleStatus).toBe(
-        readback ? 'IMPLEMENTED' : plannedSend ? 'PLANNED' : 'SPECIFIED',
+        readback || whatsappSend ? 'IMPLEMENTED' : emailSend ? 'PLANNED' : 'SPECIFIED',
       );
-      expect(spec.runtimeExposed).toBe(readback);
+      expect(spec.runtimeExposed).toBe(readback || whatsappSend);
       expect(spec.productionExecutionAllowed).toBe(readback);
       expect(spec.blockedBy).toEqual([]);
     }
@@ -74,7 +73,7 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     }
   });
 
-  it('registers only the two readbacks when the omnichannel readback runtime is bound', () => {
+  it('registers provider readbacks and whatsapp.message.send through the reconciled omnichannel surface', () => {
     const runtimeIds = new Set(
       createToolRegistry({
         instagramReadsEnabled: true,
@@ -88,11 +87,13 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     );
 
     for (const capabilityId of OMNICHANNEL_CAPABILITY_IDS) {
-      expect(runtimeIds.has(capabilityId)).toBe(capabilityId.endsWith('.readback'));
+      expect(runtimeIds.has(capabilityId)).toBe(
+        capabilityId.endsWith('.readback') || capabilityId === 'whatsapp.message.send',
+      );
     }
   });
 
-  it('makes external sends explicit, approval-gated and idempotent while keeping runtime disabled', () => {
+  it('keeps external sends explicit, approval-gated and idempotent without production promotion', () => {
     for (const capabilityId of ['whatsapp.message.send', 'email.campaign.send'] as const) {
       const contract = requireOmnichannelContract(capabilityId);
       expect(contract).toMatchObject({
@@ -107,6 +108,10 @@ describe('omnichannel capability specifications after canonical Privacy integrat
       });
       expect(contract.provider).not.toContain('unbound');
     }
+    expect(
+      CAPABILITY_CATALOG.find((definition) => definition.capability_id === 'whatsapp.message.send')
+        ?.lifecycle_status,
+    ).toBe('IMPLEMENTED');
   });
 
   it('binds nurture semantics to the existing durable workflow engine, not a scheduler', () => {
