@@ -1,0 +1,53 @@
+name: Staging Environment Resolution Probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-env-resolution-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - name: Verify environment-scoped vars resolve inside running step
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ vars.GCP_PROJECT_ID }}' = 'toca-mcp-next-staging'
+          test '${{ vars.GCP_PROJECT_NUMBER }}' = '729069789107'
+          test '${{ vars.GCP_REGION }}' = 'southamerica-east1'
+          test '${{ vars.GCP_ARTIFACT_REPOSITORY }}' = 'toca-mcp-staging'
+          test '${{ vars.GCP_CLOUD_SQL_INSTANCE }}' = 'toca-mcp-next-staging-db'
+          test '${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}' = 'toca-mcp-next-staging'
+          test '${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}' = 'toca-webhook-next-staging'
+          test '${{ vars.GCP_DATABASE_URL_SECRET }}' = 'toca-next-staging-database-url'
+          test '${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}' = '1'
+          test '${{ vars.STAGING_DATABASE_ISOLATION_MODE }}' = 'DEDICATED_CLOUD_SQL'
+          test '${{ vars.STAGING_PROVIDER_MODE }}' = 'DISABLED'
+          test '${{ vars.PRODUCTION_GCP_PROJECT_ID }}' = 'toca-mcp-production'
+          test '${{ vars.PRODUCTION_GCP_PROJECT_NUMBER }}' = '990081828836'
+          test '${{ vars.PRODUCTION_GCP_REGION }}' = 'southamerica-east1'
+          test -n '${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+          test -n '${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}'
+          test -n '${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}'
+          test -n '${{ vars.GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}'
+          test -n '${{ vars.PRODUCTION_GCP_CLOUD_SQL_INSTANCE }}'
+          test -n '${{ vars.PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE }}'
+          test -n '${{ vars.PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE }}'
+          test -n '${{ vars.PRODUCTION_GCP_DATABASE_URL_SECRET }}'
+          test -n '${{ vars.PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+          test -n '${{ vars.PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT }}'
+          test -n '${{ vars.PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}'
+          test -n '${{ vars.PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}'
+          test '${{ vars.META_ENABLED }}' = 'false'
+          test '${{ vars.WHATSAPP_ENABLED }}' = 'false'
+          test '${{ vars.EMAIL_SENDGRID_ENABLED }}' = 'false'
+          test '${{ vars.GOOGLE_ADS_PHASE }}' = 'OFF'
+          test '${{ vars.AG01_MODEL_ENABLED }}' = 'false'
+          echo 'STAGING_ENVIRONMENT_RESOLUTION=PASS'
+          echo 'MUTATION_EXECUTED=NO'
