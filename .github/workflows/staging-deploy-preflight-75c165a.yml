@@ -1,0 +1,60 @@
+name: Staging Deploy Preflight 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-deploy-preflight-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+
+jobs:
+  preflight:
+    name: Staging deploy surface read-only
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact final candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = '2b373b1564e495d81a73ca04254efec18c0e774c'
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read project and deployment surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          echo '=== ARTIFACT_REPOSITORIES ==='
+          gcloud artifacts repositories list --project="$PROJECT_ID" --location="$REGION" --format='table(name.basename(),format,location)'
+          echo '=== CLOUD_RUN_SERVICES ==='
+          gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format='table(metadata.name,status.latestReadyRevisionName,spec.template.spec.serviceAccountName,status.url)'
+          echo '=== CLOUD_RUN_REVISIONS ==='
+          gcloud run revisions list --project="$PROJECT_ID" --region="$REGION" --format='table(metadata.name,metadata.labels.serving_knative_dev/service,metadata.creationTimestamp,status.conditions[0].status)'
+          echo '=== CLOUD_RUN_TRAFFIC ==='
+          for service in $(gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format='value(metadata.name)'); do
+            echo "SERVICE=$service"
+            gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" --format='yaml(status.traffic,status.latestReadyRevisionName,spec.template.spec.serviceAccountName,spec.template.metadata.annotations)'
+          done
+          echo '=== CLOUD_SQL ==='
+          gcloud sql instances list --project="$PROJECT_ID" --format='table(name,region,connectionName,state)'
+          echo 'STAGING_DEPLOY_PREFLIGHT_READ_ONLY=PASS'
+          echo 'MUTATION_EXECUTED=NO'
