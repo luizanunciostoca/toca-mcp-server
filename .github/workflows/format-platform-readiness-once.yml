@@ -1,0 +1,70 @@
+name: Format Platform Readiness Once
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  format-once:
+    if: github.event.pull_request.number == 55 && github.event.pull_request.head.ref == 'feat/final-platform-readiness-next-v2-20260820'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply repository Prettier
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write \
+            infra/observability/platform-hardening-alerts.json \
+            infra/observability/platform-hardening-dashboard.json \
+            infra/observability/platform-hardening-synthetics.json \
+            scripts/platform-hardening-check.mjs \
+            src/health/runtime-readiness.ts \
+            test/runtime-readiness.test.ts
+
+      - name: Remove diagnostics and self-delete
+        run: |
+          set -euo pipefail
+          git checkout origin/main -- package.json
+          git rm .github/workflows/format-platform-readiness-once.yml
+          pnpm exec prettier --check .
+
+      - name: Commit exact canonical formatting
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json \
+            infra/observability/platform-hardening-alerts.json \
+            infra/observability/platform-hardening-dashboard.json \
+            infra/observability/platform-hardening-synthetics.json \
+            scripts/platform-hardening-check.mjs \
+            src/health/runtime-readiness.ts \
+            test/runtime-readiness.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'style(platform): apply canonical Prettier formatting'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
