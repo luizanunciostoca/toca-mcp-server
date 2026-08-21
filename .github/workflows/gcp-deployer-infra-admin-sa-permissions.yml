@@ -40,19 +40,15 @@ jobs:
         run: |
           set -euo pipefail
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
-          SA_PATH="projects/$PROJECT_ID/serviceAccounts/$INFRA_ADMIN_SA"
-          BODY='{"permissions":["iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","iam.serviceAccounts.getAccessToken","iam.serviceAccounts.actAs"]}'
+          BODY='{"permissions":["iam.serviceAccounts.get","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","iam.serviceAccounts.getAccessToken","iam.serviceAccounts.getOpenIdToken","iam.serviceAccounts.signJwt","iam.serviceAccounts.signBlob","iam.serviceAccounts.implicitDelegation","iam.serviceAccounts.actAs"]}'
           HTTP_CODE="$(curl -sS -o /tmp/sa-perms.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H 'Content-Type: application/json' \
             --data "$BODY" \
-            "https://iam.googleapis.com/v1/$SA_PATH:testIamPermissions")"
+            "https://iam.googleapis.com/v1/projects/-/serviceAccounts/$INFRA_ADMIN_SA:testIamPermissions")"
           echo "HTTP_CODE=$HTTP_CODE"
           echo 'DEPLOYER_INFRA_ADMIN_SA_GRANTED_BEGIN'
-          if [ "$HTTP_CODE" = '200' ]; then
-            jq -c '{permissions:(.permissions // [])}' /tmp/sa-perms.json
-          else
-            jq -c '{error:(.error.status // "UNKNOWN")}' /tmp/sa-perms.json || true
-          fi
+          jq -c '{permissions:(.permissions // [])}' /tmp/sa-perms.json || true
           echo 'DEPLOYER_INFRA_ADMIN_SA_GRANTED_END'
+          test "$HTTP_CODE" = '200'
           echo 'READ_ONLY=true'
