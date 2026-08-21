@@ -20,6 +20,8 @@ export interface PolicyContext {
   readonly financialAmountMinor?: number;
   readonly currency?: string;
   readonly now?: string;
+  /** Optional deterministic override for tests/control-plane composition. Runtime defaults to env. */
+  readonly platformKillSwitch?: boolean;
   /** @deprecated A boolean never authorizes a side effect. Supply a verified ApprovalRecord. */
   readonly approved?: boolean;
 }
@@ -70,6 +72,13 @@ export function approvalExpectationFromPolicy(
 }
 
 export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
+  if (tool.sideEffects && platformMutationKillSwitchActive(context)) {
+    return {
+      decision: 'DENY',
+      reason: 'Platform mutation kill switch is active.',
+    };
+  }
+
   if (
     tool.capabilityStatus === 'SUSPENDED' ||
     tool.capabilityStatus === 'REMOVED' ||
@@ -127,4 +136,11 @@ export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): Po
   }
 
   return { decision: 'ALLOW', reason: 'Policy requirements satisfied.' };
+}
+
+function platformMutationKillSwitchActive(context: PolicyContext): boolean {
+  if (context.platformKillSwitch !== undefined) return context.platformKillSwitch;
+  const configured = process.env.TOCA_PLATFORM_KILL_SWITCH?.trim();
+  if (!configured || configured === 'false') return false;
+  return true;
 }
