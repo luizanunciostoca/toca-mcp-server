@@ -7,7 +7,10 @@ describe('Google Ads credential-only discovery client', () => {
     const secrets = new InMemorySecretStore();
     await secrets.put('access-token', 'access-token-value');
     await secrets.put('developer-token', 'developer-token-value');
-    const requests: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
+    const requests: Array<{
+      readonly url: string;
+      readonly init: RequestInit | undefined;
+    }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       requests.push({ url: String(input), init });
       return new Response(JSON.stringify({ resourceNames: ['customers/1234567890'] }), {
