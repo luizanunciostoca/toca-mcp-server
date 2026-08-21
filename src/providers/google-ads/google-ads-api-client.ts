@@ -9,7 +9,8 @@ export interface GoogleAdsOAuthRefreshConfig {
 
 export interface GoogleAdsApiClientConfig {
   readonly apiVersion?: string;
-  readonly customerId: string;
+  /** Required only for customer-bound search/mutate calls, not credential discovery. */
+  readonly customerId?: string;
   readonly loginCustomerId?: string;
   readonly accessTokenRef?: SecretReference;
   readonly oauthRefresh?: GoogleAdsOAuthRefreshConfig;
@@ -39,7 +40,7 @@ interface CachedOAuthToken {
 export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
   readonly #apiVersion: string;
   readonly #apiBaseUrl: string;
-  readonly #customerId: string;
+  readonly #customerId: string | undefined;
   #cachedOAuthToken: CachedOAuthToken | undefined;
 
   constructor(
@@ -49,7 +50,7 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
   ) {
     this.#apiVersion = config.apiVersion ?? 'v25';
     this.#apiBaseUrl = (config.apiBaseUrl ?? 'https://googleads.googleapis.com').replace(/\/$/, '');
-    this.#customerId = normalizeCustomerId(config.customerId);
+    this.#customerId = config.customerId ? normalizeCustomerId(config.customerId) : undefined;
     const hasStaticToken = config.accessTokenRef !== undefined;
     const hasRefreshCredentials = config.oauthRefresh !== undefined;
     if (hasStaticToken === hasRefreshCredentials) {
@@ -69,7 +70,8 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     query: string,
     pageToken?: string,
   ): Promise<GoogleAdsApiResponse<Record<string, unknown>>> {
-    return this.request(`/customers/${this.#customerId}/googleAds:search`, {
+    const customerId = this.requireCustomerId();
+    return this.request(`/customers/${customerId}/googleAds:search`, {
       query,
       ...(pageToken ? { pageToken } : {}),
     });
@@ -79,10 +81,16 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     path: string,
     body: Record<string, unknown>,
   ): Promise<GoogleAdsApiResponse<Record<string, unknown>>> {
-    if (!path.startsWith(`/customers/${this.#customerId}/`)) {
+    const customerId = this.requireCustomerId();
+    if (!path.startsWith(`/customers/${customerId}/`)) {
       return Promise.reject(new Error('GOOGLE_ADS_CUSTOMER_BOUNDARY_VIOLATION'));
     }
     return this.request(path, body);
+  }
+
+  private requireCustomerId(): string {
+    if (!this.#customerId) throw new Error('GOOGLE_ADS_CUSTOMER_ID_REQUIRED');
+    return this.#customerId;
   }
 
   private async accessToken(): Promise<string> {
