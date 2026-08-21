@@ -1,0 +1,42 @@
+name: GCP Cloud SQL Network Read-Only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-cloud-sql-network-readonly.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SQL_INSTANCE: toca-mcp-db
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  inspect:
+    name: Read non-secret Cloud SQL connectivity metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read connectivity metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" --format=json >/tmp/sql.json
+          jq -c '{name,connectionName,region,databaseVersion,settings:{tier:.settings.tier,availabilityType:.settings.availabilityType,ipConfiguration:{ipv4Enabled:.settings.ipConfiguration.ipv4Enabled,privateNetwork:.settings.ipConfiguration.privateNetwork,requireSsl:.settings.ipConfiguration.requireSsl,sslMode:.settings.ipConfiguration.sslMode,authorizedNetworks:[.settings.ipConfiguration.authorizedNetworks[]? | {name,value}]},backupConfiguration:{enabled:.settings.backupConfiguration.enabled,pointInTimeRecoveryEnabled:.settings.backupConfiguration.pointInTimeRecoveryEnabled,transactionLogRetentionDays:.settings.backupConfiguration.transactionLogRetentionDays,retainedBackups:.settings.backupConfiguration.backupRetentionSettings.retainedBackups}}}' /tmp/sql.json
+          echo 'CLOUD_SQL_NETWORK_METADATA_READ_ONLY=true'
