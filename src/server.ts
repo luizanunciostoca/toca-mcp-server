@@ -118,12 +118,27 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ? createPostgresPool({ connectionString: config.DATABASE_URL })
     : undefined;
   const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
+  const googleAdsOauthCredentialRefs = [
+    config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY,
+    config.GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY,
+    config.GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY,
+  ];
+  const googleAdsOauthConfigured = googleAdsOauthCredentialRefs.every(Boolean);
+  const googleAdsOauthPartiallyConfigured =
+    googleAdsOauthCredentialRefs.some(Boolean) && !googleAdsOauthConfigured;
+  const googleAdsStaticConfigured = Boolean(config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY);
+  const googleAdsDiscoveryEnabled = Boolean(
+    config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY &&
+      !googleAdsOauthPartiallyConfigured &&
+      googleAdsStaticConfigured !== googleAdsOauthConfigured,
+  );
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     paidMediaDecisionEnabled: true,
+    googleAdsDiscoveryEnabled,
     googleAdsPhase: config.GOOGLE_ADS_PHASE,
     googleAdsActivateEnabled: config.GOOGLE_ADS_ACTIVATE_ENABLED,
     tocaManagedInstagramSchedulerEnabled: config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED,
@@ -238,9 +253,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     });
   }
 
+  let googleAdsApi: GoogleAdsRestApiClient | undefined;
   let googleAds: GoogleAdsPaidMediaProvider | undefined;
   let googleAdsAccountVerifier: GoogleAdsAccountVerifier | undefined;
-  if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+  if (googleAdsDiscoveryEnabled) {
     const {
       GOOGLE_ADS_CUSTOMER_ID: customerId,
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: loginCustomerId,
@@ -249,24 +265,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY: oauthClientSecretEnvKey,
       GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY: oauthRefreshTokenEnvKey,
       GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY: developerTokenEnvKey,
-      GOOGLE_ADS_ALLOWED_CUSTOMER_ID: allowedCustomerId,
-      GOOGLE_ADS_ALLOWED_CURRENCY: allowedCurrency,
-      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: maxDailyBudgetMicros,
-      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: currencyMinorUnitMicros,
-      GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: allowedLocationIdsRaw,
-      GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: allowedLanguageIdsRaw,
     } = config;
-    if (
-      !customerId ||
-      !developerTokenEnvKey ||
-      !allowedCustomerId ||
-      !allowedCurrency ||
-      !maxDailyBudgetMicros ||
-      !currencyMinorUnitMicros ||
-      !allowedLocationIdsRaw
-    ) {
-      throw new Error('GOOGLE_ADS_RUNTIME_GUARDRAILS_REQUIRED');
-    }
+    if (!developerTokenEnvKey) throw new Error('GOOGLE_ADS_DEVELOPER_TOKEN_REF_REQUIRED');
 
     const authConfig = accessTokenEnvKey
       ? { accessTokenRef: { provider: 'env' as const, key: accessTokenEnvKey } }
@@ -284,21 +284,45 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
           };
         })();
 
-    const api = new GoogleAdsRestApiClient(
+    googleAdsApi = new GoogleAdsRestApiClient(
       {
         apiVersion: config.GOOGLE_ADS_API_VERSION,
-        customerId,
+        ...(customerId ? { customerId } : {}),
         ...(loginCustomerId ? { loginCustomerId } : {}),
         ...authConfig,
         developerTokenRef: { provider: 'env', key: developerTokenEnvKey },
       },
       secrets,
     );
-    googleAdsAccountVerifier = new GoogleAdsAccountVerifier(api, {
+  }
+
+  if (config.GOOGLE_ADS_PHASE !== 'OFF') {
+    const {
+      GOOGLE_ADS_CUSTOMER_ID: customerId,
+      GOOGLE_ADS_ALLOWED_CUSTOMER_ID: allowedCustomerId,
+      GOOGLE_ADS_ALLOWED_CURRENCY: allowedCurrency,
+      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: maxDailyBudgetMicros,
+      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: currencyMinorUnitMicros,
+      GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: allowedLocationIdsRaw,
+      GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: allowedLanguageIdsRaw,
+    } = config;
+    if (
+      !customerId ||
+      !allowedCustomerId ||
+      !allowedCurrency ||
+      !maxDailyBudgetMicros ||
+      !currencyMinorUnitMicros ||
+      !allowedLocationIdsRaw
+    ) {
+      throw new Error('GOOGLE_ADS_RUNTIME_GUARDRAILS_REQUIRED');
+    }
+    if (!googleAdsApi) throw new Error('GOOGLE_ADS_DISCOVERY_CREDENTIALS_REQUIRED');
+
+    googleAdsAccountVerifier = new GoogleAdsAccountVerifier(googleAdsApi, {
       customerId: allowedCustomerId,
       allowedCurrency,
     });
-    googleAds = new GoogleAdsPaidMediaProvider(api, {
+    googleAds = new GoogleAdsPaidMediaProvider(googleAdsApi, {
       allowedCustomerId,
       allowedCurrency,
       maxDailyBudgetMicros,
@@ -339,6 +363,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   });
   const runtimeResolver = (capabilityId: string) =>
     resolvePaidMediaRuntimeBinding(capabilityId, {
+      ...(googleAdsApi ? { googleAdsDiscoveryClient: googleAdsApi } : {}),
       ...(googleAdsAccountVerifier ? { googleAdsAccountVerifier } : {}),
       ...(googleAdsTargetAccount ? { googleAdsTargetAccount } : {}),
     }) ?? standardRuntimeResolver(capabilityId);
