@@ -42,9 +42,7 @@ interface WhatsAppEventRow {
  * by the signed SendGrid and Meta WhatsApp webhook boundaries. This creates no
  * second delivery ledger and performs no provider mutation.
  */
-export class PostgresOmnichannelProviderEventReadback
-  implements OmnichannelProviderEventReadbackService
-{
+export class PostgresOmnichannelProviderEventReadback implements OmnichannelProviderEventReadbackService {
   constructor(private readonly pool: pg.Pool) {}
 
   async readEmail(input: OmnichannelProviderEventReadbackInput): Promise<ProviderMessageReadback> {

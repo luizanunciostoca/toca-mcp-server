@@ -79,7 +79,11 @@ export function createOmnichannelReadbackRuntimeResolver(
 }
 
 function assertScope(
-  input: { readonly tenant_id: string; readonly workspace_id: string; readonly organization_id: string },
+  input: {
+    readonly tenant_id: string;
+    readonly workspace_id: string;
+    readonly organization_id: string;
+  },
   context: CoreCapabilityRuntimeContext | undefined,
 ): void {
   const principal = context?.identity.principal;

@@ -182,6 +182,8 @@ export const ROUTE_CAPABILITY_IDS: Readonly<Record<RouteId, readonly string[]>> 
     'campaign.optimize',
     'campaign.close',
     'campaign.postmortem',
+    'email.campaign.send',
+    'email.delivery.readback',
   ],
   R08: [
     'meta_ads.account.inspect',
@@ -245,6 +247,8 @@ export const ROUTE_CAPABILITY_IDS: Readonly<Record<RouteId, readonly string[]>> 
     'sales.stage.move',
     'sales.win_loss.record',
     'sales.report.generate',
+    'whatsapp.message.send',
+    'whatsapp.message.readback',
   ],
   R11: [
     'presentation.brief.create',

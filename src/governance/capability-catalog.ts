@@ -9,6 +9,7 @@ import {
   CAPABILITY_CONTRACT_OVERRIDES,
   permissionRequirementsForCapability,
 } from './capability-contract-overrides.js';
+import { OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES } from './omnichannel-capability-contracts.js';
 import {
   ROUTE_CAPABILITY_IDS,
   TECHNICAL_EXTENSION_CAPABILITY_IDS,
@@ -127,6 +128,7 @@ const runtimeDefinitions = new Map<string, ToolDefinition>(
     googleAdsActivateEnabled: true,
     tocaManagedInstagramSchedulerEnabled: true,
     crmSalesRuntimeEnabled: true,
+    omnichannelReadbacksEnabled: true,
   })
     .list()
     .map((definition) => [definition.name, definition] as const),
@@ -221,7 +223,8 @@ function isMutationAction(capabilityId: string): boolean {
 }
 
 function isProviderWrite(capabilityId: string): boolean {
-  if (/^(meta_ads|google_ads)\./.test(capabilityId)) return isMutationAction(capabilityId);
+  if (/^(meta_ads|google_ads|email|whatsapp)\./.test(capabilityId))
+    return isMutationAction(capabilityId);
   if (/^google_business\./.test(capabilityId)) {
     return (
       capabilityId === 'google_business.post.create' ||
@@ -270,6 +273,8 @@ function inferredProvider(capabilityId: string): string {
   if (/^meta_ads\./.test(capabilityId)) return 'Meta Marketing API';
   if (/^google_ads\./.test(capabilityId)) return 'Google Ads API';
   if (/^google_business\./.test(capabilityId)) return 'Google Business Profile';
+  if (/^email\./.test(capabilityId)) return 'Twilio SendGrid';
+  if (/^whatsapp\./.test(capabilityId)) return 'Meta WhatsApp Cloud API';
   if (/^(instagram|social|engagement)\./.test(capabilityId)) return 'Meta/Instagram';
   if (/^drive\./.test(capabilityId)) return 'Google Drive';
   if (/^(release|security)\./.test(capabilityId)) return 'GitHub+GCP';
@@ -315,6 +320,12 @@ function config(capabilityId: string): readonly string[] {
   if (/^(instagram|social|engagement)\./.test(capabilityId)) {
     return ['INSTAGRAM_BUSINESS_ACCOUNT_ID', 'META_ACCESS_TOKEN_REF'];
   }
+  if (capabilityId === 'email.campaign.send')
+    return ['DATABASE_URL', 'EMAIL_SENDGRID_ENABLED', 'EMAIL_SENDGRID_BINDING_STATE'];
+  if (capabilityId === 'email.delivery.readback') return ['DATABASE_URL'];
+  if (capabilityId === 'whatsapp.message.send')
+    return ['DATABASE_URL', 'WHATSAPP_RUNTIME_ENABLED', 'WHATSAPP_BINDING_STATE'];
+  if (capabilityId === 'whatsapp.message.readback') return ['DATABASE_URL'];
   if (/^(backup|restore|dr)\./.test(capabilityId)) return ['DATABASE_URL', 'GCP_PROJECT_ID'];
   return [];
 }
@@ -358,6 +369,7 @@ function evidence(capabilityId: string, status: CapabilityStatus): readonly stri
 function contractQuality(capabilityId: string): CapabilityContractQuality {
   const explicit =
     VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality ??
+    OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality ??
     CAPABILITY_CONTRACT_OVERRIDES[capabilityId]?.contract_quality;
   if (explicit) return explicit;
   if (
@@ -427,6 +439,7 @@ function createDefinition(
   const runtimeDefinition = runtimeDefinitions.get(capabilityId);
   const override =
     VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES[capabilityId] ??
+    OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId] ??
     CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
   const inferredRisk = runtimeDefinition?.riskClass ?? inferredRiskClass(capabilityId);
   const risk = override?.risk_class ?? inferredRisk;
@@ -437,7 +450,7 @@ function createDefinition(
     runtimeDefinition?.idempotent ??
     (!sideEffects || !isProviderWrite(capabilityId));
   const external =
-    /^(instagram|meta_ads|google_ads|social|engagement|google_business|drive|release|security)\./.test(
+    /^(instagram|meta_ads|google_ads|social|engagement|google_business|email|whatsapp|drive|release|security)\./.test(
       capabilityId,
     );
   const operation = override?.operation ?? capabilityId;

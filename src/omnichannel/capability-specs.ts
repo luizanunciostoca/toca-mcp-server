@@ -30,25 +30,42 @@ export type OmnichannelCapabilityId = (typeof OMNICHANNEL_CAPABILITY_IDS)[number
 export interface OmnichannelCapabilitySpec {
   readonly capabilityId: OmnichannelCapabilityId;
   readonly primaryRouteId: RouteId;
-  readonly lifecycleStatus: Extract<CapabilityStatus, 'SPECIFIED'>;
-  readonly runtimeExposed: false;
-  readonly productionExecutionAllowed: false;
+  readonly lifecycleStatus: Extract<CapabilityStatus, 'SPECIFIED' | 'PLANNED' | 'IMPLEMENTED'>;
+  readonly runtimeExposed: boolean;
+  readonly productionExecutionAllowed: boolean;
   readonly blockedBy: readonly OmnichannelDependencyBlocker[];
 }
 
+const runtimeReadbackIds = new Set<OmnichannelCapabilityId>([
+  'email.delivery.readback',
+  'whatsapp.message.readback',
+]);
+const canonicalPlannedIds = new Set<OmnichannelCapabilityId>([
+  'email.campaign.send',
+  'whatsapp.message.send',
+]);
+
 function primaryRouteId(capabilityId: OmnichannelCapabilityId): RouteId {
-  return capabilityId.startsWith('nurture.') ? 'R10' : 'R30';
+  if (capabilityId.startsWith('email.')) return 'R07';
+  return 'R10';
 }
 
 export const OMNICHANNEL_CAPABILITY_SPECS: readonly OmnichannelCapabilitySpec[] =
-  OMNICHANNEL_CAPABILITY_IDS.map((capabilityId) => ({
-    capabilityId,
-    primaryRouteId: primaryRouteId(capabilityId),
-    lifecycleStatus: 'SPECIFIED',
-    runtimeExposed: false,
-    productionExecutionAllowed: false,
-    blockedBy: OMNICHANNEL_DEPENDENCY_BLOCKERS,
-  }));
+  OMNICHANNEL_CAPABILITY_IDS.map((capabilityId) => {
+    const runtimeExposed = runtimeReadbackIds.has(capabilityId);
+    return {
+      capabilityId,
+      primaryRouteId: primaryRouteId(capabilityId),
+      lifecycleStatus: runtimeExposed
+        ? 'IMPLEMENTED'
+        : canonicalPlannedIds.has(capabilityId)
+          ? 'PLANNED'
+          : 'SPECIFIED',
+      runtimeExposed,
+      productionExecutionAllowed: runtimeExposed,
+      blockedBy: OMNICHANNEL_DEPENDENCY_BLOCKERS,
+    };
+  });
 
 export function validateOmnichannelCapabilitySpecs(): void {
   const ids = new Set<string>();
@@ -62,11 +79,14 @@ export function validateOmnichannelCapabilitySpecs(): void {
     if (!OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[spec.capabilityId]) {
       throw new Error(`OMNICHANNEL_CONTRACT_MISSING:${spec.capabilityId}`);
     }
-    if (spec.lifecycleStatus !== 'SPECIFIED') {
-      throw new Error(`OMNICHANNEL_LIFECYCLE_MUST_REMAIN_SPECIFIED:${spec.capabilityId}`);
+    const readback = runtimeReadbackIds.has(spec.capabilityId);
+    const plannedSend = canonicalPlannedIds.has(spec.capabilityId);
+    const expectedLifecycle = readback ? 'IMPLEMENTED' : plannedSend ? 'PLANNED' : 'SPECIFIED';
+    if (spec.lifecycleStatus !== expectedLifecycle) {
+      throw new Error(`OMNICHANNEL_LIFECYCLE_DRIFT:${spec.capabilityId}`);
     }
-    if (spec.runtimeExposed || spec.productionExecutionAllowed) {
-      throw new Error(`OMNICHANNEL_RUNTIME_EXPOSURE_FORBIDDEN:${spec.capabilityId}`);
+    if (spec.runtimeExposed !== readback || spec.productionExecutionAllowed !== readback) {
+      throw new Error(`OMNICHANNEL_RUNTIME_EXPOSURE_DRIFT:${spec.capabilityId}`);
     }
     if (spec.blockedBy.length !== 0) {
       throw new Error(`OMNICHANNEL_RESOLVED_DEPENDENCY_BLOCKER_PRESENT:${spec.capabilityId}`);
