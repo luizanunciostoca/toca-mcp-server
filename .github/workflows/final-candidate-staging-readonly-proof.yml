@@ -1,0 +1,429 @@
+name: Final Candidate Staging Read-Only Proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/final-candidate-staging-readonly-proof.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+concurrency:
+  group: final-candidate-staging-readonly-proof-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+
+jobs:
+  candidate-quality:
+    name: Exact Candidate Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Workflow supply chain
+        run: node scripts/check-workflow-supply-chain.mjs
+      - name: Platform hardening contracts
+        run: node scripts/platform-hardening-check.mjs
+      - name: Format
+        run: pnpm format:check
+      - name: Architecture
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Tests
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  candidate-postgres-tenancy:
+    name: Exact Candidate PostgreSQL + Tenancy E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: toca
+          POSTGRES_PASSWORD: toca-candidate-local-only
+          POSTGRES_DB: toca_candidate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U toca -d toca_candidate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://toca:toca-candidate-local-only@127.0.0.1:5432/toca_candidate
+      DATABASE_SSL: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply repository migrations
+        run: pnpm migrate
+      - name: PostgreSQL and tenant isolation acceptance
+        run: >-
+          pnpm exec vitest run
+          test/m-found-12-postgres-e2e.test.ts
+          test/crm-sales-postgres-e2e.test.ts
+          test/whatsapp-postgres-e2e.test.ts
+          test/foundation-worker-postgres-e2e.test.ts
+          test/r29-video-postgres-e2e.test.ts
+          test/meta-ads-demand-intelligence-postgres-e2e.test.ts
+          test/r31-learning-postgres-e2e.test.ts
+          test/ag01-orchestrator-postgres-e2e.test.ts
+          test/attribution-revenue-postgres-e2e.test.ts
+          test/asset-intelligence-postgres-e2e.test.ts
+          test/tenant-approval-postgres-e2e.test.ts
+          test/tenant-configuration-postgres-e2e.test.ts
+      - name: Verify no migration drift
+        run: pnpm migrate
+
+  candidate-email-gate:
+    name: Exact Candidate Email Provider Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Email typecheck
+        run: node scripts/verify-email-typecheck.mjs
+      - name: Email provider/runtime tests
+        run: >-
+          pnpm vitest run
+          test/email-campaign-send-runtime.test.ts
+          test/email-runtime.test.ts
+          test/email-orchestrator.test.ts
+          test/omnichannel-capability-specs.test.ts
+          test/postgres-email-runtime-outbox.test.ts
+          test/sendgrid-email-event-runtime.test.ts
+          test/sendgrid-email-provider.test.ts
+      - name: Repository build
+        run: pnpm build
+
+  candidate-security:
+    name: Exact Candidate Security Supply Chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+      - name: Secret history scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Filesystem vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: '.'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Build MCP candidate image
+        run: docker build --pull -t "toca-mcp:${CANDIDATE_SHA}" .
+      - name: Scan MCP candidate image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: 'toca-mcp:${{ env.CANDIDATE_SHA }}'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Build AG-01 candidate image
+        run: docker build --pull --file Dockerfile.orchestrator -t "toca-ag01:${CANDIDATE_SHA}" .
+      - name: Scan AG-01 candidate image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: 'toca-ag01:${{ env.CANDIDATE_SHA }}'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
+        with:
+          languages: javascript-typescript
+      - name: Analyze CodeQL
+        uses: github/codeql-action/analyze@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
+
+  staging-live-readonly:
+    name: Staging Live Isolation Read-Only
+    needs: [candidate-quality, candidate-postgres-tenancy, candidate-email-gate, candidate-security]
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      snapshot: ${{ steps.snapshot.outputs.snapshot }}
+    env:
+      DEPLOY_ENVIRONMENT: staging
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}
+      GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
+      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
+      PRODUCTION_GCP_PROJECT_ID: ${{ vars.PRODUCTION_GCP_PROJECT_ID }}
+      PRODUCTION_GCP_PROJECT_NUMBER: ${{ vars.PRODUCTION_GCP_PROJECT_NUMBER }}
+      PRODUCTION_GCP_REGION: ${{ vars.PRODUCTION_GCP_REGION }}
+      PRODUCTION_GCP_CLOUD_SQL_INSTANCE: ${{ vars.PRODUCTION_GCP_CLOUD_SQL_INSTANCE }}
+      PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE }}
+      PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+      PRODUCTION_GCP_DATABASE_URL_SECRET: ${{ vars.PRODUCTION_GCP_DATABASE_URL_SECRET }}
+      PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT }}
+      PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+      PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+      STAGING_DATABASE_ISOLATION_MODE: ${{ vars.STAGING_DATABASE_ISOLATION_MODE }}
+      STAGING_PROVIDER_MODE: DISABLED
+      META_ENABLED: 'false'
+      META_WEBHOOK_ENABLED: 'false'
+      INSTAGRAM_READ_ENABLED: 'false'
+      META_ADS_READ_ENABLED: 'false'
+      META_ADS_WRITE_ENABLED: 'false'
+      WHATSAPP_ENABLED: 'false'
+      WHATSAPP_RUNTIME_ENABLED: 'false'
+      EMAIL_SENDGRID_ENABLED: 'false'
+      AG01_MODEL_ENABLED: 'false'
+      GOOGLE_ADS_PHASE: OFF
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Prove static fail-closed isolation before GCP authentication
+        run: node scripts/validate-gcp-deploy-environment.mjs
+      - name: Authenticate through staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read live staging resources without secret access or mutation
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_JSON="$(gcloud projects describe "$GCP_PROJECT_ID" --format=json)"
+          LIVE_PROJECT_NUMBER="$(jq -r '.projectNumber | tostring' <<<"$PROJECT_JSON")"
+          test "$LIVE_PROJECT_NUMBER" = "$GCP_PROJECT_NUMBER"
+          SQL_JSON="$(gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          test "$(jq -r '.name' <<<"$SQL_JSON")" = "$GCP_CLOUD_SQL_INSTANCE"
+          gcloud secrets describe "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" --format=json >/tmp/db-secret.json
+          MCP_JSON="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -r '.spec.template.spec.serviceAccountName // empty' <<<"$MCP_JSON")" = "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"
+          test "$(jq -r '.spec.template.spec.serviceAccountName // empty' <<<"$WEBHOOK_JSON")" = "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT"
+          gcloud iam service-accounts describe "$GCP_DEPLOY_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud iam service-accounts describe "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud iam service-accounts describe "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          case "$GCP_WORKLOAD_IDENTITY_PROVIDER" in
+            "projects/${GCP_PROJECT_NUMBER}/locations/global/"*) ;;
+            *) echo 'staging WIF is not owned by staging project number' >&2; exit 1 ;;
+          esac
+          SNAPSHOT="$(jq -nc \
+            --arg environment staging \
+            --arg projectId "$GCP_PROJECT_ID" \
+            --arg projectNumber "$LIVE_PROJECT_NUMBER" \
+            --arg region "$GCP_REGION" \
+            --arg sql "$GCP_CLOUD_SQL_INSTANCE" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" \
+            --arg mcp "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --arg webhook "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+            --arg wif "$GCP_WORKLOAD_IDENTITY_PROVIDER" \
+            --arg deploySa "$GCP_DEPLOY_SERVICE_ACCOUNT" \
+            --arg mcpSa "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg webhookSa "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+            '{environment:$environment,projectId:$projectId,projectNumber:$projectNumber,region:$region,sql:$sql,secret:$secret,mcp:$mcp,webhook:$webhook,wif:$wif,deploySa:$deploySa,mcpSa:$mcpSa,webhookSa:$webhookSa}')"
+          echo "snapshot=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_LIVE_READONLY=PASS' >> "$GITHUB_STEP_SUMMARY"
+
+  production-live-readonly:
+    name: Production Live Reference Read-Only
+    needs: [candidate-quality, candidate-postgres-tenancy, candidate-email-gate, candidate-security]
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      snapshot: ${{ steps.snapshot.outputs.snapshot }}
+    env:
+      DEPLOY_ENVIRONMENT: production
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}
+      GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
+      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
+      META_ENABLED: 'false'
+      META_WEBHOOK_ENABLED: 'false'
+      INSTAGRAM_READ_ENABLED: 'false'
+      META_ADS_READ_ENABLED: 'false'
+      META_ADS_WRITE_ENABLED: 'false'
+      WHATSAPP_ENABLED: 'false'
+      WHATSAPP_RUNTIME_ENABLED: 'false'
+      EMAIL_SENDGRID_ENABLED: 'false'
+      AG01_MODEL_ENABLED: 'false'
+      GOOGLE_ADS_PHASE: OFF
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Validate canonical production coordinates without mutation
+        run: node scripts/validate-gcp-deploy-environment.mjs
+      - name: Authenticate through production WIF for READ only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read live production reference resources without secret access or mutation
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_JSON="$(gcloud projects describe "$GCP_PROJECT_ID" --format=json)"
+          LIVE_PROJECT_NUMBER="$(jq -r '.projectNumber | tostring' <<<"$PROJECT_JSON")"
+          test "$LIVE_PROJECT_NUMBER" = "$GCP_PROJECT_NUMBER"
+          SQL_JSON="$(gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json)"
+          test "$(jq -r '.name' <<<"$SQL_JSON")" = "$GCP_CLOUD_SQL_INSTANCE"
+          gcloud secrets describe "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" --format=json >/tmp/db-secret.json
+          MCP_JSON="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -r '.spec.template.spec.serviceAccountName // empty' <<<"$MCP_JSON")" = "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"
+          test "$(jq -r '.spec.template.spec.serviceAccountName // empty' <<<"$WEBHOOK_JSON")" = "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT"
+          gcloud iam service-accounts describe "$GCP_DEPLOY_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud iam service-accounts describe "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud iam service-accounts describe "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" >/dev/null
+          SNAPSHOT="$(jq -nc \
+            --arg environment production \
+            --arg projectId "$GCP_PROJECT_ID" \
+            --arg projectNumber "$LIVE_PROJECT_NUMBER" \
+            --arg region "$GCP_REGION" \
+            --arg sql "$GCP_CLOUD_SQL_INSTANCE" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" \
+            --arg mcp "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --arg webhook "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+            --arg wif "$GCP_WORKLOAD_IDENTITY_PROVIDER" \
+            --arg deploySa "$GCP_DEPLOY_SERVICE_ACCOUNT" \
+            --arg mcpSa "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg webhookSa "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+            '{environment:$environment,projectId:$projectId,projectNumber:$projectNumber,region:$region,sql:$sql,secret:$secret,mcp:$mcp,webhook:$webhook,wif:$wif,deploySa:$deploySa,mcpSa:$mcpSa,webhookSa:$webhookSa}')"
+          echo "snapshot=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_LIVE_READONLY=PASS' >> "$GITHUB_STEP_SUMMARY"
+
+  platform-ready:
+    name: Compare Live Staging vs Production
+    needs: [staging-live-readonly, production-live-readonly]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STAGING_SNAPSHOT: ${{ needs.staging-live-readonly.outputs.snapshot }}
+      PRODUCTION_SNAPSHOT: ${{ needs.production-live-readonly.outputs.snapshot }}
+    steps:
+      - name: Fail closed on any staging/production collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_SNAPSHOT"
+          test -n "$PRODUCTION_SNAPSHOT"
+          S="$STAGING_SNAPSHOT" P="$PRODUCTION_SNAPSHOT" node <<'NODE'
+          const s = JSON.parse(process.env.S);
+          const p = JSON.parse(process.env.P);
+          const pairs = [
+            ['projectId', s.projectId, p.projectId],
+            ['projectNumber', s.projectNumber, p.projectNumber],
+            ['sql', s.sql, p.sql],
+            ['secret', s.secret, p.secret],
+            ['wif', s.wif, p.wif],
+            ['deploySa', s.deploySa, p.deploySa],
+            ['mcpSa', s.mcpSa, p.mcpSa],
+            ['webhookSa', s.webhookSa, p.webhookSa],
+          ];
+          for (const [name, a, b] of pairs) {
+            if (!a || !b || a === b) throw new Error(`STAGING_PRODUCTION_COLLISION:${name}`);
+          }
+          for (const sService of [s.mcp, s.webhook]) {
+            for (const pService of [p.mcp, p.webhook]) {
+              if (!sService || !pService || sService === pService) {
+                throw new Error('STAGING_PRODUCTION_COLLISION:cloud-run-service');
+              }
+            }
+          }
+          console.log('PLATFORM_READY_FOR_STAGING=YES');
+          NODE
+          echo 'PLATFORM_READY_FOR_STAGING=YES' >> "$GITHUB_STEP_SUMMARY"
+          echo "CANDIDATE_SHA=$CANDIDATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo 'READ_ONLY_PROOF=true' >> "$GITHUB_STEP_SUMMARY"
