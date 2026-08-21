@@ -18,7 +18,6 @@ import {
   type DurableFollowupScheduleInput,
 } from '../src/orchestrator/durable-followup.js';
 import { InMemoryWorkflowStore } from '../src/workflow/in-memory-workflow-store.js';
-import type { WorkflowInstance } from '../src/workflow/workflow-contracts.js';
 import type { DeadLetterRecord, DeadLetterSink } from '../src/worker/worker.js';
 
 const SCOPE: CrmScope = {
@@ -78,6 +77,7 @@ class FakeCore implements CoreCapabilityGateway {
   readonly providerCalls: string[] = [];
   failuresRemaining = 0;
   privacyBlockCode: string | null = null;
+  providerReadbackVerified = true;
 
   inspect(input: Parameters<CoreCapabilityGateway['inspect']>[0]) {
     return {
@@ -90,6 +90,7 @@ class FakeCore implements CoreCapabilityGateway {
   }
 
   async execute(input: Parameters<CoreCapabilityGateway['execute']>[0]) {
+    await Promise.resolve();
     this.executions.push(input);
     if (this.privacyBlockCode) throw new Error(this.privacyBlockCode);
     if (this.failuresRemaining > 0) {
@@ -115,7 +116,7 @@ class FakeCore implements CoreCapabilityGateway {
               state: 'ACCEPTED',
               accepted_at: DUE_AT,
             },
-      providerReadbackVerified: true,
+      providerReadbackVerified: this.providerReadbackVerified,
     };
   }
 
@@ -259,7 +260,7 @@ function fixture(options: { readonly workflows?: InMemoryWorkflowStore } = {}) {
       sales: sales.asStore(),
       core,
       deadLetters,
-      resolveIdentity: (_instance: WorkflowInstance) => identity,
+      resolveIdentity: () => identity,
       retry: { baseDelayMs: 1_000, maxDelayMs: 4_000 },
     });
   return { workflows, sales, core, deadLetters, identity, createCoordinator };
@@ -285,6 +286,12 @@ describe('durable follow-up final composition', () => {
     expect(test.sales.activities).toHaveLength(1);
     expect(test.sales.activities[0]?.outcome).toBe('SENT');
     expect(test.sales.activities[0]?.correlationId).toBe(CORRELATION_ID);
+    expect(test.sales.activities[0]?.evidence).toEqual(
+      expect.arrayContaining([
+        `durable-followup:workflow:${scheduled.instance.workflowId}`,
+        'durable-followup:next-action:next-action-1',
+      ]),
+    );
 
     const final = await test.workflows.get(scheduled.instance.workflowId);
     expect(final?.instance.status).toBe('SUCCEEDED');
@@ -326,6 +333,24 @@ describe('durable follow-up final composition', () => {
       expect(test.sales.activities[0]?.outcome).toBe(`BLOCKED:${code}`);
     },
   );
+
+  it('unverified provider readback is fail-closed and never retried automatically', async () => {
+    const test = fixture();
+    const runtime = test.createCoordinator();
+    test.core.providerReadbackVerified = false;
+    const scheduled = await runtime.schedule(scheduleInput('WHATSAPP', test.identity));
+
+    await runtime.tick(10, DUE_AT);
+    await runtime.tick(10, '2026-08-21T06:15:00.000Z');
+
+    expect(test.core.executions).toHaveLength(1);
+    expect(test.deadLetters.records).toHaveLength(0);
+    expect(test.sales.activities.at(-1)?.outcome).toBe(
+      'BLOCKED:DURABLE_FOLLOWUP_PROVIDER_READBACK_UNVERIFIED',
+    );
+    const final = await test.workflows.get(scheduled.instance.workflowId);
+    expect(final?.instance.status).toBe('SUCCEEDED');
+  });
 
   it('provider temporarily unavailable retries through Workflow timer and recovers after runtime restart', async () => {
     const test = fixture();
@@ -424,6 +449,24 @@ describe('durable follow-up final composition', () => {
     expect(replay.timers[0]?.timerId).toBe(first.timers[0]?.timerId);
   });
 
+  it('fires an already-overdue timer at the current durable tick without provider duplication', async () => {
+    const test = fixture();
+    const runtime = test.createCoordinator();
+    test.sales.put({
+      ...createNextAction(),
+      dueAt: '2026-08-21T04:00:00.000Z',
+      updatedAt: '2026-08-21T04:00:00.000Z',
+    });
+
+    await runtime.schedule(scheduleInput('EMAIL', test.identity));
+    await runtime.tick(10, BEFORE_DUE);
+    await runtime.tick(10, BEFORE_DUE);
+
+    expect(test.core.executions).toHaveLength(1);
+    expect(test.sales.activities).toHaveLength(1);
+    expect(test.sales.activities[0]?.outcome).toBe('SENT');
+  });
+
   it('honors an existing NextAction cancellation at due time and never calls outbound', async () => {
     const test = fixture();
     const runtime = test.createCoordinator();
@@ -435,6 +478,19 @@ describe('durable follow-up final composition', () => {
     expect(test.core.executions).toHaveLength(0);
     expect(test.sales.activities).toHaveLength(1);
     expect(test.sales.activities[0]?.outcome).toBe('CANCELED');
+  });
+
+  it('honors an already-completed NextAction at due time and never calls outbound', async () => {
+    const test = fixture();
+    const runtime = test.createCoordinator();
+    await runtime.schedule(scheduleInput('EMAIL', test.identity));
+    test.sales.setStatus(SCOPE, 'next-action-1', 'COMPLETED');
+
+    await runtime.tick(10, DUE_AT);
+
+    expect(test.core.executions).toHaveLength(0);
+    expect(test.sales.activities).toHaveLength(1);
+    expect(test.sales.activities[0]?.outcome).toBe('ALREADY_COMPLETED');
   });
 
   it('keeps non-follow-up Workflow timers owned by their original workers', async () => {
