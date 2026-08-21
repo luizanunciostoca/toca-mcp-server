@@ -38,8 +38,42 @@ env:
   IMMUTABLE_SUBJECT: repo:luizanunciostoca@318748875/toca-mcp-server@1339919100:environment:staging
 
 jobs:
+  staging-api-bootstrap:
+    name: Enable required staging Resource Manager API only
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
+          test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Enable Cloud Resource Manager on staging only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
+          gcloud services enable cloudresourcemanager.googleapis.com --project="$STAGING_PROJECT_ID" --quiet
+          test "$(gcloud services list --project="$STAGING_PROJECT_ID" --enabled --filter='name:cloudresourcemanager.googleapis.com' --format='value(name)')" = "projects/$STAGING_PROJECT_NUMBER/services/cloudresourcemanager.googleapis.com"
+          echo 'STAGING_CLOUD_RESOURCE_MANAGER_API=PASS'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+
   staging-wif-proof:
     name: Prove dedicated staging WIF and production denial
+    needs: staging-api-bootstrap
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 10
@@ -55,34 +89,29 @@ jobs:
           workload_identity_provider: ${{ env.STAGING_WIF }}
           service_account: ${{ env.STAGING_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Prove staging authority and no production mutation authority
+      - name: Prove staging authority and production mutation denial
         shell: bash
         run: |
           set -euo pipefail
           gcloud auth print-access-token >/dev/null
-          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
           gcloud run services describe "$STAGING_MCP_SERVICE" --project="$STAGING_PROJECT_ID" --region="$REGION" >/dev/null
           gcloud run services describe "$STAGING_WEBHOOK_SERVICE" --project="$STAGING_PROJECT_ID" --region="$REGION" >/dev/null
           gcloud sql instances describe "$STAGING_SQL_INSTANCE" --project="$STAGING_PROJECT_ID" >/dev/null
 
           TOKEN="$(gcloud auth print-access-token)"
-          STAGING_BODY='{"permissions":["run.services.get","run.services.update","cloudsql.instances.connect","serviceusage.services.use"]}'
-          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "$STAGING_BODY" \
-            "https://cloudresourcemanager.googleapis.com/v3/projects/${STAGING_PROJECT_ID}:testIamPermissions" >/tmp/staging-perms.json
-          for P in run.services.get run.services.update cloudsql.instances.connect serviceusage.services.use; do
-            jq -e --arg p "$P" '(.permissions // []) | index($p) != null' /tmp/staging-perms.json >/dev/null
-          done
-
           PROD_BODY='{"permissions":["run.services.update","cloudsql.instances.update","resourcemanager.projects.setIamPolicy","iam.serviceAccounts.actAs"]}'
-          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "$PROD_BODY" \
-            "https://cloudresourcemanager.googleapis.com/v3/projects/${PROD_PROJECT_ID}:testIamPermissions" >/tmp/prod-perms.json
+          HTTP="$(curl -sS -o /tmp/prod-perms.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "$PROD_BODY" \
+            "https://cloudresourcemanager.googleapis.com/v3/projects/${PROD_PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
           jq -e '(.permissions // []) | length == 0' /tmp/prod-perms.json >/dev/null
           echo 'STAGING_WIF_AUTH=PASS'
-          echo 'STAGING_DEPLOYER_STAGING_AUTHORITY=PASS'
+          echo 'STAGING_DEPLOYER_STAGING_READBACK=PASS'
           echo 'STAGING_DEPLOYER_PRODUCTION_MUTATION_AUTHORITY=NONE'
 
   staging-snapshot:
     name: Snapshot isolated staging control plane live
+    needs: staging-api-bootstrap
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 15
@@ -171,7 +200,8 @@ jobs:
           for SERVICE in "$STAGING_MCP_SERVICE" "$STAGING_WEBHOOK_SERVICE"; do
             IAM="$(gcloud run services get-iam-policy "$SERVICE" --project="$STAGING_PROJECT_ID" --region="$REGION" --format=json)"
             if printf '%s' "$IAM" | jq -e '[.bindings[]?.members[]?] | any(. == "allUsers" or . == "allAuthenticatedUsers")' | grep -Fxq true; then
-              echo "FAIL: public principal on $SERVICE" >&2; exit 1
+              echo "FAIL: public principal on $SERVICE" >&2
+              exit 1
             fi
           done
           for JSON in "$MCP_JSON" "$WEBHOOK_JSON"; do
@@ -180,7 +210,8 @@ jobs:
           done
           MCP_REV="$(printf '%s' "$MCP_JSON" | jq -r '.status.latestReadyRevisionName')"
           WEBHOOK_REV="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.latestReadyRevisionName')"
-          test -n "$MCP_REV"; test -n "$WEBHOOK_REV"
+          test -n "$MCP_REV"
+          test -n "$WEBHOOK_REV"
 
           CONDITION="assertion.repository_id=='1339919100' && assertion.repository_owner_id=='318748875' && assertion.environment=='staging' && assertion.sub=='${IMMUTABLE_SUBJECT}'"
           WIF_JSON="$(gcloud iam workload-identity-pools providers describe "$STAGING_WIF_PROVIDER" --workload-identity-pool="$STAGING_WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" --format=json)"
@@ -215,7 +246,7 @@ jobs:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.PROD_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Read production reference without mutation
+      - name: Read production reference without secret-manager privilege escalation
         id: snapshot
         shell: bash
         run: |
@@ -224,22 +255,28 @@ jobs:
           SQL_JSON="$(gcloud sql instances describe "$PROD_SQL_INSTANCE" --project="$PROD_PROJECT_ID" --format=json)"
           SQL_RESOURCE="$(printf '%s' "$SQL_JSON" | jq -r '.connectionName')"
           test "$SQL_RESOURCE" = "${PROD_PROJECT_ID}:${REGION}:${PROD_SQL_INSTANCE}"
-          gcloud secrets describe "$PROD_DATABASE_SECRET" --project="$PROD_PROJECT_ID" >/dev/null
+
+          RUN_LIST="$(gcloud run services list --project="$PROD_PROJECT_ID" --region="$REGION" --format=json)"
+          printf '%s' "$RUN_LIST" | jq -r '[.. | objects | .secretKeyRef?.name? // empty] | unique[]' | grep -Fxq "$PROD_DATABASE_SECRET"
+
           MCP_JSON="$(gcloud run services describe "$PROD_MCP_SERVICE" --project="$PROD_PROJECT_ID" --region="$REGION" --format=json)"
           WEBHOOK_JSON="$(gcloud run services describe "$PROD_WEBHOOK_SERVICE" --project="$PROD_PROJECT_ID" --region="$REGION" --format=json)"
           test "$(printf '%s' "$MCP_JSON" | jq -r '.spec.template.spec.serviceAccountName')" = "$PROD_RUNTIME_SA"
           test "$(printf '%s' "$WEBHOOK_JSON" | jq -r '.spec.template.spec.serviceAccountName')" = "$PROD_RUNTIME_SA"
           MCP_REV="$(printf '%s' "$MCP_JSON" | jq -r '.status.latestReadyRevisionName')"
           WEBHOOK_REV="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.latestReadyRevisionName')"
-          test -n "$MCP_REV"; test -n "$WEBHOOK_REV"
-          PROD_ARTIFACTS="$(gcloud artifacts repositories list --project="$PROD_PROJECT_ID" --location="$REGION" --format=json 2>/dev/null || printf '[]')"
-          SNAPSHOT="$(PROD_ARTIFACTS="$PROD_ARTIFACTS" jq -nc \
+          test -n "$MCP_REV"
+          test -n "$WEBHOOK_REV"
+
+          SNAPSHOT="$(jq -nc \
             --arg projectId "$PROD_PROJECT_ID" --arg projectNumber "$PROD_PROJECT_NUMBER" --arg sql "$SQL_RESOURCE" \
-            --arg secret "projects/${PROD_PROJECT_NUMBER}/secrets/${PROD_DATABASE_SECRET}" --arg mcp "$PROD_MCP_SERVICE" --arg webhook "$PROD_WEBHOOK_SERVICE" \
-            --arg mcpRev "$MCP_REV" --arg webhookRev "$WEBHOOK_REV" --arg wif "$PROD_WIF" --arg deploySa "$PROD_DEPLOYER_SA" --arg runtimeSa "$PROD_RUNTIME_SA" \
-            --argjson artifacts "$PROD_ARTIFACTS" \
-            '{projectId:$projectId,projectNumber:$projectNumber,artifacts:[$artifacts[]?.name],sql:$sql,secret:$secret,mcp:$mcp,webhook:$webhook,mcpRev:$mcpRev,webhookRev:$webhookRev,wif:$wif,deploySa:$deploySa,mcpSa:$runtimeSa,webhookSa:$runtimeSa}')"
+            --arg secret "projects/${PROD_PROJECT_NUMBER}/secrets/${PROD_DATABASE_SECRET}" \
+            --arg mcp "$PROD_MCP_SERVICE" --arg webhook "$PROD_WEBHOOK_SERVICE" \
+            --arg mcpRev "$MCP_REV" --arg webhookRev "$WEBHOOK_REV" --arg wif "$PROD_WIF" \
+            --arg deploySa "$PROD_DEPLOYER_SA" --arg runtimeSa "$PROD_RUNTIME_SA" \
+            '{projectId:$projectId,projectNumber:$projectNumber,sql:$sql,secret:$secret,mcp:$mcp,webhook:$webhook,mcpRev:$mcpRev,webhookRev:$webhookRev,wif:$wif,deploySa:$deploySa,mcpSa:$runtimeSa,webhookSa:$runtimeSa}')"
           echo "snapshot=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo 'PRODUCTION_DATABASE_SECRET_BINDING_READBACK=PASS'
           echo 'PRODUCTION_REFERENCE_READ_ONLY=PASS'
 
   platform-ready:
@@ -255,29 +292,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$STAGING_SNAPSHOT"; test -n "$PRODUCTION_SNAPSHOT"
+          test -n "$STAGING_SNAPSHOT"
+          test -n "$PRODUCTION_SNAPSHOT"
           S="$STAGING_SNAPSHOT" P="$PRODUCTION_SNAPSHOT" node <<'NODE'
           const s = JSON.parse(process.env.S);
           const p = JSON.parse(process.env.P);
           const pairs = [
-            ['projectId', s.projectId, p.projectId], ['projectNumber', s.projectNumber, p.projectNumber],
-            ['sql', s.sql, p.sql], ['secret', s.secret, p.secret], ['wif', s.wif, p.wif],
-            ['deploySa', s.deploySa, p.deploySa], ['mcpSa', s.mcpSa, p.mcpSa], ['webhookSa', s.webhookSa, p.webhookSa],
-            ['mcpRevision', s.mcpRev, p.mcpRev], ['webhookRevision', s.webhookRev, p.webhookRev],
+            ['projectId', s.projectId, p.projectId],
+            ['projectNumber', s.projectNumber, p.projectNumber],
+            ['sql', s.sql, p.sql],
+            ['secret', s.secret, p.secret],
+            ['wif', s.wif, p.wif],
+            ['deploySa', s.deploySa, p.deploySa],
+            ['mcpSa', s.mcpSa, p.mcpSa],
+            ['webhookSa', s.webhookSa, p.webhookSa],
+            ['mcpRevision', s.mcpRev, p.mcpRev],
+            ['webhookRevision', s.webhookRev, p.webhookRev],
           ];
           for (const [name, a, b] of pairs) {
             if (!a || !b || a === b) throw new Error(`STAGING_PRODUCTION_COLLISION:${name}`);
           }
-          for (const ss of [s.mcp, s.webhook]) for (const ps of [p.mcp, p.webhook]) {
-            if (!ss || !ps || ss === ps) throw new Error('STAGING_PRODUCTION_COLLISION:cloud-run-service');
+          for (const ss of [s.mcp, s.webhook]) {
+            for (const ps of [p.mcp, p.webhook]) {
+              if (!ss || !ps || ss === ps) throw new Error('STAGING_PRODUCTION_COLLISION:cloud-run-service');
+            }
           }
-          if (!s.artifact || (p.artifacts || []).includes(s.artifact)) throw new Error('STAGING_PRODUCTION_COLLISION:artifact-registry');
+          if (!s.artifact.startsWith(`projects/${s.projectId}/`)) {
+            throw new Error('STAGING_ARTIFACT_REGISTRY_PARENT_MISMATCH');
+          }
+          if (s.artifact.includes(`projects/${p.projectId}/`)) {
+            throw new Error('STAGING_PRODUCTION_COLLISION:artifact-registry');
+          }
           console.log('PLATFORM_READY_FOR_STAGING=YES');
           NODE
-          echo 'PLATFORM_READY_FOR_STAGING=YES' >> "$GITHUB_STEP_SUMMARY"
-          echo "CANDIDATE_SHA=$CANDIDATE_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo 'STAGING_PROVIDER_MODE=DISABLED' >> "$GITHUB_STEP_SUMMARY"
-          echo 'APPLICATION_MIGRATION_EXECUTED=NO' >> "$GITHUB_STEP_SUMMARY"
-          echo 'APPLICATION_DEPLOY_EXECUTED=NO' >> "$GITHUB_STEP_SUMMARY"
-          echo 'PROVIDER_MUTATION_EXECUTED=NO' >> "$GITHUB_STEP_SUMMARY"
-          echo 'PRODUCTION_MUTATION_EXECUTED=NO' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'PLATFORM_READY_FOR_STAGING=YES'
+            echo "CANDIDATE_SHA=$CANDIDATE_SHA"
+            echo 'STAGING_PROVIDER_MODE=DISABLED'
+            echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+            echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+            echo 'PROVIDER_MUTATION_EXECUTED=NO'
+            echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+          } >> "$GITHUB_STEP_SUMMARY"
