@@ -55,7 +55,7 @@ jobs:
           CANDIDATE_URL="$(printf '%s' "$SERVICE_JSON" | jq -r --arg tag "$CANDIDATE_TAG" '.status.traffic[]? | select(.tag==$tag) | .url')"
           test -n "$SERVICE_URL"; test -n "$CANDIDATE_REVISION"; test -n "$CANDIDATE_URL"
           test "$(printf '%s' "$SERVICE_JSON" | jq -r --arg rev "$CANDIDATE_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0) > 0)] | length')" = 0
-          TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+          TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$STAGING_DEPLOYER_SA" --audiences="$SERVICE_URL")"
           HEALTH_CODE="$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/healthz")"
           READY_CODE="$(curl --silent --show-error --output /tmp/ready.json --write-out '%{http_code}' -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/readyz")"
           echo "CANDIDATE_REVISION=$CANDIDATE_REVISION"
