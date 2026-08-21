@@ -13,6 +13,8 @@ export interface SendGridRuntimeConfigResult {
 export async function loadSendGridRuntimeConfig(input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly secretResolver: SecretResolver;
+  /** Event-webhook composition keeps discovery enabled by default. Outbound send disables it. */
+  readonly discoverEventWebhookPublicKey?: boolean;
 }): Promise<SendGridRuntimeConfigResult> {
   const env = input.env ?? process.env;
   const enabled = parseBoolean(env.EMAIL_SENDGRID_ENABLED, false, 'EMAIL_SENDGRID_ENABLED_INVALID');
@@ -38,7 +40,7 @@ export async function loadSendGridRuntimeConfig(input: {
   );
   const apiBaseUrl = env.EMAIL_SENDGRID_API_BASE_URL?.trim() || 'https://api.sendgrid.com';
   let eventWebhookPublicKeyPem = nullableEnv(env.EMAIL_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_PEM);
-  if (!eventWebhookPublicKeyPem) {
+  if (!eventWebhookPublicKeyPem && input.discoverEventWebhookPublicKey !== false) {
     const discovered = await discoverSendGridEventWebhookPublicKey({
       apiKey,
       apiBaseUrl,
