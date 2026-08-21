@@ -1,9 +1,11 @@
 import { createTrustedServiceExecutionIdentity, type ExecutionIdentity } from '../core/identity.js';
 import { EnvironmentSecretResolver } from '../core/secrets.js';
 import { bindApprovalStoreToScope } from '../governance/approval-scope.js';
+import { PostgresCrmSalesStore } from '../persistence/postgres-crm-sales-store.js';
 import { createTocaRuntimeComposition } from '../server.js';
 import { PostgresDeadLetterSink } from '../worker/postgres-dead-letter.js';
 import { ExistingCoreCapabilityGateway } from './core-gateway.js';
+import { DurableFollowupCoordinator } from './durable-followup.js';
 import { GoogleOAuthRefreshSecretResolver } from './google-oauth-secret-resolver.js';
 import { PostgresConversationStore } from './postgres-conversation-store.js';
 import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
@@ -47,6 +49,7 @@ export interface Ag01ProductionRuntime {
   readonly serviceVersion: string;
   readonly identity: ExecutionIdentity;
   readonly runtimeCapabilityIds: readonly string[];
+  readonly followups: DurableFollowupCoordinator;
   execute(request: Ag01RuntimeRequest): Promise<Ag01RuntimeResult>;
   resume(conversationId: string): Promise<Ag01RuntimeResult>;
   readiness(): Promise<void>;
@@ -69,6 +72,7 @@ export function createAg01ProductionRuntime(
   if (!pool) throw new Error('AG01_POSTGRES_REQUIRED');
   if (!coreComposition.approvalStore) throw new Error('AG01_APPROVAL_STORE_REQUIRED');
   if (!coreComposition.auditStore) throw new Error('AG01_AUDIT_STORE_REQUIRED');
+  if (!coreComposition.workflowStore) throw new Error('AG01_WORKFLOW_STORE_REQUIRED');
 
   const scopedApprovalStore = bindApprovalStoreToScope(coreComposition.approvalStore, {
     tenantId: config.tenantId,
@@ -83,6 +87,13 @@ export function createAg01ProductionRuntime(
   });
   const conversations = new PostgresConversationStore(pool);
   const deadLetters = new PostgresDeadLetterSink(pool);
+  const followups = new DurableFollowupCoordinator({
+    workflows: coreComposition.workflowStore,
+    sales: new PostgresCrmSalesStore(pool),
+    core,
+    deadLetters,
+    resolveIdentity: () => identity,
+  });
   const secrets = new EnvironmentSecretResolver(env);
   const googleOAuth = new GoogleOAuthRefreshSecretResolver({
     clientIdReference: { provider: 'env', key: config.googleOAuthClientIdEnvKey },
@@ -183,6 +194,7 @@ export function createAg01ProductionRuntime(
     serviceVersion: AG01_SERVICE_VERSION,
     identity,
     runtimeCapabilityIds,
+    followups,
     execute,
     resume,
     readiness: async () => {
