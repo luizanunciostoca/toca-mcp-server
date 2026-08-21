@@ -80,7 +80,7 @@ jobs:
           done
           cat /tmp/proxy.log >&2
           exit 1
-      - name: Query outbox readiness facts without payload access
+      - name: Prove candidate SQL behavior and read outbox facts without payload access
         shell: bash
         run: |
           set -euo pipefail
@@ -97,6 +97,24 @@ jobs:
           import pg from 'pg';
           const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: false });
           try {
+            try {
+              await pool.query(`
+                select
+                  coalesce(
+                    extract(epoch from (now() - min(available_at)))
+                      filter (where status in ('PENDING', 'FAILED_RETRYABLE')),
+                    0
+                  ) as oldest_pending_age_seconds,
+                  count(*) filter (where status = 'DEAD_LETTER') as dead_letter_count
+                from event_outbox
+              `);
+              console.log('CANDIDATE_OUTBOX_SQL=PASS');
+            } catch (error) {
+              console.log('CANDIDATE_OUTBOX_SQL=FAIL');
+              console.log('CANDIDATE_OUTBOX_SQLSTATE=' + String(error.code ?? 'UNKNOWN'));
+              console.log('CANDIDATE_OUTBOX_SQL_MESSAGE=' + String(error.message ?? error));
+            }
+
             const summary = await pool.query(`
               select
                 count(*)::int as total,
@@ -106,13 +124,18 @@ jobs:
                 count(*) filter (where status = 'DELIVERED')::int as delivered,
                 count(*) filter (where status = 'DEAD_LETTER')::int as dead_letter,
                 coalesce(
-                  round(extract(epoch from (now() - min(available_at)))
-                    filter (where status in ('PENDING','FAILED_RETRYABLE'))),
+                  round(
+                    extract(epoch from (
+                      now() - (min(available_at) filter (where status in ('PENDING','FAILED_RETRYABLE')))
+                    ))
+                  ),
                   0
                 )::bigint as oldest_pending_age_seconds
               from event_outbox
             `);
+            console.log('CORRECTED_OUTBOX_SQL=PASS');
             console.log('OUTBOX_SUMMARY=' + JSON.stringify(summary.rows[0]));
+
             const blocked = await pool.query(`
               select event_type, status, attempts, max_attempts, last_error_code,
                      round(extract(epoch from (now() - available_at)))::bigint as age_seconds
@@ -137,6 +160,5 @@ jobs:
         shell: bash
         run: |
           if [[ -n "${PROXY_PID:-}" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
-            kill "$PROXY_PID"
-            wait "$PROXY_PID" || true
+            kill "$PROXY_PID" || true
           fi
