@@ -1,0 +1,180 @@
+name: Staging Promote 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-promote-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  IMAGE_DIGEST: sha256:f8d464641da239b60fac20b753620d6801e99f1e241e2c82756ddf3602bfeb46
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-32519952730
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-32519952730
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact frozen candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          mkdir -p evidence
+
+      - id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Fail-closed promotion preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != toca-mcp-production
+          test "$PROJECT_NUMBER" != 990081828836
+
+          gcloud run revisions describe "$MCP_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/mcp.json
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/webhook.json
+
+          for f in /tmp/mcp.json /tmp/webhook.json; do
+            jq -e --arg d "$IMAGE_DIGEST" '.spec.containers[0].image | endswith("@" + $d)' "$f" >/dev/null
+            jq -e '.status.conditions[]? | select(.type=="Ready") | .status=="True"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="META_ENABLED") | .value][0] == "false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="WHATSAPP_ENABLED") | .value][0] == "false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="EMAIL_SENDGRID_ENABLED") | .value][0] == "false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value][0] == "OFF"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value][0] == "75c165a044c6e79e9545328dd04a2a3e73d2e910"' "$f" >/dev/null
+          done
+
+          MCP_SVC="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          WEBHOOK_SVC="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          PREV_MCP="$(jq -r '[.status.traffic[] | select((.percent // 0)==100) | .revisionName][0] // empty' <<<"$MCP_SVC")"
+          PREV_WEBHOOK="$(jq -r '[.status.traffic[] | select((.percent // 0)==100) | .revisionName][0] // empty' <<<"$WEBHOOK_SVC")"
+          test -n "$PREV_MCP"; test -n "$PREV_WEBHOOK"
+          test "$PREV_MCP" != "$MCP_REVISION"
+          test "$PREV_WEBHOOK" != "$WEBHOOK_REVISION"
+          echo "PREV_MCP=$PREV_MCP" >> "$GITHUB_ENV"
+          echo "PREV_WEBHOOK=$PREV_WEBHOOK" >> "$GITHUB_ENV"
+          jq -n --arg m "$PREV_MCP" --arg w "$PREV_WEBHOOK" --arg d "$IMAGE_DIGEST" '{previous:{mcp:$m,webhook:$w},candidateDigest:$d,providers:"DISABLED",result:"PASS"}' > evidence/preflight.json
+          echo STAGING_PROMOTION_PREFLIGHT=PASS
+
+      - name: Promote MCP candidate to 100 percent
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${MCP_REVISION}=100"
+
+      - name: Promote webhook candidate to 100 percent
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${WEBHOOK_REVISION}=100"
+
+      - id: mcp_url
+        name: Resolve MCP service URL
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          test -n "$URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - id: mcp_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER }}
+          token_format: id_token
+          id_token_audience: ${{ steps.mcp_url.outputs.url }}
+          id_token_include_email: true
+
+      - name: Smoke promoted MCP
+        env:
+          URL: ${{ steps.mcp_url.outputs.url }}
+          ID_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          CODE="$(curl -sS --retry 12 --retry-all-errors --retry-delay 5 -o evidence/mcp-readyz.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/readyz")"
+          test "$CODE" = 200
+          jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' evidence/mcp-readyz.json >/dev/null
+
+      - id: webhook_url
+        name: Resolve webhook service URL
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          test -n "$URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - id: webhook_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER }}
+          token_format: id_token
+          id_token_audience: ${{ steps.webhook_url.outputs.url }}
+          id_token_include_email: true
+
+      - name: Smoke promoted webhook and confinement
+        env:
+          URL: ${{ steps.webhook_url.outputs.url }}
+          ID_TOKEN: ${{ steps.webhook_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          CODE="$(curl -sS --retry 12 --retry-all-errors --retry-delay 5 -o evidence/webhook-readyz.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/readyz")"
+          test "$CODE" = 200
+          jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' evidence/webhook-readyz.json >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/mcp")" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/oauth/meta/start")" = 404
+
+      - name: Final promoted traffic readback
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          test "$(jq -r --arg r "$MCP_REVISION" '[.status.traffic[] | select(.revisionName==$r and (.percent==100))] | length' <<<"$MCP_JSON")" = 1
+          test "$(jq -r --arg r "$WEBHOOK_REVISION" '[.status.traffic[] | select(.revisionName==$r and (.percent==100))] | length' <<<"$WEBHOOK_JSON")" = 1
+          jq -n --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" --arg mcp "$MCP_REVISION" --arg webhook "$WEBHOOK_REVISION" '{candidateSha:$sha,imageDigest:$digest,traffic:{mcp:100,webhook:100},revisions:{mcp:$mcp,webhook:$webhook},providers:"DISABLED",productionMutation:false,result:"PASS"}' > evidence/manifest.json
+          echo STAGING_PROMOTION=PASS
+          echo PROVIDER_MUTATION_EXECUTED=NO
+          echo PRODUCTION_MUTATION_EXECUTED=NO
+
+      - name: Roll back both staging services on any failure
+        if: failure()
+        run: |
+          set +e
+          if [[ -n "${PREV_MCP:-}" ]]; then
+            gcloud run services update-traffic "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${PREV_MCP}=100"
+          fi
+          if [[ -n "${PREV_WEBHOOK:-}" ]]; then
+            gcloud run services update-traffic "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${PREV_WEBHOOK}=100"
+          fi
+          echo STAGING_ROLLBACK_ATTEMPTED=YES
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-promotion-75c165a
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 30
