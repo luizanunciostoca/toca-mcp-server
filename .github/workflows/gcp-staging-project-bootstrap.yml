@@ -100,7 +100,6 @@ jobs:
           if ! gcloud sql databases describe "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
             gcloud sql databases create "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --quiet
           fi
-
           if ! gcloud secrets describe "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
             gcloud secrets create "$DATABASE_SECRET" --replication-policy=automatic --project="$STAGING_PROJECT_ID" --quiet
           fi
@@ -114,33 +113,23 @@ jobs:
               gcloud sql users create "$DATABASE_USER" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --password="$DB_PASSWORD" --quiet
             fi
             CONNECTION_NAME="${STAGING_PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
-            DATABASE_URL="$(DB_PASSWORD="$DB_PASSWORD" CONNECTION_NAME="$CONNECTION_NAME" python3 - <<'PY'
-import os
-from urllib.parse import quote
-password = quote(os.environ['DB_PASSWORD'], safe='')
-socket = quote('/cloudsql/' + os.environ['CONNECTION_NAME'], safe='')
-print(f'postgresql://toca_app:{password}@localhost/toca_mcp_staging?host={socket}')
-PY
-)"
+            ENCODED_PASSWORD="$(DB_PASSWORD="$DB_PASSWORD" python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["DB_PASSWORD"], safe=""))')"
+            ENCODED_SOCKET="$(CONNECTION_NAME="$CONNECTION_NAME" python3 -c 'import os,urllib.parse; print(urllib.parse.quote("/cloudsql/"+os.environ["CONNECTION_NAME"], safe=""))')"
+            DATABASE_URL="postgresql://${DATABASE_USER}:${ENCODED_PASSWORD}@localhost/${DATABASE_NAME}?host=${ENCODED_SOCKET}"
             printf '%s' "$DATABASE_URL" | gcloud secrets versions add "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --data-file=- >/dev/null
-            unset DB_PASSWORD DATABASE_URL
+            unset DB_PASSWORD ENCODED_PASSWORD ENCODED_SOCKET DATABASE_URL
           fi
 
           for SA in "$DEPLOYER_SA" "$MCP_RUNTIME_SA" "$WEBHOOK_RUNTIME_SA"; do
-            gcloud secrets add-iam-policy-binding "$DATABASE_SECRET" \
-              --project="$STAGING_PROJECT_ID" \
-              --member="serviceAccount:$SA" \
-              --role=roles/secretmanager.secretAccessor \
-              --condition=None \
-              --quiet >/dev/null
+            gcloud secrets add-iam-policy-binding "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor --condition=None --quiet >/dev/null
           done
 
           test -n "$(gcloud secrets versions list "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --filter='state=ENABLED' --format='value(name)' --limit=1)"
           test "$(gcloud sql databases describe "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(name)')" = "$DATABASE_NAME"
           gcloud sql users list --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(name)' | grep -Fxq "$DATABASE_USER"
-
           CONNECTION_NAME="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(connectionName)')"
           test "$CONNECTION_NAME" = "${STAGING_PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
+
           echo "STAGING_SQL_CONNECTION_NAME=$CONNECTION_NAME"
           echo "STAGING_DATABASE_SECRET=$DATABASE_SECRET"
           echo 'STAGING_CLOUD_SQL=PASS'
