@@ -74,6 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          docker buildx create --driver docker-container --name provider-whatsapp-builder --use
+          docker buildx inspect --bootstrap
+          trap 'docker buildx rm provider-whatsapp-builder >/dev/null 2>&1 || true' EXIT
           mkdir -p /tmp/whatsapp-read
           cp scripts/whatsapp-provider-read-preflight.mjs /tmp/whatsapp-read/probe.mjs
           cat > /tmp/whatsapp-read/Dockerfile <<'DOCKER'
