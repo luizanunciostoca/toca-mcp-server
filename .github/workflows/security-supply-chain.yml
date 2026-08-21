@@ -86,11 +86,34 @@ jobs:
           output: 'toca-mcp-sbom.cdx.json'
           exit-code: '0'
 
+      - name: Build immutable AG-01 orchestrator candidate
+        run: docker build --pull --file Dockerfile.orchestrator -t "toca-ag01:${GITHUB_SHA}" .
+
+      - name: Scan AG-01 orchestrator candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: 'toca-ag01:${{ github.sha }}'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Generate AG-01 CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: 'toca-ag01:${{ github.sha }}'
+          format: 'cyclonedx'
+          output: 'toca-ag01-sbom.cdx.json'
+          exit-code: '0'
+
       - name: Upload SBOM evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: toca-mcp-sbom-${{ github.sha }}
-          path: toca-mcp-sbom.cdx.json
+          name: toca-container-sboms-${{ github.sha }}
+          path: |
+            toca-mcp-sbom.cdx.json
+            toca-ag01-sbom.cdx.json
           if-no-files-found: error
           retention-days: 30
 

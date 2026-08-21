@@ -43,7 +43,7 @@ const INJECTION_SIGNALS: readonly {
   {
     id: 'BYPASS_POLICY',
     pattern:
-      /(?:bypass|disable|circumvent)\s+(?:the\s+)?(?:policy|approval|authorization|safety|governance)/i,
+      /(?:bypass|disable|circumvent)\s+(?:the\s+)?(?:policy|approval|authorization|privacy|safety|governance)/i,
     strong: true,
   },
   {
