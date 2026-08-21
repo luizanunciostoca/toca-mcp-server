@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createTrustedServiceExecutionIdentity, type ExecutionIdentity } from '../src/core/identity.js';
+import {
+  createTrustedServiceExecutionIdentity,
+  type ExecutionIdentity,
+} from '../src/core/identity.js';
 import type { CrmScope } from '../src/crm/crm-records.js';
 import type {
   CrmSalesStore,
@@ -306,20 +309,23 @@ describe('durable follow-up final composition', () => {
     ['consent revoked before due_at', 'EMAIL' as const, 'CONSENT_REVOKED'],
     ['unsubscribe before due_at', 'EMAIL' as const, 'EMAIL_UNSUBSCRIBED'],
     ['WhatsApp suppressed before due_at', 'WHATSAPP' as const, 'WHATSAPP_SUPPRESSED'],
-  ])('%s is blocked by fresh send-time privacy without provider send', async (_name, channel, code) => {
-    const test = fixture();
-    const runtime = test.createCoordinator();
-    await runtime.schedule(scheduleInput(channel, test.identity));
+  ])(
+    '%s is blocked by fresh send-time privacy without provider send',
+    async (_name, channel, code) => {
+      const test = fixture();
+      const runtime = test.createCoordinator();
+      await runtime.schedule(scheduleInput(channel, test.identity));
 
-    test.core.privacyBlockCode = code;
-    await runtime.tick(10, DUE_AT);
+      test.core.privacyBlockCode = code;
+      await runtime.tick(10, DUE_AT);
 
-    expect(test.core.executions).toHaveLength(1);
-    expect(test.core.providerCalls).toHaveLength(0);
-    expect(test.deadLetters.records).toHaveLength(0);
-    expect(test.sales.activities).toHaveLength(1);
-    expect(test.sales.activities[0]?.outcome).toBe(`BLOCKED:${code}`);
-  });
+      expect(test.core.executions).toHaveLength(1);
+      expect(test.core.providerCalls).toHaveLength(0);
+      expect(test.deadLetters.records).toHaveLength(0);
+      expect(test.sales.activities).toHaveLength(1);
+      expect(test.sales.activities[0]?.outcome).toBe(`BLOCKED:${code}`);
+    },
+  );
 
   it('provider temporarily unavailable retries through Workflow timer and recovers after runtime restart', async () => {
     const test = fixture();
