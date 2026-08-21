@@ -66,12 +66,16 @@
       "providerRuntimesPresent": true,
       "providerVerified": false,
       "productionVerified": false,
-      "driveOperationalCapabilityRowsPresent": false,
+      "driveOperationalChannelCapabilityRowsPresent": false,
+      "existingCanonicalNurtureAuthorities": [
+        "sales.followup.create",
+        "sales.followup.schedule"
+      ],
       "blockers": [
         "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
-        "TOCA_OS capability catalog currently has no matching operational whatsapp.*, email.* or nurture.* rows; observed whatsapp/email matches are copy-generation capabilities only and nurture has no match",
+        "TOCA_OS capability catalog currently has no matching operational whatsapp.* or email.* rows; observed whatsapp/email matches are copy-generation capabilities only",
+        "nurture.sequence.* must not be created by default because TOCA_OS already has IMPLEMENTED R10 sales.followup.create and sales.followup.schedule authorities; compose durable nurture over those first",
         "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
-        "durable nurture must reuse canonical NextAction/Workflow/Scheduler authorities",
         "Drive catalog and runtime manifest must converge without inventing capabilities merely to make a checklist green"
       ]
     },
@@ -104,8 +108,9 @@
   "integrationGate": {
     "candidateFreezeBlockedBy": [
       "front A credential-first runtime composition gap",
-      "front B outbound/nurture runtime exposure/composition gap",
-      "front B TOCA_OS operational capability catalog drift"
+      "front B outbound runtime exposure/composition gap",
+      "front B TOCA_OS operational channel capability catalog drift",
+      "front B nurture manifest must converge on existing canonical R10 followup authorities"
     ],
     "requiredSequenceAfterCodeConvergence": [
       "freeze exact candidate SHA",
