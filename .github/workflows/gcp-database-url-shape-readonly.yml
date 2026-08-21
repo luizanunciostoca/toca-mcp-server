@@ -1,0 +1,53 @@
+name: GCP Database URL Shape Read-Only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-database-url-shape-readonly.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  DATABASE_SECRET_ID: toca-database-url
+
+jobs:
+  inspect:
+    name: Read sanitized production database URL shape
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Parse URL without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_DATABASE_URL="$(gcloud secrets versions access latest --secret "$DATABASE_SECRET_ID" --project "$PROJECT_ID")"
+          RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module <<'NODE'
+          const url = new URL(process.env.RAW_DATABASE_URL);
+          console.log(JSON.stringify({
+            protocol: url.protocol,
+            hostname: url.hostname,
+            port: url.port || null,
+            pathname: url.pathname,
+            queryKeys: [...url.searchParams.keys()].sort(),
+            hasUsername: Boolean(url.username),
+            hasPassword: Boolean(url.password),
+          }));
+          NODE
+          unset RAW_DATABASE_URL
+          echo 'DATABASE_URL_SHAPE_READ_ONLY=true'
