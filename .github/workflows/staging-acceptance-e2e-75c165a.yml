@@ -633,7 +633,7 @@ jobs:
               --arg requestedVersion "$version" \
               --arg versionState "$version_state" \
               --arg status "$status" \
-              '{label:$label,secretNameSha256:($secretNameSha256|select(length>0)),requestedVersion:($requestedVersion|select(length>0)),versionState:($versionState|select(length>0)),status:$status,payloadAccessed:false}' \
+              '{label:$label,secretNameSha256:($secretNameSha256|if length>0 then . else null end),requestedVersion:($requestedVersion|if length>0 then . else null end),versionState:($versionState|if length>0 then . else null end),status:$status,payloadAccessed:false}' \
               >> "$EVIDENCE_DIR/provider-secret-metadata.ndjson"
           }
           inspect_secret meta_access_token "$GCP_META_ACCESS_TOKEN_SECRET" "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
@@ -649,7 +649,7 @@ jobs:
             schemaVersion:"toca.staging.provider-secret-metadata.v1",
             secrets: .,
             payloadAccessed: false,
-            allMetadataVerified: all(.[]; .status == "METADATA_VERIFIED")
+            allMetadataVerified: (length > 0 and all(.[]; .status == "METADATA_VERIFIED"))
           }' "$EVIDENCE_DIR/provider-secret-metadata.ndjson" > "$EVIDENCE_DIR/provider-secret-metadata.json"
           jq -e '.payloadAccessed == false' "$EVIDENCE_DIR/provider-secret-metadata.json" >/dev/null
           echo 'STAGING_PROVIDER_SECRET_METADATA=CAPTURED'
