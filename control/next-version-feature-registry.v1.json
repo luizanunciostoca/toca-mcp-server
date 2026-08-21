@@ -27,7 +27,8 @@
     "noSecondAg01": true,
     "noSecondOmnichannel": true,
     "commercialConversationMessageAuthority": "canonical CRM ConversationRecord/MessageRecord",
-    "runtimeCompositionAuthority": "existing src/server.ts + src/http.ts composition roots"
+    "runtimeCompositionAuthority": "existing src/server.ts + src/http.ts composition roots",
+    "driveIsCanonicalBusinessCatalog": true
   },
   "currentMigrations": [
     "022_meta_ads_geo_demand_intelligence.sql",
@@ -61,14 +62,17 @@
       ]
     },
     "B_OMNICHANNEL_OUTBOUND_NURTURE": {
-      "state": "BLOCKED_RUNTIME_COMPOSITION",
+      "state": "BLOCKED_RUNTIME_AND_CANONICAL_CATALOG",
       "providerRuntimesPresent": true,
       "providerVerified": false,
       "productionVerified": false,
+      "driveOperationalCapabilityRowsPresent": false,
       "blockers": [
         "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
+        "TOCA_OS capability catalog currently has no matching operational whatsapp.*, email.* or nurture.* rows; observed whatsapp/email matches are copy-generation capabilities only and nurture has no match",
         "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
-        "durable nurture must reuse canonical NextAction/Workflow/Scheduler authorities"
+        "durable nurture must reuse canonical NextAction/Workflow/Scheduler authorities",
+        "Drive catalog and runtime manifest must converge without inventing capabilities merely to make a checklist green"
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
@@ -93,13 +97,15 @@
       "legacyPrMergeAllowed": false,
       "replacementBranch": "coord/final-convergence-20260820",
       "driveGoogleAdsCatalogReconciled": true,
+      "driveOmnichannelCatalogReconciled": false,
       "finalCloseoutAuthorized": false
     }
   },
   "integrationGate": {
     "candidateFreezeBlockedBy": [
       "front A credential-first runtime composition gap",
-      "front B outbound/nurture runtime exposure/composition gap"
+      "front B outbound/nurture runtime exposure/composition gap",
+      "front B TOCA_OS operational capability catalog drift"
     ],
     "requiredSequenceAfterCodeConvergence": [
       "freeze exact candidate SHA",
