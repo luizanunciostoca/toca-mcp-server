@@ -10,6 +10,7 @@ on:
         options:
           - reconcile-publication-assets-bucket
           - optimize-cloud-sql-cost
+          - grant-staging-verification-readers
       expected_policy_sha256:
         description: SHA-256 of infra/control-plane/policy.json
         required: true
@@ -31,6 +32,10 @@ env:
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
   CLOUD_SQL_INSTANCE: toca-mcp-db
+  STAGING_GCP_PROJECT_ID: toca-mcp-next-staging
+  STAGING_GCP_PROJECT_NUMBER: '729069789107'
+  STAGING_DEPLOYER_SERVICE_ACCOUNT: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  STAGING_CLOUD_SQL_INSTANCE: toca-mcp-next-staging-db
 
 jobs:
   infrastructure:
@@ -52,7 +57,7 @@ jobs:
           set -euo pipefail
           ACTUAL_POLICY_SHA256="$(sha256sum infra/control-plane/policy.json | awk '{print $1}')"
           test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
-          jq -e '.version == 9' infra/control-plane/policy.json >/dev/null
+          jq -e '.version == 10' infra/control-plane/policy.json >/dev/null
           jq -e '.projectId == "toca-mcp-production"' infra/control-plane/policy.json >/dev/null
           jq -e '.adminServiceAccount == "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com"' infra/control-plane/policy.json >/dev/null
           jq -e '.forbidden.projectOwner == true and .forbidden.projectEditor == true and .forbidden.serviceAccountKeys == true and .forbidden.bucketDelete == true and .forbidden.arbitraryGcloud == true and .forbidden.runtimePrivilegeEscalation == true and .forbidden.publicBucketIam == true and .forbidden.perContentSchedulerJobs == true and .forbidden.legacyHeartbeatRecreation == true and .forbidden.alwaysOnSchedulerPolling == true and .forbidden.unboundedCloudRunScaling == true and .forbidden.deployAsSchedulingTransport == true' infra/control-plane/policy.json >/dev/null
@@ -63,6 +68,24 @@ jobs:
               jq -e '.allowedOperations["reconcile-publication-assets-bucket"].publicRead == false' infra/control-plane/policy.json >/dev/null
               jq -e '.allowedOperations["reconcile-publication-assets-bucket"].deliveryMode == "signed-url"' infra/control-plane/policy.json >/dev/null
               jq -e '.allowedOperations["reconcile-publication-assets-bucket"].runtimeRoles == ["roles/storage.objectCreator", "roles/storage.objectViewer"]' infra/control-plane/policy.json >/dev/null
+              ;;
+            grant-staging-verification-readers)
+              jq -e '
+                .allowedOperations["grant-staging-verification-readers"] as $op |
+                $op.resourceType == "gcp-project-iam" and
+                $op.projectId == "toca-mcp-next-staging" and
+                $op.projectNumber == "729069789107" and
+                $op.principal == "serviceAccount:toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com" and
+                $op.allowedRoles == ["roles/cloudsql.viewer", "roles/monitoring.viewer"] and
+                $op.verification.cloudSqlBackupRead == true and
+                $op.verification.monitoringConfigurationRead == true and
+                $op.forbid.productionMutation == true and
+                $op.forbid.providerMutation == true and
+                $op.forbid.destructiveOperations == true and
+                $op.forbid.projectOwner == true and
+                $op.forbid.projectEditor == true and
+                $op.forbid.serviceAccountKeys == true
+              ' infra/control-plane/policy.json >/dev/null
               ;;
             optimize-cloud-sql-cost)
               jq -e '
@@ -141,6 +164,98 @@ jobs:
           service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Grant staging verification read-only roles
+        if: inputs.operation == 'grant-staging-verification-readers'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$STAGING_GCP_PROJECT_ID" != "$GCP_PROJECT_ID"
+          test "$STAGING_GCP_PROJECT_NUMBER" != '990081828836'
+          ACTUAL_NUMBER="$(gcloud projects describe "$STAGING_GCP_PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$STAGING_GCP_PROJECT_NUMBER"
+          MEMBER="serviceAccount:${STAGING_DEPLOYER_SERVICE_ACCOUNT}"
+          for role in roles/cloudsql.viewer roles/monitoring.viewer; do
+            gcloud projects add-iam-policy-binding "$STAGING_GCP_PROJECT_ID" \
+              --member="$MEMBER" \
+              --role="$role" \
+              --condition=None \
+              --quiet
+          done
+          echo 'STAGING_VERIFICATION_READERS_RECONCILED=1'
+
+      - name: Verify staging verification read-only roles
+        if: inputs.operation == 'grant-staging-verification-readers'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging-verification-reader-evidence
+          MEMBER="serviceAccount:${STAGING_DEPLOYER_SERVICE_ACCOUNT}"
+          gcloud projects get-iam-policy "$STAGING_GCP_PROJECT_ID" --format=json \
+            > staging-verification-reader-evidence/staging-iam.json
+          for role in roles/cloudsql.viewer roles/monitoring.viewer; do
+            jq -e --arg role "$role" --arg member "$MEMBER" \
+              'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' \
+              staging-verification-reader-evidence/staging-iam.json >/dev/null
+          done
+
+          gcloud sql backups list \
+            --instance "$STAGING_CLOUD_SQL_INSTANCE" \
+            --project "$STAGING_GCP_PROJECT_ID" \
+            --limit 20 \
+            --format=json \
+            > staging-verification-reader-evidence/cloudsql-backups.json
+          jq -e '[.[] | select(.status == "SUCCESSFUL")] | length > 0' \
+            staging-verification-reader-evidence/cloudsql-backups.json >/dev/null
+
+          TOKEN="$(gcloud auth print-access-token)"
+          POLICIES_HTTP="$(curl --silent --show-error \
+            --output staging-verification-reader-evidence/monitoring-alert-policies.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/projects/${STAGING_GCP_PROJECT_ID}/alertPolicies?pageSize=100")"
+          CHANNELS_HTTP="$(curl --silent --show-error \
+            --output staging-verification-reader-evidence/monitoring-notification-channels.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/projects/${STAGING_GCP_PROJECT_ID}/notificationChannels?pageSize=100")"
+          unset TOKEN
+          test "$POLICIES_HTTP" = 200
+          test "$CHANNELS_HTTP" = 200
+
+          jq -n \
+            --arg operation 'grant-staging-verification-readers' \
+            --arg targetProject "$STAGING_GCP_PROJECT_ID" \
+            --arg targetProjectNumber "$STAGING_GCP_PROJECT_NUMBER" \
+            --arg principal "$MEMBER" \
+            --argjson successfulBackups "$(jq '[.[] | select(.status == "SUCCESSFUL")] | length' staging-verification-reader-evidence/cloudsql-backups.json)" \
+            --argjson policyCount "$(jq '(.alertPolicies // []) | length' staging-verification-reader-evidence/monitoring-alert-policies.json)" \
+            --argjson channelCount "$(jq '(.notificationChannels // []) | length' staging-verification-reader-evidence/monitoring-notification-channels.json)" \
+            '{
+              schemaVersion:"toca.staging.verification-readers.v1",
+              operation:$operation,
+              targetProject:$targetProject,
+              targetProjectNumber:$targetProjectNumber,
+              principal:$principal,
+              roles:["roles/cloudsql.viewer","roles/monitoring.viewer"],
+              successfulBackupCount:$successfulBackups,
+              alertPolicyCount:$policyCount,
+              notificationChannelCount:$channelCount,
+              productionMutation:false,
+              providerMutation:false,
+              destructiveOperation:false,
+              result:"PASS"
+            }' > staging-verification-reader-evidence/manifest.json
+          echo 'STAGING_VERIFICATION_READERS=VERIFIED'
+
+      - name: Upload staging verification reader evidence
+        if: inputs.operation == 'grant-staging-verification-readers'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-verification-readers-${{ github.run_id }}
+          path: staging-verification-reader-evidence
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Install gcloud beta component
         if: inputs.operation == 'optimize-cloud-sql-cost'
