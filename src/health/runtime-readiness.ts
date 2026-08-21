@@ -101,8 +101,11 @@ export function createRuntimeReadinessChecks(
       }>(
         `select
            coalesce(
-             extract(epoch from (now() - min(available_at)))
-               filter (where status in ('PENDING', 'FAILED_RETRYABLE')),
+             extract(
+               epoch from (
+                 now() - (min(available_at) filter (where status in ('PENDING', 'FAILED_RETRYABLE')))
+               )
+             ),
              0
            ) as oldest_pending_age_seconds,
            count(*) filter (where status = 'DEAD_LETTER') as dead_letter_count
