@@ -75,7 +75,9 @@ This resolves the historical Google Ads catalog/routing drift recorded by the ol
 
 A separate Omnichannel drift remains: the code manifest defines operational `whatsapp.*` and `email.*` capability IDs, but the current TOCA_OS CAPABILITIES sheet has no matching operational rows. Searches for WhatsApp/Email currently resolve only copy-generation capabilities. Because TOCA_OS is the canonical business catalog, Front B must reconcile the intended operational channel capability surface with Drive while it completes runtime composition.
 
-For nurture, the reconciliation result is different: TOCA_OS already contains `sales.followup.create` and `sales.followup.schedule` in R10 as `IMPLEMENTED` DB-bound authorities. Therefore `nurture.sequence.*` must not be promoted into a parallel public capability family by default. Durable nurture should first be composed over those existing follow-up authorities plus the existing Workflow/Scheduler/NextAction state; only a genuinely uncovered semantic contract could justify an additional canonical ID.
+For nurture, TOCA_OS already contains `sales.followup.create` and `sales.followup.schedule` in R10 as `IMPLEMENTED` DB-bound authorities. These cover creation/scheduling of follow-up state, while the source-only `nurture.sequence.*` contracts also model sequence definition, enrollment, pause/version and outcome semantics. Front B must therefore reuse the R10 follow-up authorities and existing Workflow timers first, then justify only genuinely uncovered sequence semantics; it must not create a parallel scheduler or public capability family merely for catalog completeness.
+
+A route-ownership drift is also confirmed. TOCA_OS `ROUTING_REGISTRY` defines R10 as `COMERCIAL_PARcerias` for proposals/sponsorships/partnership negotiations, and `src/governance/route-catalog.ts` mirrors `COMERCIAL_PARCERIAS`. However the R10 capability family in both TOCA_OS and `src/governance/capability-ids.ts` is much broader and includes lead, opportunity, pipeline, follow-up and reporting operations. The existing R21 governance-drift engine is the correct reconciliation mechanism. No R33/new route is authorized; the ownership mismatch remains pending a canonical reconciliation decision rather than an arbitrary code-side rewrite.
 
 ## Active convergence blockers
 
@@ -91,7 +93,7 @@ Live Secret Manager/IAM/provider evidence and real Google Ads provider read/writ
 
 Email and WhatsApp provider engines exist and contain strong pre-send Privacy/readback/retry/idempotency behavior. However the current omnichannel capability manifest still marks WhatsApp, Email and Nurture capabilities `SPECIFIED`, `runtimeExposed=false`, and `productionExecutionAllowed=false`.
 
-The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path. WhatsApp/Email operational capability IDs must be reconciled to TOCA_OS. Durable nurture must reuse `sales.followup.create`, `sales.followup.schedule`, `NextActionRecord`, Workflow and Scheduler rather than introducing a second sequence engine. No second Omnichannel or scheduler is permitted.
+The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path. WhatsApp/Email operational capability IDs must be reconciled to TOCA_OS. Durable nurture must reuse `sales.followup.create`, `sales.followup.schedule`, `NextActionRecord`, Workflow and Scheduler, and any additional sequence contracts must be demonstrated as semantic gaps rather than a second sequence engine. R10 route ownership must be reconciled through R21 before candidate freeze. No second Omnichannel or scheduler is permitted.
 
 ### C — Platform Readiness
 
@@ -101,8 +103,8 @@ Actual GitHub Environment/GCP values have not yet been proven by this coordinati
 
 ### D — Governance / Closeout prep
 
-This branch replaces obsolete #17 coordination content with live-state artifacts only. Google Ads catalog drift is reconciled; operational Omnichannel channel catalog drift is not. Nurture has existing canonical R10 follow-up authorities and should converge on them. Final closeout remains prohibited until runtime/catalog convergence plus production and reliability evidence exist.
+This branch replaces obsolete #17 coordination content with live-state artifacts only. Google Ads catalog drift is reconciled; operational Omnichannel channel catalog drift is not; R10 route ownership is formally classified as unresolved governance drift. Final closeout remains prohibited until runtime/catalog/route convergence plus production and reliability evidence exist.
 
 ## Freeze rule
 
-Do not freeze a candidate SHA while A or B has unresolved code-composition or canonical-catalog blockers. After both converge and exact-head CI is green, re-read `main`, verify migration sequence and shared hotspots, then freeze exactly one candidate SHA for staging.
+Do not freeze a candidate SHA while A or B has unresolved code-composition, canonical-catalog or route-ownership blockers. After both converge and exact-head CI is green, re-read `main`, verify migration sequence and shared hotspots, then freeze exactly one candidate SHA for staging.
