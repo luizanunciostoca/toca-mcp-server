@@ -7,26 +7,64 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   inspect:
-    name: Read-only hosted environment context keys
+    name: Read-only hosted admin credential presence
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 5
     steps:
-      - name: Enumerate secret and variable names only
+      - name: Probe explicit secret names without values
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          VARS_JSON: ${{ toJSON(vars) }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          GCP_CREDENTIALS_JSON: ${{ secrets.GCP_CREDENTIALS_JSON }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_INFRA_ADMIN_CREDENTIALS: ${{ secrets.GCP_INFRA_ADMIN_CREDENTIALS }}
+          GCP_INFRA_ADMIN_CREDENTIALS_JSON: ${{ secrets.GCP_INFRA_ADMIN_CREDENTIALS_JSON }}
+          GCP_INFRA_ADMIN_KEY: ${{ secrets.GCP_INFRA_ADMIN_KEY }}
+          GCP_ADMIN_KEY: ${{ secrets.GCP_ADMIN_KEY }}
+          GCP_ADMIN_CREDENTIALS: ${{ secrets.GCP_ADMIN_CREDENTIALS }}
+          GOOGLE_CLOUD_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_CREDENTIALS }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          GH_ADMIN_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+          GITHUB_ADMIN_TOKEN: ${{ secrets.GITHUB_ADMIN_TOKEN }}
+          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ADMIN_GITHUB_TOKEN: ${{ secrets.ADMIN_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          echo 'AVAILABLE_SECRET_KEYS_BEGIN'
-          printf '%s' "$SECRETS_JSON" | jq -r 'keys[]' | sed 's/^/SECRET_NAME=/'
-          echo 'AVAILABLE_SECRET_KEYS_END'
-          echo 'AVAILABLE_VARIABLE_KEYS_BEGIN'
-          printf '%s' "$VARS_JSON" | jq -r 'keys[]' | sed 's/^/VARIABLE_NAME=/'
-          echo 'AVAILABLE_VARIABLE_KEYS_END'
+          check() {
+            local name="$1"
+            local value="$2"
+            if [ -n "$value" ]; then
+              printf '%s_PRESENT=YES\n' "$name"
+            else
+              printf '%s_PRESENT=NO\n' "$name"
+            fi
+          }
+          check GCP_CREDENTIALS "$GCP_CREDENTIALS"
+          check GCP_CREDENTIALS_JSON "$GCP_CREDENTIALS_JSON"
+          check GOOGLE_CREDENTIALS "$GOOGLE_CREDENTIALS"
+          check GOOGLE_APPLICATION_CREDENTIALS_JSON "$GOOGLE_APPLICATION_CREDENTIALS_JSON"
+          check GCP_SERVICE_ACCOUNT_KEY "$GCP_SERVICE_ACCOUNT_KEY"
+          check GCP_SA_KEY "$GCP_SA_KEY"
+          check GCP_INFRA_ADMIN_CREDENTIALS "$GCP_INFRA_ADMIN_CREDENTIALS"
+          check GCP_INFRA_ADMIN_CREDENTIALS_JSON "$GCP_INFRA_ADMIN_CREDENTIALS_JSON"
+          check GCP_INFRA_ADMIN_KEY "$GCP_INFRA_ADMIN_KEY"
+          check GCP_ADMIN_KEY "$GCP_ADMIN_KEY"
+          check GCP_ADMIN_CREDENTIALS "$GCP_ADMIN_CREDENTIALS"
+          check GOOGLE_CLOUD_CREDENTIALS "$GOOGLE_CLOUD_CREDENTIALS"
+          check GOOGLE_SERVICE_ACCOUNT_KEY "$GOOGLE_SERVICE_ACCOUNT_KEY"
+          check GH_ADMIN_TOKEN "$GH_ADMIN_TOKEN"
+          check GITHUB_ADMIN_TOKEN "$GITHUB_ADMIN_TOKEN"
+          check REPO_ADMIN_TOKEN "$REPO_ADMIN_TOKEN"
+          check GITHUB_PAT "$GITHUB_PAT"
+          check GH_PAT "$GH_PAT"
+          check ADMIN_GITHUB_TOKEN "$ADMIN_GITHUB_TOKEN"
           echo 'NO_SECRET_VALUES_PRINTED=true'
