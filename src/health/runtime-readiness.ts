@@ -161,14 +161,14 @@ export function createRuntimeReadinessChecks(
       ]);
       if (booleanFlag(env.AG01_MODEL_ENABLED, false)) requireProviderVerified(env, 'AG01_MODEL');
     }),
-    namedCheck('meta', async () => {
+    namedCheck('meta', () => {
       if (!metaRequired(options.config, env)) return;
       requireProviderVerified(env, 'META');
       if (options.config.META_ENABLED) {
         requireText(options.config.META_APP_ID, 'READINESS_META_APP_ID_REQUIRED');
       }
     }),
-    namedCheck('whatsapp', async () => {
+    namedCheck('whatsapp', () => {
       if (!whatsAppRequired(env)) return;
       requireProviderVerified(env, 'WHATSAPP');
       requireExact(
@@ -181,7 +181,7 @@ export function createRuntimeReadinessChecks(
       requireText(env.WHATSAPP_PHONE_NUMBER_ID, 'READINESS_WHATSAPP_PHONE_NUMBER_ID_REQUIRED');
       requireText(env.WHATSAPP_BINDING_ID, 'READINESS_WHATSAPP_BINDING_ID_REQUIRED');
     }),
-    namedCheck('email', async () => {
+    namedCheck('email', () => {
       if (!booleanFlag(env.EMAIL_SENDGRID_ENABLED, false)) return;
       requireProviderVerified(env, 'EMAIL_SENDGRID');
       requireExact(
@@ -193,14 +193,14 @@ export function createRuntimeReadinessChecks(
       requireText(env.EMAIL_SENDGRID_SENDING_DOMAIN, 'READINESS_EMAIL_SENDING_DOMAIN_REQUIRED');
       requireText(env.EMAIL_SENDGRID_FROM_EMAIL, 'READINESS_EMAIL_FROM_REQUIRED');
     }),
-    namedCheck('google_ads', async () => {
+    namedCheck('google_ads', () => {
       if (options.config.GOOGLE_ADS_PHASE === 'OFF') return;
       requireProviderVerified(env, 'GOOGLE_ADS');
     }),
-    namedCheck('provider_credentials', async () => {
+    namedCheck('provider_credentials', () => {
       assertProviderCredentials(options.config, env);
     }),
-    namedCheck('critical_configuration', async () => {
+    namedCheck('critical_configuration', () => {
       booleanFlag(env.TOCA_PLATFORM_KILL_SWITCH, false);
       requireText(options.config.DATABASE_URL, 'READINESS_DATABASE_URL_REQUIRED');
       if (options.config.NODE_ENV !== 'production') return;
@@ -222,8 +222,13 @@ export function createRuntimeReadinessChecks(
   ];
 }
 
-function namedCheck(name: string, check: () => Promise<void>): ReadinessCheck {
-  return { name, check };
+function namedCheck(name: string, check: () => void | Promise<void>): ReadinessCheck {
+  return {
+    name,
+    check: async () => {
+      await check();
+    },
+  };
 }
 
 function requiredPool(pool: pg.Pool | undefined): pg.Pool {
