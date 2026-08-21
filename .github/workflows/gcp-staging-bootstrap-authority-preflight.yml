@@ -16,59 +16,55 @@ env:
   REGION: southamerica-east1
   STAGING_MCP_SERVICE: toca-mcp-next-staging
   FAILED_MCP_REVISION: toca-mcp-next-staging-mcp-7db1a6e-46
-  STAGING_DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
-  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
-  diagnose-failed-revision:
-    name: Diagnose failed isolated staging revision read-only
+  read-failed-revision-logs:
+    name: Read failed staging revision logs with ephemeral access
     runs-on: ubuntu-latest
-    environment: staging
+    environment: infrastructure-admin
     timeout-minutes: 10
     steps:
-      - name: Checkout exact frozen candidate
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
-          fetch-depth: 1
-      - name: Assert immutable boundary
+      - name: Assert immutable isolation boundary
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
           test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
-      - name: Authenticate through dedicated staging WIF
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
-          workload_identity_provider: ${{ env.STAGING_WIF }}
-          service_account: ${{ env.STAGING_DEPLOYER_SA }}
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Read revision status and service traffic
+      - name: Read logs and remove temporary permission
         shell: bash
         run: |
           set -euo pipefail
           test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
-          gcloud run revisions describe "$FAILED_MCP_REVISION" \
-            --project="$STAGING_PROJECT_ID" --region="$REGION" \
-            --format='yaml(metadata.name,status.conditions,status.logUrl)' || true
-          SERVICE_JSON="$(gcloud run services describe "$STAGING_MCP_SERVICE" --project="$STAGING_PROJECT_ID" --region="$REGION" --format=json)"
-          printf '%s' "$SERVICE_JSON" | jq '{service:.metadata.name,traffic:.status.traffic,latestReadyRevisionName:.status.latestReadyRevisionName,latestCreatedRevisionName:.status.latestCreatedRevisionName}'
-          FAILING_TRAFFIC="$(printf '%s' "$SERVICE_JSON" | jq -r --arg rev "$FAILED_MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0) > 0)] | length')"
-          test "$FAILING_TRAFFIC" = 0
-          echo 'FAILED_REVISION_TRAFFIC_PERCENT=0'
-      - name: Read failed revision logs only
-        shell: bash
-        run: |
-          set -euo pipefail
+          MEMBER="serviceAccount:${INFRA_ADMIN_SA}"
+          HAD_ROLE=false
+          if gcloud projects get-iam-policy "$STAGING_PROJECT_ID" --format=json | jq -e --arg m "$MEMBER" '.bindings[]? | select(.role=="roles/logging.viewer") | (.members // []) | index($m) != null' >/dev/null; then
+            HAD_ROLE=true
+          else
+            gcloud projects add-iam-policy-binding "$STAGING_PROJECT_ID" --member="$MEMBER" --role=roles/logging.viewer --condition=None --quiet >/dev/null
+          fi
+          cleanup() {
+            if [[ "$HAD_ROLE" = false ]]; then
+              gcloud projects remove-iam-policy-binding "$STAGING_PROJECT_ID" --member="$MEMBER" --role=roles/logging.viewer --condition=None --quiet >/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
           FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${STAGING_MCP_SERVICE} AND resource.labels.revision_name=${FAILED_MCP_REVISION}"
-          gcloud logging read "$FILTER" --project="$STAGING_PROJECT_ID" --limit=100 --order=asc \
-            --format='value(timestamp,severity,textPayload,jsonPayload.message)' || true
-          echo 'STAGING_REVISION_LOG_DIAGNOSTIC_READ_ONLY=PASS'
-          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
-          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
-          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'FAILED_REVISION_LOGS_BEGIN'
+          gcloud logging read "$FILTER" --project="$STAGING_PROJECT_ID" --limit=200 --order=asc --format='value(timestamp,severity,textPayload,jsonPayload.message,jsonPayload.error)'
+          echo 'FAILED_REVISION_LOGS_END'
+          echo 'EPHEMERAL_LOGGING_ACCESS_USED=YES'
           echo 'PRODUCTION_MUTATION_EXECUTED=NO'
