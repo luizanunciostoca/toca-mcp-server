@@ -20,6 +20,7 @@ jobs:
   authority-preflight:
     name: Read-only staging bootstrap authority preflight
     runs-on: ubuntu-latest
+    environment: infrastructure-admin
     timeout-minutes: 10
     steps:
       - name: Checkout frozen candidate
