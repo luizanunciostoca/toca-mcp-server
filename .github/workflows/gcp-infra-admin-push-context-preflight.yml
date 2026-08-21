@@ -41,10 +41,13 @@ jobs:
         shell: bash
         run: |
           set -u -o pipefail
-          if gcloud auth print-access-token >/dev/null 2>&1; then
+          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
+          echo "GITHUB_REF=$GITHUB_REF"
+          if gcloud auth print-access-token >/dev/null 2>/tmp/token.err; then
             echo 'INFRA_ADMIN_PUSH_TOKEN=PASS'
           else
             echo 'INFRA_ADMIN_PUSH_TOKEN=FAIL'
+            cat /tmp/token.err
             exit 1
           fi
           echo 'PROJECTS_BEGIN'
