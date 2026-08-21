@@ -1,0 +1,48 @@
+name: Staging Promotion Probe 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-promotion-probe-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PROJECT_ID: toca-mcp-next-staging
+  REGION: southamerica-east1
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-32519952730
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-32519952730
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Print normalized non-secret revision facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pair in "MCP:$MCP_REVISION" "WEBHOOK:$WEBHOOK_REVISION"; do
+            KIND="${pair%%:*}"; REV="${pair#*:}"
+            J="$(gcloud run revisions describe "$REV" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+            echo "===${KIND}==="
+            jq -c '{name:.metadata.name,image:.spec.containers[0].image,ready:[.status.conditions[]?|select(.type=="Ready")|.status],env:[.spec.containers[0].env[]?|select(.name=="META_ENABLED" or .name=="WHATSAPP_ENABLED" or .name=="EMAIL_SENDGRID_ENABLED" or .name=="GOOGLE_ADS_PHASE" or .name=="TOCA_RELEASE_SHA")|{name,value}]}' <<<"$J"
+          done
+          echo MUTATION_EXECUTED=NO
