@@ -8,20 +8,78 @@
     "controlPlaneNotificationDeliveryAllowed": true
   },
   "checks": [
-    {"id":"mcp-runtime-readiness","mode":"READ_ONLY","assertion":"authenticated MCP /healthz is liveness-only and /readyz is 200 only when every mandatory dependency is ready","frequencyMinutes":5},
-    {"id":"webhook-runtime-readiness","mode":"READ_ONLY","assertion":"public webhook /healthz and /readyz are healthy while /mcp and OAuth routes return 404","frequencyMinutes":5},
-    {"id":"candidate-before-traffic","mode":"READ_ONLY","assertion":"both tagged candidates pass readiness before any traffic promotion","frequencyMinutes":0},
-    {"id":"audit-integrity","mode":"INTERNAL_CONTRACT","assertion":"audit ledger heads match their latest immutable events","frequencyMinutes":15},
-    {"id":"outbox-lag-dlq","mode":"INTERNAL_CONTRACT","assertion":"Outbox lag is within bound and dead-letter state is zero or incident-classified","frequencyMinutes":5},
-    {"id":"provider-readback-contract","mode":"READ_ONLY","assertion":"only PROVIDER_VERIFIED provider read/readback probes may run and no provider mutation is performed","frequencyMinutes":15},
-    {"id":"alert-firing-delivery-readback","mode":"CONTROL_PLANE","assertion":"a controlled synthetic signal opens the intended Cloud Monitoring incident, reaches configured notification channels, is read back, correlates to the incident runbook, then test resources are cleaned up","frequencyMinutes":0,"activationGate":"RELEASE_VALIDATION"},
-    {"id":"isolated-dr-drill","mode":"ISOLATED_STAGING","assertion":"restore or PITR proof uses staging/isolated resources only and records RPO/RTO, schema, AG-01, workflow, Outbox and provider revalidation results","frequencyMinutes":0,"activationGate":"RELEASE_VALIDATION"}
+    {
+      "id": "mcp-runtime-readiness",
+      "mode": "READ_ONLY",
+      "assertion": "authenticated MCP /healthz is liveness-only and /readyz is 200 only when every mandatory dependency is ready",
+      "frequencyMinutes": 5
+    },
+    {
+      "id": "webhook-runtime-readiness",
+      "mode": "READ_ONLY",
+      "assertion": "public webhook /healthz and /readyz are healthy while /mcp and OAuth routes return 404",
+      "frequencyMinutes": 5
+    },
+    {
+      "id": "candidate-before-traffic",
+      "mode": "READ_ONLY",
+      "assertion": "both tagged candidates pass readiness before any traffic promotion",
+      "frequencyMinutes": 0
+    },
+    {
+      "id": "audit-integrity",
+      "mode": "INTERNAL_CONTRACT",
+      "assertion": "audit ledger heads match their latest immutable events",
+      "frequencyMinutes": 15
+    },
+    {
+      "id": "outbox-lag-dlq",
+      "mode": "INTERNAL_CONTRACT",
+      "assertion": "Outbox lag is within bound and dead-letter state is zero or incident-classified",
+      "frequencyMinutes": 5
+    },
+    {
+      "id": "provider-readback-contract",
+      "mode": "READ_ONLY",
+      "assertion": "only PROVIDER_VERIFIED provider read/readback probes may run and no provider mutation is performed",
+      "frequencyMinutes": 15
+    },
+    {
+      "id": "alert-firing-delivery-readback",
+      "mode": "CONTROL_PLANE",
+      "assertion": "a controlled synthetic signal opens the intended Cloud Monitoring incident, reaches configured notification channels, is read back, correlates to the incident runbook, then test resources are cleaned up",
+      "frequencyMinutes": 0,
+      "activationGate": "RELEASE_VALIDATION"
+    },
+    {
+      "id": "isolated-dr-drill",
+      "mode": "ISOLATED_STAGING",
+      "assertion": "restore or PITR proof uses staging/isolated resources only and records RPO/RTO, schema, AG-01, workflow, Outbox and provider revalidation results",
+      "frequencyMinutes": 0,
+      "activationGate": "RELEASE_VALIDATION"
+    }
   ],
   "providerChecks": [
-    {"id":"whatsapp-provider-read","enabled":false,"activationGate":"WHATSAPP_PROVIDER_VERIFIED"},
-    {"id":"email-provider-read","enabled":false,"activationGate":"EMAIL_SENDGRID_PROVIDER_VERIFIED"},
-    {"id":"google-ads-provider-read","enabled":false,"activationGate":"GOOGLE_ADS_PROVIDER_VERIFIED"},
-    {"id":"meta-provider-read","enabled":false,"activationGate":"META_PROVIDER_VERIFIED"}
+    {
+      "id": "whatsapp-provider-read",
+      "enabled": false,
+      "activationGate": "WHATSAPP_PROVIDER_VERIFIED"
+    },
+    {
+      "id": "email-provider-read",
+      "enabled": false,
+      "activationGate": "EMAIL_SENDGRID_PROVIDER_VERIFIED"
+    },
+    {
+      "id": "google-ads-provider-read",
+      "enabled": false,
+      "activationGate": "GOOGLE_ADS_PROVIDER_VERIFIED"
+    },
+    {
+      "id": "meta-provider-read",
+      "enabled": false,
+      "activationGate": "META_PROVIDER_VERIFIED"
+    }
   ],
   "runbook": "docs/operations/observability-incident-runbook.md"
 }
