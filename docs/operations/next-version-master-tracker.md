@@ -16,9 +16,9 @@ This tracker records coordination state only. It does not promote provider, stag
 ### B — Omnichannel Outbound + Nurture
 
 - State: **BLOCKED**.
-- Authority: existing Email/WhatsApp runtimes, CRM, Privacy, Workflow/Scheduler and TOCA_OS R10.
-- Blocking conditions: capability manifest remains `SPECIFIED` and runtime exposure is forbidden; durable nurture composition is incomplete; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; nurture manifest must converge on existing R10 `sales.followup.*` authorities.
-- Next evidence: exact-head composition PR CI, canonical Drive reconciliation and PostgreSQL/Email gates where applicable.
+- Authority: existing Email/WhatsApp runtimes, CRM, Privacy, Workflow/Scheduler, TOCA_OS R10 and R21 reconciliation.
+- Blocking conditions: capability manifest remains `SPECIFIED` and runtime exposure is forbidden; durable nurture composition is incomplete; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; R10 follow-up authorities must be reused; R10 route ownership is drifted against its broad CRM/Sales capability family.
+- Next evidence: exact-head composition PR CI, canonical Drive/runtime capability reconciliation, R21 route-ownership reconciliation and PostgreSQL/Email gates where applicable.
 
 ### C — Platform Readiness / GCP / SLO / DR
 
@@ -31,15 +31,15 @@ This tracker records coordination state only. It does not promote provider, stag
 
 - State: **IN PROGRESS**.
 - Authority: this replacement branch plus TOCA_OS Drive.
-- Blocking conditions: Google Ads catalog is reconciled; Omnichannel channel catalog is still drifted; nurture mapping is identified; staging/production evidence is absent.
-- Next evidence: exact-head docs CI, Omnichannel Drive reconciliation and later production evidence.
+- Blocking conditions: Google Ads catalog is reconciled; Omnichannel channel catalog is still drifted; nurture semantic mapping is partially identified; R10 route ownership remains an R21 drift; staging/production evidence is absent.
+- Next evidence: exact-head docs CI, Omnichannel capability reconciliation, R10 ownership reconciliation and later production evidence.
 
 ### Candidate freeze
 
 - State: **BLOCKED**.
-- Authority: live `main` after A/B.
-- Blocking condition: A/B are unresolved.
-- Next evidence: one exact candidate SHA after final merges.
+- Authority: live `main` after A/B/D convergence.
+- Blocking condition: A/B code gaps and the R10 canonical ownership drift are unresolved.
+- Next evidence: one exact candidate SHA after final merges and canonical reconciliation.
 
 ### Staging
 
@@ -106,6 +106,16 @@ The coordinator rejects branch-side copies of older composition roots, providers
 
 Current merged migration names are immutable. Numeric gap `027` is intentionally left unused. Do not rename 028–032 to close the gap. Any new migration receives the next safe name only after live-main inspection and must pass real-repository migrations plus a second drift check.
 
+## R10 governance reconciliation
+
+R10 currently has three competing semantic signals:
+
+- TOCA_OS routing metadata: `COMERCIAL_PARcerias`, centered on proposals, sponsorships, partnerships and negotiations;
+- GitHub `ROUTE_CATALOG`: `COMERCIAL_PARCERIAS`, centered on leads, proposals, partnerships, sponsorships and private events;
+- TOCA_OS/GitHub R10 capability family: broad CRM/Sales operations including lead, opportunity, pipeline, follow-up and reporting.
+
+This is a governance `VALUE_MISMATCH`, not authorization to add R33 or silently redefine R10 in code. Use the existing R21 reconciliation lifecycle to establish the canonical ownership first, then make Drive and GitHub converge with evidence.
+
 ## Front A acceptance
 
 Code convergence is reached only when:
@@ -127,11 +137,12 @@ Code convergence is reached only when:
 - existing CRM Conversation/Message is the sole commercial message authority;
 - Privacy is revalidated at execution time;
 - Policy/Approval/identity/idempotency/readback/Audit/Outbox remain canonical;
-- nurture survives restart and reuses `sales.followup.create`, `sales.followup.schedule`, NextAction/Workflow/Scheduler rather than a parallel sequence engine;
+- nurture survives restart and reuses `sales.followup.create`, `sales.followup.schedule`, NextAction/Workflow/Scheduler rather than a parallel scheduler;
+- sequence definition/enrollment/pause/outcome contracts are retained only where they represent semantics not covered by existing R10 follow-up and Workflow contracts;
 - opt-out/suppression before a due follow-up blocks the send;
 - capability lifecycle/runtime contracts match the actual implementation;
 - the intended operational WhatsApp/Email capability set is represented in TOCA_OS or explicitly mapped to already-canonical IDs; no checklist-only capabilities are created;
-- any `nurture.sequence.*` source IDs are removed, internal-only, or justified as genuinely uncovered semantics instead of duplicating canonical R10 follow-up authorities;
+- R10 route ownership is reconciled through R21 without adding a 33rd route;
 - exact-head source/PG/Email gates are green as applicable.
 
 ## Merge protocol
