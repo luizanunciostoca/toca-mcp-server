@@ -64,10 +64,13 @@ jobs:
       DATABASE_URL: postgres://toca:toca-m12-local-only@127.0.0.1:5432/toca_m12
       DATABASE_SSL: 'false'
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -82,7 +85,6 @@ jobs:
       - name: Apply real repository migrations
         run: pnpm migrate
       - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence and tenant Approval isolation E2E
-        # This permanent matrix is the exact-head revalidation trigger for the integrated runtime.
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts

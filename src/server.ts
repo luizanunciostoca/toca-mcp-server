@@ -13,7 +13,9 @@ import type { InstagramCorePublicationRuntime } from './mcp/instagram-publicatio
 import { resolvePaidMediaRuntimeBinding } from './mcp/paid-media-runtime.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
 import { resolveOmnichannelReadbackRuntimeBinding } from './mcp/omnichannel-readback-runtime.js';
+import type { ProviderBindingRef } from './omnichannel/contracts.js';
 import { PostgresOmnichannelProviderEventReadback } from './omnichannel/provider-event-readback.js';
+import { createWhatsAppOutboundComposition } from './omnichannel/whatsapp-outbound-composition.js';
 import { PostgresApprovalStore } from './persistence/postgres-approval-store.js';
 import { PostgresCrmCoreStore } from './persistence/postgres-crm-core-store.js';
 import { PostgresCrmSalesStore } from './persistence/postgres-crm-sales-store.js';
@@ -148,18 +150,20 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     crmSalesRuntimeEnabled: Boolean(pool),
     omnichannelReadbacksEnabled: Boolean(pool),
   });
-  const createMetaClient = () => {
-    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
-      throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
-    }
-    return new MetaApiClient(
+  const createMetaClientForKey = (accessTokenEnvKey: string) =>
+    new MetaApiClient(
       {
         graphBaseUrl: config.META_GRAPH_BASE_URL,
         apiVersion: config.META_GRAPH_API_VERSION,
       },
       secrets,
-      { provider: 'env', key: config.META_ACCESS_TOKEN_ENV_KEY },
+      { provider: 'env', key: accessTokenEnvKey },
     );
+  const createMetaClient = () => {
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+      throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
+    }
+    return createMetaClientForKey(config.META_ACCESS_TOKEN_ENV_KEY);
   };
 
   const instagramScheduler =
@@ -343,6 +347,43 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const crmSales = pool ? new PostgresCrmSalesStore(pool) : undefined;
   const crmSalesReadback = pool ? new PostgresCrmSalesPersistenceReadback(pool) : undefined;
   const omnichannelReadback = pool ? new PostgresOmnichannelProviderEventReadback(pool) : undefined;
+  const workflowStore = pool ? new PostgresWorkflowStore(pool) : undefined;
+  const approvalStore = pool ? new PostgresApprovalStore(pool) : undefined;
+  const auditStore = pool ? new PostgresAuditSink(pool, registry) : undefined;
+  const eventStore = pool ? new PostgresEventRecordStore(pool) : undefined;
+
+  let whatsappOutboundRuntime: ReturnType<typeof createWhatsAppOutboundComposition> | undefined;
+  if (whatsappRuntimeEnabled(env)) {
+    if (!pool || !approvalStore || !omnichannelReadback) {
+      throw new Error('WHATSAPP_OUTBOUND_DATABASE_RUNTIME_REQUIRED');
+    }
+    const accessTokenEnvKey = runtimeText(
+      env.WHATSAPP_ACCESS_TOKEN_ENV_KEY ?? config.META_ACCESS_TOKEN_ENV_KEY,
+      'WHATSAPP_ACCESS_TOKEN_ENV_KEY_REQUIRED',
+    );
+    const bindingState = whatsappBindingState(env.WHATSAPP_BINDING_STATE);
+    whatsappOutboundRuntime = createWhatsAppOutboundComposition({
+      pool,
+      scope: defaultScope,
+      approvalStore,
+      providerEventReadback: omnichannelReadback,
+      metaApi: createMetaClientForKey(accessTokenEnvKey),
+      metaAppId: runtimeText(
+        env.WHATSAPP_META_APP_ID ?? config.META_APP_ID,
+        'WHATSAPP_META_APP_ID_REQUIRED',
+      ),
+      wabaId: runtimeText(env.WHATSAPP_WABA_ID, 'WHATSAPP_WABA_ID_REQUIRED'),
+      phoneNumberId: runtimeText(env.WHATSAPP_PHONE_NUMBER_ID, 'WHATSAPP_PHONE_NUMBER_ID_REQUIRED'),
+      binding: {
+        providerKey: 'META_WHATSAPP_CLOUD',
+        bindingId: runtimeText(env.WHATSAPP_BINDING_ID, 'WHATSAPP_BINDING_ID_REQUIRED'),
+        state: bindingState,
+      },
+      ...(env.WHATSAPP_PURPOSE_ID?.trim() ? { purposeId: env.WHATSAPP_PURPOSE_ID.trim() } : {}),
+      ...(env.WHATSAPP_POLICY_REF?.trim() ? { policyRef: env.WHATSAPP_POLICY_REF.trim() } : {}),
+    });
+  }
+
   const googleAdsTargetAccount =
     googleAds && config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID
       ? config.GOOGLE_ADS_ALLOWED_CUSTOMER_ID.replaceAll('-', '')
@@ -371,13 +412,9 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       ...(googleAdsAccountVerifier ? { googleAdsAccountVerifier } : {}),
       ...(googleAdsTargetAccount ? { googleAdsTargetAccount } : {}),
     }) ??
+    whatsappOutboundRuntime?.(capabilityId) ??
     resolveOmnichannelReadbackRuntimeBinding(capabilityId, omnichannelReadback) ??
     standardRuntimeResolver(capabilityId);
-
-  const workflowStore = pool ? new PostgresWorkflowStore(pool) : undefined;
-  const approvalStore = pool ? new PostgresApprovalStore(pool) : undefined;
-  const auditStore = pool ? new PostgresAuditSink(pool, registry) : undefined;
-  const eventStore = pool ? new PostgresEventRecordStore(pool) : undefined;
 
   options.onRuntimeComposition?.({
     config,
@@ -431,6 +468,29 @@ function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
     config.META_ACCESS_TOKEN_ENV_KEY &&
     config.INSTAGRAM_BUSINESS_ACCOUNT_ID,
   );
+}
+
+function whatsappRuntimeEnabled(env: NodeJS.ProcessEnv): boolean {
+  return env.WHATSAPP_RUNTIME_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+function whatsappBindingState(value: string | undefined): ProviderBindingRef['state'] {
+  const state = runtimeText(value, 'WHATSAPP_BINDING_STATE_REQUIRED');
+  if (
+    state !== 'UNBOUND' &&
+    state !== 'CONNECTED' &&
+    state !== 'INTEGRATION_VALIDATED' &&
+    state !== 'PRODUCTION_VALIDATED'
+  ) {
+    throw new Error('WHATSAPP_BINDING_STATE_INVALID');
+  }
+  return state;
+}
+
+function runtimeText(value: string | undefined, code: string): string {
+  const normalized = value?.trim();
+  if (!normalized) throw new Error(code);
+  return normalized;
 }
 
 function runtimeServiceIdentity(

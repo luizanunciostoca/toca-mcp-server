@@ -1,13 +1,17 @@
 import type pg from 'pg';
 import type { CrmScope } from '../crm/crm-records.js';
+import { createDomainEvent } from '../events/domain-events.js';
+import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
+import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
 import type { EmailDispatchOrchestrationStore } from '../omnichannel/email-orchestrator.js';
-import type {
-  EmailDeliveryState,
-  EmailDispatchRecord,
-  EmailProviderEventRecord,
-  EmailRateLimitDecision,
-  EmailRateLimitPolicy,
-  EmailThreadBinding,
+import {
+  EMAIL_DELIVERY_STATES,
+  type EmailDeliveryState,
+  type EmailDispatchRecord,
+  type EmailProviderEventRecord,
+  type EmailRateLimitDecision,
+  type EmailRateLimitPolicy,
+  type EmailThreadBinding,
 } from '../omnichannel/email-runtime.js';
 
 interface EmailDispatchRow {
@@ -49,8 +53,29 @@ interface RateLimitRow {
   readonly consumed: number;
 }
 
+export interface EmailRuntimeMutationContext {
+  readonly executionId: string;
+  readonly correlationId: string;
+  readonly actorPrincipalId: string;
+  readonly evidence: readonly string[];
+}
+
+export interface PostgresEmailRuntimeStoreOptions {
+  readonly outbox?: TransactionalOutboxWriter;
+  readonly mutationContext?: EmailRuntimeMutationContext;
+}
+
 export class PostgresEmailRuntimeStore implements EmailDispatchOrchestrationStore {
-  constructor(private readonly pool: pg.Pool) {}
+  readonly #outbox: TransactionalOutboxWriter;
+  readonly #mutationContext: EmailRuntimeMutationContext | undefined;
+
+  constructor(
+    private readonly pool: pg.Pool,
+    options: PostgresEmailRuntimeStoreOptions = {},
+  ) {
+    this.#outbox = options.outbox ?? new PostgresTransactionalOutbox(pool);
+    this.#mutationContext = options.mutationContext;
+  }
 
   async findDispatchByIdempotencyKey(
     scope: CrmScope,
@@ -87,40 +112,50 @@ export class PostgresEmailRuntimeStore implements EmailDispatchOrchestrationStor
 
   async saveDispatch(record: EmailDispatchRecord): Promise<void> {
     validateScope(record);
-    await this.pool.query(
-      `insert into email_dispatches (
-         dispatch_id, tenant_id, workspace_id, organization_id, message_id,
-         idempotency_key, provider, provider_message_ref, state, attempt_count,
-         next_retry_at, last_error, created_at, updated_at
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       on conflict (tenant_id, workspace_id, organization_id, idempotency_key)
-       do update set
-         provider_message_ref=excluded.provider_message_ref,
-         state=excluded.state,
-         attempt_count=excluded.attempt_count,
-         next_retry_at=excluded.next_retry_at,
-         last_error=excluded.last_error,
-         updated_at=excluded.updated_at
-       where email_dispatches.dispatch_id=excluded.dispatch_id
-         and email_dispatches.message_id=excluded.message_id
-         and email_dispatches.provider=excluded.provider`,
-      [
-        record.dispatchId,
-        record.tenantId,
-        record.workspaceId,
-        record.organizationId,
-        record.messageId,
-        record.idempotencyKey,
-        record.provider,
-        record.providerMessageRef,
-        record.state,
-        record.attemptCount,
-        record.nextRetryAt,
-        record.lastError,
-        record.createdAt,
-        record.updatedAt,
-      ],
-    );
+    const mutation = this.#mutationContext;
+    if (!mutation) {
+      await upsertDispatch(this.pool, record);
+      return;
+    }
+
+    validateMutationContext(mutation);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await upsertDispatch(client, record);
+      await this.#outbox.enqueue(
+        client,
+        createDomainEvent({
+          tenantId: record.tenantId,
+          workspaceId: record.workspaceId,
+          organizationId: record.organizationId,
+          eventKey: `email.dispatch.${record.state.toLowerCase()}:${record.idempotencyKey}:${record.attemptCount}`,
+          eventType: 'email.dispatch.state_changed',
+          aggregateType: 'EMAIL_TRANSPORT',
+          aggregateId: record.dispatchId,
+          aggregateVersion: dispatchAggregateVersion(record),
+          correlationId: mutation.correlationId,
+          causationId: mutation.executionId,
+          occurredAt: record.updatedAt,
+          payload: {
+            messageId: record.messageId,
+            provider: record.provider,
+            providerMessageRef: record.providerMessageRef,
+            state: record.state,
+            attemptCount: record.attemptCount,
+            nextRetryAt: record.nextRetryAt,
+            lastError: record.lastError,
+          },
+          evidence: mutationEvidence(mutation, record),
+        }),
+      );
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findThreadBindingByInternetMessageIds(
@@ -326,6 +361,74 @@ export class PostgresEmailRuntimeStore implements EmailDispatchOrchestrationStor
   }
 }
 
+async function upsertDispatch(
+  queryable: Pick<pg.Pool, 'query'> | pg.PoolClient,
+  record: EmailDispatchRecord,
+): Promise<void> {
+  await queryable.query(
+    `insert into email_dispatches (
+       dispatch_id, tenant_id, workspace_id, organization_id, message_id,
+       idempotency_key, provider, provider_message_ref, state, attempt_count,
+       next_retry_at, last_error, created_at, updated_at
+     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     on conflict (tenant_id, workspace_id, organization_id, idempotency_key)
+     do update set
+       provider_message_ref=excluded.provider_message_ref,
+       state=excluded.state,
+       attempt_count=excluded.attempt_count,
+       next_retry_at=excluded.next_retry_at,
+       last_error=excluded.last_error,
+       updated_at=excluded.updated_at
+     where email_dispatches.dispatch_id=excluded.dispatch_id
+       and email_dispatches.message_id=excluded.message_id
+       and email_dispatches.provider=excluded.provider`,
+    [
+      record.dispatchId,
+      record.tenantId,
+      record.workspaceId,
+      record.organizationId,
+      record.messageId,
+      record.idempotencyKey,
+      record.provider,
+      record.providerMessageRef,
+      record.state,
+      record.attemptCount,
+      record.nextRetryAt,
+      record.lastError,
+      record.createdAt,
+      record.updatedAt,
+    ],
+  );
+}
+
+function dispatchAggregateVersion(record: EmailDispatchRecord): number {
+  const stateIndex = EMAIL_DELIVERY_STATES.indexOf(record.state);
+  if (stateIndex < 0) throw new Error('EMAIL_DISPATCH_STATE_INVALID');
+  return record.attemptCount * EMAIL_DELIVERY_STATES.length + stateIndex + 1;
+}
+
+function mutationEvidence(
+  mutation: EmailRuntimeMutationContext,
+  record: EmailDispatchRecord,
+): readonly string[] {
+  return [
+    ...mutation.evidence.map((item) => item.trim()).filter(Boolean),
+    `email:dispatch:${record.state.toLowerCase()}`,
+    `email:message:${record.messageId}`,
+    `email:idempotency:${record.idempotencyKey}`,
+    ...(record.providerMessageRef ? [`email:provider-message:${record.providerMessageRef}`] : []),
+  ];
+}
+
+function validateMutationContext(context: EmailRuntimeMutationContext): void {
+  requireText(context.executionId, 'EMAIL_EXECUTION_ID_REQUIRED');
+  requireText(context.correlationId, 'EMAIL_CORRELATION_ID_REQUIRED');
+  requireText(context.actorPrincipalId, 'EMAIL_ACTOR_PRINCIPAL_REQUIRED');
+  if (!context.evidence.some((item) => item.trim())) {
+    throw new Error('EMAIL_OUTBOX_EVIDENCE_REQUIRED');
+  }
+}
+
 function mapDispatch(row: EmailDispatchRow): EmailDispatchRecord {
   return {
     dispatchId: row.dispatch_id,
@@ -363,8 +466,9 @@ function mapThread(row: EmailThreadRow): EmailThreadBinding {
 }
 
 function parseStringArray(value: unknown, code: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string'))
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
     throw new Error(code);
+  }
   return value as readonly string[];
 }
 

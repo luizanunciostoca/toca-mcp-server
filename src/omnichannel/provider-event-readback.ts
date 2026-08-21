@@ -12,6 +12,8 @@ export interface OmnichannelProviderEventReadbackInput extends CrmScope {
 export interface OmnichannelProviderEventReadbackService {
   readEmail(input: OmnichannelProviderEventReadbackInput): Promise<ProviderMessageReadback>;
   readWhatsApp(input: OmnichannelProviderEventReadbackInput): Promise<ProviderMessageReadback>;
+  /** Existing PostgreSQL composition source used by the outbound Email binding. */
+  emailRuntimePool?(): pg.Pool;
 }
 
 interface EmailDispatchRow {
@@ -44,6 +46,10 @@ interface WhatsAppEventRow {
  */
 export class PostgresOmnichannelProviderEventReadback implements OmnichannelProviderEventReadbackService {
   constructor(private readonly pool: pg.Pool) {}
+
+  emailRuntimePool(): pg.Pool {
+    return this.pool;
+  }
 
   async readEmail(input: OmnichannelProviderEventReadbackInput): Promise<ProviderMessageReadback> {
     validateInput(input);

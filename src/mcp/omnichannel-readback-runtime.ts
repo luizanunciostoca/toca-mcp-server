@@ -1,5 +1,7 @@
 import * as z from 'zod/v4';
+import { PostgresEmailCampaignSendRuntime } from '../omnichannel/email-campaign-send-runtime.js';
 import type { OmnichannelProviderEventReadbackService } from '../omnichannel/provider-event-readback.js';
+import { resolveEmailCampaignSendRuntimeBinding } from './email-campaign-send-runtime.js';
 import type {
   CoreCapabilityRuntimeBinding,
   CoreCapabilityRuntimeContext,
@@ -25,6 +27,14 @@ export function resolveOmnichannelReadbackRuntimeBinding(
   service: OmnichannelProviderEventReadbackService | undefined,
 ): CoreCapabilityRuntimeBinding | undefined {
   if (!service) return undefined;
+
+  if (capabilityId === 'email.campaign.send') {
+    const pool = service.emailRuntimePool?.();
+    return resolveEmailCampaignSendRuntimeBinding(
+      capabilityId,
+      pool ? new PostgresEmailCampaignSendRuntime({ pool }) : undefined,
+    );
+  }
 
   switch (capabilityId) {
     case 'email.delivery.readback':
