@@ -66,6 +66,14 @@ jobs:
       - name: Exact-head Quality
         run: |
           set -euo pipefail
+          unset GCP_PROJECT_ID
+          unset GOOGLE_ADS_CUSTOMER_ID
+          unset GOOGLE_ADS_LOGIN_CUSTOMER_ID
+          unset GOOGLE_ADS_ALLOWED_CURRENCY
+          unset GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS
+          unset GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS
+          unset GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS
+          unset GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS
           pnpm install --frozen-lockfile
           pnpm quality
 
@@ -81,6 +89,40 @@ jobs:
             echo 'GOOGLE_ADS_PROVIDER_VERIFIED must remain false until this proof is accepted.' >&2
             exit 1
           }
+
+      - name: Assert provider verification environment is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            GCP_PROJECT_ID
+            GCP_REGION
+            GCP_ARTIFACT_REPOSITORY
+            GCP_WORKLOAD_IDENTITY_PROVIDER
+            GCP_DEPLOY_SERVICE_ACCOUNT
+            GCP_RUNTIME_SERVICE_ACCOUNT
+            GCP_MCP_SERVICE
+            GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET
+            GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION
+            GCP_GOOGLE_ADS_CLIENT_ID_SECRET
+            GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION
+            GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET
+            GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION
+            GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET
+            GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION
+            GOOGLE_ADS_ALLOWED_CURRENCY
+            GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS
+            GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS
+            GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'GOOGLE_ADS_PROVIDER_VERIFY_ENV_MISSING=%s\n' "$(IFS=,; echo "${missing[*]}")" >&2
+            exit 1
+          fi
 
       - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
