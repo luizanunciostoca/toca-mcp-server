@@ -79,6 +79,17 @@ For nurture, TOCA_OS already contains `sales.followup.create` and `sales.followu
 
 A route-ownership drift is also confirmed. TOCA_OS `ROUTING_REGISTRY` defines R10 as `COMERCIAL_PARcerias` for proposals/sponsorships/partnership negotiations, and `src/governance/route-catalog.ts` mirrors `COMERCIAL_PARCERIAS`. However the R10 capability family in both TOCA_OS and `src/governance/capability-ids.ts` is much broader and includes lead, opportunity, pipeline, follow-up and reporting operations. The existing R21 governance-drift engine is the correct reconciliation mechanism. No R33/new route is authorized; the ownership mismatch remains pending a canonical reconciliation decision rather than an arbitrary code-side rewrite.
 
+## Runtime composition reconciliation
+
+The current source tree distinguishes clearly between implemented provider engines and executable canonical capabilities:
+
+- `src/governance/omnichannel-capability-contracts.ts` exists, but `src/governance/index.ts` does not export it and the central capability catalog does not consume it;
+- `src/registry.ts` has no Omnichannel registration option and registers no operational `whatsapp.*`, `email.*` or `nurture.*` tools;
+- `src/server.ts` composes Instagram, Meta Ads, Google Ads, Video and CRM into the central resolver, but does not instantiate Email or WhatsApp outbound engines;
+- `src/http.ts` composes WhatsApp webhook ingress and SendGrid event webhook/readback; `createWhatsAppHttpComposition()` explicitly instantiates `WhatsAppInboundRuntime`, not the outbound runtime.
+
+Therefore existing Email/WhatsApp send engines are implementation assets only. They are not yet evidence that outbound is reachable through the canonical ToolRegistry/Core/AG-01 execution surface.
+
 ## Active convergence blockers
 
 ### A — Provider Onboarding + Google Ads
@@ -91,9 +102,9 @@ Live Secret Manager/IAM/provider evidence and real Google Ads provider read/writ
 
 ### B — Omnichannel Outbound + Nurture
 
-Email and WhatsApp provider engines exist and contain strong pre-send Privacy/readback/retry/idempotency behavior. However the current omnichannel capability manifest still marks WhatsApp, Email and Nurture capabilities `SPECIFIED`, `runtimeExposed=false`, and `productionExecutionAllowed=false`.
+Email and WhatsApp provider engines exist and contain strong pre-send Privacy/readback/retry/idempotency behavior. However the current omnichannel capability manifest still marks WhatsApp, Email and Nurture capabilities `SPECIFIED`, `runtimeExposed=false`, and `productionExecutionAllowed=false`; the contracts are not part of the canonical governance export/catalog path; the central ToolRegistry has no Omnichannel registration; and the production composition roots do not bind outbound dispatch into the runtime resolver.
 
-The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path. WhatsApp/Email operational capability IDs must be reconciled to TOCA_OS. Durable nurture must reuse `sales.followup.create`, `sales.followup.schedule`, `NextActionRecord`, Workflow and Scheduler, and any additional sequence contracts must be demonstrated as semantic gaps rather than a second sequence engine. R10 route ownership must be reconciled through R21 before candidate freeze. No second Omnichannel or scheduler is permitted.
+The remaining work is canonical registration and composition through the existing AG-01/Workflow/Core path, not a parallel execution surface. WhatsApp/Email operational capability IDs must be reconciled to TOCA_OS. Durable nurture must reuse `sales.followup.create`, `sales.followup.schedule`, `NextActionRecord`, Workflow and Scheduler, and any additional sequence contracts must be demonstrated as semantic gaps rather than a second sequence engine. R10 route ownership must be reconciled through R21 before candidate freeze. No second Omnichannel or scheduler is permitted.
 
 ### C — Platform Readiness
 
