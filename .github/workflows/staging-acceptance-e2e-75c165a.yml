@@ -4,7 +4,7 @@ name: Staging Acceptance E2E 75c165a
   pull_request:
     paths:
       - '.github/workflows/staging-acceptance-e2e-75c165a.yml'
-      - '.github/staging-e2e/**'
+      - 'scripts/staging-e2e/**'
 
 permissions:
   contents: read
@@ -190,11 +190,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp "$HARNESS_ROOT/.github/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
-          cp "$HARNESS_ROOT/.github/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
-          cp "$HARNESS_ROOT/.github/staging-e2e/ephemeral-schema.ts" "$CANDIDATE_ROOT/staging-acceptance-ephemeral-schema.ts"
-          cp "$HARNESS_ROOT/.github/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/staging-acceptance-recover-workflows.ts"
-          cp "$HARNESS_ROOT/.github/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/ephemeral-schema.ts" "$CANDIDATE_ROOT/staging-acceptance-ephemeral-schema.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/staging-acceptance-recover-workflows.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
 
       - name: Recover only interrupted synthetic acceptance residue
         working-directory: candidate
@@ -297,7 +297,7 @@ jobs:
           set -euo pipefail
           MCP_CLIENT_DIR="$RUNNER_TEMP/toca-mcp-client"
           mkdir -p "$MCP_CLIENT_DIR"
-          cp "$HARNESS_ROOT/.github/staging-e2e/mcp-smoke.mjs" "$MCP_CLIENT_DIR/mcp-smoke.mjs"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/mcp-smoke.mjs" "$MCP_CLIENT_DIR/mcp-smoke.mjs"
           cd "$MCP_CLIENT_DIR"
           npm init --yes >/dev/null
           npm install --ignore-scripts --no-audit --no-fund --save-exact @modelcontextprotocol/client@2.0.0
