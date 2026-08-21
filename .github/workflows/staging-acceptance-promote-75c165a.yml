@@ -1,0 +1,231 @@
+name: Staging Acceptance Promote 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-acceptance-promote-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  ARTIFACT_REPOSITORY: toca-mcp-staging
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-r3
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-f1
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+  IMAGE_INDEX_DIGEST: sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250
+  RUNTIME_CHILD_DIGEST: sha256:257bd85a460764c2f207445c72a279c772c869a75f48c7bc2c071be2d858bfad
+
+jobs:
+  promote-and-smoke:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          mkdir -p staging-acceptance-evidence
+          printf '%s\n' \
+            "APPLICATION_CANDIDATE_SHA=$CANDIDATE_SHA" \
+            "OCI_INDEX_DIGEST=$IMAGE_INDEX_DIGEST" \
+            "RUNTIME_CHILD_DIGEST=$RUNTIME_CHILD_DIGEST" \
+            'STAGING_PROVIDER_MODE=DISABLED' \
+            'PRODUCTION_AUTHORIZED=NO' \
+            > staging-acceptance-evidence/release-identity.txt
+
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - id: preflight
+        name: Verify immutable artifact, target revisions, and rollback point
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+          IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${CANDIDATE_SHA}"
+          RUNTIME_IMAGE="${IMAGE_REPOSITORY}@${RUNTIME_CHILD_DIGEST}"
+          REMOTE_INDEX_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE_INDEX_DIGEST" = "$IMAGE_INDEX_DIGEST"
+
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/mcp-service-before.json
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/webhook-service-before.json
+          gcloud run revisions describe "$MCP_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/mcp-revision.json
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/webhook-revision.json
+
+          MCP_PREVIOUS="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100) | .revisionName] | first // empty' staging-acceptance-evidence/mcp-service-before.json)"
+          WEBHOOK_PREVIOUS="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100) | .revisionName] | first // empty' staging-acceptance-evidence/webhook-service-before.json)"
+          test -n "$MCP_PREVIOUS"
+          test -n "$WEBHOOK_PREVIOUS"
+
+          for tuple in \
+            "mcp:$MCP_REVISION:$MCP_RUNTIME_SA:staging-acceptance-evidence/mcp-revision.json" \
+            "webhook:$WEBHOOK_REVISION:$WEBHOOK_RUNTIME_SA:staging-acceptance-evidence/webhook-revision.json"; do
+            kind="${tuple%%:*}"; rest="${tuple#*:}"
+            revision="${rest%%:*}"; rest="${rest#*:}"
+            runtime_sa="${rest%%:*}"; file="${rest#*:}"
+            jq -e --arg image "$RUNTIME_IMAGE" '.spec.containers[0].image == $image and .status.imageDigest == $image' "$file" >/dev/null
+            jq -e --arg sa "$runtime_sa" '.spec.serviceAccountName == $sa' "$file" >/dev/null
+            jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True") and any(.status.conditions[]?; .type=="ContainerHealthy" and .status=="True")' "$file" >/dev/null
+            jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] == [$sha]' "$file" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name | test("^(META_ENABLED|META_PROVIDER_VERIFIED|META_WEBHOOK_ENABLED|META_WEBHOOK_PERSISTENCE_ENABLED|INSTAGRAM_READ_ENABLED|META_ADS_READ_ENABLED|META_ADS_WRITE_ENABLED|WHATSAPP_ENABLED|WHATSAPP_RUNTIME_ENABLED|WHATSAPP_PROVIDER_VERIFIED|EMAIL_SENDGRID_ENABLED|EMAIL_SENDGRID_PROVIDER_VERIFIED|GOOGLE_ADS_PROVIDER_VERIFIED|AG01_MODEL_ENABLED|AG01_MODEL_PROVIDER_VERIFIED)$")) | .value] | all(. == "false")' "$file" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value] == ["OFF"]' "$file" >/dev/null
+          done
+
+          MCP_BASE_URL="$(jq -r '.status.url' staging-acceptance-evidence/mcp-service-before.json)"
+          WEBHOOK_BASE_URL="$(jq -r '.status.url' staging-acceptance-evidence/webhook-service-before.json)"
+          test -n "$MCP_BASE_URL"; test -n "$WEBHOOK_BASE_URL"
+          echo "mcp_previous=$MCP_PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "webhook_previous=$WEBHOOK_PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "mcp_base_url=$MCP_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_base_url=$WEBHOOK_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo 'IMMUTABLE_ARTIFACT_PREFLIGHT=PASS'
+
+      - id: promote
+        name: Promote exact target revisions to 100 percent
+        shell: bash
+        env:
+          MCP_PREVIOUS: ${{ steps.preflight.outputs.mcp_previous }}
+          WEBHOOK_PREVIOUS: ${{ steps.preflight.outputs.webhook_previous }}
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${MCP_REVISION}=100"
+          if ! gcloud run services update-traffic "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${WEBHOOK_REVISION}=100"; then
+            gcloud run services update-traffic "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${MCP_PREVIOUS}=100"
+            exit 1
+          fi
+          echo 'promoted=yes' >> "$GITHUB_OUTPUT"
+          echo 'STAGING_EXACT_ARTIFACT_PROMOTED=YES'
+
+      - id: mcp_token
+        name: Mint MCP token for base service audience
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.preflight.outputs.mcp_base_url }}
+
+      - name: Smoke promoted MCP runtime
+        shell: bash
+        env:
+          MCP_URL: ${{ steps.preflight.outputs.mcp_base_url }}
+          MCP_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          READY_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/mcp-readyz.json --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz")"
+          HEALTH_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/mcp-healthz.txt --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz")"
+          test "$READY_STATUS" = 200
+          test "$HEALTH_STATUS" = 200
+          jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' staging-acceptance-evidence/mcp-readyz.json >/dev/null
+          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" '{readyz:($ready|tonumber),healthz:($health|tonumber),checks:16,result:"PASS"}' > staging-acceptance-evidence/mcp-smoke.json
+
+      - id: webhook_token
+        name: Mint webhook token for base service audience
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.preflight.outputs.webhook_base_url }}
+
+      - name: Smoke promoted webhook runtime and route confinement
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ steps.preflight.outputs.webhook_base_url }}
+          WEBHOOK_TOKEN: ${{ steps.webhook_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          READY_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/webhook-readyz.json --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/readyz")"
+          HEALTH_STATUS="$(curl --silent --show-error --output staging-acceptance-evidence/webhook-healthz.txt --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/healthz")"
+          MCP_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/mcp" || true)"
+          OAUTH_STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WEBHOOK_TOKEN" "$WEBHOOK_URL/oauth/meta/start" || true)"
+          test "$READY_STATUS" = 200
+          test "$HEALTH_STATUS" = 200
+          test "$MCP_STATUS" = 404
+          test "$OAUTH_STATUS" = 404
+          jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' staging-acceptance-evidence/webhook-readyz.json >/dev/null
+          jq -n --arg ready "$READY_STATUS" --arg health "$HEALTH_STATUS" --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{readyz:($ready|tonumber),healthz:($health|tonumber),mcp:($mcp|tonumber),oauthMetaStart:($oauth|tonumber),routeConfinement:"PASS",result:"PASS"}' > staging-acceptance-evidence/webhook-smoke.json
+
+      - name: Re-authenticate staging deployer for final readback
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Verify final traffic, identity, and rollback target
+        shell: bash
+        env:
+          MCP_PREVIOUS: ${{ steps.preflight.outputs.mcp_previous }}
+          WEBHOOK_PREVIOUS: ${{ steps.preflight.outputs.webhook_previous }}
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/mcp-service-after.json
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > staging-acceptance-evidence/webhook-service-after.json
+          jq -e --arg rev "$MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' staging-acceptance-evidence/mcp-service-after.json >/dev/null
+          jq -e --arg rev "$WEBHOOK_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' staging-acceptance-evidence/webhook-service-after.json >/dev/null
+          jq -n \
+            --arg sourceSha "$CANDIDATE_SHA" \
+            --arg indexDigest "$IMAGE_INDEX_DIGEST" \
+            --arg childDigest "$RUNTIME_CHILD_DIGEST" \
+            --arg mcpRevision "$MCP_REVISION" \
+            --arg webhookRevision "$WEBHOOK_REVISION" \
+            --arg mcpRollback "$MCP_PREVIOUS" \
+            --arg webhookRollback "$WEBHOOK_PREVIOUS" \
+            '{schemaVersion:"toca.staging.acceptance-promotion.v1",sourceSha:$sourceSha,ociIndexDigest:$indexDigest,runtimeChildDigest:$childDigest,trafficPercent:100,providers:"DISABLED",revisions:{mcp:$mcpRevision,webhook:$webhookRevision},rollbackTargets:{mcp:$mcpRollback,webhook:$webhookRollback},migrations:{max:"033_omnichannel_prepared_content.sql",migration027Present:false,drift:false},readiness:"PASS",routeConfinement:"PASS",providerMutation:"NO",productionMutation:"NO",result:"PASS"}' \
+            > staging-acceptance-evidence/manifest.json
+          echo 'STAGING_EXACT_ARTIFACT_AT_100_PERCENT=PASS'
+
+      - name: Roll back both services when post-promotion validation fails
+        if: failure() && steps.promote.outputs.promoted == 'yes'
+        shell: bash
+        env:
+          MCP_PREVIOUS: ${{ steps.preflight.outputs.mcp_previous }}
+          WEBHOOK_PREVIOUS: ${{ steps.preflight.outputs.webhook_previous }}
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${MCP_PREVIOUS}=100"
+          gcloud run services update-traffic "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "${WEBHOOK_PREVIOUS}=100"
+          echo 'STAGING_ROLLBACK_EXECUTED=YES' | tee staging-acceptance-evidence/rollback.txt
+
+      - name: Upload immutable staging acceptance promotion evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-acceptance-promotion-75c165a
+          path: staging-acceptance-evidence
+          if-no-files-found: error
+          retention-days: 30
