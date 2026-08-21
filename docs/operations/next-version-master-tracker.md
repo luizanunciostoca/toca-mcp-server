@@ -4,18 +4,77 @@ Observed baseline: `main@ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d`.
 
 This tracker records coordination state only. It does not promote provider, staging or production lifecycle state.
 
-| Front / gate | Current state | Merge/source authority | Blocking condition | Next evidence required |
-| --- | --- | --- | --- | --- |
-| A — Provider Onboarding + Google Ads | BLOCKED | existing Google Ads provider/client; #54/#55 merged; #46 audit draft | credential-only discovery is not reachable through canonical server/config composition; controlled write bootstrap cannot pre-promote lifecycle; live credentials/provider evidence absent | exact-head correction CI; live credential READ; controlled governed provider verification |
-| B — Omnichannel Outbound + Nurture | BLOCKED | existing Email/WhatsApp runtimes + CRM/Privacy/Workflow/Scheduler + TOCA_OS R10 | capability manifest remains SPECIFIED and runtime exposure forbidden; durable nurture composition incomplete; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; nurture manifest must converge on existing R10 `sales.followup.*` authorities | exact-head composition PR CI + canonical Drive reconciliation + PostgreSQL/Email gates where applicable |
-| C — Platform Readiness / GCP / SLO / DR | SOURCE READY, RUNTIME PENDING | #55 | actual staging environment isolation/resources not yet proven; candidate not frozen | final-candidate source revalidation then isolated staging deployment evidence |
-| D — Governance / Drive / Closeout prep | IN PROGRESS | this replacement branch + TOCA_OS Drive | Google Ads catalog reconciled; Omnichannel channel catalog still drifted; nurture mapping identified; no staging/production evidence | exact-head docs CI, Omnichannel Drive reconciliation, later production evidence |
-| Candidate freeze | BLOCKED | live `main` after A/B | A/B unresolved | one exact candidate SHA after final merges |
-| Staging | NOT VERIFIED | #55 deployment contract | candidate not frozen and actual environment isolation unproven | project/DB/secret/service/identity/WIF readback before mutation |
-| Provider verification | NOT COMPLETE | provider-specific controlled boundaries | credentials/evidence incomplete; Google Ads bootstrap gap | provider READ/write/readback + Audit/Outbox/Approval evidence |
-| Production | NOT VERIFIED | immutable candidate image only | staging/provider/reliability gates not complete | production revision/digest/migration/readback evidence |
-| Reliability | NOT VERIFIED | existing SLO/DR contracts | production candidate not deployed | alert delivery + SLO + backup/PITR + isolated DR drill |
-| Final closeout | FORBIDDEN | canonical closeout artifacts | production/reliability evidence absent | evidence-backed final reconstruction |
+## Gate state
+
+### A — Provider Onboarding + Google Ads
+
+- State: **BLOCKED**.
+- Authority: existing Google Ads provider/client; #54/#55 merged; #46 audit draft.
+- Blocking conditions: credential-only discovery is not reachable through canonical server/config composition; controlled write bootstrap cannot pre-promote lifecycle; live credentials/provider evidence is absent.
+- Next evidence: exact-head correction CI, live credential READ and controlled governed provider verification.
+
+### B — Omnichannel Outbound + Nurture
+
+- State: **BLOCKED**.
+- Authority: existing Email/WhatsApp runtimes, CRM, Privacy, Workflow/Scheduler and TOCA_OS R10.
+- Blocking conditions: capability manifest remains `SPECIFIED` and runtime exposure is forbidden; durable nurture composition is incomplete; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; nurture manifest must converge on existing R10 `sales.followup.*` authorities.
+- Next evidence: exact-head composition PR CI, canonical Drive reconciliation and PostgreSQL/Email gates where applicable.
+
+### C — Platform Readiness / GCP / SLO / DR
+
+- State: **SOURCE READY, RUNTIME PENDING**.
+- Authority: #55.
+- Blocking conditions: actual staging environment isolation/resources are not yet proven and the candidate is not frozen.
+- Next evidence: final-candidate source revalidation followed by isolated staging deployment evidence.
+
+### D — Governance / Drive / Closeout prep
+
+- State: **IN PROGRESS**.
+- Authority: this replacement branch plus TOCA_OS Drive.
+- Blocking conditions: Google Ads catalog is reconciled; Omnichannel channel catalog is still drifted; nurture mapping is identified; staging/production evidence is absent.
+- Next evidence: exact-head docs CI, Omnichannel Drive reconciliation and later production evidence.
+
+### Candidate freeze
+
+- State: **BLOCKED**.
+- Authority: live `main` after A/B.
+- Blocking condition: A/B are unresolved.
+- Next evidence: one exact candidate SHA after final merges.
+
+### Staging
+
+- State: **NOT VERIFIED**.
+- Authority: #55 deployment contract.
+- Blocking conditions: candidate is not frozen and actual environment isolation is unproven.
+- Next evidence: project/DB/secret/service/identity/WIF readback before mutation.
+
+### Provider verification
+
+- State: **NOT COMPLETE**.
+- Authority: provider-specific controlled boundaries.
+- Blocking conditions: credentials/evidence are incomplete and Google Ads still has a bootstrap gap.
+- Next evidence: provider READ/write/readback plus Audit/Outbox/Approval evidence.
+
+### Production
+
+- State: **NOT VERIFIED**.
+- Authority: immutable candidate image only.
+- Blocking condition: staging/provider/reliability gates are incomplete.
+- Next evidence: production revision/digest/migration/readback evidence.
+
+### Reliability
+
+- State: **NOT VERIFIED**.
+- Authority: existing SLO/DR contracts.
+- Blocking condition: production candidate is not deployed.
+- Next evidence: alert delivery, SLO, backup/PITR and isolated DR drill.
+
+### Final closeout
+
+- State: **FORBIDDEN**.
+- Authority: canonical closeout artifacts.
+- Blocking condition: production/reliability evidence is absent.
+- Next evidence: evidence-backed final reconstruction.
 
 ## PR disposition
 
@@ -45,7 +104,7 @@ The coordinator rejects branch-side copies of older composition roots, providers
 
 ## Migration lock
 
-Current merged migration names are immutable. Numeric gap `027` is intentionally left unused. Do not rename 028–032 to close the gap. Any new migration receives the next safe name only after live-main inspection and must pass real-repository migrations + a second drift check.
+Current merged migration names are immutable. Numeric gap `027` is intentionally left unused. Do not rename 028–032 to close the gap. Any new migration receives the next safe name only after live-main inspection and must pass real-repository migrations plus a second drift check.
 
 ## Front A acceptance
 
