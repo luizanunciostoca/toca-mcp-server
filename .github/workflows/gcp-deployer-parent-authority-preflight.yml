@@ -1,0 +1,60 @@
+name: GCP Deployer Parent Authority Preflight
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-deployer-parent-authority-preflight.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
+
+jobs:
+  preflight:
+    name: Read-only deployer parent/project authority preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Inspect project parent and inherited authority read-only
+        shell: bash
+        run: |
+          set -u -o pipefail
+          echo 'PROJECT_DESCRIPTION_BEGIN'
+          gcloud projects describe "$PROJECT_ID" --format='yaml(projectId,projectNumber,parent)' || true
+          echo 'PROJECT_DESCRIPTION_END'
+          echo 'PROJECT_IAM_FOR_DEPLOYER_BEGIN'
+          gcloud projects get-iam-policy "$PROJECT_ID" --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$DEPLOYER_SA" --format='table(bindings.role,bindings.members)' || true
+          echo 'PROJECT_IAM_FOR_DEPLOYER_END'
+          PARENT_TYPE="$(gcloud projects describe "$PROJECT_ID" --format='value(parent.type)' 2>/dev/null || true)"
+          PARENT_ID="$(gcloud projects describe "$PROJECT_ID" --format='value(parent.id)' 2>/dev/null || true)"
+          echo "PARENT_TYPE=$PARENT_TYPE"
+          echo "PARENT_ID=$PARENT_ID"
+          if [ "$PARENT_TYPE" = 'organization' ] && [ -n "$PARENT_ID" ]; then
+            echo 'ORG_IAM_FOR_DEPLOYER_BEGIN'
+            gcloud organizations get-iam-policy "$PARENT_ID" --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$DEPLOYER_SA" --format='table(bindings.role,bindings.members)' || true
+            echo 'ORG_IAM_FOR_DEPLOYER_END'
+          elif [ "$PARENT_TYPE" = 'folder' ] && [ -n "$PARENT_ID" ]; then
+            echo 'FOLDER_IAM_FOR_DEPLOYER_BEGIN'
+            gcloud resource-manager folders get-iam-policy "$PARENT_ID" --flatten='bindings[].members' --filter="bindings.members:serviceAccount:$DEPLOYER_SA" --format='table(bindings.role,bindings.members)' || true
+            echo 'FOLDER_IAM_FOR_DEPLOYER_END'
+          fi
+          echo 'DEPLOYER_PARENT_AUTHORITY_PREFLIGHT=COMPLETE'
