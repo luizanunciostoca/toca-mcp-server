@@ -400,7 +400,8 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Fail-closed project and runtime identity
+      - id: operational_runtime
+        name: Fail-closed project and runtime identity
         shell: bash
         run: |
           set -euo pipefail
@@ -420,7 +421,19 @@ jobs:
             jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] == [$sha]' "$file" >/dev/null
             jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' "$file" >/dev/null
           done
+          MCP_BASE_URL="$(jq -r '.status.url' "$EVIDENCE_DIR/mcp-service.json")"
+          test -n "$MCP_BASE_URL"
+          echo "mcp_base_url=$MCP_BASE_URL" >> "$GITHUB_OUTPUT"
           echo 'STAGING_EXACT_RUNTIME_IDENTITY=PASS'
+
+      - id: operational_mcp_token
+        name: Mint short-lived token for readiness sampling
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.operational_runtime.outputs.mcp_base_url }}
 
       - name: Capture redacted provider configuration inventory
         shell: bash
@@ -628,16 +641,17 @@ jobs:
 
       - name: Sample authenticated readiness
         shell: bash
+        env:
+          MCP_URL: ${{ steps.operational_runtime.outputs.mcp_base_url }}
+          MCP_TOKEN: ${{ steps.operational_mcp_token.outputs.id_token }}
         run: |
           set -euo pipefail
-          MCP_URL="$(jq -r '.status.url' "$EVIDENCE_DIR/mcp-service.json")"
           test -n "$MCP_URL"
-          ID_TOKEN="$(gcloud auth print-identity-token --audiences "$MCP_URL")"
-          echo "::add-mask::$ID_TOKEN"
+          test -n "$MCP_TOKEN"
           : > "$EVIDENCE_DIR/readiness-samples.jsonl"
           for index in $(seq 1 30); do
             STATUS_AND_TIME="$(curl --silent --show-error --output /tmp/ready-body.json --write-out '%{http_code} %{time_total}' \
-              -H "Authorization: Bearer ${ID_TOKEN}" "$MCP_URL/readyz")"
+              -H "Authorization: Bearer ${MCP_TOKEN}" "$MCP_URL/readyz")"
             STATUS="$(cut -d' ' -f1 <<<"$STATUS_AND_TIME")"
             ELAPSED="$(cut -d' ' -f2 <<<"$STATUS_AND_TIME")"
             test "$STATUS" = 200
