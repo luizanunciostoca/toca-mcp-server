@@ -18,20 +18,16 @@ env:
   STAGING_DATABASE_SECRET: toca-next-staging-database-url
   STAGING_DATABASE_SECRET_VERSION: '1'
   STAGING_DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
-  STAGING_MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
-  STAGING_WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
   STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
-  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
 
 jobs:
-  local-readiness:
-    name: Exact candidate readiness through isolated staging DB
+  outbox-readback:
+    name: Read isolated staging outbox blocker only
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,12 +48,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Build exact frozen candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          pnpm build
+      - name: Install exact frozen dependencies
+        run: pnpm install --frozen-lockfile
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
@@ -81,14 +73,14 @@ jobs:
           echo "PROXY_PID=$!" >> "$GITHUB_ENV"
           for attempt in {1..30}; do
             if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
-              echo 'READINESS_PROXY_READY=PASS'
+              echo 'OUTBOX_DIAGNOSTIC_PROXY_READY=PASS'
               exit 0
             fi
             sleep 1
           done
           cat /tmp/proxy.log >&2
           exit 1
-      - name: Run exact candidate readiness locally against staging DB
+      - name: Query outbox readiness facts without payload access
         shell: bash
         run: |
           set -euo pipefail
@@ -101,90 +93,50 @@ jobs:
             process.stdout.write(url.toString());
           ')"
           unset RAW_DATABASE_URL
-          export DATABASE_SSL=false
-          export NODE_ENV=production
-          export MCP_PORT=18080
-          export TOCA_DEPLOY_ENVIRONMENT=staging
-          export TOCA_RELEASE_SHA="$CANDIDATE_SHA"
-          export TOCA_PLATFORM_KILL_SWITCH=false
-          export TOCA_DEFAULT_TENANT_ID=toca
-          export TOCA_DEFAULT_WORKSPACE_ID=toca
-          export TOCA_DEFAULT_ORGANIZATION_ID=toca
-          export STAGING_PROVIDER_MODE=DISABLED
-          export META_ENABLED=false META_PROVIDER_VERIFIED=false META_WEBHOOK_ENABLED=false META_WEBHOOK_PERSISTENCE_ENABLED=false
-          export INSTAGRAM_READ_ENABLED=false META_ADS_READ_ENABLED=false META_ADS_WRITE_ENABLED=false
-          export WHATSAPP_ENABLED=false WHATSAPP_RUNTIME_ENABLED=false WHATSAPP_PROVIDER_VERIFIED=false
-          export EMAIL_SENDGRID_ENABLED=false EMAIL_SENDGRID_PROVIDER_VERIFIED=false
-          export GOOGLE_ADS_PHASE=OFF GOOGLE_ADS_PROVIDER_VERIFIED=false
-          export AG01_MODEL_ENABLED=false AG01_MODEL_PROVIDER_VERIFIED=false
-          export GCP_PROJECT_ID="$STAGING_PROJECT_ID"
-          export MCP_ENABLED=true TOCA_SERVICE_ROLE=mcp
-          node dist/src/http.js >/tmp/candidate.log 2>&1 &
-          APP_PID=$!
-          cleanup() {
-            kill "$APP_PID" 2>/dev/null || true
-            if [[ -n "${PROXY_PID:-}" ]]; then kill "$PROXY_PID" 2>/dev/null || true; fi
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: false });
+          try {
+            const summary = await pool.query(`
+              select
+                count(*)::int as total,
+                count(*) filter (where status = 'PENDING')::int as pending,
+                count(*) filter (where status = 'FAILED_RETRYABLE')::int as failed_retryable,
+                count(*) filter (where status = 'CLAIMED')::int as claimed,
+                count(*) filter (where status = 'DELIVERED')::int as delivered,
+                count(*) filter (where status = 'DEAD_LETTER')::int as dead_letter,
+                coalesce(
+                  round(extract(epoch from (now() - min(available_at)))
+                    filter (where status in ('PENDING','FAILED_RETRYABLE'))),
+                  0
+                )::bigint as oldest_pending_age_seconds
+              from event_outbox
+            `);
+            console.log('OUTBOX_SUMMARY=' + JSON.stringify(summary.rows[0]));
+            const blocked = await pool.query(`
+              select event_type, status, attempts, max_attempts, last_error_code,
+                     round(extract(epoch from (now() - available_at)))::bigint as age_seconds
+                from event_outbox
+               where status in ('PENDING','FAILED_RETRYABLE','DEAD_LETTER')
+               order by available_at asc
+               limit 20
+            `);
+            console.log('OUTBOX_BLOCKING_ROWS=' + JSON.stringify(blocked.rows));
+          } finally {
+            await pool.end();
           }
-          trap cleanup EXIT
-          for attempt in {1..20}; do
-            if curl --fail --silent --max-time 2 http://127.0.0.1:18080/healthz >/tmp/health.json; then break; fi
-            if ! kill -0 "$APP_PID" 2>/dev/null; then cat /tmp/candidate.log >&2; exit 1; fi
-            sleep 1
-          done
-          HEALTH_CODE="$(curl --silent --max-time 5 --output /tmp/health.json --write-out '%{http_code}' http://127.0.0.1:18080/healthz)"
-          READY_CODE="$(curl --silent --max-time 15 --output /tmp/ready.json --write-out '%{http_code}' http://127.0.0.1:18080/readyz)"
-          echo "LOCAL_HEALTH_HTTP=$HEALTH_CODE"
-          cat /tmp/health.json; echo
-          echo "LOCAL_READY_HTTP=$READY_CODE"
-          cat /tmp/ready.json; echo
-          echo 'LOCAL_FAILED_CHECKS='
-          jq -r '.checks[]? | select(.ok==false) | .name' /tmp/ready.json || true
-          test "$HEALTH_CODE" = 200
-          [[ "$READY_CODE" = 200 || "$READY_CODE" = 503 ]]
-          jq -e '.status == "ready" or .status == "not_ready"' /tmp/ready.json >/dev/null
-          echo 'LOCAL_EXACT_CANDIDATE_READINESS_DIAGNOSTIC=PASS'
+          NODE
+          unset DATABASE_URL
+          echo 'OUTBOX_READINESS_FACTS_READ_ONLY=PASS'
           echo 'APPLICATION_MIGRATION_EXECUTED=NO'
           echo 'APPLICATION_DEPLOY_EXECUTED=NO'
           echo 'PROVIDER_MUTATION_EXECUTED=NO'
           echo 'PRODUCTION_MUTATION_EXECUTED=NO'
-
-  runtime-iam-readback:
-    name: Staging runtime IAM readback only
-    runs-on: ubuntu-latest
-    environment: infrastructure-admin
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          persist-credentials: false
-      - name: Assert isolated boundary
+      - name: Stop Cloud SQL Auth Proxy
+        if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
-          test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
-        with:
-          workload_identity_provider: ${{ env.PROD_WIF }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Read runtime IAM bindings without mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
-          PROJECT_POLICY="$(gcloud projects get-iam-policy "$STAGING_PROJECT_ID" --format=json)"
-          SECRET_POLICY="$(gcloud secrets get-iam-policy "$STAGING_DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --format=json)"
-          for SA in "$STAGING_MCP_RUNTIME_SA" "$STAGING_WEBHOOK_RUNTIME_SA"; do
-            MEMBER="serviceAccount:$SA"
-            SQL_CLIENT="$(printf '%s' "$PROJECT_POLICY" | jq -r --arg m "$MEMBER" '[.bindings[]? | select(.role=="roles/cloudsql.client") | .members[]? | select(.==$m)] | length')"
-            SECRET_ACCESSOR="$(printf '%s' "$SECRET_POLICY" | jq -r --arg m "$MEMBER" '[.bindings[]? | select(.role=="roles/secretmanager.secretAccessor") | .members[]? | select(.==$m)] | length')"
-            echo "RUNTIME_SA=$SA CLOUDSQL_CLIENT=$SQL_CLIENT SECRET_ACCESSOR=$SECRET_ACCESSOR"
-          done
-          echo 'STAGING_RUNTIME_IAM_READBACK=PASS'
-          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
-          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
-          echo 'PROVIDER_MUTATION_EXECUTED=NO'
-          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+          if [[ -n "${PROXY_PID:-}" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
+            kill "$PROXY_PID"
+            wait "$PROXY_PID" || true
+          fi
