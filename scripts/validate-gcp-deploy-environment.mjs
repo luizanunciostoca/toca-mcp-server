@@ -78,7 +78,11 @@ function validateStagingIsolation() {
     ['MCP_SERVICE', stagingMcpServiceName],
     ['WEBHOOK_SERVICE', stagingWebhookServiceName],
   ]) {
-    assertDistinct(`${label}_NAME_VS_PRODUCTION_MCP`, stagingServiceName, productionMcpServiceName);
+    assertDistinct(
+      `${label}_NAME_VS_PRODUCTION_MCP`,
+      stagingServiceName,
+      productionMcpServiceName,
+    );
     assertDistinct(
       `${label}_NAME_VS_PRODUCTION_WEBHOOK`,
       stagingServiceName,
