@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  CANDIDATE_SHA: 4962a0b5b7a25b22089f3d6d65efff3533c41d2c
+  CANDIDATE_SHA: e026b2b441c9a1233a05e62c8a981511ccc1f92e
   STAGING_PROJECT_ID: toca-mcp-next-staging
   STAGING_PROJECT_NUMBER: '729069789107'
   REGION: southamerica-east1
