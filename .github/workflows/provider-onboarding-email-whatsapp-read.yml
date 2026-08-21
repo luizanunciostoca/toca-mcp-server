@@ -1,0 +1,288 @@
+name: Provider Onboarding Email WhatsApp READ
+
+on:
+  push:
+    branches:
+      - audit/provider-onboarding-email-whatsapp-20260821
+    paths:
+      - '.github/workflows/provider-onboarding-email-whatsapp-read.yml'
+      - 'scripts/provider-onboarding-read-preflight.mjs'
+      - '.env.example'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: provider-onboarding-email-whatsapp-read
+  cancel-in-progress: false
+
+jobs:
+  provider-read:
+    name: Sanitized provider READ preflight
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+      GCP_META_ACCESS_TOKEN_SECRET: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET }}
+      GCP_META_ACCESS_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION }}
+      GCP_SENDGRID_API_KEY_SECRET: ${{ vars.GCP_SENDGRID_API_KEY_SECRET }}
+      GCP_SENDGRID_API_KEY_SECRET_VERSION: ${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION }}
+      META_GRAPH_BASE_URL: ${{ vars.META_GRAPH_BASE_URL || 'https://graph.facebook.com' }}
+      META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+      WHATSAPP_BUSINESS_ID: ${{ vars.WHATSAPP_BUSINESS_ID }}
+      WHATSAPP_WABA_ID: ${{ vars.WHATSAPP_WABA_ID }}
+      WHATSAPP_PHONE_NUMBER_ID: ${{ vars.WHATSAPP_PHONE_NUMBER_ID }}
+      SENDGRID_API_BASE_URL: ${{ vars.EMAIL_SENDGRID_API_BASE_URL || 'https://api.sendgrid.com' }}
+      EMAIL_SENDGRID_SENDING_DOMAIN: ${{ vars.EMAIL_SENDGRID_SENDING_DOMAIN }}
+      EMAIL_SENDGRID_FROM_EMAIL: ${{ vars.EMAIL_SENDGRID_FROM_EMAIL }}
+      EMAIL_SENDGRID_EVENT_WEBHOOK_URL: ${{ vars.EMAIL_SENDGRID_EVENT_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout exact audit head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Initialize sanitized evidence envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > provider-onboarding-read.json <<JSON
+          {
+            "schemaVersion": 1,
+            "sourceSha": "${GITHUB_SHA}",
+            "workflowRunId": "${GITHUB_RUN_ID}",
+            "mode": "READ_ONLY_PROVIDER_PREFLIGHT",
+            "overallPass": false,
+            "status": "INITIALIZED",
+            "safety": {
+              "providerWrites": false,
+              "emailSent": false,
+              "whatsappSent": false,
+              "dnsMutated": false,
+              "webhookMutated": false,
+              "suppressionsMutated": false,
+              "lifecyclePromoted": false
+            }
+          }
+          JSON
+
+      - name: Validate non-secret control-plane configuration
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          require() { [[ -n "${2:-}" ]] || missing+=("$1"); }
+          require GCP_PROJECT_ID "$GCP_PROJECT_ID"
+          require GCP_REGION "$GCP_REGION"
+          require GCP_ARTIFACT_REPOSITORY "$GCP_ARTIFACT_REPOSITORY"
+          require GCP_WORKLOAD_IDENTITY_PROVIDER "$GCP_WORKLOAD_IDENTITY_PROVIDER"
+          require GCP_DEPLOY_SERVICE_ACCOUNT "$GCP_DEPLOY_SERVICE_ACCOUNT"
+          require GCP_RUNTIME_SERVICE_ACCOUNT "$GCP_RUNTIME_SERVICE_ACCOUNT"
+          require GCP_META_ACCESS_TOKEN_SECRET "$GCP_META_ACCESS_TOKEN_SECRET"
+          require GCP_META_ACCESS_TOKEN_SECRET_VERSION "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
+          require GCP_SENDGRID_API_KEY_SECRET "$GCP_SENDGRID_API_KEY_SECRET"
+          require GCP_SENDGRID_API_KEY_SECRET_VERSION "$GCP_SENDGRID_API_KEY_SECRET_VERSION"
+          require EMAIL_SENDGRID_SENDING_DOMAIN "$EMAIL_SENDGRID_SENDING_DOMAIN"
+          require EMAIL_SENDGRID_FROM_EMAIL "$EMAIL_SENDGRID_FROM_EMAIL"
+          if (( ${#missing[@]} > 0 )); then
+            jq --argjson missing "$(printf '%s\n' "${missing[@]}" | jq -R . | jq -s .)" \
+              '.status="BLOCKED_CONTROL_PLANE_CONFIG" | .missingConfig=$missing' \
+              provider-onboarding-read.json > /tmp/evidence.json
+            mv /tmp/evidence.json provider-onboarding-read.json
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate deployer to Google Cloud
+        if: steps.config.outputs.ready == 'true'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        if: steps.config.outputs.ready == 'true'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Validate secret versions and runtime accessor IAM without reading values
+        id: secret_gate
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=()
+          check_secret() {
+            local label="$1" secret="$2" version="$3"
+            if ! gcloud secrets versions describe "$version" --secret "$secret" --project "$GCP_PROJECT_ID" --format='value(state)' | grep -qx ENABLED; then
+              failed+=("${label}:version-not-enabled")
+              return
+            fi
+            policy="$(gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json)"
+            if ! jq -e --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+              '[.bindings[]? | select(.role=="roles/secretmanager.secretAccessor") | .members[]?] | index($member) != null' \
+              <<<"$policy" >/dev/null; then
+              failed+=("${label}:runtime-accessor-missing")
+            fi
+          }
+          check_secret meta-token "$GCP_META_ACCESS_TOKEN_SECRET" "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
+          check_secret sendgrid-api-key "$GCP_SENDGRID_API_KEY_SECRET" "$GCP_SENDGRID_API_KEY_SECRET_VERSION"
+          if (( ${#failed[@]} > 0 )); then
+            jq --argjson failures "$(printf '%s\n' "${failed[@]}" | jq -R . | jq -s .)" \
+              '.status="BLOCKED_SECRET_OR_IAM" | .secretIamFailures=$failures' \
+              provider-onboarding-read.json > /tmp/evidence.json
+            mv /tmp/evidence.json provider-onboarding-read.json
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            jq \
+              --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --arg meta "gcp-secret:${GCP_META_ACCESS_TOKEN_SECRET}:${GCP_META_ACCESS_TOKEN_SECRET_VERSION}" \
+              --arg sg "gcp-secret:${GCP_SENDGRID_API_KEY_SECRET}:${GCP_SENDGRID_API_KEY_SECRET_VERSION}" \
+              '.runtimeIdentity=$runtime | .secretRefs={metaToken:$meta,sendgridApiKey:$sg}' \
+              provider-onboarding-read.json > /tmp/evidence.json
+            mv /tmp/evidence.json provider-onboarding-read.json
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build immutable read-only probe image
+        if: steps.config.outputs.ready == 'true' && steps.secret_gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          mkdir -p /tmp/provider-read
+          cp scripts/provider-onboarding-read-preflight.mjs /tmp/provider-read/probe.mjs
+          cat > /tmp/provider-read/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY probe.mjs ./probe.mjs
+          USER node
+          CMD ["node", "probe.mjs"]
+          DOCKER
+          IMAGE_REPOSITORY="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/provider-onboarding-read"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker buildx build --pull --push --provenance=mode=max --sbom=true --metadata-file /tmp/build-metadata.json -t "$IMAGE_TAG" /tmp/provider-read
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$IMAGE_DIGEST" == sha256:* ]]
+          echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-provider-read-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Execute GET-only probe under production runtime identity
+        id: probe
+        if: steps.config.outputs.ready == 'true' && steps.secret_gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ENV_VARS=(
+            "SOURCE_SHA=$GITHUB_SHA"
+            "META_GRAPH_BASE_URL=$META_GRAPH_BASE_URL"
+            "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION"
+            "SENDGRID_API_BASE_URL=$SENDGRID_API_BASE_URL"
+            "EMAIL_SENDGRID_SENDING_DOMAIN=$EMAIL_SENDGRID_SENDING_DOMAIN"
+            "EMAIL_SENDGRID_FROM_EMAIL=$EMAIL_SENDGRID_FROM_EMAIL"
+          )
+          [[ -z "$WHATSAPP_BUSINESS_ID" ]] || ENV_VARS+=("WHATSAPP_BUSINESS_ID=$WHATSAPP_BUSINESS_ID")
+          [[ -z "$WHATSAPP_WABA_ID" ]] || ENV_VARS+=("WHATSAPP_WABA_ID=$WHATSAPP_WABA_ID")
+          [[ -z "$WHATSAPP_PHONE_NUMBER_ID" ]] || ENV_VARS+=("WHATSAPP_PHONE_NUMBER_ID=$WHATSAPP_PHONE_NUMBER_ID")
+          [[ -z "$EMAIL_SENDGRID_EVENT_WEBHOOK_URL" ]] || ENV_VARS+=("EMAIL_SENDGRID_EVENT_WEBHOOK_URL=$EMAIL_SENDGRID_EVENT_WEBHOOK_URL")
+          { IFS='|'; PROBE_ENV="^|^${ENV_VARS[*]}"; }
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "$PROBE_ENV" \
+            --set-secrets "META_ACCESS_TOKEN=${GCP_META_ACCESS_TOKEN_SECRET}:${GCP_META_ACCESS_TOKEN_SECRET_VERSION},SENDGRID_API_KEY=${GCP_SENDGRID_API_KEY_SECRET}:${GCP_SENDGRID_API_KEY_SECRET_VERSION}" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXEC_STATUS=$?
+          set -e
+
+          RESULT_LINE="$(gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"TOCA_PROVIDER_READ_RESULT=\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=30m \
+            --limit=30 \
+            --order=desc \
+            --format='value(textPayload)' | grep 'TOCA_PROVIDER_READ_RESULT=' | head -n1 || true)"
+          if [[ -z "$RESULT_LINE" ]]; then
+            jq --arg digest "$IMAGE_DIGEST" --argjson exit "$EXEC_STATUS" \
+              '.status="PROBE_RESULT_MISSING" | .imageDigest=$digest | .probeExitCode=$exit' \
+              provider-onboarding-read.json > /tmp/evidence.json
+            mv /tmp/evidence.json provider-onboarding-read.json
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RESULT_JSON="${RESULT_LINE#TOCA_PROVIDER_READ_RESULT=}"
+          jq -e --arg sha "$GITHUB_SHA" '.schemaVersion==1 and .sourceSha==$sha and .safety.providerWrites==false and .safety.emailSent==false and .safety.whatsappSent==false and .safety.lifecyclePromoted==false' <<<"$RESULT_JSON" >/dev/null
+          jq \
+            --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg meta "gcp-secret:${GCP_META_ACCESS_TOKEN_SECRET}:${GCP_META_ACCESS_TOKEN_SECRET_VERSION}" \
+            --arg sg "gcp-secret:${GCP_SENDGRID_API_KEY_SECRET}:${GCP_SENDGRID_API_KEY_SECRET_VERSION}" \
+            --arg digest "$IMAGE_DIGEST" \
+            --arg run "$GITHUB_RUN_ID" \
+            --argjson exit "$EXEC_STATUS" \
+            '. + {workflowRunId:$run,runtimeIdentity:$runtime,secretRefs:{metaToken:$meta,sendgridApiKey:$sg},imageDigest:$digest,probeExitCode:$exit,status:(if .overallPass then "READ_PREFLIGHT_PASS" else "READ_PREFLIGHT_BLOCKED" end)}' \
+            <<<"$RESULT_JSON" > provider-onboarding-read.json
+          if jq -e '.overallPass == true' provider-onboarding-read.json >/dev/null; then
+            echo "pass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assert no lifecycle promotion and classify outbound gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.safety.providerWrites==false and .safety.emailSent==false and .safety.whatsappSent==false and .safety.lifecyclePromoted==false' provider-onboarding-read.json >/dev/null
+          jq '. + {
+            lifecycle: {
+              emailCampaignSend: "PLANNED_CATALOG_ONLY_NO_REAL_SEND",
+              whatsappMessageSend: "PLANNED_CATALOG_ONLY_NO_REAL_SEND",
+              providerVerifiedPromoted: false,
+              productionVerifiedPromoted: false
+            }
+          }' provider-onboarding-read.json > /tmp/evidence.json
+          mv /tmp/evidence.json provider-onboarding-read.json
+          jq . provider-onboarding-read.json
+
+      - name: Upload sanitized provider evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-onboarding-email-whatsapp-read-${{ github.sha }}
+          path: provider-onboarding-read.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail workflow when preflight is blocked
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.overallPass == true' provider-onboarding-read.json >/dev/null
