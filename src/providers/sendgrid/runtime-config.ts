@@ -1,6 +1,7 @@
 import type { SecretResolver } from '../../core/secrets.js';
 import type { ProviderBindingRef } from '../../omnichannel/contracts.js';
 import { validateSendGridConfig, type SendGridConfig } from './email-provider.js';
+import { discoverSendGridEventWebhookPublicKey } from './event-webhook-discovery.js';
 
 export interface SendGridRuntimeConfigResult {
   readonly enabled: boolean;
@@ -35,9 +36,20 @@ export async function loadSendGridRuntimeConfig(input: {
   const bindingState = parseBindingState(
     requiredEnv(env, 'EMAIL_SENDGRID_BINDING_STATE', 'EMAIL_SENDGRID_BINDING_STATE_REQUIRED'),
   );
+  const apiBaseUrl = env.EMAIL_SENDGRID_API_BASE_URL?.trim() || 'https://api.sendgrid.com';
+  let eventWebhookPublicKeyPem = nullableEnv(env.EMAIL_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_PEM);
+  if (!eventWebhookPublicKeyPem) {
+    const discovered = await discoverSendGridEventWebhookPublicKey({
+      apiKey,
+      apiBaseUrl,
+      expectedUrl: nullableEnv(env.EMAIL_SENDGRID_EVENT_WEBHOOK_URL),
+    });
+    eventWebhookPublicKeyPem = discovered.publicKey;
+  }
+
   const config: SendGridConfig = {
     apiKey,
-    apiBaseUrl: env.EMAIL_SENDGRID_API_BASE_URL?.trim() || 'https://api.sendgrid.com',
+    apiBaseUrl,
     sendingDomain: requiredEnv(
       env,
       'EMAIL_SENDGRID_SENDING_DOMAIN',
@@ -48,7 +60,7 @@ export async function loadSendGridRuntimeConfig(input: {
     replyToEmail: nullableEnv(env.EMAIL_SENDGRID_REPLY_TO_EMAIL),
     bindingId: requiredEnv(env, 'EMAIL_SENDGRID_BINDING_ID', 'EMAIL_SENDGRID_BINDING_ID_REQUIRED'),
     bindingState,
-    eventWebhookPublicKeyPem: nullableEnv(env.EMAIL_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY_PEM),
+    eventWebhookPublicKeyPem,
     inboundParseEnabled: parseBoolean(
       env.EMAIL_SENDGRID_INBOUND_PARSE_ENABLED,
       false,
