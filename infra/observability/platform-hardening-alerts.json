@@ -1,125 +1,38 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "policySetId": "toca-platform-hardening-next",
+  "routing": {
+    "minimumNotificationChannels": 2,
+    "requireRedundantChannelFamilies": true,
+    "syntheticFiringRequiresReadback": true,
+    "runbook": "docs/operations/observability-incident-runbook.md"
+  },
   "policies": [
-    {
-      "id": "provider-readback-unverified",
-      "signal": "provider.readback_verified_ratio",
-      "operator": "<",
-      "threshold": 1,
-      "windowMinutes": 15,
-      "severity": "P0"
-    },
-    {
-      "id": "publication-slo",
-      "signal": "publication.verified_terminal_success_ratio",
-      "operator": "<",
-      "threshold": 0.995,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "workflow-slo",
-      "signal": "workflow.terminal_success_ratio",
-      "operator": "<",
-      "threshold": 0.995,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "lead-ingestion-slo",
-      "signal": "lead.ingestion_success_ratio",
-      "operator": "<",
-      "threshold": 0.995,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "first-response-latency",
-      "signal": "lead.first_response_p95_seconds",
-      "operator": ">",
-      "threshold": 300,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "webhook-slo",
-      "signal": "webhook.accepted_success_ratio",
-      "operator": "<",
-      "threshold": 0.999,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "outbox-lag",
-      "signal": "outbox.oldest_pending_age_seconds",
-      "operator": ">",
-      "threshold": 300,
-      "windowMinutes": 15,
-      "severity": "P1"
-    },
-    {
-      "id": "retry-exhausted",
-      "signal": "retry.exhausted_count",
-      "operator": ">",
-      "threshold": 0,
-      "windowMinutes": 15,
-      "severity": "P1"
-    },
-    {
-      "id": "dead-letter-backlog",
-      "signal": "dead_letter.pending_count",
-      "operator": ">",
-      "threshold": 0,
-      "windowMinutes": 15,
-      "severity": "P1"
-    },
-    {
-      "id": "crm-write-slo",
-      "signal": "crm.durable_write_success_ratio",
-      "operator": "<",
-      "threshold": 0.999,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "attribution-write-slo",
-      "signal": "attribution.durable_write_success_ratio",
-      "operator": "<",
-      "threshold": 0.999,
-      "windowMinutes": 60,
-      "severity": "P1"
-    },
-    {
-      "id": "r31-feedback-loop",
-      "signal": "r31.feedback_loop_success_ratio",
-      "operator": "<",
-      "threshold": 0.99,
-      "windowMinutes": 1440,
-      "severity": "P2"
-    }
+    {"id":"mcp-http-error","signal":"http.request_error_ratio","scope":"mcp","operator":">","threshold":0.01,"windowMinutes":15,"severity":"P1","source":"cloud_run_native"},
+    {"id":"webhook-http-error","signal":"http.request_error_ratio","scope":"webhook","operator":">","threshold":0.01,"windowMinutes":15,"severity":"P1","source":"cloud_run_native"},
+    {"id":"http-latency","signal":"http.request_p95_seconds","operator":">","threshold":2,"windowMinutes":15,"severity":"P1","source":"cloud_run_native"},
+    {"id":"ag01-errors","signal":"ag01.failure_count","operator":">","threshold":0,"windowMinutes":15,"severity":"P1","source":"audit_ledger_events"},
+    {"id":"core-execution-errors","signal":"core.execution_error_ratio","operator":">","threshold":0.01,"windowMinutes":60,"severity":"P1","source":"audit_ledger_events"},
+    {"id":"approval-wait","signal":"approval.decision_p95_seconds","operator":">","threshold":900,"windowMinutes":60,"severity":"P1","source":"approval_records"},
+    {"id":"outbox-lag","signal":"outbox.oldest_pending_age_seconds","operator":">","threshold":300,"windowMinutes":15,"severity":"P1","source":"event_outbox"},
+    {"id":"workflow-retry-exhausted","signal":"retry.exhausted_count","operator":">","threshold":0,"windowMinutes":15,"severity":"P1","source":"workflow_steps"},
+    {"id":"dead-letter-backlog","signal":"dead_letter.pending_count","operator":">","threshold":0,"windowMinutes":15,"severity":"P1","source":"event_outbox"},
+    {"id":"crm-write-slo","signal":"crm.durable_write_success_ratio","operator":"<","threshold":0.999,"windowMinutes":60,"severity":"P1","source":"audit_plus_crm_readback"},
+    {"id":"provider-readback-unverified","signal":"provider.readback_verified_ratio","operator":"<","threshold":1,"windowMinutes":15,"severity":"P0","source":"operational_signals","activationGate":"PROVIDER_READBACK_EMITTER_VERIFIED"},
+    {"id":"provider-latency","signal":"provider.call_p95_seconds","operator":">","threshold":5,"windowMinutes":60,"severity":"P1","source":"operational_signals","activationGate":"PROVIDER_LATENCY_EMITTER_VERIFIED"},
+    {"id":"provider-errors","signal":"provider.error_count","operator":">","threshold":0,"windowMinutes":15,"severity":"P1","source":"operational_signals","activationGate":"PROVIDER_ERROR_EMITTER_VERIFIED"},
+    {"id":"commerce-readback","signal":"commerce.readback_verified_ratio","operator":"<","threshold":0.999,"windowMinutes":60,"severity":"P1","source":"audit_plus_canonical_readback","activationGate":"COMMERCE_READBACK_SIGNAL_VERIFIED"}
   ],
-  "futureProviderPolicies": [
-    {
-      "id": "whatsapp-delivery-slo",
-      "signal": "whatsapp.delivery_verified_ratio",
-      "operator": "<",
-      "threshold": 0.99,
-      "windowMinutes": 60,
-      "severity": "P1",
-      "enabled": false
-    },
-    {
-      "id": "email-delivery-slo",
-      "signal": "email.delivery_verified_ratio",
-      "operator": "<",
-      "threshold": 0.99,
-      "windowMinutes": 60,
-      "severity": "P1",
-      "enabled": false
-    }
+  "providerPolicies": [
+    {"id":"email-send","signal":"email.send_success_ratio","operator":"<","threshold":0.99,"windowMinutes":60,"severity":"P1","source":"email_dispatches","activationGate":"EMAIL_SENDGRID_PROVIDER_VERIFIED"},
+    {"id":"email-delivery","signal":"email.delivery_verified_ratio","operator":"<","threshold":0.99,"windowMinutes":60,"severity":"P1","source":"email_provider_events","activationGate":"EMAIL_SENDGRID_PROVIDER_VERIFIED"},
+    {"id":"email-bounce","signal":"email.bounce_ratio","operator":">","threshold":0.03,"windowMinutes":1440,"severity":"P1","source":"email_provider_events","activationGate":"EMAIL_SENDGRID_PROVIDER_VERIFIED"},
+    {"id":"whatsapp-webhook","signal":"whatsapp.webhook_success_ratio","operator":"<","threshold":0.999,"windowMinutes":60,"severity":"P1","source":"cloud_run_plus_whatsapp_provider_events","activationGate":"WHATSAPP_PROVIDER_VERIFIED"},
+    {"id":"whatsapp-send","signal":"whatsapp.send_success_ratio","operator":"<","threshold":0.99,"windowMinutes":60,"severity":"P1","source":"whatsapp_dispatches","activationGate":"WHATSAPP_PROVIDER_VERIFIED"},
+    {"id":"whatsapp-readback","signal":"whatsapp.readback_verified_ratio","operator":"<","threshold":0.99,"windowMinutes":60,"severity":"P1","source":"whatsapp_provider_events","activationGate":"WHATSAPP_PROVIDER_VERIFIED"},
+    {"id":"google-ads-api-errors","signal":"google_ads.api_error_ratio","operator":">","threshold":0.02,"windowMinutes":60,"severity":"P1","source":"operational_signals","activationGate":"GOOGLE_ADS_PROVIDER_VERIFIED"},
+    {"id":"meta-api-errors","signal":"meta.api_error_ratio","operator":">","threshold":0.02,"windowMinutes":60,"severity":"P1","source":"operational_signals","activationGate":"META_PROVIDER_VERIFIED"}
   ],
   "mandatoryExistingPolicies": ["AUDIT_LEDGER_INTEGRITY_FAILED", "OUTBOX_DELIVERY_STALLED"],
-  "runbook": "docs/operations/observability-incident-runbook.md",
-  "notes": "Declarative alert contract only. Activation and managed-provider firing/readback require separate provider evidence."
+  "notes": "Policies with activationGate must remain disabled until their named measurement/provider evidence exists. No alert may be activated from an uncollectable signal."
 }
