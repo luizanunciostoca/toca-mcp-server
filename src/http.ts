@@ -18,6 +18,13 @@ import { SERVER_NAME } from './server.js';
 
 const SENDGRID_EVENT_WEBHOOK_PATH = '/webhooks/sendgrid/events';
 const SENDGRID_MAX_EVENT_WEBHOOK_BYTES = 2 * 1024 * 1024;
+const WEBHOOK_SERVICE_ALLOWED_PATHS = new Set([
+  '/health',
+  '/healthz',
+  '/readyz',
+  '/webhooks/meta',
+  SENDGRID_EVENT_WEBHOOK_PATH,
+]);
 
 const config = loadConfig();
 const metaRuntime = createMetaHttpRuntime(config, process.env);
@@ -56,7 +63,7 @@ const baseServer = createTocaHttpServer({
   ...(metaWebhook ? { metaWebhook } : {}),
 });
 
-const server = sendGridEventRuntime
+const server = sendGridEventRuntime || isWebhookService()
   ? createServer((request, response) => {
       void handleComposedHttpRequest(request, response, sendGridEventRuntime, baseServer);
     })
@@ -87,11 +94,17 @@ async function createEmailWebhookRuntime(): Promise<SendGridEventHttpRuntime | u
 async function handleComposedHttpRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  sendGrid: SendGridEventHttpRuntime,
+  sendGrid: SendGridEventHttpRuntime | undefined,
   baseServer: ReturnType<typeof createTocaHttpServer>,
 ): Promise<void> {
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
-  if (pathname !== SENDGRID_EVENT_WEBHOOK_PATH) {
+
+  if (isWebhookService() && !WEBHOOK_SERVICE_ALLOWED_PATHS.has(pathname)) {
+    sendJson(response, 404, { error: 'not_found' });
+    return;
+  }
+
+  if (pathname !== SENDGRID_EVENT_WEBHOOK_PATH || !sendGrid) {
     baseServer.emit('request', request, response);
     return;
   }
@@ -204,6 +217,10 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
     'cache-control': 'no-store',
   });
   response.end(payload);
+}
+
+function isWebhookService(): boolean {
+  return process.env.TOCA_SERVICE_ROLE?.trim() === 'webhook';
 }
 
 function isTrue(value: string | undefined): boolean {
