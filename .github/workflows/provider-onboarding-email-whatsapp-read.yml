@@ -8,6 +8,11 @@ on:
       - '.github/workflows/provider-onboarding-email-whatsapp-read.yml'
       - 'scripts/provider-onboarding-read-preflight.mjs'
       - '.env.example'
+  pull_request:
+    paths:
+      - '.github/workflows/provider-onboarding-email-whatsapp-read.yml'
+      - 'scripts/provider-onboarding-read-preflight.mjs'
+      - '.env.example'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +20,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: provider-onboarding-email-whatsapp-read
+  group: provider-onboarding-email-whatsapp-read-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +56,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Validate probe syntax
+        run: node --check scripts/provider-onboarding-read-preflight.mjs
 
       - name: Initialize sanitized evidence envelope
         shell: bash
