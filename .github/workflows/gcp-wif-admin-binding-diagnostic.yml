@@ -1,0 +1,54 @@
+name: GCP WIF Admin Binding Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-wif-admin-binding-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    name: Read-only WIF service-account policy diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate known-good deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Compare deployer and infra-admin WIF IAM bindings read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/wif-diagnostic
+          gcloud iam service-accounts get-iam-policy "$DEPLOY_SA" --project "$PROJECT_ID" --format=json > /tmp/wif-diagnostic/deployer.json
+          gcloud iam service-accounts get-iam-policy "$INFRA_ADMIN_SA" --project "$PROJECT_ID" --format=json > /tmp/wif-diagnostic/infra-admin.json
+          echo 'DEPLOYER_WIF_BINDINGS_BEGIN'
+          jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/wif-diagnostic/deployer.json || true
+          echo 'DEPLOYER_WIF_BINDINGS_END'
+          echo 'INFRA_ADMIN_WIF_BINDINGS_BEGIN'
+          jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/wif-diagnostic/infra-admin.json || true
+          echo 'INFRA_ADMIN_WIF_BINDINGS_END'
+          echo 'WIF_PROVIDER_METADATA_BEGIN'
+          gcloud iam workload-identity-pools providers describe github-toca-mcp --workload-identity-pool=github --location=global --project="$PROJECT_ID" --format='json(name,attributeMapping,attributeCondition,state)' || true
+          echo 'WIF_PROVIDER_METADATA_END'
+          echo 'WIF_BINDING_DIAGNOSTIC_READ_ONLY=true'
