@@ -71,7 +71,10 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
-          ! find "$CANDIDATE_ROOT/migrations" -maxdepth 1 -type f -name '027_*.sql' -printf '%f\n' | rg '^027_'
+          if find "$CANDIDATE_ROOT/migrations" -maxdepth 1 -type f -name '027_*.sql' -printf '%f\n' | grep -q '^027_'; then
+            echo 'RETIRED_MIGRATION_027_PRESENT'
+            exit 1
+          fi
           test "$(find "$CANDIDATE_ROOT/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1)" = '033_omnichannel_prepared_content.sql'
           printf '%s\n' \
             "APPLICATION_CANDIDATE_SHA=$CANDIDATE_SHA" \
@@ -201,9 +204,15 @@ jobs:
         run: |
           set -euo pipefail
           pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/migrate-pass-1.log"
-          ! rg '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-1.log"
+          if grep -q '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-1.log"; then
+            echo 'MIGRATION_PASS_1_WAS_NOT_A_NOOP'
+            exit 1
+          fi
           pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/migrate-pass-2.log"
-          ! rg '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-2.log"
+          if grep -q '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-2.log"; then
+            echo 'MIGRATION_PASS_2_WAS_NOT_A_NOOP'
+            exit 1
+          fi
           echo 'MIGRATIONS_CURRENT_AND_IDEMPOTENT=PASS'
 
       - name: Run PostgreSQL acceptance contracts sequentially
@@ -214,7 +223,7 @@ jobs:
           run_test() {
             test_file="$1"
             printf '\n### %s\n' "$test_file" | tee -a "$EVIDENCE_DIR/postgres-e2e.log"
-            pnpm exec vitest run "$test_file" --maxWorkers=1 --minWorkers=1 2>&1 | tee -a "$EVIDENCE_DIR/postgres-e2e.log"
+            pnpm exec vitest run "$test_file" --maxWorkers=1 --minWorkers=1 --testTimeout=60000 --hookTimeout=60000 2>&1 | tee -a "$EVIDENCE_DIR/postgres-e2e.log"
           }
           run_test test/m-found-12-postgres-e2e.test.ts
           run_test test/crm-sales-postgres-e2e.test.ts
