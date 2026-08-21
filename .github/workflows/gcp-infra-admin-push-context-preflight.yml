@@ -1,0 +1,59 @@
+name: GCP Infra Admin Push Context Preflight
+
+on:
+  push:
+    branches:
+      - ops/final-candidate-readonly-proof-20260821
+    paths:
+      - '.github/workflows/gcp-infra-admin-push-context-preflight.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROJECT_ID: toca-mcp-production
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
+
+jobs:
+  preflight:
+    name: Read-only infra-admin push-context authority preflight
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Probe authority read-only
+        shell: bash
+        run: |
+          set -u -o pipefail
+          if gcloud auth print-access-token >/dev/null 2>&1; then
+            echo 'INFRA_ADMIN_PUSH_TOKEN=PASS'
+          else
+            echo 'INFRA_ADMIN_PUSH_TOKEN=FAIL'
+            exit 1
+          fi
+          echo 'PROJECTS_BEGIN'
+          gcloud projects list --format='value(projectId,projectNumber)' || true
+          echo 'PROJECTS_END'
+          echo 'ORGS_BEGIN'
+          gcloud organizations list --format='value(name,displayName)' || true
+          echo 'ORGS_END'
+          echo 'BILLING_BEGIN'
+          gcloud billing accounts list --format='value(name,displayName,open)' || true
+          echo 'BILLING_END'
+          echo 'INFRA_ADMIN_PUSH_CONTEXT_PREFLIGHT=PASS'
