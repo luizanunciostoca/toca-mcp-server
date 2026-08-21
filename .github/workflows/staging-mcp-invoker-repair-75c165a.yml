@@ -1,0 +1,108 @@
+name: Staging MCP Invoker Repair 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-mcp-invoker-repair-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Revalidate scope and grant only service-level invoker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != 'toca-mcp-production'
+          BEFORE="$(gcloud run services get-iam-policy "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          if jq -e --arg member "serviceAccount:${DEPLOYER_SA}" '.bindings[]? | select(.role=="roles/run.invoker") | .members[]? | select(.==$member)' <<<"$BEFORE" >/dev/null; then
+            echo 'MCP_DEPLOYER_INVOKER_ALREADY_PRESENT=YES'
+          else
+            gcloud run services add-iam-policy-binding "$MCP_SERVICE" \
+              --project "$PROJECT_ID" --region "$REGION" \
+              --member "serviceAccount:${DEPLOYER_SA}" \
+              --role roles/run.invoker \
+              --quiet >/tmp/iam-update.txt
+            echo 'MCP_DEPLOYER_INVOKER_ADDED=YES'
+          fi
+          AFTER="$(gcloud run services get-iam-policy "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          jq -e --arg member "serviceAccount:${DEPLOYER_SA}" '.bindings[]? | select(.role=="roles/run.invoker") | .members[]? | select(.==$member)' <<<"$AFTER" >/dev/null
+          test "$(jq -r --arg member "serviceAccount:${DEPLOYER_SA}" '[.bindings[]? | select(.role=="roles/run.invoker") | .members[]? | select(.==$member)] | length' <<<"$AFTER")" = 1
+          echo 'MCP_DEPLOYER_INVOKER_READBACK=PASS'
+          echo 'IAM_SCOPE=STAGING_MCP_SERVICE_ONLY'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+      - id: resolve
+        name: Resolve zero-traffic candidate and base audience
+        shell: bash
+        run: |
+          set -euo pipefail
+          JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          REV="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .revisionName][0] // empty' <<<"$JSON")"
+          TAG_URL="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .url][0] // empty' <<<"$JSON")"
+          BASE_URL="$(jq -r '.status.url // empty' <<<"$JSON")"
+          test "$REV" = 'toca-mcp-next-staging-mcp-75c165a-r1'
+          test "$(jq -r --arg r "$REV" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 0
+          echo "tag_url=$TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+      - id: token
+        name: Mint authorized service-account ID token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve.outputs.base_url }}
+          id_token_include_email: true
+      - name: Prove MCP candidate authenticated readiness
+        shell: bash
+        env:
+          TAG_URL: ${{ steps.resolve.outputs.tag_url }}
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            HEALTH_STATUS="$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$TAG_URL/healthz")"
+            READY_STATUS="$(curl --silent --show-error --output /tmp/ready.json --write-out '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$TAG_URL/readyz")"
+            if [[ "$HEALTH_STATUS" == 200 && "$READY_STATUS" == 200 ]]; then
+              jq -e '.status == "ready" and (.checks | all(.ok == true))' /tmp/ready.json >/dev/null
+              echo 'MCP_CANDIDATE_AUTHENTICATED_SMOKE=PASS'
+              echo 'MCP_CANDIDATE_TRAFFIC_PERCENT=0'
+              echo 'STAGING_PROVIDER_MODE=DISABLED'
+              echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+              exit 0
+            fi
+            echo "ATTEMPT=${attempt} HEALTH=${HEALTH_STATUS} READY=${READY_STATUS}"
+            sleep 5
+          done
+          echo 'MCP_CANDIDATE_AUTHENTICATED_SMOKE=FAIL' >&2
+          cat /tmp/health.json >&2 || true
+          cat /tmp/ready.json >&2 || true
+          exit 1
