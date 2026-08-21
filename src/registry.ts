@@ -497,7 +497,11 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   if (options.instagramReadsEnabled) for (const tool of instagramReadTools) registry.register(tool);
   if (options.metaAdsReadsEnabled) for (const tool of metaAdsReadTools) registry.register(tool);
   if (options.metaAdsWritesEnabled) for (const tool of metaAdsWriteTools) registry.register(tool);
-  if (options.googleAdsDiscoveryEnabled) registry.register(googleAdsDiscoveryTool);
+  if (
+    options.googleAdsDiscoveryEnabled ||
+    (options.googleAdsPhase && googleAdsPhaseAtLeast(options.googleAdsPhase, 'READ_ONLY'))
+  )
+    registry.register(googleAdsDiscoveryTool);
   if (options.googleAdsPhase) {
     for (const { minimumPhase, ...tool } of googleAdsTools) {
       if (!googleAdsPhaseAtLeast(options.googleAdsPhase, minimumPhase)) continue;
