@@ -27,6 +27,8 @@ export interface CoreCapabilityRuntimeContext {
   readonly identity: ExecutionIdentity;
   readonly executionId: string;
   readonly correlationId: string;
+  /** Approval identifier already validated and reserved by Core for this execution. */
+  readonly approvalId?: string;
 }
 
 export interface CoreCapabilityRuntimeBinding {
@@ -181,6 +183,7 @@ export async function executeCoreCapability(
       identity,
       executionId,
       correlationId,
+      ...(input.approvalId ? { approvalId: input.approvalId } : {}),
     });
     if (resolved.tool.sideEffects && !formalApproval) {
       if (!providerReadback) {
