@@ -10,9 +10,9 @@ function response(body: unknown, status = 200): Response {
 
 describe('SendGrid Event Webhook discovery', () => {
   it('selects the only enabled signed webhook using only the API key', async () => {
-    const requests: RequestInfo[] = [];
+    const requests: string[] = [];
     const fetchImpl: typeof fetch = async (input) => {
-      requests.push(input);
+      requests.push(String(input));
       return response({
         webhooks: [
           {
@@ -35,15 +35,25 @@ describe('SendGrid Event Webhook discovery', () => {
       url: 'https://hooks.example.test/webhooks/sendgrid/events',
     });
     expect(result.publicKey).toContain('BEGIN PUBLIC KEY');
-    expect(String(requests[0])).toContain('/v3/user/webhooks/event/settings/all');
+    expect(requests[0]).toContain('/v3/user/webhooks/event/settings/all');
   });
 
   it('uses the expected URL to disambiguate and fails closed otherwise', async () => {
     const fetchImpl: typeof fetch = async () =>
       response({
         webhooks: [
-          { id: 'hook-a', url: 'https://a.example.test/events', enabled: true, public_key: 'key-a' },
-          { id: 'hook-b', url: 'https://b.example.test/events/', enabled: true, public_key: 'key-b' },
+          {
+            id: 'hook-a',
+            url: 'https://a.example.test/events',
+            enabled: true,
+            public_key: 'key-a',
+          },
+          {
+            id: 'hook-b',
+            url: 'https://b.example.test/events/',
+            enabled: true,
+            public_key: 'key-b',
+          },
         ],
       });
 
@@ -64,8 +74,18 @@ describe('SendGrid Event Webhook discovery', () => {
     const fetchImpl: typeof fetch = async () =>
       response({
         webhooks: [
-          { id: 'disabled', url: 'https://example.test/disabled', enabled: false, public_key: 'key' },
-          { id: 'unsigned', url: 'https://example.test/unsigned', enabled: true, public_key: null },
+          {
+            id: 'disabled',
+            url: 'https://example.test/disabled',
+            enabled: false,
+            public_key: 'key',
+          },
+          {
+            id: 'unsigned',
+            url: 'https://example.test/unsigned',
+            enabled: true,
+            public_key: null,
+          },
         ],
       });
 
