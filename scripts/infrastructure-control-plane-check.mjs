@@ -85,7 +85,6 @@ const forbiddenWorkflowMarkers = [
   'gcloud sql users',
   'gcloud sql ssl',
   'gcloud billing',
-  'gcloud projects add-iam-policy-binding',
   'gcloud projects remove-iam-policy-binding',
   'perform-storage-shrink',
 ];
@@ -97,13 +96,28 @@ for (const forbidden of forbiddenWorkflowMarkers) {
   }
 }
 
+const stagingReaderIamCommand =
+  'gcloud projects add-iam-policy-binding "$STAGING_GCP_PROJECT_ID"';
+const stagingReaderIamCommandCount = workflow.split(stagingReaderIamCommand).length - 1;
+if (
+  stagingReaderIamCommandCount !== 1 ||
+  !workflow.includes('for role in roles/cloudsql.viewer roles/monitoring.viewer; do') ||
+  !workflow.includes('MEMBER="serviceAccount:${STAGING_DEPLOYER_SERVICE_ACCOUNT}"') ||
+  !workflow.includes('--member="$MEMBER"') ||
+  !workflow.includes('--role="$role"') ||
+  !workflow.includes('--condition=None')
+) {
+  console.error('Staging reader IAM mutation is outside the exact approved envelope');
+  process.exit(1);
+}
+
 if (workflow.includes('push:') || workflow.includes('pull_request:')) {
   console.error('Infrastructure control plane cannot run automatically');
   process.exit(1);
 }
 
 if (
-  policy.version !== 9 ||
+  policy.version !== 10 ||
   policy.projectId !== 'toca-mcp-production' ||
   policy.adminServiceAccount !== infraAdmin ||
   policy.runtimeServiceAccount !== runtime
@@ -127,6 +141,31 @@ if (
   publicationBucket?.uniformBucketLevelAccess !== true
 ) {
   console.error('Publication asset bucket is outside the approved envelope');
+  process.exit(1);
+}
+
+const stagingReaders = policy.allowedOperations?.['grant-staging-verification-readers'];
+const stagingReaderRoles = stagingReaders?.allowedRoles;
+if (
+  stagingReaders?.resourceType !== 'gcp-project-iam' ||
+  stagingReaders?.projectId !== 'toca-mcp-next-staging' ||
+  stagingReaders?.projectNumber !== '729069789107' ||
+  stagingReaders?.principal !==
+    'serviceAccount:toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com' ||
+  !Array.isArray(stagingReaderRoles) ||
+  stagingReaderRoles.length !== 2 ||
+  stagingReaderRoles[0] !== 'roles/cloudsql.viewer' ||
+  stagingReaderRoles[1] !== 'roles/monitoring.viewer' ||
+  stagingReaders?.verification?.cloudSqlBackupRead !== true ||
+  stagingReaders?.verification?.monitoringConfigurationRead !== true ||
+  stagingReaders?.forbid?.productionMutation !== true ||
+  stagingReaders?.forbid?.providerMutation !== true ||
+  stagingReaders?.forbid?.destructiveOperations !== true ||
+  stagingReaders?.forbid?.projectOwner !== true ||
+  stagingReaders?.forbid?.projectEditor !== true ||
+  stagingReaders?.forbid?.serviceAccountKeys !== true
+) {
+  console.error('Staging verification readers are outside the approved envelope');
   process.exit(1);
 }
 
