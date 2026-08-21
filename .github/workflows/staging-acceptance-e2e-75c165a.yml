@@ -435,6 +435,225 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ steps.operational_runtime.outputs.mcp_base_url }}
 
+      - name: Capture staging provider prerequisites without secret values
+        shell: bash
+        env:
+          GCP_META_ACCESS_TOKEN_SECRET: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET }}
+          GCP_META_ACCESS_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION }}
+          GCP_META_APP_SECRET: ${{ vars.GCP_META_APP_SECRET }}
+          GCP_META_APP_SECRET_VERSION: ${{ vars.GCP_META_APP_SECRET_VERSION }}
+          GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET }}
+          GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION }}
+          META_APP_ID: ${{ vars.META_APP_ID }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION }}
+          WHATSAPP_BUSINESS_ID: ${{ vars.WHATSAPP_BUSINESS_ID }}
+          WHATSAPP_WABA_ID: ${{ vars.WHATSAPP_WABA_ID }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ vars.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_META_APP_ID: ${{ vars.WHATSAPP_META_APP_ID }}
+          WHATSAPP_BINDING_STATE: ${{ vars.WHATSAPP_BINDING_STATE }}
+          WHATSAPP_BINDING_ID: ${{ vars.WHATSAPP_BINDING_ID }}
+          GCP_SENDGRID_API_KEY_SECRET: ${{ vars.GCP_SENDGRID_API_KEY_SECRET }}
+          GCP_SENDGRID_API_KEY_SECRET_VERSION: ${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION }}
+          EMAIL_SENDGRID_SENDING_DOMAIN: ${{ vars.EMAIL_SENDGRID_SENDING_DOMAIN }}
+          EMAIL_SENDGRID_FROM_EMAIL: ${{ vars.EMAIL_SENDGRID_FROM_EMAIL }}
+          EMAIL_SENDGRID_FROM_NAME: ${{ vars.EMAIL_SENDGRID_FROM_NAME }}
+          EMAIL_SENDGRID_REPLY_TO_EMAIL: ${{ vars.EMAIL_SENDGRID_REPLY_TO_EMAIL }}
+          EMAIL_SENDGRID_BINDING_STATE: ${{ vars.EMAIL_SENDGRID_BINDING_STATE }}
+          EMAIL_SENDGRID_BINDING_ID: ${{ vars.EMAIL_SENDGRID_BINDING_ID }}
+          GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}
+          GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_CLIENT_ID_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}
+          GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}
+          GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}
+          GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION }}
+          GOOGLE_ADS_ALLOWED_CURRENCY: ${{ vars.GOOGLE_ADS_ALLOWED_CURRENCY }}
+          GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: ${{ vars.GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS }}
+          GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: ${{ vars.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS }}
+          GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: ${{ vars.GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS }}
+          GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+          GCP_AG01_MODEL_API_KEY_SECRET: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET }}
+          GCP_AG01_MODEL_API_KEY_SECRET_VERSION: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION }}
+          AG01_MODEL_PROVIDER: ${{ vars.AG01_MODEL_PROVIDER }}
+          AG01_MODEL_NAME: ${{ vars.AG01_MODEL_NAME }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const present = (name) => Boolean((process.env[name] ?? '').trim());
+          const assess = (requiredFields) => {
+            const missingFields = requiredFields.filter((name) => !present(name));
+            return {
+              requiredFieldCount: requiredFields.length,
+              configuredFieldCount: requiredFields.length - missingFields.length,
+              missingFields,
+              coordinatesComplete: missingFields.length === 0,
+            };
+          };
+          const providers = {
+            metaInstagram: assess([
+              'GCP_META_ACCESS_TOKEN_SECRET',
+              'GCP_META_ACCESS_TOKEN_SECRET_VERSION',
+              'GCP_META_APP_SECRET',
+              'GCP_META_APP_SECRET_VERSION',
+              'META_APP_ID',
+              'META_GRAPH_API_VERSION',
+            ]),
+            whatsapp: assess([
+              'GCP_META_ACCESS_TOKEN_SECRET',
+              'GCP_META_ACCESS_TOKEN_SECRET_VERSION',
+              'WHATSAPP_BUSINESS_ID',
+              'WHATSAPP_WABA_ID',
+              'WHATSAPP_PHONE_NUMBER_ID',
+              'WHATSAPP_META_APP_ID',
+              'WHATSAPP_BINDING_STATE',
+              'WHATSAPP_BINDING_ID',
+            ]),
+            sendgrid: assess([
+              'GCP_SENDGRID_API_KEY_SECRET',
+              'GCP_SENDGRID_API_KEY_SECRET_VERSION',
+              'EMAIL_SENDGRID_SENDING_DOMAIN',
+              'EMAIL_SENDGRID_FROM_EMAIL',
+              'EMAIL_SENDGRID_FROM_NAME',
+              'EMAIL_SENDGRID_REPLY_TO_EMAIL',
+              'EMAIL_SENDGRID_BINDING_STATE',
+              'EMAIL_SENDGRID_BINDING_ID',
+            ]),
+            googleAds: {
+              ...assess([
+                'GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET',
+                'GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION',
+                'GCP_GOOGLE_ADS_CLIENT_ID_SECRET',
+                'GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION',
+                'GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET',
+                'GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION',
+                'GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET',
+                'GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION',
+                'GOOGLE_ADS_ALLOWED_CURRENCY',
+                'GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS',
+                'GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS',
+                'GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS',
+              ]),
+              phase: process.env.GOOGLE_ADS_PHASE || 'OFF',
+              activationAuthorized: false,
+            },
+            ag01Model: assess([
+              'GCP_AG01_MODEL_API_KEY_SECRET',
+              'GCP_AG01_MODEL_API_KEY_SECRET_VERSION',
+              'AG01_MODEL_PROVIDER',
+              'AG01_MODEL_NAME',
+            ]),
+          };
+          const inventory = {
+            schemaVersion: 'toca.staging.provider-prerequisites.v1',
+            exactCandidateSha: process.env.CANDIDATE_SHA,
+            secretValuesRead: false,
+            externalProviderCallsExecuted: false,
+            providers,
+            allCoordinatesComplete: Object.values(providers).every(
+              (provider) => provider.coordinatesComplete === true,
+            ),
+            providerVerified: false,
+            promotionEligible: false,
+          };
+          fs.writeFileSync(
+            process.env.EVIDENCE_DIR + '/provider-prerequisites.json',
+            JSON.stringify(inventory, null, 2) + '\n',
+          );
+          NODE
+          jq -e '
+            .secretValuesRead == false and
+            .externalProviderCallsExecuted == false and
+            .providers.googleAds.phase == "OFF" and
+            .providers.googleAds.activationAuthorized == false and
+            .providerVerified == false and
+            .promotionEligible == false
+          ' "$EVIDENCE_DIR/provider-prerequisites.json" >/dev/null
+          echo 'STAGING_PROVIDER_PREREQUISITES=CAPTURED'
+
+      - name: Read provider secret metadata without accessing payloads
+        continue-on-error: true
+        shell: bash
+        env:
+          GCP_META_ACCESS_TOKEN_SECRET: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET }}
+          GCP_META_ACCESS_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION }}
+          GCP_META_APP_SECRET: ${{ vars.GCP_META_APP_SECRET }}
+          GCP_META_APP_SECRET_VERSION: ${{ vars.GCP_META_APP_SECRET_VERSION }}
+          GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET }}
+          GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION }}
+          GCP_SENDGRID_API_KEY_SECRET: ${{ vars.GCP_SENDGRID_API_KEY_SECRET }}
+          GCP_SENDGRID_API_KEY_SECRET_VERSION: ${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}
+          GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_CLIENT_ID_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}
+          GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}
+          GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION }}
+          GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}
+          GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION }}
+          GCP_AG01_MODEL_API_KEY_SECRET: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET }}
+          GCP_AG01_MODEL_API_KEY_SECRET_VERSION: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION }}
+        run: |
+          set -euo pipefail
+          : > "$EVIDENCE_DIR/provider-secret-metadata.ndjson"
+          inspect_secret() {
+            local label="$1"
+            local secret_name="$2"
+            local version="$3"
+            local name_hash=''
+            local version_state=''
+            local status='NOT_CONFIGURED'
+            if [[ -n "$secret_name" || -n "$version" ]]; then
+              if [[ ! "$secret_name" =~ ^[A-Za-z0-9_-]+$ ]] || [[ ! "$version" =~ ^(latest|[0-9]+)$ ]]; then
+                status='INVALID_REFERENCE'
+              else
+                name_hash="$(printf '%s' "$secret_name" | sha256sum | awk '{print $1}')"
+                set +e
+                gcloud secrets describe "$secret_name" --project "$PROJECT_ID" --format=json >/tmp/provider-secret.json 2>/tmp/provider-secret.err
+                secret_rc=$?
+                gcloud secrets versions describe "$version" --secret "$secret_name" --project "$PROJECT_ID" --format=json >/tmp/provider-version.json 2>/tmp/provider-version.err
+                version_rc=$?
+                set -e
+                if [[ $secret_rc -eq 0 && $version_rc -eq 0 ]]; then
+                  version_state="$(jq -r '.state // "UNKNOWN"' /tmp/provider-version.json)"
+                  if [[ "$version_state" == 'ENABLED' ]]; then
+                    status='METADATA_VERIFIED'
+                  else
+                    status='VERSION_NOT_ENABLED'
+                  fi
+                else
+                  status='DENIED_OR_MISSING'
+                fi
+              fi
+            fi
+            jq -n \
+              --arg label "$label" \
+              --arg secretNameSha256 "$name_hash" \
+              --arg requestedVersion "$version" \
+              --arg versionState "$version_state" \
+              --arg status "$status" \
+              '{label:$label,secretNameSha256:($secretNameSha256|select(length>0)),requestedVersion:($requestedVersion|select(length>0)),versionState:($versionState|select(length>0)),status:$status,payloadAccessed:false}' \
+              >> "$EVIDENCE_DIR/provider-secret-metadata.ndjson"
+          }
+          inspect_secret meta_access_token "$GCP_META_ACCESS_TOKEN_SECRET" "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
+          inspect_secret meta_app_secret "$GCP_META_APP_SECRET" "$GCP_META_APP_SECRET_VERSION"
+          inspect_secret meta_webhook_verify_token "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET" "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION"
+          inspect_secret sendgrid_api_key "$GCP_SENDGRID_API_KEY_SECRET" "$GCP_SENDGRID_API_KEY_SECRET_VERSION"
+          inspect_secret google_ads_developer_token "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET" "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION"
+          inspect_secret google_ads_client_id "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET" "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION"
+          inspect_secret google_ads_client_secret "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET" "$GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION"
+          inspect_secret google_ads_refresh_token "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET" "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION"
+          inspect_secret ag01_model_api_key "$GCP_AG01_MODEL_API_KEY_SECRET" "$GCP_AG01_MODEL_API_KEY_SECRET_VERSION"
+          jq -s '{
+            schemaVersion:"toca.staging.provider-secret-metadata.v1",
+            secrets: .,
+            payloadAccessed: false,
+            allMetadataVerified: all(.[]; .status == "METADATA_VERIFIED")
+          }' "$EVIDENCE_DIR/provider-secret-metadata.ndjson" > "$EVIDENCE_DIR/provider-secret-metadata.json"
+          jq -e '.payloadAccessed == false' "$EVIDENCE_DIR/provider-secret-metadata.json" >/dev/null
+          echo 'STAGING_PROVIDER_SECRET_METADATA=CAPTURED'
+
       - name: Capture redacted provider configuration inventory
         shell: bash
         run: |
