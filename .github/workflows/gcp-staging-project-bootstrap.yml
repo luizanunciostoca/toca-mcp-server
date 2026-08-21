@@ -13,25 +13,26 @@ env:
   CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
+  PROD_SQL_INSTANCE: toca-mcp-db
   STAGING_PROJECT_ID: toca-mcp-next-staging
   STAGING_PROJECT_NUMBER: '729069789107'
-  BILLING_ACCOUNT: 017F93-60A594-4271D6
   REGION: southamerica-east1
-  ARTIFACT_REPOSITORY: toca-mcp-staging
-  DEPLOYER_ACCOUNT_ID: toca-next-stg-deployer
-  MCP_RUNTIME_ACCOUNT_ID: toca-next-stg-mcp
-  WEBHOOK_RUNTIME_ACCOUNT_ID: toca-next-stg-webhook
-  WIF_POOL: github-staging
-  WIF_PROVIDER: github-toca-mcp-staging
+  SQL_INSTANCE: toca-mcp-next-staging-db
+  DATABASE_NAME: toca_mcp_staging
+  DATABASE_USER: toca_app
+  DATABASE_SECRET: toca-next-staging-database-url
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
   bootstrap:
-    name: Bootstrap staging identities and federation
+    name: Bootstrap isolated staging database
     runs-on: ubuntu-latest
     environment: infrastructure-admin
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -43,7 +44,7 @@ jobs:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.INFRA_ADMIN_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Bootstrap staging-only identities
+      - name: Create and verify isolated staging database resources
         shell: bash
         run: |
           set -euo pipefail
@@ -51,53 +52,100 @@ jobs:
           test "$(gcloud projects describe "$PROD_PROJECT_ID" --format='value(projectNumber)')" = "$PROD_PROJECT_NUMBER"
           test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
           test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
-          test "$(gcloud billing projects describe "$STAGING_PROJECT_ID" --format='value(billingAccountName)' | sed 's#^billingAccounts/##')" = "$BILLING_ACCOUNT"
+          test "$SQL_INSTANCE" != "$PROD_SQL_INSTANCE"
+          test "$DATABASE_SECRET" != toca-database-url
 
-          gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com monitoring.googleapis.com logging.googleapis.com --project="$STAGING_PROJECT_ID" --quiet
+          for SA in "$DEPLOYER_SA" "$MCP_RUNTIME_SA" "$WEBHOOK_RUNTIME_SA"; do
+            gcloud iam service-accounts describe "$SA" --project="$STAGING_PROJECT_ID" >/dev/null
+          done
 
-          if ! gcloud artifacts repositories describe "$ARTIFACT_REPOSITORY" --location="$REGION" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
-            gcloud artifacts repositories create "$ARTIFACT_REPOSITORY" --repository-format=docker --location="$REGION" --description='TOCA MCP isolated staging images' --project="$STAGING_PROJECT_ID" --quiet
+          if ! gcloud sql instances describe "$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
+            gcloud sql instances create "$SQL_INSTANCE" \
+              --project="$STAGING_PROJECT_ID" \
+              --database-version=POSTGRES_18 \
+              --edition=ENTERPRISE \
+              --tier=db-g1-small \
+              --region="$REGION" \
+              --availability-type=zonal \
+              --storage-type=SSD \
+              --storage-size=10 \
+              --storage-auto-increase \
+              --backup-start-time=03:00 \
+              --enable-point-in-time-recovery \
+              --retained-transaction-log-days=7 \
+              --deletion-protection \
+              --quiet
           fi
 
-          for ACCOUNT_ID in "$DEPLOYER_ACCOUNT_ID" "$MCP_RUNTIME_ACCOUNT_ID" "$WEBHOOK_RUNTIME_ACCOUNT_ID"; do
-            SA_EMAIL="${ACCOUNT_ID}@${STAGING_PROJECT_ID}.iam.gserviceaccount.com"
-            if ! gcloud iam service-accounts describe "$SA_EMAIL" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
-              gcloud iam service-accounts create "$ACCOUNT_ID" --project="$STAGING_PROJECT_ID" --display-name="$ACCOUNT_ID" --quiet
+          gcloud sql instances patch "$SQL_INSTANCE" \
+            --project="$STAGING_PROJECT_ID" \
+            --ssl-mode=ENCRYPTED_ONLY \
+            --backup-start-time=03:00 \
+            --enable-point-in-time-recovery \
+            --retained-transaction-log-days=7 \
+            --deletion-protection \
+            --quiet
+
+          SQL_JSON="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format=json)"
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.project')" = "$STAGING_PROJECT_ID"
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.name')" = "$SQL_INSTANCE"
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.region')" = "$REGION"
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.databaseVersion')" = POSTGRES_18
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.settings.ipConfiguration.sslMode')" = ENCRYPTED_ONLY
+          test "$(printf '%s' "$SQL_JSON" | jq -r '(.settings.ipConfiguration.authorizedNetworks // []) | length')" = 0
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.settings.backupConfiguration.enabled')" = true
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled')" = true
+          test "$(printf '%s' "$SQL_JSON" | jq -r '.settings.deletionProtectionEnabled')" = true
+
+          if ! gcloud sql databases describe "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
+            gcloud sql databases create "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --quiet
+          fi
+
+          if ! gcloud secrets describe "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
+            gcloud secrets create "$DATABASE_SECRET" --replication-policy=automatic --project="$STAGING_PROJECT_ID" --quiet
+          fi
+
+          ENABLED_VERSION="$(gcloud secrets versions list "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --filter='state=ENABLED' --format='value(name)' --limit=1)"
+          if [[ -z "$ENABLED_VERSION" ]]; then
+            DB_PASSWORD="$(openssl rand -base64 36 | tr -d '\n')"
+            if gcloud sql users list --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(name)' | grep -Fxq "$DATABASE_USER"; then
+              gcloud sql users set-password "$DATABASE_USER" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --password="$DB_PASSWORD" --quiet
+            else
+              gcloud sql users create "$DATABASE_USER" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --password="$DB_PASSWORD" --quiet
             fi
-          done
-
-          DEPLOYER_SA="${DEPLOYER_ACCOUNT_ID}@${STAGING_PROJECT_ID}.iam.gserviceaccount.com"
-          MCP_RUNTIME_SA="${MCP_RUNTIME_ACCOUNT_ID}@${STAGING_PROJECT_ID}.iam.gserviceaccount.com"
-          WEBHOOK_RUNTIME_SA="${WEBHOOK_RUNTIME_ACCOUNT_ID}@${STAGING_PROJECT_ID}.iam.gserviceaccount.com"
-          for ROLE in roles/run.admin roles/artifactregistry.writer roles/cloudsql.client roles/serviceusage.serviceUsageConsumer; do
-            gcloud projects add-iam-policy-binding "$STAGING_PROJECT_ID" --member="serviceAccount:$DEPLOYER_SA" --role="$ROLE" --condition=None --quiet >/dev/null
-          done
-          for RUNTIME_SA in "$MCP_RUNTIME_SA" "$WEBHOOK_RUNTIME_SA"; do
-            gcloud projects add-iam-policy-binding "$STAGING_PROJECT_ID" --member="serviceAccount:$RUNTIME_SA" --role=roles/cloudsql.client --condition=None --quiet >/dev/null
-            gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --project="$STAGING_PROJECT_ID" --member="serviceAccount:$DEPLOYER_SA" --role=roles/iam.serviceAccountUser --condition=None --quiet >/dev/null
-          done
-
-          if ! gcloud iam workload-identity-pools describe "$WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
-            gcloud iam workload-identity-pools create "$WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" --display-name='GitHub staging only' --quiet
-          fi
-          if ! gcloud iam workload-identity-pools providers describe "$WIF_PROVIDER" --workload-identity-pool="$WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" >/dev/null 2>&1; then
-            gcloud iam workload-identity-pools providers create-oidc "$WIF_PROVIDER" --workload-identity-pool="$WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" --display-name='GitHub TOCA MCP staging' --issuer-uri='https://token.actions.githubusercontent.com' --attribute-mapping='google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id' --attribute-condition="assertion.repository_id=='1339919100' && assertion.repository_owner_id=='318748875' && assertion.sub=='repo:luizanunciostoca/toca-mcp-server:environment:staging'" --quiet
-          fi
-          PRINCIPAL="principal://iam.googleapis.com/projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/subject/repo:luizanunciostoca/toca-mcp-server:environment:staging"
-          gcloud iam service-accounts add-iam-policy-binding "$DEPLOYER_SA" --project="$STAGING_PROJECT_ID" --member="$PRINCIPAL" --role=roles/iam.workloadIdentityUser --condition=None --quiet >/dev/null
-
-          PROVIDER_NAME="$(gcloud iam workload-identity-pools providers describe "$WIF_PROVIDER" --workload-identity-pool="$WIF_POOL" --location=global --project="$STAGING_PROJECT_ID" --format='value(name)')"
-          test "$PROVIDER_NAME" = "projects/$STAGING_PROJECT_NUMBER/locations/global/workloadIdentityPools/$WIF_POOL/providers/$WIF_PROVIDER"
-          POLICY="$(gcloud projects get-iam-policy "$STAGING_PROJECT_ID" --format=json)"
-          if printf '%s' "$POLICY" | jq -e --arg member "serviceAccount:${INFRA_ADMIN_SA}" '.bindings[] | select((.role=="roles/owner" or .role=="roles/editor") and (.members // [] | index($member)))' >/dev/null; then
-            echo 'FAIL: infra-admin has forbidden Owner/Editor in staging' >&2; exit 1
+            CONNECTION_NAME="${STAGING_PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
+            DATABASE_URL="$(DB_PASSWORD="$DB_PASSWORD" CONNECTION_NAME="$CONNECTION_NAME" python3 - <<'PY'
+import os
+from urllib.parse import quote
+password = quote(os.environ['DB_PASSWORD'], safe='')
+socket = quote('/cloudsql/' + os.environ['CONNECTION_NAME'], safe='')
+print(f'postgresql://toca_app:{password}@localhost/toca_mcp_staging?host={socket}')
+PY
+)"
+            printf '%s' "$DATABASE_URL" | gcloud secrets versions add "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --data-file=- >/dev/null
+            unset DB_PASSWORD DATABASE_URL
           fi
 
-          echo "STAGING_WIF_PROVIDER=$PROVIDER_NAME"
-          echo "STAGING_DEPLOYER_SA=$DEPLOYER_SA"
-          echo "STAGING_MCP_RUNTIME_SA=$MCP_RUNTIME_SA"
-          echo "STAGING_WEBHOOK_RUNTIME_SA=$WEBHOOK_RUNTIME_SA"
-          echo 'STAGING_IDENTITIES_AND_WIF=PASS'
+          for SA in "$DEPLOYER_SA" "$MCP_RUNTIME_SA" "$WEBHOOK_RUNTIME_SA"; do
+            gcloud secrets add-iam-policy-binding "$DATABASE_SECRET" \
+              --project="$STAGING_PROJECT_ID" \
+              --member="serviceAccount:$SA" \
+              --role=roles/secretmanager.secretAccessor \
+              --condition=None \
+              --quiet >/dev/null
+          done
+
+          test -n "$(gcloud secrets versions list "$DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --filter='state=ENABLED' --format='value(name)' --limit=1)"
+          test "$(gcloud sql databases describe "$DATABASE_NAME" --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(name)')" = "$DATABASE_NAME"
+          gcloud sql users list --instance="$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(name)' | grep -Fxq "$DATABASE_USER"
+
+          CONNECTION_NAME="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(connectionName)')"
+          test "$CONNECTION_NAME" = "${STAGING_PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
+          echo "STAGING_SQL_CONNECTION_NAME=$CONNECTION_NAME"
+          echo "STAGING_DATABASE_SECRET=$DATABASE_SECRET"
+          echo 'STAGING_CLOUD_SQL=PASS'
+          echo 'STAGING_DATABASE_AND_SECRET=PASS'
+          echo 'AUTHORIZED_NETWORKS_COUNT=0'
           echo 'APPLICATION_MIGRATION_EXECUTED=NO'
           echo 'APPLICATION_DEPLOY_EXECUTED=NO'
           echo 'PROVIDER_MUTATION_EXECUTED=NO'
