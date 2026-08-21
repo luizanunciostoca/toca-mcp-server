@@ -190,21 +190,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp "$HARNESS_ROOT/scripts/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
-          cp "$HARNESS_ROOT/scripts/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
-          cp "$HARNESS_ROOT/scripts/staging-e2e/ephemeral-schema.ts" "$CANDIDATE_ROOT/staging-acceptance-ephemeral-schema.ts"
-          cp "$HARNESS_ROOT/scripts/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/staging-acceptance-recover-workflows.ts"
-          cp "$HARNESS_ROOT/scripts/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
+          mkdir -p "$CANDIDATE_ROOT/scripts/staging-e2e"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/scripts/staging-e2e/db-preflight.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/scripts/staging-e2e/durable-workflow.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/ephemeral-schema.ts" "$CANDIDATE_ROOT/scripts/staging-e2e/ephemeral-schema.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/scripts/staging-e2e/recover-workflows.ts"
+          cp "$HARNESS_ROOT/scripts/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/scripts/staging-e2e/settle-outbox.ts"
 
       - name: Recover only interrupted synthetic acceptance residue
         working-directory: candidate
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/pre-recovery-outbox-settlement.log"
+          pnpm exec tsx scripts/staging-e2e/settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/pre-recovery-outbox-settlement.log"
           cp "$EVIDENCE_DIR/outbox-settlement.json" "$EVIDENCE_DIR/pre-recovery-outbox-settlement.json"
-          pnpm exec tsx staging-acceptance-recover-workflows.ts 2>&1 | tee "$EVIDENCE_DIR/synthetic-workflow-recovery.log"
-          pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/post-recovery-outbox-settlement.log"
+          pnpm exec tsx scripts/staging-e2e/recover-workflows.ts 2>&1 | tee "$EVIDENCE_DIR/synthetic-workflow-recovery.log"
+          pnpm exec tsx scripts/staging-e2e/settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/post-recovery-outbox-settlement.log"
           cp "$EVIDENCE_DIR/outbox-settlement.json" "$EVIDENCE_DIR/post-recovery-outbox-settlement.json"
 
       - name: Verify current schema and quiescent acceptance window
@@ -212,7 +213,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec tsx staging-acceptance-db-preflight.ts
+          pnpm exec tsx scripts/staging-e2e/db-preflight.ts
           cp "$EVIDENCE_DIR/database-preflight.json" "$EVIDENCE_DIR/public-database-preflight.json"
 
       - name: Prove migrations are current and idempotent twice
@@ -236,7 +237,7 @@ jobs:
         name: Create exact ephemeral acceptance schema
         working-directory: candidate
         shell: bash
-        run: pnpm exec tsx staging-acceptance-ephemeral-schema.ts create
+        run: pnpm exec tsx scripts/staging-e2e/ephemeral-schema.ts create
 
       - name: Apply and verify exact migrations in ephemeral schema
         working-directory: candidate
@@ -252,7 +253,7 @@ jobs:
             echo 'EPHEMERAL_MIGRATION_SECOND_PASS_WAS_NOT_A_NOOP'
             exit 1
           fi
-          pnpm exec tsx staging-acceptance-db-preflight.ts
+          pnpm exec tsx scripts/staging-e2e/db-preflight.ts
           cp "$EVIDENCE_DIR/database-preflight.json" "$EVIDENCE_DIR/ephemeral-database-preflight.json"
           echo 'EPHEMERAL_SCHEMA_MIGRATIONS=PASS'
 
@@ -277,7 +278,7 @@ jobs:
       - name: Prove human approval and timer resume across process restart
         working-directory: candidate
         shell: bash
-        run: pnpm exec tsx staging-acceptance-durable-workflow.ts 2>&1 | tee "$EVIDENCE_DIR/durable-workflow.log"
+        run: pnpm exec tsx scripts/staging-e2e/durable-workflow.ts 2>&1 | tee "$EVIDENCE_DIR/durable-workflow.log"
 
       - id: mcp_token
         name: Mint short-lived MCP token for staging service audience
@@ -307,7 +308,7 @@ jobs:
         if: always() && steps.database.outputs.ready == 'yes'
         working-directory: candidate
         shell: bash
-        run: pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/outbox-settlement.log"
+        run: pnpm exec tsx scripts/staging-e2e/settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/outbox-settlement.log"
 
       - name: Verify post-E2E readiness and unchanged exact traffic
         shell: bash
@@ -343,7 +344,7 @@ jobs:
         if: always() && steps.acceptance_schema.outputs.created == 'yes'
         working-directory: candidate
         shell: bash
-        run: pnpm exec tsx staging-acceptance-ephemeral-schema.ts drop
+        run: pnpm exec tsx scripts/staging-e2e/ephemeral-schema.ts drop
 
       - name: Stop Cloud SQL proxy
         if: always()

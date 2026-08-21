@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PostgresTransactionalOutbox } from './src/events/postgres-transactional-outbox.js';
-import { createPostgresPool } from './src/persistence/postgres.js';
+import { PostgresTransactionalOutbox } from '../../src/events/postgres-transactional-outbox.js';
+import { createPostgresPool } from '../../src/persistence/postgres.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 const evidenceDir = process.env.EVIDENCE_DIR;

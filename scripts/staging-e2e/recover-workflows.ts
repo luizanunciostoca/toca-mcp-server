@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createPostgresPool } from './src/persistence/postgres.js';
-import { PostgresWorkflowStore } from './src/persistence/postgres-workflow-store.js';
+import { createPostgresPool } from '../../src/persistence/postgres.js';
+import { PostgresWorkflowStore } from '../../src/persistence/postgres-workflow-store.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 const evidenceDir = process.env.EVIDENCE_DIR;

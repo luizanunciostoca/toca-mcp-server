@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createPostgresPool } from './src/persistence/postgres.js';
+import { createPostgresPool } from '../../src/persistence/postgres.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 const evidenceDir = process.env.EVIDENCE_DIR;
