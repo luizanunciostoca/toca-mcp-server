@@ -64,9 +64,8 @@ try {
   }
 
   if (businessSelection.ok) {
-    const selectedWabas = wabaByBusiness.find(
-      (row) => row.businessId === businessSelection.value.id,
-    )?.assets ?? [];
+    const selectedWabas =
+      wabaByBusiness.find((row) => row.businessId === businessSelection.value.id)?.assets ?? [];
     details.wabaCandidates = selectedWabas;
     for (const waba of selectedWabas) evidence.push(`meta:waba:${waba.id}`);
     const wabaSelection = selectAsset(selectedWabas, selector.wabaId);
@@ -78,7 +77,9 @@ try {
         `${wabaSelection.value.id}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,code_verification_status&limit=100`,
       );
       gates.phone_api = phonesResponse.ok;
-      evidence.push(`meta:waba:${wabaSelection.value.id}:phone-numbers:http:${phonesResponse.status}`);
+      evidence.push(
+        `meta:waba:${wabaSelection.value.id}:phone-numbers:http:${phonesResponse.status}`,
+      );
       const phones = phonesResponse.ok
         ? safeArray(phonesResponse.body?.data).map(phoneAsset).filter(Boolean)
         : [];
@@ -92,7 +93,9 @@ try {
         `${wabaSelection.value.id}/message_templates?fields=id,name,status,language,category,components&limit=100`,
       );
       gates.templates_api = templatesResponse.ok;
-      evidence.push(`meta:waba:${wabaSelection.value.id}:templates:http:${templatesResponse.status}`);
+      evidence.push(
+        `meta:waba:${wabaSelection.value.id}:templates:http:${templatesResponse.status}`,
+      );
       const approved = templatesResponse.ok
         ? safeArray(templatesResponse.body?.data)
             .filter(
