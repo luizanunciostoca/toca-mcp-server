@@ -95,7 +95,10 @@ class BoundWhatsAppScopeResolver implements WhatsAppScopeResolver {
     readonly wabaId: string;
     readonly phoneNumberId: string;
   }): Promise<WhatsAppScopeBinding | undefined> {
-    if (input.wabaId !== this.binding.wabaId || input.phoneNumberId !== this.binding.phoneNumberId) {
+    if (
+      input.wabaId !== this.binding.wabaId ||
+      input.phoneNumberId !== this.binding.phoneNumberId
+    ) {
       return Promise.resolve(undefined);
     }
     return Promise.resolve(this.binding);
@@ -173,7 +176,10 @@ const FAIL_CLOSED_PRIVACY_DATA_GATEWAY: PrivacyDataGateway = {
 
 function bindingFromEnv(env: NodeJS.ProcessEnv): WhatsAppScopeBinding {
   const tenantId = required(env.TOCA_DEFAULT_TENANT_ID ?? 'toca', 'WHATSAPP_TENANT_ID_REQUIRED');
-  const workspaceId = required(env.TOCA_DEFAULT_WORKSPACE_ID ?? tenantId, 'WHATSAPP_WORKSPACE_ID_REQUIRED');
+  const workspaceId = required(
+    env.TOCA_DEFAULT_WORKSPACE_ID ?? tenantId,
+    'WHATSAPP_WORKSPACE_ID_REQUIRED',
+  );
   const organizationId = required(
     env.TOCA_DEFAULT_ORGANIZATION_ID ?? tenantId,
     'WHATSAPP_ORGANIZATION_ID_REQUIRED',
@@ -185,8 +191,14 @@ function bindingFromEnv(env: NodeJS.ProcessEnv): WhatsAppScopeBinding {
     metaAppId: required(env.META_APP_ID, 'WHATSAPP_META_APP_ID_REQUIRED'),
     wabaId: required(env.WHATSAPP_WABA_ID, 'WHATSAPP_WABA_ID_REQUIRED'),
     phoneNumberId: required(env.WHATSAPP_PHONE_NUMBER_ID, 'WHATSAPP_PHONE_NUMBER_ID_REQUIRED'),
-    purposeId: required(env.WHATSAPP_PURPOSE_ID ?? DEFAULT_PURPOSE_ID, 'WHATSAPP_PURPOSE_ID_REQUIRED'),
-    policyRef: required(env.WHATSAPP_POLICY_REF ?? DEFAULT_POLICY_REF, 'WHATSAPP_POLICY_REF_REQUIRED'),
+    purposeId: required(
+      env.WHATSAPP_PURPOSE_ID ?? DEFAULT_PURPOSE_ID,
+      'WHATSAPP_PURPOSE_ID_REQUIRED',
+    ),
+    policyRef: required(
+      env.WHATSAPP_POLICY_REF ?? DEFAULT_POLICY_REF,
+      'WHATSAPP_POLICY_REF_REQUIRED',
+    ),
     actorPrincipalId: required(
       env.WHATSAPP_ACTOR_PRINCIPAL_ID ?? DEFAULT_ACTOR_PRINCIPAL_ID,
       'WHATSAPP_ACTOR_PRINCIPAL_ID_REQUIRED',

@@ -9,6 +9,10 @@ import {
   createSendGridEventHttpRuntime,
   type SendGridEventHttpRuntime,
 } from './providers/sendgrid/email-event-http-runtime.js';
+import {
+  createWhatsAppHttpComposition,
+  type WhatsAppHttpComposition,
+} from './omnichannel/whatsapp-http-composition.js';
 import { SERVER_NAME } from './server.js';
 
 const SENDGRID_EVENT_WEBHOOK_PATH = '/webhooks/sendgrid/events';
@@ -24,7 +28,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MCP_PORT/PORT must be an integer between 1 and 65535');
 }
 
-const metaWebhook = createMetaWebhookBoundary();
+const whatsappRuntime = createWhatsAppWebhookRuntime();
+const metaWebhook = createMetaWebhookBoundary(whatsappRuntime);
 const sendGridEventRuntime = await createEmailWebhookRuntime();
 
 const baseServer = createTocaHttpServer({
@@ -50,6 +55,15 @@ const server = sendGridEventRuntime
 server.listen(port, host, () => {
   console.log(`${SERVER_NAME} HTTP runtime listening on http://${host}:${port}`);
 });
+
+function createWhatsAppWebhookRuntime(): WhatsAppHttpComposition | undefined {
+  if (!isTrue(process.env.WHATSAPP_RUNTIME_ENABLED)) return undefined;
+  if (!config.DATABASE_URL?.trim()) throw new Error('WHATSAPP_DATABASE_URL_REQUIRED');
+  return createWhatsAppHttpComposition({
+    pool: createPostgresPool({ connectionString: config.DATABASE_URL }),
+    env: process.env,
+  });
+}
 
 async function createEmailWebhookRuntime(): Promise<SendGridEventHttpRuntime | undefined> {
   if (!isTrue(process.env.EMAIL_SENDGRID_ENABLED)) return undefined;
@@ -93,7 +107,9 @@ async function handleComposedHttpRequest(
   }
 }
 
-function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
+function createMetaWebhookBoundary(
+  whatsappRuntime: WhatsAppHttpComposition | undefined,
+): MetaWebhookHttpBoundary | undefined {
   if (!config.META_WEBHOOK_ENABLED) return undefined;
 
   if (
@@ -127,6 +143,7 @@ function createMetaWebhookBoundary(): MetaWebhookHttpBoundary | undefined {
   return {
     resolveAppSecret: () => resolver.resolve(appSecretReference),
     resolveVerifyToken: () => resolver.resolve(verifyTokenReference),
+    ...(whatsappRuntime ? { onWhatsAppEvents: (events) => whatsappRuntime.ingest(events) } : {}),
     onEvents: async (events) => {
       const persistence = eventStore
         ? await eventStore.persist(events)

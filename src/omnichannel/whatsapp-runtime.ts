@@ -78,6 +78,7 @@ export interface WhatsAppCrmWorkflow {
     readonly contact: ContactRecord;
     readonly conversation: ConversationRecord;
     readonly message: MessageRecord;
+    readonly contentText?: string | null;
     readonly humanHandoff: boolean;
     readonly evidence: readonly string[];
   }): Promise<void>;
@@ -309,6 +310,7 @@ export class WhatsAppInboundRuntime {
       contact,
       conversation,
       message,
+      contentText: event.text,
       humanHandoff,
       evidence: [...evidence, ...privacyEvidence],
     });
