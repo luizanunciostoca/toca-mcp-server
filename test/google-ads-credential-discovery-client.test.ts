@@ -55,10 +55,10 @@ describe('Google Ads credential-only discovery client', () => {
       () => Promise.resolve(new Response('{}', { status: 200 })),
     );
 
-    await expect(client.search('SELECT customer.id FROM customer')).rejects.toThrow(
+    expect(() => client.search('SELECT customer.id FROM customer')).toThrow(
       'GOOGLE_ADS_CUSTOMER_ID_REQUIRED',
     );
-    await expect(client.mutate('/customers/1234567890/campaigns:mutate', {})).rejects.toThrow(
+    expect(() => client.mutate('/customers/1234567890/campaigns:mutate', {})).toThrow(
       'GOOGLE_ADS_CUSTOMER_ID_REQUIRED',
     );
   });
