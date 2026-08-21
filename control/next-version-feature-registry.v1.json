@@ -67,10 +67,7 @@
       "providerVerified": false,
       "productionVerified": false,
       "driveOperationalChannelCapabilityRowsPresent": false,
-      "existingCanonicalNurtureAuthorities": [
-        "sales.followup.create",
-        "sales.followup.schedule"
-      ],
+      "existingCanonicalNurtureAuthorities": ["sales.followup.create", "sales.followup.schedule"],
       "blockers": [
         "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
         "TOCA_OS capability catalog currently has no matching operational whatsapp.* or email.* rows; observed whatsapp/email matches are copy-generation capabilities only",
