@@ -1016,10 +1016,7 @@ function classifyProviderFailure(
 }
 
 function isPrivacyRevalidationError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_')
-  );
+  return error instanceof Error && error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_');
 }
 
 function readbackFromDispatch(

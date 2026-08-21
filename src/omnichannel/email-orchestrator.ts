@@ -185,7 +185,10 @@ export class EmailDispatchCoordinator {
         channel: 'EMAIL',
         privacyChannel: requireText(input.privacyChannel, 'EMAIL_PRIVACY_CHANNEL_REQUIRED'),
         subjectRef: requireOpaqueEmailPrivacySubject(input.privacySubjectRef),
-        purposeId: requireText(input.eligibilitySnapshot.purposeId, 'EMAIL_PRIVACY_PURPOSE_REQUIRED'),
+        purposeId: requireText(
+          input.eligibilitySnapshot.purposeId,
+          'EMAIL_PRIVACY_PURPOSE_REQUIRED',
+        ),
         requester: requireText(input.actorPrincipalId, 'EMAIL_ACTOR_PRINCIPAL_REQUIRED'),
         executionId: `${requireText(input.executionId, 'EMAIL_EXECUTION_ID_REQUIRED')}:privacy-pre-send:${attemptCount}`,
         correlationId: input.correlationId,
@@ -575,10 +578,7 @@ function safeErrorCode(error: unknown): string {
 }
 
 function isPrivacyRevalidationError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_')
-  );
+  return error instanceof Error && error.message.startsWith('OMNICHANNEL_PRIVACY_REVALIDATION_');
 }
 
 function requireOpaqueEmailPrivacySubject(value: string): string {

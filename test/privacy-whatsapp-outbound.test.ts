@@ -22,9 +22,7 @@ import type {
   WhatsAppRuntimeStore,
 } from '../src/omnichannel/whatsapp-runtime-contracts.js';
 import type { CommunicationPolicyDecision } from '../src/privacy/contracts.js';
-import type {
-  PreparedWhatsAppPayloadResolver,
-} from '../src/providers/whatsapp/whatsapp-cloud-adapter.js';
+import type { PreparedWhatsAppPayloadResolver } from '../src/providers/whatsapp/whatsapp-cloud-adapter.js';
 
 const scope = {
   tenantId: 'tenant-privacy-wa',

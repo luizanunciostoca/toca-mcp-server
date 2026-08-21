@@ -1,8 +1,5 @@
 import type { CrmScope } from '../crm/crm-records.js';
-import type {
-  CommunicationPolicyDecision,
-  PrivacyExecutionContext,
-} from '../privacy/contracts.js';
+import type { CommunicationPolicyDecision, PrivacyExecutionContext } from '../privacy/contracts.js';
 import type { PrivacyGovernanceService } from '../privacy/privacy-governance.js';
 import type { OmnichannelChannel } from './contracts.js';
 

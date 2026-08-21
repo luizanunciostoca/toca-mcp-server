@@ -275,30 +275,27 @@ describe('EmailDispatchCoordinator', () => {
     expect(privacy.calls).toHaveLength(0);
   });
 
-  it(
-    'revalidates Privacy immediately before provider execution and blocks revoked consent',
-    async () => {
-      const store = new MemoryEmailStore();
-      const provider = new StubProvider();
-      const privacy = new StubOutboundPrivacy();
-      privacy.state = 'BLOCKED';
-      privacy.reasons = ['CONSENT_DENIED'];
+  it('revalidates Privacy immediately before provider execution and blocks revoked consent', async () => {
+    const store = new MemoryEmailStore();
+    const provider = new StubProvider();
+    const privacy = new StubOutboundPrivacy();
+    privacy.state = 'BLOCKED';
+    privacy.reasons = ['CONSENT_DENIED'];
 
-      const result = await coordinator(provider, store, privacy).send(buildSendInput());
+    const result = await coordinator(provider, store, privacy).send(buildSendInput());
 
-      expect(result.accepted).toBe(false);
-      expect(result.dispatch.state).toBe('FAILED');
-      expect(result.dispatch.lastError).toBe('EMAIL_PRIVACY_REVALIDATION_BLOCKED');
-      expect(provider.sendCount).toBe(0);
-      expect(privacy.calls).toHaveLength(1);
-      expect(privacy.calls[0]).toMatchObject({
-        subjectRef: 'subject:email:contact-1',
-        purposeId: 'reservation-followup',
-        privacyChannel: 'EMAIL',
-      });
-      expect(privacy.calls[0]?.executionId).toBe('email-send-exec-1:privacy-pre-send:1');
-    },
-  );
+    expect(result.accepted).toBe(false);
+    expect(result.dispatch.state).toBe('FAILED');
+    expect(result.dispatch.lastError).toBe('EMAIL_PRIVACY_REVALIDATION_BLOCKED');
+    expect(provider.sendCount).toBe(0);
+    expect(privacy.calls).toHaveLength(1);
+    expect(privacy.calls[0]).toMatchObject({
+      subjectRef: 'subject:email:contact-1',
+      purposeId: 'reservation-followup',
+      privacyChannel: 'EMAIL',
+    });
+    expect(privacy.calls[0]?.executionId).toBe('email-send-exec-1:privacy-pre-send:1');
+  });
 
   it('blocks unsubscribe/complaint suppression before Email and never calls provider', async () => {
     for (const reason of ['PROVIDER_UNSUBSCRIBED', 'PROVIDER_COMPLAINT'] as const) {
