@@ -365,6 +365,7 @@ jobs:
 
   staging-operational-preflight:
     runs-on: ubuntu-latest
+    environment: staging
     timeout-minutes: 20
     env:
       EVIDENCE_DIR: ${{ github.workspace }}/staging-operational-evidence
