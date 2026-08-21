@@ -129,8 +129,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const googleAdsStaticConfigured = Boolean(config.GOOGLE_ADS_ACCESS_TOKEN_ENV_KEY);
   const googleAdsDiscoveryEnabled = Boolean(
     config.GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY &&
-      !googleAdsOauthPartiallyConfigured &&
-      googleAdsStaticConfigured !== googleAdsOauthConfigured,
+    !googleAdsOauthPartiallyConfigured &&
+    googleAdsStaticConfigured !== googleAdsOauthConfigured,
   );
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
