@@ -1,0 +1,111 @@
+name: Staging Cloud Run Invocation Diagnostic 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-cloud-run-invocation-diagnostic-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Authenticate staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - id: resolve
+        name: Resolve service and candidate without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          JSON="$(gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          TAG_URL="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .url][0] // empty' <<<"$JSON")"
+          REV="$(jq -r '[.status.traffic[] | select(.tag=="candidate-75c165a") | .revisionName][0] // empty' <<<"$JSON")"
+          BASE_URL="$(jq -r '.status.url' <<<"$JSON")"
+          test "$REV" = 'toca-mcp-next-staging-mcp-75c165a-r1'
+          test -n "$TAG_URL"; test -n "$BASE_URL"
+          test "$(jq -r --arg r "$REV" '[.status.traffic[] | select(.revisionName==$r) | (.percent // 0)] | max // 0' <<<"$JSON")" = 0
+          echo "tag_url=$TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo '=== SERVICE IAM POLICY ==='
+          if gcloud run services get-iam-policy "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/iam.json 2>/tmp/iam.err; then
+            jq '{bindings:[.bindings[]? | select(.role=="roles/run.invoker")],etag:.etag}' /tmp/iam.json
+            if jq -e --arg member "serviceAccount:${DEPLOYER_SA}" '.bindings[]? | select(.role=="roles/run.invoker") | .members[]? | select(.==$member)' /tmp/iam.json >/dev/null; then
+              echo 'DEPLOYER_RUN_INVOKER_BINDING=PRESENT'
+            else
+              echo 'DEPLOYER_RUN_INVOKER_BINDING=ABSENT'
+            fi
+          else
+            echo 'SERVICE_IAM_POLICY_READ=DENIED'
+            cat /tmp/iam.err
+          fi
+          echo 'MUTATION_EXECUTED=NO'
+      - id: token_no_email
+        name: Mint base-audience token without email
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve.outputs.base_url }}
+          id_token_include_email: false
+      - id: token_with_email
+        name: Mint base-audience token with email
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve.outputs.base_url }}
+          id_token_include_email: true
+      - name: Capture invocation matrix without mutation
+        shell: bash
+        env:
+          TAG_URL: ${{ steps.resolve.outputs.tag_url }}
+          BASE_URL: ${{ steps.resolve.outputs.base_url }}
+          TOKEN_NO_EMAIL: ${{ steps.token_no_email.outputs.id_token }}
+          TOKEN_WITH_EMAIL: ${{ steps.token_with_email.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          request() {
+            local label="$1" url="$2" token="${3:-}"
+            local body="/tmp/${label}.body" headers="/tmp/${label}.headers" status
+            if [[ -n "$token" ]]; then
+              status="$(curl --silent --show-error --output "$body" --dump-header "$headers" --write-out '%{http_code}' -H "Authorization: Bearer $token" "$url/healthz")"
+            else
+              status="$(curl --silent --show-error --output "$body" --dump-header "$headers" --write-out '%{http_code}' "$url/healthz")"
+            fi
+            echo "${label}_STATUS=${status}"
+            echo "${label}_SERVER=$(awk 'BEGIN{IGNORECASE=1} /^server:/{gsub(/\r/,""); sub(/^server:[[:space:]]*/,""); print; exit}' "$headers")"
+            echo "${label}_BODY_PREFIX=$(head -c 160 "$body" | tr '\n' ' ')"
+          }
+          request TAG_UNAUTH "$TAG_URL"
+          request TAG_TOKEN_NO_EMAIL "$TAG_URL" "$TOKEN_NO_EMAIL"
+          request TAG_TOKEN_WITH_EMAIL "$TAG_URL" "$TOKEN_WITH_EMAIL"
+          request BASE_TOKEN_WITH_EMAIL "$BASE_URL" "$TOKEN_WITH_EMAIL"
+          echo 'INVOCATION_DIAGNOSTIC=COMPLETE'
+          echo 'MUTATION_EXECUTED=NO'
