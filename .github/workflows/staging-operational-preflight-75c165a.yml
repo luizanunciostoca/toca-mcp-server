@@ -1,0 +1,434 @@
+name: Staging Operational Preflight 75c165a
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/staging-operational-preflight-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-operational-preflight-75c165a
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-r3
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-f1
+  DATABASE_INSTANCE: toca-mcp-next-staging-db
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  EVIDENCE_DIR: ${{ github.workspace }}/evidence
+
+jobs:
+  staging-operational-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact application identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          printf '%s\n' \
+            "APPLICATION_CANDIDATE_SHA=$CANDIDATE_SHA" \
+            "APPLICATION_CANDIDATE_TREE=$CANDIDATE_TREE" \
+            'PRODUCTION_AUTHORIZED=NO' \
+            'PROVIDER_CALLS_AUTHORIZED=NO' \
+            'MUTATION_MODE=READ_ONLY' \
+            > "$EVIDENCE_DIR/release-identity.txt"
+
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Fail-closed project and runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/mcp-service.json"
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/webhook-service.json"
+          gcloud run revisions describe "$MCP_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/mcp-revision.json"
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/webhook-revision.json"
+
+          jq -e --arg rev "$MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/mcp-service.json" >/dev/null
+          jq -e --arg rev "$WEBHOOK_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/webhook-service.json" >/dev/null
+          for file in "$EVIDENCE_DIR/mcp-revision.json" "$EVIDENCE_DIR/webhook-revision.json"; do
+            jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] == [$sha]' "$file" >/dev/null
+            jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' "$file" >/dev/null
+          done
+          echo 'STAGING_EXACT_RUNTIME_IDENTITY=PASS'
+
+      - name: Capture redacted provider configuration inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '
+            [
+              .spec.containers[0].env[]?
+              | select(.name | test("^(META_|INSTAGRAM_|WHATSAPP_|EMAIL_SENDGRID_|GOOGLE_ADS_|AG01_MODEL_)"))
+              | if .valueFrom.secretKeyRef? then
+                  {
+                    name,
+                    source: "secret_ref",
+                    secretName: .valueFrom.secretKeyRef.name,
+                    secretVersion: .valueFrom.secretKeyRef.key
+                  }
+                elif (.name | test("(TOKEN|SECRET|PASSWORD|API_KEY)")) then
+                  {name, source: "literal", value: "REDACTED_IF_PRESENT"}
+                else
+                  {name, source: "literal", value: (.value // null)}
+                end
+            ]
+          ' "$EVIDENCE_DIR/mcp-revision.json" > "$EVIDENCE_DIR/provider-runtime-env.json"
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = process.env.EVIDENCE_DIR + '/provider-runtime-env.json';
+          const rows = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const byName = Object.fromEntries(rows.map((row) => [row.name, row]));
+          const value = (name) => byName[name]?.value ?? null;
+          const secretRefs = rows.filter((row) => row.source === 'secret_ref').map((row) => row.name);
+          const matrix = {
+            schemaVersion: 'toca.staging.provider-preflight.v1',
+            exactCandidateSha: process.env.CANDIDATE_SHA,
+            externalProviderCallsExecuted: false,
+            productionMutationExecuted: false,
+            secretValuesRead: false,
+            providers: {
+              metaInstagram: {
+                runtimeEnabled: value('META_ENABLED') === 'true',
+                providerVerified: value('META_PROVIDER_VERIFIED') === 'true',
+                instagramReadEnabled: value('INSTAGRAM_READ_ENABLED') === 'true',
+                secretReferencePresent: secretRefs.some((name) => name.startsWith('META_')),
+                status: 'BLOCKED_NOT_BOUND_IN_STAGING',
+              },
+              whatsapp: {
+                runtimeEnabled:
+                  value('WHATSAPP_ENABLED') === 'true' &&
+                  value('WHATSAPP_RUNTIME_ENABLED') === 'true',
+                providerVerified: value('WHATSAPP_PROVIDER_VERIFIED') === 'true',
+                secretReferencePresent: secretRefs.some((name) => name.startsWith('WHATSAPP_')),
+                status: 'BLOCKED_NOT_BOUND_IN_STAGING',
+              },
+              sendgrid: {
+                runtimeEnabled: value('EMAIL_SENDGRID_ENABLED') === 'true',
+                providerVerified: value('EMAIL_SENDGRID_PROVIDER_VERIFIED') === 'true',
+                secretReferencePresent: secretRefs.some((name) =>
+                  name.startsWith('EMAIL_SENDGRID_'),
+                ),
+                status: 'BLOCKED_NOT_BOUND_IN_STAGING',
+              },
+              googleAds: {
+                phase: value('GOOGLE_ADS_PHASE'),
+                providerVerified: value('GOOGLE_ADS_PROVIDER_VERIFIED') === 'true',
+                secretReferencePresent: secretRefs.some((name) => name.startsWith('GOOGLE_ADS_')),
+                activationExecuted: false,
+                status: 'BLOCKED_OFF_AND_UNVERIFIED',
+              },
+              ag01Model: {
+                runtimeEnabled: value('AG01_MODEL_ENABLED') === 'true',
+                providerVerified: value('AG01_MODEL_PROVIDER_VERIFIED') === 'true',
+                secretReferencePresent: secretRefs.some((name) => name.startsWith('AG01_MODEL_')),
+                status: 'BLOCKED_NOT_BOUND_IN_STAGING',
+              },
+            },
+            promotionEligible: false,
+          };
+          fs.writeFileSync(
+            process.env.EVIDENCE_DIR + '/provider-preflight.json',
+            JSON.stringify(matrix, null, 2) + '\n',
+          );
+          NODE
+          jq -e '
+            .externalProviderCallsExecuted == false and
+            .productionMutationExecuted == false and
+            .secretValuesRead == false and
+            .providers.metaInstagram.runtimeEnabled == false and
+            .providers.metaInstagram.providerVerified == false and
+            .providers.metaInstagram.secretReferencePresent == false and
+            .providers.whatsapp.runtimeEnabled == false and
+            .providers.whatsapp.providerVerified == false and
+            .providers.whatsapp.secretReferencePresent == false and
+            .providers.sendgrid.runtimeEnabled == false and
+            .providers.sendgrid.providerVerified == false and
+            .providers.sendgrid.secretReferencePresent == false and
+            .providers.googleAds.phase == "OFF" and
+            .providers.googleAds.providerVerified == false and
+            .providers.googleAds.secretReferencePresent == false and
+            .providers.googleAds.activationExecuted == false and
+            .providers.ag01Model.runtimeEnabled == false and
+            .providers.ag01Model.providerVerified == false and
+            .providers.ag01Model.secretReferencePresent == false and
+            .promotionEligible == false
+          ' "$EVIDENCE_DIR/provider-preflight.json" >/dev/null
+          echo 'STAGING_PROVIDER_PREFLIGHT=BLOCKED_FAIL_CLOSED'
+
+      - name: Read Cloud SQL protection, backup and recovery window
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$DATABASE_INSTANCE" --project "$PROJECT_ID" --format=json > "$EVIDENCE_DIR/cloud-sql-instance.json"
+          jq '{
+            name,
+            state,
+            databaseVersion,
+            region,
+            settings: {
+              deletionProtectionEnabled: .settings.deletionProtectionEnabled,
+              backupEnabled: .settings.backupConfiguration.enabled,
+              pitrEnabled: .settings.backupConfiguration.pointInTimeRecoveryEnabled,
+              availabilityType: .settings.availabilityType,
+              tier: .settings.tier,
+              edition: .settings.edition,
+              transactionLogRetentionDays: .settings.backupConfiguration.transactionLogRetentionDays
+            }
+          }' "$EVIDENCE_DIR/cloud-sql-instance.json" > "$EVIDENCE_DIR/cloud-sql-settings.json"
+
+          gcloud sql backups list --instance "$DATABASE_INSTANCE" --project "$PROJECT_ID" --limit 20 --format=json > "$EVIDENCE_DIR/cloud-sql-backups.json"
+          TOKEN="$(gcloud auth print-access-token)"
+          HTTP="$(curl --silent --show-error --output "$EVIDENCE_DIR/cloud-sql-recovery-window.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${DATABASE_INSTANCE}/getLatestRecoveryTime")"
+          printf '%s\n' "$HTTP" > "$EVIDENCE_DIR/cloud-sql-recovery-window.http"
+
+          jq -e '
+            .state == "RUNNABLE" and
+            .region == "southamerica-east1" and
+            .settings.deletionProtectionEnabled == true and
+            .settings.backupEnabled == true and
+            .settings.pitrEnabled == true
+          ' "$EVIDENCE_DIR/cloud-sql-settings.json" >/dev/null
+          jq -e '[.[] | select(.status=="SUCCESSFUL")] | length > 0' "$EVIDENCE_DIR/cloud-sql-backups.json" >/dev/null
+          test "$HTTP" = 200
+          jq -e '.latestRecoveryTime and .earliestRecoveryTime' "$EVIDENCE_DIR/cloud-sql-recovery-window.json" >/dev/null
+          echo 'STAGING_CLOUD_SQL_READINESS=PASS'
+
+      - name: Read current operational IAM
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          jq -n '{
+            permissions: [
+              "cloudsql.instances.get",
+              "cloudsql.instances.clone",
+              "cloudsql.instances.delete",
+              "cloudsql.instances.update",
+              "monitoring.alertPolicies.get",
+              "monitoring.alertPolicies.list",
+              "monitoring.notificationChannels.get",
+              "monitoring.notificationChannels.list"
+            ]
+          }' > /tmp/iam-request.json
+          HTTP="$(curl --silent --show-error --output "$EVIDENCE_DIR/iam-permissions.json" --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/iam-request.json \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          jq -e '.permissions | type == "array"' "$EVIDENCE_DIR/iam-permissions.json" >/dev/null
+          echo 'STAGING_OPERATIONAL_IAM_READ=PASS'
+
+      - name: Read Monitoring policies and channels
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          POLICIES_HTTP="$(curl --silent --show-error --output "$EVIDENCE_DIR/monitoring-alert-policies.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100")"
+          CHANNELS_HTTP="$(curl --silent --show-error --output "$EVIDENCE_DIR/monitoring-notification-channels.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100")"
+          jq -n \
+            --arg policiesHttp "$POLICIES_HTTP" \
+            --arg channelsHttp "$CHANNELS_HTTP" \
+            --argjson policyCount "$(jq '(.alertPolicies // []) | length' "$EVIDENCE_DIR/monitoring-alert-policies.json")" \
+            --argjson enabledPolicyCount "$(jq '[.alertPolicies[]? | select(.enabled == true)] | length' "$EVIDENCE_DIR/monitoring-alert-policies.json")" \
+            --argjson channelCount "$(jq '(.notificationChannels // []) | length' "$EVIDENCE_DIR/monitoring-notification-channels.json")" \
+            --argjson verifiedChannelCount "$(jq '[.notificationChannels[]? | select(.verificationStatus == "VERIFIED" and .enabled == true)] | length' "$EVIDENCE_DIR/monitoring-notification-channels.json")" \
+            '{
+              policiesHttp: $policiesHttp,
+              channelsHttp: $channelsHttp,
+              policyCount: $policyCount,
+              enabledPolicyCount: $enabledPolicyCount,
+              channelCount: $channelCount,
+              verifiedChannelCount: $verifiedChannelCount,
+              providerPathFiringTestExecuted: false
+            }' > "$EVIDENCE_DIR/monitoring-summary.json"
+          echo 'STAGING_MONITORING_INVENTORY=CAPTURED'
+
+      - name: Sample authenticated readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_URL="$(jq -r '.status.url' "$EVIDENCE_DIR/mcp-service.json")"
+          test -n "$MCP_URL"
+          ID_TOKEN="$(gcloud auth print-identity-token --audiences "$MCP_URL")"
+          echo "::add-mask::$ID_TOKEN"
+          : > "$EVIDENCE_DIR/readiness-samples.jsonl"
+          for index in $(seq 1 30); do
+            STATUS_AND_TIME="$(curl --silent --show-error --output /tmp/ready-body.json --write-out '%{http_code} %{time_total}' \
+              -H "Authorization: Bearer ${ID_TOKEN}" "$MCP_URL/readyz")"
+            STATUS="$(cut -d' ' -f1 <<<"$STATUS_AND_TIME")"
+            ELAPSED="$(cut -d' ' -f2 <<<"$STATUS_AND_TIME")"
+            test "$STATUS" = 200
+            jq -e '.status=="ready" and (.checks | length == 16) and all(.checks[]; .ok==true)' /tmp/ready-body.json >/dev/null
+            jq -n --argjson index "$index" --argjson status "$STATUS" --argjson seconds "$ELAPSED" \
+              '{index:$index,status:$status,seconds:$seconds}' >> "$EVIDENCE_DIR/readiness-samples.jsonl"
+          done
+          jq -s '
+            sort_by(.seconds) as $rows
+            | {
+                requestCount: ($rows | length),
+                http200Count: ([$rows[] | select(.status==200)] | length),
+                minSeconds: $rows[0].seconds,
+                p50Seconds: $rows[((($rows|length) * 0.50 | ceil) - 1)].seconds,
+                p95Seconds: $rows[((($rows|length) * 0.95 | ceil) - 1)].seconds,
+                maxSeconds: $rows[-1].seconds,
+                allChecksHealthy: true
+              }
+          ' "$EVIDENCE_DIR/readiness-samples.jsonl" > "$EVIDENCE_DIR/readiness-summary.json"
+          jq -e '.requestCount==30 and .http200Count==30 and .allChecksHealthy==true' "$EVIDENCE_DIR/readiness-summary.json" >/dev/null
+          echo 'STAGING_READINESS_SAMPLE=PASS'
+
+      - name: Build promotion gate manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const dir = process.env.EVIDENCE_DIR;
+          const read = (name, fallback = null) => {
+            try {
+              return JSON.parse(fs.readFileSync(dir + '/' + name, 'utf8'));
+            } catch {
+              return fallback;
+            }
+          };
+          const permissions = read('iam-permissions.json', { permissions: [] }).permissions ?? [];
+          const requiredDr = [
+            'cloudsql.instances.get',
+            'cloudsql.instances.clone',
+            'cloudsql.instances.delete',
+            'cloudsql.instances.update',
+          ];
+          const sql = read('cloud-sql-settings.json', {});
+          const backups = read('cloud-sql-backups.json', []);
+          const recovery = read('cloud-sql-recovery-window.json', {});
+          const monitoring = read('monitoring-summary.json', {});
+          const provider = read('provider-preflight.json', {});
+          const readiness = read('readiness-summary.json', {});
+          const latestMs = Date.parse(recovery.latestRecoveryTime ?? '');
+          const recoveryLagSeconds = Number.isFinite(latestMs)
+            ? Math.max(0, Math.ceil((Date.now() - latestMs) / 1000))
+            : null;
+          const databaseReady =
+            sql.state === 'RUNNABLE' &&
+            sql.settings?.deletionProtectionEnabled === true &&
+            sql.settings?.backupEnabled === true &&
+            sql.settings?.pitrEnabled === true &&
+            backups.some((backup) => backup.status === 'SUCCESSFUL') &&
+            recoveryLagSeconds !== null &&
+            recoveryLagSeconds <= 900;
+          const drAuthorityReady = requiredDr.every((permission) => permissions.includes(permission));
+          const monitoringReady =
+            monitoring.policiesHttp === '200' &&
+            monitoring.channelsHttp === '200' &&
+            monitoring.enabledPolicyCount > 0 &&
+            monitoring.verifiedChannelCount > 0;
+          const manifest = {
+            schemaVersion: 'toca.staging.operational-preflight.v1',
+            candidateSha: process.env.CANDIDATE_SHA,
+            candidateTree: process.env.CANDIDATE_TREE,
+            projectId: process.env.PROJECT_ID,
+            productionTouched: false,
+            externalProviderCallsExecuted: false,
+            sideEffectsExecuted: false,
+            runtimeReadinessPass:
+              readiness.requestCount === 30 &&
+              readiness.http200Count === 30 &&
+              readiness.allChecksHealthy === true,
+            databaseReadiness: {
+              ready: databaseReady,
+              recoveryLagSeconds,
+              latestSuccessfulBackupPresent: backups.some(
+                (backup) => backup.status === 'SUCCESSFUL',
+              ),
+            },
+            drRehearsal: {
+              executed: false,
+              authorityReady: drAuthorityReady,
+              missingPermissions: requiredDr.filter(
+                (permission) => !permissions.includes(permission),
+              ),
+            },
+            monitoring: {
+              ready: monitoringReady,
+              policyCount: monitoring.policyCount ?? null,
+              enabledPolicyCount: monitoring.enabledPolicyCount ?? null,
+              channelCount: monitoring.channelCount ?? null,
+              verifiedChannelCount: monitoring.verifiedChannelCount ?? null,
+              firingPathExecuted: false,
+            },
+            providersReady: provider.promotionEligible === true,
+            promotionEligible: false,
+            decision: 'HOLD',
+          };
+          fs.writeFileSync(
+            dir + '/operational-preflight.json',
+            JSON.stringify(manifest, null, 2) + '\n',
+          );
+          NODE
+          cat "$EVIDENCE_DIR/operational-preflight.json"
+          jq -e '
+            .candidateSha == "75c165a044c6e79e9545328dd04a2a3e73d2e910" and
+            .productionTouched == false and
+            .externalProviderCallsExecuted == false and
+            .sideEffectsExecuted == false and
+            .runtimeReadinessPass == true and
+            .databaseReadiness.ready == true and
+            .promotionEligible == false and
+            .decision == "HOLD"
+          ' "$EVIDENCE_DIR/operational-preflight.json" >/dev/null
+          echo 'STAGING_OPERATIONAL_PREFLIGHT=PASS_PROMOTION_HOLD'
+
+      - name: Upload immutable operational evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-operational-preflight-${{ env.CANDIDATE_SHA }}-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 90
