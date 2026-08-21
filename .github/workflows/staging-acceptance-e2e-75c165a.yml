@@ -3,8 +3,8 @@ name: Staging Acceptance E2E 75c165a
 "on":
   pull_request:
     paths:
-      - '.github/workflows/staging-acceptance-e2e-75c165a.yml'
-      - '.github/staging-e2e/**'
+      - ".github/workflows/staging-acceptance-e2e-75c165a.yml"
+      - ".github/staging-e2e/**"
 
 permissions:
   contents: read
@@ -18,9 +18,9 @@ env:
   CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
   CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
   PROJECT_ID: toca-mcp-next-staging
-  PROJECT_NUMBER: '729069789107'
+  PROJECT_NUMBER: "729069789107"
   PRODUCTION_PROJECT_ID: toca-mcp-production
-  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  PRODUCTION_PROJECT_NUMBER: "990081828836"
   REGION: southamerica-east1
   ARTIFACT_REPOSITORY: toca-mcp-staging
   MCP_SERVICE: toca-mcp-next-staging
@@ -29,7 +29,7 @@ env:
   WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-f1
   DATABASE_INSTANCE: toca-mcp-next-staging-db
   DATABASE_SECRET: toca-next-staging-database-url
-  DATABASE_SECRET_VERSION: '1'
+  DATABASE_SECRET_VERSION: "1"
   WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
   DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
@@ -191,7 +191,19 @@ jobs:
           set -euo pipefail
           cp "$HARNESS_ROOT/.github/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
           cp "$HARNESS_ROOT/.github/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
+          cp "$HARNESS_ROOT/.github/staging-e2e/recover-workflows.ts" "$CANDIDATE_ROOT/staging-acceptance-recover-workflows.ts"
           cp "$HARNESS_ROOT/.github/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
+
+      - name: Recover only interrupted synthetic acceptance residue
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/pre-recovery-outbox-settlement.log"
+          cp "$EVIDENCE_DIR/outbox-settlement.json" "$EVIDENCE_DIR/pre-recovery-outbox-settlement.json"
+          pnpm exec tsx staging-acceptance-recover-workflows.ts 2>&1 | tee "$EVIDENCE_DIR/synthetic-workflow-recovery.log"
+          pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/post-recovery-outbox-settlement.log"
+          cp "$EVIDENCE_DIR/outbox-settlement.json" "$EVIDENCE_DIR/post-recovery-outbox-settlement.json"
 
       - name: Verify current schema and quiescent acceptance window
         working-directory: candidate
