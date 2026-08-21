@@ -16,8 +16,8 @@ This tracker records coordination state only. It does not promote provider, stag
 ### B — Omnichannel Outbound + Nurture
 
 - State: **BLOCKED**.
-- Authority: existing Email/WhatsApp runtimes, CRM, Privacy, Workflow/Scheduler, TOCA_OS R10 and R21 reconciliation.
-- Blocking conditions: capability manifest remains `SPECIFIED` and runtime exposure is forbidden; durable nurture composition is incomplete; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; R10 follow-up authorities must be reused; R10 route ownership is drifted against its broad CRM/Sales capability family.
+- Authority: existing Email/WhatsApp engines, CRM, Privacy, Workflow/Scheduler, TOCA_OS R10 and R21 reconciliation.
+- Blocking conditions: capability manifest remains `SPECIFIED` and runtime exposure is forbidden; Omnichannel contracts are outside the central governance export/catalog path; `src/registry.ts` has no Omnichannel registration; production composition does not bind Email/WhatsApp outbound into the central resolver; TOCA_OS has no matching operational channel `whatsapp.*`/`email.*` rows; R10 follow-up authorities must be reused; R10 route ownership is drifted against its broad CRM/Sales capability family.
 - Next evidence: exact-head composition PR CI, canonical Drive/runtime capability reconciliation, R21 route-ownership reconciliation and PostgreSQL/Email gates where applicable.
 
 ### C — Platform Readiness / GCP / SLO / DR
@@ -133,7 +133,10 @@ Provider verification remains a later state requiring real provider evidence.
 
 Code convergence is reached only when:
 
-- existing Email and WhatsApp outbound engines are reachable through the canonical governed execution path;
+- existing Omnichannel contracts are consumed by the canonical governance/catalog path instead of remaining isolated source-only modules;
+- the single central ToolRegistry registers only the approved operational Email/WhatsApp/Nurture capabilities with truthful lifecycle state;
+- existing Email and WhatsApp outbound engines are reachable through the canonical runtime resolver and AG-01/Workflow/Core governed execution path;
+- HTTP webhook composition remains ingress/readback authority rather than becoming a parallel business execution surface;
 - existing CRM Conversation/Message is the sole commercial message authority;
 - Privacy is revalidated at execution time;
 - Policy/Approval/identity/idempotency/readback/Audit/Outbox remain canonical;
