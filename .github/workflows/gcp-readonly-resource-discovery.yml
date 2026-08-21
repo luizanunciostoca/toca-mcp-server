@@ -22,7 +22,6 @@ env:
   PROD_DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   PROD_RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   PROD_SQL: toca-mcp-db
-  PROD_DB_SECRET: toca-database-url
 
 jobs:
   discover:
@@ -53,17 +52,21 @@ jobs:
           gcloud sql instances describe "$PROD_SQL" --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/sql.json
           gcloud run services list --project "$PROD_PROJECT_ID" --region "$PROD_REGION" --format=json > /tmp/gcp-readonly/run-services.json
           gcloud iam service-accounts list --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/service-accounts.json
-          gcloud secrets describe "$PROD_DB_SECRET" --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/db-secret.json
           jq -e --arg sa "$PROD_RUNTIME_SA" 'map(.email) | index($sa) != null' /tmp/gcp-readonly/service-accounts.json >/dev/null
-          echo 'PRODUCTION_METADATA_READ=PASS' >> "$GITHUB_STEP_SUMMARY"
-          echo "PRODUCTION_PROJECT_ID=$PROD_PROJECT_ID" >> "$GITHUB_STEP_SUMMARY"
-          echo "PRODUCTION_PROJECT_NUMBER=$PROD_PROJECT_NUMBER" >> "$GITHUB_STEP_SUMMARY"
-          echo "PRODUCTION_SQL=$(jq -r '.name' /tmp/gcp-readonly/sql.json)" >> "$GITHUB_STEP_SUMMARY"
-          echo "PRODUCTION_DB_SECRET=$(jq -r '.name | split("/")[-1]' /tmp/gcp-readonly/db-secret.json)" >> "$GITHUB_STEP_SUMMARY"
-          echo 'PRODUCTION_CLOUD_RUN_SERVICES:' >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.[] | "- " + (.metadata.name // .name // "unknown") + " | runtime=" + (.spec.template.spec.serviceAccountName // "")' /tmp/gcp-readonly/run-services.json >> "$GITHUB_STEP_SUMMARY"
-          echo 'PRODUCTION_SERVICE_ACCOUNTS:' >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.[] | "- " + .email' /tmp/gcp-readonly/service-accounts.json >> "$GITHUB_STEP_SUMMARY"
+
+          echo "PRODUCTION_PROJECT=${PROD_PROJECT_ID}:${PROD_PROJECT_NUMBER}"
+          echo "PRODUCTION_REGION=$PROD_REGION"
+          echo "PRODUCTION_SQL=$(jq -r '.name' /tmp/gcp-readonly/sql.json)"
+          echo 'PRODUCTION_CLOUD_RUN_SERVICES_BEGIN'
+          jq -r '.[] | (.metadata.name // .name // "unknown") + "|runtime=" + (.spec.template.spec.serviceAccountName // "")' /tmp/gcp-readonly/run-services.json
+          echo 'PRODUCTION_CLOUD_RUN_SERVICES_END'
+          echo 'PRODUCTION_CLOUD_RUN_SECRET_BINDINGS_BEGIN'
+          jq -r '[.. | objects | .secretKeyRef?.name? // empty] | unique[]' /tmp/gcp-readonly/run-services.json || true
+          echo 'PRODUCTION_CLOUD_RUN_SECRET_BINDINGS_END'
+          echo 'PRODUCTION_SERVICE_ACCOUNTS_BEGIN'
+          jq -r '.[].email' /tmp/gcp-readonly/service-accounts.json
+          echo 'PRODUCTION_SERVICE_ACCOUNTS_END'
+          echo 'PRODUCTION_METADATA_READ=PASS'
       - name: Probe historically referenced staging project IDs without mutation
         shell: bash
         run: |
@@ -71,9 +74,22 @@ jobs:
           for project in toca-mcp-staging toca-staging; do
             if gcloud projects describe "$project" --format=json > "/tmp/gcp-readonly/${project}.json" 2>"/tmp/gcp-readonly/${project}.err"; then
               number="$(jq -r '.projectNumber | tostring' "/tmp/gcp-readonly/${project}.json")"
-              echo "STAGING_PROJECT_CANDIDATE_FOUND=${project}:${number}" >> "$GITHUB_STEP_SUMMARY"
+              echo "STAGING_PROJECT_CANDIDATE_FOUND=${project}:${number}"
+              echo "STAGING_${project}_SQL_BEGIN"
+              gcloud sql instances list --project "$project" --format='value(name,region)' 2>/dev/null || echo 'UNREADABLE'
+              echo "STAGING_${project}_SQL_END"
+              echo "STAGING_${project}_RUN_BEGIN"
+              gcloud run services list --project "$project" --region "$PROD_REGION" --format='value(metadata.name,spec.template.spec.serviceAccountName)' 2>/dev/null || echo 'UNREADABLE'
+              echo "STAGING_${project}_RUN_END"
+              echo "STAGING_${project}_SERVICE_ACCOUNTS_BEGIN"
+              gcloud iam service-accounts list --project "$project" --format='value(email)' 2>/dev/null || echo 'UNREADABLE'
+              echo "STAGING_${project}_SERVICE_ACCOUNTS_END"
+              echo "STAGING_${project}_WIF_BEGIN"
+              gcloud iam workload-identity-pools list --project "$project" --location=global --format='value(name)' 2>/dev/null || echo 'UNREADABLE'
+              echo "STAGING_${project}_WIF_END"
             else
-              echo "STAGING_PROJECT_CANDIDATE_UNRESOLVED=${project}" >> "$GITHUB_STEP_SUMMARY"
+              echo "STAGING_PROJECT_CANDIDATE_UNRESOLVED=${project}"
+              sed -n '1p' "/tmp/gcp-readonly/${project}.err" | sed 's/[[:space:]]\+/ /g' || true
             fi
           done
-          echo 'DISCOVERY_READ_ONLY=true' >> "$GITHUB_STEP_SUMMARY"
+          echo 'DISCOVERY_READ_ONLY=true'
