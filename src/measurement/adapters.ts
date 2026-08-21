@@ -1,3 +1,4 @@
+import type { RevenueEvidenceSource } from './attribution-revenue-contracts.js';
 import type {
   MeasurementProperties,
   MeasurementSourceSystem,
@@ -80,6 +81,99 @@ export interface TicketingReadOnlyAdapter {
   resolveEvent(externalEventId: string): Promise<TicketingExternalEventIdentity>;
   readSalesSummary(externalEventId: string): Promise<TicketingSalesReadResult>;
   readInventory(externalEventId: string): Promise<TicketingInventoryReadResult>;
+}
+
+export const COMMERCE_PROVIDER_STATUSES = [
+  'PENDING',
+  'PAID',
+  'CANCELED',
+  'REFUNDED',
+  'CHARGEBACK',
+] as const;
+export type CommerceProviderStatus = (typeof COMMERCE_PROVIDER_STATUSES)[number];
+
+export interface CommerceProviderCustomerIdentity {
+  readonly providerCustomerId: string | null;
+  readonly email: string | null;
+  readonly phone: string | null;
+}
+
+export interface CommerceProviderAttributionContext {
+  readonly contactId: string | null;
+  readonly leadId: string | null;
+  readonly opportunityId: string | null;
+  readonly conversationId: string | null;
+  readonly eventId: string | null;
+  readonly source: string | null;
+  readonly campaign: string | null;
+  readonly ad: string | null;
+  readonly content: string | null;
+  readonly utmSource: string | null;
+  readonly utmMedium: string | null;
+  readonly utmCampaign: string | null;
+  readonly utmContent: string | null;
+  readonly utmTerm: string | null;
+}
+
+export interface CommerceProviderWebhookEnvelope {
+  readonly rawBody: string;
+  readonly headers: Readonly<Record<string, string | undefined>>;
+  readonly receivedAt: string;
+}
+
+export interface CommerceWebhookVerification {
+  readonly verified: boolean;
+  readonly providerDeliveryId: string;
+  readonly evidence: readonly string[];
+}
+
+export interface CommerceProviderEvent {
+  readonly provider: string;
+  readonly providerDeliveryId: string;
+  readonly providerEventId: string;
+  readonly source: RevenueEvidenceSource;
+  readonly externalReference: string;
+  readonly providerStatus: string;
+  readonly status: CommerceProviderStatus;
+  readonly occurredAt: string;
+  readonly customer: CommerceProviderCustomerIdentity;
+  readonly attribution: CommerceProviderAttributionContext;
+  readonly ticketReference: string | null;
+  readonly orderReference: string | null;
+  readonly paymentReference: string | null;
+  readonly checkoutReference: string | null;
+  readonly evidence: readonly string[];
+}
+
+export interface CommerceProviderReadback extends CommerceProviderEvent {
+  readonly providerEvidenceRef: string;
+  readonly providerReadbackAt: string;
+  readonly currency: string | null;
+  readonly grossRevenueMinor: number | null;
+  readonly netRevenueMinor: number | null;
+  readonly refundMinor: number | null;
+  readonly costMinor: number | null;
+}
+
+/**
+ * Provider-neutral commerce boundary for ticket/order/checkout/payment confirmation.
+ * Implementations must verify the webhook signature and then perform provider readback;
+ * the webhook payload itself is never sufficient revenue evidence.
+ *
+ * This interface contains no provider writes and does not process money. It exists beside
+ * TicketingReadOnlyAdapter so ticketing providers can implement both contracts without a
+ * second Measurement/Attribution domain.
+ */
+export interface CommerceProviderReadbackAdapter {
+  readonly provider: string;
+  verifyWebhookSignature(
+    envelope: CommerceProviderWebhookEnvelope,
+  ): Promise<CommerceWebhookVerification>;
+  parseWebhook(
+    envelope: CommerceProviderWebhookEnvelope,
+    verification: CommerceWebhookVerification,
+  ): Promise<CommerceProviderEvent>;
+  readback(event: CommerceProviderEvent): Promise<CommerceProviderReadback>;
 }
 
 export interface TicketingReadNormalizer {

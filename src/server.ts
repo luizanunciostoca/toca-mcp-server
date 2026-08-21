@@ -49,12 +49,39 @@ const DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES = [
   'instagram.publish.story',
 ] as const;
 
+export interface TocaRuntimeComposition {
+  readonly config: RuntimeConfig;
+  readonly registry: ReturnType<typeof createToolRegistry>;
+  readonly runtimeResolver: ReturnType<typeof createRuntimeCapabilityResolver>;
+  readonly resolveIdentity: ExecutionIdentityResolver;
+  readonly pool: ReturnType<typeof createPostgresPool> | undefined;
+  readonly workflowStore: PostgresWorkflowStore | undefined;
+  readonly approvalStore: PostgresApprovalStore | undefined;
+  readonly auditStore: PostgresAuditSink | undefined;
+  readonly eventStore: PostgresEventRecordStore | undefined;
+}
+
 export interface TocaServerOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly executionIdentity?: ExecutionIdentity;
   readonly defaultTenantId?: string;
   readonly defaultWorkspaceId?: string;
   readonly defaultOrganizationId?: string;
+  readonly onRuntimeComposition?: (composition: TocaRuntimeComposition) => void;
+}
+
+export function createTocaRuntimeComposition(
+  options: Omit<TocaServerOptions, 'onRuntimeComposition'> = {},
+): TocaRuntimeComposition {
+  let composition: TocaRuntimeComposition | undefined;
+  createTocaServer({
+    ...options,
+    onRuntimeComposition: (value) => {
+      composition = value;
+    },
+  });
+  if (!composition) throw new Error('TOCA_RUNTIME_COMPOSITION_UNAVAILABLE');
+  return composition;
 }
 
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
@@ -320,6 +347,18 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const approvalStore = pool ? new PostgresApprovalStore(pool) : undefined;
   const auditStore = pool ? new PostgresAuditSink(pool, registry) : undefined;
   const eventStore = pool ? new PostgresEventRecordStore(pool) : undefined;
+
+  options.onRuntimeComposition?.({
+    config,
+    registry,
+    runtimeResolver,
+    resolveIdentity,
+    pool,
+    workflowStore,
+    approvalStore,
+    auditStore,
+    eventStore,
+  });
 
   registerTocaCoreSurface(server, {
     serviceName: SERVER_NAME,
