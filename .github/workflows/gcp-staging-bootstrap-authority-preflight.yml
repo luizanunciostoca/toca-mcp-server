@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           docker buildx create --name toca-staging-builder --driver docker-container --use --bootstrap
-          test "$(docker buildx inspect toca-staging-builder --format '{{.Driver}}')" = docker-container
+          docker buildx inspect toca-staging-builder | grep -E '^Driver:[[:space:]]+docker-container$'
           echo 'BUILDX_DOCKER_CONTAINER_DRIVER=PASS'
       - name: Build push and resolve immutable candidate image digest
         shell: bash
