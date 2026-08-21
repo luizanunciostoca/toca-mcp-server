@@ -30,7 +30,7 @@ export type OmnichannelCapabilityId = (typeof OMNICHANNEL_CAPABILITY_IDS)[number
 export interface OmnichannelCapabilitySpec {
   readonly capabilityId: OmnichannelCapabilityId;
   readonly primaryRouteId: RouteId;
-  readonly lifecycleStatus: Extract<CapabilityStatus, 'SPECIFIED' | 'PLANNED' | 'IMPLEMENTED'>;
+  readonly lifecycleStatus: Extract<CapabilityStatus, 'SPECIFIED' | 'IMPLEMENTED'>;
   readonly runtimeExposed: boolean;
   readonly productionExecutionAllowed: boolean;
   readonly blockedBy: readonly OmnichannelDependencyBlocker[];
@@ -43,8 +43,8 @@ const runtimeReadbackIds = new Set<OmnichannelCapabilityId>([
 const runtimeImplementedIds = new Set<OmnichannelCapabilityId>([
   ...runtimeReadbackIds,
   'whatsapp.message.send',
+  'email.campaign.send',
 ]);
-const canonicalPlannedIds = new Set<OmnichannelCapabilityId>(['email.campaign.send']);
 
 function primaryRouteId(capabilityId: OmnichannelCapabilityId): RouteId {
   if (capabilityId.startsWith('email.')) return 'R07';
@@ -57,11 +57,7 @@ export const OMNICHANNEL_CAPABILITY_SPECS: readonly OmnichannelCapabilitySpec[] 
     return {
       capabilityId,
       primaryRouteId: primaryRouteId(capabilityId),
-      lifecycleStatus: runtimeExposed
-        ? 'IMPLEMENTED'
-        : canonicalPlannedIds.has(capabilityId)
-          ? 'PLANNED'
-          : 'SPECIFIED',
+      lifecycleStatus: runtimeExposed ? 'IMPLEMENTED' : 'SPECIFIED',
       runtimeExposed,
       productionExecutionAllowed: runtimeReadbackIds.has(capabilityId),
       blockedBy: OMNICHANNEL_DEPENDENCY_BLOCKERS,
@@ -81,8 +77,7 @@ export function validateOmnichannelCapabilitySpecs(): void {
       throw new Error(`OMNICHANNEL_CONTRACT_MISSING:${spec.capabilityId}`);
     }
     const implemented = runtimeImplementedIds.has(spec.capabilityId);
-    const planned = canonicalPlannedIds.has(spec.capabilityId);
-    const expectedLifecycle = implemented ? 'IMPLEMENTED' : planned ? 'PLANNED' : 'SPECIFIED';
+    const expectedLifecycle = implemented ? 'IMPLEMENTED' : 'SPECIFIED';
     if (spec.lifecycleStatus !== expectedLifecycle) {
       throw new Error(`OMNICHANNEL_LIFECYCLE_DRIFT:${spec.capabilityId}`);
     }

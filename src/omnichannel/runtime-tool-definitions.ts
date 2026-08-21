@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../core/tool-registry.js';
 
-// Implementation lifecycle only. Core Policy continues to deny this WRITE_EXTERNAL
-// capability until a later evidence-backed PRODUCTION_VALIDATED promotion.
+// Implementation lifecycle only. Core Policy continues to deny these WRITE_EXTERNAL
+// capabilities until a later evidence-backed PRODUCTION_VALIDATED promotion.
 export const WHATSAPP_OUTBOUND_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'whatsapp.message.send',
@@ -15,8 +15,21 @@ export const WHATSAPP_OUTBOUND_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition
   },
 ];
 
+export const EMAIL_OUTBOUND_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
+  {
+    name: 'email.campaign.send',
+    version: '1.0.0',
+    provider: 'Twilio SendGrid',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+  },
+];
+
 // Historical export name retained to avoid a broad registry refactor. It now represents
-// the reconciled Omnichannel MCP surface: provider-event READs plus WhatsApp send binding.
+// the reconciled Omnichannel MCP surface: provider-event READs plus outbound send bindings.
 export const OMNICHANNEL_READBACK_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'email.delivery.readback',
@@ -39,4 +52,5 @@ export const OMNICHANNEL_READBACK_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinit
     idempotent: true,
   },
   ...WHATSAPP_OUTBOUND_RUNTIME_TOOL_DEFINITIONS,
+  ...EMAIL_OUTBOUND_RUNTIME_TOOL_DEFINITIONS,
 ];
