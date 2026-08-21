@@ -1,0 +1,307 @@
+name: Staging Acceptance E2E 75c165a
+
+"on":
+  pull_request:
+    paths:
+      - '.github/workflows/staging-acceptance-e2e-75c165a.yml'
+      - '.github/staging-e2e/**'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-acceptance-e2e-75c165a
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  ARTIFACT_REPOSITORY: toca-mcp-staging
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-r3
+  WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-f1
+  DATABASE_INSTANCE: toca-mcp-next-staging-db
+  DATABASE_SECRET: toca-next-staging-database-url
+  DATABASE_SECRET_VERSION: '1'
+  WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+  IMAGE_INDEX_DIGEST: sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250
+  RUNTIME_CHILD_DIGEST: sha256:257bd85a460764c2f207445c72a279c772c869a75f48c7bc2c071be2d858bfad
+  CLOUD_SQL_PROXY_VERSION: v2.24.1
+  CLOUD_SQL_PROXY_SHA256: fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb
+  HARNESS_ROOT: ${{ github.workspace }}/harness
+  CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+  EVIDENCE_DIR: ${{ github.workspace }}/staging-e2e-evidence
+
+jobs:
+  staging-e2e:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 50
+    steps:
+      - name: Checkout reviewable evidence harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: harness
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact frozen application candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert exact application identity and prepare evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          ! find "$CANDIDATE_ROOT/migrations" -maxdepth 1 -type f -name '027_*.sql' -printf '%f\n' | rg '^027_'
+          test "$(find "$CANDIDATE_ROOT/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1)" = '033_omnichannel_prepared_content.sql'
+          printf '%s\n' \
+            "APPLICATION_CANDIDATE_SHA=$CANDIDATE_SHA" \
+            "APPLICATION_CANDIDATE_TREE=$CANDIDATE_TREE" \
+            "OCI_INDEX_DIGEST=$IMAGE_INDEX_DIGEST" \
+            "RUNTIME_CHILD_DIGEST=$RUNTIME_CHILD_DIGEST" \
+            'STAGING_PROVIDER_MODE=DISABLED' \
+            'PRODUCTION_AUTHORIZED=NO' \
+            'HARNESS_MERGE_AUTHORIZED=NO' \
+            > "$EVIDENCE_DIR/release-identity.txt"
+
+      - name: Set up pnpm 10.15.0
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: candidate/pnpm-lock.yaml
+
+      - name: Install exact candidate dependencies
+        shell: bash
+        run: pnpm --dir "$CANDIDATE_ROOT" install --frozen-lockfile
+
+      - name: Authenticate isolated staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - id: runtime
+        name: Fail-closed runtime, artifact, and provider preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+          IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${CANDIDATE_SHA}"
+          RUNTIME_IMAGE="${IMAGE_REPOSITORY}@${RUNTIME_CHILD_DIGEST}"
+          REMOTE_INDEX_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE_INDEX_DIGEST" = "$IMAGE_INDEX_DIGEST"
+
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/mcp-service.json"
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/webhook-service.json"
+          gcloud run revisions describe "$MCP_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/mcp-revision.json"
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/webhook-revision.json"
+
+          jq -e --arg rev "$MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/mcp-service.json" >/dev/null
+          jq -e --arg rev "$WEBHOOK_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/webhook-service.json" >/dev/null
+
+          for tuple in \
+            "$MCP_RUNTIME_SA:$EVIDENCE_DIR/mcp-revision.json" \
+            "$WEBHOOK_RUNTIME_SA:$EVIDENCE_DIR/webhook-revision.json"; do
+            runtime_sa="${tuple%%:*}"
+            file="${tuple#*:}"
+            jq -e --arg image "$RUNTIME_IMAGE" '.spec.containers[0].image == $image and .status.imageDigest == $image' "$file" >/dev/null
+            jq -e --arg sa "$runtime_sa" '.spec.serviceAccountName == $sa' "$file" >/dev/null
+            jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True") and any(.status.conditions[]?; .type=="ContainerHealthy" and .status=="True")' "$file" >/dev/null
+            jq -e '.spec.containers[0].startupProbe.httpGet.path == "/readyz" and .spec.containers[0].livenessProbe.httpGet.path == "/healthz"' "$file" >/dev/null
+            jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] == [$sha]' "$file" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name | test("^(META_ENABLED|META_PROVIDER_VERIFIED|META_WEBHOOK_ENABLED|META_WEBHOOK_PERSISTENCE_ENABLED|INSTAGRAM_READ_ENABLED|META_ADS_READ_ENABLED|META_ADS_WRITE_ENABLED|WHATSAPP_ENABLED|WHATSAPP_RUNTIME_ENABLED|WHATSAPP_PROVIDER_VERIFIED|EMAIL_SENDGRID_ENABLED|EMAIL_SENDGRID_PROVIDER_VERIFIED|GOOGLE_ADS_PROVIDER_VERIFIED|AG01_MODEL_ENABLED|AG01_MODEL_PROVIDER_VERIFIED)$")) | .value] | all(. == "false")' "$file" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value] == ["OFF"]' "$file" >/dev/null
+          done
+
+          MCP_BASE_URL="$(jq -r '.status.url' "$EVIDENCE_DIR/mcp-service.json")"
+          test -n "$MCP_BASE_URL"
+          echo "mcp_base_url=$MCP_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_RUNTIME_PREFLIGHT=PASS'
+
+      - id: database
+        name: Connect to isolated staging database through pinned proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONNECTION_NAME="$(gcloud sql instances describe "$DATABASE_INSTANCE" --project "$PROJECT_ID" --format='value(connectionName)')"
+          test -n "$CONNECTION_NAME"
+          PROXY_URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
+          curl --fail --silent --show-error --location "$PROXY_URL" --output "$RUNNER_TEMP/cloud-sql-proxy"
+          printf '%s  %s\n' "$CLOUD_SQL_PROXY_SHA256" "$RUNNER_TEMP/cloud-sql-proxy" | sha256sum --check
+          chmod 0755 "$RUNNER_TEMP/cloud-sql-proxy"
+          "$RUNNER_TEMP/cloud-sql-proxy" --address 127.0.0.1 --port 5432 "$CONNECTION_NAME" > "$EVIDENCE_DIR/cloud-sql-proxy.log" 2>&1 &
+          PROXY_PID=$!
+          echo "PROXY_PID=$PROXY_PID" >> "$GITHUB_ENV"
+
+          RAW_DATABASE_URL="$(gcloud secrets versions access "$DATABASE_SECRET_VERSION" --secret "$DATABASE_SECRET" --project "$PROJECT_ID")"
+          test -n "$RAW_DATABASE_URL"
+          echo "::add-mask::$RAW_DATABASE_URL"
+          DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e "const u=new URL(process.env.RAW_DATABASE_URL); u.hostname='127.0.0.1'; u.port='5432'; for (const k of ['host','ssl','sslmode','sslrootcert','sslcert','sslkey']) u.searchParams.delete(k); process.stdout.write(u.toString())")"
+          echo "::add-mask::$DATABASE_URL"
+          echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+          echo 'DATABASE_SSL=false' >> "$GITHUB_ENV"
+
+          for attempt in $(seq 1 30); do
+            if DATABASE_URL="$DATABASE_URL" node --input-type=module -e "import pg from '$CANDIDATE_ROOT/node_modules/pg/lib/index.js'; const p=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1}); await p.query('select 1'); await p.end()"; then
+              echo 'ready=yes' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Copy reviewable harness scripts beside exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$HARNESS_ROOT/.github/staging-e2e/db-preflight.ts" "$CANDIDATE_ROOT/staging-acceptance-db-preflight.ts"
+          cp "$HARNESS_ROOT/.github/staging-e2e/durable-workflow.ts" "$CANDIDATE_ROOT/staging-acceptance-durable-workflow.ts"
+          cp "$HARNESS_ROOT/.github/staging-e2e/settle-outbox.ts" "$CANDIDATE_ROOT/staging-acceptance-settle-outbox.ts"
+
+      - name: Verify current schema and quiescent acceptance window
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec tsx staging-acceptance-db-preflight.ts
+
+      - name: Prove migrations are current and idempotent twice
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/migrate-pass-1.log"
+          ! rg '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-1.log"
+          pnpm migrate 2>&1 | tee "$EVIDENCE_DIR/migrate-pass-2.log"
+          ! rg '^Applied migration ' "$EVIDENCE_DIR/migrate-pass-2.log"
+          echo 'MIGRATIONS_CURRENT_AND_IDEMPOTENT=PASS'
+
+      - name: Run PostgreSQL acceptance contracts sequentially
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_test() {
+            test_file="$1"
+            printf '\n### %s\n' "$test_file" | tee -a "$EVIDENCE_DIR/postgres-e2e.log"
+            pnpm exec vitest run "$test_file" --maxWorkers=1 --minWorkers=1 2>&1 | tee -a "$EVIDENCE_DIR/postgres-e2e.log"
+          }
+          run_test test/m-found-12-postgres-e2e.test.ts
+          run_test test/crm-sales-postgres-e2e.test.ts
+          run_test test/whatsapp-postgres-e2e.test.ts
+          run_test test/ag01-orchestrator-postgres-e2e.test.ts
+          run_test test/attribution-revenue-postgres-e2e.test.ts
+          run_test test/tenant-approval-postgres-e2e.test.ts
+          run_test test/omnichannel-prepared-content-postgres-e2e.test.ts
+
+      - name: Prove human approval and timer resume across process restart
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec tsx staging-acceptance-durable-workflow.ts 2>&1 | tee "$EVIDENCE_DIR/durable-workflow.log"
+
+      - id: mcp_token
+        name: Mint short-lived MCP token for staging service audience
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.mcp_base_url }}
+
+      - name: Run authenticated read-only MCP protocol smoke
+        shell: bash
+        env:
+          MCP_URL: ${{ steps.runtime.outputs.mcp_base_url }}
+          MCP_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          MCP_CLIENT_DIR="$RUNNER_TEMP/toca-mcp-client"
+          mkdir -p "$MCP_CLIENT_DIR"
+          cp "$HARNESS_ROOT/.github/staging-e2e/mcp-smoke.mjs" "$MCP_CLIENT_DIR/mcp-smoke.mjs"
+          cd "$MCP_CLIENT_DIR"
+          npm init --yes >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund --save-exact @modelcontextprotocol/client@2.0.0
+          node mcp-smoke.mjs 2>&1 | tee "$EVIDENCE_DIR/mcp-protocol-smoke.log"
+
+      - name: Settle only allowlisted synthetic outbox records without providers
+        if: always() && steps.database.outputs.ready == 'yes'
+        working-directory: candidate
+        shell: bash
+        run: pnpm exec tsx staging-acceptance-settle-outbox.ts 2>&1 | tee "$EVIDENCE_DIR/outbox-settlement.log"
+
+      - name: Verify post-E2E readiness and unchanged exact traffic
+        shell: bash
+        env:
+          MCP_URL: ${{ steps.runtime.outputs.mcp_base_url }}
+          MCP_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          STATUS="$(curl --silent --show-error --output "$EVIDENCE_DIR/mcp-readyz-after-e2e.json" --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz")"
+          test "$STATUS" = 200
+          jq -e '.status=="ready" and (.checks|length)==16 and (.checks|all(.ok==true))' "$EVIDENCE_DIR/mcp-readyz-after-e2e.json" >/dev/null
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/mcp-service-after-e2e.json"
+          gcloud run services describe "$WEBHOOK_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > "$EVIDENCE_DIR/webhook-service-after-e2e.json"
+          jq -e --arg rev "$MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/mcp-service-after-e2e.json" >/dev/null
+          jq -e --arg rev "$WEBHOOK_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0)==100)] | length == 1' "$EVIDENCE_DIR/webhook-service-after-e2e.json" >/dev/null
+          echo 'POST_E2E_READINESS_AND_TRAFFIC=PASS'
+
+      - name: Write immutable acceptance manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg sourceSha "$CANDIDATE_SHA" \
+            --arg sourceTree "$CANDIDATE_TREE" \
+            --arg indexDigest "$IMAGE_INDEX_DIGEST" \
+            --arg childDigest "$RUNTIME_CHILD_DIGEST" \
+            --arg mcpRevision "$MCP_REVISION" \
+            --arg webhookRevision "$WEBHOOK_REVISION" \
+            --arg runUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{schemaVersion:"toca.staging.acceptance-e2e.v1",sourceSha:$sourceSha,sourceTree:$sourceTree,ociIndexDigest:$indexDigest,runtimeChildDigest:$childDigest,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},trafficPercent:100,migrations:{head:"033_omnichannel_prepared_content.sql",migration027Present:false,drift:false,idempotentRuns:2},contracts:["M-FOUND-12 durability","CRM sales lifecycle","WhatsApp persistence and replay","AG-01 checkpoint durability","attribution and revenue readback gate","tenant-scoped ApprovalRecord","immutable prepared content","human approval resume","timer resume","authenticated MCP read-only smoke"],providers:"DISABLED",googleAdsPhase:"OFF",sideEffectingProviderCall:"NO",providerMutation:"NO",trafficMutation:"NO",productionMutation:"NO",runUrl:$runUrl,result:"PASS"}' > "$EVIDENCE_DIR/manifest.json"
+
+      - name: Stop Cloud SQL proxy
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${PROXY_PID:-}" ]]; then
+            kill "$PROXY_PID" 2>/dev/null || true
+          fi
+
+      - name: Upload immutable staging E2E evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-acceptance-e2e-75c165a
+          path: staging-e2e-evidence
+          if-no-files-found: error
+          retention-days: 30
