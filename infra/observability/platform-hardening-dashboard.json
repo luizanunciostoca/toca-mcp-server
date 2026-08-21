@@ -3,18 +3,95 @@
   "dashboardId": "toca-platform-hardening-next",
   "title": "TOCA OS Next — Platform Readiness",
   "panels": [
-    {"id":"cloud-run","signals":["http.request_rate","http.request_error_ratio","http.request_p95_seconds"],"source":"cloud_run_native","dimensions":["environment","service","revision"]},
-    {"id":"ag01","signals":["ag01.execution_success_ratio","ag01.execution_p95_seconds","ag01.failure_count"],"source":"audit_ledger_events"},
-    {"id":"core","signals":["core.execution_success_ratio","core.execution_error_ratio"],"source":"audit_ledger_events"},
-    {"id":"approval","signals":["approval.decision_p95_seconds","approval.expired_or_revoked_ratio"],"source":"approval_records"},
-    {"id":"email","signals":["email.send_success_ratio","email.delivery_verified_ratio","email.bounce_ratio"],"source":"email_dispatches+email_provider_events","inactiveUntilProviderVerified":true},
-    {"id":"whatsapp","signals":["whatsapp.webhook_success_ratio","whatsapp.send_success_ratio","whatsapp.readback_verified_ratio"],"source":"cloud_run+whatsapp_dispatches+whatsapp_provider_events","inactiveUntilProviderVerified":true},
-    {"id":"providers","signals":["provider.call_p95_seconds","provider.error_count","provider.readback_verified_ratio"],"source":"operational_signals","inactiveUntilEmitterVerified":true},
-    {"id":"crm","signals":["crm.durable_write_success_ratio","crm.error_count"],"source":"audit_plus_crm_readback"},
-    {"id":"outbox-workflow","signals":["outbox.oldest_pending_age_seconds","retry.exhausted_count","dead_letter.pending_count","workflow.terminal_success_ratio"],"source":"event_outbox+workflow_steps+workflow_instances"},
-    {"id":"commerce","signals":["commerce.readback_verified_ratio"],"source":"audit_plus_canonical_readback","inactiveUntilEmitterVerified":true},
-    {"id":"provider-api-errors","signals":["google_ads.api_error_ratio","meta.api_error_ratio"],"source":"operational_signals","inactiveUntilProviderVerified":true}
+    {
+      "id": "cloud-run",
+      "signals": ["http.request_rate", "http.request_error_ratio", "http.request_p95_seconds"],
+      "source": "cloud_run_native",
+      "dimensions": ["environment", "service", "revision"]
+    },
+    {
+      "id": "ag01",
+      "signals": [
+        "ag01.execution_success_ratio",
+        "ag01.execution_p95_seconds",
+        "ag01.failure_count"
+      ],
+      "source": "audit_ledger_events"
+    },
+    {
+      "id": "core",
+      "signals": ["core.execution_success_ratio", "core.execution_error_ratio"],
+      "source": "audit_ledger_events"
+    },
+    {
+      "id": "approval",
+      "signals": ["approval.decision_p95_seconds", "approval.expired_or_revoked_ratio"],
+      "source": "approval_records"
+    },
+    {
+      "id": "email",
+      "signals": ["email.send_success_ratio", "email.delivery_verified_ratio", "email.bounce_ratio"],
+      "source": "email_dispatches+email_provider_events",
+      "inactiveUntilProviderVerified": true
+    },
+    {
+      "id": "whatsapp",
+      "signals": [
+        "whatsapp.webhook_success_ratio",
+        "whatsapp.send_success_ratio",
+        "whatsapp.readback_verified_ratio"
+      ],
+      "source": "cloud_run+whatsapp_dispatches+whatsapp_provider_events",
+      "inactiveUntilProviderVerified": true
+    },
+    {
+      "id": "providers",
+      "signals": [
+        "provider.call_p95_seconds",
+        "provider.error_count",
+        "provider.readback_verified_ratio"
+      ],
+      "source": "operational_signals",
+      "inactiveUntilEmitterVerified": true
+    },
+    {
+      "id": "crm",
+      "signals": ["crm.durable_write_success_ratio", "crm.error_count"],
+      "source": "audit_plus_crm_readback"
+    },
+    {
+      "id": "outbox-workflow",
+      "signals": [
+        "outbox.oldest_pending_age_seconds",
+        "retry.exhausted_count",
+        "dead_letter.pending_count",
+        "workflow.terminal_success_ratio"
+      ],
+      "source": "event_outbox+workflow_steps+workflow_instances"
+    },
+    {
+      "id": "commerce",
+      "signals": ["commerce.readback_verified_ratio"],
+      "source": "audit_plus_canonical_readback",
+      "inactiveUntilEmitterVerified": true
+    },
+    {
+      "id": "provider-api-errors",
+      "signals": ["google_ads.api_error_ratio", "meta.api_error_ratio"],
+      "source": "operational_signals",
+      "inactiveUntilProviderVerified": true
+    }
   ],
-  "requiredDimensions": ["environment","service","revision","correlation_id","execution_id","tenant_id","route_id","provider","status"],
+  "requiredDimensions": [
+    "environment",
+    "service",
+    "revision",
+    "correlation_id",
+    "execution_id",
+    "tenant_id",
+    "route_id",
+    "provider",
+    "status"
+  ],
   "notes": "Gated panels must not be enabled until their provider/emitter evidence exists. Active database panels are derived from canonical durable tables; Cloud Run panels use native metrics."
 }
