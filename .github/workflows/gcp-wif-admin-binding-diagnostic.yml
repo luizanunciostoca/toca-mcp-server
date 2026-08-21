@@ -35,20 +35,31 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Compare deployer and infra-admin WIF IAM bindings read-only
+      - name: Inspect provider and service-account policies read-only
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p /tmp/wif-diagnostic
-          gcloud iam service-accounts get-iam-policy "$DEPLOY_SA" --project "$PROJECT_ID" --format=json > /tmp/wif-diagnostic/deployer.json
-          gcloud iam service-accounts get-iam-policy "$INFRA_ADMIN_SA" --project "$PROJECT_ID" --format=json > /tmp/wif-diagnostic/infra-admin.json
-          echo 'DEPLOYER_WIF_BINDINGS_BEGIN'
-          jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/wif-diagnostic/deployer.json || true
-          echo 'DEPLOYER_WIF_BINDINGS_END'
-          echo 'INFRA_ADMIN_WIF_BINDINGS_BEGIN'
-          jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/wif-diagnostic/infra-admin.json || true
-          echo 'INFRA_ADMIN_WIF_BINDINGS_END'
+          set -u -o pipefail
           echo 'WIF_PROVIDER_METADATA_BEGIN'
-          gcloud iam workload-identity-pools providers describe github-toca-mcp --workload-identity-pool=github --location=global --project="$PROJECT_ID" --format='json(name,attributeMapping,attributeCondition,state)' || true
+          gcloud iam workload-identity-pools providers describe github-toca-mcp \
+            --workload-identity-pool=github \
+            --location=global \
+            --project="$PROJECT_ID" \
+            --format='json(name,attributeMapping,attributeCondition,state)' || true
           echo 'WIF_PROVIDER_METADATA_END'
+
+          echo 'DEPLOYER_WIF_BINDINGS_BEGIN'
+          if gcloud iam service-accounts get-iam-policy "$DEPLOY_SA" --project "$PROJECT_ID" --format=json >/tmp/deployer.json 2>/tmp/deployer.err; then
+            jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/deployer.json || true
+          else
+            cat /tmp/deployer.err
+          fi
+          echo 'DEPLOYER_WIF_BINDINGS_END'
+
+          echo 'INFRA_ADMIN_WIF_BINDINGS_BEGIN'
+          if gcloud iam service-accounts get-iam-policy "$INFRA_ADMIN_SA" --project "$PROJECT_ID" --format=json >/tmp/infra-admin.json 2>/tmp/infra-admin.err; then
+            jq -c '.bindings[]? | select(.role == "roles/iam.workloadIdentityUser" or .role == "roles/iam.serviceAccountTokenCreator")' /tmp/infra-admin.json || true
+          else
+            cat /tmp/infra-admin.err
+          fi
+          echo 'INFRA_ADMIN_WIF_BINDINGS_END'
           echo 'WIF_BINDING_DIAGNOSTIC_READ_ONLY=true'
