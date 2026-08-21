@@ -1,0 +1,52 @@
+name: GCP Staging Bootstrap Authority Preflight
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-staging-bootstrap-authority-preflight.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROD_PROJECT_ID: toca-mcp-production
+  PROD_PROJECT_NUMBER: '990081828836'
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  authority-preflight:
+    name: Read-only staging bootstrap authority preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate infrastructure administrator via existing WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Enumerate visible organizations and billing accounts read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'INFRA_ADMIN_AUTH=PASS'
+          echo 'VISIBLE_ORGANIZATIONS_BEGIN'
+          gcloud organizations list --format='value(name,displayName)' || true
+          echo 'VISIBLE_ORGANIZATIONS_END'
+          echo 'VISIBLE_BILLING_ACCOUNTS_BEGIN'
+          gcloud billing accounts list --format='value(name,displayName,open)' || true
+          echo 'VISIBLE_BILLING_ACCOUNTS_END'
+          echo 'VISIBLE_PROJECTS_BEGIN'
+          gcloud projects list --format='value(projectId,projectNumber)' || true
+          echo 'VISIBLE_PROJECTS_END'
+          echo 'AUTHORITY_PREFLIGHT_READ_ONLY=true'
