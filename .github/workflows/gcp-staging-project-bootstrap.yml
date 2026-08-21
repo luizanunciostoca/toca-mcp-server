@@ -1,4 +1,4 @@
-name: GCP Staging Project Bootstrap
+name: GCP Staging Candidate Readiness Proof
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  CANDIDATE_SHA: 4962a0b5b7a25b22089f3d6d65efff3533c41d2c
   STAGING_PROJECT_ID: toca-mcp-next-staging
   STAGING_PROJECT_NUMBER: '729069789107'
   REGION: southamerica-east1
@@ -23,11 +23,11 @@ env:
   PROD_PROJECT_NUMBER: '990081828836'
 
 jobs:
-  outbox-readback:
-    name: Read isolated staging outbox blocker only
+  exact-readiness:
+    name: Exact combined head readiness through isolated staging DB
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -48,8 +48,12 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install exact frozen dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build exact combined head
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
@@ -73,14 +77,14 @@ jobs:
           echo "PROXY_PID=$!" >> "$GITHUB_ENV"
           for attempt in {1..30}; do
             if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
-              echo 'OUTBOX_DIAGNOSTIC_PROXY_READY=PASS'
+              echo 'READINESS_PROXY_READY=PASS'
               exit 0
             fi
             sleep 1
           done
           cat /tmp/proxy.log >&2
           exit 1
-      - name: Prove candidate SQL behavior and read outbox facts without payload access
+      - name: Run exact combined head readiness against staging DB
         shell: bash
         run: |
           set -euo pipefail
@@ -93,64 +97,50 @@ jobs:
             process.stdout.write(url.toString());
           ')"
           unset RAW_DATABASE_URL
-          node --input-type=module <<'NODE'
-          import pg from 'pg';
-          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: false });
-          try {
-            try {
-              await pool.query(`
-                select
-                  coalesce(
-                    extract(epoch from (now() - min(available_at)))
-                      filter (where status in ('PENDING', 'FAILED_RETRYABLE')),
-                    0
-                  ) as oldest_pending_age_seconds,
-                  count(*) filter (where status = 'DEAD_LETTER') as dead_letter_count
-                from event_outbox
-              `);
-              console.log('CANDIDATE_OUTBOX_SQL=PASS');
-            } catch (error) {
-              console.log('CANDIDATE_OUTBOX_SQL=FAIL');
-              console.log('CANDIDATE_OUTBOX_SQLSTATE=' + String(error.code ?? 'UNKNOWN'));
-              console.log('CANDIDATE_OUTBOX_SQL_MESSAGE=' + String(error.message ?? error));
-            }
-
-            const summary = await pool.query(`
-              select
-                count(*)::int as total,
-                count(*) filter (where status = 'PENDING')::int as pending,
-                count(*) filter (where status = 'FAILED_RETRYABLE')::int as failed_retryable,
-                count(*) filter (where status = 'CLAIMED')::int as claimed,
-                count(*) filter (where status = 'DELIVERED')::int as delivered,
-                count(*) filter (where status = 'DEAD_LETTER')::int as dead_letter,
-                coalesce(
-                  round(
-                    extract(epoch from (
-                      now() - (min(available_at) filter (where status in ('PENDING','FAILED_RETRYABLE')))
-                    ))
-                  ),
-                  0
-                )::bigint as oldest_pending_age_seconds
-              from event_outbox
-            `);
-            console.log('CORRECTED_OUTBOX_SQL=PASS');
-            console.log('OUTBOX_SUMMARY=' + JSON.stringify(summary.rows[0]));
-
-            const blocked = await pool.query(`
-              select event_type, status, attempts, max_attempts, last_error_code,
-                     round(extract(epoch from (now() - available_at)))::bigint as age_seconds
-                from event_outbox
-               where status in ('PENDING','FAILED_RETRYABLE','DEAD_LETTER')
-               order by available_at asc
-               limit 20
-            `);
-            console.log('OUTBOX_BLOCKING_ROWS=' + JSON.stringify(blocked.rows));
-          } finally {
-            await pool.end();
+          export DATABASE_SSL=false
+          export NODE_ENV=production
+          export MCP_PORT=18080
+          export TOCA_DEPLOY_ENVIRONMENT=staging
+          export TOCA_RELEASE_SHA="$CANDIDATE_SHA"
+          export TOCA_PLATFORM_KILL_SWITCH=false
+          export TOCA_DEFAULT_TENANT_ID=toca
+          export TOCA_DEFAULT_WORKSPACE_ID=toca
+          export TOCA_DEFAULT_ORGANIZATION_ID=toca
+          export STAGING_PROVIDER_MODE=DISABLED
+          export META_ENABLED=false META_PROVIDER_VERIFIED=false META_WEBHOOK_ENABLED=false META_WEBHOOK_PERSISTENCE_ENABLED=false
+          export INSTAGRAM_READ_ENABLED=false META_ADS_READ_ENABLED=false META_ADS_WRITE_ENABLED=false
+          export WHATSAPP_ENABLED=false WHATSAPP_RUNTIME_ENABLED=false WHATSAPP_PROVIDER_VERIFIED=false
+          export EMAIL_SENDGRID_ENABLED=false EMAIL_SENDGRID_PROVIDER_VERIFIED=false
+          export GOOGLE_ADS_PHASE=OFF GOOGLE_ADS_PROVIDER_VERIFIED=false
+          export AG01_MODEL_ENABLED=false AG01_MODEL_PROVIDER_VERIFIED=false
+          export GCP_PROJECT_ID="$STAGING_PROJECT_ID"
+          export MCP_ENABLED=true TOCA_SERVICE_ROLE=mcp
+          node dist/src/http.js >/tmp/candidate.log 2>&1 &
+          APP_PID=$!
+          cleanup() {
+            kill "$APP_PID" 2>/dev/null || true
+            if [[ -n "${PROXY_PID:-}" ]]; then kill "$PROXY_PID" 2>/dev/null || true; fi
           }
-          NODE
-          unset DATABASE_URL
-          echo 'OUTBOX_READINESS_FACTS_READ_ONLY=PASS'
+          trap cleanup EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:18080/healthz >/tmp/health.json; then break; fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then cat /tmp/candidate.log >&2; exit 1; fi
+            sleep 1
+          done
+          HEALTH_CODE="$(curl --silent --max-time 5 --output /tmp/health.json --write-out '%{http_code}' http://127.0.0.1:18080/healthz)"
+          READY_CODE="$(curl --silent --max-time 15 --output /tmp/ready.json --write-out '%{http_code}' http://127.0.0.1:18080/readyz)"
+          echo "LOCAL_HEALTH_HTTP=$HEALTH_CODE"
+          cat /tmp/health.json; echo
+          echo "LOCAL_READY_HTTP=$READY_CODE"
+          cat /tmp/ready.json; echo
+          echo 'LOCAL_FAILED_CHECKS='
+          jq -r '.checks[]? | select(.ok==false) | .name' /tmp/ready.json || true
+          test "$HEALTH_CODE" = 200
+          test "$READY_CODE" = 200
+          jq -e '.status == "ready"' /tmp/ready.json >/dev/null
+          jq -e '[.checks[]? | select(.ok==false)] | length == 0' /tmp/ready.json >/dev/null
+          echo 'LOCAL_EXACT_COMBINED_HEAD_READINESS=PASS'
+          echo 'STAGING_PROVIDER_MODE=DISABLED'
           echo 'APPLICATION_MIGRATION_EXECUTED=NO'
           echo 'APPLICATION_DEPLOY_EXECUTED=NO'
           echo 'PROVIDER_MUTATION_EXECUTED=NO'
