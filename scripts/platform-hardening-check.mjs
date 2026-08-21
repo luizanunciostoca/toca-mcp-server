@@ -28,10 +28,25 @@ const forbid = (path, marker, code) => {
   if (files.get(path)?.includes(marker)) failures.push(`${code}:${path}:${marker}`);
 };
 
-for (const marker of ['node scripts/platform-hardening-check.mjs', 'pnpm architecture:check', 'pnpm typecheck', 'pnpm test', 'pnpm build']) {
+for (const marker of [
+  'node scripts/platform-hardening-check.mjs',
+  'pnpm architecture:check',
+  'pnpm typecheck',
+  'pnpm test',
+  'pnpm build',
+]) {
   need('.github/workflows/quality.yml', marker, 'QUALITY_GATE_MISSING');
 }
-for (const marker of ['actions/dependency-review-action@', 'github/codeql-action/init@', 'github/codeql-action/analyze@', 'gitleaks/gitleaks-action@', 'aquasecurity/trivy-action@', 'actions/upload-artifact@', 'pnpm audit --audit-level high', "format: 'cyclonedx'"]) {
+for (const marker of [
+  'actions/dependency-review-action@',
+  'github/codeql-action/init@',
+  'github/codeql-action/analyze@',
+  'gitleaks/gitleaks-action@',
+  'aquasecurity/trivy-action@',
+  'actions/upload-artifact@',
+  'pnpm audit --audit-level high',
+  "format: 'cyclonedx'",
+]) {
   need('.github/workflows/security-supply-chain.yml', marker, 'SECURITY_SUPPLY_CHAIN_MISSING');
 }
 
@@ -69,14 +84,16 @@ for (const marker of [
   'pointInTimeRecoveryEnabled',
   'transactionLogRetentionDays',
   'retainedBackups',
-]) need(deploy, marker, 'DEPLOY_CONTRACT_MISSING');
+])
+  need(deploy, marker, 'DEPLOY_CONTRACT_MISSING');
 for (const marker of [
   'GCP_PROJECT_ID: toca-mcp-production',
   'GCP_CLOUD_SQL_INSTANCE: toca-mcp-db',
   'GCP_DATABASE_URL_SECRET: toca-database-url',
   'credentials_json:',
   '.github/workflows/tmp-readiness-repair-once.yml',
-]) forbid(deploy, marker, 'DEPLOY_FORBIDDEN_FALLBACK');
+])
+  forbid(deploy, marker, 'DEPLOY_FORBIDDEN_FALLBACK');
 
 const validator = 'scripts/validate-gcp-deploy-environment.mjs';
 for (const marker of [
@@ -94,44 +111,120 @@ for (const marker of [
   'GCP_SECRET_MUST_BE_PROJECT_LOCAL_ID',
   'PRODUCTION_DATABASE_SECRET_VERSION_MUST_BE_PINNED',
   'PRODUCTION_PROVIDER_SECRET_VERSION_MUST_BE_PINNED',
-]) need(validator, marker, 'ISOLATION_GUARD_MISSING');
+])
+  need(validator, marker, 'ISOLATION_GUARD_MISSING');
 
 const readiness = 'src/health/runtime-readiness.ts';
-for (const check of ['db','migrations','schema','audit','outbox','approval_store','crm','privacy','workflow','ag01','meta','whatsapp','email','google_ads','provider_credentials','critical_configuration']) {
+for (const check of [
+  'db',
+  'migrations',
+  'schema',
+  'audit',
+  'outbox',
+  'approval_store',
+  'crm',
+  'privacy',
+  'workflow',
+  'ag01',
+  'meta',
+  'whatsapp',
+  'email',
+  'google_ads',
+  'provider_credentials',
+  'critical_configuration',
+]) {
   need(readiness, `namedCheck('${check}'`, `READINESS_CHECK_MISSING:${check}`);
 }
-for (const marker of ['READINESS_MIGRATIONS_PENDING','READINESS_SCHEMA_MISSING','READINESS_AUDIT_HEAD_MISMATCH','READINESS_OUTBOX_LAG_EXCEEDED','READINESS_OUTBOX_DEAD_LETTER_PRESENT','READINESS_MCP_ROLE_REQUIRES_MCP_ENABLED','READINESS_WEBHOOK_ROLE_REQUIRES_MCP_DISABLED','PROVIDER_NOT_VERIFIED','privacy_ledger_events','workflow_instances']) {
+for (const marker of [
+  'READINESS_MIGRATIONS_PENDING',
+  'READINESS_SCHEMA_MISSING',
+  'READINESS_AUDIT_HEAD_MISMATCH',
+  'READINESS_OUTBOX_LAG_EXCEEDED',
+  'READINESS_OUTBOX_DEAD_LETTER_PRESENT',
+  'READINESS_MCP_ROLE_REQUIRES_MCP_ENABLED',
+  'READINESS_WEBHOOK_ROLE_REQUIRES_MCP_DISABLED',
+  'PROVIDER_NOT_VERIFIED',
+  'privacy_ledger_events',
+  'workflow_instances',
+]) {
   need(readiness, marker, 'READINESS_FAIL_CLOSED_MISSING');
 }
 
-for (const marker of ["'/webhooks/meta'", "'/webhooks/sendgrid/events'", "'/healthz'", "'/readyz'", 'WEBHOOK_SERVICE_ALLOWED_PATHS', 'isWebhookService()']) {
+for (const marker of [
+  "'/webhooks/meta'",
+  "'/webhooks/sendgrid/events'",
+  "'/healthz'",
+  "'/readyz'",
+  'WEBHOOK_SERVICE_ALLOWED_PATHS',
+  'isWebhookService()',
+]) {
   need('src/http.ts', marker, 'WEBHOOK_SURFACE_GUARD_MISSING');
 }
 need('src/core/policy.ts', 'TOCA_PLATFORM_KILL_SWITCH', 'MUTATION_KILL_SWITCH_MISSING');
-need('src/core/policy.ts', 'tool.sideEffects && platformMutationKillSwitchActive(context)', 'MUTATION_KILL_SWITCH_MISSING');
+need(
+  'src/core/policy.ts',
+  'tool.sideEffects && platformMutationKillSwitchActive(context)',
+  'MUTATION_KILL_SWITCH_MISSING',
+);
 
 const alertText = files.get('infra/observability/platform-hardening-alerts.json');
 const dashboardText = files.get('infra/observability/platform-hardening-dashboard.json');
 const syntheticText = files.get('infra/observability/platform-hardening-synthetics.json');
 for (const signal of [
-  'ag01.failure_count','core.execution_error_ratio','approval.decision_p95_seconds','email.send_success_ratio','email.delivery_verified_ratio','email.bounce_ratio','whatsapp.webhook_success_ratio','whatsapp.send_success_ratio','whatsapp.readback_verified_ratio','provider.call_p95_seconds','provider.error_count','crm.durable_write_success_ratio','outbox.oldest_pending_age_seconds','retry.exhausted_count','dead_letter.pending_count','commerce.readback_verified_ratio','google_ads.api_error_ratio','meta.api_error_ratio'
+  'ag01.failure_count',
+  'core.execution_error_ratio',
+  'approval.decision_p95_seconds',
+  'email.send_success_ratio',
+  'email.delivery_verified_ratio',
+  'email.bounce_ratio',
+  'whatsapp.webhook_success_ratio',
+  'whatsapp.send_success_ratio',
+  'whatsapp.readback_verified_ratio',
+  'provider.call_p95_seconds',
+  'provider.error_count',
+  'crm.durable_write_success_ratio',
+  'outbox.oldest_pending_age_seconds',
+  'retry.exhausted_count',
+  'dead_letter.pending_count',
+  'commerce.readback_verified_ratio',
+  'google_ads.api_error_ratio',
+  'meta.api_error_ratio',
 ]) {
-  if (!alertText.includes(signal) && !dashboardText.includes(signal)) failures.push(`OBSERVABILITY_SIGNAL_MISSING:${signal}`);
+  if (!alertText.includes(signal) && !dashboardText.includes(signal))
+    failures.push(`OBSERVABILITY_SIGNAL_MISSING:${signal}`);
 }
 const alerts = JSON.parse(alertText);
 const synthetics = JSON.parse(syntheticText);
-if (alerts.routing?.minimumNotificationChannels < 2) failures.push('ALERT_REDUNDANT_CHANNELS_REQUIRED');
-if (alerts.routing?.requireRedundantChannelFamilies !== true) failures.push('ALERT_REDUNDANT_FAMILIES_REQUIRED');
-if (alerts.routing?.syntheticFiringRequiresReadback !== true) failures.push('ALERT_READBACK_REQUIRED');
-if (synthetics.safety?.realSideEffectsForTesting !== false || synthetics.safety?.destructiveOperations !== false || synthetics.safety?.providerMutationAllowed !== false) failures.push('SYNTHETIC_SAFETY_GUARD_INVALID');
+if (alerts.routing?.minimumNotificationChannels < 2)
+  failures.push('ALERT_REDUNDANT_CHANNELS_REQUIRED');
+if (alerts.routing?.requireRedundantChannelFamilies !== true)
+  failures.push('ALERT_REDUNDANT_FAMILIES_REQUIRED');
+if (alerts.routing?.syntheticFiringRequiresReadback !== true)
+  failures.push('ALERT_READBACK_REQUIRED');
+if (
+  synthetics.safety?.realSideEffectsForTesting !== false ||
+  synthetics.safety?.destructiveOperations !== false ||
+  synthetics.safety?.providerMutationAllowed !== false
+)
+  failures.push('SYNTHETIC_SAFETY_GUARD_INVALID');
 
 for (const marker of ['RPO `<=15m`', 'RTO `<=60m`', 'PITR', 'isolated restore']) {
   need('docs/operations/disaster-recovery-next-runbook.md', marker, 'DR_RUNBOOK_MISSING');
 }
-for (const marker of ['notification', 'readback', 'correlation', 'runbook']) {
-  need('docs/operations/observability-incident-runbook.md', marker, 'OBSERVABILITY_RUNBOOK_MISSING');
+for (const marker of ['Notification', 'readback', 'correlation', 'runbook']) {
+  need(
+    'docs/operations/observability-incident-runbook.md',
+    marker,
+    'OBSERVABILITY_RUNBOOK_MISSING',
+  );
 }
-for (const marker of ['schema_migrations','audit_ledger_events','event_outbox','workflow_instances','privacy_ledger_events']) {
+for (const marker of [
+  'schema_migrations',
+  'audit_ledger_events',
+  'event_outbox',
+  'workflow_instances',
+  'privacy_ledger_events',
+]) {
   need('scripts/capture-platform-evidence.mjs', marker, 'EVIDENCE_CAPTURE_MISSING');
 }
 
