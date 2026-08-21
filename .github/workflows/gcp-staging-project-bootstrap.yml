@@ -1,0 +1,102 @@
+name: GCP Staging Project Bootstrap
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-staging-project-bootstrap.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROD_PROJECT_ID: toca-mcp-production
+  PROD_PROJECT_NUMBER: '990081828836'
+  ORG_ID: '995529283213'
+  BILLING_ACCOUNT: 017F93-60A594-4271D6
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_PROJECT_ID: toca-mcp-next-staging
+
+jobs:
+  bootstrap-project:
+    name: Authorized isolated staging project bootstrap
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Checkout frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert immutable safety boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_NUMBER"
+          test "$ORG_ID" = '995529283213'
+          test "$BILLING_ACCOUNT" = '017F93-60A594-4271D6'
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Revalidate production references before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROD_PROJECT_ID" --format='value(projectNumber)')" = "$PROD_PROJECT_NUMBER"
+          test "$(gcloud projects describe "$PROD_PROJECT_ID" --format='value(parent.id)')" = "$ORG_ID"
+          test "$(gcloud billing projects describe "$PROD_PROJECT_ID" --format='value(billingAccountName)' | sed 's#^billingAccounts/##')" = "$BILLING_ACCOUNT"
+          echo 'PRODUCTION_REFERENCE_REVALIDATED=true'
+      - name: Create isolated staging project
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectId)' >/tmp/staging-existing 2>/tmp/staging-describe-error; then
+            test "$(cat /tmp/staging-existing)" = "$STAGING_PROJECT_ID"
+            echo 'STAGING_PROJECT_ALREADY_EXISTS=true'
+          else
+            echo 'STAGING_PROJECT_ALREADY_EXISTS=false'
+            gcloud projects create "$STAGING_PROJECT_ID" \
+              --organization="$ORG_ID" \
+              --name='TOCA MCP Next Staging'
+          fi
+      - name: Prove new project identity and parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_JSON="$(gcloud projects describe "$STAGING_PROJECT_ID" --format=json)"
+          printf '%s' "$PROJECT_JSON" | jq -c '{projectId,projectNumber,parent,state}'
+          STAGING_NUMBER="$(printf '%s' "$PROJECT_JSON" | jq -r '.projectNumber')"
+          test "$(printf '%s' "$PROJECT_JSON" | jq -r '.projectId')" = "$STAGING_PROJECT_ID"
+          test "$STAGING_NUMBER" != "$PROD_PROJECT_NUMBER"
+          test "$(printf '%s' "$PROJECT_JSON" | jq -r '.parent.type')" = organization
+          test "$(printf '%s' "$PROJECT_JSON" | jq -r '.parent.id')" = "$ORG_ID"
+          echo "STAGING_PROJECT_NUMBER=$STAGING_NUMBER" >> "$GITHUB_ENV"
+          echo 'STAGING_PROJECT_IDENTITY_DISTINCT=PASS'
+      - name: Link existing billing account to isolated staging project
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud billing projects link "$STAGING_PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
+          test "$(gcloud billing projects describe "$STAGING_PROJECT_ID" --format='value(billingAccountName)' | sed 's#^billingAccounts/##')" = "$BILLING_ACCOUNT"
+          test "$(gcloud billing projects describe "$STAGING_PROJECT_ID" --format='value(billingEnabled)')" = True
+          echo 'STAGING_BILLING_LINK=PASS'
+      - name: Emit project bootstrap truth
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "STAGING_PROJECT_ID=$STAGING_PROJECT_ID"
+          echo "STAGING_PROJECT_NUMBER=$STAGING_PROJECT_NUMBER"
+          echo "PRODUCTION_PROJECT_ID=$PROD_PROJECT_ID"
+          echo "PRODUCTION_PROJECT_NUMBER=$PROD_PROJECT_NUMBER"
+          echo 'STAGING_PROJECT_BOOTSTRAP=PASS'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
