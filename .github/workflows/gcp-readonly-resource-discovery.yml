@@ -1,0 +1,79 @@
+name: GCP Read-Only Resource Discovery
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gcp-readonly-resource-discovery.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-readonly-resource-discovery-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
+  PROD_PROJECT_ID: toca-mcp-production
+  PROD_PROJECT_NUMBER: '990081828836'
+  PROD_REGION: southamerica-east1
+  PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PROD_DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  PROD_RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  PROD_SQL: toca-mcp-db
+  PROD_DB_SECRET: toca-database-url
+
+jobs:
+  discover:
+    name: Discover GCP Resource Metadata Read-Only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Assert exact frozen candidate
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Authenticate through already-validated production WIF for metadata READ only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.PROD_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read canonical production metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gcp-readonly
+          gcloud projects describe "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/project.json
+          test "$(jq -r '.projectNumber | tostring' /tmp/gcp-readonly/project.json)" = "$PROD_PROJECT_NUMBER"
+          gcloud sql instances describe "$PROD_SQL" --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/sql.json
+          gcloud run services list --project "$PROD_PROJECT_ID" --region "$PROD_REGION" --format=json > /tmp/gcp-readonly/run-services.json
+          gcloud iam service-accounts list --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/service-accounts.json
+          gcloud secrets describe "$PROD_DB_SECRET" --project "$PROD_PROJECT_ID" --format=json > /tmp/gcp-readonly/db-secret.json
+          jq -e --arg sa "$PROD_RUNTIME_SA" 'map(.email) | index($sa) != null' /tmp/gcp-readonly/service-accounts.json >/dev/null
+          echo 'PRODUCTION_METADATA_READ=PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo "PRODUCTION_PROJECT_ID=$PROD_PROJECT_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "PRODUCTION_PROJECT_NUMBER=$PROD_PROJECT_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "PRODUCTION_SQL=$(jq -r '.name' /tmp/gcp-readonly/sql.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "PRODUCTION_DB_SECRET=$(jq -r '.name | split("/")[-1]' /tmp/gcp-readonly/db-secret.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PRODUCTION_CLOUD_RUN_SERVICES:' >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | "- " + (.metadata.name // .name // "unknown") + " | runtime=" + (.spec.template.spec.serviceAccountName // "")' /tmp/gcp-readonly/run-services.json >> "$GITHUB_STEP_SUMMARY"
+          echo 'PRODUCTION_SERVICE_ACCOUNTS:' >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | "- " + .email' /tmp/gcp-readonly/service-accounts.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Probe historically referenced staging project IDs without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in toca-mcp-staging toca-staging; do
+            if gcloud projects describe "$project" --format=json > "/tmp/gcp-readonly/${project}.json" 2>"/tmp/gcp-readonly/${project}.err"; then
+              number="$(jq -r '.projectNumber | tostring' "/tmp/gcp-readonly/${project}.json")"
+              echo "STAGING_PROJECT_CANDIDATE_FOUND=${project}:${number}" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "STAGING_PROJECT_CANDIDATE_UNRESOLVED=${project}" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo 'DISCOVERY_READ_ONLY=true' >> "$GITHUB_STEP_SUMMARY"
