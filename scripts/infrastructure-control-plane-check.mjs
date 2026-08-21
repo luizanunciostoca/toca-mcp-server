@@ -98,16 +98,23 @@ for (const forbidden of forbiddenWorkflowMarkers) {
 
 const stagingReaderIamCommand =
   'gcloud projects add-iam-policy-binding "$STAGING_GCP_PROJECT_ID"';
-const stagingReaderIamCommandCount = workflow.split(stagingReaderIamCommand).length - 1;
+const stagingReaderIamCommandCount =
+  workflow.split(stagingReaderIamCommand).length - 1;
 if (
   stagingReaderIamCommandCount !== 1 ||
-  !workflow.includes('for role in roles/cloudsql.viewer roles/monitoring.viewer; do') ||
-  !workflow.includes('MEMBER="serviceAccount:${STAGING_DEPLOYER_SERVICE_ACCOUNT}"') ||
+  !workflow.includes(
+    'for role in roles/cloudsql.viewer roles/monitoring.viewer; do',
+  ) ||
+  !workflow.includes(
+    'MEMBER="serviceAccount:${STAGING_DEPLOYER_SERVICE_ACCOUNT}"',
+  ) ||
   !workflow.includes('--member="$MEMBER"') ||
   !workflow.includes('--role="$role"') ||
   !workflow.includes('--condition=None')
 ) {
-  console.error('Staging reader IAM mutation is outside the exact approved envelope');
+  console.error(
+    'Staging reader IAM mutation is outside the exact approved envelope',
+  );
   process.exit(1);
 }
 
