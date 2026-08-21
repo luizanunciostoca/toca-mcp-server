@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
+import { createRuntimeReadinessChecks } from './health/runtime-readiness.js';
 import { createTocaHttpServer, type MetaWebhookHttpBoundary } from './http-server.js';
 import { PostgresMetaWebhookEventStore } from './persistence/meta-webhook-event-store.js';
 import { createPostgresPool } from './persistence/postgres.js';
@@ -17,9 +18,24 @@ import { SERVER_NAME } from './server.js';
 
 const SENDGRID_EVENT_WEBHOOK_PATH = '/webhooks/sendgrid/events';
 const SENDGRID_MAX_EVENT_WEBHOOK_BYTES = 2 * 1024 * 1024;
+const WEBHOOK_SERVICE_ALLOWED_PATHS = new Set([
+  '/health',
+  '/healthz',
+  '/readyz',
+  '/webhooks/meta',
+  SENDGRID_EVENT_WEBHOOK_PATH,
+]);
 
 const config = loadConfig();
 const metaRuntime = createMetaHttpRuntime(config, process.env);
+const readinessPool = config.DATABASE_URL
+  ? createPostgresPool({ connectionString: config.DATABASE_URL })
+  : undefined;
+const readinessChecks = createRuntimeReadinessChecks({
+  config,
+  env: process.env,
+  ...(readinessPool ? { pool: readinessPool } : {}),
+});
 const host =
   process.env.MCP_HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const port = Number.parseInt(process.env.MCP_PORT ?? process.env.PORT ?? '3000', 10);
@@ -36,6 +52,7 @@ const baseServer = createTocaHttpServer({
   onError: (error) => {
     console.error('HTTP request failed', error instanceof Error ? error.message : 'unknown error');
   },
+  readinessChecks,
   mcpEnabled: config.MCP_ENABLED,
   ...(metaRuntime
     ? {
@@ -46,7 +63,7 @@ const baseServer = createTocaHttpServer({
   ...(metaWebhook ? { metaWebhook } : {}),
 });
 
-const server = sendGridEventRuntime
+const server = sendGridEventRuntime || isWebhookService()
   ? createServer((request, response) => {
       void handleComposedHttpRequest(request, response, sendGridEventRuntime, baseServer);
     })
@@ -77,11 +94,17 @@ async function createEmailWebhookRuntime(): Promise<SendGridEventHttpRuntime | u
 async function handleComposedHttpRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  sendGrid: SendGridEventHttpRuntime,
+  sendGrid: SendGridEventHttpRuntime | undefined,
   baseServer: ReturnType<typeof createTocaHttpServer>,
 ): Promise<void> {
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
-  if (pathname !== SENDGRID_EVENT_WEBHOOK_PATH) {
+
+  if (isWebhookService() && !WEBHOOK_SERVICE_ALLOWED_PATHS.has(pathname)) {
+    sendJson(response, 404, { error: 'not_found' });
+    return;
+  }
+
+  if (pathname !== SENDGRID_EVENT_WEBHOOK_PATH || !sendGrid) {
     baseServer.emit('request', request, response);
     return;
   }
@@ -194,6 +217,10 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
     'cache-control': 'no-store',
   });
   response.end(payload);
+}
+
+function isWebhookService(): boolean {
+  return process.env.TOCA_SERVICE_ROLE?.trim() === 'webhook';
 }
 
 function isTrue(value: string | undefined): boolean {
