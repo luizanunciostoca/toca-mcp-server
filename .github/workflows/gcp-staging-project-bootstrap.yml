@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  CANDIDATE_SHA: e026b2b441c9a1233a05e62c8a981511ccc1f92e
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
   STAGING_PROJECT_ID: toca-mcp-next-staging
   STAGING_PROJECT_NUMBER: '729069789107'
   REGION: southamerica-east1
@@ -24,7 +24,7 @@ env:
 
 jobs:
   exact-readiness:
-    name: Exact combined head readiness through isolated staging DB
+    name: Exact final main candidate readiness through isolated staging DB
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 20
@@ -39,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = '2b373b1564e495d81a73ca04254efec18c0e774c'
           test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
           test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
@@ -48,7 +49,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Build exact combined head
+      - name: Build exact final candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -84,7 +85,7 @@ jobs:
           done
           cat /tmp/proxy.log >&2
           exit 1
-      - name: Run exact combined head readiness against staging DB
+      - name: Run exact final candidate readiness against staging DB
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +140,7 @@ jobs:
           test "$READY_CODE" = 200
           jq -e '.status == "ready"' /tmp/ready.json >/dev/null
           jq -e '[.checks[]? | select(.ok==false)] | length == 0' /tmp/ready.json >/dev/null
-          echo 'LOCAL_EXACT_COMBINED_HEAD_READINESS=PASS'
+          echo 'LOCAL_EXACT_FINAL_CANDIDATE_READINESS=PASS'
           echo 'STAGING_PROVIDER_MODE=DISABLED'
           echo 'APPLICATION_MIGRATION_EXECUTED=NO'
           echo 'APPLICATION_DEPLOY_EXECUTED=NO'
