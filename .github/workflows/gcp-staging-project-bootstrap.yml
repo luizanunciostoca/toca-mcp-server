@@ -14,9 +14,12 @@ env:
   STAGING_PROJECT_ID: toca-mcp-next-staging
   STAGING_PROJECT_NUMBER: '729069789107'
   REGION: southamerica-east1
-  STAGING_MCP_SERVICE: toca-mcp-next-staging
-  FAILED_MCP_REVISION: toca-mcp-next-staging-mcp-7db1a6e-46
+  STAGING_SQL_INSTANCE: toca-mcp-next-staging-db
+  STAGING_DATABASE_SECRET: toca-next-staging-database-url
+  STAGING_DATABASE_SECRET_VERSION: '1'
   STAGING_DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  STAGING_MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  STAGING_WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
   STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
@@ -24,8 +27,129 @@ env:
   PROD_PROJECT_NUMBER: '990081828836'
 
 jobs:
-  grant-log-viewer:
-    name: Grant transient staging log viewer only
+  local-readiness:
+    name: Exact candidate readiness through isolated staging DB
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact candidate and isolated boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
+          test "$STAGING_PROJECT_NUMBER" != "$PROD_PROJECT_NUMBER"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build exact frozen candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Start checksum-pinned Cloud SQL Auth Proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
+          CONNECTION_NAME="$(gcloud sql instances describe "$STAGING_SQL_INSTANCE" --project="$STAGING_PROJECT_ID" --format='value(connectionName)')"
+          test "$CONNECTION_NAME" = "${STAGING_PROJECT_ID}:${REGION}:${STAGING_SQL_INSTANCE}"
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
+            --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "$CONNECTION_NAME" >/tmp/proxy.log 2>&1 &
+          echo "PROXY_PID=$!" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+              echo 'READINESS_PROXY_READY=PASS'
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/proxy.log >&2
+          exit 1
+      - name: Run exact candidate readiness locally against staging DB
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_DATABASE_URL="$(gcloud secrets versions access "$STAGING_DATABASE_SECRET_VERSION" --secret="$STAGING_DATABASE_SECRET" --project="$STAGING_PROJECT_ID")"
+          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
+            const url = new URL(process.env.RAW_DATABASE_URL);
+            url.hostname = "127.0.0.1";
+            url.port = "5432";
+            for (const key of ["host","port","ssl","sslmode","sslcert","sslkey","sslrootcert","sslaccept"]) url.searchParams.delete(key);
+            process.stdout.write(url.toString());
+          ')"
+          unset RAW_DATABASE_URL
+          export DATABASE_SSL=false
+          export NODE_ENV=production
+          export MCP_PORT=18080
+          export TOCA_DEPLOY_ENVIRONMENT=staging
+          export TOCA_RELEASE_SHA="$CANDIDATE_SHA"
+          export TOCA_PLATFORM_KILL_SWITCH=false
+          export TOCA_DEFAULT_TENANT_ID=toca
+          export TOCA_DEFAULT_WORKSPACE_ID=toca
+          export TOCA_DEFAULT_ORGANIZATION_ID=toca
+          export STAGING_PROVIDER_MODE=DISABLED
+          export META_ENABLED=false META_PROVIDER_VERIFIED=false META_WEBHOOK_ENABLED=false META_WEBHOOK_PERSISTENCE_ENABLED=false
+          export INSTAGRAM_READ_ENABLED=false META_ADS_READ_ENABLED=false META_ADS_WRITE_ENABLED=false
+          export WHATSAPP_ENABLED=false WHATSAPP_RUNTIME_ENABLED=false WHATSAPP_PROVIDER_VERIFIED=false
+          export EMAIL_SENDGRID_ENABLED=false EMAIL_SENDGRID_PROVIDER_VERIFIED=false
+          export GOOGLE_ADS_PHASE=OFF GOOGLE_ADS_PROVIDER_VERIFIED=false
+          export AG01_MODEL_ENABLED=false AG01_MODEL_PROVIDER_VERIFIED=false
+          export GCP_PROJECT_ID="$STAGING_PROJECT_ID"
+          export MCP_ENABLED=true TOCA_SERVICE_ROLE=mcp
+          node dist/src/http.js >/tmp/candidate.log 2>&1 &
+          APP_PID=$!
+          cleanup() {
+            kill "$APP_PID" 2>/dev/null || true
+            if [[ -n "${PROXY_PID:-}" ]]; then kill "$PROXY_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:18080/healthz >/tmp/health.json; then break; fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then cat /tmp/candidate.log >&2; exit 1; fi
+            sleep 1
+          done
+          HEALTH_CODE="$(curl --silent --max-time 5 --output /tmp/health.json --write-out '%{http_code}' http://127.0.0.1:18080/healthz)"
+          READY_CODE="$(curl --silent --max-time 15 --output /tmp/ready.json --write-out '%{http_code}' http://127.0.0.1:18080/readyz)"
+          echo "LOCAL_HEALTH_HTTP=$HEALTH_CODE"
+          cat /tmp/health.json; echo
+          echo "LOCAL_READY_HTTP=$READY_CODE"
+          cat /tmp/ready.json; echo
+          echo 'LOCAL_FAILED_CHECKS='
+          jq -r '.checks[]? | select(.ok==false) | .name' /tmp/ready.json || true
+          test "$HEALTH_CODE" = 200
+          [[ "$READY_CODE" = 200 || "$READY_CODE" = 503 ]]
+          jq -e '.status == "ready" or .status == "not_ready"' /tmp/ready.json >/dev/null
+          echo 'LOCAL_EXACT_CANDIDATE_READINESS_DIAGNOSTIC=PASS'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+
+  runtime-iam-readback:
+    name: Staging runtime IAM readback only
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 10
@@ -34,7 +158,7 @@ jobs:
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
-      - name: Assert isolated staging boundary
+      - name: Assert isolated boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -46,72 +170,21 @@ jobs:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.INFRA_ADMIN_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Grant Logging Viewer in staging only
+      - name: Read runtime IAM bindings without mutation
         shell: bash
         run: |
           set -euo pipefail
           test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
-          gcloud projects add-iam-policy-binding "$STAGING_PROJECT_ID" \
-            --member="serviceAccount:$STAGING_DEPLOYER_SA" \
-            --role=roles/logging.viewer --condition=None --quiet >/dev/null
-          echo 'TRANSIENT_STAGING_LOG_VIEWER_GRANTED=YES'
-          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
-
-  diagnose:
-    name: Read failed candidate revision logs
-    needs: grant-log-viewer
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          persist-credentials: false
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
-        with:
-          workload_identity_provider: ${{ env.STAGING_WIF }}
-          service_account: ${{ env.STAGING_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Read revision logs and prove zero candidate traffic
-        shell: bash
-        run: |
-          set -euo pipefail
-          SERVICE_JSON="$(gcloud run services describe "$STAGING_MCP_SERVICE" --project="$STAGING_PROJECT_ID" --region="$REGION" --format=json)"
-          test "$(printf '%s' "$SERVICE_JSON" | jq -r --arg rev "$FAILED_MCP_REVISION" '[.status.traffic[]? | select(.revisionName==$rev and (.percent // 0) > 0)] | length')" = 0
-          echo 'FAILED_REVISION_TRAFFIC_PERCENT=0'
-          FILTER="resource.type=cloud_run_revision AND resource.labels.service_name=${STAGING_MCP_SERVICE} AND resource.labels.revision_name=${FAILED_MCP_REVISION}"
-          gcloud logging read "$FILTER" --project="$STAGING_PROJECT_ID" --limit=200 --order=asc \
-            --format='value(timestamp,severity,textPayload,jsonPayload.message)'
-          echo 'FAILED_REVISION_LOG_READ=PASS'
+          PROJECT_POLICY="$(gcloud projects get-iam-policy "$STAGING_PROJECT_ID" --format=json)"
+          SECRET_POLICY="$(gcloud secrets get-iam-policy "$STAGING_DATABASE_SECRET" --project="$STAGING_PROJECT_ID" --format=json)"
+          for SA in "$STAGING_MCP_RUNTIME_SA" "$STAGING_WEBHOOK_RUNTIME_SA"; do
+            MEMBER="serviceAccount:$SA"
+            SQL_CLIENT="$(printf '%s' "$PROJECT_POLICY" | jq -r --arg m "$MEMBER" '[.bindings[]? | select(.role=="roles/cloudsql.client") | .members[]? | select(.==$m)] | length')"
+            SECRET_ACCESSOR="$(printf '%s' "$SECRET_POLICY" | jq -r --arg m "$MEMBER" '[.bindings[]? | select(.role=="roles/secretmanager.secretAccessor") | .members[]? | select(.==$m)] | length')"
+            echo "RUNTIME_SA=$SA CLOUDSQL_CLIENT=$SQL_CLIENT SECRET_ACCESSOR=$SECRET_ACCESSOR"
+          done
+          echo 'STAGING_RUNTIME_IAM_READBACK=PASS'
           echo 'APPLICATION_MIGRATION_EXECUTED=NO'
           echo 'APPLICATION_DEPLOY_EXECUTED=NO'
           echo 'PROVIDER_MUTATION_EXECUTED=NO'
-          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
-
-  revoke-log-viewer:
-    name: Revoke transient staging log viewer
-    if: always()
-    needs: diagnose
-    runs-on: ubuntu-latest
-    environment: infrastructure-admin
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          persist-credentials: false
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
-        with:
-          workload_identity_provider: ${{ env.PROD_WIF }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Revoke Logging Viewer from staging deployer
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud projects remove-iam-policy-binding "$STAGING_PROJECT_ID" \
-            --member="serviceAccount:$STAGING_DEPLOYER_SA" \
-            --role=roles/logging.viewer --condition=None --quiet >/dev/null || true
-          echo 'TRANSIENT_STAGING_LOG_VIEWER_REVOKED=YES'
           echo 'PRODUCTION_MUTATION_EXECUTED=NO'
