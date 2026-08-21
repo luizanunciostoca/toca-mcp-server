@@ -1,0 +1,195 @@
+name: Exact Final Candidate 75c165a
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/exact-final-candidate-75c165a.yml'
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  VALIDATED_TREE_SHA: 2b373b1564e495d81a73ca04254efec18c0e774c
+
+jobs:
+  exact-quality:
+    name: Exact Final Candidate Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact release identity and validated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$VALIDATED_TREE_SHA"
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -1)" = '033_omnichannel_prepared_content.sql'
+          test -z "$(find migrations -maxdepth 1 -type f -name '027_*' -print -quit)"
+          echo 'EXACT_FINAL_IDENTITY=PASS'
+          echo 'MIGRATION_MAX=033'
+          echo 'MIGRATION_027_PRESENT=NO'
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-workflow-supply-chain.mjs
+      - run: node scripts/platform-hardening-check.mjs
+      - run: pnpm format:check
+      - run: pnpm architecture:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Candidate result
+        run: |
+          echo 'EXACT_FINAL_QUALITY=PASS'
+          echo 'PROVIDER_LIFECYCLE_PROMOTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
+
+  exact-postgres:
+    name: Exact Final Candidate PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: toca
+          POSTGRES_PASSWORD: toca-final-local-only
+          POSTGRES_DB: toca_final
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U toca -d toca_final"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://toca:toca-final-local-only@127.0.0.1:5432/toca_final
+      DATABASE_SSL: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$VALIDATED_TREE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm migrate
+      - name: PostgreSQL and tenancy acceptance
+        run: >-
+          pnpm exec vitest run
+          test/m-found-12-postgres-e2e.test.ts
+          test/crm-sales-postgres-e2e.test.ts
+          test/whatsapp-postgres-e2e.test.ts
+          test/foundation-worker-postgres-e2e.test.ts
+          test/r31-learning-postgres-e2e.test.ts
+          test/ag01-orchestrator-postgres-e2e.test.ts
+          test/tenant-approval-postgres-e2e.test.ts
+          test/tenant-configuration-postgres-e2e.test.ts
+      - name: Verify migration idempotency and exact authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm migrate
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -1)" = '033_omnichannel_prepared_content.sql'
+          test -z "$(find migrations -maxdepth 1 -type f -name '027_*' -print -quit)"
+          echo 'EXACT_FINAL_POSTGRES=PASS'
+          echo 'MIGRATION_DRIFT=NO'
+
+  exact-email-gate:
+    name: Exact Final Candidate Email Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$VALIDATED_TREE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/verify-email-typecheck.mjs
+      - run: >-
+          pnpm vitest run
+          test/email-campaign-send-runtime.test.ts
+          test/email-runtime.test.ts
+          test/email-orchestrator.test.ts
+          test/omnichannel-capability-specs.test.ts
+          test/postgres-email-runtime-outbox.test.ts
+          test/sendgrid-email-event-runtime.test.ts
+          test/sendgrid-email-provider.test.ts
+      - run: pnpm build
+      - run: echo 'EXACT_FINAL_EMAIL_GATE=PASS'
+
+  exact-security:
+    name: Exact Final Candidate Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$VALIDATED_TREE_SHA"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high
+      - name: Secret history scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Filesystem vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: '.'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - run: docker build --pull -t "toca-mcp:${CANDIDATE_SHA}" .
+      - name: Candidate container scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: 'toca-mcp:${{ env.CANDIDATE_SHA }}'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+      - run: echo 'EXACT_FINAL_SECURITY=PASS'
