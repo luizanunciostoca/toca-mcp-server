@@ -73,7 +73,9 @@ The current TOCA_OS capability catalog contains the R28 Google Ads family, inclu
 
 This resolves the historical Google Ads catalog/routing drift recorded by the old #46 text. It does **not** constitute Google Ads provider evidence. Current provider/production lifecycle states remain unpromoted.
 
-A separate Omnichannel drift remains: the code manifest defines operational `whatsapp.*`, `email.*` and `nurture.*` capability IDs, but the current TOCA_OS CAPABILITIES sheet has no matching operational rows. Searches for WhatsApp/Email currently resolve only copy-generation capabilities, and `nurture` returns no capability row. Because TOCA_OS is the canonical business catalog, Front B must reconcile the intended operational capability surface with Drive while it completes runtime composition. This is a governance blocker, not permission to invent rows solely to make a checklist green.
+A separate Omnichannel drift remains: the code manifest defines operational `whatsapp.*` and `email.*` capability IDs, but the current TOCA_OS CAPABILITIES sheet has no matching operational rows. Searches for WhatsApp/Email currently resolve only copy-generation capabilities. Because TOCA_OS is the canonical business catalog, Front B must reconcile the intended operational channel capability surface with Drive while it completes runtime composition.
+
+For nurture, the reconciliation result is different: TOCA_OS already contains `sales.followup.create` and `sales.followup.schedule` in R10 as `IMPLEMENTED` DB-bound authorities. Therefore `nurture.sequence.*` must not be promoted into a parallel public capability family by default. Durable nurture should first be composed over those existing follow-up authorities plus the existing Workflow/Scheduler/NextAction state; only a genuinely uncovered semantic contract could justify an additional canonical ID.
 
 ## Active convergence blockers
 
@@ -89,7 +91,7 @@ Live Secret Manager/IAM/provider evidence and real Google Ads provider read/writ
 
 Email and WhatsApp provider engines exist and contain strong pre-send Privacy/readback/retry/idempotency behavior. However the current omnichannel capability manifest still marks WhatsApp, Email and Nurture capabilities `SPECIFIED`, `runtimeExposed=false`, and `productionExecutionAllowed=false`.
 
-The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path plus durable nurture using existing CRM `NextActionRecord`, Workflow and Scheduler authorities. The operational capability surface must simultaneously be reconciled to TOCA_OS Drive. No second Omnichannel or scheduler is permitted.
+The remaining work is composition/exposure through the canonical AG-01/Workflow/Core path. WhatsApp/Email operational capability IDs must be reconciled to TOCA_OS. Durable nurture must reuse `sales.followup.create`, `sales.followup.schedule`, `NextActionRecord`, Workflow and Scheduler rather than introducing a second sequence engine. No second Omnichannel or scheduler is permitted.
 
 ### C — Platform Readiness
 
@@ -99,7 +101,7 @@ Actual GitHub Environment/GCP values have not yet been proven by this coordinati
 
 ### D — Governance / Closeout prep
 
-This branch replaces obsolete #17 coordination content with live-state artifacts only. Google Ads catalog drift is reconciled; operational Omnichannel catalog drift is not. Final closeout remains prohibited until runtime/catalog convergence plus production and reliability evidence exist.
+This branch replaces obsolete #17 coordination content with live-state artifacts only. Google Ads catalog drift is reconciled; operational Omnichannel channel catalog drift is not. Nurture has existing canonical R10 follow-up authorities and should converge on them. Final closeout remains prohibited until runtime/catalog convergence plus production and reliability evidence exist.
 
 ## Freeze rule
 
