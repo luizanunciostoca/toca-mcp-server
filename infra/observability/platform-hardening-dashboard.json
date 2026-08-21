@@ -30,7 +30,11 @@
     },
     {
       "id": "email",
-      "signals": ["email.send_success_ratio", "email.delivery_verified_ratio", "email.bounce_ratio"],
+      "signals": [
+        "email.send_success_ratio",
+        "email.delivery_verified_ratio",
+        "email.bounce_ratio"
+      ],
       "source": "email_dispatches+email_provider_events",
       "inactiveUntilProviderVerified": true
     },

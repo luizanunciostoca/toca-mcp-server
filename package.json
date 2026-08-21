@@ -31,7 +31,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check . || (for f in infra/observability/platform-hardening-alerts.json infra/observability/platform-hardening-dashboard.json infra/observability/platform-hardening-synthetics.json scripts/platform-hardening-check.mjs src/health/runtime-readiness.ts test/runtime-readiness.test.ts; do echo FORMAT_FILE:$f; prettier \"$f\" | base64 -w0; echo; done; exit 1)",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

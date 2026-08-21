@@ -128,7 +128,9 @@ export function createRuntimeReadinessChecks(
       const pool = requiredPool(options.pool);
       await Promise.all([
         pool.query('select tenant_id, workspace_id, organization_id from crm_contacts limit 0'),
-        pool.query('select tenant_id, workspace_id, organization_id from crm_conversations limit 0'),
+        pool.query(
+          'select tenant_id, workspace_id, organization_id from crm_conversations limit 0',
+        ),
         pool.query('select tenant_id, workspace_id, organization_id from crm_messages limit 0'),
       ]);
     }),
@@ -243,7 +245,9 @@ function metaRequired(config: RuntimeConfig, env: NodeJS.ProcessEnv): boolean {
 }
 
 function whatsAppRequired(env: NodeJS.ProcessEnv): boolean {
-  return booleanFlag(env.WHATSAPP_ENABLED, false) || booleanFlag(env.WHATSAPP_RUNTIME_ENABLED, false);
+  return (
+    booleanFlag(env.WHATSAPP_ENABLED, false) || booleanFlag(env.WHATSAPP_RUNTIME_ENABLED, false)
+  );
 }
 
 function assertProviderCredentials(config: RuntimeConfig, env: NodeJS.ProcessEnv): void {

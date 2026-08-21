@@ -10,7 +10,9 @@ import { evaluateReadiness } from '../src/health/readiness.js';
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -69,7 +71,9 @@ describe('production runtime readiness', () => {
   });
 
   it('keeps dependency readiness healthy while the mutation kill switch is active', async () => {
-    const report = await readinessReport({ env: { ...baseEnv(), TOCA_PLATFORM_KILL_SWITCH: 'true' } });
+    const report = await readinessReport({
+      env: { ...baseEnv(), TOCA_PLATFORM_KILL_SWITCH: 'true' },
+    });
     expect(report.status).toBe('ready');
   });
 
@@ -97,7 +101,9 @@ describe('production runtime readiness', () => {
   });
 });
 
-async function readinessReport(options: { readonly env?: NodeJS.ProcessEnv; readonly pool?: pg.Pool } = {}) {
+async function readinessReport(
+  options: { readonly env?: NodeJS.ProcessEnv; readonly pool?: pg.Pool } = {},
+) {
   const env = options.env ?? baseEnv();
   return evaluateReadiness(
     createRuntimeReadinessChecks({
@@ -110,7 +116,11 @@ async function readinessReport(options: { readonly env?: NodeJS.ProcessEnv; read
 }
 
 function baseEnv(): NodeJS.ProcessEnv {
-  return { NODE_ENV: 'test', DATABASE_URL: 'postgresql://readiness.invalid/toca', MCP_ENABLED: 'true' };
+  return {
+    NODE_ENV: 'test',
+    DATABASE_URL: 'postgresql://readiness.invalid/toca',
+    MCP_ENABLED: 'true',
+  };
 }
 
 function productionEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -134,12 +144,14 @@ async function emptyMigrationsDirectory(): Promise<string> {
   return directory;
 }
 
-function fakePool(options: {
-  readonly databaseFailure?: boolean;
-  readonly appliedMigrations?: readonly string[];
-  readonly outboxLagSeconds?: number;
-  readonly deadLetterCount?: number;
-} = {}): pg.Pool {
+function fakePool(
+  options: {
+    readonly databaseFailure?: boolean;
+    readonly appliedMigrations?: readonly string[];
+    readonly outboxLagSeconds?: number;
+    readonly deadLetterCount?: number;
+  } = {},
+): pg.Pool {
   const query = async (text: string, values?: readonly unknown[]) => {
     if (text === 'select 1') {
       if (options.databaseFailure) throw new Error('DATABASE_UNAVAILABLE');
@@ -161,10 +173,12 @@ function fakePool(options: {
     if (text.includes('from audit_ledger_heads h')) return { rows: [], rowCount: 0 };
     if (text.includes('from event_outbox')) {
       return {
-        rows: [{
-          oldest_pending_age_seconds: options.outboxLagSeconds ?? 0,
-          dead_letter_count: options.deadLetterCount ?? 0,
-        }],
+        rows: [
+          {
+            oldest_pending_age_seconds: options.outboxLagSeconds ?? 0,
+            dead_letter_count: options.deadLetterCount ?? 0,
+          },
+        ],
         rowCount: 1,
       };
     }
