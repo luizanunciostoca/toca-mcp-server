@@ -234,12 +234,9 @@ export class DurableFollowupCoordinator {
     }
 
     if (nextAction.dueAt && Date.parse(nextAction.dueAt) > Date.parse(now)) {
-      await this.armTimer(
-        claimedSnapshot,
-        nextAction.dueAt,
-        now,
-        ['durable-followup:next-action-rescheduled'],
-      );
+      await this.armTimer(claimedSnapshot, nextAction.dueAt, now, [
+        'durable-followup:next-action-rescheduled',
+      ]);
       return;
     }
 
@@ -330,12 +327,9 @@ export class DurableFollowupCoordinator {
       const retryAt = new Date(
         Date.parse(now) + retryDelayMs(failedStep.attempts, this.#retry),
       ).toISOString();
-      await this.armTimer(
-        retried,
-        retryAt,
-        now,
-        [`durable-followup:retry-timer:${failedStep.attempts + 1}`],
-      );
+      await this.armTimer(retried, retryAt, now, [
+        `durable-followup:retry-timer:${failedStep.attempts + 1}`,
+      ]);
       return;
     }
 
@@ -353,7 +347,14 @@ export class DurableFollowupCoordinator {
       lastError: errorCodeValue,
       failedAt: now,
     });
-    await this.recordOutcome(snapshot, nextAction, identity, claim, `DEAD_LETTERED:${errorCodeValue}`, now);
+    await this.recordOutcome(
+      snapshot,
+      nextAction,
+      identity,
+      claim,
+      `DEAD_LETTERED:${errorCodeValue}`,
+      now,
+    );
   }
 
   private async completeBlocked(
@@ -540,7 +541,8 @@ function assertOutboundEnvelope(
     approval_id: approvalId,
   } as const;
   for (const [key, value] of Object.entries(expected)) {
-    if (payload[key] !== value) throw new Error(`DURABLE_FOLLOWUP_OUTBOUND_${key.toUpperCase()}_MISMATCH`);
+    if (payload[key] !== value)
+      throw new Error(`DURABLE_FOLLOWUP_OUTBOUND_${key.toUpperCase()}_MISMATCH`);
   }
   requireRecordText(payload, 'idempotency_key', 'DURABLE_FOLLOWUP_OUTBOUND_IDEMPOTENCY_REQUIRED');
   requireRecordText(payload, 'message_id', 'DURABLE_FOLLOWUP_OUTBOUND_MESSAGE_ID_REQUIRED');
@@ -588,7 +590,10 @@ function assertWorkflowReplayMatches(
     throw new Error('DURABLE_FOLLOWUP_WORKFLOW_REPLAY_CONFLICT');
   }
   const step = requireFollowupStep(snapshot);
-  if (step.maxAttempts !== maxAttempts || step.capabilityId !== outboundCapabilityId(expected.channel)) {
+  if (
+    step.maxAttempts !== maxAttempts ||
+    step.capabilityId !== outboundCapabilityId(expected.channel)
+  ) {
     throw new Error('DURABLE_FOLLOWUP_WORKFLOW_REPLAY_CONFLICT');
   }
 }
@@ -706,7 +711,10 @@ function assertIdentityScope(scope: CrmScope, identity: ExecutionIdentity): void
   }
 }
 
-function assertIdentityMatchesWorkflow(identity: ExecutionIdentity, instance: WorkflowInstance): void {
+function assertIdentityMatchesWorkflow(
+  identity: ExecutionIdentity,
+  instance: WorkflowInstance,
+): void {
   assertIdentityScope(instance, identity);
   if (identity.principal.principalId !== instance.requesterPrincipalId) {
     throw new Error('DURABLE_FOLLOWUP_REQUESTER_MISMATCH');
