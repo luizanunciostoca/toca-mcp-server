@@ -14,11 +14,13 @@ env:
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  INFRA_ADMIN_WIF_MEMBER: principal://iam.googleapis.com/projects/990081828836/locations/global/workloadIdentityPools/github/subject/repo:luizanunciostoca@318748875/toca-mcp-server@1339919100:environment:infrastructure-admin
 
 jobs:
-  authority-preflight:
-    name: Read-only staging bootstrap authority preflight
+  authority-repair-and-preflight:
+    name: Authorized infra-admin WIF repair and staging bootstrap preflight
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 10
@@ -30,17 +32,33 @@ jobs:
           persist-credentials: false
       - name: Assert exact frozen candidate
         run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-      - name: Authenticate infrastructure administrator via existing WIF
+      - name: Authenticate known-good deployer for authorized repair
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Apply exact least-privilege infra-admin WIF binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts add-iam-policy-binding "$INFRA_ADMIN_SA" \
+            --project "$PROD_PROJECT_ID" \
+            --member "$INFRA_ADMIN_WIF_MEMBER" \
+            --role roles/iam.workloadIdentityUser \
+            --condition=None
+          echo 'INFRA_ADMIN_WIF_BINDING_REPAIR_APPLIED=true'
+      - name: Authenticate repaired infrastructure administrator
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.INFRA_ADMIN_SA }}
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Enumerate visible organizations and billing accounts read-only
+      - name: Verify usable infra-admin token and bootstrap authority read-only
         shell: bash
         run: |
           set -euo pipefail
-          echo 'INFRA_ADMIN_AUTH=PASS'
+          gcloud auth print-access-token >/dev/null
+          echo 'INFRA_ADMIN_WIF_TOKEN=PASS'
           echo 'VISIBLE_ORGANIZATIONS_BEGIN'
           gcloud organizations list --format='value(name,displayName)' || true
           echo 'VISIBLE_ORGANIZATIONS_END'
@@ -50,4 +68,3 @@ jobs:
           echo 'VISIBLE_PROJECTS_BEGIN'
           gcloud projects list --format='value(projectId,projectNumber)' || true
           echo 'VISIBLE_PROJECTS_END'
-          echo 'AUTHORITY_PREFLIGHT_READ_ONLY=true'
