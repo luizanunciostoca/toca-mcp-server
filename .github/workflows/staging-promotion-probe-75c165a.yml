@@ -11,8 +11,10 @@ permissions:
 
 env:
   CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  OCI_INDEX_DIGEST: sha256:f8d464641da239b60fac20b753620d6801e99f1e241e2c82756ddf3602bfeb46
   PROJECT_ID: toca-mcp-next-staging
   REGION: southamerica-east1
+  IMAGE_REPOSITORY: southamerica-east1-docker.pkg.dev/toca-mcp-next-staging/toca-mcp-staging/server
   MCP_REVISION: toca-mcp-next-staging-mcp-75c165a-32519952730
   WEBHOOK_REVISION: toca-webhook-next-staging-webhook-75c165a-32519952730
   WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
@@ -39,10 +41,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          RUNTIME_DIGEST=''
           for pair in "MCP:$MCP_REVISION" "WEBHOOK:$WEBHOOK_REVISION"; do
             KIND="${pair%%:*}"; REV="${pair#*:}"
             J="$(gcloud run revisions describe "$REV" --project "$PROJECT_ID" --region "$REGION" --format=json)"
             echo "===${KIND}==="
             jq -c '{name:.metadata.name,image:.spec.containers[0].image,ready:[.status.conditions[]?|select(.type=="Ready")|.status],env:[.spec.containers[0].env[]?|select(.name=="META_ENABLED" or .name=="WHATSAPP_ENABLED" or .name=="EMAIL_SENDGRID_ENABLED" or .name=="GOOGLE_ADS_PHASE" or .name=="TOCA_RELEASE_SHA")|{name,value}]}' <<<"$J"
+            D="$(jq -r '.spec.containers[0].image | split("@")[-1]' <<<"$J")"
+            if [[ -z "$RUNTIME_DIGEST" ]]; then RUNTIME_DIGEST="$D"; else test "$D" = "$RUNTIME_DIGEST"; fi
           done
+          echo "RUNTIME_DIGEST=$RUNTIME_DIGEST" >> "$GITHUB_ENV"
+
+      - name: Prove runtime digest is a manifest in validated OCI index
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >/dev/null
+          IMAGE="${IMAGE_REPOSITORY}@${OCI_INDEX_DIGEST}"
+          docker buildx imagetools inspect --raw "$IMAGE" > /tmp/index.json
+          jq -c '{mediaType,manifests:[.manifests[]|{digest,mediaType,platform}]}' /tmp/index.json
+          jq -e --arg d "$RUNTIME_DIGEST" '.manifests[]? | select(.digest==$d)' /tmp/index.json >/dev/null
+          jq -e --arg d "$RUNTIME_DIGEST" '.manifests[]? | select(.digest==$d and .platform.os=="linux" and .platform.architecture=="amd64")' /tmp/index.json >/dev/null
+          echo OCI_INDEX_RUNTIME_MANIFEST_RELATION=PASS
           echo MUTATION_EXECUTED=NO
