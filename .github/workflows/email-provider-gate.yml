@@ -8,12 +8,14 @@ on:
       - 'migrations/024_email_provider_runtime.sql'
       - 'scripts/validate-sendgrid-email.ts'
       - 'scripts/verify-email-typecheck.mjs'
+      - 'src/http.ts'
       - 'src/omnichannel/email-runtime.ts'
       - 'src/omnichannel/email-orchestrator.ts'
       - 'src/persistence/postgres-email-runtime-store.ts'
       - 'src/providers/sendgrid/**'
       - 'test/email-runtime.test.ts'
       - 'test/email-orchestrator.test.ts'
+      - 'test/sendgrid-email-event-runtime.test.ts'
       - 'test/sendgrid-email-provider.test.ts'
       - 'tsconfig.email.json'
       - '.github/workflows/email-provider-gate.yml'
@@ -47,13 +49,16 @@ jobs:
           pnpm exec prettier --check
           scripts/validate-sendgrid-email.ts
           scripts/verify-email-typecheck.mjs
+          src/http.ts
           src/omnichannel/email-runtime.ts
           src/omnichannel/email-orchestrator.ts
           src/persistence/postgres-email-runtime-store.ts
+          src/providers/sendgrid/email-event-http-runtime.ts
           src/providers/sendgrid/email-provider.ts
           src/providers/sendgrid/runtime-config.ts
           test/email-runtime.test.ts
           test/email-orchestrator.test.ts
+          test/sendgrid-email-event-runtime.test.ts
           test/sendgrid-email-provider.test.ts
           tsconfig.email.json
       - name: Lint Email-owned files
@@ -61,13 +66,16 @@ jobs:
           pnpm exec eslint
           scripts/validate-sendgrid-email.ts
           scripts/verify-email-typecheck.mjs
+          src/http.ts
           src/omnichannel/email-runtime.ts
           src/omnichannel/email-orchestrator.ts
           src/persistence/postgres-email-runtime-store.ts
+          src/providers/sendgrid/email-event-http-runtime.ts
           src/providers/sendgrid/email-provider.ts
           src/providers/sendgrid/runtime-config.ts
           test/email-runtime.test.ts
           test/email-orchestrator.test.ts
+          test/sendgrid-email-event-runtime.test.ts
           test/sendgrid-email-provider.test.ts
       - name: Typecheck Email-owned graph
         run: node scripts/verify-email-typecheck.mjs
@@ -76,6 +84,7 @@ jobs:
           pnpm vitest run
           test/email-runtime.test.ts
           test/email-orchestrator.test.ts
+          test/sendgrid-email-event-runtime.test.ts
           test/sendgrid-email-provider.test.ts
 
   stacked-integration:
