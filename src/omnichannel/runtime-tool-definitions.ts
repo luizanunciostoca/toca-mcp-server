@@ -1,7 +1,22 @@
 import type { ToolDefinition } from '../core/tool-registry.js';
 
-// These READ tools consume tenant-scoped provider events already persisted in PostgreSQL;
-// they do not invoke external provider APIs or require provider credentials at execution time.
+// Implementation lifecycle only. Core Policy continues to deny this WRITE_EXTERNAL
+// capability until a later evidence-backed PRODUCTION_VALIDATED promotion.
+export const WHATSAPP_OUTBOUND_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
+  {
+    name: 'whatsapp.message.send',
+    version: '1.0.0',
+    provider: 'Meta WhatsApp Cloud API',
+    riskClass: 'WRITE_EXTERNAL',
+    requiredScopes: [],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: true,
+    idempotent: true,
+  },
+];
+
+// Historical export name retained to avoid a broad registry refactor. It now represents
+// the reconciled Omnichannel MCP surface: provider-event READs plus WhatsApp send binding.
 export const OMNICHANNEL_READBACK_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'email.delivery.readback',
@@ -23,4 +38,5 @@ export const OMNICHANNEL_READBACK_RUNTIME_TOOL_DEFINITIONS: readonly ToolDefinit
     sideEffects: false,
     idempotent: true,
   },
+  ...WHATSAPP_OUTBOUND_RUNTIME_TOOL_DEFINITIONS,
 ];
