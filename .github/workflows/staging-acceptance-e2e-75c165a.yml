@@ -3,7 +3,7 @@ name: Staging Operational Preflight 75c165a
 'on':
   pull_request:
     paths:
-      - '.github/workflows/staging-operational-preflight-75c165a.yml'
+      - '.github/workflows/staging-acceptance-e2e-75c165a.yml'
 
 permissions:
   contents: read
