@@ -47,6 +47,17 @@
     "migratorIdentity": "exact migration filename in schema_migrations",
     "nextMigration": "REVALIDATE_LIVE_MAIN_BEFORE_ASSIGNING"
   },
+  "canonicalDrifts": {
+    "R10_ROUTE_OWNERSHIP": {
+      "state": "GOVERNANCE_DRIFT_DETECTED",
+      "driveRoutingMeaning": "COMERCIAL_PARcerias / proposals, sponsorships and partnerships",
+      "githubRouteCatalogMeaning": "COMERCIAL_PARCERIAS / leads, proposals, partnerships, sponsorships and private events",
+      "capabilityCatalogMeaning": "broad CRM/Sales family including lead, pipeline, followup and report",
+      "reconciliationAuthority": "R21_GOVERNANCE_DRIFT_RECONCILIATION",
+      "resolution": "PENDING_CANONICAL_OWNERSHIP_DECISION",
+      "newRouteAllowed": false
+    }
+  },
   "fronts": {
     "A_PROVIDER_ONBOARDING_GOOGLE_ADS": {
       "state": "BLOCKED_TECHNICAL_AND_EXTERNAL_EVIDENCE",
@@ -72,6 +83,7 @@
         "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
         "TOCA_OS capability catalog currently has no matching operational whatsapp.* or email.* rows; observed whatsapp/email matches are copy-generation capabilities only",
         "nurture.sequence.* must not be created by default because TOCA_OS already has IMPLEMENTED R10 sales.followup.create and sales.followup.schedule authorities; compose durable nurture over those first",
+        "R10 route ownership is semantically drifted between routing metadata and its broad CRM/Sales capability family and must be reconciled through R21 before candidate freeze",
         "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
         "Drive catalog and runtime manifest must converge without inventing capabilities merely to make a checklist green"
       ]
@@ -99,6 +111,7 @@
       "replacementBranch": "coord/final-convergence-20260820",
       "driveGoogleAdsCatalogReconciled": true,
       "driveOmnichannelCatalogReconciled": false,
+      "routeOwnershipReconciled": false,
       "finalCloseoutAuthorized": false
     }
   },
@@ -107,7 +120,8 @@
       "front A credential-first runtime composition gap",
       "front B outbound runtime exposure/composition gap",
       "front B TOCA_OS operational channel capability catalog drift",
-      "front B nurture manifest must converge on existing canonical R10 followup authorities"
+      "front B nurture manifest must converge on existing canonical R10 followup authorities",
+      "R10 route ownership drift must be reconciled through R21 without creating a 33rd route"
     ],
     "requiredSequenceAfterCodeConvergence": [
       "freeze exact candidate SHA",
