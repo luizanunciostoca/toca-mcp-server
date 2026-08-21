@@ -1,4 +1,4 @@
-name: Dispatch e026 Staging Candidate
+name: Dispatch 75c Staging Candidate
 
 on:
   pull_request:
@@ -17,11 +17,12 @@ jobs:
       - name: Assert exact main candidate before dispatch
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: e026b2b441c9a1233a05e62c8a981511ccc1f92e
+          EXPECTED_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
         shell: bash
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')"
+          echo "ACTUAL_MAIN_SHA=$ACTUAL_SHA"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA"
           echo "EXACT_MAIN_CANDIDATE=$ACTUAL_SHA"
 
