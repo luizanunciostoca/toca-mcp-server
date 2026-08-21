@@ -4,6 +4,10 @@ Status: **IMPLEMENTED CONTRACT / STAGING EVIDENCE REQUIRED**
 
 This document is a release handoff for the replacement of historical PR #42. It does not promote provider, staging or production verification state.
 
+## Source and supply-chain gate
+
+Before staging is eligible for any mutable action, the exact candidate head must pass the repository Quality Gate, Security Supply Chain and provider-specific source gates that apply to changed runtime composition. A successful prior commit is not evidence for a newer head. Temporary diagnostic workflows or modified test/format commands are not permitted in the final candidate diff.
+
 ## Staging mutation gate
 
 Before any staging migration or mutable deployment, the deployment preflight must prove that the staging GCP project, Cloud SQL instance, database secret, MCP/Core service, webhook service, WIF provider, deploy identity and runtime identities are isolated from production. Staging providers must be explicitly `DISABLED` or isolated with evidence and project-local secret references.
