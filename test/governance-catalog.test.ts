@@ -54,7 +54,7 @@ describe('TOCA OS route and capability catalogs', () => {
 
   it('materializes the canonical capability catalog using contract v1.1 without pretending inference is explicit', () => {
     expect(() => validateCapabilityCatalog()).not.toThrow();
-    expect(CAPABILITY_CATALOG).toHaveLength(792);
+    expect(CAPABILITY_CATALOG).toHaveLength(796);
     expect(CAPABILITY_CATALOG_VERSION).toBe('1.1.0');
     expect(CAPABILITY_CATALOG.every((definition) => definition.version === '1.1.0')).toBe(true);
 
@@ -212,6 +212,7 @@ describe('TOCA OS route and capability catalogs', () => {
       googleAdsActivateEnabled: true,
       tocaManagedInstagramSchedulerEnabled: true,
       crmSalesRuntimeEnabled: true,
+      omnichannelReadbacksEnabled: true,
     });
     expect(runtime.list().length).toBeLessThan(CAPABILITY_CATALOG.length);
     for (const tool of runtime.list()) {
