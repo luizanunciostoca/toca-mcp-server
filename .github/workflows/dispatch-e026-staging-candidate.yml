@@ -1,4 +1,4 @@
-name: Dispatch 75c Staging Candidate
+name: Read 75c Staging Candidate Run
 
 on:
   pull_request:
@@ -7,38 +7,33 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 jobs:
-  dispatch:
+  readback:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Assert exact main candidate before dispatch
+      - name: Resolve canonical deploy run for exact candidate
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
         shell: bash
         run: |
           set -euo pipefail
-          ACTUAL_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')"
-          echo "ACTUAL_MAIN_SHA=$ACTUAL_SHA"
-          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
-          echo "EXACT_MAIN_CANDIDATE=$ACTUAL_SHA"
-
-      - name: Dispatch canonical staging candidate rollout only
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run deploy-gcp.yml \
+          RUN="$(gh run list \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f environment=staging \
-            -f operation=deploy \
-            -f rollout=candidate
-          echo 'DEPLOY_ENVIRONMENT=staging'
-          echo 'DEPLOY_OPERATION=deploy'
-          echo 'DEPLOY_ROLLOUT=candidate'
-          echo 'PRODUCTION_AUTHORIZED=NO'
+            --workflow deploy-gcp.yml \
+            --branch main \
+            --event workflow_dispatch \
+            --limit 10 \
+            --json databaseId,headSha,status,conclusion,createdAt,url \
+            | jq -c --arg sha "$EXPECTED_SHA" '[.[] | select(.headSha == $sha)][0]')"
+          test "$RUN" != null
+          echo "CANONICAL_DEPLOY_RUN=$(jq -r '.databaseId' <<<"$RUN")"
+          echo "CANONICAL_DEPLOY_HEAD=$(jq -r '.headSha' <<<"$RUN")"
+          echo "CANONICAL_DEPLOY_STATUS=$(jq -r '.status' <<<"$RUN")"
+          echo "CANONICAL_DEPLOY_CONCLUSION=$(jq -r '.conclusion // ""' <<<"$RUN")"
+          echo "CANONICAL_DEPLOY_URL=$(jq -r '.url' <<<"$RUN")"
+          test "$(jq -r '.headSha' <<<"$RUN")" = "$EXPECTED_SHA"
+          echo 'READBACK_ONLY=YES'
