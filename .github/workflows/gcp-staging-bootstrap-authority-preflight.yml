@@ -13,13 +13,15 @@ env:
   CANDIDATE_SHA: 7db1a6e5caf01f98b200257c4aeecc2f1b29550a
   PROD_PROJECT_ID: toca-mcp-production
   PROD_PROJECT_NUMBER: '990081828836'
+  ORG_ID: '995529283213'
+  BILLING_ACCOUNT: 017F93-60A594-4271D6
+  STAGING_PROJECT_ID: toca-mcp-next-staging
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
-  BILLING_ACCOUNT: 017F93-60A594-4271D6
 
 jobs:
   authority-preflight:
-    name: Read-only staging bootstrap authority preflight
+    name: Read-only isolated staging handoff preflight
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 10
@@ -30,67 +32,76 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
       - name: Assert exact frozen candidate
-        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$STAGING_PROJECT_ID" != "$PROD_PROJECT_ID"
       - name: Authenticate infrastructure administrator via existing WIF
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.PROD_WIF }}
           service_account: ${{ env.INFRA_ADMIN_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-      - name: Verify token parent billing and bootstrap permissions read-only
+      - name: Prove project billing isolation and local bootstrap authority
         shell: bash
         run: |
           set -euo pipefail
           TOKEN="$(gcloud auth print-access-token)"
           echo 'INFRA_ADMIN_AUTH=PASS'
 
-          PROJECT_JSON="$(gcloud projects describe "$PROD_PROJECT_ID" --format=json)"
-          printf '%s' "$PROJECT_JSON" | jq -c '{projectId,projectNumber,parent}'
-          PARENT_TYPE="$(printf '%s' "$PROJECT_JSON" | jq -r '.parent.type // empty')"
-          PARENT_ID="$(printf '%s' "$PROJECT_JSON" | jq -r '.parent.id // empty')"
-          echo "PARENT_TYPE=${PARENT_TYPE:-none}"
-          echo "PARENT_ID=${PARENT_ID:-none}"
+          PROD_JSON="$(gcloud projects describe "$PROD_PROJECT_ID" --format=json)"
+          STAGING_JSON="$(gcloud projects describe "$STAGING_PROJECT_ID" --format=json)"
+          PROD_NUMBER="$(printf '%s' "$PROD_JSON" | jq -r '.projectNumber')"
+          STAGING_NUMBER="$(printf '%s' "$STAGING_JSON" | jq -r '.projectNumber')"
+          STAGING_PARENT_TYPE="$(printf '%s' "$STAGING_JSON" | jq -r '.parent.type')"
+          STAGING_PARENT_ID="$(printf '%s' "$STAGING_JSON" | jq -r '.parent.id')"
 
-          PROJECT_BODY='{"permissions":["serviceusage.services.enable","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","iam.serviceAccounts.create","iam.serviceAccounts.setIamPolicy","iam.workloadIdentityPools.create","iam.workloadIdentityPoolProviders.create","cloudsql.instances.create","secretmanager.secrets.create","run.services.create","artifactregistry.repositories.create"]}'
-          PROJECT_HTTP="$(curl -sS -o /tmp/project-perms.json -w '%{http_code}' -X POST \
+          test "$PROD_NUMBER" = "$PROD_PROJECT_NUMBER"
+          test "$STAGING_NUMBER" != "$PROD_PROJECT_NUMBER"
+          test "$STAGING_PARENT_TYPE" = organization
+          test "$STAGING_PARENT_ID" = "$ORG_ID"
+          echo "STAGING_PROJECT_NUMBER=$STAGING_NUMBER"
+          echo 'STAGING_PROJECT_IDENTITY_DISTINCT=PASS'
+
+          STAGING_BILLING="$(gcloud billing projects describe "$STAGING_PROJECT_ID" --format=json)"
+          test "$(printf '%s' "$STAGING_BILLING" | jq -r '.billingAccountName' | sed 's#^billingAccounts/##')" = "$BILLING_ACCOUNT"
+          test "$(printf '%s' "$STAGING_BILLING" | jq -r '.billingEnabled')" = true
+          echo 'STAGING_BILLING_LINK=PASS'
+
+          STAGING_BODY='{"permissions":["serviceusage.services.enable","serviceusage.services.use","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","iam.serviceAccounts.create","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","iam.serviceAccounts.actAs","iam.workloadIdentityPools.create","iam.workloadIdentityPools.get","iam.workloadIdentityPools.update","iam.workloadIdentityPoolProviders.create","artifactregistry.repositories.create","artifactregistry.repositories.get","cloudsql.instances.create","cloudsql.instances.get","cloudsql.users.create","secretmanager.secrets.create","secretmanager.versions.add","run.services.create","run.services.get","run.services.setIamPolicy"]}'
+          STAGING_HTTP="$(curl -sS -o /tmp/staging-perms.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            --data "$PROJECT_BODY" \
-            "https://cloudresourcemanager.googleapis.com/v3/projects/${PROD_PROJECT_ID}:testIamPermissions")"
-          echo "PROJECT_TEST_IAM_HTTP=$PROJECT_HTTP"
-          jq -c '{permissions:(.permissions // [])}' /tmp/project-perms.json || cat /tmp/project-perms.json
+            --data "$STAGING_BODY" \
+            "https://cloudresourcemanager.googleapis.com/v3/projects/${STAGING_PROJECT_ID}:testIamPermissions")"
+          test "$STAGING_HTTP" = 200
+          jq -c '{permissions:(.permissions // [])}' /tmp/staging-perms.json
 
-          ORG_BODY='{"permissions":["resourcemanager.organizations.get","resourcemanager.projects.create","resourcemanager.projects.move"]}'
-          ORG_HTTP="$(curl -sS -o /tmp/org-perms.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data "$ORG_BODY" \
-            "https://cloudresourcemanager.googleapis.com/v3/organizations/${PARENT_ID}:testIamPermissions")"
-          echo "ORG_TEST_IAM_HTTP=$ORG_HTTP"
-          jq -c '{permissions:(.permissions // [])}' /tmp/org-perms.json || cat /tmp/org-perms.json
+          EXPECTED=(
+            serviceusage.services.enable
+            resourcemanager.projects.getIamPolicy
+            resourcemanager.projects.setIamPolicy
+            iam.serviceAccounts.create
+            iam.serviceAccounts.setIamPolicy
+            iam.serviceAccounts.actAs
+            iam.workloadIdentityPools.create
+            iam.workloadIdentityPoolProviders.create
+            artifactregistry.repositories.create
+            cloudsql.instances.create
+            secretmanager.secrets.create
+            secretmanager.versions.add
+            run.services.create
+          )
+          for permission in "${EXPECTED[@]}"; do
+            if ! jq -e --arg p "$permission" '(.permissions // []) | index($p) != null' /tmp/staging-perms.json >/dev/null; then
+              echo "MISSING_STAGING_PERMISSION=$permission"
+              exit 1
+            fi
+          done
 
-          echo 'CLOUD_BILLING_API_STATE_BEGIN'
-          gcloud services list --project "$PROD_PROJECT_ID" --enabled --filter='name:cloudbilling.googleapis.com' --format='value(name)' || true
-          echo 'CLOUD_BILLING_API_STATE_END'
-
-          echo 'PRODUCTION_BILLING_LINK_BEGIN'
-          gcloud billing projects describe "$PROD_PROJECT_ID" --format='json(projectId,billingAccountName,billingEnabled)' || true
-          echo 'PRODUCTION_BILLING_LINK_END'
-
-          BILLING_BODY='{"permissions":["billing.accounts.get","billing.accounts.getIamPolicy","billing.accounts.list","billing.resourceAssociations.create"]}'
-          BILLING_HTTP="$(curl -sS -o /tmp/billing-perms.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data "$BILLING_BODY" \
-            "https://cloudbilling.googleapis.com/v1/billingAccounts/${BILLING_ACCOUNT}:testIamPermissions")"
-          echo "BILLING_TEST_IAM_HTTP=$BILLING_HTTP"
-          jq -c '{permissions:(.permissions // [])}' /tmp/billing-perms.json || cat /tmp/billing-perms.json
-
-          echo 'VISIBLE_BILLING_ACCOUNTS_BEGIN'
-          gcloud billing accounts list --format='value(name,displayName,open)' || true
-          echo 'VISIBLE_BILLING_ACCOUNTS_END'
-
-          echo 'VISIBLE_PROJECTS_BEGIN'
-          gcloud projects list --format='value(projectId,projectNumber)' || true
-          echo 'VISIBLE_PROJECTS_END'
-          echo 'AUTHORITY_PREFLIGHT_READ_ONLY=true'
+          echo 'STAGING_LOCAL_BOOTSTRAP_AUTHORITY=PASS'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'HANDOFF_PREFLIGHT_READ_ONLY=true'
