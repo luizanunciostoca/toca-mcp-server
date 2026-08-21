@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { InMemorySecretStore } from '../src/core/secrets.js';
 import { GoogleAdsRestApiClient } from '../src/providers/google-ads/google-ads-api-client.js';
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 describe('Google Ads credential-only discovery client', () => {
   it('lists accessible customers without a configured customer id', async () => {
     const secrets = new InMemorySecretStore();
@@ -11,12 +17,14 @@ describe('Google Ads credential-only discovery client', () => {
       readonly url: string;
       readonly init: RequestInit | undefined;
     }> = [];
-    const fetchImpl: typeof fetch = async (input, init) => {
-      requests.push({ url: String(input), init });
-      return new Response(JSON.stringify({ resourceNames: ['customers/1234567890'] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json', 'request-id': 'request-1' },
-      });
+    const fetchImpl: typeof fetch = (input, init) => {
+      requests.push({ url: requestUrl(input), init });
+      return Promise.resolve(
+        new Response(JSON.stringify({ resourceNames: ['customers/1234567890'] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'request-id': 'request-1' },
+        }),
+      );
     };
 
     const client = new GoogleAdsRestApiClient(
@@ -44,7 +52,7 @@ describe('Google Ads credential-only discovery client', () => {
         developerTokenRef: { provider: 'memory', key: 'developer-token' },
       },
       secrets,
-      async () => new Response('{}', { status: 200 }),
+      () => Promise.resolve(new Response('{}', { status: 200 })),
     );
 
     await expect(client.search('SELECT customer.id FROM customer')).rejects.toThrow(
