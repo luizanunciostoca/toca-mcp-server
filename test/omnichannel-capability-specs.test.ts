@@ -9,6 +9,12 @@ import {
   validateOmnichannelCapabilitySpecs,
 } from '../src/omnichannel/capability-specs.js';
 
+function requireOmnichannelContract(capabilityId: string) {
+  const contract = OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
+  if (!contract) throw new Error(`OMNICHANNEL_CONTRACT_MISSING:${capabilityId}`);
+  return contract;
+}
+
 describe('omnichannel capability specifications after canonical Privacy integration', () => {
   it('keeps only the four reconciled channel capabilities in the canonical catalog', () => {
     expect(() => validateOmnichannelCapabilitySpecs()).not.toThrow();
@@ -53,7 +59,7 @@ describe('omnichannel capability specifications after canonical Privacy integrat
       'email.campaign.send',
       'nurture.sequence.enroll',
     ] as const) {
-      const serialized = JSON.stringify(OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]);
+      const serialized = JSON.stringify(requireOmnichannelContract(capabilityId));
       expect(serialized).toContain('privacy_');
       expect(serialized).not.toContain('consent_decision_id');
       expect(serialized).not.toContain('consent_status');
@@ -88,7 +94,8 @@ describe('omnichannel capability specifications after canonical Privacy integrat
 
   it('makes external sends explicit, approval-gated and idempotent while keeping runtime disabled', () => {
     for (const capabilityId of ['whatsapp.message.send', 'email.campaign.send'] as const) {
-      expect(OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId]).toMatchObject({
+      const contract = requireOmnichannelContract(capabilityId);
+      expect(contract).toMatchObject({
         contract_quality: 'EXPLICIT',
         risk_class: 'WRITE_EXTERNAL',
         side_effects: true,
@@ -98,9 +105,7 @@ describe('omnichannel capability specifications after canonical Privacy integrat
         required_scopes: [],
         permission_requirements: [],
       });
-      expect(OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId].provider).not.toContain(
-        'unbound',
-      );
+      expect(contract.provider).not.toContain('unbound');
     }
   });
 
@@ -108,7 +113,7 @@ describe('omnichannel capability specifications after canonical Privacy integrat
     for (const capabilityId of OMNICHANNEL_CAPABILITY_IDS.filter((id) =>
       id.startsWith('nurture.'),
     )) {
-      const contract = OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES[capabilityId];
+      const contract = requireOmnichannelContract(capabilityId);
       expect(contract.provider).toBe('TOCA Core workflow engine');
       expect(contract.operation).not.toContain('scheduler');
     }
