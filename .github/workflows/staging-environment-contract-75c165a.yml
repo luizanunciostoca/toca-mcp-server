@@ -1,0 +1,144 @@
+name: Staging Environment Contract 75c165a
+
+on:
+  push:
+    branches:
+      - ops/staging-env-verify-20260821
+    paths:
+      - '.github/workflows/staging-environment-contract-75c165a.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  CANDIDATE_TREE: 2b373b1564e495d81a73ca04254efec18c0e774c
+  DEPLOY_ENVIRONMENT: staging
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+  GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+  GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}
+  GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+  GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+  GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+  GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+  GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
+  GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
+  PRODUCTION_GCP_PROJECT_ID: ${{ vars.PRODUCTION_GCP_PROJECT_ID }}
+  PRODUCTION_GCP_PROJECT_NUMBER: ${{ vars.PRODUCTION_GCP_PROJECT_NUMBER }}
+  PRODUCTION_GCP_REGION: ${{ vars.PRODUCTION_GCP_REGION }}
+  PRODUCTION_GCP_CLOUD_SQL_INSTANCE: ${{ vars.PRODUCTION_GCP_CLOUD_SQL_INSTANCE }}
+  PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE }}
+  PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+  PRODUCTION_GCP_DATABASE_URL_SECRET: ${{ vars.PRODUCTION_GCP_DATABASE_URL_SECRET }}
+  PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+  PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT }}
+  PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+  PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+  STAGING_DATABASE_ISOLATION_MODE: ${{ vars.STAGING_DATABASE_ISOLATION_MODE }}
+  STAGING_PROVIDER_MODE: ${{ vars.STAGING_PROVIDER_MODE || 'DISABLED' }}
+  META_ENABLED: ${{ vars.META_ENABLED || 'false' }}
+  META_PROVIDER_VERIFIED: ${{ vars.META_PROVIDER_VERIFIED || 'false' }}
+  META_WEBHOOK_ENABLED: ${{ vars.META_WEBHOOK_ENABLED || 'false' }}
+  META_WEBHOOK_PERSISTENCE_ENABLED: ${{ vars.META_WEBHOOK_PERSISTENCE_ENABLED || 'false' }}
+  INSTAGRAM_READ_ENABLED: ${{ vars.INSTAGRAM_READ_ENABLED || 'false' }}
+  META_ADS_READ_ENABLED: ${{ vars.META_ADS_READ_ENABLED || 'false' }}
+  META_ADS_WRITE_ENABLED: ${{ vars.META_ADS_WRITE_ENABLED || 'false' }}
+  WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
+  WHATSAPP_PROVIDER_VERIFIED: ${{ vars.WHATSAPP_PROVIDER_VERIFIED || 'false' }}
+  EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
+  EMAIL_SENDGRID_PROVIDER_VERIFIED: ${{ vars.EMAIL_SENDGRID_PROVIDER_VERIFIED || 'false' }}
+  GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+  GOOGLE_ADS_PROVIDER_VERIFIED: ${{ vars.GOOGLE_ADS_PROVIDER_VERIFIED || 'false' }}
+  AG01_MODEL_ENABLED: ${{ vars.AG01_MODEL_ENABLED || 'false' }}
+  AG01_MODEL_PROVIDER_VERIFIED: ${{ vars.AG01_MODEL_PROVIDER_VERIFIED || 'false' }}
+
+jobs:
+  verify:
+    name: Verify staging environment and live coordinates
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert candidate identity and environment values
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_ARTIFACT_REPOSITORY" = 'toca-mcp-staging'
+          test "$GCP_CLOUD_SQL_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$GCP_CLOUD_RUN_MCP_SERVICE" = 'toca-mcp-next-staging'
+          test "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" = 'toca-webhook-next-staging'
+          test "$GCP_DATABASE_URL_SECRET" = 'toca-next-staging-database-url'
+          test "$GCP_DATABASE_URL_SECRET_VERSION" = '1'
+          test "$STAGING_DATABASE_ISOLATION_MODE" = 'DEDICATED_CLOUD_SQL'
+          test "$STAGING_PROVIDER_MODE" = 'DISABLED'
+          test "$PRODUCTION_GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$PRODUCTION_GCP_PROJECT_NUMBER" = '990081828836'
+          test "$PRODUCTION_GCP_REGION" = 'southamerica-east1'
+          for key in \
+            GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT \
+            GCP_MCP_RUNTIME_SERVICE_ACCOUNT GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT \
+            PRODUCTION_GCP_CLOUD_SQL_INSTANCE PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE \
+            PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE PRODUCTION_GCP_DATABASE_URL_SECRET \
+            PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT \
+            PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT; do
+            test -n "${!key}" || { echo "MISSING_ENV_VAR=$key" >&2; exit 1; }
+          done
+          for key in META_ENABLED META_PROVIDER_VERIFIED META_WEBHOOK_ENABLED META_WEBHOOK_PERSISTENCE_ENABLED \
+            INSTAGRAM_READ_ENABLED META_ADS_READ_ENABLED META_ADS_WRITE_ENABLED WHATSAPP_ENABLED \
+            WHATSAPP_PROVIDER_VERIFIED EMAIL_SENDGRID_ENABLED EMAIL_SENDGRID_PROVIDER_VERIFIED \
+            GOOGLE_ADS_PROVIDER_VERIFIED AG01_MODEL_ENABLED AG01_MODEL_PROVIDER_VERIFIED; do
+            test "${!key}" = false || { echo "PROVIDER_FLAG_NOT_DISABLED=$key" >&2; exit 1; }
+          done
+          test "$GOOGLE_ADS_PHASE" = OFF
+          echo 'STAGING_ENVIRONMENT_VALUES=PASS'
+
+      - name: Run canonical fail-closed isolation validator
+        run: node scripts/validate-gcp-deploy-environment.mjs
+
+      - name: Authenticate staging WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Verify live staging coordinates without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectNumber)')" = "$GCP_PROJECT_NUMBER"
+          test "$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(spec.template.spec.serviceAccountName)')" = "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"
+          test "$(gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(spec.template.spec.serviceAccountName)')" = "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT"
+          gcloud artifacts repositories describe "$GCP_ARTIFACT_REPOSITORY" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format='value(name)' >/dev/null
+          gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json > /tmp/sql.json
+          jq -e '.region == "southamerica-east1"' /tmp/sql.json >/dev/null
+          jq -e '.settings.backupConfiguration.enabled == true' /tmp/sql.json >/dev/null
+          jq -e '.settings.backupConfiguration.pointInTimeRecoveryEnabled == true' /tmp/sql.json >/dev/null
+          jq -e '(.settings.backupConfiguration.transactionLogRetentionDays // 0) >= 7' /tmp/sql.json >/dev/null
+          jq -e '(.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0) >= 7' /tmp/sql.json >/dev/null
+          gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" >/dev/null
+          echo 'STAGING_LIVE_COORDINATES=PASS'
+          echo 'STAGING_PROVIDER_MODE=DISABLED'
+          echo 'APPLICATION_MIGRATION_EXECUTED=NO'
+          echo 'APPLICATION_DEPLOY_EXECUTED=NO'
+          echo 'PROVIDER_MUTATION_EXECUTED=NO'
+          echo 'PRODUCTION_MUTATION_EXECUTED=NO'
