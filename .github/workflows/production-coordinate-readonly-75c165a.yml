@@ -15,13 +15,13 @@ env:
   PROD_PROJECT_NUMBER: '990081828836'
   REGION: southamerica-east1
   PROD_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  PROD_DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
 
 jobs:
   read-prod:
     name: Production coordinates read-only
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
+    environment: production
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -36,9 +36,9 @@ jobs:
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.PROD_WIF }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
+          service_account: ${{ env.PROD_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Read non-secret production coordinates
+      - name: Read non-secret production runtime coordinates
         shell: bash
         run: |
           set -euo pipefail
@@ -47,16 +47,15 @@ jobs:
           gcloud run services list --project="$PROD_PROJECT_ID" --region="$REGION" --format=json \
             | jq -r '.[] | [.metadata.name, (.spec.template.spec.serviceAccountName // ""), (.status.latestReadyRevisionName // "")] | @tsv'
           echo '=== PROD_CLOUD_SQL ==='
-          gcloud sql instances list --project="$PROD_PROJECT_ID" --format=json 2>/tmp/sql.err \
-            | jq -r '.[] | [.name,.region,.connectionName,.state] | @tsv' \
-            || { echo 'PROD_SQL_LIST=DENIED'; cat /tmp/sql.err >&2; true; }
-          echo '=== PROD_SECRET_NAMES ==='
-          gcloud secrets list --project="$PROD_PROJECT_ID" --format='value(name)' 2>/tmp/secrets.err \
-            | grep -Ei 'database|db|url' \
-            || { status=$?; if [[ $status -ne 1 ]]; then echo 'PROD_SECRET_LIST=DENIED'; cat /tmp/secrets.err >&2; fi; true; }
-          echo '=== PROD_SERVICE_ACCOUNTS ==='
-          gcloud iam service-accounts list --project="$PROD_PROJECT_ID" --format='value(email)' 2>/tmp/sa.err \
-            | grep -E 'toca-mcp-(deployer|runtime|webhook|infra-admin)' \
-            || { status=$?; if [[ $status -ne 1 ]]; then echo 'PROD_SA_LIST=DENIED'; cat /tmp/sa.err >&2; fi; true; }
+          gcloud sql instances describe toca-mcp-db --project="$PROD_PROJECT_ID" --format=json 2>/tmp/sql.err \
+            | jq -r '[.name,.region,.connectionName,.state] | @tsv' \
+            || { echo 'PROD_SQL_DESCRIBE=DENIED'; cat /tmp/sql.err >&2; true; }
+          echo '=== PROD_DATABASE_SECRET ==='
+          if gcloud secrets describe toca-database-url --project="$PROD_PROJECT_ID" --format='value(name)' >/tmp/secret.name 2>/tmp/secret.err; then
+            cat /tmp/secret.name
+          else
+            echo 'PROD_DATABASE_SECRET_DESCRIBE=DENIED'
+            cat /tmp/secret.err >&2
+          fi
           echo 'PRODUCTION_COORDINATE_READ_ONLY=PASS'
           echo 'PRODUCTION_MUTATION_EXECUTED=NO'
