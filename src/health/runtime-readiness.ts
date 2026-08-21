@@ -143,13 +143,17 @@ export function createRuntimeReadinessChecks(
         pool.query(
           'select tenant_id, workspace_id, organization_id, status from workflow_instances limit 0',
         ),
-        pool.query('select workflow_id, step_id, status, attempts, max_attempts from workflow_steps limit 0'),
+        pool.query(
+          'select workflow_id, step_id, status, attempts, max_attempts from workflow_steps limit 0',
+        ),
       ]);
     }),
     namedCheck('ag01', async () => {
       const pool = requiredPool(options.pool);
       await Promise.all([
-        pool.query('select tenant_id, workspace_id, organization_id from ag01_conversations limit 0'),
+        pool.query(
+          'select tenant_id, workspace_id, organization_id from ag01_conversations limit 0',
+        ),
         pool.query('select tenant_id, conversation_id from ag01_message_records limit 0'),
         pool.query('select tenant_id, capability_id from ag01_runtime_circuits limit 0'),
       ]);
@@ -211,13 +215,6 @@ export function createRuntimeReadinessChecks(
       }
       if (role === 'webhook' && options.config.MCP_ENABLED) {
         throw new Error('READINESS_WEBHOOK_ROLE_REQUIRES_MCP_DISABLED');
-      }
-      if (
-        role === 'webhook' &&
-        !options.config.META_WEBHOOK_ENABLED &&
-        !booleanFlag(env.EMAIL_SENDGRID_ENABLED, false)
-      ) {
-        throw new Error('READINESS_WEBHOOK_ROLE_HAS_NO_INGRESS');
       }
     }),
   ];
@@ -360,6 +357,8 @@ function booleanFlag(value: string | undefined, fallback: boolean): boolean {
 function positiveInteger(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error('READINESS_POSITIVE_INTEGER_INVALID');
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error('READINESS_POSITIVE_INTEGER_INVALID');
+  }
   return parsed;
 }
