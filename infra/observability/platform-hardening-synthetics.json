@@ -1,70 +1,84 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "checkSetId": "toca-platform-hardening-next",
   "safety": {
     "realSideEffectsForTesting": false,
     "destructiveOperations": false,
-    "providerMutationAllowed": false
+    "providerMutationAllowed": false,
+    "controlPlaneNotificationDeliveryAllowed": true
   },
   "checks": [
     {
-      "id": "runtime-readiness",
+      "id": "mcp-runtime-readiness",
       "mode": "READ_ONLY",
-      "assertion": "runtime accepts authenticated health/readiness inspection",
+      "assertion": "authenticated MCP /healthz is liveness-only and /readyz is 200 only when every mandatory dependency is ready",
       "frequencyMinutes": 5
+    },
+    {
+      "id": "webhook-runtime-readiness",
+      "mode": "READ_ONLY",
+      "assertion": "public webhook /healthz and /readyz are healthy while /mcp and OAuth routes return 404",
+      "frequencyMinutes": 5
+    },
+    {
+      "id": "candidate-before-traffic",
+      "mode": "READ_ONLY",
+      "assertion": "both tagged candidates pass readiness before any traffic promotion",
+      "frequencyMinutes": 0
     },
     {
       "id": "audit-integrity",
       "mode": "INTERNAL_CONTRACT",
-      "assertion": "audit ledger verification remains valid",
+      "assertion": "audit ledger heads match their latest immutable events",
       "frequencyMinutes": 15
     },
     {
-      "id": "outbox-lag",
+      "id": "outbox-lag-dlq",
       "mode": "INTERNAL_CONTRACT",
-      "assertion": "oldest pending Outbox age remains within SLO",
-      "frequencyMinutes": 5
-    },
-    {
-      "id": "dead-letter-backlog",
-      "mode": "INTERNAL_CONTRACT",
-      "assertion": "dead-letter backlog remains zero or incident-classified",
+      "assertion": "Outbox lag is within bound and dead-letter state is zero or incident-classified",
       "frequencyMinutes": 5
     },
     {
       "id": "provider-readback-contract",
       "mode": "READ_ONLY",
-      "assertion": "verified provider reads/readbacks remain available without creating a mutation",
+      "assertion": "only PROVIDER_VERIFIED provider read/readback probes may run and no provider mutation is performed",
       "frequencyMinutes": 15
     },
     {
-      "id": "crm-read-contract",
-      "mode": "READ_ONLY",
-      "assertion": "CRM durable records are readable through the governed core",
-      "frequencyMinutes": 15
+      "id": "alert-firing-delivery-readback",
+      "mode": "CONTROL_PLANE",
+      "assertion": "a controlled synthetic signal opens the intended Cloud Monitoring incident, reaches configured notification channels, is read back, correlates to the incident runbook, then test resources are cleaned up",
+      "frequencyMinutes": 0,
+      "activationGate": "RELEASE_VALIDATION"
     },
     {
-      "id": "attribution-read-contract",
-      "mode": "READ_ONLY",
-      "assertion": "attribution durable records are readable through the governed core",
-      "frequencyMinutes": 15
+      "id": "isolated-dr-drill",
+      "mode": "ISOLATED_STAGING",
+      "assertion": "restore or PITR proof uses staging/isolated resources only and records RPO/RTO, schema, AG-01, workflow, Outbox and provider revalidation results",
+      "frequencyMinutes": 0,
+      "activationGate": "RELEASE_VALIDATION"
     }
   ],
-  "futureChecks": [
+  "providerChecks": [
     {
       "id": "whatsapp-provider-read",
       "enabled": false,
-      "activationGate": "PROVIDER_VERIFIED"
+      "activationGate": "WHATSAPP_PROVIDER_VERIFIED"
     },
     {
       "id": "email-provider-read",
       "enabled": false,
-      "activationGate": "PROVIDER_VERIFIED"
+      "activationGate": "EMAIL_SENDGRID_PROVIDER_VERIFIED"
     },
     {
-      "id": "r31-feedback-readback",
+      "id": "google-ads-provider-read",
       "enabled": false,
-      "activationGate": "R31_IMPLEMENTED"
+      "activationGate": "GOOGLE_ADS_PROVIDER_VERIFIED"
+    },
+    {
+      "id": "meta-provider-read",
+      "enabled": false,
+      "activationGate": "META_PROVIDER_VERIFIED"
     }
   ],
   "runbook": "docs/operations/observability-incident-runbook.md"

@@ -86,6 +86,19 @@ For every alert:
 7. close only after metric recovery and durable/provider readback agree;
 8. record cause, impact, mitigation and prevention action.
 
+## Notification delivery, firing and readback evidence
+
+A policy is not considered operational merely because its definition exists. Release validation must prove the complete alert path without creating a business side effect:
+
+1. select a versioned policy and its incident/runbook correlation;
+2. inject or trigger only the safe synthetic control-plane signal declared in `platform-hardening-synthetics.json`;
+3. read back the Cloud Monitoring incident in the firing/open state;
+4. prove delivery to the configured notification channels, with at least two independent channel families when required by the alert contract;
+5. record the alert policy ID, incident ID, synthetic execution/correlation reference, notification delivery evidence and this runbook reference;
+6. clear the synthetic condition, read back incident recovery/closure and remove any temporary synthetic control-plane resource.
+
+A missing notification, missing firing readback, missing correlation or missing runbook association is a failed release-validation result. Provider write/send operations must never be used only to force an alert.
+
 ## Synthetic checks
 
 Synthetic checks are deliberately non-destructive. They may perform authenticated health/readiness inspection, internal durable-state verification and provider READ/readback, but cannot publish, activate campaigns, pay, send future WhatsApp/Email messages, or perform another external mutation solely as proof.
@@ -96,4 +109,4 @@ The JSON files in `infra/observability` are canonical declarative contracts. The
 
 ## Postmortem minimum
 
-A P0/P1 postmortem records: incident ID, start/end, affected route/tenant/provider, detection signal, correlation/execution IDs, provider truth, durable truth, root cause, recovery action, whether any duplicate side effect occurred, Quality/security run IDs, and prevention actions.
+A P0/P1 postmortem records: incident ID, start/end, affected route/tenant/provider, detection signal, correlation/execution IDs, provider truth, durable truth, root cause, recovery action, whether any duplicate side effect occurred, Quality/security run IDs, notification/readback evidence and prevention actions.
