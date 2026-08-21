@@ -10,8 +10,7 @@ import {
 } from '../workflow/workflow-contracts.js';
 import { assertLearningBoundary } from './marketing-autopilot-cycle.js';
 
-export const MARKETING_AUTOPILOT_CLOSED_LOOP_DEFINITION_ID =
-  'marketing-autopilot-closed-loop-r31';
+export const MARKETING_AUTOPILOT_CLOSED_LOOP_DEFINITION_ID = 'marketing-autopilot-closed-loop-r31';
 export const MARKETING_AUTOPILOT_CLOSED_LOOP_DEFINITION_VERSION = '1.0.0';
 
 export const MARKETING_AUTOPILOT_STAGES = [
@@ -398,13 +397,7 @@ export class MarketingAutopilotClosedLoopRunner {
   ): Promise<WorkflowSnapshot> {
     const evidence = requireStageEvidence(result.evidenceRefs, stage);
     if (result.partial) {
-      return this.#failClaim(
-        claim,
-        stage,
-        'MARKETING_AUTOPILOT_PARTIAL_CYCLE',
-        evidence,
-        now,
-      );
+      return this.#failClaim(claim, stage, 'MARKETING_AUTOPILOT_PARTIAL_CYCLE', evidence, now);
     }
     return this.#workflowStore.completeStep({
       workflowId: claim.workflowId,
@@ -606,10 +599,7 @@ export class MarketingAutopilotClosedLoopRunner {
     };
   }
 
-  #stageEvidence(
-    snapshot: WorkflowSnapshot,
-    stage: MarketingAutopilotStage,
-  ): readonly string[] {
+  #stageEvidence(snapshot: WorkflowSnapshot, stage: MarketingAutopilotStage): readonly string[] {
     const step = snapshot.steps.find((item) => item.stepId === STAGE_STEP_IDS[stage]);
     return step?.status === 'SUCCEEDED' ? step.evidence : [];
   }

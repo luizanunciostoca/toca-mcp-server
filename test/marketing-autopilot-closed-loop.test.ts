@@ -124,7 +124,10 @@ function baseAdapters(
     observe: async () => ({ output: { observed: true }, evidenceRefs: ['observe://evidence'] }),
     diagnose: async () => ({ output: { diagnosed: true }, evidenceRefs: ['diagnose://evidence'] }),
     decidePlan: async () => ({ output: { planned: true }, evidenceRefs: ['plan://evidence'] }),
-    creativeTruth: async () => ({ output: { valid: true }, evidenceRefs: ['creative-truth://evidence'] }),
+    creativeTruth: async () => ({
+      output: { valid: true },
+      evidenceRefs: ['creative-truth://evidence'],
+    }),
     asset: async () => ({ output: { assetId: 'asset-1' }, evidenceRefs: ['asset://asset-1'] }),
     gates: async () => ({
       sideEffect,
@@ -225,7 +228,9 @@ describe('Marketing Autopilot closed loop', () => {
       now(),
     );
     expect(duplicate.instance.workflowId).toBe(started.instance.workflowId);
-    expect(duplicate.events.filter((event) => event.eventType === 'WORKFLOW_CREATED')).toHaveLength(1);
+    expect(duplicate.events.filter((event) => event.eventType === 'WORKFLOW_CREATED')).toHaveLength(
+      1,
+    );
   });
 
   it('continues from the persisted checkpoint after runner restart', async () => {
@@ -266,7 +271,9 @@ describe('Marketing Autopilot closed loop', () => {
     const approvalClaim = await claimNext(store, 'approval-worker', now());
     const waiting = await runner.handleClaim(approvalClaim, now());
     expect(waiting.instance.status).toBe('WAITING');
-    expect(waiting.steps.find((step) => step.stepId === '07-approval')?.status).toBe('WAITING_HUMAN');
+    expect(waiting.steps.find((step) => step.stepId === '07-approval')?.status).toBe(
+      'WAITING_HUMAN',
+    );
     expect(waiting.humanTasks[0]?.status).toBe('OPEN');
     expect(core.requestApprovalCalls).toBe(1);
 
@@ -306,7 +313,11 @@ describe('Marketing Autopilot closed loop', () => {
     const adapters = baseAdapters({
       readback: async () => {
         readbackCalls += 1;
-        return { providerBacked: true, output: { providerBacked: true }, evidenceRefs: ['provider://ok'] };
+        return {
+          providerBacked: true,
+          output: { providerBacked: true },
+          evidenceRefs: ['provider://ok'],
+        };
       },
       learn: async () => {
         learnCalls += 1;
@@ -344,7 +355,9 @@ describe('Marketing Autopilot closed loop', () => {
       status: 'FAILED',
       errorCode: 'MARKETING_AUTOPILOT_PARTIAL_CYCLE',
     });
-    expect(snapshot?.steps.find((step) => step.stepId === '03-decide-plan')?.status).toBe('PENDING');
+    expect(snapshot?.steps.find((step) => step.stepId === '03-decide-plan')?.status).toBe(
+      'PENDING',
+    );
   });
 
   it('rejects duplicate wakeup before executing a stage twice', async () => {
@@ -375,7 +388,12 @@ describe('Marketing Autopilot closed loop', () => {
       }),
       measure: async () => {
         measureCalls += 1;
-        return { revenue: null, revenueProviderBacked: false, output: {}, evidenceRefs: ['measurement://x'] };
+        return {
+          revenue: null,
+          revenueProviderBacked: false,
+          output: {},
+          evidenceRefs: ['measurement://x'],
+        };
       },
       learn: async () => {
         learnCalls += 1;
@@ -424,7 +442,11 @@ describe('Marketing Autopilot closed loop', () => {
 
   it('fails closed when the learning stage produces no evidence', async () => {
     const adapters = baseAdapters({
-      learn: async () => ({ actionRequested: false, output: { recommendation: 'x' }, evidenceRefs: [] }),
+      learn: async () => ({
+        actionRequested: false,
+        output: { recommendation: 'x' },
+        evidenceRefs: [],
+      }),
     });
     const { runner, store, now, started } = await startRunner({ adapters });
     await runSteps({ runner, store, now, count: 10 });
@@ -446,7 +468,9 @@ describe('Marketing Autopilot closed loop', () => {
     expect(completed.steps.every((step) => step.status === 'SUCCEEDED')).toBe(true);
     expect(completed.steps.every((step) => step.evidence.length > 0)).toBe(true);
     expect(core.executeCalls).toBe(1);
-    expect(completed.steps.find((step) => step.stepId === '12-next-recommendation')?.output).toEqual({
+    expect(
+      completed.steps.find((step) => step.stepId === '12-next-recommendation')?.output,
+    ).toEqual({
       recommendationId: 'rec-1',
     });
   });
