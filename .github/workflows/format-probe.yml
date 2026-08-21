@@ -1,9 +1,9 @@
 name: Temporary Prettier Probe
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/google-ads-discovery-only-runtime-57
+      - main
 
 permissions:
   contents: read
