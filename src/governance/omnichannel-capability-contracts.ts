@@ -480,7 +480,9 @@ const nurtureOutcomeOutput = outputSchema(
   ['outcome_record_id', 'state'],
 );
 
-export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
+export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES: Readonly<
+  Record<string, CapabilityContractOverride>
+> = {
   'whatsapp.contact.resolve': explicit({
     description:
       'Resolve a WhatsApp identity to one canonical ContactRecord without guessing across ambiguous matches.',
@@ -565,7 +567,6 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     provider: 'Meta WhatsApp Cloud API',
     operation: 'provider_event.readback',
     authentication_mode: 'INTERNAL',
-    authentication_mode: 'UNKNOWN',
     input_schema: whatsappReadbackInput,
     output_schema: whatsappReadbackOutput,
     verification_method: 'PROVIDER_READBACK',
@@ -655,7 +656,6 @@ export const OMNICHANNEL_CAPABILITY_CONTRACT_OVERRIDES = {
     provider: 'Twilio SendGrid',
     operation: 'provider_event.readback',
     authentication_mode: 'INTERNAL',
-    authentication_mode: 'UNKNOWN',
     input_schema: emailDeliveryReadbackInput,
     output_schema: emailDeliveryReadbackOutput,
     verification_method: 'PROVIDER_READBACK',
