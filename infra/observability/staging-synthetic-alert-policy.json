@@ -10,6 +10,7 @@
   "requiredIamRoles": [
     "roles/logging.logWriter",
     "roles/logging.viewer",
+    "roles/logging.configWriter",
     "roles/monitoring.alertPolicyEditor"
   ],
   "notificationChannels": {
