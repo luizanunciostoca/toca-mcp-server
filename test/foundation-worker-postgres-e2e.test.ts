@@ -7,6 +7,7 @@ import { PostgresDeadLetterSink } from '../src/worker/postgres-dead-letter.js';
 const DATABASE_URL = process.env.DATABASE_URL;
 const postgresDescribe = DATABASE_URL ? describe : describe.skip;
 const TOOL = 'foundation.runtime.restart_safety';
+const TENANT_ID = 'toca';
 
 function databaseUrl(): string {
   if (!DATABASE_URL) throw new Error('FOUNDATION_WORKER_DATABASE_URL_REQUIRED');
@@ -22,7 +23,7 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
     const firstPool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
 
     try {
-      const scheduler = new PostgresScheduler(firstPool);
+      const scheduler = new PostgresScheduler(firstPool, TENANT_ID);
       const first = await scheduler.schedule({
         id: jobId,
         toolName: TOOL,
@@ -47,8 +48,8 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
       await firstPool.query(
         `update scheduled_jobs
          set updated_at = '2026-08-17T19:40:00.000Z'::timestamptz
-         where id = $1`,
-        [jobId],
+         where id = $1 and tenant_id = $2`,
+        [jobId, TENANT_ID],
       );
     } finally {
       await firstPool.end();
@@ -56,7 +57,7 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
 
     const secondPool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
     try {
-      const scheduler = new PostgresScheduler(secondPool);
+      const scheduler = new PostgresScheduler(secondPool, TENANT_ID);
       const recovered = await scheduler.claimDue('2026-08-17T20:00:02.000Z', 1, TOOL);
       expect(recovered).toHaveLength(1);
       expect(recovered[0]).toMatchObject({ id: jobId, status: 'RUNNING', attempts: 2 });
@@ -78,13 +79,16 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
       expect(retryClaim).toHaveLength(1);
       expect(retryClaim[0]).toMatchObject({ id: jobId, status: 'RUNNING', attempts: 3 });
       const rows = await secondPool.query<{ count: string }>(
-        'select count(*)::text as count from scheduled_jobs where idempotency_key = $1',
-        [idempotencyKey],
+        'select count(*)::text as count from scheduled_jobs where idempotency_key = $1 and tenant_id = $2',
+        [idempotencyKey, TENANT_ID],
       );
       expect(rows.rows[0]?.count).toBe('1');
     } finally {
       await secondPool.query('delete from dead_letter_jobs where original_job_id = $1', [jobId]);
-      await secondPool.query('delete from scheduled_jobs where id = $1', [jobId]);
+      await secondPool.query('delete from scheduled_jobs where id = $1 and tenant_id = $2', [
+        jobId,
+        TENANT_ID,
+      ]);
       await secondPool.end();
     }
   });
@@ -96,8 +100,8 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
     const pool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
 
     try {
-      const scheduler = new PostgresScheduler(pool);
-      const deadLetters = new PostgresDeadLetterSink(pool);
+      const scheduler = new PostgresScheduler(pool, TENANT_ID);
+      const deadLetters = new PostgresDeadLetterSink(pool, TENANT_ID);
       await scheduler.schedule({
         id: atomicJobId,
         toolName: TOOL,
@@ -160,8 +164,8 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
       await pool.query(
         `update scheduled_jobs
            set updated_at = '2026-08-17T20:50:00.000Z'::timestamptz
-           where id = $1`,
-        [legacyJobId],
+           where id = $1 and tenant_id = $2`,
+        [legacyJobId, TENANT_ID],
       );
 
       expect(await scheduler.claimDue('2026-08-17T21:10:03.000Z', 1, TOOL)).toHaveLength(0);
@@ -170,8 +174,9 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
       await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [
         [atomicJobId, legacyJobId],
       ]);
-      await pool.query('delete from scheduled_jobs where id = any($1::text[])', [
+      await pool.query('delete from scheduled_jobs where id = any($1::text[]) and tenant_id = $2', [
         [atomicJobId, legacyJobId],
+        TENANT_ID,
       ]);
       await pool.end();
     }
