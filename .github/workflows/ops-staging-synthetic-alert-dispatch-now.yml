@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch exact corrected governed synthetic alert workflow
+      - name: Dispatch exact log-rule-authorized governed synthetic alert workflow
         env:
           GH_TOKEN: ${{ github.token }}
-          POLICY_SHA256: 6e149cc4d570cce31a66593202c8ca7218f42a97c9be14a17849c5219dcf1f0c
+          POLICY_SHA256: 8e6971b626a8e82efec0de843f1495c44d4462a1a35f1f744f5f425f70f24605
         shell: bash
         run: |
           set -euo pipefail
