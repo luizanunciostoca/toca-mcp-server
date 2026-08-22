@@ -10,6 +10,12 @@ export interface ScheduledJob<TPayload = unknown> {
   readonly runAt: string;
   readonly timezone: string;
   readonly idempotencyKey: string;
+  /**
+   * Tenant ownership is persisted by migration 031. It remains optional at the
+   * call boundary for compatibility with legacy/system jobs; PostgreSQL resolves
+   * it from the payload when possible and otherwise uses the compatibility tenant.
+   */
+  readonly tenantId?: string;
   readonly status: ScheduledJobStatus;
   readonly attempts: number;
   readonly lastError?: string;
