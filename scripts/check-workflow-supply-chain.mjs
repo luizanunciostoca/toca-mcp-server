@@ -44,10 +44,7 @@ for (const workflowPath of workflowFiles) {
     const imageMatch = line.match(containerImagePattern);
     if (imageMatch) {
       const imageRef = imageMatch[1];
-      if (
-        !imageRef.includes('${{') &&
-        !immutableContainerImageReference.test(imageRef)
-      ) {
+      if (!imageRef.includes('${{') && !immutableContainerImageReference.test(imageRef)) {
         failures.push(
           `${workflowPath}:${index + 1}: static container image must be pinned to an immutable @sha256 digest`,
         );
