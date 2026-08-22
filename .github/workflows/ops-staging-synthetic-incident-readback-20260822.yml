@@ -26,7 +26,7 @@ jobs:
       POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
       EXPECTED_OPEN_TIME_PREFIX: '2026-08-22T08:46'
       RESULT_PATH: ops/evidence/staging-synthetic-incident-readback.json
-      READBACK_SEQUENCE: '2'
+      READBACK_SEQUENCE: '3'
     steps:
       - name: Checkout evidence branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -98,5 +98,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$RESULT_PATH"
           git diff --cached --quiet && exit 0
-          git commit -m 'ops(reliability): publish synthetic incident readback sequence 2'
+          git commit -m 'ops(reliability): publish synthetic incident readback sequence 3'
           git push origin HEAD:ops/staging-synthetic-incident-readback-20260822
