@@ -2,9 +2,9 @@
   "schemaVersion": "1.4",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.4",
-  "status": "POST_STAGING_RELIABILITY_RECONCILIATION",
-  "observedAt": "2026-08-22T06:26:00-03:00",
-  "observedMainSha": "ba44d418a093fbe843d19f52158660c82cb8d799",
+  "status": "POST_STAGING_RELIABILITY_VERIFIED_PROVIDER_EVIDENCE_PENDING",
+  "observedAt": "2026-08-22T13:54:00-03:00",
+  "observedMainSha": "4ef5d7447f5820eea0e73267f7baab3e5dbf07d5",
   "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
   "candidateFrozen": true,
   "stagingAuthorized": true,
@@ -91,7 +91,7 @@
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
-      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_ALERT_DELIVERY_RECOVERY_VERIFIED_DR_PENDING",
+      "state": "STAGING_AND_RELIABILITY_VERIFIED_PROVIDER_EVIDENCE_PENDING",
       "mergedPrs": [
         55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108, 110, 112
       ],
@@ -122,11 +122,26 @@
       "postSignalNotificationChannelErrorCount": 0,
       "webhookNotificationPositiveReceiptVerified": true,
       "syntheticIncidentClosureVerified": true,
-      "drVerified": false,
+      "drVerified": true,
+      "drRunId": "32583241943",
+      "drHarnessSha": "3914c46aadb5eac321c2ec02761914b59d8858c8",
+      "drArtifactId": "9478540826",
+      "drArtifactSha256": "725049314a3e12123c3dbdbcb60791c608e592e5ecb90f05e1df87e2266c47d1",
+      "drProviderLatestLagSeconds": 16,
+      "drRpoSeconds": 46,
+      "drRpoObjectiveSeconds": 900,
+      "drRestoreToRunnableSeconds": 450,
+      "drRtoSeconds": 737,
+      "drRtoObjectiveSeconds": 3600,
+      "drMigrationMax": "033_omnichannel_prepared_content.sql",
+      "drGap027AbsentVerified": true,
+      "drCriticalTableCount": 28,
+      "drAuditHeadMismatchCount": 0,
+      "drTargetCleanupVerified": true,
+      "drIamCleanupVerified": true,
+      "drEvidencePath": "docs/operations/next-staging-dr-evidence-20260822.md",
       "productionVerified": false,
-      "reliabilityBlockers": [
-        "final-candidate isolated DR rehearsal remains unexecuted and requires separate authorization"
-      ],
+      "reliabilityBlockers": [],
       "syntheticIncidentId": "0.obqbjhmrmmv8",
       "syntheticIncidentOpenedAt": "2026-08-22T08:46:05Z",
       "syntheticIncidentClosedAt": "2026-08-22T09:21:09Z",
@@ -135,7 +150,7 @@
       "syntheticIncidentManualCloseExecuted": false,
       "runbookCorrelationVerified": true,
       "runbookPath": "docs/operations/next-staging-reliability-runbook.md",
-      "reliabilityVerified": false,
+      "reliabilityVerified": true,
       "webhookNotificationReceiptObservedAt": "2026-08-22T08:46:05.855Z",
       "webhookNotificationReceiptHttpStatus": 204,
       "webhookNotificationReceiptRoute": "/api/cloud-monitoring",
@@ -144,7 +159,7 @@
       "webhookNotificationReceiver": "Vercel project toca-staging-monitoring-webhook"
     },
     "D_CANONICAL_GOVERNANCE_DRIVE_CLOSEOUT_PREP": {
-      "state": "POST_STAGING_RECONCILIATION_IN_PROGRESS",
+      "state": "POST_STAGING_RELIABILITY_RECONCILED_PROVIDER_EVIDENCE_PENDING",
       "driveGoogleAdsCatalogReconciled": true,
       "driveOmnichannelCatalogReconciled": true,
       "routeOwnershipReconciled": true,
@@ -167,11 +182,11 @@
       "prove synthetic alert firing and positive email recipient delivery",
       "correlate synthetic alert policy/channel evidence to the canonical Next staging reliability runbook",
       "prove automatic synthetic incident recovery/closure without manual close",
-      "prove positive webhook notification receiver-side receipt/readback"
+      "prove positive webhook notification receiver-side receipt/readback",
+      "execute final-candidate isolated DR rehearsal and prove RPO/RTO with target and IAM cleanup"
     ],
     "remainingSequence": [
       "execute controlled provider verification without lifecycle pre-promotion",
-      "execute separately authorized final-candidate isolated DR rehearsal and prove RPO/RTO",
       "promote production only with explicit authorization and same-candidate evidence",
       "generate Final Closeout from production evidence only"
     ]

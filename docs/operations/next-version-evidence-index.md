@@ -11,7 +11,7 @@ The application/runtime candidate remains frozen independently from later reliab
 - candidate image OCI index digest: `sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250`;
 - runtime child digest: `sha256:257bd85a460764c2f207445c72a279c772c869a75f48c7bc2c071be2d858bfad`.
 
-Reliability/control-plane reconciliation observed repository `main` at `bdae307da33b8d4b8341b06d868d7a274724630f` after PR #87. PRs #83-#87 are staging IAM, evidence/documentation, and observability control-plane deltas; they do not replace the frozen application candidate or its accepted runtime revisions.
+Final staging Reliability reconciliation revalidated repository `main` at `4ef5d7447f5820eea0e73267f7baab3e5dbf07d5`. Reliability/control-plane changes after the application freeze do not replace the frozen application candidate or its accepted runtime revisions.
 
 A static evidence index must not be treated as a mutable `main` pointer. Any operation must resolve repository `main` again at execution time and must preserve the frozen application candidate identity unless an application/runtime change explicitly causes a new candidate freeze and staging cycle.
 
@@ -106,9 +106,11 @@ The staging runtime intentionally keeps provider execution fail-closed.
 
 ### WhatsApp
 
+A live GET-only provider read confirmed that provider identity access was sufficient to inspect business data, but the required `whatsapp_business_management` and `whatsapp_business_messaging` scopes remain absent. Provider verification therefore remains blocked before WABA / Phone Number ID / template enumeration and any controlled approved outbound.
+
 Still required:
 
-- valid provider binding/scopes;
+- valid provider binding and required scopes;
 - WABA / Phone Number ID / template evidence;
 - controlled approved outbound;
 - provider message reference;
@@ -116,6 +118,8 @@ Still required:
 - Privacy / Approval / Audit / Outbox correlation.
 
 ### SendGrid / Email
+
+The runtime implementation exists, but real provider binding and administrative sender/domain/webhook evidence remain unproven.
 
 Still required:
 
@@ -129,6 +133,8 @@ Still required:
 
 ### Google Ads
 
+The provider gate remains fail-closed because the required live administrative credential/account configuration has not yet been proven for the verification environment. `GOOGLE_ADS_PHASE=OFF` remains required until a controlled provider-verification sequence is authorized and passes.
+
 Still required:
 
 - authenticated accessible-customer discovery;
@@ -140,58 +146,89 @@ Still required:
 
 Current lifecycle truth remains `PROVIDER_VERIFIED=false` for these providers.
 
-## Reliability / observability / DR evidence — live read-only prerequisites PASS, promotion HOLD
+## Reliability / observability / DR evidence — VERIFIED IN ISOLATED STAGING
 
-Read-only Reliability run `32542355213` against the frozen staging candidate closed the original Cloud SQL backup/PITR and Cloud Monitoring read blockers.
+The frozen candidate now has live Reliability evidence for runtime observability, alert delivery/recovery and final-candidate isolated recovery.
 
-Proven by that run:
+### Runtime observability and alert lifecycle
 
-- exact accepted MCP/webhook revisions serving 100% traffic: PASS;
-- authenticated readiness sampling: PASS;
-- Cloud SQL state/read authority: PASS;
-- automated backups enabled: PASS;
-- PITR enabled: PASS;
-- transaction-log retention `>=7d`: PASS;
-- retained backups `>=7`: PASS;
-- backup inventory authorization/readback: PASS;
-- latest successful backup: `2026-08-21T17:20:36.918Z`;
-- backup age at readback: `27879s`, below the `36h` objective: PASS;
-- Cloud Monitoring alert-policy read: HTTP 200;
-- Cloud Monitoring notification-channel read: HTTP 200;
-- Cloud Monitoring uptime-check read: HTTP 200;
-- Cloud Monitoring dashboard read: HTTP 200;
+Live evidence already established:
+
+- exact accepted MCP/webhook revisions serving 100% staging traffic;
+- authenticated readiness sampling;
+- Cloud SQL backup/PITR configuration readback;
+- dashboard and authenticated private-webhook OIDC uptime evidence;
+- two staging notification channel families: email + token-authenticated webhook;
+- non-destructive synthetic alert firing;
+- positive email recipient delivery;
+- positive webhook receiver-side receipt;
+- policy/channel/runbook correlation;
+- automatic synthetic incident recovery/closure without manual incident close;
+- no production/provider/DB/backup/traffic mutation during the observability evidence cycle.
+
+Runtime observability run:
+
+- run ID: `32563386689`;
+- true `check_passed` points: `101`;
+- false points: `0`;
+- artifact ID: `9473430379`;
+- artifact SHA-256: `4a426268cff5556085b90c6abf6f49d6ac99633d531a16f135ae50125ca63b0d`.
+
+Synthetic alert run:
+
+- run ID: `32563070906`;
+- incident ID: `0.obqbjhmrmmv8`;
+- automatic incident close observed: `2026-08-22T09:21:30Z`;
+- manual incident close executed: `false`.
+
+### Final-candidate isolated DR
+
+Authorized staging DR V14:
+
+- run ID: `32583241943`;
+- harness head: `3914c46aadb5eac321c2ec02761914b59d8858c8`;
+- final gate: `AUTHORIZED_STAGING_DR_LP_V14=PASS`;
+- artifact ID: `9478540826`;
+- artifact SHA-256: `725049314a3e12123c3dbdbcb60791c608e592e5ecb90f05e1df87e2266c47d1`.
+
+Measured recovery:
+
+- provider latest recovery lag: `16s`;
+- RPO: `46s` against objective `<=900s`: PASS;
+- restore start to target `RUNNABLE`: `450s`;
+- full PostgreSQL recovery/validation RTO: `737s` against objective `<=3600s`: PASS;
+- migration max: `033_omnichannel_prepared_content.sql`;
+- migration 027: absent as required;
+- critical tables validated: `28`;
+- audit ledger head mismatch count: `0`.
+
+The restored surface covered canonical Workflow/timers, Approval, Outbox, Audit, Privacy, CRM, AG-01, Email, WhatsApp and prepared-content state. The clone-only application-table-owner path completed without changing grants.
+
+Cleanup proof:
+
+- temporary PITR target removed: PASS;
+- source staging instance unchanged: PASS;
+- temporary DR identity/IAM removed: PASS;
+- final IAM cleanup: PASS.
+
+The sanitized manifest explicitly records:
+
 - production mutation: NO;
-- provider call/mutation: NO.
+- provider mutation: NO;
+- traffic mutation: NO;
+- Cloud Run mutation: NO;
+- Secret Manager read: NO;
+- Secret Manager mutation: NO.
 
-The same readback found the staging Monitoring project empty at that evidence window:
+Canonical sanitized evidence is recorded in `docs/operations/next-staging-dr-evidence-20260822.md`.
 
-- alert policy count: `0`;
-- enabled notification channel count: `0`;
-- notification channel family count: `0`;
-- uptime check count: `0`;
-- dashboard count: `0`.
+For the frozen candidate in isolated staging:
 
-PR #86 introduced the governed staging notification-channel bootstrap. Its first live attempt failed with HTTP 403 because it authenticated the production infrastructure administrator against the staging Monitoring API. PR #87 (`bdae307da33b8d4b8341b06d868d7a274724630f`) fixes that exact blocker by granting only `roles/monitoring.notificationChannelEditor` to the isolated staging operator and re-authenticating through staging WIF before notification-channel creation/readback.
+- `STAGING_VERIFIED=true`;
+- `DR_VERIFIED=true`;
+- `RELIABILITY_VERIFIED=true`.
 
-PR #87 source/CI does **not** prove the post-fix channel reconciliation. The next live operation must rerun `Staging Notification Channels` and prove:
-
-- two enabled channels;
-- two independent channel families (`email` + `webhook_tokenauth`);
-- email verification complete;
-- sanitized channel readback;
-- production/provider/DB/backup/traffic/DR mutation remains false.
-
-After notification channels are ready, Reliability still requires:
-
-1. managed alert-policy/dashboard/synthetic configuration readback from the canonical `infra/observability` contracts;
-2. a non-destructive synthetic signal that opens the intended Cloud Monitoring incident;
-3. incident/policy readback plus delivery evidence for the configured channel families and runbook correlation;
-4. synthetic condition cleanup and incident recovery/closure readback;
-5. an isolated backup/PITR drill for the frozen candidate, including migration 033 / `omnichannel_prepared_content`, AG-01, Workflow/timers, CRM, Outbox/DLQ, Approval/Privacy/Audit and provider revalidation prerequisites;
-6. measured PITR RPO `<=15m` and PostgreSQL recovery RTO `<=60m`;
-7. isolated-drill cleanup and production-unchanged readback.
-
-Until those live proofs exist, `RELIABILITY_VERIFIED` remains false. Historical V1 alert/DR evidence may establish provider capability/history, but it cannot substitute for exact-candidate Next recovery evidence where the recovery surface changed.
+This does not imply provider or production verification.
 
 ## Metric contract note — provider-gated WhatsApp signal
 
