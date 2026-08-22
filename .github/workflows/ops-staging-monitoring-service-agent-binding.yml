@@ -1,0 +1,66 @@
+name: Ops Staging Monitoring Service Agent Binding 2026-08-22
+
+on:
+  pull_request:
+    paths: ['.github/workflows/ops-staging-monitoring-service-agent-binding.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  MONITORING_SERVICE_AGENT: service-729069789107@gcp-sa-monitoring-notification.iam.gserviceaccount.com
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Bind exact Monitoring notification service-agent role in staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          MEMBER="serviceAccount:${MONITORING_SERVICE_AGENT}"
+          ROLE='roles/monitoring.notificationServiceAgent'
+
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" \
+            --role="$ROLE" \
+            --condition=None \
+            --quiet >/dev/null
+
+          PROJECT_POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg role "$ROLE" --arg member "$MEMBER" \
+            'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' \
+            <<<"$PROJECT_POLICY" >/dev/null
+
+          echo 'STAGING_MONITORING_SERVICE_AGENT_BINDING=PASS'
+          echo 'PRODUCTION_MUTATION=false'
+          echo 'PROVIDER_MUTATION=false'
+          echo 'DATABASE_MUTATION=false'
+          echo 'BACKUP_MUTATION=false'
+          echo 'DR_MUTATION=false'
+          echo 'TRAFFIC_MUTATION=false'
+          echo 'CLOUD_RUN_MUTATION=false'
+          echo 'SECRET_MUTATION=false'
