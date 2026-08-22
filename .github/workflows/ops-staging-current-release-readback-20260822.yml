@@ -1,0 +1,150 @@
+name: Ops Staging Current Release Readback 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-current-release-readback-20260822]
+    paths:
+      - '.github/workflows/ops-staging-current-release-readback-20260822.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      PRODUCTION_PROJECT_NUMBER: '990081828836'
+      REGION: southamerica-east1
+      MCP_SERVICE: toca-mcp-next-staging
+      WEBHOOK_SERVICE: toca-webhook-next-staging
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      EXPECTED_MAIN_SHA: 9d3e07e9ecb490d03d0ab822420522960b0ab258
+      RESULT_PATH: ops/evidence/staging-current-release-readback.json
+    steps:
+      - name: Checkout evidence branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/staging-current-release-readback-20260822
+          persist-credentials: true
+
+      - name: Fail closed on staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+      - name: Authenticate isolated staging reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read current staging release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json > /tmp/mcp.json
+          gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json > /tmp/webhook.json
+
+          extract_release() {
+            jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value][0] // empty' "$1"
+          }
+          extract_sa() {
+            jq -r '.spec.template.spec.serviceAccountName // empty' "$1"
+          }
+          extract_revision() {
+            jq -r '.status.latestReadyRevisionName // empty' "$1"
+          }
+          extract_image() {
+            jq -r '.spec.template.spec.containers[0].image // empty' "$1"
+          }
+          extract_traffic() {
+            jq -c '[.status.traffic[]? | {revisionName:(.revisionName // null),percent:(.percent // 0),latestRevision:(.latestRevision // false)}]' "$1"
+          }
+
+          MCP_RELEASE="$(extract_release /tmp/mcp.json)"
+          WEBHOOK_RELEASE="$(extract_release /tmp/webhook.json)"
+          MCP_REVISION="$(extract_revision /tmp/mcp.json)"
+          WEBHOOK_REVISION="$(extract_revision /tmp/webhook.json)"
+          MCP_SA="$(extract_sa /tmp/mcp.json)"
+          WEBHOOK_SA="$(extract_sa /tmp/webhook.json)"
+          MCP_IMAGE="$(extract_image /tmp/mcp.json)"
+          WEBHOOK_IMAGE="$(extract_image /tmp/webhook.json)"
+          MCP_TRAFFIC="$(extract_traffic /tmp/mcp.json)"
+          WEBHOOK_TRAFFIC="$(extract_traffic /tmp/webhook.json)"
+
+          test -n "$MCP_REVISION"
+          test -n "$WEBHOOK_REVISION"
+          test -n "$MCP_RELEASE"
+          test -n "$WEBHOOK_RELEASE"
+
+          mkdir -p "$(dirname "$RESULT_PATH")"
+          jq -n \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg expectedMain "$EXPECTED_MAIN_SHA" \
+            --arg mcpRelease "$MCP_RELEASE" \
+            --arg webhookRelease "$WEBHOOK_RELEASE" \
+            --arg mcpRevision "$MCP_REVISION" \
+            --arg webhookRevision "$WEBHOOK_REVISION" \
+            --arg mcpServiceAccount "$MCP_SA" \
+            --arg webhookServiceAccount "$WEBHOOK_SA" \
+            --arg mcpImage "$MCP_IMAGE" \
+            --arg webhookImage "$WEBHOOK_IMAGE" \
+            --argjson mcpTraffic "$MCP_TRAFFIC" \
+            --argjson webhookTraffic "$WEBHOOK_TRAFFIC" \
+            '{
+              schemaVersion:"toca.staging.current-release-readback.v1",
+              observedAt:$observedAt,
+              project:$project,
+              projectNumber:$projectNumber,
+              expectedMainSha:$expectedMain,
+              mcp:{releaseSha:$mcpRelease,revision:$mcpRevision,serviceAccount:$mcpServiceAccount,image:$mcpImage,traffic:$mcpTraffic,mainMatch:($mcpRelease==$expectedMain)},
+              webhook:{releaseSha:$webhookRelease,revision:$webhookRevision,serviceAccount:$webhookServiceAccount,image:$webhookImage,traffic:$webhookTraffic,mainMatch:($webhookRelease==$expectedMain)},
+              runtimeReleaseAgreement:($mcpRelease==$webhookRelease),
+              currentMainFullyServed:(($mcpRelease==$expectedMain) and ($webhookRelease==$expectedMain)),
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              cloudRunMutation:false,
+              secretMutation:false
+            }' > "$RESULT_PATH"
+
+          echo "MCP_RELEASE_SHA=${MCP_RELEASE}"
+          echo "WEBHOOK_RELEASE_SHA=${WEBHOOK_RELEASE}"
+          echo "MCP_REVISION=${MCP_REVISION}"
+          echo "WEBHOOK_REVISION=${WEBHOOK_REVISION}"
+          echo "CURRENT_MAIN_FULLY_SERVED=$(jq -r '.currentMainFullyServed' "$RESULT_PATH")"
+          echo 'STAGING_CURRENT_RELEASE_READBACK=PASS'
+
+      - name: Commit sanitized readback evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$RESULT_PATH"
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops(staging): publish current release readback'
+          git push origin HEAD:ops/staging-current-release-readback-20260822
