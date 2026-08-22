@@ -1,0 +1,8 @@
+title = "TOCA OS Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public canonical Morro de Sao Paulo geography key; never a credential"
+regexes = ['''^morro-de-sao-paulo-15km$''']
