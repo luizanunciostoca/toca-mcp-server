@@ -1,0 +1,31 @@
+name: Internal tenant fix patcher
+
+on:
+  push:
+    branches:
+      - 'fix/tenant-scoped-scheduler-dlq-20260822'
+    paths:
+      - '.github/workflows/internal-tenant-fix-patcher.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic tenant-scope patch
+        run: node scripts/internal-tenant-fix-patcher.mjs
+      - name: Commit product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'toca-os-internal-acceptance'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src test migrations
+          git diff --cached --check
+          git commit -m 'fix(tenancy): enforce scheduler and DLQ tenant boundaries'
+          git push origin HEAD:"$GITHUB_REF_NAME"
