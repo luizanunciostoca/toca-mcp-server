@@ -1,0 +1,163 @@
+name: Ops Staging DR V5 Rescue Cleanup 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-v5-rescue-cleanup-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-staging-dr-v5-rescue-cleanup-20260822
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DR_SA_EMAIL: toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr32567566263
+  TARGET_INSTANCE: toca-next-lp-pitr-32567566263
+
+jobs:
+  rescue-cleanup:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Remove exact V5 target and temporary IAM fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$TARGET_INSTANCE" = 'toca-next-lp-pitr-32567566263'
+          test "$DR_SA_EMAIL" = 'toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com'
+          test "$DR_ROLE_ID" = 'tocaNextDr32567566263'
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-before.json
+          jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '.project==$p and .region==$r and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18"' /tmp/source-before.json >/dev/null
+          echo 'DR_V5_RESCUE_SOURCE_BEFORE=PASS'
+
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/target.json 2>/dev/null; then
+            jq -e --arg p "$PROJECT_ID" --arg r "$REGION" --arg t "$TARGET_INSTANCE" '.project==$p and .region==$r and .name==$t and .databaseVersion=="POSTGRES_18"' /tmp/target.json >/dev/null
+
+            if [[ "$(jq -r '.settings.deletionProtectionEnabled // false' /tmp/target.json)" == true ]]; then
+              PATCHED=0
+              for attempt in $(seq 1 120); do
+                set +e
+                OUT="$(gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet 2>&1)"
+                RC=$?
+                set -e
+                if [[ $RC -eq 0 ]]; then
+                  PATCHED=1
+                  echo "DR_V5_RESCUE_DELETION_PROTECTION=DISABLED attempt=${attempt}"
+                  break
+                fi
+                if grep -Eq 'HTTPError 409|another operation was already in progress' <<<"$OUT"; then
+                  sleep 10
+                  continue
+                fi
+                printf '%s\n' "$OUT" >&2
+                exit 31
+              done
+              test "$PATCHED" = 1
+            else
+              echo 'DR_V5_RESCUE_DELETION_PROTECTION=ALREADY_DISABLED'
+            fi
+
+            DELETED=0
+            for attempt in $(seq 1 120); do
+              if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+                DELETED=1
+                echo "DR_V5_RESCUE_TARGET=ALREADY_ABSENT attempt=${attempt}"
+                break
+              fi
+              set +e
+              OUT="$(gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet 2>&1)"
+              RC=$?
+              set -e
+              if [[ $RC -eq 0 ]]; then
+                for check in $(seq 1 120); do
+                  if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+                    DELETED=1
+                    break
+                  fi
+                  sleep 5
+                done
+                if [[ "$DELETED" == 1 ]]; then
+                  echo "DR_V5_RESCUE_TARGET_DELETE=PASS attempt=${attempt}"
+                  break
+                fi
+                echo 'Target deletion command succeeded but target remained visible beyond bound' >&2
+                exit 32
+              fi
+              if grep -Eq 'HTTPError 409|another operation was already in progress' <<<"$OUT"; then
+                sleep 10
+                continue
+              fi
+              printf '%s\n' "$OUT" >&2
+              exit 33
+            done
+            test "$DELETED" = 1
+          else
+            echo 'DR_V5_RESCUE_TARGET=ALREADY_ABSENT'
+          fi
+
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          MEMBER_DR="serviceAccount:${DR_SA_EMAIL}"
+          MEMBER_INFRA="serviceAccount:${INFRA_ADMIN_SA}"
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_DR" --role="$ROLE" --condition=None --quiet >/dev/null
+          fi
+
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            SA_POLICY="$(gcloud iam service-accounts get-iam-policy "$DR_SA_EMAIL" --project="$PROJECT_ID" --format=json)"
+            if jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.serviceAccountTokenCreator" and any(.members[]?; .==$m))' <<<"$SA_POLICY" >/dev/null; then
+              gcloud iam service-accounts remove-iam-policy-binding "$DR_SA_EMAIL" --project="$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.serviceAccountTokenCreator' --condition=None --quiet >/dev/null
+            fi
+            gcloud iam service-accounts delete "$DR_SA_EMAIL" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+
+          if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam roles delete "$DR_ROLE_ID" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet >/dev/null
+          fi
+
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
+          ! gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1
+          POLICY_FINAL="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          ! jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY_FINAL" >/dev/null
+          ! jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY_FINAL" >/dev/null
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-after.json
+          jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '.project==$p and .region==$r and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18"' /tmp/source-after.json >/dev/null
+          echo 'DR_V5_RESCUE_CLEANUP=PASS target_absent=true temp_sa_absent=true temp_role_absent=true roleadmin_removed=true source_unchanged=true'
