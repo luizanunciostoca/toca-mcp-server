@@ -22,7 +22,12 @@ describe('platform hardening SLO catalog', () => {
   });
 
   it('keeps future WhatsApp and Email SLOs declared but not falsely production-active', () => {
-    expect(getPlatformSlo('whatsapp_delivery_success').futureProvider).toBe(true);
+    expect(getPlatformSlo('whatsapp_delivery_success')).toEqual(
+      expect.objectContaining({
+        signal: 'whatsapp.readback_verified_ratio',
+        futureProvider: true,
+      }),
+    );
     expect(getPlatformSlo('email_delivery_success').futureProvider).toBe(true);
   });
 

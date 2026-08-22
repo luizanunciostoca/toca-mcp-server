@@ -175,7 +175,7 @@ export const PLATFORM_NEXT_SLOS: readonly PlatformSloDefinition[] = Object.freez
   {
     id: 'whatsapp_delivery_success',
     routeId: 'R25',
-    signal: 'whatsapp.delivery_verified_ratio',
+    signal: 'whatsapp.readback_verified_ratio',
     kind: 'RATIO',
     comparator: 'GTE',
     target: 0.99,
