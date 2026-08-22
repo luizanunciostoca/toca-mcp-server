@@ -7,6 +7,7 @@ import {
 } from './scheduler-contracts.js';
 
 const DEAD_LETTER_RECOVERY_MARKER = 'WORKER_DEAD_LETTER_RECOVERED';
+const COMPATIBILITY_TENANT = 'toca';
 
 type Row = {
   id: string;
@@ -15,6 +16,7 @@ type Row = {
   run_at: Date;
   timezone: string;
   idempotency_key: string;
+  tenant_id: string;
   status: ScheduledJob['status'];
   attempts: number;
   last_error: string | null;
@@ -28,6 +30,7 @@ function mapRow<TPayload = unknown>(row: Row): ScheduledJob<TPayload> {
     runAt: row.run_at.toISOString(),
     timezone: row.timezone,
     idempotencyKey: row.idempotency_key,
+    tenantId: row.tenant_id,
     status: row.status,
     attempts: row.attempts,
     ...(row.last_error ? { lastError: row.last_error } : {}),
@@ -44,15 +47,30 @@ function assertSingleTransition(rowCount: number | null, code: string, id: strin
   if (rowCount !== 1) throw new Error(`${code}:${id}`);
 }
 
+function resolveTenantId(job: Pick<ScheduledJob, 'tenantId' | 'payload'>): string {
+  const explicit = job.tenantId?.trim();
+  if (explicit) return explicit;
+  if (job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)) {
+    const payload = job.payload as Readonly<Record<string, unknown>>;
+    for (const key of ['tenantId', 'tenant_id'] as const) {
+      const value = payload[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  }
+  return COMPATIBILITY_TENANT;
+}
+
 export class PostgresScheduler implements Scheduler {
   constructor(private readonly pool: pg.Pool) {}
 
   async schedule<TPayload>(
     job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
   ): Promise<ScheduledJob<TPayload>> {
+    const tenantId = resolveTenantId(job as Omit<ScheduledJob, 'status' | 'attempts'>);
     const result = await this.pool.query<Row>(
-      `insert into scheduled_jobs (id, tool_name, payload, run_at, timezone, idempotency_key)
-       values ($1, $2, $3::jsonb, $4::timestamptz, $5, $6)
+      `insert into scheduled_jobs
+         (id, tool_name, payload, run_at, timezone, idempotency_key, tenant_id)
+       values ($1, $2, $3::jsonb, $4::timestamptz, $5, $6, $7)
        on conflict (idempotency_key) do update set idempotency_key = excluded.idempotency_key
        returning *`,
       [
@@ -62,6 +80,7 @@ export class PostgresScheduler implements Scheduler {
         job.runAt,
         job.timezone,
         job.idempotencyKey,
+        tenantId,
       ],
     );
     return mapRow<TPayload>(result.rows[0]!);
