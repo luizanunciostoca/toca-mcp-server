@@ -39,8 +39,11 @@ jobs:
         run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format check
-        run: pnpm format:check
+      - name: Diagnose formatter output
+        run: |
+          pnpm exec prettier --write scripts/check-workflow-supply-chain.mjs
+          git --no-pager diff -- scripts/check-workflow-supply-chain.mjs
+          exit 1
       - name: Architecture check
         run: pnpm architecture:check
       - name: Lint
