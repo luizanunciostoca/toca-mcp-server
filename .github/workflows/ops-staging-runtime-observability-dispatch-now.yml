@@ -16,7 +16,7 @@ jobs:
       - name: Dispatch exact governed runtime observability workflow
         env:
           GH_TOKEN: ${{ github.token }}
-          POLICY_SHA256: 7a128f29daca168e90f065a56eacc5fb206bde9a061b680aff789a17474dd9a1
+          POLICY_SHA256: 6de4a54c0e0802057678ef4090e0edd9f6f823b1db161643f5ce1e4cbccc2245
         shell: bash
         run: |
           set -euo pipefail
