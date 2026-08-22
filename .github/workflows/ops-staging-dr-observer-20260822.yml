@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve exact bounded V5 residue cleanup run
+      - name: Resolve exact V5 rescue cleanup run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -24,13 +24,13 @@ jobs:
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           RUNS="$(gh run list \
             --repo "$GH_REPO" \
-            --workflow 'Ops Staging DR V5 Residue Cleanup 2026-08-22' \
+            --workflow 'Ops Staging DR V5 Rescue Cleanup 2026-08-22' \
             --branch 'ops/staging-dr-authorized-20260822' \
             --event push \
             --limit 10 \
             --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$RUNS" | jq -e --arg sha '58ad982d4bf8948210acb3a86d96b90e46a4e9aa' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          MATCH="$(echo "$RUNS" | jq -r --arg sha '58ad982d4bf8948210acb3a86d96b90e46a4e9aa' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          echo "$RUNS" | jq -e --arg sha '0b06e4e7fafc2d284f55cc2900facbfa24406169' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '0b06e4e7fafc2d284f55cc2900facbfa24406169' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
           IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
           test -n "$RUN_ID"
-          echo "DR_V5_RESIDUE_CLEANUP_RUN_ID=$RUN_ID DR_V5_RESIDUE_CLEANUP_STATUS=$RUN_STATUS DR_V5_RESIDUE_CLEANUP_CONCLUSION=$RUN_CONCLUSION DR_V5_RESIDUE_CLEANUP_URL=$RUN_URL"
+          echo "DR_V5_RESCUE_RUN_ID=$RUN_ID DR_V5_RESCUE_STATUS=$RUN_STATUS DR_V5_RESCUE_CONCLUSION=$RUN_CONCLUSION DR_V5_RESCUE_URL=$RUN_URL"
