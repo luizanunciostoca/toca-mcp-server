@@ -1,6 +1,9 @@
 name: Internal Acceptance PostgreSQL Migrations Tenancy
 
 on:
+  push:
+    branches:
+      - 'internal-acceptance/postgres-tenancy-75c165a-20260822'
   pull_request:
     paths:
       - 'test/internal-acceptance-scheduler-tenancy-postgres.test.ts'
@@ -10,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: internal-acceptance-postgres-tenancy-${{ github.event.pull_request.number }}
+  group: internal-acceptance-postgres-tenancy-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -21,7 +24,7 @@ env:
 
 jobs:
   acceptance:
-    if: github.head_ref == 'internal-acceptance/postgres-tenancy-75c165a-20260822'
+    if: github.ref_name == 'internal-acceptance/postgres-tenancy-75c165a-20260822' || github.head_ref == 'internal-acceptance/postgres-tenancy-75c165a-20260822'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
