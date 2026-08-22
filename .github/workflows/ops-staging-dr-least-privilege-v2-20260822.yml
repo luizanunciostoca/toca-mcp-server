@@ -1,0 +1,191 @@
+name: Ops Authorized Staging DR Least Privilege V2 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-least-privilege-v2-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-staging-dr-least-privilege-v2-20260822
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_SA_ID: toca-next-dr-${{ github.run_id }}
+  DR_SA_EMAIL: toca-next-dr-${{ github.run_id }}@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr${{ github.run_id }}
+  TARGET_INSTANCE: toca-next-lp-pitr-${{ github.run_id }}
+  HARNESS_SCRIPT: ops/staging-dr-least-privilege-20260822.sh
+
+jobs:
+  syntax-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact harness commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate shell syntax and forbidden command boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n "$HARNESS_SCRIPT"
+          ! grep -Eq 'gcloud[[:space:]]+(run|secrets)|secretmanager\.googleapis\.com|graph\.facebook\.com|api\.sendgrid\.com|googleads\.googleapis\.com' "$HARNESS_SCRIPT"
+          grep -Fq "75c165a044c6e79e9545328dd04a2a3e73d2e910" "$HARNESS_SCRIPT"
+          grep -Fq "toca-mcp-next-staging" "$HARNESS_SCRIPT"
+          grep -Fq "DR_LP_V2_IAM_CLEANUP=PASS" "$HARNESS_SCRIPT"
+          echo 'DR_LP_V2_SYNTAX_BOUNDARY=PASS'
+
+  bootstrap:
+    needs: syntax-boundary
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    outputs:
+      roleadmin_granted: ${{ steps.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - name: Checkout exact harness commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate infrastructure administrator for staging IAM only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Bootstrap ephemeral least-privilege DR identity
+        id: bootstrap
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" bootstrap
+
+  drill:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact harness commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Checkout exact frozen application candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Authenticate ephemeral least-privilege staging DR identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA_EMAIL }}
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Execute isolated PITR and validate durable Next state
+        shell: bash
+        run: bash "harness/${HARNESS_SCRIPT}" drill candidate
+      - name: Build sanitized evidence manifest
+        if: always()
+        shell: bash
+        run: bash "harness/${HARNESS_SCRIPT}" manifest candidate
+      - name: Upload sanitized DR evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-dr-lp-v2-${{ github.run_id }}
+          path: dr-lp-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  cleanup-target:
+    needs: [bootstrap, drill]
+    if: always() && needs.bootstrap.result == 'success'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact harness commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate ephemeral least-privilege staging DR identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA_EMAIL }}
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Delete only temporary target and re-read source
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-target
+
+  cleanup-iam:
+    needs: [bootstrap, drill, cleanup-target]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 25
+    env:
+      ROLEADMIN_GRANTED: ${{ needs.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - name: Checkout exact harness commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate infrastructure administrator for cleanup only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Fallback target cleanup and remove all temporary IAM
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-iam
+
+  final-gate:
+    needs: [syntax-boundary, bootstrap, drill, cleanup-target, cleanup-iam]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require complete authorized DR lifecycle
+        env:
+          SYNTAX_RESULT: ${{ needs.syntax-boundary.result }}
+          BOOTSTRAP_RESULT: ${{ needs.bootstrap.result }}
+          DRILL_RESULT: ${{ needs.drill.result }}
+          TARGET_CLEANUP_RESULT: ${{ needs.cleanup-target.result }}
+          IAM_CLEANUP_RESULT: ${{ needs.cleanup-iam.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SYNTAX_RESULT" = success
+          test "$BOOTSTRAP_RESULT" = success
+          test "$DRILL_RESULT" = success
+          test "$TARGET_CLEANUP_RESULT" = success
+          test "$IAM_CLEANUP_RESULT" = success
+          echo 'AUTHORIZED_STAGING_DR_LP_V2=PASS'
