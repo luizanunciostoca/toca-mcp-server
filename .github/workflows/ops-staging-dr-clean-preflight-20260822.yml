@@ -1,0 +1,56 @@
+name: Ops Staging DR Clean Preflight 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-clean-preflight-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      SOURCE_INSTANCE: toca-mcp-next-staging-db
+      INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Prove zero temporary DR residue read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source.json
+          jq -e --arg p "$PROJECT_ID" '.project==$p and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18"' /tmp/source.json >/dev/null
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          MEMBER="serviceAccount:${INFRA_ADMIN_SA}"
+          ROLEADMIN_COUNT="$(jq -r --arg m "$MEMBER" '[.bindings[]? | select(.role=="roles/iam.roleAdmin") | .members[]? | select(.==$m)] | length' <<<"$POLICY")"
+
+          TARGETS="$(gcloud sql instances list --project="$PROJECT_ID" --format='value(name)' | grep '^toca-next-lp-pitr-' || true)"
+          SAS="$(gcloud iam service-accounts list --project="$PROJECT_ID" --format='value(email)' | grep '^toca-next-dr-' || true)"
+          ROLES="$(gcloud iam roles list --project="$PROJECT_ID" --show-deleted --format='value(name,deleted)' | grep '/roles/tocaNextDr' || true)"
+          ACTIVE_ROLES="$(printf '%s\n' "$ROLES" | awk '$2 != "True" && $2 != "true" && NF {print $1}' || true)"
+
+          echo "DR_CLEAN_PREFLIGHT_ROLEADMIN_COUNT=${ROLEADMIN_COUNT}"
+          echo "DR_CLEAN_PREFLIGHT_TARGET_COUNT=$(printf '%s\n' "$TARGETS" | sed '/^$/d' | wc -l)"
+          echo "DR_CLEAN_PREFLIGHT_SA_COUNT=$(printf '%s\n' "$SAS" | sed '/^$/d' | wc -l)"
+          echo "DR_CLEAN_PREFLIGHT_ACTIVE_CUSTOM_ROLE_COUNT=$(printf '%s\n' "$ACTIVE_ROLES" | sed '/^$/d' | wc -l)"
+
+          test "$ROLEADMIN_COUNT" = 0
+          test -z "$TARGETS"
+          test -z "$SAS"
+          test -z "$ACTIVE_ROLES"
+          echo 'DR_CLEAN_PREFLIGHT=PASS source_runnable=true roleadmin_absent=true targets_absent=true temp_sas_absent=true active_custom_roles_absent=true'
