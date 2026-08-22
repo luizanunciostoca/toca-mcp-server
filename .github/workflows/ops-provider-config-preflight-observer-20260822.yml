@@ -1,0 +1,27 @@
+name: Ops Provider Config Preflight Observer 2026-08-22
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ops-provider-config-preflight-observer-20260822.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve provider config preflight run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNS="$(gh run list --repo "$GH_REPO" --workflow 'Ops Provider Config Preflight 2026-08-22' --branch 'ops/google-ads-read-reverify-20260822' --event push --limit 10 --json databaseId,headSha,status,conclusion,url)"
+          MATCH="$(echo "$RUNS" | jq -r '.[] | [.databaseId,.headSha,.status,(.conclusion // ""),.url] | @tsv' | head -n1)"
+          test -n "$MATCH"
+          IFS=$'\t' read -r RUN_ID RUN_SHA RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
+          echo "PROVIDER_CONFIG_PREFLIGHT_RUN_ID=$RUN_ID HEAD_SHA=$RUN_SHA STATUS=$RUN_STATUS CONCLUSION=$RUN_CONCLUSION URL=$RUN_URL"
