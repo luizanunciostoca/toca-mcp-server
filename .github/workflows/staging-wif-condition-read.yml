@@ -1,0 +1,100 @@
+name: Staging WIF Condition Read
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-wif-condition-read
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_PROJECT_ID: toca-mcp-next-staging
+  STAGING_PROJECT_NUMBER: '729069789107'
+  STAGING_POOL: github-staging
+  STAGING_PROVIDER: github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  EXPECTED_REPOSITORY: luizanunciostoca/toca-mcp-server
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Fail closed on source and target identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$STAGING_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$STAGING_PROJECT_NUMBER" != '990081828836'
+          test "$STAGING_OPERATOR_SA" = 'toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com'
+          echo 'STAGING_WIF_READ_BOUNDARY=PASS'
+
+      - name: Authenticate existing infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.PRODUCTION_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read staging WIF provider and impersonation binding without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging-wif-evidence
+          test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
+
+          gcloud iam workload-identity-pools providers describe "$STAGING_PROVIDER" \
+            --project "$STAGING_PROJECT_ID" \
+            --location global \
+            --workload-identity-pool "$STAGING_POOL" \
+            --format=json > /tmp/provider.json
+          jq '{name,state,attributeMapping,attributeCondition,oidc:{issuerUri:.oidc.issuerUri}}' /tmp/provider.json > staging-wif-evidence/provider-sanitized.json
+          jq -e '.state == "ACTIVE"' staging-wif-evidence/provider-sanitized.json >/dev/null
+          jq -e '.oidc.issuerUri == "https://token.actions.githubusercontent.com"' staging-wif-evidence/provider-sanitized.json >/dev/null
+          CONDITION="$(jq -r '.attributeCondition // empty' staging-wif-evidence/provider-sanitized.json)"
+          test -n "$CONDITION"
+          echo "STAGING_WIF_ATTRIBUTE_CONDITION=$CONDITION"
+
+          gcloud iam service-accounts get-iam-policy "$STAGING_OPERATOR_SA" \
+            --project "$STAGING_PROJECT_ID" \
+            --format=json > /tmp/operator-iam.json
+          jq '{bindings:[.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | {role,members,condition}]}' \
+            /tmp/operator-iam.json > staging-wif-evidence/operator-wif-binding.json
+          WIF_MEMBER_COUNT="$(jq '[.bindings[]?.members[]?] | length' staging-wif-evidence/operator-wif-binding.json)"
+          test "$WIF_MEMBER_COUNT" -ge 1
+          echo "STAGING_WIF_OPERATOR_MEMBER_COUNT=$WIF_MEMBER_COUNT"
+
+          jq -n \
+            --arg project "$STAGING_PROJECT_ID" \
+            --arg projectNumber "$STAGING_PROJECT_NUMBER" \
+            --arg pool "$STAGING_POOL" \
+            --arg provider "$STAGING_PROVIDER" \
+            --arg operator "$STAGING_OPERATOR_SA" \
+            --arg condition "$CONDITION" \
+            --argjson wifMemberCount "$WIF_MEMBER_COUNT" \
+            '{schemaVersion:"toca.staging.wif-condition-read.v2",project:$project,projectNumber:$projectNumber,pool:$pool,provider:$provider,operatorServiceAccount:$operator,attributeCondition:$condition,workloadIdentityUserMemberCount:$wifMemberCount,productionMutation:false,stagingMutation:false,result:"PASS"}' \
+            > staging-wif-evidence/manifest.json
+          rm -f /tmp/provider.json /tmp/operator-iam.json
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-wif-condition-${{ github.run_id }}
+          path: staging-wif-evidence
+          if-no-files-found: error
+          retention-days: 90
