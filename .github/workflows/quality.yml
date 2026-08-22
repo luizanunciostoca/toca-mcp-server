@@ -39,6 +39,11 @@ jobs:
         run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Diagnose Prettier diff
+        run: |
+          pnpm exec prettier test/scheduler-multitenancy-postgres-e2e.test.ts --write
+          git diff -- test/scheduler-multitenancy-postgres-e2e.test.ts
+          git checkout -- test/scheduler-multitenancy-postgres-e2e.test.ts
       - name: Format check
         run: pnpm format:check
       - name: Architecture check
