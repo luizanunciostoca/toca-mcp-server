@@ -1,0 +1,192 @@
+name: Ops Staging DR Preflight 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-preflight-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-preflight-20260822.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      PRODUCTION_PROJECT_NUMBER: '990081828836'
+      REGION: southamerica-east1
+      SOURCE_INSTANCE: toca-mcp-next-staging-db
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      FROZEN_CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+      RESULT_PATH: ops/evidence/staging-dr-preflight.json
+    steps:
+      - name: Checkout preflight branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/staging-dr-preflight-20260822
+          persist-credentials: true
+
+      - name: Fail closed on staging-only read boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-dr-preflight-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+      - name: Authenticate isolated staging operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read DR prerequisites and permissions only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          SOURCE_JSON="$(gcloud sql instances describe "$SOURCE_INSTANCE" --project "$PROJECT_ID" --format=json)"
+          SOURCE_STATE="$(jq -r '.state // empty' <<<"$SOURCE_JSON")"
+          SOURCE_VERSION="$(jq -r '.databaseVersion // empty' <<<"$SOURCE_JSON")"
+          SOURCE_REGION="$(jq -r '.region // empty' <<<"$SOURCE_JSON")"
+          BACKUP_ENABLED="$(jq -r '.settings.backupConfiguration.enabled // false' <<<"$SOURCE_JSON")"
+          PITR_ENABLED="$(jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled // false' <<<"$SOURCE_JSON")"
+          DELETION_PROTECTION="$(jq -r '.settings.deletionProtectionEnabled // false' <<<"$SOURCE_JSON")"
+          LOG_RETENTION_DAYS="$(jq -r '.settings.backupConfiguration.transactionLogRetentionDays // 0' <<<"$SOURCE_JSON")"
+
+          TOKEN="$(gcloud auth print-access-token)"
+          cat >/tmp/permission-request.json <<'JSON'
+          {
+            "permissions": [
+              "cloudsql.instances.get",
+              "cloudsql.instances.clone",
+              "cloudsql.instances.create",
+              "cloudsql.instances.update",
+              "cloudsql.instances.delete",
+              "run.jobs.create",
+              "run.jobs.get",
+              "run.jobs.run",
+              "run.jobs.delete",
+              "iam.serviceAccounts.actAs"
+            ]
+          }
+          JSON
+          PERM_HTTP="$(curl --silent --show-error --output /tmp/permissions.json --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/permission-request.json \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+
+          RECOVERY_HTTP="$(curl --silent --show-error --output /tmp/recovery.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime")"
+          unset TOKEN
+
+          REQUIRED='["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.create","cloudsql.instances.update","cloudsql.instances.delete","run.jobs.create","run.jobs.get","run.jobs.run","run.jobs.delete","iam.serviceAccounts.actAs"]'
+          GRANTED='[]'
+          if [[ "$PERM_HTTP" == 200 ]]; then
+            GRANTED="$(jq -c '.permissions // [] | sort' /tmp/permissions.json)"
+          fi
+          MISSING="$(jq -cn --argjson required "$REQUIRED" --argjson granted "$GRANTED" '$required - $granted')"
+
+          EARLIEST=""
+          LATEST=""
+          PROVIDER_LATEST_LAG_SECONDS=-1
+          if [[ "$RECOVERY_HTTP" == 200 ]]; then
+            EARLIEST="$(jq -r '.earliestRecoveryTime // empty' /tmp/recovery.json)"
+            LATEST="$(jq -r '.latestRecoveryTime // empty' /tmp/recovery.json)"
+            if [[ -n "$LATEST" ]]; then
+              NOW_EPOCH="$(date -u +%s)"
+              LATEST_EPOCH="$(date -u -d "$LATEST" +%s)"
+              PROVIDER_LATEST_LAG_SECONDS=$((NOW_EPOCH - LATEST_EPOCH))
+            fi
+          fi
+
+          PREREQS_OK=false
+          if [[ "$SOURCE_STATE" == RUNNABLE && "$SOURCE_REGION" == "$REGION" && "$BACKUP_ENABLED" == true && "$PITR_ENABLED" == true && "$DELETION_PROTECTION" == true && "$LOG_RETENTION_DAYS" -ge 7 && "$RECOVERY_HTTP" == 200 && "$PROVIDER_LATEST_LAG_SECONDS" -ge 0 && "$PROVIDER_LATEST_LAG_SECONDS" -le 900 ]]; then
+            PREREQS_OK=true
+          fi
+
+          PERMISSIONS_OK="$(jq -cn --argjson missing "$MISSING" '$missing | length == 0')"
+          READY=false
+          if [[ "$PREREQS_OK" == true && "$PERMISSIONS_OK" == true ]]; then READY=true; fi
+
+          mkdir -p "$(dirname "$RESULT_PATH")"
+          jq -n \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg sourceInstance "$SOURCE_INSTANCE" \
+            --arg sourceState "$SOURCE_STATE" \
+            --arg sourceVersion "$SOURCE_VERSION" \
+            --arg sourceRegion "$SOURCE_REGION" \
+            --arg frozenCandidateSha "$FROZEN_CANDIDATE_SHA" \
+            --arg earliestRecoveryTime "$EARLIEST" \
+            --arg latestRecoveryTime "$LATEST" \
+            --argjson backupEnabled "$BACKUP_ENABLED" \
+            --argjson pitrEnabled "$PITR_ENABLED" \
+            --argjson deletionProtection "$DELETION_PROTECTION" \
+            --argjson transactionLogRetentionDays "$LOG_RETENTION_DAYS" \
+            --argjson permissionHttpStatus "$PERM_HTTP" \
+            --argjson recoveryHttpStatus "$RECOVERY_HTTP" \
+            --argjson providerLatestLagSeconds "$PROVIDER_LATEST_LAG_SECONDS" \
+            --argjson requiredPermissions "$REQUIRED" \
+            --argjson grantedPermissions "$GRANTED" \
+            --argjson missingPermissions "$MISSING" \
+            --argjson prerequisitesReady "$PREREQS_OK" \
+            --argjson permissionsReady "$PERMISSIONS_OK" \
+            --argjson executionReady "$READY" \
+            '{
+              schemaVersion:"toca.staging.dr-preflight.v1",
+              observedAt:$observedAt,
+              frozenApplicationCandidateSha:$frozenCandidateSha,
+              project:$project,
+              projectNumber:$projectNumber,
+              source:{instance:$sourceInstance,state:$sourceState,databaseVersion:$sourceVersion,region:$sourceRegion,backupEnabled:$backupEnabled,pitrEnabled:$pitrEnabled,deletionProtection:$deletionProtection,transactionLogRetentionDays:$transactionLogRetentionDays},
+              recoveryWindow:{httpStatus:$recoveryHttpStatus,earliest:$earliestRecoveryTime,latest:$latestRecoveryTime,providerLatestLagSeconds:$providerLatestLagSeconds,rpoWindowObjectiveSeconds:900},
+              authority:{identity:"staging-operator",permissionHttpStatus:$permissionHttpStatus,required:$requiredPermissions,granted:$grantedPermissions,missing:$missingPermissions},
+              readiness:{prerequisitesReady:$prerequisitesReady,permissionsReady:$permissionsReady,isolatedDrExecutionReady:$executionReady},
+              mutationAuthorized:false,
+              mutationExecuted:false,
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              cloudRunMutation:false,
+              secretRead:false,
+              secretMutation:false
+            }' > "$RESULT_PATH"
+
+          cat "$RESULT_PATH"
+          echo 'STAGING_DR_PREFLIGHT_READ_ONLY=PASS'
+
+      - name: Commit sanitized preflight evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$RESULT_PATH"
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops(reliability): publish staging DR preflight'
+          git push origin HEAD:ops/staging-dr-preflight-20260822
