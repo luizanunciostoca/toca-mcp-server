@@ -12,6 +12,7 @@ import {
 
 export interface WorkerRuntimeOptions {
   readonly pool: pg.Pool;
+  readonly tenantId: string;
   readonly handlers: ReadonlyMap<string, JobHandler>;
   readonly telemetry?: Telemetry;
   readonly logger?: StructuredLogger;
@@ -24,9 +25,9 @@ export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<num
   const logger = options.logger ?? new JsonConsoleLogger();
   const telemetry = options.telemetry ?? new RuntimeTelemetry(logger);
   const worker = new SchedulerWorker({
-    scheduler: new PostgresScheduler(options.pool),
+    scheduler: new PostgresScheduler(options.pool, options.tenantId),
     handlers: new MapJobHandlerRegistry(options.handlers),
-    deadLetters: new PostgresDeadLetterSink(options.pool),
+    deadLetters: new PostgresDeadLetterSink(options.pool, options.tenantId),
     telemetry,
     logger,
     retry: options.retry ?? {
