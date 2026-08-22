@@ -96,7 +96,9 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       });
       expect(completed.instance.status).toBe('SUCCEEDED');
       expect(completed.steps[0]?.attempts).toBe(1);
-      const timerFiredEvents = completed.events.filter((event) => event.eventType === 'TIMER_FIRED');
+      const timerFiredEvents = completed.events.filter(
+        (event) => event.eventType === 'TIMER_FIRED',
+      );
       expect(timerFiredEvents).toHaveLength(1);
     } finally {
       await pool2.end();
@@ -153,7 +155,9 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       ).toContain(timerId);
       const snapshot = await store2.get(definition.workflowId);
       expect(snapshot?.timers[0]?.status).toBe('FIRED');
-      const timerFiredEvents = snapshot?.events.filter((event) => event.eventType === 'TIMER_FIRED');
+      const timerFiredEvents = snapshot?.events.filter(
+        (event) => event.eventType === 'TIMER_FIRED',
+      );
       expect(timerFiredEvents).toHaveLength(1);
     } finally {
       await pool2.end();
