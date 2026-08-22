@@ -1,0 +1,229 @@
+name: Ops Authorized Staging DR Least Privilege V4 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-least-privilege-v4-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-staging-dr-least-privilege-v4-20260822
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DR_SA_ID: toca-next-dr-${{ github.run_id }}
+  DR_SA_EMAIL: toca-next-dr-${{ github.run_id }}@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr${{ github.run_id }}
+  TARGET_INSTANCE: toca-next-lp-pitr-${{ github.run_id }}
+  HARNESS_SCRIPT: ops/staging-dr-least-privilege-v3-20260822.sh
+
+jobs:
+  syntax-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate syntax and immutable boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n "$HARNESS_SCRIPT"
+          ! grep -Eq 'gcloud[[:space:]]+(run|secrets)|secretmanager\.googleapis\.com|graph\.facebook\.com|api\.sendgrid\.com|googleads\.googleapis\.com' "$HARNESS_SCRIPT"
+          grep -Fq '75c165a044c6e79e9545328dd04a2a3e73d2e910' "$HARNESS_SCRIPT"
+          grep -Fq 'toca-mcp-next-staging' "$HARNESS_SCRIPT"
+          echo 'DR_LP_V4_SYNTAX_BOUNDARY=PASS'
+
+  bootstrap:
+    needs: syntax-boundary
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    outputs:
+      roleadmin_granted: ${{ steps.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Bootstrap and wait for exact temporary IAM propagation
+        id: bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$CANDIDATE_SHA" = '75c165a044c6e79e9545328dd04a2a3e73d2e910'
+          [[ "$DR_SA_ID" == toca-next-dr-* ]]
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source.json
+          jq -e '.state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and (.settings.backupConfiguration.transactionLogRetentionDays//0)>=7 and (.settings.backupConfiguration.backupRetentionSettings.retainedBackups//0)>=7' /tmp/source.json >/dev/null
+
+          MEMBER_INFRA="serviceAccount:${INFRA_ADMIN_SA}"
+          POLICY_BEFORE="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          ! jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY_BEFORE" >/dev/null
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet >/dev/null
+          echo 'roleadmin_granted=true' >> "$GITHUB_OUTPUT"
+
+          ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
+          gcloud iam service-accounts create "$DR_SA_ID" --project="$PROJECT_ID" --display-name='TOCA Next temporary isolated DR' --description="Temporary DR identity for run ${GITHUB_RUN_ID}" >/dev/null
+          PERMISSIONS='cloudsql.instances.clone,cloudsql.instances.connect,cloudsql.instances.delete,cloudsql.instances.get,cloudsql.instances.update,cloudsql.operations.get,cloudsql.users.list,cloudsql.users.update,resourcemanager.projects.get,serviceusage.services.use'
+          gcloud iam roles create "$DR_ROLE_ID" --project="$PROJECT_ID" --title='TOCA Next isolated DR least privilege' --description="Temporary DR-only role for run ${GITHUB_RUN_ID}" --permissions="$PERMISSIONS" --stage=GA --quiet >/dev/null
+          gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" --format=json >/tmp/role.json
+          test "$(jq -r '.includedPermissions[]' /tmp/role.json | sort)" = "$(tr ',' '\n' <<<"$PERMISSIONS" | sort)"
+
+          gcloud iam service-accounts add-iam-policy-binding "$DR_SA_EMAIL" --project="$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.serviceAccountTokenCreator' --condition=None --quiet >/dev/null
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          MEMBER_DR="serviceAccount:${DR_SA_EMAIL}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_DR" --role="$ROLE" --condition=None --quiet >/dev/null
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null
+          for forbidden in roles/owner roles/editor roles/cloudsql.admin roles/run.admin roles/secretmanager.admin; do
+            ! jq -e --arg r "$forbidden" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null
+          done
+
+          READY=0
+          for attempt in $(seq 1 60); do
+            if gcloud --impersonate-service-account="$DR_SA_EMAIL" projects describe "$PROJECT_ID" --format='value(projectNumber)' >/tmp/imp-project 2>/tmp/imp-error \
+              && test "$(cat /tmp/imp-project)" = "$PROJECT_NUMBER" \
+              && gcloud --impersonate-service-account="$DR_SA_EMAIL" sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format='value(state)' >/tmp/imp-source 2>>/tmp/imp-error \
+              && test "$(cat /tmp/imp-source)" = RUNNABLE; then
+              READY=1
+              echo "DR_LP_V4_IAM_PROPAGATION=PASS attempt=${attempt}"
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$READY" != 1 ]]; then
+            echo 'Temporary impersonation/custom-role propagation did not converge' >&2
+            tail -n 20 /tmp/imp-error >&2 || true
+            exit 1
+          fi
+          echo 'DR_LP_V4_BOOTSTRAP=PASS'
+
+  drill:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Execute isolated PITR and validate candidate state
+        shell: bash
+        run: bash "harness/${HARNESS_SCRIPT}" drill candidate
+      - name: Build sanitized evidence manifest
+        if: always()
+        shell: bash
+        run: bash "harness/${HARNESS_SCRIPT}" manifest candidate
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-dr-lp-v4-${{ github.run_id }}
+          path: dr-v3-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  cleanup-target:
+    needs: [bootstrap, drill]
+    if: always() && needs.bootstrap.result == 'success'
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Delete only temporary target
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-target
+
+  cleanup-iam:
+    needs: [bootstrap, drill, cleanup-target]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 25
+    env:
+      ROLEADMIN_GRANTED: ${{ needs.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Fallback cleanup and remove temporary IAM
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-iam
+
+  final-gate:
+    needs: [syntax-boundary, bootstrap, drill, cleanup-target, cleanup-iam]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require full lifecycle success
+        env:
+          A: ${{ needs.syntax-boundary.result }}
+          B: ${{ needs.bootstrap.result }}
+          C: ${{ needs.drill.result }}
+          D: ${{ needs.cleanup-target.result }}
+          E: ${{ needs.cleanup-iam.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$A" = success
+          test "$B" = success
+          test "$C" = success
+          test "$D" = success
+          test "$E" = success
+          echo 'AUTHORIZED_STAGING_DR_LP_V4=PASS'
