@@ -1,0 +1,36 @@
+name: Ops Staging DR V6 Observer 2026-08-22
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-staging-dr-v6-observer-20260822.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve exact V6 authorized staging DR run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          RUNS="$(gh run list \
+            --repo "$GH_REPO" \
+            --workflow 'Ops Authorized Staging DR Least Privilege V6 2026-08-22' \
+            --branch 'ops/staging-dr-authorized-20260822' \
+            --event push \
+            --limit 10 \
+            --json databaseId,headSha,status,conclusion,url)"
+          echo "$RUNS" | jq -e --arg sha '0a7f72e32e1820c7d9b1d633ed106c8276fe7663' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '0a7f72e32e1820c7d9b1d633ed106c8276fe7663' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
+          test -n "$RUN_ID"
+          echo "DR_LP_V6_RUN_ID=$RUN_ID DR_LP_V6_STATUS=$RUN_STATUS DR_LP_V6_CONCLUSION=$RUN_CONCLUSION DR_LP_V6_URL=$RUN_URL"
