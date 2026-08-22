@@ -57,10 +57,31 @@ jobs:
       - name: Audit Node dependency vulnerabilities
         run: pnpm audit --audit-level high
 
-      - name: Scan committed history for secrets
+      - name: Scan pull-request commits for secrets
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3
+
+      - name: Scan complete candidate ancestry for secrets
+        if: always()
+        run: >-
+          gitleaks git
+          --redact
+          --exit-code=1
+          --report-format=sarif
+          --report-path=full-history-gitleaks-results.sarif
+          --log-opts=HEAD
+          .
+
+      - name: Upload complete-history secret-scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gitleaks-full-history-${{ env.CANDIDATE_SHA }}
+          path: full-history-gitleaks-results.sarif
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Scan repository filesystem
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
