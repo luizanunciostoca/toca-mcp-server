@@ -31,7 +31,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --write test/dlq-schema033-postgres-e2e.test.ts && git diff -- test/dlq-schema033-postgres-e2e.test.ts && exit 1",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
