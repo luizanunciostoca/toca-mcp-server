@@ -2,9 +2,9 @@
   "schemaVersion": "1.4",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.4",
-  "status": "POST_STAGING_RELIABILITY_RECONCILIATION",
-  "observedAt": "2026-08-22T06:01:36-03:00",
-  "observedMainSha": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
+  "status": "POST_STAGING_INCIDENT_CLOSURE_RECONCILIATION",
+  "observedAt": "2026-08-22T06:21:30-03:00",
+  "observedMainSha": "ba44d418a093fbe843d19f52158660c82cb8d799",
   "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
   "candidateFrozen": true,
   "stagingAuthorized": true,
@@ -91,8 +91,8 @@
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
-      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_VERIFIED_ALERT_DELIVERY_PARTIAL_DR_PENDING",
-      "mergedPrs": [55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108],
+      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_AND_INCIDENT_CLOSURE_VERIFIED_ALERT_DELIVERY_PARTIAL_DR_PENDING",
+      "mergedPrs": [55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108, 110, 112],
       "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
       "stagingProjectId": "toca-mcp-next-staging",
       "stagingProjectNumber": "729069789107",
@@ -119,12 +119,18 @@
       "emailNotificationReceiptObservedAt": "2026-08-22T08:46:05Z",
       "postSignalNotificationChannelErrorCount": 0,
       "webhookNotificationPositiveReceiptVerified": false,
-      "syntheticIncidentClosureVerified": false,
+      "syntheticIncidentId": "0.obqbjhmrmmv8",
+      "syntheticIncidentClosureVerified": true,
+      "syntheticIncidentOpenTime": "2026-08-22T08:46:05Z",
+      "syntheticIncidentCloseTime": "2026-08-22T09:21:09Z",
+      "syntheticIncidentClosureReadbackObservedAt": "2026-08-22T09:21:30Z",
+      "syntheticIncidentManualCloseExecuted": false,
+      "runbookCorrelationVerified": true,
+      "runbookPath": "docs/operations/next-staging-reliability-runbook.md",
       "drVerified": false,
       "productionVerified": false,
       "reliabilityBlockers": [
         "independent positive recipient/readback evidence for the webhook_tokenauth notification channel remains pending; zero notification_channel_events errors is not positive receipt",
-        "synthetic incident recovery/closure readback remains pending",
         "final-candidate isolated DR rehearsal remains unexecuted and requires separate authorization"
       ]
     },
@@ -149,10 +155,11 @@
       "execute post-PR-83 read-only Cloud SQL backup/PITR reliability verification",
       "configure two staging notification channel families",
       "prove staging runtime dashboard and authenticated private-webhook OIDC uptime",
-      "prove synthetic alert firing and positive email recipient delivery"
+      "prove synthetic alert firing and positive email recipient delivery",
+      "prove synthetic incident recovery/closure and exact policy/incident runbook correlation"
     ],
     "remainingSequence": [
-      "prove positive webhook notification receipt/readback and synthetic incident recovery/closure",
+      "prove positive webhook notification receipt/readback",
       "execute controlled provider verification without lifecycle pre-promotion",
       "execute separately authorized final-candidate isolated DR rehearsal and prove RPO/RTO",
       "promote production only with explicit authorization and same-candidate evidence",
