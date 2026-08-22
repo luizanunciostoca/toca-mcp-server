@@ -390,7 +390,8 @@ function normalizeRecord(record: DeadLetterRecord): NormalizedDeadLetterRecord {
     payloadText(record.payload, 'idempotencyKey', 'idempotency_key') ??
     `dead-letter-source:${record.originalJobId}`;
   const workspaceId =
-    normalizedOptional(record.workspaceId) ?? payloadText(record.payload, 'workspaceId', 'workspace_id');
+    normalizedOptional(record.workspaceId) ??
+    payloadText(record.payload, 'workspaceId', 'workspace_id');
   const organizationId =
     normalizedOptional(record.organizationId) ??
     payloadText(record.payload, 'organizationId', 'organization_id');
