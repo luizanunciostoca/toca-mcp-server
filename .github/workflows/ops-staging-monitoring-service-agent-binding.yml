@@ -13,12 +13,106 @@ env:
   PROJECT_NUMBER: '729069789107'
   PRODUCTION_PROJECT_ID: toca-mcp-production
   PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   MONITORING_SERVICE_AGENT: service-729069789107@gcp-sa-monitoring-notification.iam.gserviceaccount.com
+  UPTIME_DISPLAY_NAME: TOCA Next Staging — Webhook Readiness
 
 jobs:
-  bind:
+  seed-uptime:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    outputs:
+      uptime_name: ${{ steps.seed.outputs.uptime_name }}
+    steps:
+      - name: Authenticate isolated staging operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Seed exact authenticated staging uptime check
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+          HOST="${SERVICE_URL#https://}"
+          HOST="${HOST%/}"
+          [[ "$HOST" != *'/'* ]]
+
+          TOKEN="$(gcloud auth print-access-token)"
+          UPTIME_API="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$UPTIME_API" > /tmp/uptime-list.json
+          UPTIME_NAME="$(jq -r --arg display "$UPTIME_DISPLAY_NAME" 'first(.uptimeCheckConfigs[]? | select(.displayName==$display) | .name) // empty' /tmp/uptime-list.json)"
+
+          if [[ -z "$UPTIME_NAME" ]]; then
+            jq -n --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" '{
+              displayName:$display,
+              monitoredResource:{type:"uptime_url",labels:{host:$host}},
+              httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,validateSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
+              timeout:"10s",
+              period:"300s"
+            }' > /tmp/uptime-create.json
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data-binary @/tmp/uptime-create.json \
+              "$UPTIME_API" > /tmp/uptime-created.json
+            UPTIME_NAME="$(jq -r '.name // empty' /tmp/uptime-created.json)"
+          fi
+          test -n "$UPTIME_NAME"
+
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime-readback.json
+          unset TOKEN
+
+          jq -e --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" '
+            .displayName==$display and
+            .monitoredResource.type=="uptime_url" and
+            .monitoredResource.labels.host==$host and
+            .httpCheck.requestMethod=="GET" and
+            .httpCheck.path=="/readyz" and
+            .httpCheck.port==443 and
+            .httpCheck.useSsl==true and
+            .httpCheck.validateSsl==true and
+            .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and
+            .period=="300s" and
+            .timeout=="10s"
+          ' /tmp/uptime-readback.json >/dev/null
+
+          echo "uptime_name=$UPTIME_NAME" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_AUTHENTICATED_UPTIME_SEED=PASS'
+          echo 'PRODUCTION_MUTATION=false'
+          echo 'PROVIDER_MUTATION=false'
+          echo 'DATABASE_MUTATION=false'
+          echo 'BACKUP_MUTATION=false'
+          echo 'DR_MUTATION=false'
+          echo 'TRAFFIC_MUTATION=false'
+          echo 'CLOUD_RUN_MUTATION=false'
+          echo 'SECRET_MUTATION=false'
+
+  bind-service-agent:
+    needs: seed-uptime
     runs-on: ubuntu-latest
     environment: infrastructure-admin
     timeout-minutes: 10
@@ -32,29 +126,17 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Generate and bind exact Monitoring service agent in staging
+      - name: Bind and read back exact Monitoring service agent role
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-
-          TOKEN="$(gcloud auth print-access-token)"
-          curl --fail --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H 'Content-Type: application/json' \
-            --data '' \
-            "https://serviceusage.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/services/monitoring.googleapis.com:generateServiceIdentity" \
-            > /tmp/monitoring-service-identity-operation.json
-          unset TOKEN
-
-          jq -e '.name | type == "string" and length > 0' /tmp/monitoring-service-identity-operation.json >/dev/null
+          test -n "${{ needs.seed-uptime.outputs.uptime_name }}"
 
           OBSERVED_EMAIL=''
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 30); do
             OBSERVED_EMAIL="$(gcloud iam service-accounts describe "$MONITORING_SERVICE_AGENT" \
               --project="$PROJECT_ID" \
               --format='value(email)' 2>/dev/null || true)"
@@ -67,7 +149,6 @@ jobs:
 
           MEMBER="serviceAccount:${MONITORING_SERVICE_AGENT}"
           ROLE='roles/monitoring.notificationServiceAgent'
-
           gcloud projects add-iam-policy-binding "$PROJECT_ID" \
             --member="$MEMBER" \
             --role="$ROLE" \
