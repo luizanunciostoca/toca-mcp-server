@@ -15,6 +15,11 @@ import {
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
+const tenantId: string = (() => {
+  const value = process.env.TOCA_DEFAULT_TENANT_ID?.trim();
+  if (!value) throw new Error('TOCA_DEFAULT_TENANT_ID_REQUIRED');
+  return value;
+})();
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
 
 if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) {
@@ -42,7 +47,7 @@ let lastError: string | null = null;
 let lastDailyControlDay: string | null = null;
 
 async function verifySchedulerPersistence(): Promise<void> {
-  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
+  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool, tenantId));
   const smokeId = randomUUID();
   const jobIds: string[] = [];
 
@@ -115,7 +120,10 @@ async function verifySchedulerPersistence(): Promise<void> {
   } finally {
     telemetry.record('daemon.scheduler_self_test.duration_ms', Date.now() - started);
     if (jobIds.length > 0) {
-      await pool.query('delete from scheduled_jobs where id = any($1::text[])', [jobIds]);
+      await pool.query('delete from scheduled_jobs where id = any($1::text[]) and tenant_id = $2', [
+        jobIds,
+        tenantId,
+      ]);
     }
   }
 }
@@ -150,7 +158,13 @@ async function tick(): Promise<TickResult> {
   const started = Date.now();
   telemetry.increment('daemon.tick.started');
   try {
-    lastClaimed = await runTocaManagedInstagramWorkerBatch({ config, pool, telemetry, logger });
+    lastClaimed = await runTocaManagedInstagramWorkerBatch({
+      config,
+      pool,
+      tenantId,
+      telemetry,
+      logger,
+    });
     await runDailyControlWithoutBlockingWorker();
     lastError = null;
     telemetry.increment('daemon.tick.succeeded');

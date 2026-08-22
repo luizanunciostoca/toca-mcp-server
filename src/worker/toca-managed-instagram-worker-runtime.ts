@@ -19,6 +19,7 @@ import type { JobHandler } from './worker.js';
 export interface TocaManagedInstagramWorkerRuntimeOptions {
   readonly config: RuntimeConfig;
   readonly pool: pg.Pool;
+  readonly tenantId: string;
   readonly telemetry?: Telemetry;
   readonly logger?: StructuredLogger;
 }
@@ -61,6 +62,7 @@ export async function runTocaManagedInstagramWorkerBatch(
 
   return runWorkerBatch({
     pool: options.pool,
+    tenantId: options.tenantId,
     handlers,
     claimToolName: TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB,
     ...(options.telemetry ? { telemetry: options.telemetry } : {}),

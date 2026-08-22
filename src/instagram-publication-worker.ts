@@ -15,13 +15,15 @@ if (!manualWorkerEnabled && !tocaManagedWorkerEnabled) {
   console.info('instagram.publication.worker.disabled');
 } else {
   if (!config.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
+  const tenantId = process.env.TOCA_DEFAULT_TENANT_ID?.trim();
+  if (!tenantId) throw new Error('TOCA_DEFAULT_TENANT_ID_REQUIRED');
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
   try {
     if (tocaManagedWorkerEnabled) {
-      const claimed = await runTocaManagedInstagramWorkerBatch({ config, pool });
+      const claimed = await runTocaManagedInstagramWorkerBatch({ config, pool, tenantId });
       console.info('instagram.publication.worker.toca_managed.completed', { claimed });
     } else {
-      const claimed = await runInstagramPublicationWorkerBatch({ config, pool });
+      const claimed = await runInstagramPublicationWorkerBatch({ config, pool, tenantId });
       console.info('instagram.publication.worker.manual.completed', { claimed });
     }
   } finally {
