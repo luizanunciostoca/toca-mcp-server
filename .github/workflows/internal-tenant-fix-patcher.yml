@@ -29,3 +29,5 @@ jobs:
           git diff --cached --check
           git commit -m 'fix(tenancy): enforce scheduler and DLQ tenant boundaries'
           git push origin HEAD:"$GITHUB_REF_NAME"
+
+# One-shot internal patcher for the pre-production tenant-boundary fix branch only.
