@@ -66,7 +66,7 @@ export class PostgresScheduler implements Scheduler {
   async schedule<TPayload>(
     job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
   ): Promise<ScheduledJob<TPayload>> {
-    const tenantId = resolveTenantId(job as Omit<ScheduledJob, 'status' | 'attempts'>);
+    const tenantId = resolveTenantId(job);
     const result = await this.pool.query<Row>(
       `insert into scheduled_jobs
          (id, tool_name, payload, run_at, timezone, idempotency_key, tenant_id)
