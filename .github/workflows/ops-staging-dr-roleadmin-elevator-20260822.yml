@@ -1,0 +1,139 @@
+name: Ops Staging DR RoleAdmin Elevator 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-roleadmin-elevator-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  actions: write
+
+concurrency:
+  group: ops-staging-dr-roleadmin-elevator-20260822
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DR_RUN_ID: '32566064960'
+
+jobs:
+  grant-rerun-observe:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 90
+    steps:
+      - name: Verify exact temporary IAM boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-dr-authorized-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$DR_RUN_ID" = '32566064960'
+          echo 'DR_ROLEADMIN_BOUNDARY=PASS'
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Grant temporary project custom-role administration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          MEMBER="serviceAccount:${INFRA_ADMIN_SA}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" \
+            --role='roles/iam.roleAdmin' \
+            --condition=None \
+            --quiet
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg member "$MEMBER" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null
+          echo 'DR_ROLEADMIN_TEMP_GRANT=PASS'
+
+      - name: Re-run only failed DR jobs and dependents
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run rerun "$DR_RUN_ID" --failed --repo "$GH_REPO"
+          echo 'DR_RERUN_REQUESTED=PASS'
+
+      - name: Wait for authorized DR rerun to finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SEEN_ACTIVE=0
+          for attempt in $(seq 1 360); do
+            VIEW="$(gh run view "$DR_RUN_ID" --repo "$GH_REPO" --json status,conclusion,attempt,updatedAt)"
+            STATUS="$(jq -r '.status' <<<"$VIEW")"
+            CONCLUSION="$(jq -r '.conclusion // empty' <<<"$VIEW")"
+            ATTEMPT="$(jq -r '.attempt' <<<"$VIEW")"
+            if [[ "$STATUS" != completed ]]; then SEEN_ACTIVE=1; fi
+            if [[ "$STATUS" == completed && "$SEEN_ACTIVE" == 1 ]]; then
+              echo "DR_RERUN_FINISHED attempt=${ATTEMPT} conclusion=${CONCLUSION}"
+              test "$CONCLUSION" = success
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for authorized DR rerun' >&2
+          exit 1
+
+  cleanup-roleadmin:
+    needs: grant-rerun-observe
+    if: always()
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Authenticate infrastructure administrator for cleanup
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Remove temporary project custom-role administration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          MEMBER="serviceAccount:${INFRA_ADMIN_SA}"
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg member "$MEMBER" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+              --member="$MEMBER" \
+              --role='roles/iam.roleAdmin' \
+              --condition=None \
+              --quiet
+          fi
+          POLICY_AFTER="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg member "$MEMBER" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY_AFTER" >/dev/null; then
+            echo 'Temporary roles/iam.roleAdmin binding still present' >&2
+            exit 1
+          fi
+          echo 'DR_ROLEADMIN_TEMP_CLEANUP=PASS'
