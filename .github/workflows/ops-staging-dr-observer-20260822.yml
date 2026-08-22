@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve authorized staging DR push run
+      - name: Resolve least-privilege authorized staging DR run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -22,28 +22,15 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          DR_RUNS="$(gh run list \
+          RUNS="$(gh run list \
             --repo "$GH_REPO" \
-            --workflow 'Ops Authorized Staging DR 2026-08-22' \
+            --workflow 'Ops Authorized Staging DR Least Privilege 2026-08-22' \
             --branch 'ops/staging-dr-authorized-20260822' \
             --event push \
             --limit 10 \
             --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$DR_RUNS" | jq -e --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          DR_MATCH="$(echo "$DR_RUNS" | jq -r --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
-          IFS=$'\t' read -r DR_RUN_ID DR_STATUS DR_CONCLUSION DR_URL <<< "$DR_MATCH"
-          test -n "$DR_RUN_ID"
-          echo "DR_PUSH_RUN_ID=$DR_RUN_ID DR_PUSH_STATUS=$DR_STATUS DR_PUSH_CONCLUSION=$DR_CONCLUSION DR_PUSH_URL=$DR_URL"
-
-          ELEVATOR_RUNS="$(gh run list \
-            --repo "$GH_REPO" \
-            --workflow 'Ops Staging DR RoleAdmin Elevator 2026-08-22' \
-            --branch 'ops/staging-dr-authorized-20260822' \
-            --event push \
-            --limit 10 \
-            --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$ELEVATOR_RUNS" | jq -e --arg sha 'a19118c46191f8d9510f6408e46b0dfae8b2823d' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          ELEVATOR_MATCH="$(echo "$ELEVATOR_RUNS" | jq -r --arg sha 'a19118c46191f8d9510f6408e46b0dfae8b2823d' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
-          IFS=$'\t' read -r ELEVATOR_RUN_ID ELEVATOR_STATUS ELEVATOR_CONCLUSION ELEVATOR_URL <<< "$ELEVATOR_MATCH"
-          test -n "$ELEVATOR_RUN_ID"
-          echo "DR_ELEVATOR_RUN_ID=$ELEVATOR_RUN_ID DR_ELEVATOR_STATUS=$ELEVATOR_STATUS DR_ELEVATOR_CONCLUSION=$ELEVATOR_CONCLUSION DR_ELEVATOR_URL=$ELEVATOR_URL"
+          echo "$RUNS" | jq -e --arg sha 'a6f5d3bcb4be3f57e020b25e5e5a6dcf8dc9b7fb' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha 'a6f5d3bcb4be3f57e020b25e5e5a6dcf8dc9b7fb' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
+          test -n "$RUN_ID"
+          echo "DR_LP_RUN_ID=$RUN_ID DR_LP_STATUS=$RUN_STATUS DR_LP_CONCLUSION=$RUN_CONCLUSION DR_LP_URL=$RUN_URL"
