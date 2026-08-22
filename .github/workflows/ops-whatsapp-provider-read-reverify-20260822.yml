@@ -1,0 +1,245 @@
+name: Ops WhatsApp Provider READ Reverify 2026-08-22
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ops-whatsapp-provider-read-reverify-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-whatsapp-provider-read-reverify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_GRAPH_API_VERSION: v24.0
+
+jobs:
+  provider-read:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact verification head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert immutable GET-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
+          test "$META_TOKEN_SECRET_ID" = 'toca-meta-oauth-token'
+          echo 'WHATSAPP_READ_BOUNDARY=PASS'
+
+      - name: Authenticate existing production deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Build immutable GET-only probe image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          mkdir -p /tmp/wa-provider-read
+          cat > /tmp/wa-provider-read/read.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const apiVersion = process.env.META_GRAPH_API_VERSION;
+          const sourceSha = process.env.SOURCE_SHA;
+          if (!token || !apiVersion || !sourceSha) throw new Error('WHATSAPP_READ_CONFIG_MISSING');
+
+          async function graph(path) {
+            const response = await fetch(`https://graph.facebook.com/${apiVersion}/${path}`, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            let body = null;
+            try { body = await response.json(); } catch { body = null; }
+            return {
+              ok: response.ok,
+              status: response.status,
+              body,
+              errorCode: Number.isInteger(body?.error?.code) ? body.error.code : null,
+              errorSubcode: Number.isInteger(body?.error?.error_subcode) ? body.error.error_subcode : null,
+            };
+          }
+
+          const permissionsResponse = await graph('me/permissions');
+          if (!permissionsResponse.ok) throw new Error(`WHATSAPP_READ_PERMISSIONS_HTTP_${permissionsResponse.status}`);
+          const granted = new Set(
+            (Array.isArray(permissionsResponse.body?.data) ? permissionsResponse.body.data : [])
+              .filter((item) => item?.status === 'granted' && typeof item.permission === 'string')
+              .map((item) => item.permission),
+          );
+          const managementScope = granted.has('whatsapp_business_management');
+          const messagingScope = granted.has('whatsapp_business_messaging');
+
+          const businessesResponse = await graph('me/businesses?fields=id,name&limit=100');
+          if (!businessesResponse.ok) throw new Error(`WHATSAPP_READ_BUSINESSES_HTTP_${businessesResponse.status}`);
+          const businesses = Array.isArray(businessesResponse.body?.data) ? businessesResponse.body.data : [];
+
+          const businessEvidence = [];
+          const allWabas = new Map();
+          if (managementScope) {
+            for (const business of businesses) {
+              const owned = await graph(`${business.id}/owned_whatsapp_business_accounts?fields=id,name&limit=100`);
+              const client = await graph(`${business.id}/client_whatsapp_business_accounts?fields=id,name&limit=100`);
+              const ownedRows = owned.ok && Array.isArray(owned.body?.data) ? owned.body.data : [];
+              const clientRows = client.ok && Array.isArray(client.body?.data) ? client.body.data : [];
+              const rows = [...ownedRows, ...clientRows];
+              for (const row of rows) {
+                if (typeof row?.id === 'string') allWabas.set(row.id, { id: row.id, name: row.name ?? null, businessId: business.id });
+              }
+              businessEvidence.push({
+                businessId: business.id,
+                businessName: business.name ?? null,
+                owned: { status: owned.status, errorCode: owned.errorCode, count: ownedRows.length },
+                client: { status: client.status, errorCode: client.errorCode, count: clientRows.length },
+                discoveredWabaIds: [...new Set(rows.map((row) => row?.id).filter((id) => typeof id === 'string'))],
+              });
+            }
+          }
+
+          const businessesWithWaba = businessEvidence.filter((item) => item.discoveredWabaIds.length > 0);
+          const businessSelectionUnambiguous = businessesWithWaba.length === 1;
+          const selectedBusinessId = businessSelectionUnambiguous ? businessesWithWaba[0].businessId : null;
+          const selectedBusinessWabas = selectedBusinessId
+            ? [...allWabas.values()].filter((item) => item.businessId === selectedBusinessId)
+            : [];
+          const selectedWabaId = selectedBusinessWabas.length === 1 ? selectedBusinessWabas[0].id : null;
+
+          let phoneEvidence = { status: null, errorCode: null, count: 0, ids: [] };
+          let templateEvidence = { status: null, errorCode: null, count: 0, approvedCount: 0 };
+          if (selectedWabaId) {
+            const phones = await graph(`${selectedWabaId}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,status&limit=100`);
+            const phoneRows = phones.ok && Array.isArray(phones.body?.data) ? phones.body.data : [];
+            phoneEvidence = {
+              status: phones.status,
+              errorCode: phones.errorCode,
+              count: phoneRows.length,
+              ids: phoneRows.map((row) => row?.id).filter((id) => typeof id === 'string'),
+            };
+            const templates = await graph(`${selectedWabaId}/message_templates?fields=id,name,status,language&limit=100`);
+            const templateRows = templates.ok && Array.isArray(templates.body?.data) ? templates.body.data : [];
+            templateEvidence = {
+              status: templates.status,
+              errorCode: templates.errorCode,
+              count: templateRows.length,
+              approvedCount: templateRows.filter((row) => row?.status === 'APPROVED').length,
+            };
+          }
+
+          const evidence = {
+            schemaVersion: 'toca.whatsapp.provider-read.v2',
+            sourceSha,
+            verifiedAt: new Date().toISOString(),
+            provider: 'Meta Graph API',
+            apiVersion,
+            tokenAccepted: true,
+            managementScope,
+            messagingScope,
+            businessCount: businesses.length,
+            businessEvidence,
+            wabaCount: allWabas.size,
+            businessSelectionUnambiguous,
+            selectedBusinessId,
+            selectedWabaId,
+            phoneEvidence,
+            templateEvidence,
+            providerWritesExecuted: false,
+            messageSendExecuted: false,
+            webhookMutationExecuted: false,
+            templateMutationExecuted: false,
+            readGateEligible:
+              managementScope &&
+              messagingScope &&
+              businessSelectionUnambiguous &&
+              selectedWabaId !== null &&
+              phoneEvidence.count > 0,
+          };
+          console.log(`WHATSAPP_PROVIDER_READ_RESULT=${JSON.stringify(evidence)}`);
+          NODE
+          cat > /tmp/wa-provider-read/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY read.mjs ./read.mjs
+          USER node
+          CMD ["node", "read.mjs"]
+          DOCKER
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/whatsapp-provider-read:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/wa-provider-read
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-whatsapp-read-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Execute GET-only probe under runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,SOURCE_SHA=$GITHUB_SHA" \
+            --set-secrets "META_ACCESS_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"WHATSAPP_PROVIDER_READ_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=20m --limit=50 --order=desc --format='value(textPayload)' \
+              | grep 'WHATSAPP_PROVIDER_READ_RESULT=' | head -n1 || true)"
+            [[ -n "$RESULT_LINE" ]] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#WHATSAPP_PROVIDER_READ_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e '
+            .providerWritesExecuted == false and
+            .messageSendExecuted == false and
+            .webhookMutationExecuted == false and
+            .templateMutationExecuted == false
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > whatsapp-provider-read.json
+          echo 'WHATSAPP_GET_ONLY_EVIDENCE_CAPTURED=PASS'
+
+      - name: Upload sanitized provider-read evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: whatsapp-provider-read-${{ github.sha }}
+          path: whatsapp-provider-read.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Require provider READ prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.readGateEligible == true' whatsapp-provider-read.json >/dev/null
+          echo 'WHATSAPP_PROVIDER_READ_GATE=PASS'
