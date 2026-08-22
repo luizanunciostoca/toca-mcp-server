@@ -63,7 +63,7 @@ jobs:
             .productionProjectNumber == "990081828836" and
             .executionEnvironment == "staging" and
             .operatorServiceAccount == "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com" and
-            .requiredIamRoles == ["roles/logging.logWriter","roles/logging.viewer","roles/monitoring.alertPolicyEditor"] and
+            .requiredIamRoles == ["roles/logging.logWriter","roles/logging.viewer","roles/logging.configWriter","roles/monitoring.alertPolicyEditor"] and
             .notificationChannels.requiredEnabledCount == 2 and
             .notificationChannels.requiredFamilies == ["email","webhook_tokenauth"] and
             .syntheticSignal.logId == "toca-staging-reliability-synthetic" and
@@ -109,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
-          for role in roles/logging.logWriter roles/logging.viewer roles/monitoring.alertPolicyEditor; do
+          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
             gcloud projects add-iam-policy-binding "$PROJECT_ID" \
               --member="$MEMBER" \
               --role="$role" \
@@ -117,7 +117,7 @@ jobs:
               --quiet
           done
           POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          for role in roles/logging.logWriter roles/logging.viewer roles/monitoring.alertPolicyEditor; do
+          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
             jq -e --arg role "$role" --arg member "$MEMBER" \
               'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' \
               <<<"$POLICY" >/dev/null
@@ -213,7 +213,6 @@ jobs:
 
           if [[ -z "$POLICY_NAME" ]]; then
             jq -n \
-              --arg project "$PROJECT_ID" \
               --arg filter "$EXPECTED_FILTER" \
               --arg email "$EMAIL_CHANNEL" \
               --arg webhook "$WEBHOOK_CHANNEL" \
@@ -231,14 +230,20 @@ jobs:
                 alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"}
               }' > /tmp/alert-policy-create.json
 
-            curl --fail --silent --show-error \
+            CREATE_HTTP="$(curl --silent --show-error \
+              --output /tmp/alert-policy-created.json \
+              --write-out '%{http_code}' \
               -X POST \
               -H "Authorization: Bearer ${TOKEN}" \
               -H 'Content-Type: application/json' \
               --data-binary @/tmp/alert-policy-create.json \
-              "${API_ROOT}/alertPolicies" \
-              > /tmp/alert-policy-created.json
-            POLICY_NAME="$(jq -r '.name' /tmp/alert-policy-created.json)"
+              "${API_ROOT}/alertPolicies")"
+            if [[ "$CREATE_HTTP" != 200 ]]; then
+              echo "STAGING_SYNTHETIC_ALERT_POLICY_CREATE_HTTP=${CREATE_HTTP}" >&2
+              jq -c '{error:{code:(.error.code // null),status:(.error.status // null),message:(.error.message // null)}}' /tmp/alert-policy-created.json >&2 || true
+              exit 1
+            fi
+            POLICY_NAME="$(jq -r '.name // empty' /tmp/alert-policy-created.json)"
           fi
 
           test -n "$POLICY_NAME"
