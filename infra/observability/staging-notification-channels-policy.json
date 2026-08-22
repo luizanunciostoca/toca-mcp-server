@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "toca.staging.notification-channels.v1",
+  "operation": "configure-staging-notification-channels",
+  "projectId": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "region": "southamerica-east1",
+  "channels": [
+    {
+      "role": "primary-email",
+      "type": "email",
+      "destinationSecret": "STAGING_ALERT_EMAIL",
+      "enabled": true
+    },
+    {
+      "role": "secondary-webhook",
+      "type": "webhook_tokenauth",
+      "destinationSecret": "STAGING_ALERT_WEBHOOK_URL",
+      "tokenSecret": "STAGING_ALERT_WEBHOOK_TOKEN",
+      "enabled": true
+    }
+  ],
+  "requirements": {
+    "minimumEnabledChannels": 2,
+    "minimumChannelFamilies": 2,
+    "requireHttpsWebhook": true,
+    "requireEmailVerification": true,
+    "requireSyntheticDeliveryReadbackBeforeReliabilityPromotion": true
+  },
+  "forbid": {
+    "productionMutation": true,
+    "providerMutation": true,
+    "databaseMutation": true,
+    "backupMutation": true,
+    "drRestore": true,
+    "trafficMutation": true,
+    "iamMutation": true,
+    "serviceAccountKeys": true,
+    "secretValuesInRepository": true,
+    "secretValuesInArtifacts": true,
+    "reliabilityPromotionWithoutDeliveryReadback": true
+  }
+}
