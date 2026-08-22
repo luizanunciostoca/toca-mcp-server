@@ -1,0 +1,140 @@
+name: Ops Staging DR Emergency Cleanup 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-emergency-cleanup-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  TARGET_INSTANCE: toca-next-pitr-32567130027
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  TEMP_DR_ROLE: roles/cloudsql.admin
+
+jobs:
+  bootstrap-iam:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Verify cleanup boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-dr-authorized-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$TARGET_INSTANCE" = 'toca-next-pitr-32567130027'
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          [[ "$TARGET_INSTANCE" == toca-next-pitr-* ]]
+          echo 'DR_EMERGENCY_CLEANUP_BOUNDARY=PASS'
+
+      - name: Authenticate infrastructure administrator for staging IAM only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Ensure temporary Cloud SQL Admin for cleanup only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$TEMP_DR_ROLE" --condition=None --quiet
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null
+          echo 'DR_EMERGENCY_CLEANUP_IAM_READY=PASS'
+
+  cleanup-target:
+    needs: bootstrap-iam
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Authenticate isolated staging operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Disable protection on exact temporary target and delete it
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          [[ "$TARGET_INSTANCE" == toca-next-pitr-* ]]
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-before-cleanup.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-before-cleanup.json >/dev/null
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-before-cleanup.json 2>/dev/null; then
+            jq -e --arg project "$PROJECT_ID" --arg region "$REGION" --arg target "$TARGET_INSTANCE" '.project==$project and .region==$region and .name==$target and .databaseVersion=="POSTGRES_18"' /tmp/target-before-cleanup.json >/dev/null
+            gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet
+            gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-unprotected.json
+            jq -e '.settings.deletionProtectionEnabled==false' /tmp/target-unprotected.json >/dev/null
+            gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet
+          fi
+          for attempt in $(seq 1 90); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 10
+          done
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-after-cleanup.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-after-cleanup.json >/dev/null
+          echo 'DR_EMERGENCY_TARGET_CLEANUP=PASS'
+          echo 'STAGING_SOURCE_POST_EMERGENCY_CLEANUP=PASS'
+
+  cleanup-iam:
+    needs: [bootstrap-iam, cleanup-target]
+    if: always() && needs.bootstrap-iam.result == 'success'
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Authenticate infrastructure administrator for IAM cleanup only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Revoke temporary Cloud SQL Admin binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$TEMP_DR_ROLE" --condition=None --quiet
+          fi
+          POLICY_AFTER="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          ! jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY_AFTER" >/dev/null
+          echo 'DR_EMERGENCY_IAM_CLEANUP=PASS'
