@@ -5,6 +5,12 @@ export type ScheduledJobStatus = 'SCHEDULED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED
 
 export interface ScheduledJob<TPayload = unknown> {
   readonly id: string;
+  /**
+   * Persisted ownership when the backing scheduler can prove it. Kept optional at
+   * the generic contract boundary for in-memory/system schedulers, but any
+   * ownership-sensitive persistence boundary must fail closed when it is absent.
+   */
+  readonly tenantId?: string;
   readonly toolName: string;
   readonly payload: TPayload;
   readonly runAt: string;
