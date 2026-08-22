@@ -1,0 +1,28 @@
+name: Ops Staging DR V14 Observer 2026-08-22
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ops-staging-dr-v14-observer-20260822.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve exact V14 authorized staging DR run by file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: luizanunciostoca/toca-mcp-server
+          V14_SHA: 3914c46aadb5eac321c2ec02761914b59d8858c8
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          RUNS="$(gh run list --repo "$GH_REPO" --workflow 'ops-staging-dr-least-privilege-v11-20260822.yml' --branch 'ops/staging-dr-authorized-20260822' --event push --limit 20 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
+          MATCH="$(echo "$RUNS" | jq -c --arg sha "$V14_SHA" '[.[] | select(.headSha==$sha)]')"
+          echo "$MATCH" | jq -e 'length == 1' >/dev/null
+          echo "$MATCH" | jq -c '.[0]'
