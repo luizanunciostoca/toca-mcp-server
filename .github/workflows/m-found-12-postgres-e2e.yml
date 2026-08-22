@@ -19,6 +19,7 @@ on:
       - 'test/attribution-revenue-postgres-e2e.test.ts'
       - 'test/asset-intelligence-postgres-e2e.test.ts'
       - 'test/tenant-approval-postgres-e2e.test.ts'
+      - 'test/omnichannel-prepared-content-postgres-e2e.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'src/assets/**'
@@ -49,7 +50,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18
+        image: postgres:18@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
         env:
           POSTGRES_USER: toca
           POSTGRES_PASSWORD: toca-m12-local-only
@@ -85,7 +86,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit, timer recovery, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence and tenant Approval isolation E2E
+      - name: Execute PostgreSQL restart/outbox/audit, timer recovery, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence, tenant Approval isolation and Omnichannel prepared-content E2E
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
@@ -100,5 +101,6 @@ jobs:
           test/attribution-revenue-postgres-e2e.test.ts
           test/asset-intelligence-postgres-e2e.test.ts
           test/tenant-approval-postgres-e2e.test.ts
+          test/omnichannel-prepared-content-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
         run: pnpm migrate
