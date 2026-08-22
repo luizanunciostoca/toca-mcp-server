@@ -68,7 +68,11 @@
   "fronts": {
     "A_PROVIDER_ONBOARDING_GOOGLE_ADS": {
       "state": "IMPLEMENTED_PROVIDER_EVIDENCE_PENDING",
-      "mergedPrs": [54, 59, 64],
+      "mergedPrs": [
+        54,
+        59,
+        64
+      ],
       "providerVerified": false,
       "productionVerified": false,
       "blockers": [
@@ -78,13 +82,23 @@
     },
     "B_OMNICHANNEL_OUTBOUND_NURTURE": {
       "state": "IMPLEMENTED_AND_STAGING_ACCEPTED_PROVIDER_EVIDENCE_PENDING",
-      "mergedPrs": [60, 61, 65, 66, 67, 68],
+      "mergedPrs": [
+        60,
+        61,
+        65,
+        66,
+        67,
+        68
+      ],
       "providerRuntimesPresent": true,
       "stagingAccepted": true,
       "providerVerified": false,
       "productionVerified": false,
       "driveOperationalChannelCapabilityRowsPresent": true,
-      "existingCanonicalNurtureAuthorities": ["sales.followup.create", "sales.followup.schedule"],
+      "existingCanonicalNurtureAuthorities": [
+        "sales.followup.create",
+        "sales.followup.schedule"
+      ],
       "blockers": [
         "real SendGrid provider binding/send/readback evidence pending",
         "real WhatsApp provider binding/send/readback evidence pending"
@@ -92,7 +106,27 @@
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
       "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_ALERT_DELIVERY_RECOVERY_VERIFIED_DR_PENDING",
-      "mergedPrs": [55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108, 110, 112],
+      "mergedPrs": [
+        55,
+        62,
+        71,
+        72,
+        73,
+        83,
+        86,
+        87,
+        92,
+        93,
+        95,
+        96,
+        98,
+        100,
+        103,
+        106,
+        108,
+        110,
+        112
+      ],
       "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
       "stagingProjectId": "toca-mcp-next-staging",
       "stagingProjectNumber": "729069789107",
@@ -111,7 +145,10 @@
       "runtimeObservabilityFalsePoints": 0,
       "runtimeObservabilityArtifactId": "9473430379",
       "runtimeObservabilityArtifactSha256": "4a426268cff5556085b90c6abf6f49d6ac99633d531a16f135ae50125ca63b0d",
-      "notificationChannelFamilies": ["email", "webhook_tokenauth"],
+      "notificationChannelFamilies": [
+        "email",
+        "webhook_tokenauth"
+      ],
       "syntheticAlertFiringVerified": true,
       "syntheticAlertRunId": "32563070906",
       "syntheticAlertPolicyId": "5562724679805698256",
