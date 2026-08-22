@@ -26,6 +26,7 @@ jobs:
       POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
       EXPECTED_OPEN_TIME_PREFIX: '2026-08-22T08:46'
       RESULT_PATH: ops/evidence/staging-synthetic-incident-readback.json
+      READBACK_SEQUENCE: '2'
     steps:
       - name: Checkout evidence branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -57,16 +58,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
-          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-
           TOKEN="$(gcloud auth print-access-token)"
-          HTTP_STATUS="$(curl --silent --show-error \
-            --output /tmp/alert.json \
-            --write-out '%{http_code}' \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "x-goog-user-project: ${PROJECT_ID}" \
+          HTTP_STATUS="$(curl --silent --show-error --output /tmp/alert.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
             "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
           unset TOKEN
           test "$HTTP_STATUS" = 200
@@ -76,57 +72,23 @@ jobs:
           CLOSE_TIME="$(jq -r '.close_time // .closeTime // empty' /tmp/alert.json)"
           POLICY="$(jq -r '.policy.name // empty' /tmp/alert.json)"
           DISPLAY_NAME="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/alert.json)"
-
           test -n "$STATE"
           test -n "$OPEN_TIME"
           test "$POLICY" = "$POLICY_NAME"
           [[ "$OPEN_TIME" == "$EXPECTED_OPEN_TIME_PREFIX"* ]]
 
           CLOSED=false
-          if [[ "$STATE" == CLOSED ]]; then
-            test -n "$CLOSE_TIME"
-            CLOSED=true
-          fi
+          if [[ "$STATE" == CLOSED ]]; then test -n "$CLOSE_TIME"; CLOSED=true; fi
 
           mkdir -p "$(dirname "$RESULT_PATH")"
           jq -n \
-            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg project "$PROJECT_ID" \
-            --arg projectNumber "$PROJECT_NUMBER" \
-            --arg alertId "$ALERT_ID" \
-            --arg state "$STATE" \
-            --arg openTime "$OPEN_TIME" \
-            --arg closeTime "$CLOSE_TIME" \
-            --arg policyName "$POLICY" \
-            --arg policyDisplayName "$DISPLAY_NAME" \
-            --argjson closed "$CLOSED" \
-            '{
-              schemaVersion:"toca.staging.synthetic-incident-readback.v1",
-              observedAt:$observedAt,
-              project:$project,
-              projectNumber:$projectNumber,
-              alertId:$alertId,
-              state:$state,
-              openTime:$openTime,
-              closeTime:(if $closeTime=="" then null else $closeTime end),
-              policy:{name:$policyName,displayName:$policyDisplayName},
-              exactSyntheticIncidentMatched:true,
-              recoveryClosureObserved:$closed,
-              productionMutation:false,
-              providerMutation:false,
-              databaseMutation:false,
-              backupMutation:false,
-              drRestore:false,
-              trafficMutation:false,
-              cloudRunMutation:false,
-              secretMutation:false
-            }' > "$RESULT_PATH"
-
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" \
+            --arg alertId "$ALERT_ID" --arg state "$STATE" --arg openTime "$OPEN_TIME" --arg closeTime "$CLOSE_TIME" \
+            --arg policyName "$POLICY" --arg policyDisplayName "$DISPLAY_NAME" --arg sequence "$READBACK_SEQUENCE" --argjson closed "$CLOSED" \
+            '{schemaVersion:"toca.staging.synthetic-incident-readback.v1",observedAt:$observedAt,readbackSequence:$sequence,project:$project,projectNumber:$projectNumber,alertId:$alertId,state:$state,openTime:$openTime,closeTime:(if $closeTime=="" then null else $closeTime end),policy:{name:$policyName,displayName:$policyDisplayName},exactSyntheticIncidentMatched:true,recoveryClosureObserved:$closed,manualCloseExecuted:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false}' > "$RESULT_PATH"
           echo "SYNTHETIC_INCIDENT_STATE=${STATE}"
-          echo "SYNTHETIC_INCIDENT_OPEN_TIME=${OPEN_TIME}"
           echo "SYNTHETIC_INCIDENT_CLOSE_TIME=${CLOSE_TIME:-none}"
           echo "SYNTHETIC_INCIDENT_CLOSURE_OBSERVED=${CLOSED}"
-          echo 'STAGING_SYNTHETIC_INCIDENT_READBACK=PASS'
 
       - name: Commit sanitized incident readback
         shell: bash
@@ -136,5 +98,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$RESULT_PATH"
           git diff --cached --quiet && exit 0
-          git commit -m 'ops(reliability): publish synthetic incident readback'
+          git commit -m 'ops(reliability): publish synthetic incident readback sequence 2'
           git push origin HEAD:ops/staging-synthetic-incident-readback-20260822
