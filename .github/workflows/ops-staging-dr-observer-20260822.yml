@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve exact V8 authorized staging DR run
+      - name: Resolve exact V9 authorized staging DR run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -22,9 +22,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          RUNS="$(gh run list --repo "$GH_REPO" --workflow 'Ops Authorized Staging DR Least Privilege V8 2026-08-22' --branch 'ops/staging-dr-authorized-20260822' --event push --limit 10 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$RUNS" | jq -e --arg sha '8b25a093487c69de757da61b00e0aac2dcda1969' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          MATCH="$(echo "$RUNS" | jq -r --arg sha '8b25a093487c69de757da61b00e0aac2dcda1969' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          RUNS="$(gh run list --repo "$GH_REPO" --workflow 'Ops Authorized Staging DR Least Privilege V9 2026-08-22' --branch 'ops/staging-dr-authorized-20260822' --event push --limit 10 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
+          echo "$RUNS" | jq -e --arg sha '22b40bd28b08053c70ca99180816e8e0440a1d20' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '22b40bd28b08053c70ca99180816e8e0440a1d20' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
           IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
           test -n "$RUN_ID"
-          echo "DR_LP_V8_RUN_ID=$RUN_ID DR_LP_V8_STATUS=$RUN_STATUS DR_LP_V8_CONCLUSION=$RUN_CONCLUSION DR_LP_V8_URL=$RUN_URL"
+          echo "DR_LP_V9_RUN_ID=$RUN_ID DR_LP_V9_STATUS=$RUN_STATUS DR_LP_V9_CONCLUSION=$RUN_CONCLUSION DR_LP_V9_URL=$RUN_URL"
