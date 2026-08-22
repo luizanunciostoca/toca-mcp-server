@@ -76,10 +76,7 @@
       "providerVerified": false,
       "productionVerified": false,
       "driveOperationalChannelCapabilityRowsPresent": true,
-      "existingCanonicalNurtureAuthorities": [
-        "sales.followup.create",
-        "sales.followup.schedule"
-      ],
+      "existingCanonicalNurtureAuthorities": ["sales.followup.create", "sales.followup.schedule"],
       "blockers": [
         "real SendGrid provider binding/send/readback evidence pending",
         "real WhatsApp provider binding/send/readback evidence pending"
