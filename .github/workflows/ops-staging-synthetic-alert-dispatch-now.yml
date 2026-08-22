@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          echo 'REDISPATCH_REASON=policy_propagation_window_elapsed'
           DISPATCH_URL="$(gh workflow run staging-synthetic-alert.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
