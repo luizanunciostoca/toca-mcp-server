@@ -65,7 +65,8 @@ class MemoryRecoveryStore implements DeadLetterRecoveryStore {
     this.record = record;
   }
 
-  put(_record: DeadLetterRecord): Promise<void> {
+  put(record: DeadLetterRecord): Promise<void> {
+    void record;
     return Promise.resolve();
   }
 
