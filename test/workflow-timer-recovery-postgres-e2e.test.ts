@@ -150,9 +150,9 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       expect(
         await store2.fireDueTimers({ now: '2030-01-02T10:09:59.000Z', limit: 100 }),
       ).not.toContain(timerId);
-      expect(
-        await store2.fireDueTimers({ now: '2030-01-02T10:10:00.000Z', limit: 100 }),
-      ).toContain(timerId);
+      expect(await store2.fireDueTimers({ now: '2030-01-02T10:10:00.000Z', limit: 100 })).toContain(
+        timerId,
+      );
       const snapshot = await store2.get(definition.workflowId);
       expect(snapshot?.timers[0]?.status).toBe('FIRED');
       const timerFiredEvents = snapshot?.events.filter(
