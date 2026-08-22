@@ -18,8 +18,10 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation', () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const tenants = [`tenant-a-${suffix}`, `tenant-b-${suffix}`, `tenant-c-${suffix}`] as const;
     const [tenantA, tenantB, tenantC] = tenants;
-    const schedulers = tenants.map((tenantId) => new PostgresScheduler(pool, tenantId));
-    const [schedulerA, schedulerB, schedulerC] = schedulers;
+    const schedulerA = new PostgresScheduler(pool, tenantA);
+    const schedulerB = new PostgresScheduler(pool, tenantB);
+    const schedulerC = new PostgresScheduler(pool, tenantC);
+    const schedulers = [schedulerA, schedulerB, schedulerC] as const;
     const createdIds: string[] = [];
 
     try {

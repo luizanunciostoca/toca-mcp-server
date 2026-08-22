@@ -212,7 +212,7 @@ describe('Instagram direct publication Core runtime', () => {
 
   it('marks TOCA-managed reschedule as a validated side-effect binding', () => {
     const scheduler = new TocaManagedInstagramScheduler(new InMemoryScheduler());
-    const binding = createRuntimeCapabilityResolver({ instagramScheduler: scheduler })(
+    const binding = createRuntimeCapabilityResolver({ instagramScheduler: () => scheduler })(
       'instagram.toca_schedule.reschedule',
     );
     expect(binding).toBeDefined();
