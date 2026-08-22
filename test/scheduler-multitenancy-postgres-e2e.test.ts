@@ -77,7 +77,9 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation without schema mutat
       // Adversarial attempt 2: cross-tenant list.
       expect((await schedulerA.list(TOOL)).map((job) => job.id)).toEqual([aFutureId]);
       // Adversarial attempt 3: cross-tenant reschedule.
-      expect(await schedulerA.reschedule(bFutureId, '2099-02-01T00:00:00.000Z', 'UTC')).toBeUndefined();
+      expect(
+        await schedulerA.reschedule(bFutureId, '2099-02-01T00:00:00.000Z', 'UTC'),
+      ).toBeUndefined();
       expect(await schedulerB.get(bFutureId)).toMatchObject({ runAt: '2099-01-01T00:00:00.000Z' });
       // Adversarial attempt 4: cross-tenant cancel.
       expect(await schedulerA.cancel(bFutureId)).toBeUndefined();
@@ -176,7 +178,10 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation without schema mutat
       expect(concurrentClaims.flat().map((job) => job.id)).toEqual([concurrencyId]);
       expect(bRunning.tenantId).toBe(tenantB);
     } finally {
-      await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [ids]);
+      await pool.query(
+        'delete from dead_letter_jobs where original_job_id = any($1::text[])',
+        [ids],
+      );
       await pool.query('delete from scheduled_jobs where id = any($1::text[])', [ids]);
       await pool.query('delete from tenants where tenant_id = any($1::text[])', [
         [tenantA, tenantB],
