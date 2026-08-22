@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "operation": "staging-runtime-observability-bootstrap",
   "projectId": "toca-mcp-next-staging",
   "projectNumber": "729069789107",
@@ -18,7 +18,9 @@
     "period": "300s",
     "timeout": "10s",
     "useSsl": true,
-    "port": 443
+    "port": 443,
+    "authentication": "MONITORING_SERVICE_AGENT_OIDC",
+    "requireObservedPass": true
   },
   "requiredIamRoles": [
     "roles/run.viewer",
@@ -36,6 +38,7 @@
     "secretMutation": true,
     "serviceAccountKey": true,
     "projectOwner": true,
-    "projectEditor": true
+    "projectEditor": true,
+    "publicWebhookExposure": true
   }
 }
