@@ -1,10 +1,7 @@
 import type { AuditSink } from '../core/audit.js';
 import type { ExecutionIdentity } from '../core/identity.js';
 import type { CoreCapabilityGateway } from '../orchestrator/contracts.js';
-import type {
-  DeadLetterRecoveryStore,
-  DurableDeadLetterRecord,
-} from './postgres-dead-letter.js';
+import type { DeadLetterRecoveryStore, DurableDeadLetterRecord } from './postgres-dead-letter.js';
 
 export interface DeadLetterRecoveryDependencies {
   readonly store: DeadLetterRecoveryStore;
@@ -91,9 +88,7 @@ export class DeadLetterRecoveryService {
         evidence: [
           ...evidence,
           `dead-letter:core-execution:${execution.executionId}`,
-          ...(execution.providerReadbackVerified
-            ? ['dead-letter:provider-readback-verified']
-            : []),
+          ...(execution.providerReadbackVerified ? ['dead-letter:provider-readback-verified'] : []),
         ],
         now: this.#now().toISOString(),
       });
