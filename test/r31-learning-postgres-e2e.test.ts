@@ -11,7 +11,7 @@ import { runWorkerBatch } from '../src/worker/worker-runtime.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const postgresDescribe = DATABASE_URL ? describe : describe.skip;
-const TENANT_ID = 'tenant-r31';
+const TENANT_ID = 'toca';
 
 function databaseUrl(): string {
   if (!DATABASE_URL) throw new Error('R31_DATABASE_URL_REQUIRED');
