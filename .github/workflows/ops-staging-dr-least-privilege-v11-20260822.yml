@@ -1,4 +1,4 @@
-name: Ops Authorized Staging DR Least Privilege V11 2026-08-22
+name: Ops Authorized Staging DR Least Privilege V12 2026-08-22
 
 on:
   push:
@@ -31,7 +31,7 @@ env:
   BOOTSTRAP_SCRIPT: ops/staging-dr-bootstrap-v5-20260822.sh
   HARNESS_SCRIPT: ops/staging-dr-least-privilege-v3-20260822.sh
   GCLOUD_SHIM: ops/gcloud-dr-shim-v9-20260822.sh
-  PSQL_SHIM: ops/psql-retry-shim-v11-20260822.sh
+  PSQL_SHIM: ops/psql-retry-shim-v12-20260822.sh
 
 jobs:
   syntax-boundary:
@@ -57,12 +57,15 @@ jobs:
           grep -Fq 'DR_LP_V9_REST_CLONE_ACCEPTED=PASS' "$GCLOUD_SHIM"
           grep -Fq -- '--impersonate-service-account=' "$GCLOUD_SHIM"
           grep -Fq 'run_with_409_retry set_password' "$GCLOUD_SHIM"
-          grep -Fq 'DR_LP_V11_DB_DISCOVERY_INCLUDE_POSTGRES_EXCLUDE_CLOUDSQLADMIN=PASS' "$PSQL_SHIM"
-          grep -Fq 'DR_LP_V11_APP_DB_SELECTION_BY_SCHEMA_MIGRATIONS=PASS' "$PSQL_SHIM"
+          grep -Fq 'DR_LP_V12_DB_DISCOVERY_INCLUDE_POSTGRES_EXCLUDE_CLOUDSQLADMIN=PASS' "$PSQL_SHIM"
+          grep -Fq 'DR_LP_V12_APP_DB_SELECTION_BY_SCHEMA_MIGRATIONS=PASS' "$PSQL_SHIM"
+          grep -Fq 'DR_LP_V12_APP_TABLE_OWNER_AUTH=PASS' "$PSQL_SHIM"
+          grep -Fq 'pg_get_userbyid(c.relowner)' "$PSQL_SHIM"
+          grep -Fq 'grants_changed=false' "$PSQL_SHIM"
           grep -Fq "datname <> 'cloudsqladmin'" "$PSQL_SHIM"
           grep -Fq '033_omnichannel_prepared_content.sql' "$HARNESS_SCRIPT"
           grep -Fq '! grep -Eq '\''^027_'\'' dr-v3-evidence/restored-migrations.txt' "$HARNESS_SCRIPT"
-          echo 'DR_LP_V11_SYNTAX_BOUNDARY=PASS'
+          echo 'DR_LP_V12_SYNTAX_BOUNDARY=PASS'
 
   bootstrap:
     needs: syntax-boundary
@@ -114,14 +117,14 @@ jobs:
           set -euo pipefail
           REAL_GCLOUD="$(command -v gcloud)"
           test -x "$REAL_GCLOUD"
-          mkdir -p /tmp/dr-v11-bin
-          cp "harness/${GCLOUD_SHIM}" /tmp/dr-v11-bin/gcloud
-          cp "harness/${PSQL_SHIM}" /tmp/dr-v11-bin/psql
-          chmod 0755 /tmp/dr-v11-bin/gcloud /tmp/dr-v11-bin/psql
+          mkdir -p /tmp/dr-v12-bin
+          cp "harness/${GCLOUD_SHIM}" /tmp/dr-v12-bin/gcloud
+          cp "harness/${PSQL_SHIM}" /tmp/dr-v12-bin/psql
+          chmod 0755 /tmp/dr-v12-bin/gcloud /tmp/dr-v12-bin/psql
           echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
           echo 'REAL_PSQL=/usr/bin/psql' >> "$GITHUB_ENV"
-          echo '/tmp/dr-v11-bin' >> "$GITHUB_PATH"
-          echo 'DR_LP_V11_SHIMS_INSTALLED=PASS'
+          echo '/tmp/dr-v12-bin' >> "$GITHUB_PATH"
+          echo 'DR_LP_V12_SHIMS_INSTALLED=PASS'
       - name: Execute isolated PITR and validate candidate state
         shell: bash
         run: bash "harness/${HARNESS_SCRIPT}" drill candidate
@@ -129,11 +132,15 @@ jobs:
         if: always()
         shell: bash
         run: bash "harness/${HARNESS_SCRIPT}" manifest candidate
+      - name: Scrub temporary cloned-login credential
+        if: always()
+        shell: bash
+        run: rm -f /tmp/dr-v12-app-owner /tmp/dr-v12-app-db /tmp/dr-v12-app-owner-password
       - name: Upload sanitized DR evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: staging-dr-lp-v11-${{ github.run_id }}
+          name: staging-dr-lp-v12-${{ github.run_id }}
           path: dr-v3-evidence
           if-no-files-found: error
           retention-days: 90
@@ -159,11 +166,11 @@ jobs:
         run: |
           set -euo pipefail
           REAL_GCLOUD="$(command -v gcloud)"
-          mkdir -p /tmp/dr-v11-bin
-          cp "$GCLOUD_SHIM" /tmp/dr-v11-bin/gcloud
-          chmod 0755 /tmp/dr-v11-bin/gcloud
+          mkdir -p /tmp/dr-v12-bin
+          cp "$GCLOUD_SHIM" /tmp/dr-v12-bin/gcloud
+          chmod 0755 /tmp/dr-v12-bin/gcloud
           echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
-          echo '/tmp/dr-v11-bin' >> "$GITHUB_PATH"
+          echo '/tmp/dr-v12-bin' >> "$GITHUB_PATH"
       - name: Delete only temporary target
         shell: bash
         run: bash "$HARNESS_SCRIPT" cleanup-target
@@ -191,11 +198,11 @@ jobs:
         run: |
           set -euo pipefail
           REAL_GCLOUD="$(command -v gcloud)"
-          mkdir -p /tmp/dr-v11-bin
-          cp "$GCLOUD_SHIM" /tmp/dr-v11-bin/gcloud
-          chmod 0755 /tmp/dr-v11-bin/gcloud
+          mkdir -p /tmp/dr-v12-bin
+          cp "$GCLOUD_SHIM" /tmp/dr-v12-bin/gcloud
+          chmod 0755 /tmp/dr-v12-bin/gcloud
           echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
-          echo '/tmp/dr-v11-bin' >> "$GITHUB_PATH"
+          echo '/tmp/dr-v12-bin' >> "$GITHUB_PATH"
       - name: Fallback cleanup and remove temporary IAM
         shell: bash
         run: bash "$HARNESS_SCRIPT" cleanup-iam
@@ -220,4 +227,4 @@ jobs:
           test "$C" = success
           test "$D" = success
           test "$E" = success
-          echo 'AUTHORIZED_STAGING_DR_LP_V11=PASS'
+          echo 'AUTHORIZED_STAGING_DR_LP_V12=PASS'
