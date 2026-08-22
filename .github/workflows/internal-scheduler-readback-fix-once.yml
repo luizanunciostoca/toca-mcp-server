@@ -1,0 +1,124 @@
+name: Internal scheduler readback fix once
+
+on:
+  push:
+    branches:
+      - 'fix/tenant-scoped-scheduler-dlq-clean-20260822'
+    paths:
+      - '.github/workflows/internal-scheduler-readback-fix-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/tenant-scoped-scheduler-dlq-clean-20260822
+          fetch-depth: 0
+      - name: Bind scheduler results to authenticated tenant
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/mcp/runtime-capability-resolver.ts')
+          source = path.read_text()
+
+          replacements = [
+            (
+              """            (input, context) => schedulerForContext(services, context).schedule(input),""",
+              """            async (input, context) =>
+              bindSchedulerResultTenant(
+                await schedulerForContext(services, context).schedule(input),
+                context,
+              ),""",
+            ),
+            (
+              """            (input, context) =>
+              executeIdempotentReschedule(schedulerForContext(services, context), input),""",
+              """            async (input, context) =>
+              bindSchedulerResultTenant(
+                await executeIdempotentReschedule(schedulerForContext(services, context), input),
+                context,
+              ),""",
+            ),
+            (
+              """            (input, context) => schedulerForContext(services, context).cancel(input.jobId),""",
+              """            async (input, context) => {
+              const result = await schedulerForContext(services, context).cancel(input.jobId);
+              return result ? bindSchedulerResultTenant(result, context) : undefined;
+            },""",
+            ),
+          ]
+          for before, after in replacements:
+            count = source.count(before)
+            if count != 1:
+              raise SystemExit(f'PATCH_PRECONDITION_COUNT={count}: {before[:80]}')
+            source = source.replace(before, after, 1)
+
+          before_helper = """function schedulerForContext(
+  services: RuntimeCapabilityServices,
+  context: CoreCapabilityRuntimeContext | undefined,
+): TocaManagedInstagramScheduler {
+  const tenantId = context?.identity.principal.tenantId?.trim();
+  if (!tenantId) throw new Error('SCHEDULER_RUNTIME_TENANT_CONTEXT_REQUIRED');
+  const resolve = services.instagramScheduler;
+  if (!resolve) throw new Error('SCHEDULER_RUNTIME_UNAVAILABLE');
+  return resolve(tenantId);
+}
+"""
+          after_helper = """function schedulerTenantId(context: CoreCapabilityRuntimeContext | undefined): string {
+  const tenantId = context?.identity.principal.tenantId?.trim();
+  if (!tenantId) throw new Error('SCHEDULER_RUNTIME_TENANT_CONTEXT_REQUIRED');
+  return tenantId;
+}
+
+function schedulerForContext(
+  services: RuntimeCapabilityServices,
+  context: CoreCapabilityRuntimeContext | undefined,
+): TocaManagedInstagramScheduler {
+  const tenantId = schedulerTenantId(context);
+  const resolve = services.instagramScheduler;
+  if (!resolve) throw new Error('SCHEDULER_RUNTIME_UNAVAILABLE');
+  return resolve(tenantId);
+}
+
+function bindSchedulerResultTenant<T extends { readonly tenantId?: string }>(
+  result: T,
+  context: CoreCapabilityRuntimeContext | undefined,
+): T & { readonly tenantId: string } {
+  const tenantId = schedulerTenantId(context);
+  const persistedTenantId = result.tenantId?.trim();
+  if (persistedTenantId && persistedTenantId !== tenantId) {
+    throw new Error('SCHEDULER_RUNTIME_TENANT_RESULT_MISMATCH');
+  }
+  return persistedTenantId ? (result as T & { readonly tenantId: string }) : { ...result, tenantId };
+}
+"""
+          if source.count(before_helper) != 1:
+            raise SystemExit('SCHEDULER_HELPER_PRECONDITION_FAILED')
+          path.write_text(source.replace(before_helper, after_helper, 1))
+          PY
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --write src/mcp/runtime-capability-resolver.ts
+      - run: pnpm typecheck
+      - run: pnpm exec vitest run test/m-found-12-core-facade-e2e.test.ts test/instagram-core-publication-runtime.test.ts
+      - name: Commit readback invariant fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'toca-os-internal-acceptance'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/mcp/runtime-capability-resolver.ts
+          git diff --cached --check
+          git commit -m 'fix(tenancy): bind scheduler readback to execution tenant'
+          git push origin HEAD:fix/tenant-scoped-scheduler-dlq-clean-20260822
