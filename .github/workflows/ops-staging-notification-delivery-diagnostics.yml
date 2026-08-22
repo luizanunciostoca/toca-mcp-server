@@ -18,6 +18,8 @@ jobs:
       PROJECT_ID: toca-mcp-next-staging
       PROJECT_NUMBER: '729069789107'
       PRODUCTION_PROJECT_ID: toca-mcp-production
+      REGION: southamerica-east1
+      WEBHOOK_SERVICE: toca-webhook-next-staging
       STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
       STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
       SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
@@ -52,46 +54,39 @@ jobs:
           test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
           echo 'STAGING_NOTIFICATION_DIAGNOSTIC_IDENTITY=PASS'
 
+      - name: Probe exact webhook public health routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          test -n "$SERVICE_URL"
+          HOST="${SERVICE_URL#https://}"
+          HOST="${HOST%/}"
+          [[ "$HOST" != *'/'* ]]
+          HEALTHZ_STATUS="$(curl --silent --show-error --output /tmp/healthz --write-out '%{http_code}' "https://${HOST}/healthz")"
+          READYZ_STATUS="$(curl --silent --show-error --output /tmp/readyz --write-out '%{http_code}' "https://${HOST}/readyz")"
+          ROOT_STATUS="$(curl --silent --show-error --output /tmp/root --write-out '%{http_code}' "https://${HOST}/")"
+          echo "WEBHOOK_HOST=${HOST}"
+          echo "WEBHOOK_HEALTHZ_HTTP=${HEALTHZ_STATUS}"
+          echo "WEBHOOK_READYZ_HTTP=${READYZ_STATUS}"
+          echo "WEBHOOK_ROOT_HTTP=${ROOT_STATUS}"
+          echo "WEBHOOK_HEALTHZ_BODY_SHA256=$(sha256sum /tmp/healthz | awk '{print $1}')"
+          echo "WEBHOOK_READYZ_BODY_SHA256=$(sha256sum /tmp/readyz | awk '{print $1}')"
+          echo 'STAGING_WEBHOOK_ROUTE_DIAGNOSTIC=PASS'
+
       - name: Read notification-channel events and synthetic signal
         shell: bash
         run: |
           set -euo pipefail
           CHANNEL_FILTER='resource.type="stackdriver_notification_channel" AND logName="projects/toca-mcp-next-staging/logs/monitoring.googleapis.com%2Fnotification_channel_events"'
-          gcloud logging read "$CHANNEL_FILTER" \
-            --project="$PROJECT_ID" \
-            --freshness=3h \
-            --limit=100 \
-            --format=json > /tmp/channel-events.json
-
+          gcloud logging read "$CHANNEL_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=100 --format=json > /tmp/channel-events.json
           SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
-          gcloud logging read "$SYNTHETIC_FILTER" \
-            --project="$PROJECT_ID" \
-            --freshness=3h \
-            --limit=20 \
-            --format=json > /tmp/synthetic.json
-
-          jq '[.[] | {
-            timestamp,
-            severity,
-            channelResource:(.resource.labels.notification_channel_id // .resource.labels.channel_id // .resource.labels.channel_name // null),
-            httpStatus:(.httpRequest.status // .jsonPayload.httpStatus // .jsonPayload.status // null),
-            summary:((.textPayload // .jsonPayload.message // .jsonPayload.summary // .jsonPayload.error // "") | tostring
-              | gsub("https?://[^ ]+";"<redacted-url>")
-              | gsub("auth_token=[^& ]+";"auth_token=<redacted>"))
-          }]' /tmp/channel-events.json > /tmp/channel-events-sanitized.json
-
-          TOTAL_EVENTS="$(jq 'length' /tmp/channel-events-sanitized.json)"
-          ERROR_EVENTS="$(jq '[.[] | select(.severity == "ERROR" or .severity == "CRITICAL" or .severity == "ALERT" or .severity == "EMERGENCY")] | length' /tmp/channel-events-sanitized.json)"
+          gcloud logging read "$SYNTHETIC_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=20 --format=json > /tmp/synthetic.json
+          TOTAL_EVENTS="$(jq 'length' /tmp/channel-events.json)"
           SYNTHETIC_COUNT="$(jq 'length' /tmp/synthetic.json)"
           SYNTHETIC_LATEST="$(jq -r 'sort_by(.timestamp) | last | .timestamp // "none"' /tmp/synthetic.json)"
-
           echo "NOTIFICATION_CHANNEL_EVENT_COUNT=${TOTAL_EVENTS}"
-          echo "NOTIFICATION_CHANNEL_ERROR_COUNT=${ERROR_EVENTS}"
           echo "SYNTHETIC_SIGNAL_COUNT=${SYNTHETIC_COUNT}"
           echo "SYNTHETIC_SIGNAL_LATEST=${SYNTHETIC_LATEST}"
-          echo 'SANITIZED_NOTIFICATION_CHANNEL_EVENTS_BEGIN'
-          cat /tmp/channel-events-sanitized.json
-          echo 'SANITIZED_NOTIFICATION_CHANNEL_EVENTS_END'
-
           test "$SYNTHETIC_COUNT" -ge 1
           echo 'STAGING_NOTIFICATION_DELIVERY_DIAGNOSTIC_READ=PASS'
