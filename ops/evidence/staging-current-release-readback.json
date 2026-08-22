@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "toca.staging.current-release-readback.v1",
+  "observedAt": "2026-08-22T08:55:58Z",
+  "project": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "expectedMainSha": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
+  "mcp": {
+    "releaseSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+    "revision": "toca-mcp-next-staging-mcp-75c165a-r3",
+    "serviceAccount": "toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com",
+    "image": "southamerica-east1-docker.pkg.dev/toca-mcp-next-staging/toca-mcp-staging/server@sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250",
+    "traffic": [
+      {
+        "revisionName": "toca-mcp-next-staging-mcp-75c165a-32520233707",
+        "percent": 0,
+        "latestRevision": false
+      },
+      {
+        "revisionName": "toca-mcp-next-staging-mcp-75c165a-r1",
+        "percent": 0,
+        "latestRevision": false
+      },
+      {
+        "revisionName": "toca-mcp-next-staging-mcp-75c165a-r2",
+        "percent": 0,
+        "latestRevision": false
+      },
+      {
+        "revisionName": "toca-mcp-next-staging-mcp-75c165a-r3",
+        "percent": 100,
+        "latestRevision": false
+      },
+      {
+        "revisionName": "toca-mcp-next-staging-mcp-7db1a6e-46",
+        "percent": 0,
+        "latestRevision": false
+      }
+    ],
+    "mainMatch": false
+  },
+  "webhook": {
+    "releaseSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+    "revision": "toca-webhook-next-staging-webhook-75c165a-f1",
+    "serviceAccount": "toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com",
+    "image": "southamerica-east1-docker.pkg.dev/toca-mcp-next-staging/toca-mcp-staging/server@sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250",
+    "traffic": [
+      {
+        "revisionName": "toca-webhook-next-staging-webhook-75c165a-32520233707",
+        "percent": 0,
+        "latestRevision": false
+      },
+      {
+        "revisionName": "toca-webhook-next-staging-webhook-75c165a-f1",
+        "percent": 100,
+        "latestRevision": false
+      }
+    ],
+    "mainMatch": false
+  },
+  "runtimeReleaseAgreement": true,
+  "currentMainFullyServed": false,
+  "productionMutation": false,
+  "providerMutation": false,
+  "databaseMutation": false,
+  "backupMutation": false,
+  "drRestore": false,
+  "trafficMutation": false,
+  "cloudRunMutation": false,
+  "secretMutation": false
+}
