@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve least-privilege authorized staging DR run
+      - name: Resolve least-privilege V2 authorized staging DR run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -24,13 +24,13 @@ jobs:
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           RUNS="$(gh run list \
             --repo "$GH_REPO" \
-            --workflow 'Ops Authorized Staging DR Least Privilege 2026-08-22' \
+            --workflow 'Ops Authorized Staging DR Least Privilege V2 2026-08-22' \
             --branch 'ops/staging-dr-authorized-20260822' \
             --event push \
             --limit 10 \
             --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$RUNS" | jq -e --arg sha 'a6f5d3bcb4be3f57e020b25e5e5a6dcf8dc9b7fb' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          MATCH="$(echo "$RUNS" | jq -r --arg sha 'a6f5d3bcb4be3f57e020b25e5e5a6dcf8dc9b7fb' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          echo "$RUNS" | jq -e --arg sha '0aba36ed3e06bb231ee2aa124ee324e16f548a9a' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '0aba36ed3e06bb231ee2aa124ee324e16f548a9a' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
           IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
           test -n "$RUN_ID"
-          echo "DR_LP_RUN_ID=$RUN_ID DR_LP_STATUS=$RUN_STATUS DR_LP_CONCLUSION=$RUN_CONCLUSION DR_LP_URL=$RUN_URL"
+          echo "DR_LP_V2_RUN_ID=$RUN_ID DR_LP_V2_STATUS=$RUN_STATUS DR_LP_V2_CONCLUSION=$RUN_CONCLUSION DR_LP_V2_URL=$RUN_URL"
