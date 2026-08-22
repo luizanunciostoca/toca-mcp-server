@@ -64,7 +64,9 @@ class FaultStore implements EventOutboxStore {
     }
   }
 
-  enqueue(_client: pg.PoolClient, _event: DomainEventEnvelope): Promise<void> {
+  enqueue(client: pg.PoolClient, envelope: DomainEventEnvelope): Promise<void> {
+    void client;
+    void envelope;
     return Promise.resolve();
   }
 
@@ -204,14 +206,14 @@ describe('Outbox fault injection', () => {
     const logicalEffects = new Set<string>();
     let deliveries = 0;
     const transport: EventTransport = {
-      async deliver(record) {
+      deliver(record) {
         deliveries += 1;
         const firstLogicalApplication = !logicalEffects.has(record.eventId);
         logicalEffects.add(record.eventId);
         if (deliveries === 1 && firstLogicalApplication) {
-          throw new Error('LOST_ACK_AFTER_LOGICAL_EFFECT');
+          return Promise.reject(new Error('LOST_ACK_AFTER_LOGICAL_EFFECT'));
         }
-        return { evidence: [`fake-transport:dedup:${record.eventId}`] };
+        return Promise.resolve({ evidence: [`fake-transport:dedup:${record.eventId}`] });
       },
     };
     const worker = dispatcher(store, transport);
