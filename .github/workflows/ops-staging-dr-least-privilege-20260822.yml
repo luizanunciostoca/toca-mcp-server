@@ -1,0 +1,519 @@
+name: Ops Authorized Staging DR Least Privilege 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-least-privilege-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-staging-dr-least-privilege-20260822
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  CANDIDATE_SHA: 75c165a044c6e79e9545328dd04a2a3e73d2e910
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_SA_ID: toca-next-dr-${{ github.run_id }}
+  DR_SA_EMAIL: toca-next-dr-${{ github.run_id }}@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr${{ github.run_id }}
+  TARGET_INSTANCE: toca-next-lp-pitr-${{ github.run_id }}
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    steps:
+      - name: Verify immutable authorization boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-dr-authorized-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$CANDIDATE_SHA" = '75c165a044c6e79e9545328dd04a2a3e73d2e910'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$DR_SA_ID" == toca-next-dr-* ]]
+          [[ "$DR_SA_EMAIL" == toca-next-dr-*"@toca-mcp-next-staging.iam.gserviceaccount.com" ]]
+          [[ "$DR_ROLE_ID" == tocaNextDr* ]]
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          echo 'DR_LP_AUTHORIZATION_BOUNDARY=PASS'
+
+      - name: Authenticate infrastructure administrator for staging IAM only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Preflight exact staging source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-preflight.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '
+            .project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and
+            .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and
+            .settings.backupConfiguration.enabled==true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and
+            (.settings.backupConfiguration.transactionLogRetentionDays // 0)>=7 and
+            (.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0)>=7
+          ' /tmp/source-preflight.json >/dev/null
+          echo 'DR_LP_SOURCE_PREFLIGHT=PASS'
+
+      - name: Grant temporary custom-role administration to infra admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${INFRA_ADMIN_SA}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" \
+            --role='roles/iam.roleAdmin' \
+            --condition=None \
+            --quiet
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg member "$MEMBER" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null
+          echo 'DR_LP_ROLEADMIN_TEMP_GRANT=PASS'
+
+      - name: Create ephemeral DR service account and exact custom role
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo 'Ephemeral DR service account unexpectedly already exists' >&2
+            exit 1
+          fi
+          gcloud iam service-accounts create "$DR_SA_ID" \
+            --project="$PROJECT_ID" \
+            --display-name='TOCA Next temporary isolated DR' \
+            --description="Temporary DR identity for GitHub run ${GITHUB_RUN_ID} only"
+
+          PERMISSIONS='cloudsql.instances.clone,cloudsql.instances.connect,cloudsql.instances.delete,cloudsql.instances.get,cloudsql.instances.update,cloudsql.operations.get,cloudsql.users.list,cloudsql.users.update,resourcemanager.projects.get,serviceusage.services.use'
+          gcloud iam roles create "$DR_ROLE_ID" \
+            --project="$PROJECT_ID" \
+            --title='TOCA Next isolated DR least privilege' \
+            --description="Temporary DR-only role for GitHub run ${GITHUB_RUN_ID}"
+            --permissions="$PERMISSIONS" \
+            --stage=GA \
+            --quiet
+          gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" --format=json > /tmp/dr-role.json
+          EXPECTED="$(tr ',' '\n' <<<"$PERMISSIONS" | sort)"
+          ACTUAL="$(jq -r '.includedPermissions[]' /tmp/dr-role.json | sort)"
+          test "$ACTUAL" = "$EXPECTED"
+          echo 'DR_LP_EPHEMERAL_IDENTITY_ROLE=PASS'
+
+      - name: Copy only canonical staging WIF impersonation binding to ephemeral DR identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts get-iam-policy "$STAGING_OPERATOR_SA" \
+            --project="$PROJECT_ID" --format=json > /tmp/source-wif-policy.json
+          jq -e '[.bindings[]? | select(.role=="roles/iam.workloadIdentityUser")] | length >= 1' /tmp/source-wif-policy.json >/dev/null
+          jq '{bindings:[.bindings[] | select(.role=="roles/iam.workloadIdentityUser")]}' /tmp/source-wif-policy.json > /tmp/dr-wif-policy.json
+          jq -e --arg pool 'projects/729069789107/locations/global/workloadIdentityPools/github-staging' '
+            (.bindings|length)>=1 and
+            all(.bindings[]; .role=="roles/iam.workloadIdentityUser") and
+            all(.bindings[].members[]; contains($pool))
+          ' /tmp/dr-wif-policy.json >/dev/null
+          gcloud iam service-accounts set-iam-policy "$DR_SA_EMAIL" /tmp/dr-wif-policy.json \
+            --project="$PROJECT_ID" --quiet >/tmp/dr-sa-policy-applied.txt
+          gcloud iam service-accounts get-iam-policy "$DR_SA_EMAIL" \
+            --project="$PROJECT_ID" --format=json > /tmp/dr-sa-policy-readback.json
+          jq -e --arg pool 'projects/729069789107/locations/global/workloadIdentityPools/github-staging' '
+            (.bindings|length)>=1 and
+            all(.bindings[]; .role=="roles/iam.workloadIdentityUser") and
+            all(.bindings[].members[]; contains($pool))
+          ' /tmp/dr-sa-policy-readback.json >/dev/null
+          echo 'DR_LP_WIF_BINDING=PASS'
+
+      - name: Bind exact DR custom role and reject broad roles on ephemeral identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          MEMBER="serviceAccount:${DR_SA_EMAIL}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" --role="$ROLE" --condition=None --quiet
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          jq -e --arg role "$ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null
+          for forbidden in roles/owner roles/editor roles/cloudsql.admin roles/run.admin roles/secretmanager.admin; do
+            if jq -e --arg role "$forbidden" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
+              echo "Forbidden broad role bound to ephemeral DR identity: $forbidden" >&2
+              exit 1
+            fi
+          done
+          sleep 15
+          echo 'DR_LP_PROJECT_BINDING=PASS'
+
+  drill:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact frozen application candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate migration inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort > /tmp/repo-migrations.txt
+          grep -Fxq '033_omnichannel_prepared_content.sql' /tmp/repo-migrations.txt
+          ! grep -Eq '^027_' /tmp/repo-migrations.txt
+          test "$(tail -n1 /tmp/repo-migrations.txt)" = '033_omnichannel_prepared_content.sql'
+          echo 'DR_LP_CANDIDATE_MIGRATION_INVENTORY=PASS'
+
+      - name: Authenticate ephemeral least-privilege staging DR identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read provider PITR window and select recovery point
+        id: recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dr-lp-evidence
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DR_SA_EMAIL"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > dr-lp-evidence/source-before.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18"' dr-lp-evidence/source-before.json >/dev/null
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime" \
+            > dr-lp-evidence/recovery-window.json
+          unset TOKEN
+          EARLIEST="$(jq -r '.earliestRecoveryTime' dr-lp-evidence/recovery-window.json)"
+          LATEST="$(jq -r '.latestRecoveryTime' dr-lp-evidence/recovery-window.json)"
+          test -n "$EARLIEST" && test "$EARLIEST" != null
+          test -n "$LATEST" && test "$LATEST" != null
+          REFERENCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REF_EPOCH="$(date -u -d "$REFERENCE" +%s)"
+          LATEST_EPOCH="$(date -u -d "$LATEST" +%s)"
+          EARLIEST_EPOCH="$(date -u -d "$EARLIEST" +%s)"
+          PROVIDER_LAG="$((REF_EPOCH-LATEST_EPOCH))"
+          SELECTED_EPOCH="$((LATEST_EPOCH-30))"
+          (( SELECTED_EPOCH >= EARLIEST_EPOCH ))
+          RPO_SECONDS="$((REF_EPOCH-SELECTED_EPOCH))"
+          (( PROVIDER_LAG >= 0 && PROVIDER_LAG <= 900 ))
+          (( RPO_SECONDS >= 0 && RPO_SECONDS <= 900 ))
+          RECOVERY_POINT="$(date -u -d "@${SELECTED_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
+          printf '%s\n' "$REFERENCE" > /tmp/reference-time
+          printf '%s\n' "$RECOVERY_POINT" > /tmp/recovery-point
+          printf '%s\n' "$RPO_SECONDS" > /tmp/rpo-seconds
+          printf '%s\n' "$PROVIDER_LAG" > /tmp/provider-lag-seconds
+          echo "recovery_point=$RECOVERY_POINT" >> "$GITHUB_OUTPUT"
+          echo "DR_LP_RECOVERY_WINDOW=PASS provider_lag_seconds=${PROVIDER_LAG} rpo_seconds=${RPO_SECONDS}"
+
+      - name: Clone staging source to isolated PITR target
+        env:
+          RECOVERY_POINT: ${{ steps.recovery.outputs.recovery_point }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo 'Target already exists before drill' >&2
+            exit 1
+          fi
+          RESTORE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '%s\n' "$RESTORE_STARTED" > /tmp/restore-started
+          gcloud sql instances clone "$SOURCE_INSTANCE" "$TARGET_INSTANCE" \
+            --project="$PROJECT_ID" \
+            --point-in-time="$RECOVERY_POINT" \
+            --quiet
+          for attempt in $(seq 1 90); do
+            STATE="$(gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format='value(state)' 2>/dev/null || true)"
+            if [[ "$STATE" == RUNNABLE ]]; then
+              TARGET_RUNNABLE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf '%s\n' "$TARGET_RUNNABLE" > /tmp/target-runnable
+              gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > dr-lp-evidence/target-runnable.json
+              jq -e --arg project "$PROJECT_ID" --arg region "$REGION" --arg target "$TARGET_INSTANCE" '.project==$project and .region==$region and .name==$target and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18"' dr-lp-evidence/target-runnable.json >/dev/null
+              echo 'DR_LP_PITR_TARGET_RUNNABLE=PASS'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for isolated PITR target RUNNABLE' >&2
+          exit 1
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+          psql --version
+
+      - name: Prepare clone-only validator credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASSWORD="$(openssl rand -base64 48 | tr -d '\n')"
+          echo "::add-mask::$PASSWORD"
+          printf '%s' "$PASSWORD" > /tmp/dr-validator-password
+          chmod 600 /tmp/dr-validator-password
+          gcloud sql users list --instance="$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-users.json
+          jq -e 'any(.[]?; .name=="postgres")' /tmp/target-users.json >/dev/null
+          gcloud sql users set-password postgres \
+            --instance="$TARGET_INSTANCE" \
+            --project="$PROJECT_ID" \
+            --password="$PASSWORD" \
+            --quiet >/dev/null
+          echo 'DR_LP_CLONE_ONLY_VALIDATOR_CREDENTIAL=PASS'
+
+      - name: Start verified Cloud SQL Auth Proxy for isolated target
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
+            --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          CONNECTION_NAME="$(gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format='value(connectionName)')"
+          test -n "$CONNECTION_NAME"
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "$CONNECTION_NAME" >/tmp/cloud-sql-proxy.log 2>&1 &
+          PROXY_PID=$!
+          echo "$PROXY_PID" > /tmp/cloud-sql-proxy.pid
+          for attempt in $(seq 1 30); do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+              echo 'DR_LP_CLOUD_SQL_PROXY_READY=PASS'
+              exit 0
+            fi
+            kill -0 "$PROXY_PID" 2>/dev/null || { cat /tmp/cloud-sql-proxy.log >&2; exit 1; }
+            sleep 1
+          done
+          cat /tmp/cloud-sql-proxy.log >&2
+          exit 1
+
+      - name: Validate migration 033 and durable Next recovery state
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$(cat /tmp/dr-validator-password)"
+          mapfile -t DBS < <(psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -Atqc "select datname from pg_database where datistemplate=false and datallowconn=true and datname <> 'postgres' order by datname")
+          test "${#DBS[@]}" -gt 0
+          APP_DB=''
+          for db in "${DBS[@]}"; do
+            HAS="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$db" -Atqc "select to_regclass('public.schema_migrations') is not null" 2>/dev/null || true)"
+            if [[ "$HAS" == t ]] && psql -h 127.0.0.1 -p 5432 -U postgres -d "$db" -Atqc "select 1 from schema_migrations where version='033_omnichannel_prepared_content.sql'" 2>/dev/null | grep -Fxq 1; then
+              test -z "$APP_DB" || { echo 'More than one application database contains migration 033' >&2; exit 1; }
+              APP_DB="$db"
+            fi
+          done
+          test -n "$APP_DB"
+          psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc 'select version from schema_migrations order by version' > dr-lp-evidence/restored-migrations.txt
+          diff -u /tmp/repo-migrations.txt dr-lp-evidence/restored-migrations.txt
+          ! grep -Eq '^027_' dr-lp-evidence/restored-migrations.txt
+          test "$(tail -n1 dr-lp-evidence/restored-migrations.txt)" = '033_omnichannel_prepared_content.sql'
+
+          REQUIRED_TABLES=(
+            schema_migrations tenants approval_records
+            workflow_instances workflow_steps workflow_timers workflow_events workflow_human_tasks workflow_compensations
+            event_outbox event_outbox_delivery_attempts event_consumer_receipts dead_letter_jobs
+            audit_ledger_events audit_ledger_heads operational_signals privacy_ledger_events
+            crm_conversations crm_messages event_records
+            ag01_conversations ag01_message_records ag01_runtime_circuits
+            email_dispatches email_provider_events whatsapp_dispatches whatsapp_provider_events
+            omnichannel_prepared_content
+          )
+          : > dr-lp-evidence/critical-table-counts.txt
+          for table in "${REQUIRED_TABLES[@]}"; do
+            EXISTS="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select to_regclass('public.${table}') is not null")"
+            test "$EXISTS" = t
+            COUNT="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from public.${table}")"
+            printf '%s=%s\n' "$table" "$COUNT" >> dr-lp-evidence/critical-table-counts.txt
+          done
+
+          INVALID_FKS="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from pg_constraint where contype='f' and not convalidated")"
+          test "$INVALID_FKS" = 0
+          for trigger in audit_ledger_events_append_only operational_signals_append_only privacy_ledger_no_update privacy_ledger_no_delete ag01_message_records_append_only whatsapp_provider_events_append_only; do
+            ENABLED="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from pg_trigger where tgname='${trigger}' and tgenabled <> 'D'")"
+            test "$ENABLED" = 1
+          done
+          PREPARED_COLUMNS="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from information_schema.columns where table_schema='public' and table_name='omnichannel_prepared_content' and column_name in ('prepared_content_ref','tenant_id','workspace_id','organization_id','content_kind','schema_version','payload','content_sha256','evidence','created_at')")"
+          test "$PREPARED_COLUMNS" = 10
+
+          VALIDATION_COMPLETED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RESTORE_STARTED="$(cat /tmp/restore-started)"
+          TARGET_RUNNABLE="$(cat /tmp/target-runnable)"
+          RTO_SECONDS="$(( $(date -u -d "$VALIDATION_COMPLETED" +%s) - $(date -u -d "$RESTORE_STARTED" +%s) ))"
+          RUNNABLE_SECONDS="$(( $(date -u -d "$TARGET_RUNNABLE" +%s) - $(date -u -d "$RESTORE_STARTED" +%s) ))"
+          RPO_SECONDS="$(cat /tmp/rpo-seconds)"
+          (( RTO_SECONDS >= 0 && RTO_SECONDS <= 3600 ))
+          (( RUNNABLE_SECONDS >= 0 && RUNNABLE_SECONDS <= 3600 ))
+          (( RPO_SECONDS >= 0 && RPO_SECONDS <= 900 ))
+          printf '%s\n' "$VALIDATION_COMPLETED" > /tmp/validation-completed
+          printf '%s\n' "$RTO_SECONDS" > /tmp/rto-seconds
+          printf '%s\n' "$RUNNABLE_SECONDS" > /tmp/runnable-seconds
+          unset PGPASSWORD
+          rm -f /tmp/dr-validator-password
+          echo "DR_LP_DATABASE_VALIDATION=PASS migration_max=033 critical_tables=${#REQUIRED_TABLES[@]} rpo_seconds=${RPO_SECONDS} restore_to_runnable_seconds=${RUNNABLE_SECONDS} rto_seconds=${RTO_SECONDS}"
+
+      - name: Build sanitized DR evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dr-lp-evidence
+          REFERENCE="$(cat /tmp/reference-time 2>/dev/null || true)"
+          RECOVERY_POINT="$(cat /tmp/recovery-point 2>/dev/null || true)"
+          RESTORE_STARTED="$(cat /tmp/restore-started 2>/dev/null || true)"
+          TARGET_RUNNABLE="$(cat /tmp/target-runnable 2>/dev/null || true)"
+          VALIDATION_COMPLETED="$(cat /tmp/validation-completed 2>/dev/null || true)"
+          RPO_SECONDS="$(cat /tmp/rpo-seconds 2>/dev/null || echo -1)"
+          PROVIDER_LAG="$(cat /tmp/provider-lag-seconds 2>/dev/null || echo -1)"
+          RUNNABLE_SECONDS="$(cat /tmp/runnable-seconds 2>/dev/null || echo -1)"
+          RTO_SECONDS="$(cat /tmp/rto-seconds 2>/dev/null || echo -1)"
+          jq -n \
+            --arg candidate "$CANDIDATE_SHA" \
+            --arg project "$PROJECT_ID" \
+            --arg source "$SOURCE_INSTANCE" \
+            --arg target "$TARGET_INSTANCE" \
+            --arg drIdentity "$DR_SA_EMAIL" \
+            --arg referenceTime "$REFERENCE" \
+            --arg recoveryPoint "$RECOVERY_POINT" \
+            --arg restoreStartedAt "$RESTORE_STARTED" \
+            --arg targetRunnableAt "$TARGET_RUNNABLE" \
+            --arg validationCompletedAt "$VALIDATION_COMPLETED" \
+            --argjson providerLagSeconds "$PROVIDER_LAG" \
+            --argjson rpoSeconds "$RPO_SECONDS" \
+            --argjson restoreToRunnableSeconds "$RUNNABLE_SECONDS" \
+            --argjson rtoSeconds "$RTO_SECONDS" \
+            '{schemaVersion:2,operation:"authorized-isolated-staging-pitr-least-privilege",candidateSha:$candidate,projectId:$project,sourceInstance:$source,targetInstance:$target,ephemeralDrIdentity:$drIdentity,referenceTime:$referenceTime,recoveryPoint:$recoveryPoint,restoreStartedAt:$restoreStartedAt,targetRunnableAt:$targetRunnableAt,validationCompletedAt:$validationCompletedAt,providerLatestLagSeconds:$providerLagSeconds,rpoSeconds:$rpoSeconds,restoreToRunnableSeconds:$restoreToRunnableSeconds,rtoSeconds:$rtoSeconds,rpoObjectiveSeconds:900,rtoObjectiveSeconds:3600,migration033Required:true,gap027RequiredAbsent:true,durableStateAuthorities:["Approval","Workflow","Timers","Outbox","DLQ","Audit","Privacy","CRM","EventRecord","AG-01","EmailLedger","WhatsAppLedger","PreparedContent"],productionMutation:false,providerMutation:false,trafficMutation:false,cloudRunMutation:false,secretManagerRead:false,secretManagerMutation:false}' \
+            > dr-lp-evidence/manifest.json
+          find dr-lp-evidence -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > dr-lp-evidence/SHA256SUMS
+
+      - name: Upload sanitized DR evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-dr-lp-${{ github.run_id }}
+          path: dr-lp-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  cleanup-target:
+    needs: [bootstrap, drill]
+    if: always() && needs.bootstrap.result == 'success'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Authenticate ephemeral least-privilege staging DR identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Delete only the temporary PITR target and prove source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/target-cleanup.json 2>/dev/null; then
+            jq -e --arg project "$PROJECT_ID" --arg target "$TARGET_INSTANCE" '.project==$project and .name==$target' /tmp/target-cleanup.json >/dev/null
+            gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet
+            gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet
+          fi
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo 'Temporary PITR target still exists after cleanup' >&2
+            exit 1
+          fi
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-after.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' /tmp/source-after.json >/dev/null
+          echo 'DR_LP_TARGET_CLEANUP=PASS source_unchanged=true'
+
+  cleanup-iam:
+    needs: [bootstrap, drill, cleanup-target]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    steps:
+      - name: Authenticate infrastructure administrator for cleanup only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Remove ephemeral DR IAM and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          MEMBER_DR="serviceAccount:${DR_SA_EMAIL}"
+          MEMBER_INFRA="serviceAccount:${INFRA_ADMIN_SA}"
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg role "$ROLE" --arg member "$MEMBER_DR" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_DR" --role="$ROLE" --condition=None --quiet
+          fi
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam service-accounts delete "$DR_SA_EMAIL" --project="$PROJECT_ID" --quiet
+          fi
+          if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam roles delete "$DR_ROLE_ID" --project="$PROJECT_ID" --quiet
+          fi
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg member "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet
+          fi
+
+          POLICY_AFTER="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg role "$ROLE" --arg member "$MEMBER_DR" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY_AFTER" >/dev/null; then
+            echo 'Ephemeral DR custom-role project binding still exists' >&2
+            exit 1
+          fi
+          if jq -e --arg member "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$member))' <<<"$POLICY_AFTER" >/dev/null; then
+            echo 'Temporary roles/iam.roleAdmin binding still exists' >&2
+            exit 1
+          fi
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo 'Ephemeral DR service account still exists' >&2
+            exit 1
+          fi
+          echo 'DR_LP_IAM_CLEANUP=PASS'
