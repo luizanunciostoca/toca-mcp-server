@@ -1,0 +1,271 @@
+name: Staging Notification Channels
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_policy_sha256:
+        description: SHA-256 of infra/observability/staging-notification-channels-policy.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-notification-channels
+  cancel-in-progress: false
+
+env:
+  POLICY_PATH: infra/observability/staging-notification-channels-policy.json
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify staging notification policy boundary
+        shell: bash
+        env:
+          EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
+        run: |
+          set -euo pipefail
+          ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
+          test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
+          jq -e '
+            .schemaVersion == "toca.staging.notification-channels.v1" and
+            .operation == "configure-staging-notification-channels" and
+            .projectId == "toca-mcp-next-staging" and
+            .projectNumber == "729069789107" and
+            .channels == [
+              {"role":"primary-email","type":"email","destinationSecret":"STAGING_ALERT_EMAIL","enabled":true},
+              {"role":"secondary-webhook","type":"webhook_tokenauth","destinationSecret":"STAGING_ALERT_WEBHOOK_URL","tokenSecret":"STAGING_ALERT_WEBHOOK_TOKEN","enabled":true}
+            ] and
+            .requirements.minimumEnabledChannels == 2 and
+            .requirements.minimumChannelFamilies == 2 and
+            .requirements.requireHttpsWebhook == true and
+            .requirements.requireEmailVerification == true and
+            .requirements.requireSyntheticDeliveryReadbackBeforeReliabilityPromotion == true and
+            .forbid.productionMutation == true and
+            .forbid.providerMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.backupMutation == true and
+            .forbid.drRestore == true and
+            .forbid.trafficMutation == true and
+            .forbid.iamMutation == true and
+            .forbid.serviceAccountKeys == true and
+            .forbid.secretValuesInRepository == true and
+            .forbid.secretValuesInArtifacts == true and
+            .forbid.reliabilityPromotionWithoutDeliveryReadback == true
+          ' "$POLICY_PATH" >/dev/null
+          echo 'STAGING_NOTIFICATION_POLICY_BOUNDARY=PASS'
+
+      - name: Validate configured destinations without disclosure
+        shell: bash
+        env:
+          ALERT_EMAIL: ${{ secrets.STAGING_ALERT_EMAIL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.STAGING_ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_TOKEN: ${{ secrets.STAGING_ALERT_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$ALERT_EMAIL"
+          test -n "$ALERT_WEBHOOK_URL"
+          [[ "$ALERT_WEBHOOK_URL" == https://* ]]
+          [[ "$ALERT_EMAIL" == *@*.* ]]
+          echo 'STAGING_NOTIFICATION_DESTINATIONS_PRESENT=1'
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Fail closed on staging project identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          echo 'STAGING_NOTIFICATION_PROJECT_IDENTITY=PASS'
+
+      - name: Reconcile email and webhook notification channels
+        id: channels
+        shell: bash
+        env:
+          ALERT_EMAIL: ${{ secrets.STAGING_ALERT_EMAIL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.STAGING_ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_TOKEN: ${{ secrets.STAGING_ALERT_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging-notification-evidence
+          TOKEN="$(gcloud auth print-access-token)"
+          API_ROOT="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}"
+
+          list_channels() {
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${TOKEN}" \
+              "${API_ROOT}/notificationChannels?pageSize=100" \
+              > staging-notification-evidence/channels-raw.json
+          }
+
+          create_channel() {
+            local payload="$1"
+            local output="$2"
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@${payload}" \
+              "${API_ROOT}/notificationChannels" \
+              > "${output}"
+          }
+
+          list_channels
+          EMAIL_NAME="$(jq -r 'first(.notificationChannels[]? | select(.type=="email" and .userLabels.toca_managed=="staging_reliability" and .userLabels.channel_role=="primary_email") | .name) // empty' staging-notification-evidence/channels-raw.json)"
+          if [[ -z "$EMAIL_NAME" ]]; then
+            jq -n \
+              --arg email "$ALERT_EMAIL" \
+              '{
+                type:"email",
+                displayName:"TOCA Next Staging - Email",
+                description:"Governed staging Reliability notifications",
+                labels:{email_address:$email},
+                userLabels:{toca_managed:"staging_reliability",channel_role:"primary_email"},
+                enabled:true
+              }' > /tmp/staging-email-channel.json
+            create_channel /tmp/staging-email-channel.json /tmp/staging-email-created.json
+            EMAIL_NAME="$(jq -r '.name' /tmp/staging-email-created.json)"
+            rm -f /tmp/staging-email-channel.json /tmp/staging-email-created.json
+          fi
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${API_ROOT}/notificationChannelDescriptors/webhook_tokenauth" \
+            > /tmp/webhook-descriptor.json
+          jq -e 'any(.labels[]?; .key=="url")' /tmp/webhook-descriptor.json >/dev/null
+          WEBHOOK_REQUIRES_TOKEN="$(jq -r 'any(.labels[]?; .key=="auth_token")' /tmp/webhook-descriptor.json)"
+          if [[ "$WEBHOOK_REQUIRES_TOKEN" == true ]]; then
+            test -n "$ALERT_WEBHOOK_TOKEN"
+          fi
+
+          list_channels
+          WEBHOOK_NAME="$(jq -r 'first(.notificationChannels[]? | select(.type=="webhook_tokenauth" and .userLabels.toca_managed=="staging_reliability" and .userLabels.channel_role=="secondary_webhook") | .name) // empty' staging-notification-evidence/channels-raw.json)"
+          if [[ -z "$WEBHOOK_NAME" ]]; then
+            if [[ "$WEBHOOK_REQUIRES_TOKEN" == true ]]; then
+              jq -n \
+                --arg url "$ALERT_WEBHOOK_URL" \
+                --arg token "$ALERT_WEBHOOK_TOKEN" \
+                '{
+                  type:"webhook_tokenauth",
+                  displayName:"TOCA Next Staging - Webhook",
+                  description:"Governed staging Reliability webhook notifications",
+                  labels:{url:$url,auth_token:$token},
+                  userLabels:{toca_managed:"staging_reliability",channel_role:"secondary_webhook"},
+                  enabled:true
+                }' > /tmp/staging-webhook-channel.json
+            else
+              jq -n \
+                --arg url "$ALERT_WEBHOOK_URL" \
+                '{
+                  type:"webhook_tokenauth",
+                  displayName:"TOCA Next Staging - Webhook",
+                  description:"Governed staging Reliability webhook notifications",
+                  labels:{url:$url},
+                  userLabels:{toca_managed:"staging_reliability",channel_role:"secondary_webhook"},
+                  enabled:true
+                }' > /tmp/staging-webhook-channel.json
+            fi
+            create_channel /tmp/staging-webhook-channel.json /tmp/staging-webhook-created.json
+            WEBHOOK_NAME="$(jq -r '.name' /tmp/staging-webhook-created.json)"
+            rm -f /tmp/staging-webhook-channel.json /tmp/staging-webhook-created.json
+          fi
+          rm -f /tmp/webhook-descriptor.json
+
+          list_channels
+          jq '{notificationChannels:[.notificationChannels[]? | select(.userLabels.toca_managed=="staging_reliability") | {name,type,displayName,enabled,verificationStatus,userLabels}]}' \
+            staging-notification-evidence/channels-raw.json \
+            > staging-notification-evidence/channels-sanitized.json
+          rm -f staging-notification-evidence/channels-raw.json
+
+          ENABLED="$(jq '[.notificationChannels[]? | select(.enabled==true)] | length' staging-notification-evidence/channels-sanitized.json)"
+          FAMILIES="$(jq '[.notificationChannels[]? | select(.enabled==true) | .type] | unique | length' staging-notification-evidence/channels-sanitized.json)"
+          EMAIL_STATUS="$(jq -r 'first(.notificationChannels[]? | select(.type=="email") | .verificationStatus) // "UNSPECIFIED"' staging-notification-evidence/channels-sanitized.json)"
+
+          jq -n \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg emailName "$EMAIL_NAME" \
+            --arg webhookName "$WEBHOOK_NAME" \
+            --arg emailVerificationStatus "$EMAIL_STATUS" \
+            --argjson enabledChannelCount "$ENABLED" \
+            --argjson channelFamilyCount "$FAMILIES" \
+            '{
+              schemaVersion:"toca.staging.notification-channels.evidence.v1",
+              project:$project,
+              projectNumber:$projectNumber,
+              emailChannel:{name:$emailName,type:"email",verificationStatus:$emailVerificationStatus},
+              webhookChannel:{name:$webhookName,type:"webhook_tokenauth"},
+              enabledChannelCount:$enabledChannelCount,
+              channelFamilyCount:$channelFamilyCount,
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              iamMutation:false,
+              syntheticDeliveryReadbackExecuted:false
+            }' > staging-notification-evidence/manifest.json
+
+          unset TOKEN
+          test "$ENABLED" -ge 2
+          test "$FAMILIES" -ge 2
+          echo 'channel_contract=pass' >> "$GITHUB_OUTPUT"
+          if [[ "$EMAIL_STATUS" == "UNVERIFIED" ]]; then
+            echo 'email_verification=required' >> "$GITHUB_OUTPUT"
+          else
+            echo 'email_verification=pass' >> "$GITHUB_OUTPUT"
+          fi
+          echo 'STAGING_NOTIFICATION_CHANNEL_RECONCILIATION=PASS'
+
+      - name: Upload sanitized notification-channel evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-notification-channels-${{ github.run_id }}
+          path: staging-notification-evidence
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Notification channel readiness decision
+        shell: bash
+        env:
+          CHANNEL_CONTRACT: ${{ steps.channels.outputs.channel_contract }}
+          EMAIL_VERIFICATION: ${{ steps.channels.outputs.email_verification }}
+        run: |
+          set -euo pipefail
+          test "$CHANNEL_CONTRACT" = pass
+          if [[ "$EMAIL_VERIFICATION" != pass ]]; then
+            echo 'STAGING_NOTIFICATION_EMAIL_VERIFICATION_REQUIRED=1'
+            exit 1
+          fi
+          echo 'STAGING_NOTIFICATION_CHANNELS=READY'
+          echo 'SYNTHETIC_DELIVERY_READBACK=NOT_YET_EXECUTED'
