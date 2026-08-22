@@ -1,0 +1,29 @@
+name: Ops Staging Synthetic Alert Dispatch Now 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-synthetic-alert-dispatch-now-20260822]
+    paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch exact governed staging synthetic alert workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POLICY_SHA256: 15635125cf8c3f1fff5eb2cf94b7c07fb95e092d8925abe9510a2c30a3ad3d7f
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          gh workflow run staging-synthetic-alert.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f expected_policy_sha256="$POLICY_SHA256"
+          echo 'SYNTHETIC_ALERT_CHILD_DISPATCHED=1'
