@@ -78,12 +78,12 @@ jobs:
           gcloud run revisions describe "$WEBHOOK_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > reliability-evidence/webhook-revision.json
           for pair in "mcp:$MCP_REVISION" "webhook:$WEBHOOK_REVISION"; do
             kind="${pair%%:*}"; rev="${pair#*:}"; file="reliability-evidence/${kind}-service.json"
-            jq -e --arg rev "$rev" '[.status.traffic[]? | select(.revisionName==$rev and ((.percent // 0) > 0))] | length == 0' "$file" >/dev/null
+            jq -e --arg rev "$rev" '[.status.traffic[]? | select(.revisionName==$rev and ((.percent // 0) == 100))] | length == 1' "$file" >/dev/null
           done
           jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' reliability-evidence/mcp-revision.json >/dev/null
           jq -e 'any(.status.conditions[]?; .type=="Ready" and .status=="True")' reliability-evidence/webhook-revision.json >/dev/null
           echo 'CANDIDATE_RUNTIME_READBACK=PASS'
-          echo 'CANDIDATE_TRAFFIC_PERCENT=0'
+          echo 'CANDIDATE_TRAFFIC_PERCENT=100'
 
       - name: Read Cloud SQL DR posture
         shell: bash
