@@ -1,0 +1,97 @@
+name: Ops Staging Notification Delivery Diagnostics
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ops-staging-notification-delivery-diagnostics.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
+      SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+    steps:
+      - name: Fail closed on exact staging boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          echo 'STAGING_NOTIFICATION_DIAGNOSTIC_BOUNDARY=PASS'
+
+      - name: Authenticate isolated staging reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify exact staging reader identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          echo 'STAGING_NOTIFICATION_DIAGNOSTIC_IDENTITY=PASS'
+
+      - name: Read notification-channel events and synthetic signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHANNEL_FILTER='resource.type="stackdriver_notification_channel" AND logName="projects/toca-mcp-next-staging/logs/monitoring.googleapis.com%2Fnotification_channel_events"'
+          gcloud logging read "$CHANNEL_FILTER" \
+            --project="$PROJECT_ID" \
+            --freshness=3h \
+            --limit=100 \
+            --format=json > /tmp/channel-events.json
+
+          SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
+          gcloud logging read "$SYNTHETIC_FILTER" \
+            --project="$PROJECT_ID" \
+            --freshness=3h \
+            --limit=20 \
+            --format=json > /tmp/synthetic.json
+
+          jq '[.[] | {
+            timestamp,
+            severity,
+            channelResource:(.resource.labels.notification_channel_id // .resource.labels.channel_id // .resource.labels.channel_name // null),
+            httpStatus:(.httpRequest.status // .jsonPayload.httpStatus // .jsonPayload.status // null),
+            summary:((.textPayload // .jsonPayload.message // .jsonPayload.summary // .jsonPayload.error // "") | tostring
+              | gsub("https?://[^ ]+";"<redacted-url>")
+              | gsub("auth_token=[^& ]+";"auth_token=<redacted>"))
+          }]' /tmp/channel-events.json > /tmp/channel-events-sanitized.json
+
+          TOTAL_EVENTS="$(jq 'length' /tmp/channel-events-sanitized.json)"
+          ERROR_EVENTS="$(jq '[.[] | select(.severity == "ERROR" or .severity == "CRITICAL" or .severity == "ALERT" or .severity == "EMERGENCY")] | length' /tmp/channel-events-sanitized.json)"
+          SYNTHETIC_COUNT="$(jq 'length' /tmp/synthetic.json)"
+          SYNTHETIC_LATEST="$(jq -r 'sort_by(.timestamp) | last | .timestamp // "none"' /tmp/synthetic.json)"
+
+          echo "NOTIFICATION_CHANNEL_EVENT_COUNT=${TOTAL_EVENTS}"
+          echo "NOTIFICATION_CHANNEL_ERROR_COUNT=${ERROR_EVENTS}"
+          echo "SYNTHETIC_SIGNAL_COUNT=${SYNTHETIC_COUNT}"
+          echo "SYNTHETIC_SIGNAL_LATEST=${SYNTHETIC_LATEST}"
+          echo 'SANITIZED_NOTIFICATION_CHANNEL_EVENTS_BEGIN'
+          cat /tmp/channel-events-sanitized.json
+          echo 'SANITIZED_NOTIFICATION_CHANNEL_EVENTS_END'
+
+          test "$SYNTHETIC_COUNT" -ge 1
+          echo 'STAGING_NOTIFICATION_DELIVERY_DIAGNOSTIC_READ=PASS'
