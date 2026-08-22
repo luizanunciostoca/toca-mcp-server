@@ -28,7 +28,7 @@ jobs:
       SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
       EXPECTED_OPEN_TIME_PREFIX: '2026-08-22T08:46'
       RESULT_PATH: ops/evidence/staging-synthetic-incident-readback.json
-      READBACK_SEQUENCE: '5'
+      READBACK_SEQUENCE: '6'
     steps:
       - name: Checkout evidence branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -56,53 +56,61 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Read exact incident and latest matching synthetic signal
+      - name: Poll exact incident for backend auto-close without mutation
         shell: bash
         run: |
           set -euo pipefail
           test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-
           TOKEN="$(gcloud auth print-access-token)"
-          HTTP_STATUS="$(curl --silent --show-error --output /tmp/alert.json --write-out '%{http_code}' \
-            -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
-            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
+          STATE=''
+          OPEN_TIME=''
+          CLOSE_TIME=''
+          POLICY=''
+          DISPLAY_NAME=''
+          ATTEMPTS=0
+          for attempt in $(seq 1 15); do
+            ATTEMPTS="$attempt"
+            HTTP_STATUS="$(curl --silent --show-error --output /tmp/alert.json --write-out '%{http_code}' \
+              -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
+              "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
+            test "$HTTP_STATUS" = 200
+            STATE="$(jq -r '.state // empty' /tmp/alert.json)"
+            OPEN_TIME="$(jq -r '.open_time // .openTime // empty' /tmp/alert.json)"
+            CLOSE_TIME="$(jq -r '.close_time // .closeTime // empty' /tmp/alert.json)"
+            POLICY="$(jq -r '.policy.name // empty' /tmp/alert.json)"
+            DISPLAY_NAME="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/alert.json)"
+            test -n "$STATE"
+            test -n "$OPEN_TIME"
+            test "$POLICY" = "$POLICY_NAME"
+            [[ "$OPEN_TIME" == "$EXPECTED_OPEN_TIME_PREFIX"* ]]
+            if [[ "$STATE" == CLOSED && -n "$CLOSE_TIME" ]]; then break; fi
+            sleep 20
+          done
           unset TOKEN
-          test "$HTTP_STATUS" = 200
 
           SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
           gcloud logging read "$SYNTHETIC_FILTER" --project="$PROJECT_ID" --freshness=2h --limit=50 --format=json > /tmp/synthetic.json
-
-          STATE="$(jq -r '.state // empty' /tmp/alert.json)"
-          OPEN_TIME="$(jq -r '.open_time // .openTime // empty' /tmp/alert.json)"
-          CLOSE_TIME="$(jq -r '.close_time // .closeTime // empty' /tmp/alert.json)"
-          POLICY="$(jq -r '.policy.name // empty' /tmp/alert.json)"
-          DISPLAY_NAME="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/alert.json)"
           SIGNAL_COUNT="$(jq 'length' /tmp/synthetic.json)"
           LATEST_SIGNAL="$(jq -r 'sort_by(.timestamp) | last | .timestamp // empty' /tmp/synthetic.json)"
           LATEST_RUN_MARKER="$(jq -r 'sort_by(.timestamp) | last | .jsonPayload.runMarker // empty' /tmp/synthetic.json)"
-
-          test -n "$STATE"
-          test -n "$OPEN_TIME"
-          test "$POLICY" = "$POLICY_NAME"
-          [[ "$OPEN_TIME" == "$EXPECTED_OPEN_TIME_PREFIX"* ]]
           test "$SIGNAL_COUNT" -ge 1
           test -n "$LATEST_SIGNAL"
 
           CLOSED=false
           if [[ "$STATE" == CLOSED ]]; then test -n "$CLOSE_TIME"; CLOSED=true; fi
-
           mkdir -p "$(dirname "$RESULT_PATH")"
           jq -n \
             --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" \
             --arg alertId "$ALERT_ID" --arg state "$STATE" --arg openTime "$OPEN_TIME" --arg closeTime "$CLOSE_TIME" \
             --arg policyName "$POLICY" --arg policyDisplayName "$DISPLAY_NAME" --arg sequence "$READBACK_SEQUENCE" \
-            --arg latestSignal "$LATEST_SIGNAL" --arg latestRunMarker "$LATEST_RUN_MARKER" --argjson signalCount "$SIGNAL_COUNT" --argjson closed "$CLOSED" \
-            '{schemaVersion:"toca.staging.synthetic-incident-readback.v2",observedAt:$observedAt,readbackSequence:$sequence,project:$project,projectNumber:$projectNumber,alertId:$alertId,state:$state,openTime:$openTime,closeTime:(if $closeTime=="" then null else $closeTime end),policy:{name:$policyName,displayName:$policyDisplayName},syntheticSignals:{count:$signalCount,latestTimestamp:$latestSignal,latestRunMarker:$latestRunMarker},exactSyntheticIncidentMatched:true,recoveryClosureObserved:$closed,manualCloseExecuted:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false}' > "$RESULT_PATH"
+            --arg latestSignal "$LATEST_SIGNAL" --arg latestRunMarker "$LATEST_RUN_MARKER" \
+            --argjson signalCount "$SIGNAL_COUNT" --argjson attempts "$ATTEMPTS" --argjson closed "$CLOSED" \
+            '{schemaVersion:"toca.staging.synthetic-incident-readback.v2",observedAt:$observedAt,readbackSequence:$sequence,pollAttempts:$attempts,project:$project,projectNumber:$projectNumber,alertId:$alertId,state:$state,openTime:$openTime,closeTime:(if $closeTime=="" then null else $closeTime end),policy:{name:$policyName,displayName:$policyDisplayName},syntheticSignals:{count:$signalCount,latestTimestamp:$latestSignal,latestRunMarker:$latestRunMarker},exactSyntheticIncidentMatched:true,recoveryClosureObserved:$closed,manualCloseExecuted:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false}' > "$RESULT_PATH"
           echo "SYNTHETIC_INCIDENT_STATE=${STATE}"
-          echo "SYNTHETIC_LATEST_SIGNAL=${LATEST_SIGNAL}"
-          echo "SYNTHETIC_SIGNAL_COUNT=${SIGNAL_COUNT}"
+          echo "SYNTHETIC_INCIDENT_CLOSE_TIME=${CLOSE_TIME:-none}"
           echo "SYNTHETIC_INCIDENT_CLOSURE_OBSERVED=${CLOSED}"
+          echo "READBACK_ATTEMPTS=${ATTEMPTS}"
 
       - name: Commit sanitized incident readback
         shell: bash
@@ -112,5 +120,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$RESULT_PATH"
           git diff --cached --quiet && exit 0
-          git commit -m 'ops(reliability): publish synthetic incident readback sequence 5'
+          git commit -m 'ops(reliability): publish bounded incident closure readback'
           git push origin HEAD:ops/staging-synthetic-incident-readback-20260822
