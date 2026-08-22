@@ -1,7 +1,7 @@
 {
   "schemaVersion": "toca.staging.synthetic-incident-readback.v1",
-  "observedAt": "2026-08-22T09:17:07Z",
-  "readbackSequence": "3",
+  "observedAt": "2026-08-22T09:18:25Z",
+  "readbackSequence": "4",
   "project": "toca-mcp-next-staging",
   "projectNumber": "729069789107",
   "alertId": "0.obqbjhmrmmv8",
