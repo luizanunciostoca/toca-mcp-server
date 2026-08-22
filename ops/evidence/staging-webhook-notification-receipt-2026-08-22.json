@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "toca.staging.webhook-notification-receipt.v1",
+  "observedAt": "2026-08-22T08:46:05.855Z",
+  "receiver": {
+    "platform": "Vercel",
+    "projectName": "toca-staging-monitoring-webhook",
+    "route": "/api/cloud-monitoring",
+    "method": "POST",
+    "httpStatus": 204,
+    "event": "TOCA_MONITORING_WEBHOOK_RECEIVED"
+  },
+  "alert": {
+    "policyName": "TOCA Next Staging - Synthetic Reliability Delivery",
+    "conditionName": "TOCA staging synthetic log marker",
+    "incidentStateAtReceipt": "open",
+    "bodySha256": "06901a165b0256ebcc2149bbe2fa640eb75e889c15820aaec0dc7baa15514645"
+  },
+  "positiveReceiverSideReceiptVerified": true,
+  "secretUrlRead": false,
+  "secretTokenRead": false,
+  "productionMutation": false,
+  "providerMutation": false,
+  "databaseMutation": false,
+  "backupMutation": false,
+  "drRestore": false,
+  "trafficMutation": false,
+  "cloudRunMutation": false,
+  "secretMutation": false
+}
