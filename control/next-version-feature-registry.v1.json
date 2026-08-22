@@ -3,8 +3,8 @@
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.4",
   "status": "POST_STAGING_RELIABILITY_RECONCILIATION",
-  "observedAt": "2026-08-22T06:01:36-03:00",
-  "observedMainSha": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
+  "observedAt": "2026-08-22T06:26:00-03:00",
+  "observedMainSha": "ba44d418a093fbe843d19f52158660c82cb8d799",
   "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
   "candidateFrozen": true,
   "stagingAuthorized": true,
@@ -91,8 +91,10 @@
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
-      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_VERIFIED_ALERT_DELIVERY_PARTIAL_DR_PENDING",
-      "mergedPrs": [55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108],
+      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_ALERT_DELIVERY_RECOVERY_VERIFIED_DR_PENDING",
+      "mergedPrs": [
+        55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108, 110, 112
+      ],
       "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
       "stagingProjectId": "toca-mcp-next-staging",
       "stagingProjectNumber": "729069789107",
@@ -118,15 +120,28 @@
       "emailNotificationDeliveryVerified": true,
       "emailNotificationReceiptObservedAt": "2026-08-22T08:46:05Z",
       "postSignalNotificationChannelErrorCount": 0,
-      "webhookNotificationPositiveReceiptVerified": false,
-      "syntheticIncidentClosureVerified": false,
+      "webhookNotificationPositiveReceiptVerified": true,
+      "syntheticIncidentClosureVerified": true,
       "drVerified": false,
       "productionVerified": false,
       "reliabilityBlockers": [
-        "independent positive recipient/readback evidence for the webhook_tokenauth notification channel remains pending; zero notification_channel_events errors is not positive receipt",
-        "synthetic incident recovery/closure readback remains pending",
         "final-candidate isolated DR rehearsal remains unexecuted and requires separate authorization"
-      ]
+      ],
+      "syntheticIncidentId": "0.obqbjhmrmmv8",
+      "syntheticIncidentOpenedAt": "2026-08-22T08:46:05Z",
+      "syntheticIncidentClosedAt": "2026-08-22T09:21:09Z",
+      "syntheticIncidentClosureObservedAt": "2026-08-22T09:21:30Z",
+      "syntheticIncidentSignalCount": 1,
+      "syntheticIncidentManualCloseExecuted": false,
+      "runbookCorrelationVerified": true,
+      "runbookPath": "docs/operations/next-staging-reliability-runbook.md",
+      "reliabilityVerified": false,
+      "webhookNotificationReceiptObservedAt": "2026-08-22T08:46:05.855Z",
+      "webhookNotificationReceiptHttpStatus": 204,
+      "webhookNotificationReceiptRoute": "/api/cloud-monitoring",
+      "webhookNotificationReceiptEvent": "TOCA_MONITORING_WEBHOOK_RECEIVED",
+      "webhookNotificationReceiptBodySha256": "06901a165b0256ebcc2149bbe2fa640eb75e889c15820aaec0dc7baa15514645",
+      "webhookNotificationReceiver": "Vercel project toca-staging-monitoring-webhook"
     },
     "D_CANONICAL_GOVERNANCE_DRIVE_CLOSEOUT_PREP": {
       "state": "POST_STAGING_RECONCILIATION_IN_PROGRESS",
@@ -149,10 +164,12 @@
       "execute post-PR-83 read-only Cloud SQL backup/PITR reliability verification",
       "configure two staging notification channel families",
       "prove staging runtime dashboard and authenticated private-webhook OIDC uptime",
-      "prove synthetic alert firing and positive email recipient delivery"
+      "prove synthetic alert firing and positive email recipient delivery",
+      "correlate synthetic alert policy/channel evidence to the canonical Next staging reliability runbook",
+      "prove automatic synthetic incident recovery/closure without manual close",
+      "prove positive webhook notification receiver-side receipt/readback"
     ],
     "remainingSequence": [
-      "prove positive webhook notification receipt/readback and synthetic incident recovery/closure",
       "execute controlled provider verification without lifecycle pre-promotion",
       "execute separately authorized final-candidate isolated DR rehearsal and prove RPO/RTO",
       "promote production only with explicit authorization and same-candidate evidence",
