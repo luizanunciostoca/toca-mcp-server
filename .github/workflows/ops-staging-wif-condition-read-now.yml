@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
+  pull-requests: write
 
 jobs:
   read:
@@ -22,14 +24,31 @@ jobs:
           service_account: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - name: Read exact staging provider condition
+        id: provider
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          gcloud iam workload-identity-pools providers describe github-toca-mcp-staging \
+          CONDITION="$(gcloud iam workload-identity-pools providers describe github-toca-mcp-staging \
             --project toca-mcp-next-staging \
             --location global \
             --workload-identity-pool github-staging \
-            --format='value(attributeCondition)'
+            --format='value(attributeCondition)')"
+          test -n "$CONDITION"
+          printf 'condition<<EOF\n%s\nEOF\n' "$CONDITION" >> "$GITHUB_OUTPUT"
+          echo "STAGING_WIF_ATTRIBUTE_CONDITION=$CONDITION"
           echo 'PRODUCTION_MUTATION=NO'
           echo 'STAGING_MUTATION=NO'
+      - name: Publish exact sanitized condition to reliability tracker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONDITION: ${{ steps.provider.outputs.condition }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="Staging WIF live read-only probe from wrapper ${GITHUB_SHA}.
+
+attributeCondition: ${CONDITION}
+production mutation: none
+staging mutation: none"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" -f body="$BODY" >/dev/null
