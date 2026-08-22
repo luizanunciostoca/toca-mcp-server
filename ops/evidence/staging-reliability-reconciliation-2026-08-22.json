@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "toca.staging.reliability-reconciliation.v1",
+  "observedAt": "2026-08-22T09:01:36Z",
+  "repositoryMainShaObserved": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
+  "frozenApplicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+  "candidateFrozen": true,
+  "staging": {
+    "projectId": "toca-mcp-next-staging",
+    "projectNumber": "729069789107",
+    "mcp": {
+      "releaseSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+      "revision": "toca-mcp-next-staging-mcp-75c165a-r3",
+      "trafficPercent": 100
+    },
+    "webhook": {
+      "releaseSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+      "revision": "toca-webhook-next-staging-webhook-75c165a-f1",
+      "trafficPercent": 100,
+      "privateUnauthenticatedReadyzHttpStatus": 403
+    },
+    "runtimeReleaseAgreement": true,
+    "frozenCandidateFullyServed": true
+  },
+  "runtimeObservability": {
+    "verified": true,
+    "runId": "32563386689",
+    "policySha256": "6de4a54c0e0802057678ef4090e0edd9f6f823b1db161643f5ce1e4cbccc2245",
+    "dashboardReadback": true,
+    "uptimeAuthentication": "MONITORING_SERVICE_AGENT_OIDC",
+    "uptimeObservedPass": true,
+    "truePoints": 101,
+    "falsePoints": 0,
+    "artifactId": "9473430379",
+    "artifactZipSha256": "4a426268cff5556085b90c6abf6f49d6ac99633d531a16f135ae50125ca63b0d"
+  },
+  "syntheticAlert": {
+    "firingVerified": true,
+    "runId": "32563070906",
+    "policyId": "5562724679805698256",
+    "signalTimestamp": "2026-08-22T08:45:32.844128223Z",
+    "notificationChannelFamilies": ["email", "webhook_tokenauth"],
+    "emailRecipientReceiptVerified": true,
+    "emailRecipientReceiptTimestamp": "2026-08-22T08:46:05Z",
+    "notificationChannelEventsAfterSignal": 0,
+    "notificationChannelErrorsAfterSignal": 0,
+    "webhookPositiveReceiptVerified": false,
+    "incidentRecoveryClosureVerified": false
+  },
+  "cloudSqlReadOnlyReliabilityPrerequisites": {
+    "backupEnabled": true,
+    "pitrEnabled": true,
+    "retentionVerified": true,
+    "latestSuccessfulBackupPreviouslyReadBack": "2026-08-21T17:20:36.918Z"
+  },
+  "lifecycle": {
+    "stagingVerified": true,
+    "reliabilityVerified": false,
+    "providerVerified": false,
+    "productionVerified": false
+  },
+  "remainingReliabilityBlockers": [
+    "positive webhook_tokenauth recipient/readback evidence",
+    "synthetic incident recovery/closure readback",
+    "separately authorized final-candidate isolated DR rehearsal with RPO/RTO proof"
+  ],
+  "safety": {
+    "productionMutation": false,
+    "providerMutation": false,
+    "databaseMutation": false,
+    "backupMutation": false,
+    "drRestore": false,
+    "trafficMutation": false,
+    "cloudRunMutation": false,
+    "secretMutation": false
+  }
+}
