@@ -21,7 +21,7 @@
     "logId": "toca-staging-reliability-synthetic",
     "severity": "WARNING",
     "marker": "TOCA_STAGING_RELIABILITY_SYNTHETIC_V1",
-    "autoCloseSeconds": 300,
+    "autoCloseSeconds": 1800,
     "notificationRateLimitSeconds": 300
   },
   "forbid": {
