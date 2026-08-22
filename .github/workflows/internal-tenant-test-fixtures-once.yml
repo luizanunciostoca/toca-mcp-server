@@ -1,0 +1,83 @@
+name: Internal tenant test fixtures once
+
+on:
+  push:
+    branches:
+      - 'fix/tenant-scoped-scheduler-dlq-20260822'
+    paths:
+      - '.github/workflows/internal-tenant-test-fixtures-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/tenant-scoped-scheduler-dlq-20260822
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Align test fixtures with tenant-aware scheduler contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, before, after, expected):
+              p = Path(path)
+              src = p.read_text()
+              count = src.count(before)
+              if count != expected:
+                  raise SystemExit(f'PRECONDITION:{path}:{count}!={expected}:{before}')
+              p.write_text(src.replace(before, after))
+
+          replace_exact(
+              'test/instagram-core-publication-runtime.test.ts',
+              'createRuntimeCapabilityResolver({ instagramScheduler: scheduler })',
+              'createRuntimeCapabilityResolver({ instagramScheduler: () => scheduler })',
+              1,
+          )
+          replace_exact(
+              'test/m-found-12-core-facade-e2e.test.ts',
+              'createRuntimeCapabilityResolver({ instagramScheduler: scheduler })',
+              'createRuntimeCapabilityResolver({ instagramScheduler: () => scheduler })',
+              3,
+          )
+          replace_exact(
+              'test/instagram-publication-worker-runtime.test.ts',
+              'runInstagramPublicationWorkerBatch({ config, pool })',
+              "runInstagramPublicationWorkerBatch({ config, pool, tenantId: 'toca' })",
+              1,
+          )
+
+          p = Path('test/scheduler-multitenancy-postgres-e2e.test.ts')
+          src = p.read_text()
+          before = """    const schedulers = tenants.map((tenantId) => new PostgresScheduler(pool, tenantId));\n    const [schedulerA, schedulerB, schedulerC] = schedulers;"""
+          after = """    const schedulerA = new PostgresScheduler(pool, tenantA);\n    const schedulerB = new PostgresScheduler(pool, tenantB);\n    const schedulerC = new PostgresScheduler(pool, tenantC);\n    const schedulers = [schedulerA, schedulerB, schedulerC] as const;"""
+          if src.count(before) != 1:
+              raise SystemExit('PRECONDITION:scheduler-multitenancy-destructure')
+          p.write_text(src.replace(before, after, 1))
+          PY
+      - name: Format changed tests
+        run: pnpm exec prettier --write test/instagram-core-publication-runtime.test.ts test/m-found-12-core-facade-e2e.test.ts test/instagram-publication-worker-runtime.test.ts test/scheduler-multitenancy-postgres-e2e.test.ts
+      - name: Typecheck before commit
+        run: pnpm typecheck
+      - name: Commit test fixture alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'toca-os-internal-acceptance'
+          git config user.email 'actions@users.noreply.github.com'
+          git add test
+          git diff --cached --check
+          git commit -m 'test(tenancy): align scheduler fixtures with tenant scope'
+          git push origin HEAD:fix/tenant-scoped-scheduler-dlq-20260822
