@@ -11,6 +11,7 @@ import { runWorkerBatch } from '../src/worker/worker-runtime.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const postgresDescribe = DATABASE_URL ? describe : describe.skip;
+const TENANT_ID = 'toca';
 
 function databaseUrl(): string {
   if (!DATABASE_URL) throw new Error('R31_DATABASE_URL_REQUIRED');
@@ -29,7 +30,7 @@ postgresDescribe('Marketing Autopilot R31 PostgreSQL E2E', () => {
     const firstPool = createPostgresPool({ connectionString: databaseUrl(), max: 3 });
 
     try {
-      const scheduler = new PostgresScheduler(firstPool);
+      const scheduler = new PostgresScheduler(firstPool, TENANT_ID);
       await scheduler.schedule({
         id: firstJobId,
         toolName: R31_LEARNING_TOOL_NAME,
@@ -43,6 +44,7 @@ postgresDescribe('Marketing Autopilot R31 PostgreSQL E2E', () => {
       });
       const claimed = await runWorkerBatch({
         pool: firstPool,
+        tenantId: TENANT_ID,
         handlers: new Map([[R31_LEARNING_TOOL_NAME, handler]]),
         claimToolName: R31_LEARNING_TOOL_NAME,
       });
@@ -54,7 +56,7 @@ postgresDescribe('Marketing Autopilot R31 PostgreSQL E2E', () => {
 
     const secondPool = createPostgresPool({ connectionString: databaseUrl(), max: 3 });
     try {
-      const scheduler = new PostgresScheduler(secondPool);
+      const scheduler = new PostgresScheduler(secondPool, TENANT_ID);
       await scheduler.schedule({
         id: secondJobId,
         toolName: R31_LEARNING_TOOL_NAME,
@@ -68,6 +70,7 @@ postgresDescribe('Marketing Autopilot R31 PostgreSQL E2E', () => {
       });
       const claimed = await runWorkerBatch({
         pool: secondPool,
+        tenantId: TENANT_ID,
         handlers: new Map([[R31_LEARNING_TOOL_NAME, handler]]),
         claimToolName: R31_LEARNING_TOOL_NAME,
       });
@@ -119,7 +122,7 @@ function buildPayload(input: {
 }): Readonly<Record<string, unknown>> {
   const experiment: Experiment = {
     experimentId: input.experimentId,
-    tenantId: 'tenant-r31',
+    tenantId: TENANT_ID,
     workspaceId: 'workspace-r31',
     organizationId: 'org-r31',
     status: 'RUNNING',

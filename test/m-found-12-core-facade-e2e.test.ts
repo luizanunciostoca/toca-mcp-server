@@ -11,6 +11,7 @@ import {
 import { createRuntimeCapabilityResolver } from '../src/mcp/runtime-capability-resolver.js';
 import { createToolRegistry } from '../src/registry.js';
 import { InMemoryScheduler } from '../src/scheduler/in-memory-scheduler.js';
+import type { ScheduledJob } from '../src/scheduler/scheduler-contracts.js';
 import {
   hashTocaManagedInstagramApprovalDescriptor,
   TocaManagedInstagramScheduler,
@@ -21,6 +22,14 @@ const NOW = '2026-08-15T20:00:00.000Z';
 const TENANT = 'toca-do-morcego';
 
 type ToolHandler = (input: Record<string, unknown>, context: Record<string, unknown>) => unknown;
+
+class TenantAwareInMemoryScheduler extends InMemoryScheduler {
+  override async schedule<TPayload>(
+    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
+  ): Promise<ScheduledJob<TPayload>> {
+    return { ...(await super.schedule(job)), tenantId: TENANT };
+  }
+}
 
 class MFound12AuditStore implements CoreAuditQuerySink {
   private readonly events: AuditEvent[] = [];
@@ -116,11 +125,13 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
   it('executes WRITE_REVERSIBLE through discovery/runtime/policy/idempotency/readback/audit/verify', async () => {
     let sequence = 0;
     const scheduler = new TocaManagedInstagramScheduler(
-      new InMemoryScheduler(),
+      new TenantAwareInMemoryScheduler(),
       () => `m12-job-${++sequence}`,
     );
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:operator',
@@ -214,11 +225,13 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
   it('replays the same scheduled write without creating a duplicate durable job', async () => {
     let sequence = 0;
     const scheduler = new TocaManagedInstagramScheduler(
-      new InMemoryScheduler(),
+      new TenantAwareInMemoryScheduler(),
       () => `m12-replay-job-${++sequence}`,
     );
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:operator',
@@ -267,14 +280,16 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
 
   it('executes a READ through the same Core resolver without provider-write side effects', async () => {
     const scheduler = new TocaManagedInstagramScheduler(
-      new InMemoryScheduler(),
+      new TenantAwareInMemoryScheduler(),
       () => 'm12-read-job',
     );
     const payload = schedulePayload('m12:e2e:read-bootstrap');
     await scheduler.schedule(payload);
 
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:reader',
