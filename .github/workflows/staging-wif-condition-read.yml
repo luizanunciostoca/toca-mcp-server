@@ -18,6 +18,7 @@ env:
   STAGING_PROJECT_NUMBER: '729069789107'
   STAGING_POOL: github-staging
   STAGING_PROVIDER: github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   EXPECTED_REPOSITORY: luizanunciostoca/toca-mcp-server
 
 jobs:
@@ -39,6 +40,7 @@ jobs:
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$STAGING_PROJECT_ID" = 'toca-mcp-next-staging'
           test "$STAGING_PROJECT_NUMBER" != '990081828836'
+          test "$STAGING_OPERATOR_SA" = 'toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com'
           echo 'STAGING_WIF_READ_BOUNDARY=PASS'
 
       - name: Authenticate existing infrastructure administrator
@@ -49,12 +51,13 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Read staging WIF provider without mutation
+      - name: Read staging WIF provider and impersonation binding without mutation
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p staging-wif-evidence
           test "$(gcloud projects describe "$STAGING_PROJECT_ID" --format='value(projectNumber)')" = "$STAGING_PROJECT_NUMBER"
+
           gcloud iam workload-identity-pools providers describe "$STAGING_PROVIDER" \
             --project "$STAGING_PROJECT_ID" \
             --location global \
@@ -66,15 +69,27 @@ jobs:
           CONDITION="$(jq -r '.attributeCondition // empty' staging-wif-evidence/provider-sanitized.json)"
           test -n "$CONDITION"
           echo "STAGING_WIF_ATTRIBUTE_CONDITION=$CONDITION"
+
+          gcloud iam service-accounts get-iam-policy "$STAGING_OPERATOR_SA" \
+            --project "$STAGING_PROJECT_ID" \
+            --format=json > /tmp/operator-iam.json
+          jq '{bindings:[.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | {role,members,condition}]}' \
+            /tmp/operator-iam.json > staging-wif-evidence/operator-wif-binding.json
+          WIF_MEMBER_COUNT="$(jq '[.bindings[]?.members[]?] | length' staging-wif-evidence/operator-wif-binding.json)"
+          test "$WIF_MEMBER_COUNT" -ge 1
+          echo "STAGING_WIF_OPERATOR_MEMBER_COUNT=$WIF_MEMBER_COUNT"
+
           jq -n \
             --arg project "$STAGING_PROJECT_ID" \
             --arg projectNumber "$STAGING_PROJECT_NUMBER" \
             --arg pool "$STAGING_POOL" \
             --arg provider "$STAGING_PROVIDER" \
+            --arg operator "$STAGING_OPERATOR_SA" \
             --arg condition "$CONDITION" \
-            '{schemaVersion:"toca.staging.wif-condition-read.v1",project:$project,projectNumber:$projectNumber,pool:$pool,provider:$provider,attributeCondition:$condition,productionMutation:false,stagingMutation:false,result:"PASS"}' \
+            --argjson wifMemberCount "$WIF_MEMBER_COUNT" \
+            '{schemaVersion:"toca.staging.wif-condition-read.v2",project:$project,projectNumber:$projectNumber,pool:$pool,provider:$provider,operatorServiceAccount:$operator,attributeCondition:$condition,workloadIdentityUserMemberCount:$wifMemberCount,productionMutation:false,stagingMutation:false,result:"PASS"}' \
             > staging-wif-evidence/manifest.json
-          rm -f /tmp/provider.json
+          rm -f /tmp/provider.json /tmp/operator-iam.json
 
       - name: Upload sanitized evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
