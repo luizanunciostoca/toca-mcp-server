@@ -57,6 +57,57 @@ where tenant_id is null
    or idempotency_key is null
    or jsonb_array_length(evidence) = 0;
 
+-- Compatibility boundary: historical code/tests may still insert the original
+-- seven-column DLQ shape. Normalize those writes inside the canonical table before
+-- NOT NULL/check constraints run, rather than weakening the new metadata contract.
+create or replace function normalize_dead_letter_recovery_metadata()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.tenant_id := coalesce(
+    nullif(new.tenant_id, ''),
+    nullif(new.payload ->> 'tenantId', ''),
+    nullif(new.payload ->> 'tenant_id', ''),
+    'toca'
+  );
+  new.workspace_id := coalesce(
+    nullif(new.workspace_id, ''),
+    nullif(new.payload ->> 'workspaceId', ''),
+    nullif(new.payload ->> 'workspace_id', '')
+  );
+  new.organization_id := coalesce(
+    nullif(new.organization_id, ''),
+    nullif(new.payload ->> 'organizationId', ''),
+    nullif(new.payload ->> 'organization_id', '')
+  );
+  new.correlation_id := coalesce(
+    nullif(new.correlation_id, ''),
+    nullif(new.payload ->> 'correlationId', ''),
+    nullif(new.payload ->> 'correlation_id', ''),
+    'legacy-dead-letter:' || new.id
+  );
+  new.idempotency_key := coalesce(
+    nullif(new.idempotency_key, ''),
+    nullif(new.payload ->> 'idempotencyKey', ''),
+    nullif(new.payload ->> 'idempotency_key', ''),
+    'legacy-dead-letter:' || new.original_job_id
+  );
+  if new.evidence is null
+     or jsonb_typeof(new.evidence) <> 'array'
+     or jsonb_array_length(new.evidence) = 0 then
+    new.evidence := jsonb_build_array('migration:034:legacy-dead-letter-insert');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists dead_letter_recovery_metadata_before_insert on dead_letter_jobs;
+create trigger dead_letter_recovery_metadata_before_insert
+before insert on dead_letter_jobs
+for each row
+execute function normalize_dead_letter_recovery_metadata();
+
 alter table dead_letter_jobs
   alter column tenant_id set not null,
   alter column correlation_id set not null,
