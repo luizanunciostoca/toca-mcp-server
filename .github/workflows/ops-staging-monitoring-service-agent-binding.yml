@@ -72,12 +72,19 @@ jobs:
               timeout:"10s",
               period:"300s"
             }' > /tmp/uptime-create.json
-            curl --fail --silent --show-error \
+            HTTP_CODE="$(curl --silent --show-error \
               -X POST \
               -H "Authorization: Bearer ${TOKEN}" \
               -H 'Content-Type: application/json' \
               --data-binary @/tmp/uptime-create.json \
-              "$UPTIME_API" > /tmp/uptime-created.json
+              --output /tmp/uptime-created.json \
+              --write-out '%{http_code}' \
+              "$UPTIME_API")"
+            if [[ "$HTTP_CODE" != 2* ]]; then
+              echo "STAGING_UPTIME_CREATE_HTTP=${HTTP_CODE}"
+              jq -c '{error:{code:(.error.code // null),status:(.error.status // null),message:(.error.message // "unknown")}}' /tmp/uptime-created.json
+              exit 1
+            fi
             UPTIME_NAME="$(jq -r '.name // empty' /tmp/uptime-created.json)"
           fi
           test -n "$UPTIME_NAME"
