@@ -59,9 +59,8 @@ jobs:
           set -euo pipefail
           RUN_ID=''
           for _ in $(seq 1 30); do
-            RUN_ID="$(gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?event=workflow_dispatch&branch=${TARGET_REF}&per_page=20" \
-              --jq --arg started "$STARTED_AT" '.workflow_runs | map(select(.created_at >= $started)) | sort_by(.created_at) | last | .id // empty')"
+            DATA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?event=workflow_dispatch&branch=${TARGET_REF}&per_page=20")"
+            RUN_ID="$(jq -r --arg started "$STARTED_AT" '.workflow_runs | map(select(.created_at >= $started)) | sort_by(.created_at) | last | .id // empty' <<<"$DATA")"
             if [[ -n "$RUN_ID" ]]; then break; fi
             sleep 2
           done
@@ -102,21 +101,19 @@ jobs:
           CHILD_CONCLUSION: ${{ steps.wait.outputs.conclusion }}
         run: |
           set -euo pipefail
-          BODY=$(cat <<EOF
-          Post-#87 staging notification-channel operational dispatch completed.
+          BODY="Post-#87 staging notification-channel operational dispatch readback.
 
-          - wrapper SHA: `${GITHUB_SHA}`
-          - governed workflow: `${TARGET_WORKFLOW}` on `${TARGET_REF}`
-          - expected policy SHA-256: `${EXPECTED_POLICY_SHA256}`
-          - child run: `${RUN_ID:-UNRESOLVED}`
-          - child status: `${CHILD_STATUS:-UNRESOLVED}`
-          - child conclusion: `${CHILD_CONCLUSION:-UNRESOLVED}`
-          - mutation scope: staging notification channels + exact IAM bootstrap only
-          - production/provider/database/backup/DR/traffic mutation: forbidden by policy
+          wrapper SHA: ${GITHUB_SHA}
+          governed workflow: ${TARGET_WORKFLOW}
+          target ref: ${TARGET_REF}
+          expected policy SHA-256: ${EXPECTED_POLICY_SHA256}
+          child run: ${RUN_ID:-UNRESOLVED}
+          child status: ${CHILD_STATUS:-UNRESOLVED}
+          child conclusion: ${CHILD_CONCLUSION:-UNRESOLVED}
+          mutation scope: staging notification channels + exact IAM bootstrap only
+          production/provider/database/backup/DR/traffic mutation: forbidden by policy
 
-          This comment is operational readback only; `RELIABILITY_VERIFIED` remains gated on successful channel readiness, synthetic delivery/readback, and isolated DR evidence.
-          EOF
-          )
+          RELIABILITY_VERIFIED remains gated on successful channel readiness, synthetic delivery/readback, and isolated DR evidence."
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TRACKING_PR}/comments" -f body="$BODY" >/dev/null
 
       - name: Final safety summary
