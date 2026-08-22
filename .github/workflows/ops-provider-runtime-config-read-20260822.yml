@@ -1,0 +1,64 @@
+name: Ops Provider Runtime Config Read 2026-08-22
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ops-provider-runtime-config-read-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      MCP_SERVICE: toca-mcp-production
+    steps:
+      - name: Authenticate documented production deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read provider binding metadata without values
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json
+          jq -e --arg svc "$MCP_SERVICE" '.metadata.name == $svc' /tmp/service.json >/dev/null
+          jq -c '[.spec.template.spec.containers[0].env[]? | {
+            name,
+            bindingType:(if .valueFrom.secretKeyRef then "secret" elif (.value // "") != "" then "value" else "empty" end),
+            secretName:(.valueFrom.secretKeyRef.name // null)
+          }]' /tmp/service.json > /tmp/env-metadata.json
+          names=(
+            EMAIL_SENDGRID_ENABLED EMAIL_SENDGRID_PROVIDER_VERIFIED EMAIL_SENDGRID_API_KEY_SECRET_KEY
+            EMAIL_SENDGRID_SENDING_DOMAIN EMAIL_SENDGRID_FROM_EMAIL EMAIL_SENDGRID_EVENT_WEBHOOK_URL
+            EMAIL_SENDGRID_EMAIL_ACTIVITY_READBACK_ENABLED WHATSAPP_ENABLED WHATSAPP_RUNTIME_ENABLED
+            WHATSAPP_PROVIDER_VERIFIED WHATSAPP_BUSINESS_ID WHATSAPP_WABA_ID WHATSAPP_PHONE_NUMBER_ID
+            WHATSAPP_ACCESS_TOKEN_ENV_KEY GOOGLE_ADS_PHASE GOOGLE_ADS_PROVIDER_VERIFIED GOOGLE_ADS_CUSTOMER_ID
+            GOOGLE_ADS_LOGIN_CUSTOMER_ID GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY
+            GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY
+          )
+          for name in "${names[@]}"; do
+            entry="$(jq -c --arg n "$name" '[.[] | select(.name==$n)][0] // null' /tmp/env-metadata.json)"
+            if [[ "$entry" == null ]]; then
+              echo "$name=ABSENT"
+            else
+              type="$(jq -r '.bindingType' <<<"$entry")"
+              if [[ "$type" == secret ]]; then
+                secret="$(jq -r '.secretName // ""' <<<"$entry")"
+                echo "$name=PRESENT_SECRET_REF:$secret"
+              else
+                echo "$name=PRESENT_${type^^}"
+              fi
+            fi
+          done
+          echo 'PRODUCTION_RUNTIME_PROVIDER_METADATA_READ=PASS'
