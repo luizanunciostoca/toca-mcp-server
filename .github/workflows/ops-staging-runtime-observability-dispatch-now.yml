@@ -21,8 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          echo 'REDISPATCH_REASON=cloud_run_revision_oidc_fix_merged'
-          echo 'REDISPATCH_SEQUENCE=2'
+          echo 'REDISPATCH_REASON=dashboard_bootstrapped_and_oidc_target_fixed'
+          echo 'REDISPATCH_SEQUENCE=3'
           DISPATCH_URL="$(gh workflow run staging-runtime-observability.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
