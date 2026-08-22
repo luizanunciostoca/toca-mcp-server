@@ -733,6 +733,49 @@ export class PostgresWorkflowStore implements WorkflowStore {
     return this.#requireSnapshot(input.workflowId);
   }
 
+  async rescheduleTimer(input: {
+    readonly timerId: string;
+    readonly workflowId: string;
+    readonly stepId: string;
+    readonly fireAt: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {
+    requireText(input.timerId, 'WORKFLOW_TIMER_ID_REQUIRED');
+    const evidence = requireWorkflowEvidence(input.evidence);
+    assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
+    assertTimestamp(input.fireAt, 'WORKFLOW_TIMER_FIRE_AT_INVALID');
+    if (Date.parse(input.fireAt) < Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_IN_PAST');
+    await this.#withWorkflowTransaction(input.workflowId, async (client, instance) => {
+      const timerResult = await client.query<WorkflowTimerRow>(
+        'select * from workflow_timers where timer_id = $1 for update',
+        [input.timerId],
+      );
+      const timer = timerResult.rows[0];
+      if (!timer) throw new Error('WORKFLOW_TIMER_NOT_FOUND');
+      if (timer.workflow_id !== input.workflowId || timer.step_id !== input.stepId)
+        throw new Error('WORKFLOW_TIMER_SCOPE_MISMATCH');
+      if (timer.status !== 'SCHEDULED') throw new Error('WORKFLOW_TIMER_NOT_SCHEDULED');
+      const step = await this.#lockStep(client, input.workflowId, input.stepId);
+      if (step.status !== 'WAITING_TIMER') throw new Error('WORKFLOW_STEP_NOT_WAITING_TIMER');
+      await client.query(
+        `update workflow_timers set fire_at = $2::timestamptz, version = version + 1
+         where timer_id = $1 and version = $3`,
+        [input.timerId, input.fireAt, timer.version],
+      );
+      await this.#appendEvent(client, {
+        workflowId: input.workflowId,
+        stepId: input.stepId,
+        eventType: 'TIMER_SCHEDULED',
+        correlationId: instance.correlation_id,
+        payload: { timerId: input.timerId, fireAt: input.fireAt, rescheduled: true },
+        evidence,
+        occurredAt: input.now,
+      });
+    });
+    return this.#requireSnapshot(input.workflowId);
+  }
+
   async fireDueTimers(input: {
     readonly now: string;
     readonly limit: number;
@@ -743,15 +786,23 @@ export class PostgresWorkflowStore implements WorkflowStore {
     try {
       await client.query('begin');
       const timers = await client.query<WorkflowTimerRow>(
-        `select * from workflow_timers
-         where status = 'SCHEDULED' and fire_at <= $1::timestamptz
-         order by fire_at asc, timer_id asc
-         for update skip locked
+        `select t.*
+         from workflow_timers t
+         join workflow_steps s
+           on s.workflow_id = t.workflow_id and s.step_id = t.step_id
+         where (t.status = 'SCHEDULED' and t.fire_at <= $1::timestamptz)
+            or (t.status = 'FIRED' and s.status = 'READY')
+         order by t.fire_at asc, t.timer_id asc
+         for update of t skip locked
          limit $2`,
         [input.now, input.limit],
       );
       const fired: string[] = [];
       for (const timer of timers.rows) {
+        if (timer.status === 'FIRED') {
+          fired.push(timer.timer_id);
+          continue;
+        }
         const instance = await this.#lockInstance(client, timer.workflow_id);
         const step = await this.#lockStep(client, timer.workflow_id, timer.step_id);
         if (step.status !== 'WAITING_TIMER') throw new Error('WORKFLOW_STEP_NOT_WAITING_TIMER');
