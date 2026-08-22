@@ -1,0 +1,88 @@
+name: Ops Staging Dashboard Bootstrap 2026-08-22
+
+on:
+  pull_request:
+    paths: ['.github/workflows/ops-staging-dashboard-bootstrap.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate isolated staging operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Reconcile and read back staging readiness dashboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          TOKEN="$(gcloud auth print-access-token)"
+          ALERTS_API="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100"
+          DASH_API="https://monitoring.googleapis.com/v1/projects/${PROJECT_ID}/dashboards"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$ALERTS_API" > /tmp/alerts.json
+          ALERT_POLICY="$(jq -r 'first(.alertPolicies[]? | select(.userLabels.toca_managed=="staging_reliability" and .userLabels.alert_role=="synthetic_delivery") | .name) // empty' /tmp/alerts.json)"
+          test -n "$ALERT_POLICY"
+
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$DASH_API" > /tmp/dashboards.json
+          DASHBOARD_NAME="$(jq -r 'first(.dashboards[]? | select(.displayName=="TOCA OS Next — Platform Readiness — Staging") | .name) // empty' /tmp/dashboards.json)"
+
+          if [[ -z "$DASHBOARD_NAME" ]]; then
+            jq -n --arg alertPolicy "$ALERT_POLICY" '{
+              displayName:"TOCA OS Next — Platform Readiness — Staging",
+              labels:{staging_reliability:"",toca_os_next:""},
+              mosaicLayout:{columns:48,tiles:[
+                {xPos:0,yPos:0,width:48,height:5,widget:{text:{content:"# TOCA OS Next — Staging Reliability\n\nStaging-only readiness dashboard. Provider-gated signals remain inactive until provider verification.",format:"MARKDOWN"}}},
+                {xPos:0,yPos:5,width:24,height:16,widget:{title:"Cloud Run request rate — staging services",xyChart:{dataSets:[{timeSeriesQuery:{timeSeriesFilter:{filter:"metric.type=\"run.googleapis.com/request_count\" AND resource.type=\"cloud_run_revision\" AND (resource.label.\"service_name\"=\"toca-mcp-next-staging\" OR resource.label.\"service_name\"=\"toca-webhook-next-staging\")",aggregation:{alignmentPeriod:"60s",perSeriesAligner:"ALIGN_RATE"}}},plotType:"LINE",minAlignmentPeriod:"60s"}],yAxis:{scale:"LINEAR"},chartOptions:{mode:"COLOR"}}}},
+                {xPos:24,yPos:5,width:24,height:16,widget:{title:"Synthetic Reliability alert",alertChart:{name:$alertPolicy}}},
+                {xPos:0,yPos:21,width:48,height:10,widget:{title:"Staging incidents",incidentList:{policyNames:[$alertPolicy],monitoredResources:[]}}}
+              ]}
+            }' > /tmp/dashboard-create.json
+            CREATE_HTTP="$(curl --silent --show-error -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/dashboard-create.json --output /tmp/dashboard-created.json --write-out '%{http_code}' "$DASH_API")"
+            if [[ "$CREATE_HTTP" != 2* ]]; then
+              echo "STAGING_DASHBOARD_CREATE_HTTP=${CREATE_HTTP}"
+              jq -c '{error:{code:(.error.code // null),status:(.error.status // null),message:(.error.message // "unknown")}}' /tmp/dashboard-created.json
+              exit 1
+            fi
+            DASHBOARD_NAME="$(jq -r '.name // empty' /tmp/dashboard-created.json)"
+          fi
+
+          test -n "$DASHBOARD_NAME"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v1/${DASHBOARD_NAME}" > /tmp/dashboard-readback.json
+          unset TOKEN
+
+          jq -e '.displayName=="TOCA OS Next — Platform Readiness — Staging" and (.labels|has("staging_reliability")) and (.labels|has("toca_os_next")) and (.mosaicLayout.tiles|length)>=4' /tmp/dashboard-readback.json >/dev/null
+          jq -c '{name,displayName,labels,tileCount:(.mosaicLayout.tiles|length)}' /tmp/dashboard-readback.json
+          echo 'STAGING_RUNTIME_DASHBOARD=PASS'
+          echo 'PRODUCTION_MUTATION=false'
+          echo 'PROVIDER_MUTATION=false'
+          echo 'DATABASE_MUTATION=false'
+          echo 'BACKUP_MUTATION=false'
+          echo 'DR_MUTATION=false'
+          echo 'TRAFFIC_MUTATION=false'
+          echo 'CLOUD_RUN_MUTATION=false'
+          echo 'SECRET_MUTATION=false'
