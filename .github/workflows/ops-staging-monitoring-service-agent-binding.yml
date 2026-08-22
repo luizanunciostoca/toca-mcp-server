@@ -41,10 +41,17 @@ jobs:
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
 
-          gcloud beta services identity create \
-            --service=monitoring.googleapis.com \
-            --project="$PROJECT_ID" \
-            --quiet >/tmp/monitoring-service-identity.txt
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data '' \
+            "https://serviceusage.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/services/monitoring.googleapis.com:generateServiceIdentity" \
+            > /tmp/monitoring-service-identity-operation.json
+          unset TOKEN
+
+          jq -e '.name | type == "string" and length > 0' /tmp/monitoring-service-identity-operation.json >/dev/null
 
           OBSERVED_EMAIL=''
           for attempt in $(seq 1 20); do
