@@ -39,7 +39,10 @@ class FaultStore implements EventOutboxStore {
   claimCalls = 0;
   staleRecoveries = 0;
 
-  constructor(count: number, private readonly maxAttempts = 3) {
+  constructor(
+    count: number,
+    private readonly maxAttempts = 3,
+  ) {
     for (let index = 0; index < count; index += 1) {
       const envelope = event(index);
       this.rows.set(envelope.eventId, {
