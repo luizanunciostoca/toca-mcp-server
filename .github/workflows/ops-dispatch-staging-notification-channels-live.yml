@@ -1,0 +1,103 @@
+name: Ops Dispatch Staging Notification Channels Live 2026-08-21
+
+on:
+  push:
+    branches: [ops/staging-notification-channels-live-20260821]
+    paths: ['.github/workflows/ops-dispatch-staging-notification-channels-live.yml']
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ops-dispatch-staging-notification-channels-live-20260821
+  cancel-in-progress: false
+
+jobs:
+  dispatch-and-readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TARGET_WORKFLOW: staging-notification-channels.yml
+      TARGET_REF: main
+      EXPECTED_POLICY_SHA256: 1842881d328ccc8e7adba1462eb6a789f144eefd8c9645a313e592d1c0a88c33
+    steps:
+      - name: Fail closed on operational branch and repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-notification-channels-live-20260821'
+          test "$TARGET_REF" = main
+          echo 'OPS_DISPATCH_BOUNDARY=PASS'
+
+      - name: Dispatch governed main workflow
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "started_at=$STARTED_AT" >> "$GITHUB_OUTPUT"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            -f ref="$TARGET_REF" \
+            -f "inputs[expected_policy_sha256]=$EXPECTED_POLICY_SHA256"
+          echo 'STAGING_NOTIFICATION_DISPATCH=PASS'
+
+      - name: Resolve dispatched run
+        id: child
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for _ in $(seq 1 30); do
+            RUN_ID="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?event=workflow_dispatch&branch=${TARGET_REF}&per_page=20" \
+              --jq --arg started "$STARTED_AT" '.workflow_runs | map(select(.created_at >= $started)) | sort_by(.created_at) | last | .id // empty')"
+            if [[ -n "$RUN_ID" ]]; then break; fi
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "STAGING_NOTIFICATION_RUN_ID=$RUN_ID"
+
+      - name: Wait for governed run completion
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          STATUS=''
+          CONCLUSION=''
+          for _ in $(seq 1 120); do
+            DATA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+            STATUS="$(jq -r '.status' <<<"$DATA")"
+            CONCLUSION="$(jq -r '.conclusion // empty' <<<"$DATA")"
+            echo "child_status=$STATUS conclusion=${CONCLUSION:-pending}"
+            if [[ "$STATUS" == completed ]]; then break; fi
+            sleep 5
+          done
+          test "$STATUS" = completed
+          echo "STAGING_NOTIFICATION_CHILD_CONCLUSION=$CONCLUSION"
+          test "$CONCLUSION" = success
+
+      - name: Final safety summary
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          {
+            echo '### Operational staging notification dispatch'
+            echo "- target workflow: ${TARGET_WORKFLOW}"
+            echo "- target ref: ${TARGET_REF}"
+            echo "- child run id: ${RUN_ID:-unresolved}"
+            echo '- project mutation scope: staging notification channels + exact IAM bootstrap only'
+            echo '- production/provider/database/backup/DR/traffic mutation: forbidden by child policy'
+          } >> "$GITHUB_STEP_SUMMARY"
