@@ -65,9 +65,9 @@ jobs:
           UPTIME_NAME="$(jq -r --arg display "$UPTIME_DISPLAY_NAME" 'first(.uptimeCheckConfigs[]? | select(.displayName==$display) | .name) // empty' /tmp/uptime-list.json)"
 
           if [[ -z "$UPTIME_NAME" ]]; then
-            jq -n --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" '{
+            jq -n --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" --arg project "$PROJECT_ID" '{
               displayName:$display,
-              monitoredResource:{type:"uptime_url",labels:{host:$host}},
+              monitoredResource:{type:"uptime_url",labels:{host:$host,project_id:$project}},
               httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,validateSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
               timeout:"10s",
               period:"300s"
@@ -93,10 +93,11 @@ jobs:
             "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime-readback.json
           unset TOKEN
 
-          jq -e --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" '
+          jq -e --arg host "$HOST" --arg display "$UPTIME_DISPLAY_NAME" --arg project "$PROJECT_ID" '
             .displayName==$display and
             .monitoredResource.type=="uptime_url" and
             .monitoredResource.labels.host==$host and
+            .monitoredResource.labels.project_id==$project and
             .httpCheck.requestMethod=="GET" and
             .httpCheck.path=="/readyz" and
             .httpCheck.port==443 and
