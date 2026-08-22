@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve least-privilege V5 authorized staging DR run
+      - name: Resolve exact V5 emergency cleanup run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -24,13 +24,13 @@ jobs:
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           RUNS="$(gh run list \
             --repo "$GH_REPO" \
-            --workflow 'Ops Authorized Staging DR Least Privilege V5 2026-08-22' \
+            --workflow 'Ops Staging DR Emergency Cleanup 2026-08-22' \
             --branch 'ops/staging-dr-authorized-20260822' \
             --event push \
             --limit 10 \
             --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-          echo "$RUNS" | jq -e --arg sha '5a6e284337deb70a2787874f21d264fa80aae3bd' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          MATCH="$(echo "$RUNS" | jq -r --arg sha '5a6e284337deb70a2787874f21d264fa80aae3bd' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          echo "$RUNS" | jq -e --arg sha 'c3417385c20cab4791b5acb347bf91169557e6ac' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha 'c3417385c20cab4791b5acb347bf91169557e6ac' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
           IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
           test -n "$RUN_ID"
-          echo "DR_LP_V5_RUN_ID=$RUN_ID DR_LP_V5_STATUS=$RUN_STATUS DR_LP_V5_CONCLUSION=$RUN_CONCLUSION DR_LP_V5_URL=$RUN_URL"
+          echo "DR_EMERGENCY_V5_RUN_ID=$RUN_ID DR_EMERGENCY_V5_STATUS=$RUN_STATUS DR_EMERGENCY_V5_CONCLUSION=$RUN_CONCLUSION DR_EMERGENCY_V5_URL=$RUN_URL"
