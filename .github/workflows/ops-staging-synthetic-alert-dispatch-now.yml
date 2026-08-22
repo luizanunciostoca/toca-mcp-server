@@ -4,14 +4,11 @@ on:
   push:
     branches: [ops/staging-synthetic-alert-dispatch-now-20260822]
     paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
-  pull_request:
-    paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
 
 permissions:
   actions: write
   contents: read
   issues: write
-  pull-requests: write
 
 jobs:
   dispatch:
@@ -21,34 +18,21 @@ jobs:
       - name: Dispatch and capture exact governed synthetic alert workflow
         env:
           GH_TOKEN: ${{ github.token }}
-          POLICY_SHA256: 15635125cf8c3f1fff5eb2cf94b7c07fb95e092d8925abe9510a2c30a3ad3d7f
+          POLICY_SHA256: 6e149cc4d570cce31a66593202c8ca7218f42a97c9be14a17849c5219dcf1f0c
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          gh workflow run staging-synthetic-alert.yml \
+          DISPATCH_URL="$(gh workflow run staging-synthetic-alert.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f expected_policy_sha256="$POLICY_SHA256"
+            -f expected_policy_sha256="$POLICY_SHA256")"
+          CHILD_ID="${DISPATCH_URL##*/}"
+          [[ "$CHILD_ID" =~ ^[0-9]+$ ]]
 
-          CHILD_ID=''
-          for attempt in $(seq 1 30); do
-            CHILD_ID="$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow staging-synthetic-alert.yml \
-              --branch main \
-              --event workflow_dispatch \
-              --limit 10 \
-              --json databaseId,createdAt \
-              --jq --arg started "$STARTED_AT" '[.[] | select(.createdAt >= $started)] | sort_by(.createdAt) | last | .databaseId // empty')"
-            if [[ -n "$CHILD_ID" ]]; then
-              break
-            fi
-            sleep 2
-          done
-          test -n "$CHILD_ID"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
+            -f body="Synthetic Reliability corrected child dispatched.\n\n- child run: ${CHILD_ID}\n- target: main\n- policy SHA-256: ${POLICY_SHA256}\n- wrapper SHA: ${GITHUB_SHA}\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden" >/dev/null
 
           STATUS=''
           CONCLUSION=''
@@ -62,8 +46,8 @@ jobs:
           done
           test "$STATUS" = completed
 
-          BODY="Synthetic Reliability child dispatch readback.\n\n- wrapper SHA: ${GITHUB_SHA}\n- governed workflow: staging-synthetic-alert.yml\n- target ref: main\n- expected policy SHA-256: ${POLICY_SHA256}\n- child run: ${CHILD_ID}\n- child status: ${STATUS}\n- child conclusion: ${CONCLUSION}\n- scope: staging alert policy + one synthetic log signal only\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden\n\nDelivery/readback remains a separate external verification gate."
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" -f body="$BODY" >/dev/null
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
+            -f body="Synthetic Reliability corrected child readback.\n\n- child run: ${CHILD_ID}\n- status: ${STATUS}\n- conclusion: ${CONCLUSION}\n- policy SHA-256: ${POLICY_SHA256}\n- wrapper SHA: ${GITHUB_SHA}\n- scope: staging alert policy + one synthetic log signal only\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden\n\nExternal email + webhook delivery/readback is the next gate." >/dev/null
 
           echo "SYNTHETIC_ALERT_CHILD_RUN=${CHILD_ID}"
           echo "SYNTHETIC_ALERT_CHILD_CONCLUSION=${CONCLUSION}"
