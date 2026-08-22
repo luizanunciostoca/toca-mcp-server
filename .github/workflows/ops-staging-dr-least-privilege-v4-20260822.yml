@@ -92,7 +92,7 @@ jobs:
 
           ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
           gcloud iam service-accounts create "$DR_SA_ID" --project="$PROJECT_ID" --display-name='TOCA Next temporary isolated DR' --description="Temporary DR identity for run ${GITHUB_RUN_ID}" >/dev/null
-          PERMISSIONS='cloudsql.instances.clone,cloudsql.instances.connect,cloudsql.instances.delete,cloudsql.instances.get,cloudsql.instances.update,cloudsql.operations.get,cloudsql.users.list,cloudsql.users.update,resourcemanager.projects.get,serviceusage.services.use'
+          PERMISSIONS='cloudsql.instances.clone,cloudsql.instances.connect,cloudsql.instances.delete,cloudsql.instances.get,cloudsql.instances.update,cloudsql.operations.get,cloudsql.users.list,cloudsql.users.update,resourcemanager.projects.get,resourcemanager.projects.list,serviceusage.quotas.get,serviceusage.services.get,serviceusage.services.use'
           gcloud iam roles create "$DR_ROLE_ID" --project="$PROJECT_ID" --title='TOCA Next isolated DR least privilege' --description="Temporary DR-only role for run ${GITHUB_RUN_ID}" --permissions="$PERMISSIONS" --stage=GA --quiet >/dev/null
           gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" --format=json >/tmp/role.json
           test "$(jq -r '.includedPermissions[]' /tmp/role.json | sort)" = "$(tr ',' '\n' <<<"$PERMISSIONS" | sort)"
@@ -111,6 +111,8 @@ jobs:
           for attempt in $(seq 1 60); do
             if gcloud --impersonate-service-account="$DR_SA_EMAIL" projects describe "$PROJECT_ID" --format='value(projectNumber)' >/tmp/imp-project 2>/tmp/imp-error \
               && test "$(cat /tmp/imp-project)" = "$PROJECT_NUMBER" \
+              && gcloud --impersonate-service-account="$DR_SA_EMAIL" services describe sqladmin.googleapis.com --project="$PROJECT_ID" --format='value(state)' >/tmp/imp-service 2>>/tmp/imp-error \
+              && test "$(cat /tmp/imp-service)" = ENABLED \
               && gcloud --impersonate-service-account="$DR_SA_EMAIL" sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format='value(state)' >/tmp/imp-source 2>>/tmp/imp-error \
               && test "$(cat /tmp/imp-source)" = RUNNABLE; then
               READY=1
@@ -124,6 +126,7 @@ jobs:
             tail -n 20 /tmp/imp-error >&2 || true
             exit 1
           fi
+          sleep 60
           echo 'DR_LP_V4_BOOTSTRAP=PASS'
 
   drill:
