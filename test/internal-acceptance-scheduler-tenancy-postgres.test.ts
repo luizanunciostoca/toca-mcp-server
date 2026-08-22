@@ -1,15 +1,39 @@
-import { describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'vitest';
 import { createPostgresPool } from '../src/persistence/postgres.js';
 import { PostgresScheduler } from '../src/scheduler/postgres-scheduler.js';
 import { PostgresDeadLetterSink } from '../src/worker/postgres-dead-letter.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const postgresDescribe = DATABASE_URL ? describe : describe.skip;
+const attempts: Array<{ label: string; leaked: boolean; evidence: unknown }> = [];
 
 function databaseUrl(): string {
   if (!DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
   return DATABASE_URL;
 }
+
+function record(label: string, leaked: boolean, evidence: unknown): void {
+  attempts.push({ label, leaked, evidence });
+}
+
+afterAll(() => {
+  const leaks = attempts.filter((attempt) => attempt.leaked);
+  writeFileSync(
+    '/tmp/internal-acceptance-tenant-probe.json',
+    `${JSON.stringify(
+      {
+        candidateSha: '75c165a044c6e79e9545328dd04a2a3e73d2e910',
+        tenantsTested: 3,
+        crossTenantAttempts: attempts.length,
+        crossTenantLeaks: leaks.length,
+        attempts,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+});
 
 postgresDescribe('INTERNAL ACCEPTANCE scheduler/DLQ tenant boundary', () => {
   it('fails closed when a tenant-A caller knows tenant-B scheduled-job identifiers', async () => {
@@ -61,14 +85,19 @@ postgresDescribe('INTERNAL ACCEPTANCE scheduler/DLQ tenant boundary', () => {
     );
     const siblingCanceled = await scheduler.cancel(jobs[2]!.id);
 
-    // A tenant-safe scheduler must not disclose or mutate sibling jobs through an A-scoped call.
-    expect(siblingKnownId, 'CROSS_TENANT_LEAK:scheduler.get known tenant-B id').toBeUndefined();
-    expect(
-      omittedTenantFilter.filter((job) => job.id !== jobs[0]!.id),
-      'CROSS_TENANT_LEAK:scheduler.list omitted tenant filter',
-    ).toHaveLength(0);
-    expect(siblingRescheduled, 'CROSS_TENANT_LEAK:scheduler.reschedule tenant-B').toBeUndefined();
-    expect(siblingCanceled, 'CROSS_TENANT_LEAK:scheduler.cancel tenant-C').toBeUndefined();
+    const knownIdLeak = siblingKnownId !== undefined;
+    const listLeaks = omittedTenantFilter.filter((job) => job.id !== jobs[0]!.id);
+    const rescheduleLeak = siblingRescheduled !== undefined;
+    const cancelLeak = siblingCanceled !== undefined;
+    record('scheduler.get known tenant-B id from tenant-A context', knownIdLeak, siblingKnownId ?? null);
+    record('scheduler.list with omitted tenant filter from tenant-A context', listLeaks.length > 0, listLeaks.map((job) => job.id));
+    record('scheduler.reschedule tenant-B from tenant-A context', rescheduleLeak, siblingRescheduled ?? null);
+    record('scheduler.cancel tenant-C from tenant-A context', cancelLeak, siblingCanceled ?? null);
+
+    expect.soft(siblingKnownId, 'CROSS_TENANT_LEAK:scheduler.get known tenant-B id').toBeUndefined();
+    expect.soft(listLeaks, 'CROSS_TENANT_LEAK:scheduler.list omitted tenant filter').toHaveLength(0);
+    expect.soft(siblingRescheduled, 'CROSS_TENANT_LEAK:scheduler.reschedule tenant-B').toBeUndefined();
+    expect.soft(siblingCanceled, 'CROSS_TENANT_LEAK:scheduler.cancel tenant-C').toBeUndefined();
 
     await pool.end();
   });
@@ -129,10 +158,16 @@ postgresDescribe('INTERNAL ACCEPTANCE scheduler/DLQ tenant boundary', () => {
       'select id from dead_letter_jobs where original_job_id = $1',
       [job.id],
     );
+    const dlqLeak = !rejected || source.rows[0]?.status !== 'RUNNING' || (dlq.rowCount ?? 0) > 0;
+    record('DLQ finalize tenant-B job from tenant-A context', dlqLeak, {
+      rejected,
+      tenantBSourceStatus: source.rows[0]?.status ?? null,
+      deadLetterRows: dlq.rowCount ?? 0,
+    });
 
-    expect(rejected, 'CROSS_TENANT_LEAK:DLQ finalize accepted sibling tenant job').toBe(true);
-    expect(source.rows[0]?.status).toBe('RUNNING');
-    expect(dlq.rowCount).toBe(0);
+    expect.soft(rejected, 'CROSS_TENANT_LEAK:DLQ finalize accepted sibling tenant job').toBe(true);
+    expect.soft(source.rows[0]?.status, 'CROSS_TENANT_LEAK:DLQ mutated tenant-B source').toBe('RUNNING');
+    expect.soft(dlq.rowCount, 'CROSS_TENANT_LEAK:DLQ created sibling-tenant record').toBe(0);
     await pool.end();
   });
 });
