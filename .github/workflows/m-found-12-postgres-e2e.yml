@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - 'test/m-found-12-postgres-e2e.test.ts'
+      - 'test/workflow-timer-recovery-postgres-e2e.test.ts'
       - 'test/foundation-worker-postgres-e2e.test.ts'
       - 'test/r29-video-postgres-e2e.test.ts'
       - 'test/r29-video-core-runtime.test.ts'
@@ -84,10 +85,11 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL restart/outbox/audit, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence and tenant Approval isolation E2E
+      - name: Execute PostgreSQL restart/outbox/audit, timer recovery, CRM Sales, WhatsApp, worker restart safety, Video/R29, Demand Intelligence, R31 Learning, AG-01, Attribution/Revenue, Asset Intelligence and tenant Approval isolation E2E
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
+          test/workflow-timer-recovery-postgres-e2e.test.ts
           test/crm-sales-postgres-e2e.test.ts
           test/whatsapp-postgres-e2e.test.ts
           test/foundation-worker-postgres-e2e.test.ts
