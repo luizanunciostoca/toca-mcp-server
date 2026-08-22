@@ -15,22 +15,21 @@ env:
   PROJECT_NUMBER: '729069789107'
   REGION: southamerica-east1
   SOURCE_INSTANCE: toca-mcp-next-staging-db
-  TARGET_INSTANCE: toca-next-pitr-32567130027
+  TARGET_INSTANCE: toca-next-lp-pitr-32567566263
+  DR_SA_EMAIL: toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr32567566263
   PRODUCTION_PROJECT_ID: toca-mcp-production
   PRODUCTION_PROJECT_NUMBER: '990081828836'
   INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
-  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
-  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
-  TEMP_DR_ROLE: roles/cloudsql.admin
 
 jobs:
-  bootstrap-iam:
+  cleanup:
     runs-on: ubuntu-latest
     environment: infrastructure-admin
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
-      - name: Verify cleanup boundary
+      - name: Verify immutable emergency-cleanup boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -41,12 +40,14 @@ jobs:
           test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
-          test "$TARGET_INSTANCE" = 'toca-next-pitr-32567130027'
+          test "$TARGET_INSTANCE" = 'toca-next-lp-pitr-32567566263'
           test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
-          [[ "$TARGET_INSTANCE" == toca-next-pitr-* ]]
-          echo 'DR_EMERGENCY_CLEANUP_BOUNDARY=PASS'
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$DR_SA_EMAIL" = 'toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com'
+          test "$DR_ROLE_ID" = 'tocaNextDr32567566263'
+          echo 'DR_EMERGENCY_V5_BOUNDARY=PASS'
 
-      - name: Authenticate infrastructure administrator for staging IAM only
+      - name: Authenticate infrastructure administrator
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.INFRA_WIF }}
@@ -55,86 +56,74 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Ensure temporary Cloud SQL Admin for cleanup only
+      - name: Delete exact V5 target after backend operations settle
         shell: bash
         run: |
           set -euo pipefail
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
-          gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$TEMP_DR_ROLE" --condition=None --quiet
-          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null
-          echo 'DR_EMERGENCY_CLEANUP_IAM_READY=PASS'
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-before.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-before.json >/dev/null
 
-  cleanup-target:
-    needs: bootstrap-iam
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 30
-    steps:
-      - name: Authenticate isolated staging operator
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.STAGING_WIF }}
-          service_account: ${{ env.STAGING_OPERATOR_SA }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Disable protection on exact temporary target and delete it
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
-          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
-          [[ "$TARGET_INSTANCE" == toca-next-pitr-* ]]
-          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-before-cleanup.json
-          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-before-cleanup.json >/dev/null
-          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-before-cleanup.json 2>/dev/null; then
-            jq -e --arg project "$PROJECT_ID" --arg region "$REGION" --arg target "$TARGET_INSTANCE" '.project==$project and .region==$region and .name==$target and .databaseVersion=="POSTGRES_18"' /tmp/target-before-cleanup.json >/dev/null
-            gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet
-            gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-unprotected.json
-            jq -e '.settings.deletionProtectionEnabled==false' /tmp/target-unprotected.json >/dev/null
-            gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet
-          fi
-          for attempt in $(seq 1 90); do
-            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+          for attempt in $(seq 1 120); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/target.json 2>/dev/null; then
+              echo "DR_EMERGENCY_V5_TARGET_ABSENT=PASS attempt=${attempt}"
               break
+            fi
+            jq -e --arg project "$PROJECT_ID" --arg region "$REGION" --arg target "$TARGET_INSTANCE" '.project==$project and .region==$region and .name==$target and .databaseVersion=="POSTGRES_18"' /tmp/target.json >/dev/null
+            if [[ "$(jq -r '.settings.deletionProtectionEnabled // false' /tmp/target.json)" == true ]]; then
+              if ! gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet >/tmp/patch.out 2>/tmp/patch.err; then
+                if grep -q 'another operation was already in progress' /tmp/patch.err; then sleep 10; continue; fi
+                cat /tmp/patch.err >&2; exit 1
+              fi
+              sleep 5
+              continue
+            fi
+            if ! gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet >/tmp/delete.out 2>/tmp/delete.err; then
+              if grep -q 'another operation was already in progress' /tmp/delete.err; then sleep 10; continue; fi
+              cat /tmp/delete.err >&2; exit 1
             fi
             sleep 10
           done
           ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
-          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-after-cleanup.json
-          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-after-cleanup.json >/dev/null
-          echo 'DR_EMERGENCY_TARGET_CLEANUP=PASS'
-          echo 'STAGING_SOURCE_POST_EMERGENCY_CLEANUP=PASS'
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-after-target.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-after-target.json >/dev/null
+          echo 'DR_EMERGENCY_V5_TARGET_CLEANUP=PASS source_unchanged=true'
 
-  cleanup-iam:
-    needs: [bootstrap-iam, cleanup-target]
-    if: always() && needs.bootstrap-iam.result == 'success'
-    runs-on: ubuntu-latest
-    environment: infrastructure-admin
-    timeout-minutes: 15
-    steps:
-      - name: Authenticate infrastructure administrator for IAM cleanup only
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.INFRA_WIF }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Revoke temporary Cloud SQL Admin binding
+      - name: Remove only V5 temporary IAM and verify zero residue
         shell: bash
         run: |
           set -euo pipefail
-          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          MEMBER_DR="serviceAccount:${DR_SA_EMAIL}"
+          MEMBER_INFRA="serviceAccount:${INFRA_ADMIN_SA}"
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          ROLEADMIN_ADDED=false
           POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          if jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY" >/dev/null; then
-            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$TEMP_DR_ROLE" --condition=None --quiet
+          if ! jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet >/dev/null
+              ROLEADMIN_ADDED=true
+            fi
+          fi
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_DR" --role="$ROLE" --condition=None --quiet >/dev/null
+          fi
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam service-accounts delete "$DR_SA_EMAIL" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+          if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam roles delete "$DR_ROLE_ID" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet >/dev/null
           fi
           POLICY_AFTER="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          ! jq -e --arg role "$TEMP_DR_ROLE" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$POLICY_AFTER" >/dev/null
-          echo 'DR_EMERGENCY_IAM_CLEANUP=PASS'
+          ! jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY_AFTER" >/dev/null
+          ! jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY_AFTER" >/dev/null
+          ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
+          ! gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-final.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-final.json >/dev/null
+          echo 'DR_EMERGENCY_V5_IAM_CLEANUP=PASS target_absent=true source_unchanged=true'
