@@ -34,3 +34,4 @@ jobs:
           }
           resolve 'Ops Authorized Staging DR Least Privilege V5 2026-08-22' '4d5553121462d65a0fb4bcdbb1b94013c6d1bd31' 'DR_V5_FIXED'
           resolve 'Ops Authorized Staging DR Least Privilege V6 2026-08-22' '0a7f72e32e1820c7d9b1d633ed106c8276fe7663' 'DR_V6'
+          echo 'OBSERVER_V6_RESOLUTION=PASS'
