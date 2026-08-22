@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "toca.staging.reliability-reconciliation.v1",
-  "observedAt": "2026-08-22T09:01:36Z",
-  "repositoryMainShaObserved": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
+  "schemaVersion": "toca.staging.reliability-reconciliation.v2",
+  "observedAt": "2026-08-22T09:21:30Z",
+  "repositoryMainShaObserved": "ba44d418a093fbe843d19f52158660c82cb8d799",
   "frozenApplicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
   "candidateFrozen": true,
   "staging": {
@@ -44,13 +44,29 @@
     "notificationChannelEventsAfterSignal": 0,
     "notificationChannelErrorsAfterSignal": 0,
     "webhookPositiveReceiptVerified": false,
-    "incidentRecoveryClosureVerified": false
+    "incident": {
+      "alertId": "0.obqbjhmrmmv8",
+      "openTime": "2026-08-22T08:46:05Z",
+      "closeTime": "2026-08-22T09:21:09Z",
+      "finalReadbackObservedAt": "2026-08-22T09:21:30Z",
+      "state": "CLOSED",
+      "recoveryClosureVerified": true,
+      "manualCloseExecuted": false,
+      "syntheticSignalCount": 1,
+      "pollAttempts": 2
+    }
   },
   "cloudSqlReadOnlyReliabilityPrerequisites": {
     "backupEnabled": true,
     "pitrEnabled": true,
     "retentionVerified": true,
     "latestSuccessfulBackupPreviouslyReadBack": "2026-08-21T17:20:36.918Z"
+  },
+  "runbookCorrelation": {
+    "verified": true,
+    "path": "docs/operations/next-staging-reliability-runbook.md",
+    "policyId": "5562724679805698256",
+    "alertId": "0.obqbjhmrmmv8"
   },
   "lifecycle": {
     "stagingVerified": true,
@@ -60,7 +76,6 @@
   },
   "remainingReliabilityBlockers": [
     "positive webhook_tokenauth recipient/readback evidence",
-    "synthetic incident recovery/closure readback",
     "separately authorized final-candidate isolated DR rehearsal with RPO/RTO proof"
   ],
   "safety": {
