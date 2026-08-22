@@ -9,7 +9,6 @@ TARGET_INSTANCE="${TARGET_INSTANCE:?TARGET_INSTANCE required}"
 
 is_clone=0
 clone_index=-1
-for i in "${!@}"; do :; done
 args=("$@")
 for ((i=0; i<${#args[@]}-2; i++)); do
   if [[ "${args[$i]}" == 'sql' && "${args[$((i+1))]}" == 'instances' && "${args[$((i+2))]}" == 'clone' ]]; then
