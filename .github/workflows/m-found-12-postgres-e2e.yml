@@ -89,6 +89,7 @@ jobs:
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
+          test/workflow-timer-recovery-postgres-e2e.test.ts
           test/crm-sales-postgres-e2e.test.ts
           test/whatsapp-postgres-e2e.test.ts
           test/foundation-worker-postgres-e2e.test.ts

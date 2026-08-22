@@ -508,21 +508,64 @@ export class InMemoryWorkflowStore implements WorkflowStore {
     return this.#snapshot(input.workflowId);
   }
 
+  async rescheduleTimer(input: {
+    readonly timerId: string;
+    readonly workflowId: string;
+    readonly stepId: string;
+    readonly fireAt: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot> {
+    await Promise.resolve();
+    requireText(input.timerId, 'WORKFLOW_TIMER_ID_REQUIRED');
+    const evidence = requireWorkflowEvidence(input.evidence);
+    assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
+    assertTimestamp(input.fireAt, 'WORKFLOW_TIMER_FIRE_AT_INVALID');
+    if (Date.parse(input.fireAt) < Date.parse(input.now)) throw new Error('WORKFLOW_TIMER_IN_PAST');
+    const timer = this.#timers.get(input.timerId);
+    if (!timer) throw new Error('WORKFLOW_TIMER_NOT_FOUND');
+    if (timer.workflowId !== input.workflowId || timer.stepId !== input.stepId)
+      throw new Error('WORKFLOW_TIMER_SCOPE_MISMATCH');
+    if (timer.status !== 'SCHEDULED') throw new Error('WORKFLOW_TIMER_NOT_SCHEDULED');
+    const step = this.#requireStep(input.workflowId, input.stepId);
+    if (step.status !== 'WAITING_TIMER') throw new Error('WORKFLOW_STEP_NOT_WAITING_TIMER');
+
+    this.#timers.set(input.timerId, {
+      ...timer,
+      fireAt: input.fireAt,
+      version: timer.version + 1,
+    });
+    this.#appendEvent(
+      input.workflowId,
+      input.stepId,
+      'TIMER_SCHEDULED',
+      { timerId: input.timerId, fireAt: input.fireAt, rescheduled: true },
+      evidence,
+      input.now,
+    );
+    return this.#snapshot(input.workflowId);
+  }
+
   fireDueTimers(input: {
     readonly now: string;
     readonly limit: number;
   }): Promise<readonly string[]> {
     assertTimestamp(input.now, 'WORKFLOW_NOW_INVALID');
     assertLimit(input.limit);
-    const due = [...this.#timers.values()]
-      .filter(
-        (timer) =>
-          timer.status === 'SCHEDULED' && Date.parse(timer.fireAt) <= Date.parse(input.now),
-      )
+    const candidates = [...this.#timers.values()]
+      .filter((timer) => {
+        if (timer.status === 'SCHEDULED') return Date.parse(timer.fireAt) <= Date.parse(input.now);
+        if (timer.status !== 'FIRED') return false;
+        return this.#requireStep(timer.workflowId, timer.stepId).status === 'READY';
+      })
       .sort((a, b) => a.fireAt.localeCompare(b.fireAt) || a.timerId.localeCompare(b.timerId))
       .slice(0, input.limit);
     const fired: string[] = [];
-    for (const timer of due) {
+    for (const timer of candidates) {
+      if (timer.status === 'FIRED') {
+        fired.push(timer.timerId);
+        continue;
+      }
       const step = this.#requireStep(timer.workflowId, timer.stepId);
       if (step.status !== 'WAITING_TIMER') throw new Error('WORKFLOW_STEP_NOT_WAITING_TIMER');
       this.#timers.set(timer.timerId, {

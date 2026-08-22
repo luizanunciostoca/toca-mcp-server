@@ -272,6 +272,18 @@ export interface WorkflowStore {
     readonly evidence: readonly string[];
     readonly now: string;
   }): Promise<WorkflowSnapshot>;
+  rescheduleTimer(input: {
+    readonly timerId: string;
+    readonly workflowId: string;
+    readonly stepId: string;
+    readonly fireAt: string;
+    readonly evidence: readonly string[];
+    readonly now: string;
+  }): Promise<WorkflowSnapshot>;
+  /**
+   * Fires due timers and redelivers already-fired timers while their owning step
+   * remains READY. Redelivery stops as soon as a worker successfully claims the step.
+   */
   fireDueTimers(input: {
     readonly now: string;
     readonly limit: number;
