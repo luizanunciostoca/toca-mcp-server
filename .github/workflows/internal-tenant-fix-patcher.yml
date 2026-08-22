@@ -6,16 +6,24 @@ on:
       - 'fix/tenant-scoped-scheduler-dlq-20260822'
     paths:
       - '.github/workflows/internal-tenant-fix-patcher.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/internal-tenant-fix-patcher.yml'
+      - 'scripts/internal-tenant-fix-patcher.mjs'
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.head_ref == 'fix/tenant-scoped-scheduler-dlq-20260822' || github.ref_name == 'fix/tenant-scoped-scheduler-dlq-20260822'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: fix/tenant-scoped-scheduler-dlq-20260822
           fetch-depth: 0
       - name: Apply deterministic tenant-scope patch
         run: node scripts/internal-tenant-fix-patcher.mjs
@@ -28,6 +36,4 @@ jobs:
           git add src test migrations
           git diff --cached --check
           git commit -m 'fix(tenancy): enforce scheduler and DLQ tenant boundaries'
-          git push origin HEAD:"$GITHUB_REF_NAME"
-
-# One-shot internal patcher for the pre-production tenant-boundary fix branch only.
+          git push origin HEAD:fix/tenant-scoped-scheduler-dlq-20260822
