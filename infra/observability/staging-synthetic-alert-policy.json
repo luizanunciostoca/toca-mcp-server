@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "operation": "staging-synthetic-alert-delivery-readback",
+  "projectId": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "productionProjectId": "toca-mcp-production",
+  "productionProjectNumber": "990081828836",
+  "executionEnvironment": "staging",
+  "operatorServiceAccount": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "requiredIamRoles": [
+    "roles/logging.logWriter",
+    "roles/logging.viewer",
+    "roles/monitoring.alertPolicyEditor"
+  ],
+  "notificationChannels": {
+    "managedLabel": "staging_reliability",
+    "requiredEnabledCount": 2,
+    "requiredFamilies": ["email", "webhook_tokenauth"]
+  },
+  "syntheticSignal": {
+    "logId": "toca-staging-reliability-synthetic",
+    "severity": "WARNING",
+    "marker": "TOCA_STAGING_RELIABILITY_SYNTHETIC_V1",
+    "autoCloseSeconds": 300,
+    "notificationRateLimitSeconds": 300
+  },
+  "forbid": {
+    "productionMutation": true,
+    "providerMutation": true,
+    "databaseMutation": true,
+    "backupMutation": true,
+    "drRestore": true,
+    "trafficMutation": true,
+    "cloudRunMutation": true,
+    "secretMutation": true,
+    "serviceAccountKey": true,
+    "projectOwner": true,
+    "projectEditor": true
+  }
+}
