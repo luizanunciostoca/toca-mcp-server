@@ -140,10 +140,12 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation without schema mutat
       );
       expect(await schedulerA.get(aDueId)).toMatchObject({ status: 'RUNNING' });
       expect(
-        (await pool.query<{ count: string }>(
-          'select count(*)::text as count from dead_letter_jobs where original_job_id = $1',
-          [aDueId],
-        )).rows[0]?.count,
+        (
+          await pool.query<{ count: string }>(
+            'select count(*)::text as count from dead_letter_jobs where original_job_id = $1',
+            [aDueId],
+          )
+        ).rows[0]?.count,
       ).toBe('0');
 
       const ownRecord = {
@@ -178,10 +180,9 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation without schema mutat
       expect(concurrentClaims.flat().map((job) => job.id)).toEqual([concurrencyId]);
       expect(bRunning.tenantId).toBe(tenantB);
     } finally {
-      await pool.query(
-        'delete from dead_letter_jobs where original_job_id = any($1::text[])',
-        [ids],
-      );
+      await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [
+        ids,
+      ]);
       await pool.query('delete from scheduled_jobs where id = any($1::text[])', [ids]);
       await pool.query('delete from tenants where tenant_id = any($1::text[])', [
         [tenantA, tenantB],
