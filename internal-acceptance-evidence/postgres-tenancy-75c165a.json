@@ -1,0 +1,169 @@
+{
+  "front": "POSTGRES_MIGRATIONS_TENANCY",
+  "candidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+  "testedHarnessHead": "2c009b2c4430f9852172834d0d173611775d6d04",
+  "runId": "32588671941",
+  "postgres": "18",
+  "productionTouched": false,
+  "providerCalls": false,
+  "googleAdsPhase": "OFF",
+  "migrations": [
+    "001_production_foundation.sql",
+    "002_worker_dead_letter.sql",
+    "003_meta_webhook_idempotency.sql",
+    "004_meta_webhook_reply_routing.sql",
+    "005_approval_governance.sql",
+    "006_approval_execution_atomicity.sql",
+    "007_durable_workflow_persistence.sql",
+    "008_workflow_execution_claims.sql",
+    "009_transactional_outbox.sql",
+    "010_audit_ledger_observability.sql",
+    "011_event_record.sql",
+    "012_crm_core_records.sql",
+    "013_measurement_ticketing_attribution.sql",
+    "014_privacy_governance.sql",
+    "020_content_item_versioning_video.sql",
+    "021_r29_video_artifacts.sql",
+    "022_meta_ads_geo_demand_intelligence.sql",
+    "023_crm_sales_engine.sql",
+    "024_email_provider_runtime.sql",
+    "025_marketing_autopilot_r31_learning.sql",
+    "026_ag01_orchestrator_runtime.sql",
+    "028_attribution_revenue_feedback.sql",
+    "029_asset_intelligence_content_supply.sql",
+    "030_whatsapp_provider_runtime.sql",
+    "031_multi_tenant_foundation.sql",
+    "032_tenant_scoped_approvals.sql",
+    "033_omnichannel_prepared_content.sql"
+  ],
+  "migrationMax": "033_omnichannel_prepared_content.sql",
+  "gap027Absent": true,
+  "catalog": {
+    "publicTables": 94,
+    "constraints": {
+      "c": 537,
+      "f": 111,
+      "n": 984,
+      "p": 94,
+      "u": 66
+    },
+    "notNullColumns": 984,
+    "defaultedColumns": 120,
+    "indexes": 295,
+    "timestampColumns": 196,
+    "criticalTables": [
+      "ag01_conversations",
+      "ag01_message_records",
+      "ag01_runtime_circuits",
+      "audit_events",
+      "audit_ledger_events",
+      "audit_ledger_heads",
+      "crm_assignment_history",
+      "crm_attribution_touchpoints",
+      "crm_contact_channels",
+      "crm_contact_merge_history",
+      "crm_contacts",
+      "crm_conversations",
+      "crm_idempotency_keys",
+      "crm_lead_score_observations",
+      "crm_leads",
+      "crm_messages",
+      "crm_next_actions",
+      "crm_opportunities",
+      "crm_pipeline_stage_history",
+      "crm_qualification_decisions",
+      "crm_record_revisions",
+      "crm_sales_activities",
+      "crm_sla_states",
+      "dead_letter_jobs",
+      "event_outbox",
+      "event_outbox_delivery_attempts",
+      "omnichannel_prepared_content",
+      "privacy_ledger_events",
+      "workflow_compensations",
+      "workflow_dependencies",
+      "workflow_events",
+      "workflow_execution_claims",
+      "workflow_human_tasks",
+      "workflow_instances",
+      "workflow_steps",
+      "workflow_timers"
+    ]
+  },
+  "schemaFingerprintBefore": "5b9bb70d8d04d459c141ea6e3a79a30be667df011281e98ea1fe8cb8211e20b7",
+  "schemaFingerprintAfter": "5b9bb70d8d04d459c141ea6e3a79a30be667df011281e98ea1fe8cb8211e20b7",
+  "canonicalOutcome": "success",
+  "migratorRerunOutcome": "success",
+  "schemaDriftOutcome": "success",
+  "adversarialProbeOutcome": "failure",
+  "tenantsTested": 3,
+  "crossTenantAttempts": 5,
+  "crossTenantLeaks": 5,
+  "attempts": [
+    {
+      "label": "scheduler.get known tenant-B id from tenant-A context",
+      "leaked": true,
+      "evidence": {
+        "id": "accept-b-1787420739568-6fa9415428971:job",
+        "toolName": "internal.acceptance",
+        "payload": {
+          "tenantId": "accept-b-1787420739568-6fa9415428971"
+        },
+        "runAt": "2026-08-22T17:44:39.581Z",
+        "timezone": "UTC",
+        "idempotencyKey": "accept-b-1787420739568-6fa9415428971:idem",
+        "status": "SCHEDULED",
+        "attempts": 0
+      }
+    },
+    {
+      "label": "scheduler.list with omitted tenant filter from tenant-A context",
+      "leaked": true,
+      "evidence": [
+        "accept-b-1787420739568-6fa9415428971:job",
+        "accept-c-1787420739568-6fa9415428971:job"
+      ]
+    },
+    {
+      "label": "scheduler.reschedule tenant-B from tenant-A context",
+      "leaked": true,
+      "evidence": {
+        "id": "accept-b-1787420739568-6fa9415428971:job",
+        "toolName": "internal.acceptance",
+        "payload": {
+          "tenantId": "accept-b-1787420739568-6fa9415428971"
+        },
+        "runAt": "2026-08-22T18:45:39.585Z",
+        "timezone": "UTC",
+        "idempotencyKey": "accept-b-1787420739568-6fa9415428971:idem",
+        "status": "SCHEDULED",
+        "attempts": 0
+      }
+    },
+    {
+      "label": "scheduler.cancel tenant-C from tenant-A context",
+      "leaked": true,
+      "evidence": {
+        "id": "accept-c-1787420739568-6fa9415428971:job",
+        "toolName": "internal.acceptance",
+        "payload": {
+          "tenantId": "accept-c-1787420739568-6fa9415428971"
+        },
+        "runAt": "2026-08-22T17:44:39.581Z",
+        "timezone": "UTC",
+        "idempotencyKey": "accept-c-1787420739568-6fa9415428971:idem",
+        "status": "CANCELED",
+        "attempts": 0
+      }
+    },
+    {
+      "label": "DLQ finalize tenant-B job from tenant-A context",
+      "leaked": true,
+      "evidence": {
+        "rejected": false,
+        "tenantBSourceStatus": "FAILED",
+        "deadLetterRows": 1
+      }
+    }
+  ]
+}
