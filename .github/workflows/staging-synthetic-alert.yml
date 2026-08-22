@@ -68,6 +68,8 @@ jobs:
             .notificationChannels.requiredFamilies == ["email","webhook_tokenauth"] and
             .syntheticSignal.logId == "toca-staging-reliability-synthetic" and
             .syntheticSignal.marker == "TOCA_STAGING_RELIABILITY_SYNTHETIC_V1" and
+            .syntheticSignal.autoCloseSeconds == 1800 and
+            .syntheticSignal.notificationRateLimitSeconds == 300 and
             .forbid.productionMutation == true and
             .forbid.providerMutation == true and
             .forbid.databaseMutation == true and
@@ -226,7 +228,7 @@ jobs:
                   conditionMatchedLog:{filter:$filter}
                 }],
                 notificationChannels:[$email,$webhook],
-                alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"300s"}
+                alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"}
               }' > /tmp/alert-policy-create.json
 
             curl --fail --silent --show-error \
@@ -253,7 +255,9 @@ jobs:
             .userLabels.alert_role == "synthetic_delivery" and
             (.conditions | length) == 1 and
             .conditions[0].conditionMatchedLog.filter == $filter and
-            (.notificationChannels | sort) == ([$email,$webhook] | sort)
+            (.notificationChannels | sort) == ([$email,$webhook] | sort) and
+            .alertStrategy.notificationRateLimit.period == "300s" and
+            .alertStrategy.autoClose == "1800s"
           ' /tmp/alert-policy-readback.json >/dev/null
 
           jq '{name,displayName,enabled,userLabels,conditions:[.conditions[] | {displayName,conditionMatchedLog}],notificationChannels,alertStrategy}' \
