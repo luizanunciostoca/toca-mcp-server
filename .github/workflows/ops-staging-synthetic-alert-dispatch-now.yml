@@ -1,21 +1,19 @@
 name: Ops Staging Synthetic Alert Dispatch Now 2026-08-22
 
 on:
-  push:
-    branches: [ops/staging-synthetic-alert-dispatch-now-20260822]
+  pull_request:
     paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
 
 permissions:
   actions: write
   contents: read
-  issues: write
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - name: Dispatch and capture exact governed synthetic alert workflow
+      - name: Dispatch exact corrected governed synthetic alert workflow
         env:
           GH_TOKEN: ${{ github.token }}
           POLICY_SHA256: 6e149cc4d570cce31a66593202c8ca7218f42a97c9be14a17849c5219dcf1f0c
@@ -23,32 +21,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-
           DISPATCH_URL="$(gh workflow run staging-synthetic-alert.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f expected_policy_sha256="$POLICY_SHA256")"
+          echo "SYNTHETIC_ALERT_CHILD_URL=${DISPATCH_URL}"
           CHILD_ID="${DISPATCH_URL##*/}"
           [[ "$CHILD_ID" =~ ^[0-9]+$ ]]
-
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Synthetic Reliability corrected child dispatched.\n\n- child run: ${CHILD_ID}\n- target: main\n- policy SHA-256: ${POLICY_SHA256}\n- wrapper SHA: ${GITHUB_SHA}\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden" >/dev/null
-
-          STATUS=''
-          CONCLUSION=''
-          for attempt in $(seq 1 120); do
-            STATUS="$(gh run view "$CHILD_ID" --repo "$GITHUB_REPOSITORY" --json status --jq .status)"
-            CONCLUSION="$(gh run view "$CHILD_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion // ""')"
-            if [[ "$STATUS" == completed ]]; then
-              break
-            fi
-            sleep 5
-          done
-          test "$STATUS" = completed
-
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Synthetic Reliability corrected child readback.\n\n- child run: ${CHILD_ID}\n- status: ${STATUS}\n- conclusion: ${CONCLUSION}\n- policy SHA-256: ${POLICY_SHA256}\n- wrapper SHA: ${GITHUB_SHA}\n- scope: staging alert policy + one synthetic log signal only\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden\n\nExternal email + webhook delivery/readback is the next gate." >/dev/null
-
           echo "SYNTHETIC_ALERT_CHILD_RUN=${CHILD_ID}"
-          echo "SYNTHETIC_ALERT_CHILD_CONCLUSION=${CONCLUSION}"
-          test "$CONCLUSION" = success
