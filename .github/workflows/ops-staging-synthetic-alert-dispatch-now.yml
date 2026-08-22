@@ -8,13 +8,15 @@ on:
 permissions:
   actions: write
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Dispatch exact governed staging synthetic alert workflow
+      - name: Dispatch and capture exact governed synthetic alert workflow
         env:
           GH_TOKEN: ${{ github.token }}
           POLICY_SHA256: 15635125cf8c3f1fff5eb2cf94b7c07fb95e092d8925abe9510a2c30a3ad3d7f
@@ -22,8 +24,45 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
           gh workflow run staging-synthetic-alert.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f expected_policy_sha256="$POLICY_SHA256"
-          echo 'SYNTHETIC_ALERT_CHILD_DISPATCHED=1'
+
+          CHILD_ID=''
+          for attempt in $(seq 1 30); do
+            CHILD_ID="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow staging-synthetic-alert.yml \
+              --branch main \
+              --event workflow_dispatch \
+              --limit 10 \
+              --json databaseId,createdAt \
+              --jq --arg started "$STARTED_AT" '[.[] | select(.createdAt >= $started)] | sort_by(.createdAt) | last | .databaseId // empty')"
+            if [[ -n "$CHILD_ID" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          test -n "$CHILD_ID"
+
+          STATUS=''
+          CONCLUSION=''
+          for attempt in $(seq 1 120); do
+            STATUS="$(gh run view "$CHILD_ID" --repo "$GITHUB_REPOSITORY" --json status --jq .status)"
+            CONCLUSION="$(gh run view "$CHILD_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion // ""')"
+            if [[ "$STATUS" == completed ]]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$STATUS" = completed
+
+          BODY="Synthetic Reliability child dispatch readback.\n\n- wrapper SHA: ${GITHUB_SHA}\n- governed workflow: staging-synthetic-alert.yml\n- target ref: main\n- expected policy SHA-256: ${POLICY_SHA256}\n- child run: ${CHILD_ID}\n- child status: ${STATUS}\n- child conclusion: ${CONCLUSION}\n- scope: staging alert policy + one synthetic log signal only\n- production/provider/database/backup/DR/traffic/Cloud Run/secret mutation: forbidden\n\nDelivery/readback remains a separate external verification gate."
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/79/comments" -f body="$BODY" >/dev/null
+
+          echo "SYNTHETIC_ALERT_CHILD_RUN=${CHILD_ID}"
+          echo "SYNTHETIC_ALERT_CHILD_CONCLUSION=${CONCLUSION}"
+          test "$CONCLUSION" = success
