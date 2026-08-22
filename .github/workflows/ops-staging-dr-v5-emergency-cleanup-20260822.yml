@@ -1,0 +1,142 @@
+name: Ops Staging DR V5 Emergency Cleanup 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-v5-emergency-cleanup-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  TARGET_INSTANCE: toca-next-lp-pitr-32567566263
+  DR_SA_EMAIL: toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr32567566263
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 40
+    steps:
+      - name: Verify exact V5 cleanup boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-dr-authorized-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$TARGET_INSTANCE" = 'toca-next-lp-pitr-32567566263'
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+          [[ "$TARGET_INSTANCE" == toca-next-lp-pitr-* ]]
+          test "$DR_SA_EMAIL" = 'toca-next-dr-32567566263@toca-mcp-next-staging.iam.gserviceaccount.com'
+          test "$DR_ROLE_ID" = 'tocaNextDr32567566263'
+          echo 'DR_V5_EMERGENCY_CLEANUP_BOUNDARY=PASS'
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Wait for target operations to settle and delete exact V5 target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-before.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-before.json >/dev/null
+
+          if gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target.json 2>/dev/null; then
+            jq -e --arg project "$PROJECT_ID" --arg region "$REGION" --arg target "$TARGET_INSTANCE" '.project==$project and .region==$region and .name==$target and .databaseVersion=="POSTGRES_18"' /tmp/target.json >/dev/null
+            SETTLED=0
+            for attempt in $(seq 1 90); do
+              gcloud sql operations list --instance="$TARGET_INSTANCE" --project="$PROJECT_ID" --limit=20 --format=json > /tmp/ops.json
+              ACTIVE="$(jq '[.[] | select(.status != "DONE")] | length' /tmp/ops.json)"
+              if [[ "$ACTIVE" = 0 ]]; then
+                SETTLED=1
+                break
+              fi
+              sleep 10
+            done
+            test "$SETTLED" = 1
+            gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet
+            gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/target-unprotected.json
+            jq -e '.settings.deletionProtectionEnabled==false' /tmp/target-unprotected.json >/dev/null
+            gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet
+          fi
+
+          for attempt in $(seq 1 90); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 10
+          done
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source-after.json
+          jq -e --arg project "$PROJECT_ID" --arg region "$REGION" '.project==$project and .region==$region and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.deletionProtectionEnabled==true' /tmp/source-after.json >/dev/null
+          echo 'DR_V5_TEMP_TARGET_CLEANUP=PASS'
+          echo 'STAGING_SOURCE_POST_V5_CLEANUP=PASS'
+
+      - name: Remove exact V5 temporary IAM resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROLE="projects/${PROJECT_ID}/roles/${DR_ROLE_ID}"
+          MEMBER_DR="serviceAccount:${DR_SA_EMAIL}"
+          MEMBER_INFRA="serviceAccount:${INFRA_ADMIN_SA}"
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_DR" --role="$ROLE" --condition=None --quiet >/dev/null
+          fi
+
+          if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam roles delete "$DR_ROLE_ID" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+
+          if gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud iam service-accounts delete "$DR_SA_EMAIL" --project="$PROJECT_ID" --quiet >/dev/null
+          fi
+
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          if jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null; then
+            gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="$MEMBER_INFRA" --role='roles/iam.roleAdmin' --condition=None --quiet >/dev/null
+          fi
+
+          POLICY_AFTER="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          ! jq -e --arg r "$ROLE" --arg m "$MEMBER_DR" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY_AFTER" >/dev/null
+          ! jq -e --arg m "$MEMBER_INFRA" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY_AFTER" >/dev/null
+          ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
+          if gcloud iam roles describe "$DR_ROLE_ID" --project="$PROJECT_ID" --format=json > /tmp/role-after.json 2>/dev/null; then
+            jq -e '.deleted==true' /tmp/role-after.json >/dev/null
+          fi
+          echo 'DR_V5_TEMP_IAM_CLEANUP=PASS'
+
+      - name: Final no-residue proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          ! gcloud iam service-accounts describe "$DR_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1
+          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          ! jq -e --arg r "projects/${PROJECT_ID}/roles/${DR_ROLE_ID}" --arg m "serviceAccount:${DR_SA_EMAIL}" 'any(.bindings[]?; .role==$r and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null
+          ! jq -e --arg m "serviceAccount:${INFRA_ADMIN_SA}" 'any(.bindings[]?; .role=="roles/iam.roleAdmin" and any(.members[]?; .==$m))' <<<"$POLICY" >/dev/null
+          echo 'DR_V5_NO_RESIDUE=PASS'
