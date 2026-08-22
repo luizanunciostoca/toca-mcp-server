@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Locate emergency cleanup push run
+      - name: Locate V5 emergency cleanup push run
         env:
           GH_TOKEN: ${{ github.token }}
-          CLEANUP_HEAD_SHA: bca38be14f4618f00abcbcea74abe6dff073fbee
-          OBSERVER_SEQUENCE: '4'
+          CLEANUP_HEAD_SHA: a67b9469535dbfd4725b1252f3c75627efe6e9a6
+          OBSERVER_SEQUENCE: '5'
         shell: bash
         run: |
           set -euo pipefail
           gh api "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${CLEANUP_HEAD_SHA}&per_page=20" > /tmp/runs.json
-          COUNT="$(jq '[.workflow_runs[] | select(.name=="Ops Staging DR Emergency Cleanup 2026-08-22" and .event=="push")] | length' /tmp/runs.json)"
+          COUNT="$(jq '[.workflow_runs[] | select(.name=="Ops Staging DR V5 Emergency Cleanup 2026-08-22" and .event=="push")] | length' /tmp/runs.json)"
           test "$COUNT" -ge 1
-          jq -r '.workflow_runs[] | select(.name=="Ops Staging DR Emergency Cleanup 2026-08-22" and .event=="push") | "EMERGENCY_CLEANUP_RUN_ID=\(.id) status=\(.status) conclusion=\(.conclusion // "") head=\(.head_sha)"' /tmp/runs.json
+          jq -r '.workflow_runs[] | select(.name=="Ops Staging DR V5 Emergency Cleanup 2026-08-22" and .event=="push") | "V5_EMERGENCY_CLEANUP_RUN_ID=\(.id) status=\(.status) conclusion=\(.conclusion // "") head=\(.head_sha)"' /tmp/runs.json
