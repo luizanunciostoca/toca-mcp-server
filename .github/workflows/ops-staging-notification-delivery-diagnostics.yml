@@ -24,6 +24,9 @@ jobs:
       STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
       SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
       SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+      TARGET_RUN_ID: '32563070906'
+      TARGET_MAIN_SHA: 152eb4f6eaa3236ff74156ca8bccb20ea3065e76
+      EXPECTED_POLICY_ID: '5562724679805698256'
     steps:
       - name: Fail closed on exact staging boundary
         shell: bash
@@ -54,39 +57,37 @@ jobs:
           test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
           echo 'STAGING_NOTIFICATION_DIAGNOSTIC_IDENTITY=PASS'
 
-      - name: Probe exact webhook public health routes
+      - name: Read exact synthetic signal and notification delivery errors
         shell: bash
         run: |
           set -euo pipefail
-          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
-          test -n "$SERVICE_URL"
-          HOST="${SERVICE_URL#https://}"
-          HOST="${HOST%/}"
-          [[ "$HOST" != *'/'* ]]
-          HEALTHZ_STATUS="$(curl --silent --show-error --output /tmp/healthz --write-out '%{http_code}' "https://${HOST}/healthz")"
-          READYZ_STATUS="$(curl --silent --show-error --output /tmp/readyz --write-out '%{http_code}' "https://${HOST}/readyz")"
-          ROOT_STATUS="$(curl --silent --show-error --output /tmp/root --write-out '%{http_code}' "https://${HOST}/")"
-          echo "WEBHOOK_HOST=${HOST}"
-          echo "WEBHOOK_HEALTHZ_HTTP=${HEALTHZ_STATUS}"
-          echo "WEBHOOK_READYZ_HTTP=${READYZ_STATUS}"
-          echo "WEBHOOK_ROOT_HTTP=${ROOT_STATUS}"
-          echo "WEBHOOK_HEALTHZ_BODY_SHA256=$(sha256sum /tmp/healthz | awk '{print $1}')"
-          echo "WEBHOOK_READYZ_BODY_SHA256=$(sha256sum /tmp/readyz | awk '{print $1}')"
-          echo 'STAGING_WEBHOOK_ROUTE_DIAGNOSTIC=PASS'
+          RUN_MARKER="${SYNTHETIC_MARKER}:run:${TARGET_RUN_ID}:sha:${TARGET_MAIN_SHA}"
+          SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${RUN_MARKER}\""
+          gcloud logging read "$SYNTHETIC_FILTER" \
+            --project="$PROJECT_ID" --freshness=30m --limit=5 --format=json > /tmp/synthetic.json
 
-      - name: Read notification-channel events and synthetic signal
-        shell: bash
-        run: |
-          set -euo pipefail
-          CHANNEL_FILTER='resource.type="stackdriver_notification_channel" AND logName="projects/toca-mcp-next-staging/logs/monitoring.googleapis.com%2Fnotification_channel_events"'
-          gcloud logging read "$CHANNEL_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=100 --format=json > /tmp/channel-events.json
-          SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
-          gcloud logging read "$SYNTHETIC_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=20 --format=json > /tmp/synthetic.json
-          TOTAL_EVENTS="$(jq 'length' /tmp/channel-events.json)"
           SYNTHETIC_COUNT="$(jq 'length' /tmp/synthetic.json)"
-          SYNTHETIC_LATEST="$(jq -r 'sort_by(.timestamp) | last | .timestamp // "none"' /tmp/synthetic.json)"
-          echo "NOTIFICATION_CHANNEL_EVENT_COUNT=${TOTAL_EVENTS}"
-          echo "SYNTHETIC_SIGNAL_COUNT=${SYNTHETIC_COUNT}"
-          echo "SYNTHETIC_SIGNAL_LATEST=${SYNTHETIC_LATEST}"
           test "$SYNTHETIC_COUNT" -ge 1
-          echo 'STAGING_NOTIFICATION_DELIVERY_DIAGNOSTIC_READ=PASS'
+          SYNTHETIC_TS="$(jq -r 'sort_by(.timestamp) | last | .timestamp' /tmp/synthetic.json)"
+          POLICY_NAME="$(jq -r 'sort_by(.timestamp) | last | .jsonPayload.alertPolicy // empty' /tmp/synthetic.json)"
+          test "$POLICY_NAME" = "projects/${PROJECT_ID}/alertPolicies/${EXPECTED_POLICY_ID}"
+
+          CHANNEL_FILTER='resource.type="stackdriver_notification_channel" AND logName="projects/toca-mcp-next-staging/logs/monitoring.googleapis.com%2Fnotification_channel_events"'
+          gcloud logging read "$CHANNEL_FILTER" \
+            --project="$PROJECT_ID" --freshness=30m --limit=100 --format=json > /tmp/channel-events.json
+
+          TOTAL_EVENTS="$(jq 'length' /tmp/channel-events.json)"
+          ERROR_EVENTS="$(jq '[.[] | select(.severity=="ERROR" or .severity=="CRITICAL" or .severity=="ALERT" or .severity=="EMERGENCY")] | length' /tmp/channel-events.json)"
+          POST_SIGNAL_EVENTS="$(jq --arg ts "$SYNTHETIC_TS" '[.[] | select((.timestamp // "") >= $ts)] | length' /tmp/channel-events.json)"
+          POST_SIGNAL_ERRORS="$(jq --arg ts "$SYNTHETIC_TS" '[.[] | select((.timestamp // "") >= $ts and (.severity=="ERROR" or .severity=="CRITICAL" or .severity=="ALERT" or .severity=="EMERGENCY"))] | length' /tmp/channel-events.json)"
+
+          echo "TARGET_SYNTHETIC_SIGNAL_COUNT=${SYNTHETIC_COUNT}"
+          echo "TARGET_SYNTHETIC_TIMESTAMP=${SYNTHETIC_TS}"
+          echo "TARGET_ALERT_POLICY=${POLICY_NAME}"
+          echo "NOTIFICATION_CHANNEL_EVENT_COUNT_30M=${TOTAL_EVENTS}"
+          echo "NOTIFICATION_CHANNEL_ERROR_COUNT_30M=${ERROR_EVENTS}"
+          echo "NOTIFICATION_CHANNEL_EVENTS_AFTER_SIGNAL=${POST_SIGNAL_EVENTS}"
+          echo "NOTIFICATION_CHANNEL_ERRORS_AFTER_SIGNAL=${POST_SIGNAL_ERRORS}"
+          test "$POST_SIGNAL_ERRORS" = 0
+          echo 'STAGING_NOTIFICATION_DELIVERY_ERROR_READBACK=PASS'
+          echo 'POSITIVE_DELIVERY_MUST_BE_PROVEN_AT_RECIPIENT=TRUE'
