@@ -167,12 +167,15 @@ export class DurableFollowupCoordinator {
     assertWorkflowReplayMatches(snapshot, durableInput, input, correlationId, maxAttempts);
 
     const step = requireFollowupStep(snapshot);
-    if (step.status === 'WAITING_TIMER' || isTerminalWorkflowStep(step)) return snapshot;
+    const fireAt = laterTimestamp(nextAction.dueAt, now);
+    if (step.status === 'WAITING_TIMER') {
+      return this.reconcileScheduledTimer(snapshot, fireAt, now, evidence);
+    }
+    if (isTerminalWorkflowStep(step)) return snapshot;
     if (step.status !== 'READY' && step.status !== 'RUNNING') {
       throw new Error(`DURABLE_FOLLOWUP_ARM_STATE_INVALID:${step.status}`);
     }
 
-    const fireAt = laterTimestamp(nextAction.dueAt, now);
     snapshot = await this.armTimer(snapshot, fireAt, now, evidence);
     return snapshot;
   }
@@ -424,6 +427,31 @@ export class DurableFollowupCoordinator {
       actorPrincipalId: identity.principal.principalId,
       idempotencyKey: `durable-followup-outcome:${snapshot.instance.workflowId}:${outcome}`,
       evidence,
+      now,
+    });
+  }
+
+  private async reconcileScheduledTimer(
+    snapshot: WorkflowSnapshot,
+    fireAt: string,
+    now: string,
+    evidence: readonly string[],
+  ): Promise<WorkflowSnapshot> {
+    const scheduled = snapshot.timers.filter(
+      (timer) => timer.stepId === DURABLE_FOLLOWUP_STEP_ID && timer.status === 'SCHEDULED',
+    );
+    if (scheduled.length !== 1) throw new Error('DURABLE_FOLLOWUP_ACTIVE_TIMER_INVALID');
+    const timer = scheduled[0]!;
+    if (timer.fireAt === fireAt) return snapshot;
+    return this.deps.workflows.rescheduleTimer({
+      timerId: timer.timerId,
+      workflowId: snapshot.instance.workflowId,
+      stepId: DURABLE_FOLLOWUP_STEP_ID,
+      fireAt,
+      evidence: normalizeEvidence([
+        ...evidence,
+        `durable-followup:timer-rescheduled:${timer.timerId}`,
+      ]),
       now,
     });
   }
