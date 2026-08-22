@@ -25,6 +25,18 @@ jobs:
         with:
           ref: fix/tenant-scoped-scheduler-dlq-20260822
           fetch-depth: 0
+      - name: Remove stale R31 patch precondition locally
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/internal-tenant-fix-patcher.mjs')
+          source = path.read_text()
+          stale = """replaceAllExact(\n  'test/r31-learning-postgres-e2e.test.ts',\n  `new PostgresScheduler(pool)`,\n  `new PostgresScheduler(pool, 'toca')`,\n  1,\n);\n\n"""
+          if stale not in source:
+              raise SystemExit('STALE_R31_PATCH_BLOCK_NOT_FOUND')
+          path.write_text(source.replace(stale, '', 1))
+          PY
       - name: Apply deterministic tenant-scope patch
         run: node scripts/internal-tenant-fix-patcher.mjs
       - name: Commit product patch
@@ -37,5 +49,3 @@ jobs:
           git diff --cached --check
           git commit -m 'fix(tenancy): enforce scheduler and DLQ tenant boundaries'
           git push origin HEAD:fix/tenant-scoped-scheduler-dlq-20260822
-
-# retrigger after PR #127 creation
