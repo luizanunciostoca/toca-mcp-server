@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch exact log-rule-authorized governed synthetic alert workflow
+      - name: Dispatch exact governed synthetic alert workflow
         env:
           GH_TOKEN: ${{ github.token }}
           POLICY_SHA256: 8e6971b626a8e82efec0de843f1495c44d4462a1a35f1f744f5f425f70f24605
@@ -21,7 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          echo 'REDISPATCH_REASON=policy_propagation_window_elapsed'
+          echo 'REDISPATCH_REASON=runtime_observability_verified'
+          echo 'REDISPATCH_SEQUENCE=5'
           DISPATCH_URL="$(gh workflow run staging-synthetic-alert.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
