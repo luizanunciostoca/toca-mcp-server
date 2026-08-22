@@ -28,10 +28,10 @@ env:
   STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
 
 jobs:
-  configure:
+  bootstrap:
     runs-on: ubuntu-latest
     environment: infrastructure-admin
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout exact main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -45,6 +45,8 @@ jobs:
           EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
           ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
           test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
           jq -e '
@@ -86,20 +88,6 @@ jobs:
           ' "$POLICY_PATH" >/dev/null
           echo 'STAGING_NOTIFICATION_POLICY_BOUNDARY=PASS'
 
-      - name: Validate configured destinations without disclosure
-        shell: bash
-        env:
-          ALERT_EMAIL: ${{ secrets.STAGING_ALERT_EMAIL }}
-          ALERT_WEBHOOK_URL: ${{ secrets.STAGING_ALERT_WEBHOOK_URL }}
-          ALERT_WEBHOOK_TOKEN: ${{ secrets.STAGING_ALERT_WEBHOOK_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$ALERT_EMAIL"
-          test -n "$ALERT_WEBHOOK_URL"
-          [[ "$ALERT_WEBHOOK_URL" == https://* ]]
-          [[ "$ALERT_EMAIL" == *@*.* ]]
-          echo 'STAGING_NOTIFICATION_DESTINATIONS_PRESENT=1'
-
       - name: Authenticate infrastructure administrator for exact IAM bootstrap
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
@@ -140,11 +128,66 @@ jobs:
           rm -f /tmp/staging-notification-iam.json
           echo 'STAGING_NOTIFICATION_IAM_BOOTSTRAP=PASS'
 
+  configure:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify exact staging execution boundary
+        shell: bash
+        env:
+          EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
+          test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
+          echo 'STAGING_NOTIFICATION_EXECUTION_BOUNDARY=PASS'
+
+      - name: Validate configured destinations without disclosure
+        shell: bash
+        env:
+          ALERT_EMAIL: ${{ secrets.STAGING_ALERT_EMAIL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.STAGING_ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_TOKEN: ${{ secrets.STAGING_ALERT_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$ALERT_EMAIL"
+          test -n "$ALERT_WEBHOOK_URL"
+          [[ "$ALERT_WEBHOOK_URL" == https://* ]]
+          [[ "$ALERT_EMAIL" == *@*.* ]]
+          echo 'STAGING_NOTIFICATION_DESTINATIONS_PRESENT=1'
+
       - name: Authenticate isolated staging notification operator
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
           service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify isolated staging operator identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+          echo 'STAGING_NOTIFICATION_OPERATOR_IDENTITY=PASS'
 
       - name: Reconcile email and webhook notification channels
         id: channels
@@ -277,9 +320,10 @@ jobs:
             --argjson enabledChannelCount "$ENABLED" \
             --argjson channelFamilyCount "$FAMILIES" \
             '{
-              schemaVersion:"toca.staging.notification-channels.evidence.v2",
+              schemaVersion:"toca.staging.notification-channels.evidence.v3",
               project:$project,
               projectNumber:$projectNumber,
+              executionEnvironment:"staging",
               operator:"toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
               iamRole:"roles/monitoring.notificationChannelEditor",
               emailChannel:{name:$emailName,type:"email",verificationStatus:$emailVerificationStatus},
