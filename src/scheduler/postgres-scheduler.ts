@@ -15,14 +15,17 @@ type Row = {
   run_at: Date;
   timezone: string;
   idempotency_key: string;
+  tenant_id: string;
   status: ScheduledJob['status'];
   attempts: number;
   last_error: string | null;
 };
 
 function mapRow<TPayload = unknown>(row: Row): ScheduledJob<TPayload> {
+  const tenantId = row.tenant_id?.trim();
   return {
     id: row.id,
+    ...(tenantId ? { tenantId } : {}),
     toolName: row.tool_name,
     payload: row.payload as TPayload,
     runAt: row.run_at.toISOString(),
