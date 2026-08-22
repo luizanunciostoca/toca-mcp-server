@@ -1,0 +1,28 @@
+name: Ops Staging DR Observer 2026-08-22
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-staging-dr-observer-20260822.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Locate authorized DR push run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DR_HEAD_SHA: 456908090ddb3b25cab6c115788a65015fd3d13c
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${DR_HEAD_SHA}&per_page=20" > /tmp/runs.json
+          COUNT="$(jq '[.workflow_runs[] | select(.name=="Ops Authorized Staging DR 2026-08-22" and .event=="push")] | length' /tmp/runs.json)"
+          test "$COUNT" -ge 1
+          jq -r '.workflow_runs[] | select(.name=="Ops Authorized Staging DR 2026-08-22" and .event=="push") | "AUTHORIZED_DR_RUN_ID=\(.id) status=\(.status) conclusion=\(.conclusion // "") head=\(.head_sha)"' /tmp/runs.json
