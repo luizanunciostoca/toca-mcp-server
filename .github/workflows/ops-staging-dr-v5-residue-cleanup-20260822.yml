@@ -1,0 +1,59 @@
+name: Ops Staging DR V5 Residue Cleanup 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-dr-authorized-20260822]
+    paths:
+      - '.github/workflows/ops-staging-dr-v5-residue-cleanup-20260822.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-staging-dr-v5-residue-cleanup-20260822
+  cancel-in-progress: false
+
+env:
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  CLEANUP_SCRIPT: ops/staging-dr-v5-residue-cleanup-20260822.sh
+
+jobs:
+  syntax-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate bounded cleanup before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n "$CLEANUP_SCRIPT"
+          grep -Fq "TARGET_INSTANCE='toca-next-lp-pitr-32567566263'" "$CLEANUP_SCRIPT"
+          grep -Fq "SOURCE_INSTANCE='toca-mcp-next-staging-db'" "$CLEANUP_SCRIPT"
+          grep -Fq "PROJECT_ID='toca-mcp-next-staging'" "$CLEANUP_SCRIPT"
+          ! grep -Eq 'gcloud[[:space:]]+(run|secrets)|secretmanager\.googleapis\.com|graph\.facebook\.com|api\.sendgrid\.com|googleads\.googleapis\.com' "$CLEANUP_SCRIPT"
+          echo 'V5_RESIDUE_CLEANUP_BOUNDARY=PASS'
+
+  cleanup:
+    needs: syntax-boundary
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Cleanup exact V5 residue
+        shell: bash
+        run: bash "$CLEANUP_SCRIPT"
