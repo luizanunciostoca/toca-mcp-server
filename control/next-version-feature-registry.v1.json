@@ -2,9 +2,9 @@
   "schemaVersion": "1.4",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
   "registryVersion": "1.4",
-  "status": "POST_STAGING_VERIFICATION",
-  "observedAt": "2026-08-21T21:43:00-03:00",
-  "observedMainSha": "4c2ece55a85ce8e596a4b70e60c159fe7862f75d",
+  "status": "POST_STAGING_RELIABILITY_RECONCILIATION",
+  "observedAt": "2026-08-22T06:01:36-03:00",
+  "observedMainSha": "9d3e07e9ecb490d03d0ab822420522960b0ab258",
   "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
   "candidateFrozen": true,
   "stagingAuthorized": true,
@@ -55,6 +55,14 @@
       "state": "RECONCILED",
       "resolution": "WhatsApp outbound and durable follow-up use canonical R10 CRM/Sales authority; Email outbound uses R07; no R33 introduced",
       "newRouteAllowed": false
+    },
+    "WHATSAPP_FUTURE_PROVIDER_SLO_SIGNAL": {
+      "state": "POST_CANDIDATE_SOURCE_CHANGE_NOT_PROMOTED_TO_FROZEN_RUNTIME",
+      "frozenCandidateSignal": "whatsapp.delivery_verified_ratio",
+      "currentMainSignal": "whatsapp.readback_verified_ratio",
+      "futureProvider": true,
+      "runtimeCandidateInvalidated": false,
+      "reason": "provider-disabled future-provider SLO naming canonicalization is explicit post-candidate source drift and does not replace the frozen application SHA without a new freeze/staging cycle"
     }
   },
   "fronts": {
@@ -83,18 +91,41 @@
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
-      "state": "STAGING_VERIFIED_RELIABILITY_EVIDENCE_PENDING",
-      "mergedPrs": [55, 62, 71, 72, 73, 83],
+      "state": "STAGING_VERIFIED_RUNTIME_OBSERVABILITY_VERIFIED_ALERT_DELIVERY_PARTIAL_DR_PENDING",
+      "mergedPrs": [55, 62, 71, 72, 73, 83, 86, 87, 92, 93, 95, 96, 98, 100, 103, 106, 108],
       "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
       "stagingProjectId": "toca-mcp-next-staging",
       "stagingProjectNumber": "729069789107",
       "stagingIsolationContract": "PASS_DEDICATED_GCP_PROJECT_CLOUD_SQL_DB_SECRET_SERVICES_IDENTITIES_WIF",
       "stagingVerified": true,
+      "runtimeCandidateReadbackVerified": true,
+      "runtimeCandidateReadbackObservedAt": "2026-08-22T08:55:58Z",
+      "runtimeCandidateMcpRevision": "toca-mcp-next-staging-mcp-75c165a-r3",
+      "runtimeCandidateWebhookRevision": "toca-webhook-next-staging-webhook-75c165a-f1",
+      "runtimeCandidateTrafficPercent": 100,
+      "cloudSqlBackupPitrReadbackVerified": true,
+      "runtimeObservabilityVerified": true,
+      "runtimeObservabilityRunId": "32563386689",
+      "runtimeObservabilityPolicySha256": "6de4a54c0e0802057678ef4090e0edd9f6f823b1db161643f5ce1e4cbccc2245",
+      "runtimeObservabilityTruePoints": 101,
+      "runtimeObservabilityFalsePoints": 0,
+      "runtimeObservabilityArtifactId": "9473430379",
+      "runtimeObservabilityArtifactSha256": "4a426268cff5556085b90c6abf6f49d6ac99633d531a16f135ae50125ca63b0d",
+      "notificationChannelFamilies": ["email", "webhook_tokenauth"],
+      "syntheticAlertFiringVerified": true,
+      "syntheticAlertRunId": "32563070906",
+      "syntheticAlertPolicyId": "5562724679805698256",
+      "emailNotificationDeliveryVerified": true,
+      "emailNotificationReceiptObservedAt": "2026-08-22T08:46:05Z",
+      "postSignalNotificationChannelErrorCount": 0,
+      "webhookNotificationPositiveReceiptVerified": false,
+      "syntheticIncidentClosureVerified": false,
+      "drVerified": false,
       "productionVerified": false,
       "reliabilityBlockers": [
-        "post-PR-83 read-only Cloud SQL backup/PITR verification must be rerun and recorded",
-        "Cloud Monitoring policies/channels and firing/readback evidence remain incomplete",
-        "final-candidate DR rehearsal remains unexecuted"
+        "independent positive recipient/readback evidence for the webhook_tokenauth notification channel remains pending; zero notification_channel_events errors is not positive receipt",
+        "synthetic incident recovery/closure readback remains pending",
+        "final-candidate isolated DR rehearsal remains unexecuted and requires separate authorization"
       ]
     },
     "D_CANONICAL_GOVERNANCE_DRIVE_CLOSEOUT_PREP": {
@@ -114,12 +145,16 @@
       "exact-candidate Quality/Security/PostgreSQL verification",
       "prove staging != production",
       "deploy exact immutable candidate to isolated staging",
-      "execute staging acceptance and collect evidence"
+      "execute staging acceptance and collect evidence",
+      "execute post-PR-83 read-only Cloud SQL backup/PITR reliability verification",
+      "configure two staging notification channel families",
+      "prove staging runtime dashboard and authenticated private-webhook OIDC uptime",
+      "prove synthetic alert firing and positive email recipient delivery"
     ],
     "remainingSequence": [
-      "execute post-PR-83 read-only reliability verification",
+      "prove positive webhook notification receipt/readback and synthetic incident recovery/closure",
       "execute controlled provider verification without lifecycle pre-promotion",
-      "prove alerts/notification delivery and final-candidate DR",
+      "execute separately authorized final-candidate isolated DR rehearsal and prove RPO/RTO",
       "promote production only with explicit authorization and same-candidate evidence",
       "generate Final Closeout from production evidence only"
     ]
