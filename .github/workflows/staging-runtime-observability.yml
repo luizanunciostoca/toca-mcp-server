@@ -102,15 +102,21 @@ jobs:
           test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
           MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
           for role in roles/run.viewer roles/monitoring.dashboardEditor roles/monitoring.uptimeCheckConfigEditor; do
-            gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$role" --condition=None --quiet
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$MEMBER" --role="$role" --condition=None --quiet >/dev/null
           done
+
           PROJECT_POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
           for role in roles/run.viewer roles/monitoring.dashboardEditor roles/monitoring.uptimeCheckConfigEditor; do
             jq -e --arg role "$role" --arg member "$MEMBER" 'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' <<<"$PROJECT_POLICY" >/dev/null
           done
-          jq -e --arg member "serviceAccount:${MONITORING_SERVICE_AGENT}" 'any(.bindings[]?; .role=="roles/monitoring.notificationServiceAgent" and any(.members[]?; .==$member))' <<<"$PROJECT_POLICY" >/dev/null
+
+          jq -e --arg member "serviceAccount:${MONITORING_SERVICE_AGENT}" '
+            any(.bindings[]?; .role=="roles/monitoring.notificationServiceAgent" and any(.members[]?; .==$member))
+          ' <<<"$PROJECT_POLICY" >/dev/null
+
           echo 'STAGING_RUNTIME_OBSERVABILITY_ROLES=PASS'
           echo 'MONITORING_SERVICE_AGENT_PROJECT_BINDING=PASS'
 
@@ -181,6 +187,7 @@ jobs:
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" > /tmp/alerts.json
           ALERT_POLICY="$(jq -r 'first(.alertPolicies[]? | select(.userLabels.toca_managed=="staging_reliability" and .userLabels.alert_role=="synthetic_delivery") | .name) // empty' /tmp/alerts.json)"
           test -n "$ALERT_POLICY"
+
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$DASH_API" > /tmp/dashboards.json
           DASHBOARD_NAME="$(jq -r 'first(.dashboards[]? | select(.displayName=="TOCA OS Next — Platform Readiness — Staging") | .name) // empty' /tmp/dashboards.json)"
           if [[ -z "$DASHBOARD_NAME" ]]; then
@@ -197,6 +204,7 @@ jobs:
             curl --fail --silent --show-error -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/dashboard-create.json "$DASH_API" > /tmp/dashboard-created.json
             DASHBOARD_NAME="$(jq -r '.name' /tmp/dashboard-created.json)"
           fi
+
           test -n "$DASHBOARD_NAME"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v1/${DASHBOARD_NAME}" > /tmp/dashboard-readback.json
           unset TOKEN
@@ -205,10 +213,8 @@ jobs:
           echo "name=$DASHBOARD_NAME" >> "$GITHUB_OUTPUT"
           echo 'STAGING_RUNTIME_DASHBOARD=PASS'
 
-      - name: Reconcile authenticated private webhook uptime check
+      - name: Reconcile authenticated Cloud Run webhook uptime check
         id: uptime
-        env:
-          HOST: ${{ steps.target.outputs.host }}
         shell: bash
         run: |
           set -euo pipefail
@@ -216,20 +222,36 @@ jobs:
           UPTIME_API="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$UPTIME_API" > /tmp/uptime-list.json
           UPTIME_NAME="$(jq -r 'first(.uptimeCheckConfigs[]? | select(.displayName=="TOCA Next Staging — Webhook Readiness") | .name) // empty' /tmp/uptime-list.json)"
+
           if [[ -z "$UPTIME_NAME" ]]; then
-            jq -n --arg host "$HOST" '{
+            jq -n --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '{
               displayName:"TOCA Next Staging — Webhook Readiness",
-              monitoredResource:{type:"uptime_url",labels:{host:$host}},
-              httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,validateSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
+              monitoredResource:{type:"cloud_run_revision",labels:{project_id:$project,location:$location,service_name:$service}},
+              httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
               timeout:"10s",
               period:"300s"
             }' > /tmp/uptime-create.json
             curl --fail --silent --show-error -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/uptime-create.json "$UPTIME_API" > /tmp/uptime-created.json
             UPTIME_NAME="$(jq -r '.name' /tmp/uptime-created.json)"
           fi
+
           test -n "$UPTIME_NAME"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime-readback.json
-          jq -e --arg host "$HOST" '.displayName=="TOCA Next Staging — Webhook Readiness" and .monitoredResource.type=="uptime_url" and .monitoredResource.labels.host==$host and .httpCheck.path=="/readyz" and .httpCheck.port==443 and .httpCheck.useSsl==true and .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and .period=="300s" and .timeout=="10s"' /tmp/uptime-readback.json >/dev/null
+          jq -e --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '
+            .displayName=="TOCA Next Staging — Webhook Readiness" and
+            .monitoredResource.type=="cloud_run_revision" and
+            .monitoredResource.labels.project_id==$project and
+            .monitoredResource.labels.location==$location and
+            .monitoredResource.labels.service_name==$service and
+            .httpCheck.requestMethod=="GET" and
+            .httpCheck.path=="/readyz" and
+            .httpCheck.port==443 and
+            .httpCheck.useSsl==true and
+            .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and
+            .period=="300s" and
+            .timeout=="10s"
+          ' /tmp/uptime-readback.json >/dev/null
+
           CHECK_ID="${UPTIME_NAME##*/}"
           OBSERVED=0
           TRUE_POINTS=0
@@ -237,7 +259,7 @@ jobs:
           for attempt in $(seq 1 20); do
             START="$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
             END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            FILTER="metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id = \"${CHECK_ID}\" AND resource.type = \"uptime_url\""
+            FILTER="metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id = \"${CHECK_ID}\" AND resource.type = \"cloud_run_revision\""
             curl --fail --silent --show-error --get -H "Authorization: Bearer ${TOKEN}" \
               --data-urlencode "filter=${FILTER}" \
               --data-urlencode "interval.startTime=${START}" \
@@ -246,13 +268,17 @@ jobs:
               "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/timeSeries" > /tmp/uptime-series.json
             TRUE_POINTS="$(jq '[.timeSeries[]?.points[]?.value.boolValue | select(.==true)] | length' /tmp/uptime-series.json)"
             FALSE_POINTS="$(jq '[.timeSeries[]?.points[]?.value.boolValue | select(.==false)] | length' /tmp/uptime-series.json)"
-            if [[ "$TRUE_POINTS" -ge 1 ]]; then OBSERVED=1; break; fi
+            if [[ "$TRUE_POINTS" -ge 1 ]]; then
+              OBSERVED=1
+              break
+            fi
             sleep 15
           done
           unset TOKEN
           test "$OBSERVED" = 1
-          jq '{name,displayName,monitoredResource,httpCheck:{requestMethod:.httpCheck.requestMethod,path:.httpCheck.path,port:.httpCheck.port,useSsl:.httpCheck.useSsl,validateSsl:.httpCheck.validateSsl,serviceAgentAuthentication:.httpCheck.serviceAgentAuthentication},period,timeout}' /tmp/uptime-readback.json > staging-runtime-observability-evidence/uptime-check.json
-          jq -n --arg checkId "$CHECK_ID" --argjson truePoints "$TRUE_POINTS" --argjson falsePoints "$FALSE_POINTS" '{checkId:$checkId,observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints}' > staging-runtime-observability-evidence/uptime-observation.json
+
+          jq '{name,displayName,monitoredResource,httpCheck:{requestMethod:.httpCheck.requestMethod,path:.httpCheck.path,port:.httpCheck.port,useSsl:.httpCheck.useSsl,serviceAgentAuthentication:.httpCheck.serviceAgentAuthentication},period,timeout}' /tmp/uptime-readback.json > staging-runtime-observability-evidence/uptime-check.json
+          jq -n --arg checkId "$CHECK_ID" --argjson truePoints "$TRUE_POINTS" --argjson falsePoints "$FALSE_POINTS" '{checkId:$checkId,resourceType:"cloud_run_revision",observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints}' > staging-runtime-observability-evidence/uptime-observation.json
           echo "name=$UPTIME_NAME" >> "$GITHUB_OUTPUT"
           echo "true_points=$TRUE_POINTS" >> "$GITHUB_OUTPUT"
           echo "false_points=$FALSE_POINTS" >> "$GITHUB_OUTPUT"
@@ -269,7 +295,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" --arg operator "$STAGING_OPERATOR_SA" --arg runId "$GITHUB_RUN_ID" --arg githubSha "$GITHUB_SHA" --arg policySha256 "$POLICY_SHA256" --arg host "$HOST" --arg dashboard "$DASHBOARD_NAME" --arg uptime "$UPTIME_NAME" --arg truePoints "$TRUE_POINTS" --arg falsePoints "$FALSE_POINTS" '{schemaVersion:"toca.staging.runtime-observability.evidence.v2",project:$project,projectNumber:$projectNumber,operator:$operator,githubRunId:$runId,githubSha:$githubSha,policySha256:$policySha256,webhookReadinessTarget:{host:$host,path:"/readyz",private:true,authentication:"MONITORING_SERVICE_AGENT_OIDC"},dashboard:{name:$dashboard,readback:true},uptimeCheck:{name:$uptime,readback:true,period:"300s",observedPass:true,truePoints:($truePoints|tonumber),falsePoints:($falsePoints|tonumber)},productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false,publicWebhookExposure:false,result:"CONFIGURED_READ_BACK_AND_UPTIME_PASS_OBSERVED"}' > staging-runtime-observability-evidence/manifest.json
+          jq -n \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg operator "$STAGING_OPERATOR_SA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg githubSha "$GITHUB_SHA" \
+            --arg policySha256 "$POLICY_SHA256" \
+            --arg host "$HOST" \
+            --arg dashboard "$DASHBOARD_NAME" \
+            --arg uptime "$UPTIME_NAME" \
+            --arg truePoints "$TRUE_POINTS" \
+            --arg falsePoints "$FALSE_POINTS" \
+            '{
+              schemaVersion:"toca.staging.runtime-observability.evidence.v2",
+              project:$project,
+              projectNumber:$projectNumber,
+              operator:$operator,
+              githubRunId:$runId,
+              githubSha:$githubSha,
+              policySha256:$policySha256,
+              webhookReadinessTarget:{host:$host,path:"/readyz",private:true,unauthenticatedStatus:403,authentication:"MONITORING_SERVICE_AGENT_OIDC"},
+              dashboard:{name:$dashboard,readback:true},
+              uptimeCheck:{name:$uptime,resourceType:"cloud_run_revision",serviceName:"toca-webhook-next-staging",readback:true,period:"300s",observedPass:true,truePoints:($truePoints|tonumber),falsePoints:($falsePoints|tonumber)},
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              cloudRunMutation:false,
+              secretMutation:false,
+              publicWebhookExposure:false,
+              result:"CONFIGURED_READ_BACK_AND_UPTIME_PASS_OBSERVED"
+            }' > staging-runtime-observability-evidence/manifest.json
           sha256sum staging-runtime-observability-evidence/* > staging-runtime-observability-evidence/SHA256SUMS
           echo 'STAGING_RUNTIME_OBSERVABILITY=CONFIGURED_READ_BACK_AND_UPTIME_PASS_OBSERVED'
 
