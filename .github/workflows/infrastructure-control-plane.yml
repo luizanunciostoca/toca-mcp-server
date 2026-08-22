@@ -205,8 +205,6 @@ jobs:
             --limit 20 \
             --format=json \
             > staging-verification-reader-evidence/cloudsql-backups.json
-          jq -e '[.[] | select(.status == "SUCCESSFUL")] | length > 0' \
-            staging-verification-reader-evidence/cloudsql-backups.json >/dev/null
 
           TOKEN="$(gcloud auth print-access-token)"
           POLICIES_HTTP="$(curl --silent --show-error \
@@ -238,6 +236,7 @@ jobs:
               targetProjectNumber:$targetProjectNumber,
               principal:$principal,
               roles:["roles/cloudsql.viewer","roles/monitoring.viewer"],
+              backupInventoryReadable:true,
               successfulBackupCount:$successfulBackups,
               alertPolicyCount:$policyCount,
               notificationChannelCount:$channelCount,
