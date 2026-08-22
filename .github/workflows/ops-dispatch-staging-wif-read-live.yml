@@ -6,7 +6,7 @@ on:
     paths: ['.github/workflows/ops-dispatch-staging-wif-read-live.yml']
 
 permissions:
-  contents: read
+  contents: write
   actions: write
   issues: write
   pull-requests: write
@@ -19,6 +19,7 @@ jobs:
       TARGET_WORKFLOW: staging-wif-condition-read.yml
       TARGET_REF: main
       TRACKING_PR: '79'
+      EVIDENCE_BRANCH: ops/staging-wif-read-live-20260821
     steps:
       - name: Dispatch read-only main workflow
         id: dispatch
@@ -68,6 +69,8 @@ jobs:
             if [[ "$STATUS" == completed ]]; then break; fi
             sleep 4
           done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           BODY="Staging WIF condition live read dispatch.
 
 wrapper SHA: ${GITHUB_SHA}
@@ -80,3 +83,34 @@ staging mutation: none"
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TRACKING_PR}/comments" -f body="$BODY" >/dev/null
           test "$STATUS" = completed
           test "$CONCLUSION" = success
+
+      - name: Download and persist sanitized child evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/staging-wif-evidence
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir /tmp/staging-wif-download
+          find /tmp/staging-wif-download -type f -maxdepth 3 -print
+          PROVIDER_FILE="$(find /tmp/staging-wif-download -name provider-sanitized.json -print -quit)"
+          BINDING_FILE="$(find /tmp/staging-wif-download -name operator-wif-binding.json -print -quit)"
+          MANIFEST_FILE="$(find /tmp/staging-wif-download -name manifest.json -print -quit)"
+          test -f "$PROVIDER_FILE"; test -f "$BINDING_FILE"; test -f "$MANIFEST_FILE"
+          jq -e '.state == "ACTIVE" and (.attributeCondition | type == "string" and length > 0)' "$PROVIDER_FILE" >/dev/null
+          jq -e '.bindings | type == "array"' "$BINDING_FILE" >/dev/null
+          jq -e '.result == "PASS" and .productionMutation == false and .stagingMutation == false' "$MANIFEST_FILE" >/dev/null
+          jq -n \
+            --slurpfile provider "$PROVIDER_FILE" \
+            --slurpfile binding "$BINDING_FILE" \
+            --slurpfile manifest "$MANIFEST_FILE" \
+            --arg childRun "$RUN_ID" \
+            '{childRun:($childRun|tonumber),provider:$provider[0],operatorWifBinding:$binding[0],manifest:$manifest[0]}' \
+            > /tmp/staging-wif-evidence/live-readback.json
+          CONTENT="$(base64 -w0 /tmp/staging-wif-evidence/live-readback.json)"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/ops-evidence/staging-wif-live-readback.json" \
+            -f message="ops(reliability): persist sanitized WIF live readback ${RUN_ID}" \
+            -f content="$CONTENT" \
+            -f branch="$EVIDENCE_BRANCH" >/dev/null
+          echo 'STAGING_WIF_SANITIZED_EVIDENCE_PERSISTED=PASS'
