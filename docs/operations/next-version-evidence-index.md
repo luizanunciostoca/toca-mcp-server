@@ -2,16 +2,18 @@
 
 Evidence is classified by what it actually proves. Source CI cannot be substituted for provider, staging or production evidence.
 
-## Current source and candidate identity
+## Frozen candidate and control-plane identity
 
-- live `main`: `4c2ece55a85ce8e596a4b70e60c159fe7862f75d`;
-- current main delta: PR #83, staging verification read-only IAM only;
+The application/runtime candidate remains frozen independently from later reliability control-plane changes:
+
 - frozen application candidate: `75c165a044c6e79e9545328dd04a2a3e73d2e910`;
 - candidate tree: `2b373b1564e495d81a73ca04254efec18c0e774c`;
 - candidate image OCI index digest: `sha256:611a56ea24d1fd838aeae867debedcc87cd5496e35b99c642188c1c93b2d5250`;
 - runtime child digest: `sha256:257bd85a460764c2f207445c72a279c772c869a75f48c7bc2c071be2d858bfad`.
 
-PR #83 does not alter the application candidate. It only adds a tightly allowlisted infrastructure control-plane operation granting `roles/cloudsql.viewer` and `roles/monitoring.viewer` to the fixed staging deployer.
+Reliability/control-plane reconciliation observed repository `main` at `bdae307da33b8d4b8341b06d868d7a274724630f` after PR #87. PRs #83-#87 are staging IAM, evidence/documentation, and observability control-plane deltas; they do not replace the frozen application candidate or its accepted runtime revisions.
+
+A static evidence index must not be treated as a mutable `main` pointer. Any operation must resolve repository `main` again at execution time and must preserve the frozen application candidate identity unless an application/runtime change explicitly causes a new candidate freeze and staging cycle.
 
 ## Exact-candidate CI evidence
 
@@ -138,24 +140,64 @@ Still required:
 
 Current lifecycle truth remains `PROVIDER_VERIFIED=false` for these providers.
 
-## Reliability / observability / DR evidence — partial, promotion HOLD
+## Reliability / observability / DR evidence — live read-only prerequisites PASS, promotion HOLD
 
-A read-only operational preflight against the frozen staging candidate proved:
+Read-only Reliability run `32542355213` against the frozen staging candidate closed the original Cloud SQL backup/PITR and Cloud Monitoring read blockers.
 
-- exact Cloud Run runtime identity and 100% traffic: PASS;
+Proven by that run:
+
+- exact accepted MCP/webhook revisions serving 100% traffic: PASS;
 - authenticated readiness sampling: PASS;
-- production touched: NO;
-- external provider calls: NO;
-- provider execution remains fail-closed.
+- Cloud SQL state/read authority: PASS;
+- automated backups enabled: PASS;
+- PITR enabled: PASS;
+- transaction-log retention `>=7d`: PASS;
+- retained backups `>=7`: PASS;
+- backup inventory authorization/readback: PASS;
+- latest successful backup: `2026-08-21T17:20:36.918Z`;
+- backup age at readback: `27879s`, below the `36h` objective: PASS;
+- Cloud Monitoring alert-policy read: HTTP 200;
+- Cloud Monitoring notification-channel read: HTTP 200;
+- Cloud Monitoring uptime-check read: HTTP 200;
+- Cloud Monitoring dashboard read: HTTP 200;
+- production mutation: NO;
+- provider call/mutation: NO.
 
-At that preflight point, promotion remained on HOLD because:
+The same readback found the staging Monitoring project empty at that evidence window:
 
-- Cloud SQL backup listing returned 403 to the staging deployer;
-- DR rehearsal was not executed;
-- Cloud Monitoring had zero discovered alert policies and zero verified notification channels in that evidence window;
-- no alert firing/readback path was executed.
+- alert policy count: `0`;
+- enabled notification channel count: `0`;
+- notification channel family count: `0`;
+- uptime check count: `0`;
+- dashboard count: `0`.
 
-PR #83 is now merged to `main` and adds only the minimum read-only roles required to remove the Cloud SQL backup and Monitoring read blockers. A post-PR-83 read-only rerun is still required before those items can be promoted to PASS.
+PR #86 introduced the governed staging notification-channel bootstrap. Its first live attempt failed with HTTP 403 because it authenticated the production infrastructure administrator against the staging Monitoring API. PR #87 (`bdae307da33b8d4b8341b06d868d7a274724630f`) fixes that exact blocker by granting only `roles/monitoring.notificationChannelEditor` to the isolated staging operator and re-authenticating through staging WIF before notification-channel creation/readback.
+
+PR #87 source/CI does **not** prove the post-fix channel reconciliation. The next live operation must rerun `Staging Notification Channels` and prove:
+
+- two enabled channels;
+- two independent channel families (`email` + `webhook_tokenauth`);
+- email verification complete;
+- sanitized channel readback;
+- production/provider/DB/backup/traffic/DR mutation remains false.
+
+After notification channels are ready, Reliability still requires:
+
+1. managed alert-policy/dashboard/synthetic configuration readback from the canonical `infra/observability` contracts;
+2. a non-destructive synthetic signal that opens the intended Cloud Monitoring incident;
+3. incident/policy readback plus delivery evidence for the configured channel families and runbook correlation;
+4. synthetic condition cleanup and incident recovery/closure readback;
+5. an isolated backup/PITR drill for the frozen candidate, including migration 033 / `omnichannel_prepared_content`, AG-01, Workflow/timers, CRM, Outbox/DLQ, Approval/Privacy/Audit and provider revalidation prerequisites;
+6. measured PITR RPO `<=15m` and PostgreSQL recovery RTO `<=60m`;
+7. isolated-drill cleanup and production-unchanged readback.
+
+Until those live proofs exist, `RELIABILITY_VERIFIED` remains false. Historical V1 alert/DR evidence may establish provider capability/history, but it cannot substitute for exact-candidate Next recovery evidence where the recovery surface changed.
+
+## Metric contract note — provider-gated WhatsApp signal
+
+The frozen application candidate declares its formal future-provider WhatsApp SLO as `whatsapp.delivery_verified_ratio`, while the staging dashboard/alert contract names the provider readback SLI `whatsapp.readback_verified_ratio`. Because WhatsApp remains provider-disabled/unverified for the frozen candidate, this naming drift does not promote or invalidate current Core staging evidence, but it must not be silently normalized in a way that changes the frozen application SHA.
+
+Canonicalization is therefore an explicit post-candidate application change: update the formal catalog/test and then freeze/revalidate a new candidate before treating the renamed signal as exact-release runtime evidence. The current release must preserve the frozen candidate and record the provider-gated mismatch transparently.
 
 ## Production evidence — missing
 
