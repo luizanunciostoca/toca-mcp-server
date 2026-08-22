@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18
+        image: postgres:18@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
         env:
           POSTGRES_USER: toca
           POSTGRES_PASSWORD: toca-tenancy-local-only
@@ -38,10 +38,13 @@ jobs:
       DATABASE_URL: postgres://toca:toca-tenancy-local-only@127.0.0.1:5432/toca_tenancy
       DATABASE_SSL: 'false'
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
