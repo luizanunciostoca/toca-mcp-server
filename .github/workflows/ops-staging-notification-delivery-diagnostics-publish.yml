@@ -1,0 +1,119 @@
+name: Ops Staging Notification Delivery Diagnostics Publish
+
+on:
+  push:
+    branches: [ops/staging-notification-delivery-diagnostics-20260822]
+    paths:
+      - '.github/workflows/ops-staging-notification-delivery-diagnostics-publish.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  diagnose-and-publish:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
+      SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+      RESULT_PATH: ops/evidence/staging-notification-delivery-diagnostic.json
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/staging-notification-delivery-diagnostics-20260822
+          persist-credentials: true
+
+      - name: Fail closed on exact staging boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-notification-delivery-diagnostics-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+
+      - name: Authenticate isolated staging reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read and sanitize notification delivery diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
+
+          CHANNEL_FILTER='resource.type="stackdriver_notification_channel" AND logName="projects/toca-mcp-next-staging/logs/monitoring.googleapis.com%2Fnotification_channel_events"'
+          gcloud logging read "$CHANNEL_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=100 --format=json > /tmp/channel-events.json
+
+          SYNTHETIC_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
+          gcloud logging read "$SYNTHETIC_FILTER" --project="$PROJECT_ID" --freshness=3h --limit=20 --format=json > /tmp/synthetic.json
+
+          mkdir -p "$(dirname "$RESULT_PATH")"
+          jq -n \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg operator "$STAGING_OPERATOR_SA" \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg syntheticMarker "$SYNTHETIC_MARKER" \
+            --argjson events "$(jq '[.[] | {
+              timestamp,
+              severity,
+              channelResource:(.resource.labels.notification_channel_id // .resource.labels.channel_id // .resource.labels.channel_name // null),
+              httpStatus:(.httpRequest.status // .jsonPayload.httpStatus // .jsonPayload.status // null),
+              summary:((.textPayload // .jsonPayload.message // .jsonPayload.summary // .jsonPayload.error // "") | tostring
+                | gsub("https?://[^ ]+";"<redacted-url>")
+                | gsub("auth_token=[^& ]+";"auth_token=<redacted>"))
+            }]' /tmp/channel-events.json)" \
+            --argjson syntheticCount "$(jq 'length' /tmp/synthetic.json)" \
+            --arg syntheticLatest "$(jq -r 'sort_by(.timestamp) | last | .timestamp // "none"' /tmp/synthetic.json)" \
+            '{
+              schemaVersion:"toca.staging.notification-delivery-diagnostic.v1",
+              project:$project,
+              projectNumber:$projectNumber,
+              operator:$operator,
+              observedAt:$observedAt,
+              syntheticMarker:$syntheticMarker,
+              syntheticSignalCount:$syntheticCount,
+              syntheticSignalLatest:$syntheticLatest,
+              notificationChannelEventCount:($events|length),
+              notificationChannelErrorCount:([$events[] | select(.severity == "ERROR" or .severity == "CRITICAL" or .severity == "ALERT" or .severity == "EMERGENCY")]|length),
+              notificationChannelEvents:$events,
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              cloudRunMutation:false,
+              secretMutation:false
+            }' > "$RESULT_PATH"
+
+          test "$(jq -r '.syntheticSignalCount' "$RESULT_PATH")" -ge 1
+
+      - name: Commit sanitized diagnostic evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$RESULT_PATH"
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops(reliability): publish sanitized notification delivery diagnostic'
+          git push origin HEAD:ops/staging-notification-delivery-diagnostics-20260822
