@@ -1,0 +1,140 @@
+name: Ops Staging Synthetic Incident Readback 2026-08-22
+
+on:
+  push:
+    branches: [ops/staging-synthetic-incident-readback-20260822]
+    paths:
+      - '.github/workflows/ops-staging-synthetic-incident-readback-20260822.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      PRODUCTION_PROJECT_NUMBER: '990081828836'
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      ALERT_ID: 0.obqbjhmrmmv8
+      POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
+      EXPECTED_OPEN_TIME_PREFIX: '2026-08-22T08:46'
+      RESULT_PATH: ops/evidence/staging-synthetic-incident-readback.json
+    steps:
+      - name: Checkout evidence branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/staging-synthetic-incident-readback-20260822
+          persist-credentials: true
+
+      - name: Fail closed on staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/staging-synthetic-incident-readback-20260822'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+
+      - name: Authenticate isolated staging reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read exact synthetic incident
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          TOKEN="$(gcloud auth print-access-token)"
+          HTTP_STATUS="$(curl --silent --show-error \
+            --output /tmp/alert.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "x-goog-user-project: ${PROJECT_ID}" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
+          unset TOKEN
+          test "$HTTP_STATUS" = 200
+
+          STATE="$(jq -r '.state // empty' /tmp/alert.json)"
+          OPEN_TIME="$(jq -r '.open_time // .openTime // empty' /tmp/alert.json)"
+          CLOSE_TIME="$(jq -r '.close_time // .closeTime // empty' /tmp/alert.json)"
+          POLICY="$(jq -r '.policy.name // empty' /tmp/alert.json)"
+          DISPLAY_NAME="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/alert.json)"
+
+          test -n "$STATE"
+          test -n "$OPEN_TIME"
+          test "$POLICY" = "$POLICY_NAME"
+          [[ "$OPEN_TIME" == "$EXPECTED_OPEN_TIME_PREFIX"* ]]
+
+          CLOSED=false
+          if [[ "$STATE" == CLOSED ]]; then
+            test -n "$CLOSE_TIME"
+            CLOSED=true
+          fi
+
+          mkdir -p "$(dirname "$RESULT_PATH")"
+          jq -n \
+            --arg observedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg alertId "$ALERT_ID" \
+            --arg state "$STATE" \
+            --arg openTime "$OPEN_TIME" \
+            --arg closeTime "$CLOSE_TIME" \
+            --arg policyName "$POLICY" \
+            --arg policyDisplayName "$DISPLAY_NAME" \
+            --argjson closed "$CLOSED" \
+            '{
+              schemaVersion:"toca.staging.synthetic-incident-readback.v1",
+              observedAt:$observedAt,
+              project:$project,
+              projectNumber:$projectNumber,
+              alertId:$alertId,
+              state:$state,
+              openTime:$openTime,
+              closeTime:(if $closeTime=="" then null else $closeTime end),
+              policy:{name:$policyName,displayName:$policyDisplayName},
+              exactSyntheticIncidentMatched:true,
+              recoveryClosureObserved:$closed,
+              productionMutation:false,
+              providerMutation:false,
+              databaseMutation:false,
+              backupMutation:false,
+              drRestore:false,
+              trafficMutation:false,
+              cloudRunMutation:false,
+              secretMutation:false
+            }' > "$RESULT_PATH"
+
+          echo "SYNTHETIC_INCIDENT_STATE=${STATE}"
+          echo "SYNTHETIC_INCIDENT_OPEN_TIME=${OPEN_TIME}"
+          echo "SYNTHETIC_INCIDENT_CLOSE_TIME=${CLOSE_TIME:-none}"
+          echo "SYNTHETIC_INCIDENT_CLOSURE_OBSERVED=${CLOSED}"
+          echo 'STAGING_SYNTHETIC_INCIDENT_READBACK=PASS'
+
+      - name: Commit sanitized incident readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$RESULT_PATH"
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops(reliability): publish synthetic incident readback'
+          git push origin HEAD:ops/staging-synthetic-incident-readback-20260822
