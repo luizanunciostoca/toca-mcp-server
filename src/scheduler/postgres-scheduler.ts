@@ -33,6 +33,7 @@ function mapRow<TPayload = unknown>(row: Row, tenantId: string): ScheduledJob<TP
   }
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     toolName: row.tool_name,
     payload: row.payload as TPayload,
     runAt: row.run_at.toISOString(),

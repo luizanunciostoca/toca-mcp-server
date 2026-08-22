@@ -22,7 +22,7 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
     const firstPool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
 
     try {
-      const scheduler = new PostgresScheduler(firstPool);
+      const scheduler = new PostgresScheduler(firstPool, 'toca');
       const first = await scheduler.schedule({
         id: jobId,
         toolName: TOOL,
@@ -56,7 +56,7 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
 
     const secondPool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
     try {
-      const scheduler = new PostgresScheduler(secondPool);
+      const scheduler = new PostgresScheduler(secondPool, 'toca');
       const recovered = await scheduler.claimDue('2026-08-17T20:00:02.000Z', 1, TOOL);
       expect(recovered).toHaveLength(1);
       expect(recovered[0]).toMatchObject({ id: jobId, status: 'RUNNING', attempts: 2 });
@@ -96,8 +96,8 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
     const pool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
 
     try {
-      const scheduler = new PostgresScheduler(pool);
-      const deadLetters = new PostgresDeadLetterSink(pool);
+      const scheduler = new PostgresScheduler(pool, 'toca');
+      const deadLetters = new PostgresDeadLetterSink(pool, 'toca');
       await scheduler.schedule({
         id: atomicJobId,
         toolName: TOOL,
@@ -145,8 +145,8 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
       if (!legacyJob) throw new Error('FOUNDATION_LEGACY_DEAD_LETTER_CLAIM_MISSING');
       await pool.query(
         `insert into dead_letter_jobs
-            (id, original_job_id, tool_name, payload, attempts, last_error, failed_at)
-           values ($1, $2, $3, $4::jsonb, $5, $6, $7::timestamptz)`,
+            (id, original_job_id, tool_name, payload, attempts, last_error, failed_at, tenant_id)
+           values ($1, $2, $3, $4::jsonb, $5, $6, $7::timestamptz, $8)`,
         [
           `foundation-legacy-dlq-${suffix}`,
           legacyJobId,
@@ -155,6 +155,7 @@ postgresDescribe('Foundation scheduler/worker PostgreSQL restart safety', () => 
           legacyJob.attempts,
           'Error: legacy terminal write completed before source transition',
           '2026-08-17T21:10:02.000Z',
+          'toca',
         ],
       );
       await pool.query(

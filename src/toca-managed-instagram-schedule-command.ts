@@ -35,8 +35,9 @@ if (!config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED) {
 if (!config.DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED');
 
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
+const tenantId = process.env.TOCA_DEFAULT_TENANT_ID?.trim() || 'toca';
 try {
-  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool));
+  const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool, tenantId));
   const job = await scheduler.schedule(payload);
   const confirmed = await scheduler.status(job.id);
   if (!confirmed || confirmed.status !== 'SCHEDULED') {
