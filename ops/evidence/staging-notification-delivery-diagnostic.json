@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "toca.staging.notification-delivery-diagnostic.v1",
+  "project": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "operator": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "observedAt": "2026-08-22T04:46:58Z",
+  "syntheticMarker": "TOCA_STAGING_RELIABILITY_SYNTHETIC_V1",
+  "syntheticSignalCount": 1,
+  "syntheticSignalLatest": "2026-08-22T04:22:43.046895860Z",
+  "notificationChannelEventCount": 0,
+  "notificationChannelErrorCount": 0,
+  "notificationChannelEvents": [],
+  "productionMutation": false,
+  "providerMutation": false,
+  "databaseMutation": false,
+  "backupMutation": false,
+  "drRestore": false,
+  "trafficMutation": false,
+  "cloudRunMutation": false,
+  "secretMutation": false
+}
