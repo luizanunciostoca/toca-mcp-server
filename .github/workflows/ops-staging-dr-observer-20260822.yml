@@ -30,4 +30,7 @@ jobs:
             --limit 10 \
             --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
           echo "$RUNS" | jq -e --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-          echo "$RUNS" | jq -r --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '.[] | select(.headSha==$sha) | "DR_PUSH_RUN_ID=\(.databaseId) DR_PUSH_STATUS=\(.status) DR_PUSH_CONCLUSION=\(.conclusion // \"\") DR_PUSH_URL=\(.url)"'
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
+          test -n "$RUN_ID"
+          echo "DR_PUSH_RUN_ID=$RUN_ID DR_PUSH_STATUS=$RUN_STATUS DR_PUSH_CONCLUSION=$RUN_CONCLUSION DR_PUSH_URL=$RUN_URL"
