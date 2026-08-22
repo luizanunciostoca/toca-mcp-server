@@ -27,7 +27,7 @@ function blueprint(suffix: string) {
 }
 
 postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
-  it('redelivers FIRED while READY after restart, then stops after exactly one claim', async () => {
+  it('redelivers FIRED+READY after restart and stops after one claim', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const definition = blueprint(suffix);
     const timerId = `timer-recovery-fired-${suffix}`;
@@ -83,7 +83,9 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       });
       expect(afterClaim).not.toContain(timerId);
 
-      if (!recoveredClaim) throw new Error('WORKFLOW_TIMER_RECOVERY_RESUME_CLAIM_REQUIRED');
+      if (!recoveredClaim) {
+        throw new Error('WORKFLOW_TIMER_RECOVERY_RESUME_CLAIM_REQUIRED');
+      }
       const completed = await store2.completeStep({
         workflowId: definition.workflowId,
         stepId: 'wake',
@@ -94,13 +96,14 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       });
       expect(completed.instance.status).toBe('SUCCEEDED');
       expect(completed.steps[0]?.attempts).toBe(1);
-      expect(completed.events.filter((event) => event.eventType === 'TIMER_FIRED')).toHaveLength(1);
+      const timerFiredEvents = completed.events.filter((event) => event.eventType === 'TIMER_FIRED');
+      expect(timerFiredEvents).toHaveLength(1);
     } finally {
       await pool2.end();
     }
   });
 
-  it('persists timer reschedule across restart and fires only at the reconciled due time', async () => {
+  it('persists reschedule across restart and honors reconciled due time', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const definition = blueprint(`reschedule-${suffix}`);
     const timerId = `timer-recovery-reschedule-${suffix}`;
@@ -150,7 +153,8 @@ postgresDescribe('Workflow timer PostgreSQL restart recovery', () => {
       ).toContain(timerId);
       const snapshot = await store2.get(definition.workflowId);
       expect(snapshot?.timers[0]?.status).toBe('FIRED');
-      expect(snapshot?.events.filter((event) => event.eventType === 'TIMER_FIRED')).toHaveLength(1);
+      const timerFiredEvents = snapshot?.events.filter((event) => event.eventType === 'TIMER_FIRED');
+      expect(timerFiredEvents).toHaveLength(1);
     } finally {
       await pool2.end();
     }
