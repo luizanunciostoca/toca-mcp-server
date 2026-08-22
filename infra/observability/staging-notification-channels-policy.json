@@ -1,9 +1,22 @@
 {
-  "schemaVersion": "toca.staging.notification-channels.v1",
+  "schemaVersion": "toca.staging.notification-channels.v2",
   "operation": "configure-staging-notification-channels",
   "projectId": "toca-mcp-next-staging",
   "projectNumber": "729069789107",
   "region": "southamerica-east1",
+  "operator": {
+    "serviceAccount": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+    "workloadIdentityProvider": "projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging"
+  },
+  "iamBootstrap": {
+    "enabled": true,
+    "projectId": "toca-mcp-next-staging",
+    "projectNumber": "729069789107",
+    "principal": "serviceAccount:toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+    "role": "roles/monitoring.notificationChannelEditor",
+    "condition": "None",
+    "purpose": "staging Reliability notification channels only"
+  },
   "channels": [
     {
       "role": "primary-email",
@@ -24,6 +37,7 @@
     "minimumChannelFamilies": 2,
     "requireHttpsWebhook": true,
     "requireEmailVerification": true,
+    "sendEmailVerificationCodeWhenRequired": true,
     "requireSyntheticDeliveryReadbackBeforeReliabilityPromotion": true
   },
   "forbid": {
@@ -33,7 +47,9 @@
     "backupMutation": true,
     "drRestore": true,
     "trafficMutation": true,
-    "iamMutation": true,
+    "iamMutationOutsideBootstrap": true,
+    "projectOwner": true,
+    "projectEditor": true,
     "serviceAccountKeys": true,
     "secretValuesInRepository": true,
     "secretValuesInArtifacts": true,
