@@ -217,10 +217,10 @@ jobs:
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$UPTIME_API" > /tmp/uptime-list.json
           UPTIME_NAME="$(jq -r 'first(.uptimeCheckConfigs[]? | select(.displayName=="TOCA Next Staging — Webhook Readiness") | .name) // empty' /tmp/uptime-list.json)"
           if [[ -z "$UPTIME_NAME" ]]; then
-            jq -n --arg host "$HOST" '{
+            jq -n --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '{
               displayName:"TOCA Next Staging — Webhook Readiness",
-              monitoredResource:{type:"uptime_url",labels:{host:$host}},
-              httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,validateSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
+              monitoredResource:{type:"cloud_run_revision",labels:{project_id:$project,location:$location,service_name:$service}},
+              httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
               timeout:"10s",
               period:"300s"
             }' > /tmp/uptime-create.json
@@ -229,7 +229,7 @@ jobs:
           fi
           test -n "$UPTIME_NAME"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime-readback.json
-          jq -e --arg host "$HOST" '.displayName=="TOCA Next Staging — Webhook Readiness" and .monitoredResource.type=="uptime_url" and .monitoredResource.labels.host==$host and .httpCheck.path=="/readyz" and .httpCheck.port==443 and .httpCheck.useSsl==true and .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and .period=="300s" and .timeout=="10s"' /tmp/uptime-readback.json >/dev/null
+          jq -e --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '.displayName=="TOCA Next Staging — Webhook Readiness" and .monitoredResource.type=="cloud_run_revision" and .monitoredResource.labels.project_id==$project and .monitoredResource.labels.location==$location and .monitoredResource.labels.service_name==$service and .httpCheck.path=="/readyz" and .httpCheck.port==443 and .httpCheck.useSsl==true and .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and .period=="300s" and .timeout=="10s"' /tmp/uptime-readback.json >/dev/null
           CHECK_ID="${UPTIME_NAME##*/}"
           OBSERVED=0
           TRUE_POINTS=0
@@ -237,7 +237,7 @@ jobs:
           for attempt in $(seq 1 20); do
             START="$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
             END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            FILTER="metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id = \"${CHECK_ID}\" AND resource.type = \"uptime_url\""
+            FILTER="metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id = \"${CHECK_ID}\" AND resource.type = \"cloud_run_revision\""
             curl --fail --silent --show-error --get -H "Authorization: Bearer ${TOKEN}" \
               --data-urlencode "filter=${FILTER}" \
               --data-urlencode "interval.startTime=${START}" \
