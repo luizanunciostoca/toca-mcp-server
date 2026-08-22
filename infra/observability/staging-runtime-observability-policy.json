@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "operation": "staging-runtime-observability-bootstrap",
+  "projectId": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "productionProjectId": "toca-mcp-production",
+  "productionProjectNumber": "990081828836",
+  "region": "southamerica-east1",
+  "operatorServiceAccount": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "webhookService": "toca-webhook-next-staging",
+  "dashboard": {
+    "displayName": "TOCA OS Next — Platform Readiness — Staging",
+    "managedLabel": "staging_reliability"
+  },
+  "uptimeCheck": {
+    "displayName": "TOCA Next Staging — Webhook Readiness",
+    "path": "/readyz",
+    "period": "300s",
+    "timeout": "10s",
+    "useSsl": true,
+    "port": 443
+  },
+  "requiredIamRoles": [
+    "roles/run.viewer",
+    "roles/monitoring.dashboardEditor",
+    "roles/monitoring.uptimeCheckConfigEditor"
+  ],
+  "forbid": {
+    "productionMutation": true,
+    "providerMutation": true,
+    "databaseMutation": true,
+    "backupMutation": true,
+    "drRestore": true,
+    "trafficMutation": true,
+    "cloudRunMutation": true,
+    "secretMutation": true,
+    "serviceAccountKey": true,
+    "projectOwner": true,
+    "projectEditor": true
+  }
+}
