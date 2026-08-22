@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "toca.staging.dr-preflight.v1",
+  "observedAt": "2026-08-22T09:45:39Z",
+  "frozenApplicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+  "project": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "source": {
+    "instance": "toca-mcp-next-staging-db",
+    "state": "RUNNABLE",
+    "databaseVersion": "POSTGRES_18",
+    "region": "southamerica-east1",
+    "backupEnabled": true,
+    "pitrEnabled": true,
+    "deletionProtection": true,
+    "transactionLogRetentionDays": 7
+  },
+  "recoveryWindow": {
+    "httpStatus": 200,
+    "earliest": "2026-08-21T17:20:36.918Z",
+    "latest": "2026-08-22T09:43:49.954138061Z",
+    "providerLatestLagSeconds": 110,
+    "rpoWindowObjectiveSeconds": 900
+  },
+  "authority": {
+    "identity": "staging-operator",
+    "permissionHttpStatus": 200,
+    "required": [
+      "cloudsql.instances.get",
+      "cloudsql.instances.clone",
+      "cloudsql.instances.create",
+      "cloudsql.instances.update",
+      "cloudsql.instances.delete",
+      "run.jobs.create",
+      "run.jobs.get",
+      "run.jobs.run",
+      "run.jobs.delete",
+      "iam.serviceAccounts.actAs"
+    ],
+    "granted": [
+      "cloudsql.instances.get",
+      "run.jobs.create",
+      "run.jobs.delete",
+      "run.jobs.get",
+      "run.jobs.run"
+    ],
+    "missing": [
+      "cloudsql.instances.clone",
+      "cloudsql.instances.create",
+      "cloudsql.instances.update",
+      "cloudsql.instances.delete",
+      "iam.serviceAccounts.actAs"
+    ]
+  },
+  "readiness": {
+    "prerequisitesReady": true,
+    "permissionsReady": false,
+    "isolatedDrExecutionReady": false
+  },
+  "mutationAuthorized": false,
+  "mutationExecuted": false,
+  "productionMutation": false,
+  "providerMutation": false,
+  "databaseMutation": false,
+  "backupMutation": false,
+  "drRestore": false,
+  "trafficMutation": false,
+  "cloudRunMutation": false,
+  "secretRead": false,
+  "secretMutation": false
+}
