@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
   actions: write
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: ops-dispatch-staging-notification-channels-live-20260821
@@ -21,6 +23,7 @@ jobs:
       TARGET_WORKFLOW: staging-notification-channels.yml
       TARGET_REF: main
       EXPECTED_POLICY_SHA256: 1842881d328ccc8e7adba1462eb6a789f144eefd8c9645a313e592d1c0a88c33
+      TRACKING_PR: '79'
     steps:
       - name: Fail closed on operational branch and repository
         shell: bash
@@ -67,6 +70,7 @@ jobs:
           echo "STAGING_NOTIFICATION_RUN_ID=$RUN_ID"
 
       - name: Wait for governed run completion
+        id: wait
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,9 +87,37 @@ jobs:
             if [[ "$STATUS" == completed ]]; then break; fi
             sleep 5
           done
-          test "$STATUS" = completed
-          echo "STAGING_NOTIFICATION_CHILD_CONCLUSION=$CONCLUSION"
-          test "$CONCLUSION" = success
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+          echo "STAGING_NOTIFICATION_CHILD_STATUS=$STATUS"
+          echo "STAGING_NOTIFICATION_CHILD_CONCLUSION=${CONCLUSION:-unresolved}"
+
+      - name: Publish operational readback to reliability tracker
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+          CHILD_STATUS: ${{ steps.wait.outputs.status }}
+          CHILD_CONCLUSION: ${{ steps.wait.outputs.conclusion }}
+        run: |
+          set -euo pipefail
+          BODY=$(cat <<EOF
+          Post-#87 staging notification-channel operational dispatch completed.
+
+          - wrapper SHA: `${GITHUB_SHA}`
+          - governed workflow: `${TARGET_WORKFLOW}` on `${TARGET_REF}`
+          - expected policy SHA-256: `${EXPECTED_POLICY_SHA256}`
+          - child run: `${RUN_ID:-UNRESOLVED}`
+          - child status: `${CHILD_STATUS:-UNRESOLVED}`
+          - child conclusion: `${CHILD_CONCLUSION:-UNRESOLVED}`
+          - mutation scope: staging notification channels + exact IAM bootstrap only
+          - production/provider/database/backup/DR/traffic mutation: forbidden by policy
+
+          This comment is operational readback only; `RELIABILITY_VERIFIED` remains gated on successful channel readiness, synthetic delivery/readback, and isolated DR evidence.
+          EOF
+          )
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TRACKING_PR}/comments" -f body="$BODY" >/dev/null
 
       - name: Final safety summary
         if: always()
@@ -101,3 +133,13 @@ jobs:
             echo '- project mutation scope: staging notification channels + exact IAM bootstrap only'
             echo '- production/provider/database/backup/DR/traffic mutation: forbidden by child policy'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce child success
+        shell: bash
+        env:
+          CHILD_STATUS: ${{ steps.wait.outputs.status }}
+          CHILD_CONCLUSION: ${{ steps.wait.outputs.conclusion }}
+        run: |
+          set -euo pipefail
+          test "$CHILD_STATUS" = completed
+          test "$CHILD_CONCLUSION" = success
