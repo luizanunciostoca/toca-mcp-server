@@ -32,7 +32,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Bind exact Monitoring notification service-agent role in staging
+      - name: Generate and bind exact Monitoring service agent in staging
         shell: bash
         run: |
           set -euo pipefail
@@ -40,6 +40,23 @@ jobs:
           test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud beta services identity create \
+            --service=monitoring.googleapis.com \
+            --project="$PROJECT_ID" \
+            --quiet >/tmp/monitoring-service-identity.txt
+
+          OBSERVED_EMAIL=''
+          for attempt in $(seq 1 20); do
+            OBSERVED_EMAIL="$(gcloud iam service-accounts describe "$MONITORING_SERVICE_AGENT" \
+              --project="$PROJECT_ID" \
+              --format='value(email)' 2>/dev/null || true)"
+            if [[ "$OBSERVED_EMAIL" = "$MONITORING_SERVICE_AGENT" ]]; then
+              break
+            fi
+            sleep 3
+          done
+          test "$OBSERVED_EMAIL" = "$MONITORING_SERVICE_AGENT"
 
           MEMBER="serviceAccount:${MONITORING_SERVICE_AGENT}"
           ROLE='roles/monitoring.notificationServiceAgent'
@@ -55,6 +72,7 @@ jobs:
             'any(.bindings[]?; .role==$role and any(.members[]?; .==$member))' \
             <<<"$PROJECT_POLICY" >/dev/null
 
+          echo 'STAGING_MONITORING_SERVICE_AGENT_IDENTITY=PASS'
           echo 'STAGING_MONITORING_SERVICE_AGENT_BINDING=PASS'
           echo 'PRODUCTION_MUTATION=false'
           echo 'PROVIDER_MUTATION=false'
