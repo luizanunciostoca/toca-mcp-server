@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AuditEvent } from './audit.js';
+import { sanitizeAuditEvidenceValues } from './audit-evidence.js';
 import type { RiskClass } from './tool-registry.js';
 
 export const AUDIT_GENESIS_HASH = '0'.repeat(64);
@@ -62,33 +63,13 @@ export function canonicalAuditPayload(
   sequence: number,
   previousHash: string,
 ): Readonly<Record<string, unknown>> {
-  assertAuditSequence(sequence);
-  assertAuditHash(previousHash, 'AUDIT_PREVIOUS_HASH_INVALID');
-  const evidence = normalizeAuditEvidence(event);
-  const input: AuditLedgerCanonicalInput = {
-    executionId: requireText(event.executionId, 'AUDIT_EXECUTION_ID_REQUIRED'),
-    correlationId: requireText(event.correlationId, 'AUDIT_CORRELATION_ID_REQUIRED'),
+  return canonicalAuditPayloadWithEvidence(
+    event,
+    riskClass,
     sequence,
     previousHash,
-    requester: requireText(event.requester, 'AUDIT_REQUESTER_REQUIRED'),
-    principalType: event.principalType ?? null,
-    tenantId: nullableText(event.tenantId),
-    workspaceId: nullableText(event.workspaceId),
-    organizationId: nullableText(event.organizationId),
-    sessionId: nullableText(event.sessionId),
-    authenticationMethod: event.authenticationMethod ?? null,
-    authorizationRoles: [...new Set(event.authorizationRoles ?? [])].sort(),
-    toolName: requireText(event.toolName, 'AUDIT_TOOL_NAME_REQUIRED'),
-    riskClass,
-    status: event.status,
-    approvalId: nullableText(event.approvalId),
-    connectedAccount: nullableText(event.connectedAccount),
-    externalResourceId: nullableText(event.externalResourceId),
-    errorCode: nullableText(event.errorCode),
-    evidence,
-    createdAt: assertTimestamp(event.createdAt),
-  };
-  return canonicalize(input) as Readonly<Record<string, unknown>>;
+    normalizeAuditEvidence(event),
+  );
 }
 
 export function hashAuditPayload(payload: Readonly<Record<string, unknown>>): string {
@@ -96,9 +77,7 @@ export function hashAuditPayload(payload: Readonly<Record<string, unknown>>): st
 }
 
 export function normalizeAuditEvidence(event: AuditEvent): readonly string[] {
-  const evidence = [
-    ...new Set((event.evidence ?? []).map((item) => item.trim()).filter(Boolean)),
-  ].sort();
+  const evidence = sanitizeAuditEvidenceValues(event.evidence ?? []);
   return evidence.length > 0
     ? evidence
     : [
@@ -132,15 +111,27 @@ export function verifyAuditLedger(
       return invalid(executionId, records, previousHash, 'AUDIT_SEQUENCE_GAP');
     if (record.previousHash !== previousHash)
       return invalid(executionId, records, previousHash, 'AUDIT_PREVIOUS_HASH_MISMATCH');
-    const expectedPayload = canonicalAuditPayload(
+
+    let expectedPayload = canonicalAuditPayload(
       record,
       record.riskClass,
       record.sequence,
       record.previousHash,
     );
     if (canonicalJson(record.canonicalPayload) !== canonicalJson(expectedPayload)) {
-      return invalid(executionId, records, previousHash, 'AUDIT_CANONICAL_PAYLOAD_MISMATCH');
+      const legacyPayload = canonicalAuditPayloadWithEvidence(
+        record,
+        record.riskClass,
+        record.sequence,
+        record.previousHash,
+        legacyNormalizeAuditEvidence(record),
+      );
+      if (canonicalJson(record.canonicalPayload) !== canonicalJson(legacyPayload)) {
+        return invalid(executionId, records, previousHash, 'AUDIT_CANONICAL_PAYLOAD_MISMATCH');
+      }
+      expectedPayload = legacyPayload;
     }
+
     const expectedHash = hashAuditPayload(expectedPayload);
     if (record.eventHash !== expectedHash)
       return invalid(executionId, records, previousHash, 'AUDIT_EVENT_HASH_MISMATCH');
@@ -165,6 +156,52 @@ export function verifyAuditLedger(
     headHash: previousHash,
     reason: null,
   };
+}
+
+function canonicalAuditPayloadWithEvidence(
+  event: AuditEvent,
+  riskClass: RiskClass,
+  sequence: number,
+  previousHash: string,
+  evidence: readonly string[],
+): Readonly<Record<string, unknown>> {
+  assertAuditSequence(sequence);
+  assertAuditHash(previousHash, 'AUDIT_PREVIOUS_HASH_INVALID');
+  const input: AuditLedgerCanonicalInput = {
+    executionId: requireText(event.executionId, 'AUDIT_EXECUTION_ID_REQUIRED'),
+    correlationId: requireText(event.correlationId, 'AUDIT_CORRELATION_ID_REQUIRED'),
+    sequence,
+    previousHash,
+    requester: requireText(event.requester, 'AUDIT_REQUESTER_REQUIRED'),
+    principalType: event.principalType ?? null,
+    tenantId: nullableText(event.tenantId),
+    workspaceId: nullableText(event.workspaceId),
+    organizationId: nullableText(event.organizationId),
+    sessionId: nullableText(event.sessionId),
+    authenticationMethod: event.authenticationMethod ?? null,
+    authorizationRoles: [...new Set(event.authorizationRoles ?? [])].sort(),
+    toolName: requireText(event.toolName, 'AUDIT_TOOL_NAME_REQUIRED'),
+    riskClass,
+    status: event.status,
+    approvalId: nullableText(event.approvalId),
+    connectedAccount: nullableText(event.connectedAccount),
+    externalResourceId: nullableText(event.externalResourceId),
+    errorCode: nullableText(event.errorCode),
+    evidence,
+    createdAt: assertTimestamp(event.createdAt),
+  };
+  return canonicalize(input) as Readonly<Record<string, unknown>>;
+}
+
+function legacyNormalizeAuditEvidence(event: AuditEvent): readonly string[] {
+  const evidence = [
+    ...new Set((event.evidence ?? []).map((item) => item.trim()).filter(Boolean)),
+  ].sort();
+  return evidence.length > 0
+    ? evidence
+    : [
+        `audit:${event.status.toLowerCase()}:${requireText(event.executionId, 'AUDIT_EXECUTION_ID_REQUIRED')}`,
+      ];
 }
 
 function invalid(
