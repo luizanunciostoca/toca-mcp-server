@@ -10,6 +10,7 @@ permissions:
   contents: read
   id-token: write
 
+# Read-only gate before any further authorized DR mutation.
 jobs:
   preflight:
     runs-on: ubuntu-latest
