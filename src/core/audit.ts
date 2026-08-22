@@ -1,4 +1,5 @@
 import type { AuthenticationMethod, AuthorizationRole, PrincipalType } from './identity.js';
+import { sanitizeAuditEvidenceValues } from './audit-evidence.js';
 
 export type AuditStatus = 'STARTED' | 'SUCCEEDED' | 'FAILED' | 'DENIED';
 
@@ -31,11 +32,19 @@ export class InMemoryAuditSink implements AuditSink {
   private readonly events: AuditEvent[] = [];
 
   write(event: AuditEvent): Promise<void> {
-    this.events.push(event);
+    this.events.push(sanitizeAuditEvent(event));
     return Promise.resolve();
   }
 
   list(): readonly AuditEvent[] {
     return this.events;
   }
+}
+
+export function sanitizeAuditEvent(event: AuditEvent): AuditEvent {
+  if (!event.evidence) return event;
+  return {
+    ...event,
+    evidence: sanitizeAuditEvidenceValues(event.evidence),
+  };
 }
