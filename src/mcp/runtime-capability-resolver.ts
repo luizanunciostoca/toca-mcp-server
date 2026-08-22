@@ -29,6 +29,7 @@ import {
 } from '../scheduler/toca-managed-instagram-scheduler.js';
 import type {
   CoreCapabilityRuntimeBinding,
+  CoreCapabilityRuntimeContext,
   CoreCapabilityRuntimeResolver,
 } from './core-execution.js';
 import {
@@ -246,7 +247,7 @@ export interface RuntimeCapabilityServices {
   readonly metaAdsDemand?: MetaAdsDemandIntelligenceService;
   readonly metaAdsWrite?: MetaAdsControlledWriteService;
   readonly metaAdsWriteProvider?: MetaAdsControlledGraphProvider;
-  readonly instagramScheduler?: TocaManagedInstagramScheduler;
+  readonly instagramScheduler?: (tenantId: string) => TocaManagedInstagramScheduler;
   readonly videoContent?: VideoContentRuntimeService;
   readonly crmSales?: CrmSalesRuntimeServices;
 }
@@ -699,11 +700,10 @@ function resolveBinding(
       return services.instagramScheduler
         ? binding(
             tocaManagedInstagramSchedulePayloadSchema,
-            (input) => services.instagramScheduler!.schedule(input),
+            (input, context) => schedulerForContext(services, context).schedule(input),
             {
               idempotencyKey: scheduleIdempotencyKey,
-              providerReadback: (result) =>
-                scheduleReadback(services.instagramScheduler!, result.id),
+              providerReadback: (result) => scheduleReadback(services, result),
               sideEffectValidated: true,
             },
           )
@@ -712,46 +712,54 @@ function resolveBinding(
       return services.instagramScheduler
         ? binding(
             rescheduleSchema,
-            (input) => executeIdempotentReschedule(services.instagramScheduler!, input),
+            (input, context) =>
+              executeIdempotentReschedule(schedulerForContext(services, context), input),
             {
               idempotencyKey: (input) =>
                 `instagram:reschedule:${input.jobId}:${scheduleIdempotencyKey(input.replacement)}`,
-              providerReadback: (result) =>
-                scheduleReadback(services.instagramScheduler!, result.id),
+              providerReadback: (result) => scheduleReadback(services, result),
               sideEffectValidated: true,
             },
           )
         : undefined;
     case 'instagram.toca_schedule.cancel':
       return services.instagramScheduler
-        ? binding(jobIdSchema, (input) => services.instagramScheduler!.cancel(input.jobId), {
-            idempotencyKey: (input) => `instagram:cancel:${input.jobId}`,
-            providerReadback: async (_result, input) => {
-              const job = await services.instagramScheduler!.status(input.jobId);
-              const verified = job?.status === 'CANCELED';
-              return {
-                verified,
-                evidence: [
-                  verified
-                    ? `scheduler:job:${input.jobId}:canceled`
-                    : `scheduler:job:${input.jobId}:cancel-readback-mismatch`,
-                ],
-                externalResourceId: input.jobId,
-                ...(!verified ? { reason: 'SCHEDULER_CANCEL_NOT_READ_BACK' } : {}),
-              };
+        ? binding(
+            jobIdSchema,
+            (input, context) => schedulerForContext(services, context).cancel(input.jobId),
+            {
+              idempotencyKey: (input) => `instagram:cancel:${input.jobId}`,
+              providerReadback: async (result, input) => {
+                const tenantId = result?.tenantId?.trim();
+                const scheduler = tenantId ? services.instagramScheduler?.(tenantId) : undefined;
+                const job = scheduler ? await scheduler.status(input.jobId) : undefined;
+                const verified = job?.status === 'CANCELED';
+                return {
+                  verified,
+                  evidence: [
+                    verified
+                      ? `scheduler:job:${input.jobId}:canceled`
+                      : `scheduler:job:${input.jobId}:cancel-readback-mismatch`,
+                  ],
+                  externalResourceId: input.jobId,
+                  ...(!verified ? { reason: 'SCHEDULER_CANCEL_NOT_READ_BACK' } : {}),
+                };
+              },
+              sideEffectValidated: true,
             },
-            sideEffectValidated: true,
-          })
+          )
         : undefined;
     case 'instagram.toca_schedule.status':
       return services.instagramScheduler
-        ? binding(jobIdSchema, async (input) => ({
-            job: await services.instagramScheduler!.status(input.jobId),
+        ? binding(jobIdSchema, async (input, context) => ({
+            job: await schedulerForContext(services, context).status(input.jobId),
           }))
         : undefined;
     case 'instagram.toca_schedule.list':
       return services.instagramScheduler
-        ? binding(z.object({}), async () => ({ jobs: await services.instagramScheduler!.list() }))
+        ? binding(z.object({}), async (_input, context) => ({
+            jobs: await schedulerForContext(services, context).list(),
+          }))
         : undefined;
     default:
       return undefined;
@@ -760,7 +768,7 @@ function resolveBinding(
 
 function binding<T, TResult>(
   schema: z.ZodType<T>,
-  execute: (input: T) => Promise<TResult>,
+  execute: (input: T, context?: CoreCapabilityRuntimeContext) => Promise<TResult>,
   options: {
     readonly targetAccount?: (input: T) => string | undefined;
     readonly idempotencyKey?: (input: T) => string | undefined;
@@ -781,7 +789,7 @@ function binding<T, TResult>(
 ): CoreCapabilityRuntimeBinding {
   return {
     inputSchema: schema,
-    execute: (input) => execute(input as T),
+    execute: (input, context) => execute(input as T, context),
     ...(options.targetAccount
       ? { targetAccount: (input: unknown) => options.targetAccount!(input as T) }
       : {}),
@@ -848,6 +856,17 @@ function scheduleIdempotencyKey(input: TocaManagedInstagramSchedulePayload): str
   return `internal:instagram:toca-managed:${input.contentItemId}:${hashTocaManagedInstagramApprovalDescriptor(input)}`;
 }
 
+function schedulerForContext(
+  services: RuntimeCapabilityServices,
+  context: CoreCapabilityRuntimeContext | undefined,
+): TocaManagedInstagramScheduler {
+  const tenantId = context?.identity.principal.tenantId?.trim();
+  if (!tenantId) throw new Error('SCHEDULER_RUNTIME_TENANT_CONTEXT_REQUIRED');
+  const resolve = services.instagramScheduler;
+  if (!resolve) throw new Error('SCHEDULER_RUNTIME_UNAVAILABLE');
+  return resolve(tenantId);
+}
+
 async function executeIdempotentReschedule(
   scheduler: TocaManagedInstagramScheduler,
   input: z.infer<typeof rescheduleSchema>,
@@ -874,15 +893,22 @@ async function executeIdempotentReschedule(
   }
 }
 
-async function scheduleReadback(scheduler: TocaManagedInstagramScheduler, jobId: string) {
-  const job = await scheduler.status(jobId);
+async function scheduleReadback(
+  services: RuntimeCapabilityServices,
+  result: { readonly id: string; readonly tenantId?: string },
+) {
+  const tenantId = result.tenantId?.trim();
+  const scheduler = tenantId ? services.instagramScheduler?.(tenantId) : undefined;
+  const job = scheduler ? await scheduler.status(result.id) : undefined;
   const verified = job?.status === 'SCHEDULED';
   return {
     verified,
     evidence: [
-      verified ? `scheduler:job:${jobId}:scheduled` : `scheduler:job:${jobId}:readback-mismatch`,
+      verified
+        ? `scheduler:job:${result.id}:scheduled`
+        : `scheduler:job:${result.id}:readback-mismatch`,
     ],
-    externalResourceId: jobId,
+    externalResourceId: result.id,
     ...(!verified ? { reason: 'SCHEDULER_JOB_NOT_READ_BACK_AS_SCHEDULED' } : {}),
   };
 }
