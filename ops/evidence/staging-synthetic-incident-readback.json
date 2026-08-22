@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "toca.staging.synthetic-incident-readback.v1",
+  "observedAt": "2026-08-22T09:08:31Z",
+  "project": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "alertId": "0.obqbjhmrmmv8",
+  "state": "OPEN",
+  "openTime": "2026-08-22T08:46:05Z",
+  "closeTime": null,
+  "policy": {
+    "name": "projects/toca-mcp-next-staging/alertPolicies/5562724679805698256",
+    "displayName": "TOCA Next Staging - Synthetic Reliability Delivery"
+  },
+  "exactSyntheticIncidentMatched": true,
+  "recoveryClosureObserved": false,
+  "productionMutation": false,
+  "providerMutation": false,
+  "databaseMutation": false,
+  "backupMutation": false,
+  "drRestore": false,
+  "trafficMutation": false,
+  "cloudRunMutation": false,
+  "secretMutation": false
+}
