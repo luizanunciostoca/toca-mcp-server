@@ -22,6 +22,12 @@ export interface DeadLetterRecord {
   readonly attempts: number;
   readonly lastError: string;
   readonly failedAt: string;
+  readonly tenantId?: string;
+  readonly workspaceId?: string;
+  readonly organizationId?: string;
+  readonly correlationId?: string;
+  readonly idempotencyKey?: string;
+  readonly evidence?: readonly string[];
 }
 
 export interface DeadLetterSink {
@@ -70,6 +76,48 @@ function logicalAttempt(job: ScheduledJob): number {
 
 function rootIdempotencyKey(key: string): string {
   return key.replace(/(?::retry:\d+)+$/, '');
+}
+
+function payloadText(payload: unknown, ...keys: readonly string[]): string | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+  const record = payload as Readonly<Record<string, unknown>>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function deadLetterRecord(
+  job: ScheduledJob,
+  id: string,
+  attempt: number,
+  normalizedError: string,
+  failedAt: string,
+): DeadLetterRecord {
+  const tenantId = job.tenantId ?? payloadText(job.payload, 'tenantId', 'tenant_id');
+  const workspaceId = payloadText(job.payload, 'workspaceId', 'workspace_id');
+  const organizationId = payloadText(job.payload, 'organizationId', 'organization_id');
+  const correlationId = payloadText(job.payload, 'correlationId', 'correlation_id');
+  return {
+    id,
+    originalJobId: job.id,
+    toolName: job.toolName,
+    payload: job.payload,
+    attempts: attempt,
+    lastError: normalizedError,
+    failedAt,
+    ...(tenantId ? { tenantId } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(organizationId ? { organizationId } : {}),
+    ...(correlationId ? { correlationId } : {}),
+    idempotencyKey: rootIdempotencyKey(job.idempotencyKey),
+    evidence: [
+      `worker:dead-letter:${id}`,
+      `worker:source-job:${job.id}`,
+      `worker:attempts:${attempt}`,
+    ],
+  };
 }
 
 export class SchedulerWorker {
@@ -141,15 +189,13 @@ export class SchedulerWorker {
     normalizedError: string,
   ): Promise<void> {
     if (attempt >= this.options.retry.maxAttempts) {
-      const record: DeadLetterRecord = {
-        id: this.#createId(),
-        originalJobId: job.id,
-        toolName: job.toolName,
-        payload: job.payload,
-        attempts: attempt,
-        lastError: normalizedError,
-        failedAt: this.#now().toISOString(),
-      };
+      const record = deadLetterRecord(
+        job,
+        this.#createId(),
+        attempt,
+        normalizedError,
+        this.#now().toISOString(),
+      );
       if (this.options.deadLetters.finalize) {
         await this.options.deadLetters.finalize(job, record);
       } else {
@@ -171,6 +217,7 @@ export class SchedulerWorker {
           runAt: retryAt,
           timezone: job.timezone,
           idempotencyKey: `${rootIdempotencyKey(job.idempotencyKey)}:retry:${attempt}`,
+          ...(job.tenantId ? { tenantId: job.tenantId } : {}),
         });
       }
       this.options.telemetry.increment('worker.job.retry_scheduled', { toolName: job.toolName });
