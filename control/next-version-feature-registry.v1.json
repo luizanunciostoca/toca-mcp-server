@@ -1,12 +1,14 @@
 {
-  "schemaVersion": "1.3",
+  "schemaVersion": "1.4",
   "registryId": "TOCA_NEXT_VERSION_FEATURE_REGISTRY",
-  "registryVersion": "1.3",
-  "status": "FINAL_CONVERGENCE",
-  "observedAt": "2026-08-20T23:22:00-03:00",
-  "observedMainSha": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
-  "candidateFrozen": false,
-  "stagingAuthorized": false,
+  "registryVersion": "1.4",
+  "status": "POST_STAGING_VERIFICATION",
+  "observedAt": "2026-08-21T21:43:00-03:00",
+  "observedMainSha": "4c2ece55a85ce8e596a4b70e60c159fe7862f75d",
+  "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+  "candidateFrozen": true,
+  "stagingAuthorized": true,
+  "stagingVerified": true,
   "productionAuthorized": false,
   "finalCloseoutAuthorized": false,
   "rules": {
@@ -40,7 +42,8 @@
     "029_asset_intelligence_content_supply.sql",
     "030_whatsapp_provider_runtime.sql",
     "031_multi_tenant_foundation.sql",
-    "032_tenant_scoped_approvals.sql"
+    "032_tenant_scoped_approvals.sql",
+    "033_omnichannel_prepared_content.sql"
   ],
   "migrationCoordination": {
     "gap027": "INTENTIONAL_DO_NOT_RENUMBER_MERGED_MIGRATIONS",
@@ -49,92 +52,78 @@
   },
   "canonicalDrifts": {
     "R10_ROUTE_OWNERSHIP": {
-      "state": "GOVERNANCE_DRIFT_DETECTED",
-      "driveRoutingMeaning": "COMERCIAL_PARcerias / proposals, sponsorships and partnerships",
-      "githubRouteCatalogMeaning": "COMERCIAL_PARCERIAS / leads, proposals, partnerships, sponsorships and private events",
-      "capabilityCatalogMeaning": "broad CRM/Sales family including lead, pipeline, followup and report",
-      "reconciliationAuthority": "R21_GOVERNANCE_DRIFT_RECONCILIATION",
-      "resolution": "PENDING_CANONICAL_OWNERSHIP_DECISION",
+      "state": "RECONCILED",
+      "resolution": "WhatsApp outbound and durable follow-up use canonical R10 CRM/Sales authority; Email outbound uses R07; no R33 introduced",
       "newRouteAllowed": false
     }
   },
   "fronts": {
     "A_PROVIDER_ONBOARDING_GOOGLE_ADS": {
-      "state": "BLOCKED_TECHNICAL_AND_EXTERNAL_EVIDENCE",
-      "mergedFoundationPrs": [54, 55],
-      "trackingPr": 46,
+      "state": "IMPLEMENTED_PROVIDER_EVIDENCE_PENDING",
+      "mergedPrs": [54, 59, 64],
       "providerVerified": false,
       "productionVerified": false,
       "blockers": [
-        "google_ads.customers.discover client supports credential-only discovery but canonical server/config composition still requires customer-bound configuration before binding the verifier",
-        "first controlled Google Ads CREATE_PAUSED cannot use normal Core bootstrap while sideEffectValidated is false and approval request requires PRODUCTION_VALIDATED",
-        "live Secret Manager/IAM/provider credential evidence not proven",
-        "no live Google Ads provider read/write/readback evidence recorded"
+        "live provider credential/account read evidence not yet recorded on the final candidate",
+        "controlled CREATE_PAUSED, if required, remains separately gated and must never activate or spend"
       ]
     },
     "B_OMNICHANNEL_OUTBOUND_NURTURE": {
-      "state": "BLOCKED_RUNTIME_AND_CANONICAL_CATALOG",
+      "state": "IMPLEMENTED_AND_STAGING_ACCEPTED_PROVIDER_EVIDENCE_PENDING",
+      "mergedPrs": [60, 61, 65, 66, 67, 68],
       "providerRuntimesPresent": true,
+      "stagingAccepted": true,
       "providerVerified": false,
       "productionVerified": false,
-      "driveOperationalChannelCapabilityRowsPresent": false,
-      "existingCanonicalNurtureAuthorities": ["sales.followup.create", "sales.followup.schedule"],
+      "driveOperationalChannelCapabilityRowsPresent": true,
+      "existingCanonicalNurtureAuthorities": [
+        "sales.followup.create",
+        "sales.followup.schedule"
+      ],
       "blockers": [
-        "current omnichannel capability manifest keeps WhatsApp/Email/Nurture capabilities SPECIFIED with runtimeExposed=false and productionExecutionAllowed=false",
-        "TOCA_OS capability catalog currently has no matching operational whatsapp.* or email.* rows; observed whatsapp/email matches are copy-generation capabilities only",
-        "omnichannel capability contracts are not exported by src/governance/index.ts and are not part of the central capability catalog/runtime registration path",
-        "src/registry.ts has no Omnichannel registration option or whatsapp.*, email.* or nurture.* runtime tools",
-        "src/server.ts does not compose Email or WhatsApp outbound engines into the canonical runtime resolver",
-        "src/http.ts composes WhatsApp inbound and SendGrid event webhook/readback only; it does not expose outbound dispatch",
-        "nurture.sequence.* must not be created by default because TOCA_OS already has IMPLEMENTED R10 sales.followup.create and sales.followup.schedule authorities; compose durable nurture over those first",
-        "R10 route ownership is semantically drifted between routing metadata and its broad CRM/Sales capability family and must be reconciled through R21 before candidate freeze",
-        "outbound provider engines must be composed through canonical AG-01/Workflow/Core rather than exposed through a parallel execution path",
-        "Drive catalog and runtime manifest must converge without inventing capabilities merely to make a checklist green"
+        "real SendGrid provider binding/send/readback evidence pending",
+        "real WhatsApp provider binding/send/readback evidence pending"
       ]
     },
     "C_PLATFORM_READINESS_GCP_OBSERVABILITY_DR": {
-      "state": "SOURCE_READY_RUNTIME_EVIDENCE_PENDING",
-      "replacementPr": 55,
-      "supersedesPr": 42,
-      "exactHead": "c3791176195edd392890fa02dbd93209b7bc785e",
-      "mergedMainSha": "ec8a8e6a2eed9eba1181bc2c32fbcc8fed93845d",
-      "sourceGates": {
-        "quality": "SUCCESS",
-        "securitySupplyChain": "SUCCESS",
-        "emailProviderGate": "SUCCESS",
-        "postgresE2E": "NOT_TRIGGERED_BY_PR_55_PATH_FILTER"
-      },
-      "stagingIsolationContract": "FAIL_CLOSED_DEDICATED_GCP_PROJECT_CLOUD_SQL_DB_SECRET_SERVICES_IDENTITIES_WIF",
-      "stagingVerified": false,
-      "productionVerified": false
+      "state": "STAGING_VERIFIED_RELIABILITY_EVIDENCE_PENDING",
+      "mergedPrs": [55, 62, 71, 72, 73, 83],
+      "applicationCandidateSha": "75c165a044c6e79e9545328dd04a2a3e73d2e910",
+      "stagingProjectId": "toca-mcp-next-staging",
+      "stagingProjectNumber": "729069789107",
+      "stagingIsolationContract": "PASS_DEDICATED_GCP_PROJECT_CLOUD_SQL_DB_SECRET_SERVICES_IDENTITIES_WIF",
+      "stagingVerified": true,
+      "productionVerified": false,
+      "reliabilityBlockers": [
+        "post-PR-83 read-only Cloud SQL backup/PITR verification must be rerun and recorded",
+        "Cloud Monitoring policies/channels and firing/readback evidence remain incomplete",
+        "final-candidate DR rehearsal remains unexecuted"
+      ]
     },
     "D_CANONICAL_GOVERNANCE_DRIVE_CLOSEOUT_PREP": {
-      "state": "IN_PROGRESS",
-      "legacyPr": 17,
-      "legacyPrMergeAllowed": false,
-      "replacementBranch": "coord/final-convergence-20260820",
+      "state": "POST_STAGING_RECONCILIATION_IN_PROGRESS",
       "driveGoogleAdsCatalogReconciled": true,
-      "driveOmnichannelCatalogReconciled": false,
-      "routeOwnershipReconciled": false,
+      "driveOmnichannelCatalogReconciled": true,
+      "routeOwnershipReconciled": true,
+      "stagingEvidenceReconciled": true,
+      "productionEvidenceReconciled": false,
       "finalCloseoutAuthorized": false
     }
   },
   "integrationGate": {
-    "candidateFreezeBlockedBy": [
-      "front A credential-first runtime composition gap",
-      "front B outbound runtime registration and composition gap",
-      "front B TOCA_OS operational channel capability catalog drift",
-      "front B nurture manifest must converge on existing canonical R10 followup authorities",
-      "R10 route ownership drift must be reconciled through R21 without creating a 33rd route"
-    ],
-    "requiredSequenceAfterCodeConvergence": [
+    "candidateFreezeBlockedBy": [],
+    "completed": [
       "freeze exact candidate SHA",
-      "revalidate Platform Readiness on final candidate",
-      "prove staging != production before any mutation",
-      "execute staging acceptance and collect evidence",
+      "exact-candidate Quality/Security/PostgreSQL verification",
+      "prove staging != production",
+      "deploy exact immutable candidate to isolated staging",
+      "execute staging acceptance and collect evidence"
+    ],
+    "remainingSequence": [
+      "execute post-PR-83 read-only reliability verification",
       "execute controlled provider verification without lifecycle pre-promotion",
-      "promote production only with evidence",
-      "execute Reliability Verification",
+      "prove alerts/notification delivery and final-candidate DR",
+      "promote production only with explicit authorization and same-candidate evidence",
       "generate Final Closeout from production evidence only"
     ]
   }
