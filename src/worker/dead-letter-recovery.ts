@@ -151,8 +151,6 @@ export class DeadLetterRecoveryService {
     const existing = await this.requireScopedRecord(input.id, input.identity);
     if (existing.status === 'RESOLVED') return existing;
 
-    // Resolving a record is an operator action. Inspecting the original capability
-    // proves the operator is authorized for the same Core scope without re-executing it.
     this.deps.core.inspect({
       capabilityId: existing.toolName,
       payload: existing.payload,
@@ -227,8 +225,9 @@ function auditEventBase(
     tenantId: identity.principal.tenantId,
     workspaceId: identity.principal.workspaceId,
     organizationId: identity.principal.organizationId,
-    authenticationMethod: identity.authentication.method,
-    authorizationRoles: identity.principal.roles,
+    ...(identity.principal.sessionId ? { sessionId: identity.principal.sessionId } : {}),
+    authenticationMethod: identity.principal.authenticationMethod,
+    authorizationRoles: identity.authorization.roles,
   } as const;
 }
 
