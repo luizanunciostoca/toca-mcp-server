@@ -1,0 +1,33 @@
+name: Ops Staging DR Observer 2026-08-22
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-staging-dr-observer-20260822.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve authorized staging DR push run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          RUNS="$(gh run list \
+            --repo "$GH_REPO" \
+            --workflow 'Ops Authorized Staging DR 2026-08-22' \
+            --branch 'ops/staging-dr-authorized-20260822' \
+            --event push \
+            --limit 10 \
+            --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
+          echo "$RUNS" | jq -e --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          echo "$RUNS" | jq -r --arg sha '456908090ddb3b25cab6c115788a65015fd3d13c' '.[] | select(.headSha==$sha) | "DR_PUSH_RUN_ID=\(.databaseId) DR_PUSH_STATUS=\(.status) DR_PUSH_CONCLUSION=\(.conclusion // \"\") DR_PUSH_URL=\(.url)"'
