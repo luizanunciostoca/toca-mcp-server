@@ -61,10 +61,18 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation', () => {
       expect(await schedulerA.get(`random-${suffix}`)).toBeUndefined();
       expect((await schedulerA.list(TOOL)).map((job) => job.id)).toEqual([jobs[0]!.id]);
       expect((await schedulerB.list(TOOL)).map((job) => job.id)).toEqual([jobs[1]!.id]);
-      expect(await schedulerA.reschedule(jobs[1]!.id, '2099-02-01T00:00:00.000Z', 'UTC')).toBeUndefined();
+      expect(
+        await schedulerA.reschedule(jobs[1]!.id, '2099-02-01T00:00:00.000Z', 'UTC'),
+      ).toBeUndefined();
       expect(await schedulerA.cancel(jobs[2]!.id)).toBeUndefined();
-      expect(await schedulerB.get(jobs[1]!.id)).toMatchObject({ status: 'SCHEDULED', tenantId: tenantB });
-      expect(await schedulerC.get(jobs[2]!.id)).toMatchObject({ status: 'SCHEDULED', tenantId: tenantC });
+      expect(await schedulerB.get(jobs[1]!.id)).toMatchObject({
+        status: 'SCHEDULED',
+        tenantId: tenantB,
+      });
+      expect(await schedulerC.get(jobs[2]!.id)).toMatchObject({
+        status: 'SCHEDULED',
+        tenantId: tenantC,
+      });
 
       const spoofId = `${tenantA}:spoof-payload`;
       createdIds.push(spoofId);
@@ -104,9 +112,13 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation', () => {
         expect(claim.every((job) => job.tenantId === tenants[index])).toBe(true);
       }
     } finally {
-      await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [createdIds]);
+      await pool.query('delete from dead_letter_jobs where original_job_id = any($1::text[])', [
+        createdIds,
+      ]);
       await pool.query('delete from scheduled_jobs where id = any($1::text[])', [createdIds]);
-      await pool.query('delete from tenants where tenant_id = any($1::text[])', [Array.from(tenants)]);
+      await pool.query('delete from tenants where tenant_id = any($1::text[])', [
+        Array.from(tenants),
+      ]);
       await pool.end();
     }
   });
@@ -189,7 +201,9 @@ postgresDescribe('Scheduler/DLQ PostgreSQL tenant isolation', () => {
     } finally {
       await pool.query('delete from dead_letter_jobs where original_job_id = $1', [jobId]);
       await pool.query('delete from scheduled_jobs where id = $1', [jobId]);
-      await pool.query('delete from tenants where tenant_id = any($1::text[])', [[tenantA, tenantB]]);
+      await pool.query('delete from tenants where tenant_id = any($1::text[])', [
+        [tenantA, tenantB],
+      ]);
       await pool.end();
     }
   });

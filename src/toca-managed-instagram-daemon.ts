@@ -116,10 +116,10 @@ async function verifySchedulerPersistence(): Promise<void> {
   } finally {
     telemetry.record('daemon.scheduler_self_test.duration_ms', Date.now() - started);
     if (jobIds.length > 0) {
-      await pool.query(
-        'delete from scheduled_jobs where id = any($1::text[]) and tenant_id = $2',
-        [jobIds, tenantId],
-      );
+      await pool.query('delete from scheduled_jobs where id = any($1::text[]) and tenant_id = $2', [
+        jobIds,
+        tenantId,
+      ]);
     }
   }
 }
