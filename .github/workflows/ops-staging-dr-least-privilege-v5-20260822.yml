@@ -53,6 +53,7 @@ jobs:
           grep -Fq 'toca-mcp-next-staging' "$BOOTSTRAP_SCRIPT"
           grep -Fq 'cloudsql.instances.create' "$BOOTSTRAP_SCRIPT"
           grep -Fq 'sqladmin.googleapis.com/v1/projects/' "$CLONE_SHIM"
+          grep -Fq 'DR_LP_V5_REST_CLONE_DONE=PASS' "$CLONE_SHIM"
           echo 'DR_LP_V5_SYNTAX_BOUNDARY=PASS'
 
   bootstrap:
