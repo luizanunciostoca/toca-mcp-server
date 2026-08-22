@@ -21,8 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          echo 'REDISPATCH_REASON=dashboard_jq_closure_fixed'
-          echo 'REDISPATCH_SEQUENCE=4'
+          echo 'REDISPATCH_REASON=zero_state_incident_policy_fix_merged'
+          echo 'REDISPATCH_SEQUENCE=5'
           DISPATCH_URL="$(gh workflow run staging-runtime-observability.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
