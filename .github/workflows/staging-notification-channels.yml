@@ -22,8 +22,10 @@ env:
   PROJECT_NUMBER: '729069789107'
   PRODUCTION_PROJECT_ID: toca-mcp-production
   PRODUCTION_PROJECT_NUMBER: '990081828836'
-  WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
 
 jobs:
   configure:
@@ -46,10 +48,18 @@ jobs:
           ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
           test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
           jq -e '
-            .schemaVersion == "toca.staging.notification-channels.v1" and
+            .schemaVersion == "toca.staging.notification-channels.v2" and
             .operation == "configure-staging-notification-channels" and
             .projectId == "toca-mcp-next-staging" and
             .projectNumber == "729069789107" and
+            .operator.serviceAccount == "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com" and
+            .operator.workloadIdentityProvider == "projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging" and
+            .iamBootstrap.enabled == true and
+            .iamBootstrap.projectId == "toca-mcp-next-staging" and
+            .iamBootstrap.projectNumber == "729069789107" and
+            .iamBootstrap.principal == "serviceAccount:toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com" and
+            .iamBootstrap.role == "roles/monitoring.notificationChannelEditor" and
+            .iamBootstrap.condition == "None" and
             .channels == [
               {"role":"primary-email","type":"email","destinationSecret":"STAGING_ALERT_EMAIL","enabled":true},
               {"role":"secondary-webhook","type":"webhook_tokenauth","destinationSecret":"STAGING_ALERT_WEBHOOK_URL","tokenSecret":"STAGING_ALERT_WEBHOOK_TOKEN","enabled":true}
@@ -58,6 +68,7 @@ jobs:
             .requirements.minimumChannelFamilies == 2 and
             .requirements.requireHttpsWebhook == true and
             .requirements.requireEmailVerification == true and
+            .requirements.sendEmailVerificationCodeWhenRequired == true and
             .requirements.requireSyntheticDeliveryReadbackBeforeReliabilityPromotion == true and
             .forbid.productionMutation == true and
             .forbid.providerMutation == true and
@@ -65,7 +76,9 @@ jobs:
             .forbid.backupMutation == true and
             .forbid.drRestore == true and
             .forbid.trafficMutation == true and
-            .forbid.iamMutation == true and
+            .forbid.iamMutationOutsideBootstrap == true and
+            .forbid.projectOwner == true and
+            .forbid.projectEditor == true and
             .forbid.serviceAccountKeys == true and
             .forbid.secretValuesInRepository == true and
             .forbid.secretValuesInArtifacts == true and
@@ -87,10 +100,10 @@ jobs:
           [[ "$ALERT_EMAIL" == *@*.* ]]
           echo 'STAGING_NOTIFICATION_DESTINATIONS_PRESENT=1'
 
-      - name: Authenticate infrastructure administrator
+      - name: Authenticate infrastructure administrator for exact IAM bootstrap
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
-          workload_identity_provider: ${{ env.WIF }}
+          workload_identity_provider: ${{ env.INFRA_WIF }}
           service_account: ${{ env.INFRA_ADMIN_SA }}
 
       - name: Setup gcloud
@@ -105,6 +118,33 @@ jobs:
           test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
           test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
           echo 'STAGING_NOTIFICATION_PROJECT_IDENTITY=PASS'
+
+      - name: Bootstrap exact staging notification-channel editor role
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          ROLE='roles/monitoring.notificationChannelEditor'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$STAGING_OPERATOR_SA" = 'toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com'
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" \
+            --role="$ROLE" \
+            --condition=None \
+            --quiet
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/staging-notification-iam.json
+          jq -e --arg role "$ROLE" --arg member "$MEMBER" \
+            'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' \
+            /tmp/staging-notification-iam.json >/dev/null
+          rm -f /tmp/staging-notification-iam.json
+          echo 'STAGING_NOTIFICATION_IAM_BOOTSTRAP=PASS'
+
+      - name: Authenticate isolated staging notification operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
 
       - name: Reconcile email and webhook notification channels
         id: channels
@@ -166,12 +206,21 @@ jobs:
             test -n "$ALERT_WEBHOOK_TOKEN"
           fi
 
+          WEBHOOK_BASE_URL="$ALERT_WEBHOOK_URL"
+          if [[ "$WEBHOOK_REQUIRES_TOKEN" == true ]]; then
+            WEBHOOK_BASE_URL="$(ALERT_WEBHOOK_URL="$ALERT_WEBHOOK_URL" node --input-type=module -e '
+              const url = new URL(process.env.ALERT_WEBHOOK_URL);
+              url.searchParams.delete("auth_token");
+              process.stdout.write(url.toString());
+            ')"
+          fi
+
           list_channels
           WEBHOOK_NAME="$(jq -r 'first(.notificationChannels[]? | select(.type=="webhook_tokenauth" and .userLabels.toca_managed=="staging_reliability" and .userLabels.channel_role=="secondary_webhook") | .name) // empty' staging-notification-evidence/channels-raw.json)"
           if [[ -z "$WEBHOOK_NAME" ]]; then
             if [[ "$WEBHOOK_REQUIRES_TOKEN" == true ]]; then
               jq -n \
-                --arg url "$ALERT_WEBHOOK_URL" \
+                --arg url "$WEBHOOK_BASE_URL" \
                 --arg token "$ALERT_WEBHOOK_TOKEN" \
                 '{
                   type:"webhook_tokenauth",
@@ -183,7 +232,7 @@ jobs:
                 }' > /tmp/staging-webhook-channel.json
             else
               jq -n \
-                --arg url "$ALERT_WEBHOOK_URL" \
+                --arg url "$WEBHOOK_BASE_URL" \
                 '{
                   type:"webhook_tokenauth",
                   displayName:"TOCA Next Staging - Webhook",
@@ -209,6 +258,16 @@ jobs:
           FAMILIES="$(jq '[.notificationChannels[]? | select(.enabled==true) | .type] | unique | length' staging-notification-evidence/channels-sanitized.json)"
           EMAIL_STATUS="$(jq -r 'first(.notificationChannels[]? | select(.type=="email") | .verificationStatus) // "UNSPECIFIED"' staging-notification-evidence/channels-sanitized.json)"
 
+          if [[ "$EMAIL_STATUS" == "UNVERIFIED" ]]; then
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data '{}' \
+              "https://monitoring.googleapis.com/v3/${EMAIL_NAME}:sendVerificationCode" \
+              >/dev/null
+          fi
+
           jq -n \
             --arg project "$PROJECT_ID" \
             --arg projectNumber "$PROJECT_NUMBER" \
@@ -218,9 +277,11 @@ jobs:
             --argjson enabledChannelCount "$ENABLED" \
             --argjson channelFamilyCount "$FAMILIES" \
             '{
-              schemaVersion:"toca.staging.notification-channels.evidence.v1",
+              schemaVersion:"toca.staging.notification-channels.evidence.v2",
               project:$project,
               projectNumber:$projectNumber,
+              operator:"toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+              iamRole:"roles/monitoring.notificationChannelEditor",
               emailChannel:{name:$emailName,type:"email",verificationStatus:$emailVerificationStatus},
               webhookChannel:{name:$webhookName,type:"webhook_tokenauth"},
               enabledChannelCount:$enabledChannelCount,
@@ -231,7 +292,6 @@ jobs:
               backupMutation:false,
               drRestore:false,
               trafficMutation:false,
-              iamMutation:false,
               syntheticDeliveryReadbackExecuted:false
             }' > staging-notification-evidence/manifest.json
 
