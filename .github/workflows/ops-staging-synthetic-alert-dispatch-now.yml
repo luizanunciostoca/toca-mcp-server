@@ -4,6 +4,8 @@ on:
   push:
     branches: [ops/staging-synthetic-alert-dispatch-now-20260822]
     paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
+  pull_request:
+    paths: ['.github/workflows/ops-staging-synthetic-alert-dispatch-now.yml']
 
 permissions:
   actions: write
