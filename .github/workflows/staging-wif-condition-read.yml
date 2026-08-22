@@ -108,16 +108,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BODY="Staging WIF live read-only evidence.
-
-run: ${GITHUB_RUN_ID}
-source SHA: ${GITHUB_SHA}
-provider: projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${STAGING_POOL}/providers/${STAGING_PROVIDER}
-attributeCondition: ${CONDITION}
-operator: ${STAGING_OPERATOR_SA}
-roles/iam.workloadIdentityUser mapped members: ${MEMBER_COUNT}
-production mutation: none
-staging mutation: none"
+          BODY="$(printf '%s\n' \
+            'Staging WIF live read-only evidence.' \
+            '' \
+            "run: ${GITHUB_RUN_ID}" \
+            "source SHA: ${GITHUB_SHA}" \
+            "provider: projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${STAGING_POOL}/providers/${STAGING_PROVIDER}" \
+            "attributeCondition: ${CONDITION}" \
+            "operator: ${STAGING_OPERATOR_SA}" \
+            "roles/iam.workloadIdentityUser mapped members: ${MEMBER_COUNT}" \
+            'production mutation: none' \
+            'staging mutation: none')"
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TRACKING_PR}/comments" -f body="$BODY" >/dev/null
 
       - name: Upload sanitized evidence
