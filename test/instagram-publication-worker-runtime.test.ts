@@ -13,7 +13,9 @@ describe('Instagram publication worker runtime', () => {
     const config = loadConfig({ NODE_ENV: 'test', META_ENABLED: 'false' });
     const { pool, query } = createPool();
 
-    await expect(runInstagramPublicationWorkerBatch({ config, pool })).resolves.toBe(0);
+    await expect(
+      runInstagramPublicationWorkerBatch({ config, pool, tenantId: 'toca' }),
+    ).resolves.toBe(0);
     expect(query).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import { runWorkerBatch } from './worker-runtime.js';
 export interface InstagramPublicationWorkerRuntimeOptions {
   readonly config: RuntimeConfig;
   readonly pool: pg.Pool;
+  readonly tenantId: string;
 }
 
 export async function runInstagramPublicationWorkerBatch(
@@ -21,6 +22,7 @@ export async function runInstagramPublicationWorkerBatch(
 
   return runWorkerBatch({
     pool: options.pool,
+    tenantId: options.tenantId,
     handlers,
     claimToolName: INSTAGRAM_PUBLICATION_JOB,
   });

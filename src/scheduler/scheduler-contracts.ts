@@ -5,6 +5,7 @@ export type ScheduledJobStatus = 'SCHEDULED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED
 
 export interface ScheduledJob<TPayload = unknown> {
   readonly id: string;
+  readonly tenantId?: string;
   readonly toolName: string;
   readonly payload: TPayload;
   readonly runAt: string;
@@ -17,7 +18,7 @@ export interface ScheduledJob<TPayload = unknown> {
 
 export interface Scheduler {
   schedule<TPayload>(
-    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
+    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts' | 'tenantId'>,
   ): Promise<ScheduledJob<TPayload>>;
   get<TPayload = unknown>(id: string): Promise<ScheduledJob<TPayload> | undefined>;
   reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined>;

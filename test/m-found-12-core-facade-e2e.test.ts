@@ -120,7 +120,9 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
       () => `m12-job-${++sequence}`,
     );
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:operator',
@@ -218,7 +220,9 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
       () => `m12-replay-job-${++sequence}`,
     );
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:operator',
@@ -274,7 +278,9 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
     await scheduler.schedule(payload);
 
     const registry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    const runtimeResolver = createRuntimeCapabilityResolver({ instagramScheduler: scheduler });
+    const runtimeResolver = createRuntimeCapabilityResolver({
+      instagramScheduler: () => scheduler,
+    });
     const auditStore = new MFound12AuditStore();
     const identity = createTrustedServiceExecutionIdentity({
       principalId: 'm12:reader',

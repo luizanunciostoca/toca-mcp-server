@@ -168,7 +168,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
 
   const instagramScheduler =
     config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED && pool
-      ? new TocaManagedInstagramScheduler(new PostgresScheduler(pool))
+      ? (tenantId: string) =>
+          new TocaManagedInstagramScheduler(new PostgresScheduler(pool, tenantId))
       : undefined;
   const instagramHistory =
     config.INSTAGRAM_READ_ENABLED &&

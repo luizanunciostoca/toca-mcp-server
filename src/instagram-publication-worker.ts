@@ -4,6 +4,7 @@ import { runInstagramPublicationWorkerBatch } from './worker/instagram-publicati
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
+const tenantId = process.env.TOCA_DEFAULT_TENANT_ID?.trim() || 'toca';
 const manualWorkerEnabled = config.INSTAGRAM_PUBLICATION_WRITES_ENABLED;
 const tocaManagedWorkerEnabled = config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED;
 
@@ -18,10 +19,10 @@ if (!manualWorkerEnabled && !tocaManagedWorkerEnabled) {
   const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
   try {
     if (tocaManagedWorkerEnabled) {
-      const claimed = await runTocaManagedInstagramWorkerBatch({ config, pool });
+      const claimed = await runTocaManagedInstagramWorkerBatch({ config, pool, tenantId });
       console.info('instagram.publication.worker.toca_managed.completed', { claimed });
     } else {
-      const claimed = await runInstagramPublicationWorkerBatch({ config, pool });
+      const claimed = await runInstagramPublicationWorkerBatch({ config, pool, tenantId });
       console.info('instagram.publication.worker.manual.completed', { claimed });
     }
   } finally {

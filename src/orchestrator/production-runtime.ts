@@ -86,7 +86,7 @@ export function createAg01ProductionRuntime(
     approvalStore: scopedApprovalStore,
   });
   const conversations = new PostgresConversationStore(pool);
-  const deadLetters = new PostgresDeadLetterSink(pool);
+  const deadLetters = new PostgresDeadLetterSink(pool, config.tenantId);
   const followups = new DurableFollowupCoordinator({
     workflows: coreComposition.workflowStore,
     sales: new PostgresCrmSalesStore(pool),
