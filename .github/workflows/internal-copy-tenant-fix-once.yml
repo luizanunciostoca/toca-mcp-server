@@ -1,0 +1,67 @@
+name: Internal copy tenant fix once
+
+on:
+  push:
+    branches:
+      - 'fix/tenant-scoped-scheduler-dlq-clean-20260822'
+    paths:
+      - '.github/workflows/internal-copy-tenant-fix-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/tenant-scoped-scheduler-dlq-clean-20260822
+          fetch-depth: 0
+      - name: Copy validated final files from remediation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/tenant-scoped-scheduler-dlq-20260822
+          git checkout origin/fix/tenant-scoped-scheduler-dlq-20260822 -- \
+            .github/workflows/m-found-12-postgres-e2e.yml \
+            migrations/033_omnichannel_prepared_content.sql \
+            src/instagram-publication-worker.ts \
+            src/mcp/runtime-capability-resolver.ts \
+            src/orchestrator/production-runtime.ts \
+            src/scheduler/postgres-scheduler.ts \
+            src/scheduler/scheduler-contracts.ts \
+            src/server.ts \
+            src/toca-managed-instagram-daemon.ts \
+            src/toca-managed-instagram-schedule-command.ts \
+            src/worker/instagram-publication-worker-runtime.ts \
+            src/worker/postgres-dead-letter.ts \
+            src/worker/toca-managed-instagram-worker-runtime.ts \
+            src/worker/worker-runtime.ts \
+            test/foundation-worker-postgres-e2e.test.ts \
+            test/instagram-core-publication-runtime.test.ts \
+            test/instagram-publication-worker-runtime.test.ts \
+            test/m-found-12-core-facade-e2e.test.ts \
+            test/r31-learning-postgres-e2e.test.ts \
+            test/scheduler-multitenancy-postgres-e2e.test.ts
+          git diff --check
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - name: Commit clean remediation diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'toca-os-internal-acceptance'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/m-found-12-postgres-e2e.yml migrations/033_omnichannel_prepared_content.sql src test
+          git diff --cached --check
+          git commit -m 'fix(tenancy): enforce scheduler and DLQ tenant boundaries'
+          git push origin HEAD:fix/tenant-scoped-scheduler-dlq-clean-20260822
