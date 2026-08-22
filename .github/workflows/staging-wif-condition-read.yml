@@ -2,10 +2,15 @@ name: Staging WIF Condition Read
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/staging-wif-condition-read.yml']
 
 permissions:
   contents: read
   id-token: write
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: staging-wif-condition-read
@@ -20,6 +25,7 @@ env:
   STAGING_PROVIDER: github-toca-mcp-staging
   STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   EXPECTED_REPOSITORY: luizanunciostoca/toca-mcp-server
+  TRACKING_PR: '79'
 
 jobs:
   read:
@@ -52,6 +58,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Read staging WIF provider and impersonation binding without mutation
+        id: readback
         shell: bash
         run: |
           set -euo pipefail
@@ -68,6 +75,7 @@ jobs:
           jq -e '.oidc.issuerUri == "https://token.actions.githubusercontent.com"' staging-wif-evidence/provider-sanitized.json >/dev/null
           CONDITION="$(jq -r '.attributeCondition // empty' staging-wif-evidence/provider-sanitized.json)"
           test -n "$CONDITION"
+          printf 'condition<<EOF\n%s\nEOF\n' "$CONDITION" >> "$GITHUB_OUTPUT"
           echo "STAGING_WIF_ATTRIBUTE_CONDITION=$CONDITION"
 
           gcloud iam service-accounts get-iam-policy "$STAGING_OPERATOR_SA" \
@@ -77,6 +85,7 @@ jobs:
             /tmp/operator-iam.json > staging-wif-evidence/operator-wif-binding.json
           WIF_MEMBER_COUNT="$(jq '[.bindings[]?.members[]?] | length' staging-wif-evidence/operator-wif-binding.json)"
           test "$WIF_MEMBER_COUNT" -ge 1
+          echo "member_count=$WIF_MEMBER_COUNT" >> "$GITHUB_OUTPUT"
           echo "STAGING_WIF_OPERATOR_MEMBER_COUNT=$WIF_MEMBER_COUNT"
 
           jq -n \
@@ -90,6 +99,26 @@ jobs:
             '{schemaVersion:"toca.staging.wif-condition-read.v2",project:$project,projectNumber:$projectNumber,pool:$pool,provider:$provider,operatorServiceAccount:$operator,attributeCondition:$condition,workloadIdentityUserMemberCount:$wifMemberCount,productionMutation:false,stagingMutation:false,result:"PASS"}' \
             > staging-wif-evidence/manifest.json
           rm -f /tmp/provider.json /tmp/operator-iam.json
+
+      - name: Publish sanitized live readback to reliability tracker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONDITION: ${{ steps.readback.outputs.condition }}
+          MEMBER_COUNT: ${{ steps.readback.outputs.member_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="Staging WIF live read-only evidence.
+
+run: ${GITHUB_RUN_ID}
+source SHA: ${GITHUB_SHA}
+provider: projects/${STAGING_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${STAGING_POOL}/providers/${STAGING_PROVIDER}
+attributeCondition: ${CONDITION}
+operator: ${STAGING_OPERATOR_SA}
+roles/iam.workloadIdentityUser mapped members: ${MEMBER_COUNT}
+production mutation: none
+staging mutation: none"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${TRACKING_PR}/comments" -f body="$BODY" >/dev/null
 
       - name: Upload sanitized evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
