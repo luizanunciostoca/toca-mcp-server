@@ -14,7 +14,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve exact active V5 and V6 DR runs
+      - name: Resolve exact V7 authorized staging DR run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -22,16 +22,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          resolve() {
-            local workflow="$1" sha="$2" prefix="$3"
-            local runs match run_id status conclusion url
-            runs="$(gh run list --repo "$GH_REPO" --workflow "$workflow" --branch 'ops/staging-dr-authorized-20260822' --event push --limit 15 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
-            echo "$runs" | jq -e --arg sha "$sha" '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
-            match="$(echo "$runs" | jq -r --arg sha "$sha" '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
-            IFS=$'\t' read -r run_id status conclusion url <<< "$match"
-            test -n "$run_id"
-            echo "${prefix}_RUN_ID=${run_id} ${prefix}_STATUS=${status} ${prefix}_CONCLUSION=${conclusion} ${prefix}_URL=${url}"
-          }
-          resolve 'Ops Authorized Staging DR Least Privilege V5 2026-08-22' '4d5553121462d65a0fb4bcdbb1b94013c6d1bd31' 'DR_V5_FIXED'
-          resolve 'Ops Authorized Staging DR Least Privilege V6 2026-08-22' '0a7f72e32e1820c7d9b1d633ed106c8276fe7663' 'DR_V6'
-          echo 'OBSERVER_V6_RESOLUTION=PASS'
+          RUNS="$(gh run list --repo "$GH_REPO" --workflow 'Ops Authorized Staging DR Least Privilege V7 2026-08-22' --branch 'ops/staging-dr-authorized-20260822' --event push --limit 10 --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
+          echo "$RUNS" | jq -e --arg sha '6e824a16994a84549d544146ec26da36d757e18b' '[.[] | select(.headSha==$sha)] | length == 1' >/dev/null
+          MATCH="$(echo "$RUNS" | jq -r --arg sha '6e824a16994a84549d544146ec26da36d757e18b' '.[] | select(.headSha==$sha) | [.databaseId,.status,(.conclusion // ""),.url] | @tsv')"
+          IFS=$'\t' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$MATCH"
+          test -n "$RUN_ID"
+          echo "DR_LP_V7_RUN_ID=$RUN_ID DR_LP_V7_STATUS=$RUN_STATUS DR_LP_V7_CONCLUSION=$RUN_CONCLUSION DR_LP_V7_URL=$RUN_URL"
