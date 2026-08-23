@@ -1,0 +1,153 @@
+name: Staging Reliability Alerts
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_sha:
+        description: Exact repository SHA expected on main
+        required: true
+        type: string
+      expected_policy_sha256:
+        description: SHA-256 of canonical staging observability policy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-reliability-alerts
+  cancel-in-progress: false
+
+env:
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  RECONCILE_SCRIPT: ops/staging-runtime-observability-reconcile-v3.sh
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.expected_source_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify staging-only alert boundary
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_SOURCE_SHA"
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
+          test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
+          jq -e '
+            .version == 3 and
+            .operation == "staging-runtime-capacity-observability-verification" and
+            .projectId == "toca-mcp-next-staging" and
+            .projectNumber == "729069789107" and
+            .notificationChannels.requiredEnabledCount == 2 and
+            .notificationChannels.requiredFamilies == ["email","webhook_tokenauth"] and
+            ([.domainReadiness[].id] | sort) == (["ag01","approval","crm","db","outbox_dlq","workflow"] | sort) and
+            .nativeSignals.latency.metricType == "run.googleapis.com/request_latencies" and
+            .nativeSignals.latency.aligner == "ALIGN_PERCENTILE_95" and
+            .nativeSignals.errorRate.metricType == "run.googleapis.com/request_count" and
+            .nativeSignals.errorRate.errorResponseClass == "5xx" and
+            (.requiredIamRoles | index("roles/run.viewer") != null) and
+            (.requiredIamRoles | index("roles/monitoring.viewer") != null) and
+            (.requiredIamRoles | index("roles/monitoring.dashboardEditor") != null) and
+            (.requiredIamRoles | index("roles/monitoring.uptimeCheckConfigEditor") != null) and
+            (.requiredIamRoles | index("roles/monitoring.alertPolicyEditor") != null) and
+            (.requiredIamRoles | index("roles/owner") == null) and
+            (.requiredIamRoles | index("roles/editor") == null) and
+            .forbid.productionAccess == true and
+            .forbid.productionMutation == true and
+            .forbid.providerMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.backupMutation == true and
+            .forbid.drRestore == true and
+            .forbid.trafficMutation == true and
+            .forbid.cloudRunMutation == true and
+            .forbid.secretRead == true and
+            .forbid.secretMutation == true and
+            .forbid.destructiveStress == true
+          ' "$POLICY_PATH" >/dev/null
+          test -f "$RECONCILE_SCRIPT"
+          echo 'STAGING_RELIABILITY_ALERT_BOUNDARY=PASS'
+
+      - name: Authenticate isolated staging operator only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve isolated staging webhook target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          [[ "$SERVICE_URL" == https://*.run.app ]]
+          HOST="${SERVICE_URL#https://}"
+          test -n "$HOST"
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_RELIABILITY_TARGET=PASS'
+
+      - name: Reconcile complete staging SLI and domain alert coverage
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+          EVIDENCE_DIR: staging-runtime-observability-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "$RECONCILE_SCRIPT"
+
+      - name: Persist exact-run provenance
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --arg sourceSha "$EXPECTED_SOURCE_SHA" --arg runId "$GITHUB_RUN_ID" --arg policySha256 "$POLICY_SHA256" '. + {sourceSha:$sourceSha,githubRunId:$runId,policySha256:$policySha256}' staging-runtime-observability-evidence/manifest.json > /tmp/manifest.json
+          mv /tmp/manifest.json staging-runtime-observability-evidence/manifest.json
+          sha256sum staging-runtime-observability-evidence/* > staging-runtime-observability-evidence/SHA256SUMS
+          echo 'STAGING_RELIABILITY_ALERT_PROVENANCE=PASS'
+
+      - name: Upload staging reliability evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-reliability-alerts-${{ github.run_id }}
+          path: staging-runtime-observability-evidence
+          if-no-files-found: error
+          retention-days: 90
