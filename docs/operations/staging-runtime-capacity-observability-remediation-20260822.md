@@ -18,7 +18,7 @@ Scope: internal acceptance remediation only. Production and real external provid
 - Existing dashboard and OIDC uptime configuration are read back without mutation.
 - Optional controlled capacity sampling uses only authenticated `/readyz`, with fixed concurrency levels 1/5/10/25, 50 requests per level, zero accepted errors, recovery probes after every level, and no destructive stress.
 - Capacity evidence records throughput, p50, p95, p99 and error rate, then requires Cloud Run CPU/memory/request telemetry and Cloud SQL PostgreSQL backend-connection telemetry to be observable.
-- Added regression tests that reject production WIF/admin access, IAM bootstrap, mutable checkout, missing exact-runtime binding, or unbounded capacity settings.
+- The workflow performs its own fail-closed boundary assertions before any GCP access. Repository Quality CI separately validates workflow supply-chain and platform-hardening contracts without formatter or test ignores.
 
 ## Explicit non-claims
 
