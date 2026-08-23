@@ -12,7 +12,8 @@ The machine-readable sources are:
 - `src/governance/route-catalog.ts`: R01-R32, owners, priorities, subflows and terminal states;
 - `src/governance/capability-ids.ts`: requested capability identifiers by route plus transversal
   and existing technical identifiers;
-- `src/governance/capability-catalog.ts`: normalized metadata for all 783 catalog entries;
+- `src/governance/capability-catalog.ts`: normalized metadata for the canonical capability catalog;
+  executable tests are authoritative for its current count and version;
 - `src/registry.ts`: the intentionally smaller set exposed by the running MCP server.
 
 Catalog presence does not imply execution. `execution_surface: CATALOG_ONLY` and
@@ -30,19 +31,22 @@ For final V1 reporting, use these evidence states:
 
 This evidence vocabulary is deliberately separate from the existing runtime lifecycle enum. It does
 not rewrite runtime semantics or permit skipped gates. `CI_VERIFIED` is a separate evidence flag and
-is currently `PENDING_FINAL_ACTIONS_ROUND` while GitHub Actions is unavailable.
+must be derived from exact-head workflow evidence; missing, stale or unrelated checks are never
+treated as green.
 
 Executability requires a real resolver/handler binding, registration on the intended runtime surface,
 validated side-effect binding for mutations, satisfied feature/config/provider gates and policy/
 approval authorization. A registry label alone is insufficient.
 
-Current V1 exceptions that must be read from the evidence overlay rather than inferred from labels:
+Current V1 guardrails that must be read from exact-head executable evidence rather than inferred from
+labels or stale point-in-time documentation:
 
-- `instagram.toca_schedule.reschedule` is labelled `PRODUCTION_VALIDATED` in `src/registry.ts`, but
-  canonical `main` still has `sideEffectValidated: false` on the governed Core binding. It is therefore
-  not executable through that surface until PR #185 or an equivalent verified implementation is merged;
+- runtime lifecycle labels never override the governed resolver/binding. Side effects require an
+  executable exact-head binding, validated side-effect semantics and authoritative read-back where
+  the capability contract requires it;
 - `instagram.publish.image`, `instagram.publish.carousel`, `instagram.publish.reel` and
-  `instagram.publish.story` remain `PLANNED` on canonical `main`; unmerged PR #185 is not V1 truth;
+  `instagram.publish.story` remain governed by their exact-head catalog/runtime lifecycle and may not
+  be treated as executable merely because they are discoverable;
 - Meta Ads `CREATE_PAUSED` has provider/production evidence only for the exact controlled PAUSED-only
   boundary; this does not authorize activation, generic writes or budget expansion;
 - Google Ads real provider execution is **DEFERRED / NEXT_VERSION**. The in-repository R28 path is
@@ -119,9 +123,9 @@ capability-specific guardrails remain additive.
 ## Release and structural lifecycles
 
 R23 requires branch, tests, architecture check, Quality Gate, PR review, merge, deploy, smoke,
-provider verification and release evidence when those gates apply to the release scope. During the
-current GitHub Actions outage, development and direct/local validation may continue, but
-`CI_VERIFIED` remains pending and no absent check is treated as green. A failure after merge or deploy
+provider verification and release evidence when those gates apply to the release scope.
+`CI_VERIFIED` must come from exact-head workflow evidence for the candidate being evaluated; an
+absent, skipped, stale or unrelated check is not treated as green. A failure after merge or deploy
 enters `ROLLBACK_REQUIRED`; release closure requires evidence and a known rollback target.
 
 R24-R26 and R28-R32 use typed state-machine definitions. Security fails closed on mandatory
