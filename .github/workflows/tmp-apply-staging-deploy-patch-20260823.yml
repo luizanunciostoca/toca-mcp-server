@@ -1,0 +1,33 @@
+name: TEMP Apply Staging Deploy Patch 2026-08-23
+
+on:
+  push:
+    branches:
+      - fix/staging-canonical-deploy-config-20260823
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/staging-canonical-deploy-config-20260823
+          fetch-depth: 1
+
+      - name: Apply deterministic patch and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/tmp-apply-staging-deploy-workflow-patch.mjs
+          git rm scripts/tmp-apply-staging-deploy-workflow-patch.mjs
+          git rm .github/workflows/tmp-apply-staging-deploy-patch-20260823.yml
+          git add .github/workflows/deploy-gcp.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(staging): load canonical deploy config after quality'
+          git push origin HEAD:fix/staging-canonical-deploy-config-20260823
