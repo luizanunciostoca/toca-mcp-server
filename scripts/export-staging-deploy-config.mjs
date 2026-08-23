@@ -6,11 +6,7 @@ const raw = await readFile(configPath, 'utf8');
 const config = JSON.parse(raw);
 
 function requireString(key, value) {
-  if (
-    typeof value !== 'string' ||
-    value.trim().length === 0 ||
-    /[\r\n]/.test(value)
-  ) {
+  if (typeof value !== 'string' || value.trim().length === 0 || /[\r\n]/.test(value)) {
     throw new Error(`STAGING_CONFIG_INVALID:${key}`);
   }
   return value.trim();
@@ -42,10 +38,7 @@ const workloadIdentityProvider = requireString(
   'workloadIdentityProvider',
   config.workloadIdentityProvider,
 );
-const deployServiceAccount = requireString(
-  'deployServiceAccount',
-  config.deployServiceAccount,
-);
+const deployServiceAccount = requireString('deployServiceAccount', config.deployServiceAccount);
 const mcpRuntimeServiceAccount = requireString(
   'mcpRuntimeServiceAccount',
   config.mcpRuntimeServiceAccount,
@@ -54,10 +47,7 @@ const webhookRuntimeServiceAccount = requireString(
   'webhookRuntimeServiceAccount',
   config.webhookRuntimeServiceAccount,
 );
-const databaseIsolationMode = requireString(
-  'databaseIsolationMode',
-  config.databaseIsolationMode,
-);
+const databaseIsolationMode = requireString('databaseIsolationMode', config.databaseIsolationMode);
 const providerMode = requireString('providerMode', config.providerMode);
 const databaseSecretId = requireString(
   'secretReferences.databaseUrl.id',
@@ -151,10 +141,7 @@ emit('GCP_DATABASE_URL_SECRET_VERSION', databaseSecretVersion);
 emit('STAGING_DATABASE_ISOLATION_MODE', databaseIsolationMode);
 emit('STAGING_PROVIDER_MODE', providerMode);
 emit('STAGING_PROVIDER_ISOLATION_EVIDENCE_REF', '');
-emit(
-  'TOCA_DEFAULT_TENANT_ID',
-  requireString('runtimeDefaults.tenantId', runtime.tenantId),
-);
+emit('TOCA_DEFAULT_TENANT_ID', requireString('runtimeDefaults.tenantId', runtime.tenantId));
 emit(
   'TOCA_DEFAULT_WORKSPACE_ID',
   requireString('runtimeDefaults.workspaceId', runtime.workspaceId),
