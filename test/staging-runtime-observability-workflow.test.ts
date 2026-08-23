@@ -44,7 +44,7 @@ describe('staging runtime capacity observability acceptance boundary', () => {
     expect(source).toContain('expected_candidate_sha:');
     expect(source).toContain('expected_image_digest:');
     expect(source).toContain('TOCA_RELEASE_SHA');
-    expect(source).toContain("(.percent // 0) == 100");
+    expect(source).toContain('(.percent // 0) == 100');
     expect(source).toContain('test "$traffic_count" = 1');
     expect(source).toContain('test "$traffic_sum" = 100');
     expect(source).toContain('test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"');
@@ -61,21 +61,27 @@ describe('staging runtime capacity observability acceptance boundary', () => {
         maxErrorRate?: number;
         destructiveStress?: boolean;
       };
-      forbid?: { productionAccess?: boolean; secretRead?: boolean; destructiveStress?: boolean };
+      forbid?: {
+        productionAccess?: boolean;
+        secretRead?: boolean;
+        destructiveStress?: boolean;
+      };
       operation?: string;
       version?: number;
     };
 
     expect(source).toContain('for concurrency in 1 5 10 25');
     expect(source).toContain('seq 1 50 | xargs -P "$concurrency"');
-    expect(source).toContain('capacity stage returned non-200 response');
+    expect(source).toContain('test "$errors" = 0');
     expect(source).toContain('recoveryAfterEachLevel:true');
     expect(source).toContain('run.googleapis.com/container/cpu/utilizations');
     expect(source).toContain('run.googleapis.com/container/memory/utilizations');
     expect(source).toContain('cloudsql.googleapis.com/database/postgresql/num_backends');
 
     expect(parsed.version).toBe(3);
-    expect(parsed.operation).toBe('staging-runtime-capacity-observability-verification');
+    expect(parsed.operation).toBe(
+      'staging-runtime-capacity-observability-verification',
+    );
     expect(parsed.capacity?.levels).toEqual([1, 5, 10, 25]);
     expect(parsed.capacity?.requestsPerLevel).toBe(50);
     expect(parsed.capacity?.maxErrorRate).toBe(0);
