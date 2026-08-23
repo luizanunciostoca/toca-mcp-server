@@ -406,16 +406,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MANIFEST="$(cat staging-deploy-evidence/manifest.json)"
-          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "## Canonical staging deploy — PASS\
-\
-\`RUN_ID=${GITHUB_RUN_ID}\`\
-\
-\`\`\`json\
-${MANIFEST}\
-\`\`\`\
-\
-No production access and no external provider calls."
+          {
+            echo '## Canonical staging deploy — PASS'
+            echo
+            echo "\`RUN_ID=${GITHUB_RUN_ID}\`"
+            echo
+            echo '\`\`\`json'
+            cat staging-deploy-evidence/manifest.json
+            echo '\`\`\`'
+            echo
+            echo 'No production access and no external provider calls.'
+          } > /tmp/staging-deploy-comment.md
+          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/staging-deploy-comment.md
 
       - name: Automatic staging traffic rollback after failed post-promotion step
         if: failure() && env.TRAFFIC_PROMOTED == 'true' && env.PREVIOUS_MCP_REVISION != '' && env.PREVIOUS_WEBHOOK_REVISION != ''
