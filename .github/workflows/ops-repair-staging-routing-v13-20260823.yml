@@ -1,0 +1,151 @@
+name: TEMP Repair Staging Routing V13 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  repair-routing:
+    if: github.head_ref == 'ops/repair-staging-routing-v13-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          test "$GCP_REGION" = 'southamerica-east1'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture before state and validate supported flags
+        id: before
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update --help | grep -q -- '--default-url'
+          gcloud run services update --help | grep -q -- '--invoker-iam-check'
+          mkdir -p /tmp/repair
+          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/repair/${service}-before.json"
+          done
+          jq -c '.status.traffic' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-before.json" > /tmp/repair/mcp-traffic-before.json
+          jq -c '.status.traffic' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-before.json" > /tmp/repair/webhook-traffic-before.json
+          echo "mcp_latest=$(jq -r '.status.latestReadyRevisionName // empty' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-before.json")" >> "$GITHUB_OUTPUT"
+          echo "webhook_latest=$(jq -r '.status.latestReadyRevisionName // empty' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-before.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Reassert private MCP endpoint state without traffic change
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --ingress all --default-url --invoker-iam-check --quiet
+
+      - name: Reassert public webhook using recommended invoker-check mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --ingress all --default-url --no-invoker-iam-check --quiet
+
+      - name: Verify no revision or traffic change and resolve URLs
+        id: after
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/repair/${service}-after.json"
+          done
+          test "$(jq -r '.status.latestReadyRevisionName // empty' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-after.json")" = '${{ steps.before.outputs.mcp_latest }}'
+          test "$(jq -r '.status.latestReadyRevisionName // empty' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-after.json")" = '${{ steps.before.outputs.webhook_latest }}'
+          diff -u /tmp/repair/mcp-traffic-before.json <(jq -c '.status.traffic' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-after.json")
+          diff -u /tmp/repair/webhook-traffic-before.json <(jq -c '.status.traffic' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-after.json")
+          MCP_SERVICE_URL="$(jq -r '.status.url // empty' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-after.json")"
+          MCP_TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty' "/tmp/repair/${GCP_CLOUD_RUN_MCP_SERVICE}-after.json")"
+          WEBHOOK_SERVICE_URL="$(jq -r '.status.url // empty' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-after.json")"
+          WEBHOOK_TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "wh-fd37991") | .url) // empty' "/tmp/repair/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-after.json")"
+          test -n "$MCP_SERVICE_URL"; test -n "$MCP_TAG_URL"; test -n "$WEBHOOK_SERVICE_URL"; test -n "$WEBHOOK_TAG_URL"
+          echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "mcp_tag_url=$MCP_TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_service_url=$WEBHOOK_SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_tag_url=$WEBHOOK_TAG_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint MCP ID token
+        id: token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.after.outputs.mcp_service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Probe repaired routes and publish evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCP_TOKEN: ${{ steps.token.outputs.id_token }}
+          MCP_SERVICE_URL: ${{ steps.after.outputs.mcp_service_url }}
+          MCP_TAG_URL: ${{ steps.after.outputs.mcp_tag_url }}
+          WEBHOOK_SERVICE_URL: ${{ steps.after.outputs.webhook_service_url }}
+          WEBHOOK_TAG_URL: ${{ steps.after.outputs.webhook_tag_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth_status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$1" || true; }
+          anon_status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$1" || true; }
+          MCP_SERVICE_HTTP="$(auth_status "$MCP_SERVICE_URL/healthz")"
+          MCP_TAG_HTTP="$(auth_status "$MCP_TAG_URL/healthz")"
+          WEBHOOK_SERVICE_HTTP="$(anon_status "$WEBHOOK_SERVICE_URL/healthz")"
+          WEBHOOK_TAG_HTTP="$(anon_status "$WEBHOOK_TAG_URL/healthz")"
+          MCP_INVOKER_DISABLED="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
+          WEBHOOK_INVOKER_DISABLED="$(gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
+          cat > /tmp/comment.md <<EOF
+          STAGING_ROUTING_REPAIR_V13 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          MCP_SERVICE_HTTP=${MCP_SERVICE_HTTP}
+          MCP_CANDIDATE_TAG_HTTP=${MCP_TAG_HTTP}
+          WEBHOOK_SERVICE_HTTP=${WEBHOOK_SERVICE_HTTP}
+          WEBHOOK_CANDIDATE_TAG_HTTP=${WEBHOOK_TAG_HTTP}
+          MCP_INVOKER_IAM_DISABLED=${MCP_INVOKER_DISABLED}
+          WEBHOOK_INVOKER_IAM_DISABLED=${WEBHOOK_INVOKER_DISABLED}
+          LATEST_REVISIONS_UNCHANGED=true
+          TRAFFIC_CONFIG_UNCHANGED=true
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          DATABASE_ACCESS=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
