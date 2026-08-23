@@ -158,8 +158,7 @@ class DurableMemoryStore {
           ? this.dispatch.providerMessageRef
           : input.providerMessageRef,
       attemptCount: input.attemptCount,
-      nextRetryAt:
-        input.nextRetryAt === undefined ? this.dispatch.nextRetryAt : input.nextRetryAt,
+      nextRetryAt: input.nextRetryAt === undefined ? this.dispatch.nextRetryAt : input.nextRetryAt,
       lastErrorCode:
         input.lastErrorCode === undefined ? this.dispatch.lastErrorCode : input.lastErrorCode,
       updatedAt: input.now ?? now,
@@ -299,26 +298,27 @@ function input(): WhatsAppOutboundSendInput {
 }
 
 describe('WhatsApp fake timeout and restart boundary', () => {
-  it('dead-letters an uncertain timeout and keeps restart fail-closed without another provider call', async () => {
-    const store = new DurableMemoryStore();
-    const provider = new TimeoutProvider();
+  it(
+    'dead-letters an uncertain timeout and keeps restart fail-closed without another provider call',
+    async () => {
+      const store = new DurableMemoryStore();
+      const provider = new TimeoutProvider();
 
-    await expect(runtime(store, provider).send(input())).rejects.toThrow(
-      'UND_ERR_CONNECT_TIMEOUT',
-    );
-    expect(store.dispatch).toMatchObject({
-      state: 'DEAD_LETTER',
-      attemptCount: 1,
-      nextRetryAt: null,
-      lastErrorCode: 'WHATSAPP_PROVIDER_OUTCOME_UNCERTAIN',
-    });
-    expect(store.handoffReason).toBe('WHATSAPP_PROVIDER_OUTCOME_UNCERTAIN');
-    expect(provider.sendCount).toBe(1);
+      await expect(runtime(store, provider).send(input())).rejects.toThrow('UND_ERR_CONNECT_TIMEOUT');
+      expect(store.dispatch).toMatchObject({
+        state: 'DEAD_LETTER',
+        attemptCount: 1,
+        nextRetryAt: null,
+        lastErrorCode: 'WHATSAPP_PROVIDER_OUTCOME_UNCERTAIN',
+      });
+      expect(store.handoffReason).toBe('WHATSAPP_PROVIDER_OUTCOME_UNCERTAIN');
+      expect(provider.sendCount).toBe(1);
 
-    const restarted = runtime(store, provider);
-    await expect(restarted.send(input())).rejects.toThrow('WHATSAPP_HUMAN_HANDOFF_ACTIVE');
+      const restarted = runtime(store, provider);
+      await expect(restarted.send(input())).rejects.toThrow('WHATSAPP_HUMAN_HANDOFF_ACTIVE');
 
-    expect(provider.sendCount).toBe(1);
-    expect(provider.readbackCount).toBe(0);
-  });
+      expect(provider.sendCount).toBe(1);
+      expect(provider.readbackCount).toBe(0);
+    },
+  );
 });
