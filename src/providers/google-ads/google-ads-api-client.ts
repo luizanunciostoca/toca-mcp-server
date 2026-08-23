@@ -16,11 +16,11 @@ export interface GoogleAdsApiClientConfig {
   readonly oauthRefresh?: GoogleAdsOAuthRefreshConfig;
   readonly developerTokenRef: SecretReference;
   readonly apiBaseUrl?: string;
-  /** Hard upper bound for one provider HTTP attempt. */
+  /** Hard upper bound for one provider HTTP attempt and one retry wait. */
   readonly requestTimeoutMs?: number;
   /** Maximum attempts for reads and validateOnly requests. Real mutations stay single-attempt. */
   readonly maxSafeAttempts?: number;
-  /** Local exponential backoff floor. Retry-After may raise this delay. */
+  /** Local exponential backoff floor. Retry-After may raise this delay only up to requestTimeoutMs. */
   readonly retryBaseDelayMs?: number;
 }
 
@@ -287,7 +287,8 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
 
   private async waitForRetry(attempt: number, retryAfterMs: number | null): Promise<void> {
     const localDelay = this.#retryBaseDelayMs * 2 ** Math.max(0, attempt - 1);
-    const delayMs = Math.max(localDelay, retryAfterMs ?? 0);
+    const requestedDelay = Math.max(localDelay, retryAfterMs ?? 0);
+    const delayMs = Math.min(requestedDelay, this.#requestTimeoutMs);
     if (delayMs <= 0) return;
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
   }
