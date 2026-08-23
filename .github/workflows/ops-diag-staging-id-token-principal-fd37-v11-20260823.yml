@@ -1,0 +1,120 @@
+name: TEMP Staging ID Token Principal fd37 V11 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose-id-token-principal:
+    if: github.head_ref == 'ops/diag-staging-auth-boundary-v8-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve canonical service URL and deployer unique id
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$GCP_DEPLOY_SERVICE_ACCOUNT"
+          SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+          TAG_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty')"
+          DEPLOYER_UNIQUE_ID="$(gcloud iam service-accounts describe "$GCP_DEPLOY_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format='value(uniqueId)')"
+          test -n "$SERVICE_URL"; test -n "$TAG_URL"; test -n "$DEPLOYER_UNIQUE_ID"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "tag_url=$TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "deployer_unique_id=$DEPLOYER_UNIQUE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Mint service-account ID token
+        id: token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify token principal and probe canonical service
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCP_TOKEN: ${{ steps.token.outputs.id_token }}
+          SERVICE_URL: ${{ steps.state.outputs.service_url }}
+          TAG_URL: ${{ steps.state.outputs.tag_url }}
+          DEPLOYER_UNIQUE_ID: ${{ steps.state.outputs.deployer_unique_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE="$(python3 - "$MCP_TOKEN" "$GCP_DEPLOY_SERVICE_ACCOUNT" "$DEPLOYER_UNIQUE_ID" <<'PY'
+          import base64, json, sys
+          token, expected_email, expected_sub = sys.argv[1:]
+          part = token.split('.')[1]
+          part += '=' * (-len(part) % 4)
+          data = json.loads(base64.urlsafe_b64decode(part.encode()))
+          safe = {
+            'aud_matches_service': data.get('aud') == 'https://toca-mcp-next-staging-ur3hrydemq-rj.a.run.app',
+            'issuer_google': data.get('iss') == 'https://accounts.google.com',
+            'email_matches_deployer': data.get('email') == expected_email,
+            'email_verified': data.get('email_verified') is True,
+            'sub_matches_deployer_unique_id': str(data.get('sub', '')) == str(expected_sub),
+          }
+          print(json.dumps(safe, separators=(',', ':')))
+          PY
+          )"
+          status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$1/healthz" || true; }
+          SERVICE_HTTP="$(status "$SERVICE_URL")"
+          TAG_HTTP="$(status "$TAG_URL")"
+          cat > /tmp/comment.md <<EOF
+          STAGING_ID_TOKEN_PRINCIPAL_DIAG_V11 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          TOKEN_SAFE_MATCHES=${SAFE}
+          CANONICAL_SERVICE_HTTP=${SERVICE_HTTP}
+          CANDIDATE_TAG_HTTP=${TAG_HTTP}
+
+          READ_ONLY=true
+          TOKEN_EXPOSED=false
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          DATABASE_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
