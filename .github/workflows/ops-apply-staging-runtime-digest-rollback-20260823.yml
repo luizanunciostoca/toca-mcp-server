@@ -1,0 +1,314 @@
+name: TEMP Apply Staging Digest Rollback Remediation 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-patch:
+    if: github.head_ref == 'fix/staging-runtime-digest-rollback-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout remediation branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/staging-runtime-digest-rollback-20260823
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply exact patch in workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          deploy_path = Path('.github/workflows/deploy-gcp-staging-canonical.yml')
+          runtime_path = Path('.github/workflows/staging-runtime-observability.yml')
+          test_path = Path('test/gcp-staging-canonical-workflow.test.ts')
+          deploy = deploy_path.read_text()
+          runtime = runtime_path.read_text()
+          test = test_path.read_text()
+
+          old = '''          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
+          echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+'''
+          new = '''          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
+          OCI_MANIFEST_JSON="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" --format '{{json .Manifest}}')"
+          RESOLVED_INDEX_DIGEST="$(jq -r '.digest // empty' <<<"$OCI_MANIFEST_JSON")"
+          test "$RESOLVED_INDEX_DIGEST" = "$IMAGE_DIGEST"
+          RUNTIME_IMAGE_DIGEST="$(jq -r 'if .mediaType == "application/vnd.oci.image.index.v1+json" then (first(.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest) // empty) else (.digest // empty) end' <<<"$OCI_MANIFEST_JSON")"
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" >> "$GITHUB_ENV"
+'''
+          assert deploy.count(old) == 1, 'build digest anchor mismatch'
+          deploy = deploy.replace(old, new)
+
+          old = '''      - name: Capture current rollback targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_revision() {
+            gcloud run services describe "$1" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.traffic[percent=100].revisionName)' 2>/dev/null || true
+          }
+          echo "PREVIOUS_MCP_REVISION=$(current_revision "$GCP_CLOUD_RUN_MCP_SERVICE")" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_REVISION=$(current_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")" >> "$GITHUB_ENV"
+'''
+          new = '''      - name: Capture current rollback targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_revision() {
+            local service="$1" payload count traffic_sum revision
+            payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' <<<"$payload")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' <<<"$payload")"
+            test "$count" = 1
+            test "$traffic_sum" = 100
+            test -n "$revision"
+            printf '%s\\n' "$revision"
+          }
+          PREVIOUS_MCP_REVISION="$(current_revision "$GCP_CLOUD_RUN_MCP_SERVICE")"
+          PREVIOUS_WEBHOOK_REVISION="$(current_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")"
+          test -n "$PREVIOUS_MCP_REVISION"
+          test -n "$PREVIOUS_WEBHOOK_REVISION"
+          echo "PREVIOUS_MCP_REVISION=$PREVIOUS_MCP_REVISION" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_REVISION=$PREVIOUS_WEBHOOK_REVISION" >> "$GITHUB_ENV"
+'''
+          assert deploy.count(old) == 1, 'rollback capture anchor mismatch'
+          deploy = deploy.replace(old, new)
+
+          old = '''      - name: Promote verified candidate to full staging traffic
+        if: ${{ inputs.promote_full }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=100"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=100"
+          echo 'TRAFFIC_PROMOTED=true' >> "$GITHUB_ENV"
+'''
+          new = '''      - name: Promote verified candidate to full staging traffic
+        if: ${{ inputs.promote_full }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'TRAFFIC_PROMOTION_STARTED=true' >> "$GITHUB_ENV"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=100"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=100"
+          echo 'TRAFFIC_PROMOTED=true' >> "$GITHUB_ENV"
+'''
+          assert deploy.count(old) == 1, 'promotion anchor mismatch'
+          deploy = deploy.replace(old, new)
+
+          old = '''          verify_service() {
+            local service="$1" revision="$2" expected_sa="$3" evidence="$4"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${service}-final.json"
+            test "$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' "/tmp/${service}-final.json")" = 1
+            test "$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/${service}-final.json")" = 100
+            gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${revision}.json"
+            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "/tmp/${revision}.json")"
+            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "/tmp/${revision}.json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "/tmp/${revision}.json")"
+            test "$release_sha" = "$CANDIDATE_SHA"
+            test "$runtime_sa" = "$expected_sa"
+            test "${image##*@}" = "$IMAGE_DIGEST"
+            jq -n --arg service "$service" --arg revision "$revision" --arg releaseSha "$release_sha" --arg runtimeIdentity "$runtime_sa" --arg imageDigest "$IMAGE_DIGEST" '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageDigest:$imageDigest}' > "staging-deploy-evidence/${evidence}"
+          }
+'''
+          new = '''          verify_service() {
+            local service="$1" revision="$2" expected_sa="$3" evidence="$4"
+            local traffic_ready=false
+            for attempt in $(seq 1 24); do
+              gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${service}-final.json"
+              traffic_count="$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' "/tmp/${service}-final.json")"
+              traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/${service}-final.json")"
+              if [[ "$traffic_count" == 1 && "$traffic_sum" == 100 ]]; then
+                traffic_ready=true
+                break
+              fi
+              sleep 5
+            done
+            test "$traffic_ready" = true
+            gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${revision}.json"
+            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "/tmp/${revision}.json")"
+            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "/tmp/${revision}.json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "/tmp/${revision}.json")"
+            runtime_digest="${image##*@}"
+            test "$release_sha" = "$CANDIDATE_SHA"
+            test "$runtime_sa" = "$expected_sa"
+            test "$runtime_digest" = "$RUNTIME_IMAGE_DIGEST"
+            jq -n --arg service "$service" --arg revision "$revision" --arg releaseSha "$release_sha" --arg runtimeIdentity "$runtime_sa" --arg imageIndexDigest "$IMAGE_DIGEST" --arg runtimeImageDigest "$runtime_digest" '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageIndexDigest:$imageIndexDigest,runtimeImageDigest:$runtimeImageDigest}' > "staging-deploy-evidence/${evidence}"
+          }
+'''
+          assert deploy.count(old) == 1, 'final readback anchor mismatch'
+          deploy = deploy.replace(old, new)
+
+          old = '''      - name: Automatic staging traffic rollback after failed post-promotion step
+        if: failure() && env.TRAFFIC_PROMOTED == 'true' && env.PREVIOUS_MCP_REVISION != '' && env.PREVIOUS_WEBHOOK_REVISION != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_MCP_REVISION}=100"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
+'''
+          new = '''      - name: Automatic staging traffic rollback after failed post-promotion step
+        if: failure() && env.TRAFFIC_PROMOTION_STARTED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PREVIOUS_MCP_REVISION"
+          test -n "$PREVIOUS_WEBHOOK_REVISION"
+          rollback_service() {
+            local service="$1" revision="$2"
+            gcloud run services update-traffic "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${revision}=100"
+            for attempt in $(seq 1 24); do
+              payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+              count="$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' <<<"$payload")"
+              traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+              if [[ "$count" == 1 && "$traffic_sum" == 100 ]]; then
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Timed out verifying staging rollback for $service to $revision" >&2
+            return 1
+          }
+          rollback_service "$GCP_CLOUD_RUN_MCP_SERVICE" "$PREVIOUS_MCP_REVISION"
+          rollback_service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$PREVIOUS_WEBHOOK_REVISION"
+          echo 'STAGING_TRAFFIC_ROLLBACK=PASS'
+'''
+          assert deploy.count(old) == 1, 'rollback action anchor mismatch'
+          deploy = deploy.replace(old, new)
+
+          old = "  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com\n"
+          new = old + "  ARTIFACT_REPOSITORY: toca-mcp-staging\n"
+          assert runtime.count(old) == 1, 'runtime env anchor mismatch'
+          runtime = runtime.replace(old, new)
+
+          setup_anchor = '''      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+'''
+          image_step = '''      - name: Resolve expected Cloud Run runtime manifest from attested image index
+        id: image
+        env:
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          OCI_MANIFEST_JSON="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}@${EXPECTED_IMAGE_DIGEST}" --format '{{json .Manifest}}')"
+          RESOLVED_INDEX_DIGEST="$(jq -r '.digest // empty' <<<"$OCI_MANIFEST_JSON")"
+          test "$RESOLVED_INDEX_DIGEST" = "$EXPECTED_IMAGE_DIGEST"
+          RUNTIME_IMAGE_DIGEST="$(jq -r 'if .mediaType == "application/vnd.oci.image.index.v1+json" then (first(.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest) // empty) else (.digest // empty) end' <<<"$OCI_MANIFEST_JSON")"
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "runtime_digest=$RUNTIME_IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+
+'''
+          assert runtime.count(setup_anchor) == 1, 'runtime setup anchor mismatch'
+          runtime = runtime.replace(setup_anchor, setup_anchor + image_step)
+
+          old = '''        env:
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+'''
+          expr = '$' + '{{ steps.image.outputs.runtime_digest }}'
+          new = '''        env:
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_IMAGE_INDEX_DIGEST: ${{ inputs.expected_image_digest }}
+          EXPECTED_RUNTIME_IMAGE_DIGEST: ''' + expr + '''
+'''
+          assert runtime.count(old) == 1, 'runtime verify env anchor mismatch'
+          runtime = runtime.replace(old, new)
+          assert runtime.count('test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"') == 1
+          runtime = runtime.replace('test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"', 'test "$image_digest" = "$EXPECTED_RUNTIME_IMAGE_DIGEST"')
+          old = '''              --arg imageDigest "$image_digest" \\
+              --arg serviceUrl "$service_url" \\
+              '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageDigest:$imageDigest,serviceUrl:$serviceUrl}' \\
+'''
+          new = '''              --arg imageIndexDigest "$EXPECTED_IMAGE_INDEX_DIGEST" \\
+              --arg runtimeImageDigest "$image_digest" \\
+              --arg serviceUrl "$service_url" \\
+              '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageIndexDigest:$imageIndexDigest,runtimeImageDigest:$runtimeImageDigest,serviceUrl:$serviceUrl}' \\
+'''
+          assert runtime.count(old) == 1, 'runtime evidence anchor mismatch'
+          runtime = runtime.replace(old, new)
+
+          marker = '''  it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {'''
+          added = '''  it('validates the Cloud Run runtime manifest as the linux/amd64 child of the attested OCI index', () => {
+    expect(workflow).toContain('docker buildx imagetools inspect');
+    expect(workflow).toContain('RUNTIME_IMAGE_DIGEST=');
+    expect(workflow).toContain('test "$runtime_digest" = "$RUNTIME_IMAGE_DIGEST"');
+    expect(runtimeWorkflow).toContain('Resolve expected Cloud Run runtime manifest from attested image index');
+    expect(runtimeWorkflow).toContain('EXPECTED_RUNTIME_IMAGE_DIGEST');
+    expect(runtimeWorkflow).toContain('test "$image_digest" = "$EXPECTED_RUNTIME_IMAGE_DIGEST"');
+  });
+
+  it('captures rollback targets from JSON and cannot silently skip rollback after promotion starts', () => {
+    expect(workflow).not.toContain("status.traffic[percent=100].revisionName");
+    expect(workflow).toContain('PREVIOUS_MCP_REVISION="$(current_revision');
+    expect(workflow).toContain('test -n "$PREVIOUS_MCP_REVISION"');
+    expect(workflow).toContain("TRAFFIC_PROMOTION_STARTED=true");
+    expect(workflow).toContain("if: failure() && env.TRAFFIC_PROMOTION_STARTED == 'true'");
+    expect(workflow).toContain('STAGING_TRAFFIC_ROLLBACK=PASS');
+    expect(workflow).toContain('Timed out verifying staging rollback');
+  });
+
+  it('waits boundedly for final traffic convergence before exact runtime readback', () => {
+    const finalReadback = workflow.indexOf('Read back exact final staging runtime');
+    const finalSection = workflow.slice(finalReadback, workflow.indexOf('Publish sanitized deployment evidence'));
+    expect(finalSection).toContain('for attempt in $(seq 1 24); do');
+    expect(finalSection).toContain('traffic_ready=true');
+    expect(finalSection).toContain('test "$traffic_ready" = true');
+  });
+
+'''
+          assert test.count(marker) == 1, 'test marker mismatch'
+          test = test.replace(marker, added + marker)
+
+          deploy_path.write_text(deploy)
+          runtime_path.write_text(runtime)
+          test_path.write_text(test)
+          PY
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Format and validate affected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          git diff --check
+          pnpm exec vitest run test/gcp-staging-canonical-workflow.test.ts
+
+      - name: Persist validated snapshots only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ops-snapshots
+          cp .github/workflows/deploy-gcp-staging-canonical.yml .ops-snapshots/deploy-gcp-staging-canonical.yml
+          cp .github/workflows/staging-runtime-observability.yml .ops-snapshots/staging-runtime-observability.yml
+          cp test/gcp-staging-canonical-workflow.test.ts .ops-snapshots/gcp-staging-canonical-workflow.test.ts
+          git checkout -- .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          git add .ops-snapshots
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(validation): persist staging digest rollback snapshots'
+          git push origin HEAD:fix/staging-runtime-digest-rollback-20260823
