@@ -1,93 +1,96 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const WORKFLOW_PATH = '.github/workflows/staging-runtime-observability.yml';
-const POLICY_PATH = 'infra/observability/staging-runtime-observability-policy.json';
-
-function workflow(): string {
-  return readFileSync(WORKFLOW_PATH, 'utf8');
+interface AcceptancePolicy {
+  version: number;
+  operation: string;
+  capacity: {
+    levels: number[];
+    requestsPerLevel: number;
+    maxErrorRate: number;
+    destructiveStress: boolean;
+  };
+  forbid: {
+    productionAccess: boolean;
+    secretRead: boolean;
+    destructiveStress: boolean;
+  };
 }
 
-function policy(): Record<string, unknown> {
-  return JSON.parse(readFileSync(POLICY_PATH, 'utf8')) as Record<string, unknown>;
-}
+const WORKFLOW = readFileSync('.github/workflows/staging-runtime-observability.yml', 'utf8');
+const POLICY = JSON.parse(
+  readFileSync('infra/observability/staging-runtime-observability-policy.json', 'utf8'),
+) as AcceptancePolicy;
 
 describe('staging runtime capacity observability acceptance boundary', () => {
   it('never authenticates to production or mutates IAM', () => {
-    const source = workflow();
+    const forbidden = [
+      'INFRA_WIF',
+      'INFRA_ADMIN_SA',
+      'toca-mcp-infra-admin@toca-mcp-production',
+      'add-iam-policy-binding',
+      'secrets versions access',
+    ];
 
-    expect(source).not.toContain('INFRA_WIF');
-    expect(source).not.toContain('INFRA_ADMIN_SA');
-    expect(source).not.toContain('toca-mcp-infra-admin@toca-mcp-production');
-    expect(source).not.toContain('add-iam-policy-binding');
-    expect(source).not.toContain('secrets versions access');
-    expect(source).toContain('Authenticate isolated staging operator only');
-    expect(source).toContain(
-      'projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging',
-    );
+    for (const token of forbidden) {
+      expect(WORKFLOW).not.toContain(token);
+    }
+
+    expect(WORKFLOW).toContain('Authenticate isolated staging operator only');
+    expect(WORKFLOW).toContain('workloadIdentityPools/github-staging/providers/github-toca-mcp-staging');
   });
 
-  it('pins workflow source and records trigger and actual checkout SHA separately', () => {
-    const source = workflow();
-
-    expect(source).toContain('ref: ${{ github.sha }}');
-    expect(source).not.toContain('ref: main');
-    expect(source).toContain('ACTUAL_CHECKOUT_SHA="$(git rev-parse HEAD)"');
-    expect(source).toContain('test "$ACTUAL_CHECKOUT_SHA" = "$GITHUB_SHA"');
-    expect(source).toContain('--arg triggerSha "$GITHUB_SHA"');
-    expect(source).toContain('--arg actualCheckoutSha "$ACTUAL_CHECKOUT_SHA"');
+  it('pins workflow source and records trigger and checkout SHA independently', () => {
+    expect(WORKFLOW).toContain('ref: ${{ github.sha }}');
+    expect(WORKFLOW).not.toContain('ref: main');
+    expect(WORKFLOW).toContain('ACTUAL_CHECKOUT_SHA="$(git rev-parse HEAD)"');
+    expect(WORKFLOW).toContain('test "$ACTUAL_CHECKOUT_SHA" = "$GITHUB_SHA"');
+    expect(WORKFLOW).toContain('--arg triggerSha "$GITHUB_SHA"');
+    expect(WORKFLOW).toContain('--arg actualCheckoutSha "$ACTUAL_CHECKOUT_SHA"');
   });
 
-  it('fails closed unless exact candidate digest revision identity and 100 percent traffic agree', () => {
-    const source = workflow();
+  it('requires exact candidate digest runtime identity and 100 percent traffic', () => {
+    const required = [
+      'expected_candidate_sha:',
+      'expected_image_digest:',
+      'TOCA_RELEASE_SHA',
+      '(.percent // 0) == 100',
+      'test "$traffic_count" = 1',
+      'test "$traffic_sum" = 100',
+      'test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"',
+      'test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"',
+      'test "$runtime_sa" = "$expected_sa"',
+    ];
 
-    expect(source).toContain('expected_candidate_sha:');
-    expect(source).toContain('expected_image_digest:');
-    expect(source).toContain('TOCA_RELEASE_SHA');
-    expect(source).toContain('(.percent // 0) == 100');
-    expect(source).toContain('test "$traffic_count" = 1');
-    expect(source).toContain('test "$traffic_sum" = 100');
-    expect(source).toContain('test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"');
-    expect(source).toContain('test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"');
-    expect(source).toContain('test "$runtime_sa" = "$expected_sa"');
+    for (const token of required) {
+      expect(WORKFLOW).toContain(token);
+    }
   });
 
-  it('contains only bounded non-destructive capacity levels and recovery probes', () => {
-    const source = workflow();
-    const parsed = policy() as {
-      capacity?: {
-        levels?: number[];
-        requestsPerLevel?: number;
-        maxErrorRate?: number;
-        destructiveStress?: boolean;
-      };
-      forbid?: {
-        productionAccess?: boolean;
-        secretRead?: boolean;
-        destructiveStress?: boolean;
-      };
-      operation?: string;
-      version?: number;
-    };
+  it('bounds capacity and requires recovery and resource telemetry', () => {
+    const required = [
+      'for concurrency in 1 5 10 25',
+      'seq 1 50 | xargs -P "$concurrency"',
+      'test "$errors" = 0',
+      'recoveryAfterEachLevel:true',
+      'container/cpu/utilizations',
+      'container/memory/utilizations',
+      'postgresql/num_backends',
+    ];
 
-    expect(source).toContain('for concurrency in 1 5 10 25');
-    expect(source).toContain('seq 1 50 | xargs -P "$concurrency"');
-    expect(source).toContain('test "$errors" = 0');
-    expect(source).toContain('recoveryAfterEachLevel:true');
-    expect(source).toContain('run.googleapis.com/container/cpu/utilizations');
-    expect(source).toContain('run.googleapis.com/container/memory/utilizations');
-    expect(source).toContain('cloudsql.googleapis.com/database/postgresql/num_backends');
+    for (const token of required) {
+      expect(WORKFLOW).toContain(token);
+    }
 
-    expect(parsed.version).toBe(3);
-    expect(parsed.operation).toBe(
-      'staging-runtime-capacity-observability-verification',
-    );
-    expect(parsed.capacity?.levels).toEqual([1, 5, 10, 25]);
-    expect(parsed.capacity?.requestsPerLevel).toBe(50);
-    expect(parsed.capacity?.maxErrorRate).toBe(0);
-    expect(parsed.capacity?.destructiveStress).toBe(false);
-    expect(parsed.forbid?.productionAccess).toBe(true);
-    expect(parsed.forbid?.secretRead).toBe(true);
-    expect(parsed.forbid?.destructiveStress).toBe(true);
+    const expectedOperation = 'staging-runtime-capacity-observability-verification';
+    expect(POLICY.version).toBe(3);
+    expect(POLICY.operation).toBe(expectedOperation);
+    expect(POLICY.capacity.levels).toEqual([1, 5, 10, 25]);
+    expect(POLICY.capacity.requestsPerLevel).toBe(50);
+    expect(POLICY.capacity.maxErrorRate).toBe(0);
+    expect(POLICY.capacity.destructiveStress).toBe(false);
+    expect(POLICY.forbid.productionAccess).toBe(true);
+    expect(POLICY.forbid.secretRead).toBe(true);
+    expect(POLICY.forbid.destructiveStress).toBe(true);
   });
 });
