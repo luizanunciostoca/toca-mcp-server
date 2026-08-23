@@ -6,7 +6,11 @@ const raw = await readFile(configPath, 'utf8');
 const config = JSON.parse(raw);
 
 function requireString(key, value) {
-  if (typeof value !== 'string' || value.trim().length === 0 || /[\r\n]/.test(value)) {
+  if (
+    typeof value !== 'string' ||
+    value.trim().length === 0 ||
+    /[\r\n]/.test(value)
+  ) {
     throw new Error(`STAGING_CONFIG_INVALID:${key}`);
   }
   return value.trim();
@@ -38,7 +42,10 @@ const workloadIdentityProvider = requireString(
   'workloadIdentityProvider',
   config.workloadIdentityProvider,
 );
-const deployServiceAccount = requireString('deployServiceAccount', config.deployServiceAccount);
+const deployServiceAccount = requireString(
+  'deployServiceAccount',
+  config.deployServiceAccount,
+);
 const mcpRuntimeServiceAccount = requireString(
   'mcpRuntimeServiceAccount',
   config.mcpRuntimeServiceAccount,
@@ -47,7 +54,10 @@ const webhookRuntimeServiceAccount = requireString(
   'webhookRuntimeServiceAccount',
   config.webhookRuntimeServiceAccount,
 );
-const databaseIsolationMode = requireString('databaseIsolationMode', config.databaseIsolationMode);
+const databaseIsolationMode = requireString(
+  'databaseIsolationMode',
+  config.databaseIsolationMode,
+);
 const providerMode = requireString('providerMode', config.providerMode);
 const databaseSecretId = requireString(
   'secretReferences.databaseUrl.id',
@@ -59,11 +69,15 @@ const databaseSecretVersion = requireString(
 );
 const runtime = config.runtimeDefaults ?? {};
 
-if (!/^\d{6,20}$/.test(projectNumber)) throw new Error('STAGING_CONFIG_INVALID:projectNumber');
+if (!/^\d{6,20}$/.test(projectNumber)) {
+  throw new Error('STAGING_CONFIG_INVALID:projectNumber');
+}
 if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) {
   throw new Error('STAGING_CONFIG_INVALID:projectId');
 }
-if (/production/i.test(projectId)) throw new Error('STAGING_CONFIG_FORBIDDEN:production-project');
+if (/production/i.test(projectId)) {
+  throw new Error('STAGING_CONFIG_FORBIDDEN:production-project');
+}
 if (!workloadIdentityProvider.startsWith(`projects/${projectNumber}/locations/global/`)) {
   throw new Error('STAGING_CONFIG_INVALID:workloadIdentityProvider');
 }
@@ -76,11 +90,15 @@ for (const [key, account] of [
     throw new Error(`STAGING_CONFIG_INVALID:${key}`);
   }
 }
-if (mcpService === webhookService) throw new Error('STAGING_CONFIG_INVALID:service-collision');
+if (mcpService === webhookService) {
+  throw new Error('STAGING_CONFIG_INVALID:service-collision');
+}
 if (databaseIsolationMode !== 'DEDICATED_CLOUD_SQL') {
   throw new Error('STAGING_CONFIG_INVALID:databaseIsolationMode');
 }
-if (providerMode !== 'DISABLED') throw new Error('STAGING_CONFIG_INVALID:providerMode');
+if (providerMode !== 'DISABLED') {
+  throw new Error('STAGING_CONFIG_INVALID:providerMode');
+}
 if (!/^[A-Za-z0-9_-]+$/.test(databaseSecretId)) {
   throw new Error('STAGING_CONFIG_INVALID:databaseSecretId');
 }
@@ -133,8 +151,14 @@ emit('GCP_DATABASE_URL_SECRET_VERSION', databaseSecretVersion);
 emit('STAGING_DATABASE_ISOLATION_MODE', databaseIsolationMode);
 emit('STAGING_PROVIDER_MODE', providerMode);
 emit('STAGING_PROVIDER_ISOLATION_EVIDENCE_REF', '');
-emit('TOCA_DEFAULT_TENANT_ID', requireString('runtimeDefaults.tenantId', runtime.tenantId));
-emit('TOCA_DEFAULT_WORKSPACE_ID', requireString('runtimeDefaults.workspaceId', runtime.workspaceId));
+emit(
+  'TOCA_DEFAULT_TENANT_ID',
+  requireString('runtimeDefaults.tenantId', runtime.tenantId),
+);
+emit(
+  'TOCA_DEFAULT_WORKSPACE_ID',
+  requireString('runtimeDefaults.workspaceId', runtime.workspaceId),
+);
 emit(
   'TOCA_DEFAULT_ORGANIZATION_ID',
   requireString('runtimeDefaults.organizationId', runtime.organizationId),
