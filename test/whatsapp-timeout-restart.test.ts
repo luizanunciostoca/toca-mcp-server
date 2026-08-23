@@ -123,7 +123,9 @@ class DurableMemoryStore {
     readonly idempotencyKey: string;
     readonly now?: string;
   }) {
-    if (this.dispatch?.idempotencyKey === input.idempotencyKey) return Promise.resolve(this.dispatch);
+    if (this.dispatch?.idempotencyKey === input.idempotencyKey) {
+      return Promise.resolve(this.dispatch);
+    }
     this.dispatch = {
       ...scope,
       dispatchId: input.dispatchId,
@@ -156,7 +158,8 @@ class DurableMemoryStore {
           ? this.dispatch.providerMessageRef
           : input.providerMessageRef,
       attemptCount: input.attemptCount,
-      nextRetryAt: input.nextRetryAt === undefined ? this.dispatch.nextRetryAt : input.nextRetryAt,
+      nextRetryAt:
+        input.nextRetryAt === undefined ? this.dispatch.nextRetryAt : input.nextRetryAt,
       lastErrorCode:
         input.lastErrorCode === undefined ? this.dispatch.lastErrorCode : input.lastErrorCode,
       updatedAt: input.now ?? now,
@@ -270,7 +273,12 @@ function runtime(store: DurableMemoryStore, provider: TimeoutProvider) {
       preparedPayloads,
       privacyRevalidation: new AllowPrivacy(),
     },
-    { throttleLimit: 10, throttleWindowSeconds: 60, maxAttempts: 3, retryDelaySeconds: 10 },
+    {
+      throttleLimit: 10,
+      throttleWindowSeconds: 60,
+      maxAttempts: 3,
+      retryDelaySeconds: 10,
+    },
   );
 }
 
@@ -295,7 +303,9 @@ describe('WhatsApp fake timeout and restart boundary', () => {
     const store = new DurableMemoryStore();
     const provider = new TimeoutProvider();
 
-    await expect(runtime(store, provider).send(input())).rejects.toThrow('UND_ERR_CONNECT_TIMEOUT');
+    await expect(runtime(store, provider).send(input())).rejects.toThrow(
+      'UND_ERR_CONNECT_TIMEOUT',
+    );
     expect(store.dispatch).toMatchObject({
       state: 'DEAD_LETTER',
       attemptCount: 1,
