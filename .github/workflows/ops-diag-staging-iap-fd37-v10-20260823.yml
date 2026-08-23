@@ -1,0 +1,74 @@
+name: TEMP Staging Cloud Run IAP State fd37 V10 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  inspect-iap:
+    if: github.head_ref == 'ops/diag-staging-ingress-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read IAP and audience state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          trap 'unset ACCESS_TOKEN' EXIT
+          read_service() {
+            curl --fail --silent --show-error -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://run.googleapis.com/v2/projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/$1"
+          }
+          MCP="$(read_service "$GCP_CLOUD_RUN_MCP_SERVICE")"
+          WEBHOOK="$(read_service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")"
+          summary() {
+            jq -c '{iapEnabled:(.iapEnabled // false),customAudiences:(.customAudiences // []),ingress:(.ingress // null),defaultUriDisabled:(.defaultUriDisabled // false),invokerIamDisabled:(.invokerIamDisabled // false)}'
+          }
+          MCP_SUMMARY="$(summary <<<"$MCP")"
+          WEBHOOK_SUMMARY="$(summary <<<"$WEBHOOK")"
+          cat > /tmp/comment.md <<EOF
+          STAGING_IAP_STATE_V10 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          MCP=${MCP_SUMMARY}
+          WEBHOOK=${WEBHOOK_SUMMARY}
+
+          READ_ONLY=true
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
