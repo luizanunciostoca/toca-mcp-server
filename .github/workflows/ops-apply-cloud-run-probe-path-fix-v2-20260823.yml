@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec prettier --write src/http-server.ts src/http.ts src/orchestrator/http-server.ts .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml ops/staging-runtime-observability-reconcile-v3.sh infra/observability/staging-runtime-observability-policy.json test/http-server.test.ts test/gcp-staging-canonical-workflow.test.ts
+          pnpm exec prettier --write src/http-server.ts src/http.ts src/orchestrator/http-server.ts .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml infra/observability/staging-runtime-observability-policy.json test/http-server.test.ts test/gcp-staging-canonical-workflow.test.ts
           git diff --check
           pnpm exec vitest run test/http-server.test.ts test/gcp-staging-canonical-workflow.test.ts
           grep -Fq 'httpGet.path=/readyz' .github/workflows/deploy-gcp-staging-canonical.yml
