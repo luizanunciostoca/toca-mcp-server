@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const workflowPath = '.github/workflows/deploy-gcp-staging-canonical.yml';
 const configPath = 'infra/environments/staging.json';
 const workflow = readFileSync(workflowPath, 'utf8');
+const runtimeWorkflow = readFileSync('.github/workflows/staging-runtime-observability.yml', 'utf8');
 const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
 
 describe('canonical isolated staging deployment workflow', () => {
@@ -103,6 +104,23 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('EXPECTED_WEBHOOK_REVISION=');
     expect(workflow).toContain('test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"');
     expect(workflow).toContain('test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"');
+  });
+
+  it('mints Cloud Run ID tokens through pinned staging WIF actions instead of gcloud external-account audiences', () => {
+    expect(workflow).not.toContain('gcloud auth print-identity-token');
+    expect(workflow).toContain('id: mcp_probe_auth');
+    expect(workflow).toContain('token_format: id_token');
+    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');
+    expect(workflow).toContain('create_credentials_file: false');
+    expect(workflow).toContain('export_environment_variables: false');
+    expect(runtimeWorkflow).not.toContain('gcloud auth print-identity-token');
+    expect(runtimeWorkflow).toContain('id: mcp_probe_auth');
+    expect(runtimeWorkflow).toContain('id: webhook_probe_auth');
+    expect(runtimeWorkflow).toContain('id: capacity_auth');
+    expect(runtimeWorkflow).toContain('id_token_audience: ${{ steps.runtime.outputs.mcp_url }}');
+    expect(runtimeWorkflow).toContain(
+      'id_token_audience: ${{ steps.runtime.outputs.webhook_url }}',
+    );
   });
 
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
