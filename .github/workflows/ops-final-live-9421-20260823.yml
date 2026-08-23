@@ -1,0 +1,121 @@
+name: TEMP Final Staging Live Chain 9421 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  chain:
+    if: github.head_ref == 'ops/final-live-9421-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CANDIDATE_SHA: 94214d296459bef258405a9067c421672f670f66
+      EVIDENCE_ISSUE: '151'
+    steps:
+      - name: Checkout temporary orchestrator branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/final-live-9421-20260823
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify immutable main boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "OPS_FINAL_LIVE_9421_START RUN_ID=${GITHUB_RUN_ID} CANDIDATE=${CANDIDATE_SHA}"
+
+      - name: Dispatch deploy capacity alerts and synthetic sequentially
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_run_id() {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --branch main --event workflow_dispatch --limit 30 --json databaseId,headSha \
+              | jq -r --arg sha "$CANDIDATE_SHA" '[.[] | select(.headSha == $sha) | .databaseId] | max // 0'
+          }
+          wait_new_run() {
+            local workflow="$1" before="$2" run_id=''
+            for _ in $(seq 1 60); do
+              run_id="$(latest_run_id "$workflow")"
+              if [[ "$run_id" =~ ^[0-9]+$ ]] && [ "$run_id" -gt "$before" ]; then echo "$run_id"; return 0; fi
+              sleep 5
+            done
+            echo "RUN_NOT_FOUND:$workflow" >&2
+            return 1
+          }
+          wait_success() {
+            local run_id="$1" label="$2"
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+            test "$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')" = success
+            echo "${label}_RUN_ID=${run_id}"
+          }
+          dispatch_json() {
+            local workflow="$1" json="$2"
+            printf '%s' "$json" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+          }
+
+          DEPLOY_WF='deploy-gcp-staging-canonical.yml'
+          before="$(latest_run_id "$DEPLOY_WF")"
+          dispatch_json "$DEPLOY_WF" "$(jq -nc --arg sha "$CANDIDATE_SHA" --arg issue "$EVIDENCE_ISSUE" '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:$issue}}')"
+          DEPLOY_RUN_ID="$(wait_new_run "$DEPLOY_WF" "$before")"
+          echo "DEPLOY_RUN_ID=$DEPLOY_RUN_ID"
+          wait_success "$DEPLOY_RUN_ID" CANONICAL_DEPLOY
+
+          IMAGE_DIGEST=''
+          for _ in $(seq 1 30); do
+            BODY="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+              | jq -rs --arg sha "$CANDIDATE_SHA" '[.[][] | select((.body // "") | contains("Canonical staging deploy — PASS")) | select((.body // "") | contains($sha))] | last | .body // empty')"
+            IMAGE_DIGEST="$(printf '%s' "$BODY" | grep -oE 'sha256:[0-9a-f]{64}' | head -n1 || true)"
+            [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+            sleep 5
+          done
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "FINAL_IMAGE_DIGEST=$IMAGE_DIGEST"
+
+          POLICY_SHA="$(sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}')"
+          SYNTH_SHA="$(sha256sum infra/observability/staging-synthetic-alert-policy.json | awk '{print $1}')"
+
+          CAP_WF='staging-runtime-observability.yml'
+          before="$(latest_run_id "$CAP_WF")"
+          dispatch_json "$CAP_WF" "$(jq -nc --arg p "$POLICY_SHA" --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" '{ref:"main",inputs:{expected_policy_sha256:$p,expected_candidate_sha:$sha,expected_image_digest:$digest,run_capacity:"true"}}')"
+          CAP_RUN_ID="$(wait_new_run "$CAP_WF" "$before")"
+          echo "CAPACITY_RUN_ID=$CAP_RUN_ID"
+          wait_success "$CAP_RUN_ID" CAPACITY_READINESS
+
+          ALERT_WF='staging-reliability-alerts.yml'
+          before="$(latest_run_id "$ALERT_WF")"
+          dispatch_json "$ALERT_WF" "$(jq -nc --arg sha "$CANDIDATE_SHA" --arg p "$POLICY_SHA" '{ref:"main",inputs:{expected_source_sha:$sha,expected_policy_sha256:$p}}')"
+          ALERT_RUN_ID="$(wait_new_run "$ALERT_WF" "$before")"
+          echo "ALERT_RUN_ID=$ALERT_RUN_ID"
+          wait_success "$ALERT_RUN_ID" RELIABILITY_ALERTS
+
+          SYNTH_WF='staging-synthetic-alert.yml'
+          before="$(latest_run_id "$SYNTH_WF")"
+          dispatch_json "$SYNTH_WF" "$(jq -nc --arg p "$SYNTH_SHA" '{ref:"main",inputs:{expected_policy_sha256:$p}}')"
+          SYNTH_RUN_ID="$(wait_new_run "$SYNTH_WF" "$before")"
+          echo "SYNTHETIC_RUN_ID=$SYNTH_RUN_ID"
+          wait_success "$SYNTH_RUN_ID" SYNTHETIC_ALERT
+
+          printf 'FINAL_LIVE_CHAIN=PASS\nCANDIDATE_SHA=%s\nIMAGE_DIGEST=%s\nDEPLOY_RUN_ID=%s\nCAPACITY_RUN_ID=%s\nALERT_RUN_ID=%s\nSYNTHETIC_RUN_ID=%s\n' \
+            "$CANDIDATE_SHA" "$IMAGE_DIGEST" "$DEPLOY_RUN_ID" "$CAP_RUN_ID" "$ALERT_RUN_ID" "$SYNTH_RUN_ID"
+
+      - name: Publish final observer status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "OPS_FINAL_LIVE_9421_FINAL RUN_ID=${GITHUB_RUN_ID} STATUS=${JOB_STATUS} CANDIDATE=${CANDIDATE_SHA}"
