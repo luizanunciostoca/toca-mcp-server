@@ -109,11 +109,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Load repository-canonical staging coordinates
+        id: config
         shell: bash
         run: |
           set -euo pipefail
           echo 'DEPLOY_ENVIRONMENT=staging' >> "$GITHUB_ENV"
-          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json >> "$GITHUB_ENV"
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging-deploy.env
+          cat /tmp/staging-deploy.env >> "$GITHUB_ENV"
+          set -a
+          source /tmp/staging-deploy.env
+          set +a
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
 
       - name: Validate canonical staging isolation without production coordinates
         shell: bash
@@ -125,8 +132,8 @@ jobs:
       - name: Authenticate isolated staging deployer only
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
@@ -146,7 +153,8 @@ jobs:
           jq -e '.settings.backupConfiguration.pointInTimeRecoveryEnabled == true' /tmp/cloud-sql.json >/dev/null
           jq -e '(.settings.backupConfiguration.transactionLogRetentionDays // 0) >= 7' /tmp/cloud-sql.json >/dev/null
           jq -e '(.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0) >= 7' /tmp/cloud-sql.json >/dev/null
-          gcloud secrets describe "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" --format='value(name)' | grep -F "/secrets/${GCP_DATABASE_URL_SECRET}$"
+          SECRET_NAME="$(gcloud secrets describe "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID" --format='value(name)')"
+          test "${SECRET_NAME##*/}" = "$GCP_DATABASE_URL_SECRET"
           for spec in "$GCP_CLOUD_RUN_MCP_SERVICE:$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE:$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT"; do
             service="${spec%%:*}"
             expected_sa="${spec#*:}"
@@ -352,6 +360,7 @@ jobs:
           echo 'TRAFFIC_PROMOTED=true' >> "$GITHUB_ENV"
 
       - name: Read back exact final staging runtime
+        if: ${{ inputs.promote_full }}
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         shell: bash
@@ -360,7 +369,7 @@ jobs:
           verify_service() {
             local service="$1" revision="$2" expected_sa="$3" evidence="$4"
             gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${service}-final.json"
-            test "$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == env.revision)] | length' --arg revision "$revision" "/tmp/${service}-final.json")" = 1
+            test "$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' "/tmp/${service}-final.json")" = 1
             test "$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/${service}-final.json")" = 100
             gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/${revision}.json"
             release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "/tmp/${revision}.json")"
@@ -383,7 +392,7 @@ jobs:
           echo 'STAGING_CANONICAL_DEPLOY=PASS'
 
       - name: Publish sanitized deployment evidence
-        if: ${{ inputs.evidence_issue != '' }}
+        if: ${{ inputs.promote_full && inputs.evidence_issue != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
