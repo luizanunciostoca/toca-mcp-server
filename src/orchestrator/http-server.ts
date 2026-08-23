@@ -56,7 +56,7 @@ async function routeRequest(
     return;
   }
 
-  if (method === 'GET' && url.pathname === '/readyz') {
+  if (method === 'GET' && (url.pathname === '/readyz' || url.pathname === '/ready')) {
     try {
       await runtime.readiness();
       writeJson(response, 200, {

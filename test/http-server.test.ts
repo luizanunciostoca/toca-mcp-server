@@ -68,6 +68,18 @@ describe('remote MCP HTTP server', () => {
     }
   });
 
+  it('exposes readiness through internal and Cloud Run-safe external aliases', async () => {
+    const baseUrl = await listen();
+
+    for (const path of ['/readyz', '/ready']) {
+      const response = await fetch(`${baseUrl}${path}`);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { status?: string };
+      expect(body.status).toBe('ready');
+    }
+  });
+
   it('exposes public Meta compliance pages even when MCP is disabled', async () => {
     const baseUrl = await listen({ mcpEnabled: false });
     const expected = [

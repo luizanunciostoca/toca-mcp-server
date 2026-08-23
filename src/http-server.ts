@@ -58,7 +58,7 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
       return;
     }
 
-    if (url.pathname === '/readyz' && method === 'GET') {
+    if ((url.pathname === '/readyz' || url.pathname === '/ready') && method === 'GET') {
       void evaluateReadiness(options.readinessChecks ?? []).then((report) => {
         response.writeHead(report.status === 'ready' ? 200 : 503, {
           'content-type': 'application/json; charset=utf-8',

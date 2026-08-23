@@ -220,12 +220,12 @@ jobs:
               -H "Authorization: Bearer ${token}" \
               -H "X-Request-ID: ${request_id}" \
               -H "X-Correlation-ID: ${correlation_id}" \
-              "${base_url}/healthz" > "staging-runtime-observability-evidence/${service}-healthz.json"
+              "${base_url}/health" > "staging-runtime-observability-evidence/${service}-healthz.json"
             curl --fail --silent --show-error \
               -H "Authorization: Bearer ${token}" \
               -H "X-Request-ID: ${request_id}-ready" \
               -H "X-Correlation-ID: ${correlation_id}" \
-              "${base_url}/readyz" > "staging-runtime-observability-evidence/${service}-readyz.json"
+              "${base_url}/ready" > "staging-runtime-observability-evidence/${service}-readyz.json"
             jq -e '.status == "ready" and (.checks | all(.ok == true))' \
               "staging-runtime-observability-evidence/${service}-readyz.json" >/dev/null
             unset token
@@ -256,7 +256,7 @@ jobs:
           test -n "$UPTIME_NAME"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
             "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime.json
-          jq -e '.httpCheck.path == "/readyz" and .httpCheck.port == 443 and .httpCheck.useSsl == true and .httpCheck.serviceAgentAuthentication.type == "OIDC_TOKEN" and .period == "300s" and .timeout == "10s"' /tmp/uptime.json >/dev/null
+          jq -e '.httpCheck.path == "/ready" and .httpCheck.port == 443 and .httpCheck.useSsl == true and .httpCheck.serviceAgentAuthentication.type == "OIDC_TOKEN" and .period == "300s" and .timeout == "10s"' /tmp/uptime.json >/dev/null
           CHECK_ID="${UPTIME_NAME##*/}"
           START="$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
           END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -306,7 +306,7 @@ jobs:
           export MCP_URL TOKEN
           for warmup in $(seq 1 5); do
             curl --fail --silent --show-error \
-              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready" >/dev/null
           done
 
           : > staging-runtime-observability-evidence/capacity.ndjson
@@ -319,7 +319,7 @@ jobs:
             start_ns="$(date +%s%N)"
             export sample
             seq 1 50 | xargs -P "$concurrency" -I{} bash -c '
-              result="$(curl --silent --show-error --output /dev/null --write-out "%{http_code} %{time_total}" -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz")"
+              result="$(curl --silent --show-error --output /dev/null --write-out "%{http_code} %{time_total}" -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready")"
               printf "%s\n" "$result" >> "$sample"
             '
             end_ns="$(date +%s%N)"
@@ -351,7 +351,7 @@ jobs:
               fi
             fi
             curl --fail --silent --show-error \
-              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready" >/dev/null
           done
           jq -s \
             --arg saturationLevel "$SATURATION_LEVEL" \

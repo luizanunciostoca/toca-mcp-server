@@ -363,12 +363,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" > staging-deploy-evidence/mcp-healthz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" > staging-deploy-evidence/mcp-readyz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/healthz" > staging-deploy-evidence/webhook-healthz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/readyz" > staging-deploy-evidence/webhook-readyz.json
-          jq -e '.status == "ready" and (.checks | all(.ok == true))' staging-deploy-evidence/mcp-readyz.json >/dev/null
-          jq -e '.status == "ready" and (.checks | all(.ok == true))' staging-deploy-evidence/webhook-readyz.json >/dev/null
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/health" > staging-deploy-evidence/mcp-health.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/ready" > staging-deploy-evidence/mcp-ready.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/health" > staging-deploy-evidence/webhook-health.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/ready" > staging-deploy-evidence/webhook-ready.json
+          jq -e '.status == "ready" and (.checks | all(.ok == true))' staging-deploy-evidence/mcp-ready.json >/dev/null
+          jq -e '.status == "ready" and (.checks | all(.ok == true))' staging-deploy-evidence/webhook-ready.json >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/mcp")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/oauth/meta/start")" = 404
 

@@ -73,7 +73,7 @@ ensure_uptime() {
     jq -n --arg display "$display_name" --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '{
       displayName:$display,
       monitoredResource:{type:"cloud_run_revision",labels:{project_id:$project,location:$location,service_name:$service}},
-      httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
+      httpCheck:{requestMethod:"GET",path:"/ready",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"}},
       timeout:"10s",
       period:"300s"
     }' > "$body"
@@ -83,7 +83,7 @@ ensure_uptime() {
     jq -n --arg display "$display_name" --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" --arg matcher "$matcher" '{
       displayName:$display,
       monitoredResource:{type:"cloud_run_revision",labels:{project_id:$project,location:$location,service_name:$service}},
-      httpCheck:{requestMethod:"GET",path:"/readyz",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"},acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]},
+      httpCheck:{requestMethod:"GET",path:"/ready",port:443,useSsl:true,serviceAgentAuthentication:{type:"OIDC_TOKEN"},acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]},
       contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}],
       timeout:"10s",
       period:"300s"
@@ -105,7 +105,7 @@ ensure_uptime() {
   fi
 
   api_get "https://monitoring.googleapis.com/v3/${name}" "$result"
-  jq -e --arg display "$display_name" --arg service "$WEBHOOK_SERVICE" '.displayName==$display and .monitoredResource.type=="cloud_run_revision" and .monitoredResource.labels.service_name==$service and .httpCheck.path=="/readyz" and .httpCheck.useSsl==true and .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and .period=="300s" and .timeout=="10s"' "$result" >/dev/null
+  jq -e --arg display "$display_name" --arg service "$WEBHOOK_SERVICE" '.displayName==$display and .monitoredResource.type=="cloud_run_revision" and .monitoredResource.labels.service_name==$service and .httpCheck.path=="/ready" and .httpCheck.useSsl==true and .httpCheck.serviceAgentAuthentication.type=="OIDC_TOKEN" and .period=="300s" and .timeout=="10s"' "$result" >/dev/null
   if [[ -n "$check_name" ]]; then
     jq -e --arg matcher "\"name\":\"${check_name}\",\"ok\":true" '.httpCheck.acceptedResponseStatusCodes == [{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}] and .contentMatchers == [{content:$matcher,matcher:"CONTAINS_STRING"}]' "$result" >/dev/null
   fi

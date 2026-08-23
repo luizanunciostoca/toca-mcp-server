@@ -24,7 +24,7 @@
   },
   "uptimeCheck": {
     "displayName": "TOCA Next Staging — Webhook Readiness",
-    "path": "/readyz",
+    "path": "/ready",
     "period": "300s",
     "timeout": "10s",
     "useSsl": true,
@@ -33,7 +33,7 @@
     "requireObservedPass": true
   },
   "capacity": {
-    "endpoint": "/readyz",
+    "endpoint": "/ready",
     "levels": [1, 5, 10, 25],
     "requestsPerLevel": 50,
     "warmupRequests": 5,
