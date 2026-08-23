@@ -291,7 +291,6 @@ jobs:
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "$RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
-            --readiness-probe 'httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1 --no-allow-unauthenticated
 
@@ -305,7 +304,6 @@ jobs:
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "$RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
-            --readiness-probe 'httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 --allow-unauthenticated
 
