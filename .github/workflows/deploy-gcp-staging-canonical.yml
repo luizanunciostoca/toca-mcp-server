@@ -308,6 +308,7 @@ jobs:
             --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 --allow-unauthenticated
 
       - name: Resolve candidate tagged revisions and URLs
+        id: candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -338,12 +339,25 @@ jobs:
           echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
           echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"
+          echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint MCP readiness identity token through staging WIF
+        id: mcp_probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.candidate.outputs.mcp_url }}
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Verify candidate health readiness and public route confinement before traffic
+        env:
+          MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
         shell: bash
         run: |
           set -euo pipefail
-          MCP_TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_URL")"
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" > staging-deploy-evidence/mcp-healthz.json
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" > staging-deploy-evidence/mcp-readyz.json
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/healthz" > staging-deploy-evidence/webhook-healthz.json
