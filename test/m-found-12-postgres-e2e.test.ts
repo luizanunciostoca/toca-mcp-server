@@ -303,3 +303,5 @@ postgresDescribe('M-FOUND-12 PostgreSQL durability E2E', () => {
     }
   });
 });
+
+// Evidence-base-only trigger marker; never merge.
