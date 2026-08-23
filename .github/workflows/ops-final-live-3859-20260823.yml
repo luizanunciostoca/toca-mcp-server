@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
   actions: write
-  issues: read
+  issues: write
 
 jobs:
   chain:
@@ -26,6 +26,11 @@ jobs:
           ref: ops/final-live-3859-20260823
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Publish observer start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "OPS_FINAL_LIVE_CHAIN_START RUN_ID=${GITHUB_RUN_ID} HEAD=${GITHUB_SHA} CANDIDATE=${CANDIDATE_SHA}"
 
       - name: Verify immutable candidate boundary and exact main
         env:
@@ -82,9 +87,9 @@ jobs:
           payload="$(jq -nc --arg sha "$CANDIDATE_SHA" --arg issue "$EVIDENCE_ISSUE" '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:$issue}}')"
           dispatch_json "$DEPLOY_WF" "$payload"
           DEPLOY_RUN_ID="$(wait_new_run "$DEPLOY_WF" "$before")"
+          echo "DEPLOY_RUN_ID=$DEPLOY_RUN_ID"
           wait_success "$DEPLOY_RUN_ID" 'CANONICAL_DEPLOY'
 
-          # The canonical deploy publishes a sanitized manifest to the evidence issue.
           IMAGE_DIGEST=''
           for _ in $(seq 1 30); do
             BODY="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
@@ -104,6 +109,7 @@ jobs:
           payload="$(jq -nc --arg p "$POLICY_SHA" --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" '{ref:"main",inputs:{expected_policy_sha256:$p,expected_candidate_sha:$sha,expected_image_digest:$digest,run_capacity:"true"}}')"
           dispatch_json "$CAP_WF" "$payload"
           CAP_RUN_ID="$(wait_new_run "$CAP_WF" "$before")"
+          echo "CAPACITY_RUN_ID=$CAP_RUN_ID"
           wait_success "$CAP_RUN_ID" 'CAPACITY_READINESS'
 
           ALERT_WF='staging-reliability-alerts.yml'
@@ -111,6 +117,7 @@ jobs:
           payload="$(jq -nc --arg sha "$CANDIDATE_SHA" --arg p "$POLICY_SHA" '{ref:"main",inputs:{expected_source_sha:$sha,expected_policy_sha256:$p}}')"
           dispatch_json "$ALERT_WF" "$payload"
           ALERT_RUN_ID="$(wait_new_run "$ALERT_WF" "$before")"
+          echo "ALERT_RUN_ID=$ALERT_RUN_ID"
           wait_success "$ALERT_RUN_ID" 'RELIABILITY_ALERTS'
 
           SYNTH_WF='staging-synthetic-alert.yml'
@@ -118,7 +125,15 @@ jobs:
           payload="$(jq -nc --arg p "$SYNTH_SHA" '{ref:"main",inputs:{expected_policy_sha256:$p}}')"
           dispatch_json "$SYNTH_WF" "$payload"
           SYNTH_RUN_ID="$(wait_new_run "$SYNTH_WF" "$before")"
+          echo "SYNTHETIC_RUN_ID=$SYNTH_RUN_ID"
           wait_success "$SYNTH_RUN_ID" 'SYNTHETIC_ALERT'
 
           printf 'FINAL_LIVE_CHAIN=PASS\nCANDIDATE_SHA=%s\nIMAGE_DIGEST=%s\nDEPLOY_RUN_ID=%s\nCAPACITY_RUN_ID=%s\nALERT_RUN_ID=%s\nSYNTHETIC_RUN_ID=%s\n' \
             "$CANDIDATE_SHA" "$IMAGE_DIGEST" "$DEPLOY_RUN_ID" "$CAP_RUN_ID" "$ALERT_RUN_ID" "$SYNTH_RUN_ID"
+
+      - name: Publish observer final status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "OPS_FINAL_LIVE_CHAIN_FINAL RUN_ID=${GITHUB_RUN_ID} STATUS=${JOB_STATUS} HEAD=${GITHUB_SHA} CANDIDATE=${CANDIDATE_SHA}"
