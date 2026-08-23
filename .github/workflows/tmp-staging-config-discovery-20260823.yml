@@ -1,0 +1,103 @@
+name: TEMP Staging Config Discovery 2026-08-23
+
+on:
+  push:
+    branches:
+      - ops/staging-config-discovery-20260823
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  CLOUD_SQL_INSTANCE: toca-mcp-next-staging-db
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+  DATABASE_SECRET_ID: toca-next-staging-database-url
+
+jobs:
+  discover:
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 771bb1f3c4cc625aa7a712af2a762c1191385756
+          persist-credentials: false
+
+      - name: Assert staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          [[ "$MCP_RUNTIME_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          [[ "$WEBHOOK_RUNTIME_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+
+      - name: Authenticate staging operator only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Discover non-secret staging coordinates
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          AR_REPOS="$(gcloud artifacts repositories list --project="$PROJECT_ID" --location="$REGION" --format='value(name)' | sed 's#.*/##' | sort | paste -sd, -)"
+          test -n "$AR_REPOS"
+
+          MCP_IMAGE="$(gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(spec.template.spec.containers[0].image)')"
+          WEBHOOK_IMAGE="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(spec.template.spec.containers[0].image)')"
+          MCP_SA="$(gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(spec.template.spec.serviceAccountName)')"
+          WEBHOOK_SA="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(spec.template.spec.serviceAccountName)')"
+          SQL_REGION="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project="$PROJECT_ID" --format='value(region)')"
+          DB_SECRET_EXISTS=false
+          if gcloud secrets describe "$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' >/tmp/secret-name 2>/dev/null; then DB_SECRET_EXISTS=true; fi
+
+          test "$MCP_SA" = "$MCP_RUNTIME_SA"
+          test "$WEBHOOK_SA" = "$WEBHOOK_RUNTIME_SA"
+          test "$SQL_REGION" = "$REGION"
+
+          jq -n \
+            --arg projectId "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg region "$REGION" \
+            --arg artifactRepositories "$AR_REPOS" \
+            --arg mcpService "$MCP_SERVICE" \
+            --arg webhookService "$WEBHOOK_SERVICE" \
+            --arg cloudSqlInstance "$CLOUD_SQL_INSTANCE" \
+            --arg wif "$STAGING_WIF" \
+            --arg deployServiceAccount "$STAGING_OPERATOR_SA" \
+            --arg mcpRuntimeServiceAccount "$MCP_RUNTIME_SA" \
+            --arg webhookRuntimeServiceAccount "$WEBHOOK_RUNTIME_SA" \
+            --arg databaseSecretId "$DATABASE_SECRET_ID" \
+            --arg mcpImage "$MCP_IMAGE" \
+            --arg webhookImage "$WEBHOOK_IMAGE" \
+            --argjson databaseSecretMetadataVisible "$DB_SECRET_EXISTS" \
+            '{projectId:$projectId,projectNumber:$projectNumber,region:$region,artifactRepositories:($artifactRepositories|split(",")),mcpService:$mcpService,webhookService:$webhookService,cloudSqlInstance:$cloudSqlInstance,workloadIdentityProvider:$wif,deployServiceAccount:$deployServiceAccount,mcpRuntimeServiceAccount:$mcpRuntimeServiceAccount,webhookRuntimeServiceAccount:$webhookRuntimeServiceAccount,databaseSecretId:$databaseSecretId,databaseSecretMetadataVisible:$databaseSecretMetadataVisible,currentMcpImage:$mcpImage,currentWebhookImage:$webhookImage,secretPayloadRead:false,productionAccess:false,providerAccess:false}' > /tmp/staging-config.json
+
+      - name: Publish sanitized discovery to issue 151
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(cat /tmp/staging-config.json)"
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body "## Staging canonical config discovery — read-only\n\n\`DISCOVERY_RUN=${GITHUB_RUN_ID}\`\n\n\`\`\`json\n${BODY}\n\`\`\`\n\nNo production access, no provider calls, no Secret Manager payload read, no mutations."
