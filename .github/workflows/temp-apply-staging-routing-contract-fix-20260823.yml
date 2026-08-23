@@ -3,13 +3,16 @@ name: TEMP Apply Staging Routing Contract Fix 2026-08-23
 on:
   push:
     branches: [fix/staging-cloud-run-routing-contract-20260823]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.head_ref == 'fix/staging-cloud-run-routing-contract-20260823' || github.ref_name == 'fix/staging-cloud-run-routing-contract-20260823')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
