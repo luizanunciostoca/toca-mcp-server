@@ -1,11 +1,10 @@
 name: TEMP Final Staging Live Chain 3859 2026-08-23
 
 on:
-  push:
+  pull_request:
     branches:
-      - ops/final-live-3859-20260823
-    paths:
-      - .github/workflows/ops-final-live-3859-20260823.yml
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -14,6 +13,7 @@ permissions:
 
 jobs:
   chain:
+    if: github.head_ref == 'ops/final-live-3859-20260823'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
