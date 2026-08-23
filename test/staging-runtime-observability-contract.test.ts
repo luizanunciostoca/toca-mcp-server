@@ -39,8 +39,13 @@ function policy(): StagingObservabilityPolicy {
 }
 
 describe('staging runtime observability coverage contract', () => {
-  it('materializes the required reliability domains from canonical readiness checks', () => {
+  it('materializes required domains from canonical readiness checks', () => {
     const config = policy();
+    const domains = config.domainReadiness.map(({ id, checkName, alertRole }) => ({
+      id,
+      checkName,
+      alertRole,
+    }));
 
     expect(config.version).toBe(3);
     expect(config.notificationChannels).toMatchObject({
@@ -48,10 +53,7 @@ describe('staging runtime observability coverage contract', () => {
       requiredEnabledCount: 2,
       requiredFamilies: ['email', 'webhook_tokenauth'],
     });
-
-    expect(
-      config.domainReadiness.map(({ id, checkName, alertRole }) => ({ id, checkName, alertRole })),
-    ).toEqual([
+    expect(domains).toEqual([
       { id: 'db', checkName: 'db', alertRole: 'db_readiness' },
       { id: 'ag01', checkName: 'ag01', alertRole: 'ag01_readiness' },
       { id: 'workflow', checkName: 'workflow', alertRole: 'workflow_readiness' },
@@ -61,7 +63,7 @@ describe('staging runtime observability coverage contract', () => {
     ]);
   });
 
-  it('uses Cloud Run native golden signals for latency and 5xx error ratio', () => {
+  it('uses Cloud Run native latency and 5xx ratio signals', () => {
     const config = policy();
 
     expect(config.nativeSignals.latency).toMatchObject({
@@ -76,7 +78,7 @@ describe('staging runtime observability coverage contract', () => {
     });
   });
 
-  it('grants only the monitoring permissions required by the reconciliation', () => {
+  it('grants only required monitoring permissions', () => {
     const config = policy();
 
     expect(config.requiredIamRoles).toEqual([
@@ -91,15 +93,14 @@ describe('staging runtime observability coverage contract', () => {
     expect(Object.values(config.forbid).every(Boolean)).toBe(true);
   });
 
-  it('keeps domain probes read-only and isolates a failing domain from unrelated readiness failures', () => {
+  it('keeps domain probes read-only and isolated', () => {
     const script = readFileSync(reconcilePath, 'utf8');
+    const acceptedStatuses =
+      'acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]';
+    const contentMatcher = 'contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}]';
 
-    expect(script).toContain(
-      'acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]',
-    );
-    expect(script).toContain(
-      'contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}]',
-    );
+    expect(script).toContain(acceptedStatuses);
+    expect(script).toContain(contentMatcher);
     expect(script).toContain('LATENCY_ALIGNER="$(jq -r');
     expect(script).toContain('denominatorFilter:$denominator');
     expect(script).not.toContain('gcloud sql');
@@ -109,7 +110,7 @@ describe('staging runtime observability coverage contract', () => {
     execFileSync('bash', ['-n', reconcilePath], { stdio: 'pipe' });
   });
 
-  it('pins exact source provenance and invokes the single canonical reconciliation path', () => {
+  it('pins provenance and invokes one reconciliation path', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
     expect(workflow).toContain('expected_source_sha:');
