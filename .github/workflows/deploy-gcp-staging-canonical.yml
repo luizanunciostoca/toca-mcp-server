@@ -311,12 +311,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          service_field() { gcloud run services describe "$1" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format="$2"; }
-          MCP_REVISION="$(service_field "$GCP_CLOUD_RUN_MCP_SERVICE" "value(status.traffic[tag=${MCP_TAG}].revisionName)")"
-          MCP_URL="$(service_field "$GCP_CLOUD_RUN_MCP_SERVICE" "value(status.traffic[tag=${MCP_TAG}].url)")"
-          WEBHOOK_REVISION="$(service_field "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "value(status.traffic[tag=${WEBHOOK_TAG}].revisionName)")"
-          WEBHOOK_URL="$(service_field "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "value(status.traffic[tag=${WEBHOOK_TAG}].url)")"
-          test -n "$MCP_REVISION"; test -n "$MCP_URL"; test -n "$WEBHOOK_REVISION"; test -n "$WEBHOOK_URL"
+          resolve_tag() {
+            local service="$1" tag="$2"
+            local payload revision url
+            for attempt in $(seq 1 24); do
+              payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+              revision="$(jq -r --arg tag "$tag" 'first(.status.traffic[]? | select(.tag == $tag) | .revisionName) // empty' <<<"$payload")"
+              url="$(jq -r --arg tag "$tag" 'first(.status.traffic[]? | select(.tag == $tag) | .url) // empty' <<<"$payload")"
+              if [[ -n "$revision" && -n "$url" ]]; then
+                printf '%s\t%s\n' "$revision" "$url"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Timed out resolving Cloud Run traffic tag '$tag' for service '$service'" >&2
+            return 1
+          }
+          IFS=$'\t' read -r MCP_REVISION MCP_URL < <(resolve_tag "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_TAG")
+          IFS=$'\t' read -r WEBHOOK_REVISION WEBHOOK_URL < <(resolve_tag "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_TAG")
+          EXPECTED_MCP_REVISION="${GCP_CLOUD_RUN_MCP_SERVICE}-${MCP_REVISION_SUFFIX}"
+          EXPECTED_WEBHOOK_REVISION="${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-${WEBHOOK_REVISION_SUFFIX}"
+          test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"
+          test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"
+          test -n "$MCP_URL"; test -n "$WEBHOOK_URL"
           echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
           echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"

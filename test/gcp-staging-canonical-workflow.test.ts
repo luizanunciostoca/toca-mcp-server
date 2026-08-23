@@ -94,6 +94,17 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).not.toContain('WEBHOOK_TAG=staging-webhook-${GITHUB_SHA::7}');
   });
 
+  it('waits boundedly for tagged revision propagation and validates the exact revisions', () => {
+    expect(workflow).toContain('for attempt in $(seq 1 24); do');
+    expect(workflow).toContain('select(.tag == $tag)');
+    expect(workflow).toContain('sleep 5');
+    expect(workflow).toContain('Timed out resolving Cloud Run traffic tag');
+    expect(workflow).toContain('EXPECTED_MCP_REVISION=');
+    expect(workflow).toContain('EXPECTED_WEBHOOK_REVISION=');
+    expect(workflow).toContain('test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"');
+    expect(workflow).toContain('test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"');
+  });
+
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
     expect(workflow).toContain('[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
