@@ -212,6 +212,11 @@ jobs:
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
+      - name: Setup Docker Buildx for attestations
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+
       - name: Build push and resolve immutable candidate digest
         shell: bash
         run: |
@@ -402,7 +407,15 @@ jobs:
         run: |
           set -euo pipefail
           MANIFEST="$(cat staging-deploy-evidence/manifest.json)"
-          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "## Canonical staging deploy — PASS\n\n\`RUN_ID=${GITHUB_RUN_ID}\`\n\n\`\`\`json\n${MANIFEST}\n\`\`\`\n\nNo production access and no external provider calls."
+          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "## Canonical staging deploy — PASS\
+\
+\`RUN_ID=${GITHUB_RUN_ID}\`\
+\
+\`\`\`json\
+${MANIFEST}\
+\`\`\`\
+\
+No production access and no external provider calls."
 
       - name: Automatic staging traffic rollback after failed post-promotion step
         if: failure() && env.TRAFFIC_PROMOTED == 'true' && env.PREVIOUS_MCP_REVISION != '' && env.PREVIOUS_WEBHOOK_REVISION != ''
