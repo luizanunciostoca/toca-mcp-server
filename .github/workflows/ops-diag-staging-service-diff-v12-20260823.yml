@@ -1,0 +1,138 @@
+name: TEMP Staging Service State Diff V12 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  compare-service-state:
+    if: github.head_ref == 'ops/diag-staging-service-diff-v12-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          test "$GCP_REGION" = 'southamerica-east1'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Create fresh private reference service and compare safe state
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIAG_SERVICE='toca-diag-state-fd379915'
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com'
+          gcloud run services describe "$DIAG_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1 && { echo 'Refusing to reuse diagnostic service' >&2; exit 1; }
+
+          gcloud run deploy "$DIAG_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image 'us-docker.pkg.dev/cloudrun/container/hello' \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --ingress all \
+            --min-instances 0 \
+            --max-instances 1 \
+            --memory 256Mi \
+            --cpu 1 \
+            --quiet >/tmp/diag.out 2>/tmp/diag.err
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          trap 'unset ACCESS_TOKEN' EXIT
+          read_v2() {
+            curl --fail --silent --show-error -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://run.googleapis.com/v2/projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/$1"
+          }
+          read_v2 "$GCP_CLOUD_RUN_MCP_SERVICE" > /tmp/mcp.json
+          read_v2 "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" > /tmp/webhook.json
+          read_v2 "$DIAG_SERVICE" > /tmp/fresh.json
+
+          safe_state() {
+            jq -c '{
+              ingress:(.ingress // null),
+              launchStage:(.launchStage // null),
+              invokerIamDisabled:(.invokerIamDisabled // false),
+              defaultUriDisabled:(.defaultUriDisabled // false),
+              iapEnabled:(.iapEnabled // false),
+              threatDetectionEnabled:(.threatDetectionEnabled // false),
+              customAudiences:(.customAudiences // []),
+              scaling:(.scaling // null),
+              multiRegionSettings:(.multiRegionSettings // null),
+              binaryAuthorization:(.binaryAuthorization // null),
+              buildConfig:(.buildConfig // null),
+              terminalCondition:{state:(.terminalCondition.state // null),reason:(.terminalCondition.reason // null)},
+              reconciling:(.reconciling // false),
+              satisfiesPzs:(.satisfiesPzs // false)
+            }' "$1"
+          }
+          MCP_SAFE="$(safe_state /tmp/mcp.json)"
+          WEBHOOK_SAFE="$(safe_state /tmp/webhook.json)"
+          FRESH_SAFE="$(safe_state /tmp/fresh.json)"
+          MCP_DIFF="$(jq -n -c --argjson a "$FRESH_SAFE" --argjson b "$MCP_SAFE" '$a as $a | $b as $b | reduce (($a|keys[]) , ($b|keys[])) as $k ({}; if $a[$k] != $b[$k] then .[$k]={fresh:$a[$k],canonical:$b[$k]} else . end)')"
+          WEBHOOK_DIFF="$(jq -n -c --argjson a "$FRESH_SAFE" --argjson b "$WEBHOOK_SAFE" '$a as $a | $b as $b | reduce (($a|keys[]) , ($b|keys[])) as $k ({}; if $a[$k] != $b[$k] then .[$k]={fresh:$a[$k],canonical:$b[$k]} else . end)')"
+
+          cat > /tmp/comment.md <<EOF
+          STAGING_SERVICE_STATE_DIFF_V12 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          FRESH_SAFE_STATE=${FRESH_SAFE}
+          MCP_SAFE_STATE=${MCP_SAFE}
+          WEBHOOK_SAFE_STATE=${WEBHOOK_SAFE}
+          MCP_DIFF_FROM_FRESH=${MCP_DIFF}
+          WEBHOOK_DIFF_FROM_FRESH=${WEBHOOK_DIFF}
+          TEMPLATE_INCLUDED=false
+          ENV_INCLUDED=false
+          SECRET_VALUES_INCLUDED=false
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          CANONICAL_SERVICE_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
+
+      - name: Delete isolated diagnostic service
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_REGION" = 'southamerica-east1'
+          if gcloud run services describe toca-diag-state-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+            gcloud run services delete toca-diag-state-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          fi
+          ! gcloud run services describe toca-diag-state-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1
+          echo 'DIAGNOSTIC_SERVICE_CLEANUP=PASS'
