@@ -25,6 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo 'TEMP_READINESS_PATCH_TRIGGER=2'
           python3 - <<'PY'
           from pathlib import Path
 
