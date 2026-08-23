@@ -292,7 +292,8 @@ jobs:
             --update-secrets "$RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
-            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1 --no-allow-unauthenticated
+            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1 \
+            --ingress all --default-url --invoker-iam-check --no-allow-unauthenticated
 
       - name: Deploy public webhook candidate by digest with no traffic
         shell: bash
@@ -305,7 +306,8 @@ jobs:
             --update-secrets "$RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
-            --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 --allow-unauthenticated
+            --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 \
+            --ingress all --default-url --no-invoker-iam-check
 
       - name: Resolve candidate tagged revisions and URLs
         id: candidate
