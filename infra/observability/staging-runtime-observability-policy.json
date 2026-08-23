@@ -17,6 +17,11 @@
     "managedLabel": "staging_reliability",
     "requireReadback": true
   },
+  "notificationChannels": {
+    "managedLabel": "staging_reliability",
+    "requiredEnabledCount": 2,
+    "requiredFamilies": ["email", "webhook_tokenauth"]
+  },
   "uptimeCheck": {
     "displayName": "TOCA Next Staging — Webhook Readiness",
     "path": "/readyz",
@@ -36,6 +41,49 @@
     "requireRecoveryAfterEachLevel": true,
     "destructiveStress": false
   },
+  "domainReadiness": [
+    {"id":"db","displayName":"TOCA Next Staging — DB Readiness","checkName":"db","alertRole":"db_readiness"},
+    {"id":"ag01","displayName":"TOCA Next Staging — AG-01 Readiness","checkName":"ag01","alertRole":"ag01_readiness"},
+    {"id":"workflow","displayName":"TOCA Next Staging — Workflow Readiness","checkName":"workflow","alertRole":"workflow_readiness"},
+    {"id":"approval","displayName":"TOCA Next Staging — Approval Readiness","checkName":"approval_store","alertRole":"approval_readiness"},
+    {"id":"crm","displayName":"TOCA Next Staging — CRM Readiness","checkName":"crm","alertRole":"crm_readiness"},
+    {"id":"outbox_dlq","displayName":"TOCA Next Staging — Outbox + DLQ Readiness","checkName":"outbox","alertRole":"outbox_dlq_readiness"}
+  ],
+  "nativeSignals": {
+    "latency": {
+      "displayName": "TOCA Next Staging — HTTP P95 Latency",
+      "alertRole": "http_latency",
+      "metricType": "run.googleapis.com/request_latencies",
+      "aligner": "ALIGN_PERCENTILE_95",
+      "alignmentPeriod": "300s",
+      "thresholdMilliseconds": 2000,
+      "duration": "60s"
+    },
+    "errorRate": {
+      "displayName": "TOCA Next Staging — HTTP 5xx Error Rate",
+      "alertRole": "http_error_rate",
+      "metricType": "run.googleapis.com/request_count",
+      "errorResponseClass": "5xx",
+      "aligner": "ALIGN_DELTA",
+      "alignmentPeriod": "300s",
+      "thresholdRatio": 0.01,
+      "duration": "60s"
+    }
+  },
+  "alerting": {
+    "managedLabel": "staging_reliability",
+    "severity": "P1",
+    "uptimeFailureDuration": "60s",
+    "autoClose": "1800s",
+    "runbook": "docs/operations/observability-incident-runbook.md"
+  },
+  "requiredIamRoles": [
+    "roles/run.viewer",
+    "roles/monitoring.viewer",
+    "roles/monitoring.dashboardEditor",
+    "roles/monitoring.uptimeCheckConfigEditor",
+    "roles/monitoring.alertPolicyEditor"
+  ],
   "forbid": {
     "productionAccess": true,
     "productionMutation": true,
