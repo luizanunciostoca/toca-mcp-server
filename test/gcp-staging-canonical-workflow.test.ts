@@ -101,12 +101,8 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('Timed out resolving Cloud Run traffic tag');
     expect(workflow).toContain('EXPECTED_MCP_REVISION=');
     expect(workflow).toContain('EXPECTED_WEBHOOK_REVISION=');
-    expect(workflow).toContain(
-      'test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"',
-    );
-    expect(workflow).toContain(
-      'test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"',
-    );
+    expect(workflow).toContain('test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"');
+    expect(workflow).toContain('test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"');
   });
 
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
