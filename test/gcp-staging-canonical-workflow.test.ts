@@ -4,13 +4,18 @@ import { describe, expect, it } from 'vitest';
 const workflowPath = '.github/workflows/deploy-gcp-staging-canonical.yml';
 const configPath = 'infra/environments/staging.json';
 const workflow = readFileSync(workflowPath, 'utf8');
-const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<
+  string,
+  unknown
+>;
 
 describe('canonical isolated staging deployment workflow', () => {
   it('keeps Quality outside the staging deployment environment', () => {
     const qualityStart = workflow.indexOf('  quality:\n');
     const deployStart = workflow.indexOf('  deploy:\n');
-    const cleanQuality = workflow.indexOf('Exact-head Quality in clean non-deployment environment');
+    const cleanQuality = workflow.indexOf(
+      'Exact-head Quality in clean non-deployment environment',
+    );
     const stagingEnvironment = workflow.indexOf('    environment: staging', deployStart);
 
     expect(qualityStart).toBeGreaterThanOrEqual(0);
@@ -23,7 +28,9 @@ describe('canonical isolated staging deployment workflow', () => {
   });
 
   it('loads canonical repository coordinates only after Quality', () => {
-    const qualityStep = workflow.indexOf('Exact-head Quality in clean non-deployment environment');
+    const qualityStep = workflow.indexOf(
+      'Exact-head Quality in clean non-deployment environment',
+    );
     const loadStep = workflow.indexOf('Load repository-canonical staging coordinates');
 
     expect(loadStep).toBeGreaterThan(qualityStep);
@@ -49,7 +56,9 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain(
       'RUNTIME_SECRETS=DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}',
     );
-    expect(workflow).toContain('gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION"');
+    expect(workflow).toContain(
+      'gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION"',
+    );
     expect(workflow.toLowerCase()).not.toContain('postgresql://');
 
     expect(config.secretReferences).toEqual({
@@ -63,10 +72,14 @@ describe('canonical isolated staging deployment workflow', () => {
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
     expect(workflow).toContain('[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
-    expect(workflow).toContain('Verify candidate health readiness and public route confinement before traffic');
+    expect(workflow).toContain(
+      'Verify candidate health readiness and public route confinement before traffic',
+    );
     expect(workflow).toContain('Promote verified candidate to full staging traffic');
     expect(workflow).toContain('Read back exact final staging runtime');
     expect(workflow).toContain('.revisionName == $revision');
-    expect(workflow).toContain('Automatic staging traffic rollback after failed post-promotion step');
+    expect(workflow).toContain(
+      'Automatic staging traffic rollback after failed post-promotion step',
+    );
   });
 });
