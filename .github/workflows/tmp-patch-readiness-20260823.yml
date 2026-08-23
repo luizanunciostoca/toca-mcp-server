@@ -50,7 +50,10 @@ jobs:
           git rm .github/workflows/tmp-patch-readiness-20260823.yml
           git diff --check
           git add .github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts
-          test "$(git diff --cached --name-only | sort | paste -sd ' ' -)" = ".github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts"
+          test "$(git diff --cached --name-only | sort | wc -l)" -eq 3
+          git diff --cached --name-only | grep -Fx '.github/workflows/deploy-gcp-staging-canonical.yml'
+          git diff --cached --name-only | grep -Fx '.github/workflows/tmp-patch-readiness-20260823.yml'
+          git diff --cached --name-only | grep -Fx 'test/gcp-staging-canonical-workflow.test.ts'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(staging): remove unsupported Cloud Run readiness flag'
