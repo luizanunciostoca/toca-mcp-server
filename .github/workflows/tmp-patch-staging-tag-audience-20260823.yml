@@ -34,18 +34,30 @@ jobs:
           assert workflow.count(old) == 1
           workflow = workflow.replace(old, new, 1)
 
-          old = '          id_token_audience: ${{ steps.candidate.outputs.mcp_url }}\n'
-          new = '          id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}\n'
+          expr_old = '$' + '{{ steps.candidate.outputs.mcp_url }}'
+          expr_new = '$' + '{{ steps.candidate.outputs.mcp_service_url }}'
+          old = f'          id_token_audience: {expr_old}\n'
+          new = f'          id_token_audience: {expr_new}\n'
           assert workflow.count(old) == 1
           workflow = workflow.replace(old, new, 1)
           workflow_path.write_text(workflow)
 
           test_path = Path('test/gcp-staging-canonical-workflow.test.ts')
           test = test_path.read_text()
-          old = "    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');\n"
-          new = """    expect(workflow).toContain('echo \"mcp_tag_url=$MCP_URL\" >> \"$GITHUB_OUTPUT\"');\n    expect(workflow).toContain(\n      'echo \"mcp_service_url=$MCP_SERVICE_URL\" >> \"$GITHUB_OUTPUT\"',\n    );\n    expect(workflow).toContain(\n      'id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}',\n    );\n    expect(workflow).not.toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');\n"""
-          assert test.count(old) == 1
-          test = test.replace(old, new, 1)
+          old_expect = f"    expect(workflow).toContain('id_token_audience: {expr_old}');\n"
+          new_expect = (
+              '    expect(workflow).toContain(\'echo "mcp_tag_url=$MCP_URL" >> "$GITHUB_OUTPUT"\');\n'
+              '    expect(workflow).toContain(\n'
+              '      \'echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"\',\n'
+              '    );\n'
+              '    expect(workflow).toContain(\n'
+              f"      'id_token_audience: {expr_new}',\n"
+              '    );\n'
+              f"    expect(workflow).not.toContain('id_token_audience: {expr_old}');\n"
+          )
+          assert test.count(old_expect) == 1
+          test = test.replace(old_expect, new_expect, 1)
+
           marker = "  it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {\n"
           addition = """  it('uses the canonical Cloud Run service URL as token audience while probing the tagged candidate URL', () => {\n    expect(workflow).toContain(\n      'MCP_SERVICE_URL=\"$(gcloud run services describe \"$GCP_CLOUD_RUN_MCP_SERVICE\"',\n    );\n    expect(workflow).toContain('test \"$MCP_SERVICE_URL\" != \"$MCP_URL\"');\n    expect(workflow).toContain('-H \"Authorization: Bearer $MCP_TOKEN\" \"$MCP_URL/healthz\"');\n    expect(workflow).toContain('-H \"Authorization: Bearer $MCP_TOKEN\" \"$MCP_URL/readyz\"');\n  });\n\n"""
           assert test.count(marker) == 1
