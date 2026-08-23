@@ -74,6 +74,17 @@ describe('canonical isolated staging deployment workflow', () => {
     });
   });
 
+  it('does not use unsupported Cloud Run readiness-probe and keeps readiness fail-closed', () => {
+    expect(workflow).not.toContain('--readiness-probe');
+    expect(workflow).toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(workflow).toContain(
+      'Verify candidate health readiness and public route confinement before traffic',
+    );
+    expect(workflow).toContain('$MCP_URL/readyz');
+    expect(workflow).toContain('$WEBHOOK_URL/readyz');
+    expect(workflow).toContain('.status == "ready" and (.checks | all(.ok == true))');
+  });
+
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
     expect(workflow).toContain('[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
