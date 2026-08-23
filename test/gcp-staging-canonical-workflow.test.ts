@@ -85,6 +85,15 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('.status == "ready" and (.checks | all(.ok == true))');
   });
 
+  it('keeps the webhook traffic tag within the Cloud Run combined 46-character limit', () => {
+    const webhookService = 'toca-webhook-next-staging';
+    const webhookTag = 'wh-abcdef0';
+
+    expect(webhookService.length + webhookTag.length).toBeLessThanOrEqual(46);
+    expect(workflow).toContain('WEBHOOK_TAG=wh-${GITHUB_SHA::7}');
+    expect(workflow).not.toContain('WEBHOOK_TAG=staging-webhook-${GITHUB_SHA::7}');
+  });
+
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
     expect(workflow).toContain('[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');

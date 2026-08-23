@@ -231,7 +231,7 @@ jobs:
           echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "MCP_TAG=staging-mcp-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          echo "WEBHOOK_TAG=staging-webhook-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_TAG=wh-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
 
