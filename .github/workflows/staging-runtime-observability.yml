@@ -180,17 +180,40 @@ jobs:
           echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
           echo 'STAGING_EXACT_RUNTIME_IDENTITY=PASS'
 
+      - name: Mint MCP probe identity token through staging WIF
+        id: mcp_probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.mcp_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Mint webhook probe identity token through staging WIF
+        id: webhook_probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.webhook_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
       - name: Verify health readiness and release runtime agreement
         env:
           MCP_URL: ${{ steps.runtime.outputs.mcp_url }}
           WEBHOOK_URL: ${{ steps.runtime.outputs.webhook_url }}
+          MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
+          WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
         shell: bash
         run: |
           set -euo pipefail
           probe() {
-            local service="$1" base_url="$2"
-            local token request_id correlation_id
-            token="$(gcloud auth print-identity-token --audiences="$base_url")"
+            local service="$1" base_url="$2" token="$3"
+            local request_id correlation_id
             request_id="acceptance-${GITHUB_RUN_ID}-${service}-request"
             correlation_id="acceptance-${GITHUB_RUN_ID}-${service}-correlation"
             curl --fail --silent --show-error \
@@ -207,8 +230,8 @@ jobs:
               "staging-runtime-observability-evidence/${service}-readyz.json" >/dev/null
             unset token
           }
-          probe mcp "$MCP_URL"
-          probe webhook "$WEBHOOK_URL"
+          probe mcp "$MCP_URL" "$MCP_TOKEN"
+          probe webhook "$WEBHOOK_URL" "$WEBHOOK_TOKEN"
           echo 'STAGING_HEALTH_READY=PASS'
 
       - name: Verify dashboard and authenticated uptime without mutation
@@ -259,15 +282,27 @@ jobs:
           unset TOKEN
           echo 'STAGING_OBSERVABILITY_READBACK=PASS'
 
+      - name: Mint fresh MCP capacity identity token through staging WIF
+        if: ${{ inputs.run_capacity }}
+        id: capacity_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.mcp_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
       - name: Run controlled non-destructive capacity sampling
         if: ${{ inputs.run_capacity }}
         id: capacity
         env:
           MCP_URL: ${{ steps.runtime.outputs.mcp_url }}
+          TOKEN: ${{ steps.capacity_auth.outputs.id_token }}
         shell: bash
         run: |
           set -euo pipefail
-          TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_URL")"
           export MCP_URL TOKEN
           for warmup in $(seq 1 5); do
             curl --fail --silent --show-error \
