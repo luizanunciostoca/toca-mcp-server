@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { InMemorySecretStore } from '../src/core/secrets.js';
 import { GoogleAdsRestApiClient } from '../src/providers/google-ads/google-ads-api-client.js';
 
-async function clientWithFetch(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}) {
+async function clientWithFetch(
+  fetchImpl: typeof fetch,
+  overrides: {
+    readonly requestTimeoutMs?: number;
+    readonly maxSafeAttempts?: number;
+    readonly retryBaseDelayMs?: number;
+  } = {},
+) {
   const secrets = new InMemorySecretStore();
   const accessTokenRef = await secrets.put('access-token', 'fake-access-token');
   const developerTokenRef = await secrets.put('developer-token', 'fake-developer-token');
