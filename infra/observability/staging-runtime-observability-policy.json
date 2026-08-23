@@ -42,12 +42,42 @@
     "destructiveStress": false
   },
   "domainReadiness": [
-    {"id":"db","displayName":"TOCA Next Staging — DB Readiness","checkName":"db","alertRole":"db_readiness"},
-    {"id":"ag01","displayName":"TOCA Next Staging — AG-01 Readiness","checkName":"ag01","alertRole":"ag01_readiness"},
-    {"id":"workflow","displayName":"TOCA Next Staging — Workflow Readiness","checkName":"workflow","alertRole":"workflow_readiness"},
-    {"id":"approval","displayName":"TOCA Next Staging — Approval Readiness","checkName":"approval_store","alertRole":"approval_readiness"},
-    {"id":"crm","displayName":"TOCA Next Staging — CRM Readiness","checkName":"crm","alertRole":"crm_readiness"},
-    {"id":"outbox_dlq","displayName":"TOCA Next Staging — Outbox + DLQ Readiness","checkName":"outbox","alertRole":"outbox_dlq_readiness"}
+    {
+      "id": "db",
+      "displayName": "TOCA Next Staging — DB Readiness",
+      "checkName": "db",
+      "alertRole": "db_readiness"
+    },
+    {
+      "id": "ag01",
+      "displayName": "TOCA Next Staging — AG-01 Readiness",
+      "checkName": "ag01",
+      "alertRole": "ag01_readiness"
+    },
+    {
+      "id": "workflow",
+      "displayName": "TOCA Next Staging — Workflow Readiness",
+      "checkName": "workflow",
+      "alertRole": "workflow_readiness"
+    },
+    {
+      "id": "approval",
+      "displayName": "TOCA Next Staging — Approval Readiness",
+      "checkName": "approval_store",
+      "alertRole": "approval_readiness"
+    },
+    {
+      "id": "crm",
+      "displayName": "TOCA Next Staging — CRM Readiness",
+      "checkName": "crm",
+      "alertRole": "crm_readiness"
+    },
+    {
+      "id": "outbox_dlq",
+      "displayName": "TOCA Next Staging — Outbox + DLQ Readiness",
+      "checkName": "outbox",
+      "alertRole": "outbox_dlq_readiness"
+    }
   ],
   "nativeSignals": {
     "latency": {
