@@ -81,8 +81,14 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     this.#apiVersion = config.apiVersion ?? 'v25';
     this.#apiBaseUrl = (config.apiBaseUrl ?? 'https://googleads.googleapis.com').replace(/\/$/, '');
     this.#customerId = config.customerId ? normalizeCustomerId(config.customerId) : undefined;
-    this.#requestTimeoutMs = positiveInteger(config.requestTimeoutMs ?? 10_000, 'GOOGLE_ADS_TIMEOUT_INVALID');
-    this.#maxSafeAttempts = positiveInteger(config.maxSafeAttempts ?? 3, 'GOOGLE_ADS_MAX_ATTEMPTS_INVALID');
+    this.#requestTimeoutMs = positiveInteger(
+      config.requestTimeoutMs ?? 10_000,
+      'GOOGLE_ADS_TIMEOUT_INVALID',
+    );
+    this.#maxSafeAttempts = positiveInteger(
+      config.maxSafeAttempts ?? 3,
+      'GOOGLE_ADS_MAX_ATTEMPTS_INVALID',
+    );
     this.#retryBaseDelayMs = nonNegativeInteger(
       config.retryBaseDelayMs ?? 250,
       'GOOGLE_ADS_RETRY_DELAY_INVALID',
@@ -270,7 +276,9 @@ export class GoogleAdsRestApiClient implements GoogleAdsApiClient {
     try {
       return await this.fetchImpl(input, { ...init, signal: controller.signal });
     } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) throw new GoogleAdsRequestTimeoutError();
+      if (controller.signal.aborted || isAbortError(error)) {
+        throw new GoogleAdsRequestTimeoutError();
+      }
       throw error;
     } finally {
       clearTimeout(timeout);
