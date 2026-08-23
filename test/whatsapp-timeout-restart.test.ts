@@ -291,7 +291,7 @@ function input(): WhatsAppOutboundSendInput {
 }
 
 describe('WhatsApp fake timeout and restart boundary', () => {
-  it('dead-letters an uncertain timeout and never retries provider implicitly after restart', async () => {
+  it('dead-letters an uncertain timeout and keeps restart fail-closed without another provider call', async () => {
     const store = new DurableMemoryStore();
     const provider = new TimeoutProvider();
 
@@ -306,9 +306,8 @@ describe('WhatsApp fake timeout and restart boundary', () => {
     expect(provider.sendCount).toBe(1);
 
     const restarted = runtime(store, provider);
-    const replay = await restarted.send(input());
+    await expect(restarted.send(input())).rejects.toThrow('WHATSAPP_HUMAN_HANDOFF_ACTIVE');
 
-    expect(replay.state).toBe('FAILED');
     expect(provider.sendCount).toBe(1);
     expect(provider.readbackCount).toBe(0);
   });
