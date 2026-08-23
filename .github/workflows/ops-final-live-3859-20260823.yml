@@ -1,0 +1,124 @@
+name: TEMP Final Staging Live Chain 3859 2026-08-23
+
+on:
+  push:
+    branches:
+      - ops/final-live-3859-20260823
+    paths:
+      - .github/workflows/ops-final-live-3859-20260823.yml
+
+permissions:
+  contents: read
+  actions: write
+  issues: read
+
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CANDIDATE_SHA: 3859d321552b316b82e8b9263de9bdda6da89730
+      EVIDENCE_ISSUE: '151'
+    steps:
+      - name: Checkout frozen candidate plus temporary orchestrator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/final-live-3859-20260823
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify immutable candidate boundary and exact main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          echo 'FINAL_LIVE_MAIN_BOUNDARY=PASS'
+
+      - name: Dispatch canonical deploy and sequential acceptance gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_run_id() {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --branch main --event workflow_dispatch --limit 30 --json databaseId,headSha \
+              | jq -r --arg sha "$CANDIDATE_SHA" '[.[] | select(.headSha == $sha) | .databaseId] | max // 0'
+          }
+
+          wait_new_run() {
+            local workflow="$1" before="$2" run_id=''
+            for _ in $(seq 1 60); do
+              run_id="$(latest_run_id "$workflow")"
+              if [[ "$run_id" =~ ^[0-9]+$ ]] && [ "$run_id" -gt "$before" ]; then
+                echo "$run_id"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "RUN_NOT_FOUND:$workflow" >&2
+            return 1
+          }
+
+          wait_success() {
+            local run_id="$1" label="$2"
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+            conclusion="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+            test "$conclusion" = success
+            echo "${label}_RUN_ID=${run_id}"
+          }
+
+          dispatch_json() {
+            local workflow="$1" json="$2"
+            printf '%s' "$json" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+          }
+
+          DEPLOY_WF='deploy-gcp-staging-canonical.yml'
+          before="$(latest_run_id "$DEPLOY_WF")"
+          payload="$(jq -nc --arg sha "$CANDIDATE_SHA" --arg issue "$EVIDENCE_ISSUE" '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:$issue}}')"
+          dispatch_json "$DEPLOY_WF" "$payload"
+          DEPLOY_RUN_ID="$(wait_new_run "$DEPLOY_WF" "$before")"
+          wait_success "$DEPLOY_RUN_ID" 'CANONICAL_DEPLOY'
+
+          # The canonical deploy publishes a sanitized manifest to the evidence issue.
+          IMAGE_DIGEST=''
+          for _ in $(seq 1 30); do
+            BODY="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+              | jq -rs --arg sha "$CANDIDATE_SHA" '[.[][] | select((.body // "") | contains("Canonical staging deploy — PASS")) | select((.body // "") | contains($sha))] | last | .body // empty')"
+            IMAGE_DIGEST="$(printf '%s' "$BODY" | grep -oE 'sha256:[0-9a-f]{64}' | head -n1 || true)"
+            [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] && break
+            sleep 5
+          done
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "FINAL_IMAGE_DIGEST=$IMAGE_DIGEST"
+
+          POLICY_SHA="$(git show "$CANDIDATE_SHA:infra/observability/staging-runtime-observability-policy.json" | sha256sum | awk '{print $1}')"
+          SYNTH_SHA="$(git show "$CANDIDATE_SHA:infra/observability/staging-synthetic-alert-policy.json" | sha256sum | awk '{print $1}')"
+
+          CAP_WF='staging-runtime-observability.yml'
+          before="$(latest_run_id "$CAP_WF")"
+          payload="$(jq -nc --arg p "$POLICY_SHA" --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" '{ref:"main",inputs:{expected_policy_sha256:$p,expected_candidate_sha:$sha,expected_image_digest:$digest,run_capacity:"true"}}')"
+          dispatch_json "$CAP_WF" "$payload"
+          CAP_RUN_ID="$(wait_new_run "$CAP_WF" "$before")"
+          wait_success "$CAP_RUN_ID" 'CAPACITY_READINESS'
+
+          ALERT_WF='staging-reliability-alerts.yml'
+          before="$(latest_run_id "$ALERT_WF")"
+          payload="$(jq -nc --arg sha "$CANDIDATE_SHA" --arg p "$POLICY_SHA" '{ref:"main",inputs:{expected_source_sha:$sha,expected_policy_sha256:$p}}')"
+          dispatch_json "$ALERT_WF" "$payload"
+          ALERT_RUN_ID="$(wait_new_run "$ALERT_WF" "$before")"
+          wait_success "$ALERT_RUN_ID" 'RELIABILITY_ALERTS'
+
+          SYNTH_WF='staging-synthetic-alert.yml'
+          before="$(latest_run_id "$SYNTH_WF")"
+          payload="$(jq -nc --arg p "$SYNTH_SHA" '{ref:"main",inputs:{expected_policy_sha256:$p}}')"
+          dispatch_json "$SYNTH_WF" "$payload"
+          SYNTH_RUN_ID="$(wait_new_run "$SYNTH_WF" "$before")"
+          wait_success "$SYNTH_RUN_ID" 'SYNTHETIC_ALERT'
+
+          printf 'FINAL_LIVE_CHAIN=PASS\nCANDIDATE_SHA=%s\nIMAGE_DIGEST=%s\nDEPLOY_RUN_ID=%s\nCAPACITY_RUN_ID=%s\nALERT_RUN_ID=%s\nSYNTHETIC_RUN_ID=%s\n' \
+            "$CANDIDATE_SHA" "$IMAGE_DIGEST" "$DEPLOY_RUN_ID" "$CAP_RUN_ID" "$ALERT_RUN_ID" "$SYNTH_RUN_ID"
