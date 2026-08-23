@@ -35,6 +35,20 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('steps.config.outputs.deployer_sa');
   });
 
+  it('uses an attestation-capable BuildKit builder without dropping provenance or SBOM', () => {
+    const setupBuildx = workflow.indexOf('Setup Docker Buildx for attestations');
+    const build = workflow.indexOf('Build push and resolve immutable candidate digest');
+
+    expect(setupBuildx).toBeGreaterThanOrEqual(0);
+    expect(build).toBeGreaterThan(setupBuildx);
+    expect(workflow).toContain(
+      'docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c',
+    );
+    expect(workflow).toContain('driver: docker-container');
+    expect(workflow).toContain('--provenance=mode=max');
+    expect(workflow).toContain('--sbom=true');
+  });
+
   it('has no production coordinate dependency or provider activation', () => {
     expect(workflow).not.toContain('PRODUCTION_GCP_');
     expect(workflow).not.toContain('toca-mcp-production');
