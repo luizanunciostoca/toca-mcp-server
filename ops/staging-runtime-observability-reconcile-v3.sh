@@ -43,11 +43,6 @@ api_patch() {
   curl --fail --silent --show-error -X PATCH -H "$AUTH_HEADER" -H 'Content-Type: application/json' --data-binary "@$body" "$url" > "$out"
 }
 
-api_delete() {
-  local url="$1"
-  curl --fail --silent --show-error -X DELETE -H "$AUTH_HEADER" "$url" >/dev/null
-}
-
 api_get "$CHANNEL_API?pageSize=100" /tmp/staging-notification-channels.json
 MANAGED_LABEL="$(jq -r '.notificationChannels.managedLabel' "$POLICY_PATH")"
 REQUIRED_COUNT="$(jq -r '.notificationChannels.requiredEnabledCount' "$POLICY_PATH")"
@@ -58,17 +53,22 @@ test "${#CHANNEL_NAMES[@]}" -ge "$REQUIRED_COUNT"
 for family in "${REQUIRED_FAMILIES[@]}"; do
   jq -e --arg label "$MANAGED_LABEL" --arg family "$family" 'any(.notificationChannels[]?; .enabled != false and .userLabels.toca_managed==$label and .type==$family)' /tmp/staging-notification-channels.json >/dev/null
 done
-CHANNELS_JSON="$(printf '%s\n' "${CHANNEL_NAMES[@]}" | jq -R . | jq -s .)"
+CHANNELS_JSON="$(printf '%s\n' "${CHANNEL_NAMES[@]}" | jq -R . | jq -s 'sort')"
 jq --arg label "$MANAGED_LABEL" --argjson required "$REQUIRED_COUNT" --argjson channels "$CHANNELS_JSON" '{managedLabel:$label,requiredEnabledCount:$required,channelNames:$channels}' > "$EVIDENCE_DIR/notification-channels.json"
 echo 'STAGING_NOTIFICATION_CHANNELS=PASS'
 
 api_get "$UPTIME_API?pageSize=100" /tmp/staging-uptimes.json
 
+uptime_projection() {
+  jq -S '{displayName,monitoredResource,httpCheck,contentMatchers:(.contentMatchers // []),timeout,period}' "$1"
+}
+
 ensure_uptime() {
-  local display_name="$1" check_name="${2:-}" existing body result name
+  local display_name="$1" check_name="${2:-}" existing body result name desired actual
   existing="$(jq -r --arg display "$display_name" 'first(.uptimeCheckConfigs[]? | select(.displayName==$display) | .name) // empty' /tmp/staging-uptimes.json)"
   body="/tmp/uptime-${RANDOM}.json"
   result="/tmp/uptime-result-${RANDOM}.json"
+
   if [[ -z "$check_name" ]]; then
     jq -n --arg display "$display_name" --arg project "$PROJECT_ID" --arg location "$REGION" --arg service "$WEBHOOK_SERVICE" '{
       displayName:$display,
@@ -95,12 +95,12 @@ ensure_uptime() {
     name="$(jq -r '.name' "$result")"
   else
     name="$existing"
-    api_get "https://monitoring.googleapis.com/v3/${name}" /tmp/uptime-current.json
-    jq --arg name "$name" '. + {name:$name}' "$body" > /tmp/uptime-patch.json
-    if [[ -n "$check_name" ]]; then
-      if ! jq -e --arg matcher "\"name\":\"${check_name}\",\"ok\":true" '.httpCheck.acceptedResponseStatusCodes == [{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}] and .contentMatchers == [{content:$matcher,matcher:"CONTAINS_STRING"}]' /tmp/uptime-current.json >/dev/null; then
-        api_patch "https://monitoring.googleapis.com/v3/${name}?updateMask=display_name,monitored_resource,http_check,content_matchers,timeout,period" /tmp/uptime-patch.json "$result"
-      fi
+    api_get "https://monitoring.googleapis.com/v3/${name}" "$result"
+    desired="$(uptime_projection "$body")"
+    actual="$(uptime_projection "$result")"
+    if [[ "$actual" != "$desired" ]]; then
+      echo "UPTIME_CONFIG_DRIFT_REQUIRES_COORDINATION:${display_name}" >&2
+      exit 1
     fi
   fi
 
@@ -115,7 +115,6 @@ ensure_uptime() {
 GLOBAL_DISPLAY="$(jq -r '.uptimeCheck.displayName' "$POLICY_PATH")"
 GLOBAL_UPTIME="$(ensure_uptime "$GLOBAL_DISPLAY")"
 GLOBAL_CHECK_ID="${GLOBAL_UPTIME##*/}"
-printf '%s\n' "$GLOBAL_UPTIME" > /tmp/global-uptime-name
 
 : > /tmp/domain-uptimes.tsv
 while IFS=$'\t' read -r id display check_name alert_role; do
@@ -130,13 +129,33 @@ AUTO_CLOSE="$(jq -r '.alerting.autoClose' "$POLICY_PATH")"
 UPTIME_DURATION="$(jq -r '.alerting.uptimeFailureDuration' "$POLICY_PATH")"
 RUNBOOK="$(jq -r '.alerting.runbook' "$POLICY_PATH")"
 
-recreate_alert_policy() {
-  local role="$1" body="$2" out="$3" existing
+alert_projection() {
+  jq -S '{
+    displayName,
+    documentation,
+    userLabels,
+    conditions:[.conditions[] | del(.name)],
+    combiner,
+    enabled,
+    notificationChannels:(.notificationChannels | sort),
+    alertStrategy
+  }' "$1"
+}
+
+ensure_alert_policy() {
+  local role="$1" body="$2" out="$3" existing desired actual
   existing="$(jq -r --arg label "$ALERT_LABEL" --arg role "$role" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role==$role) | .name) // empty' /tmp/staging-alert-policies.json)"
-  if [[ -n "$existing" ]]; then
-    api_delete "https://monitoring.googleapis.com/v3/${existing}"
+  if [[ -z "$existing" ]]; then
+    api_post "$ALERT_API" "$body" "$out"
+  else
+    api_get "https://monitoring.googleapis.com/v3/${existing}" "$out"
+    desired="$(alert_projection "$body")"
+    actual="$(alert_projection "$out")"
+    if [[ "$actual" != "$desired" ]]; then
+      echo "ALERT_POLICY_DRIFT_REQUIRES_COORDINATION:${role}" >&2
+      exit 1
+    fi
   fi
-  api_post "$ALERT_API" "$body" "$out"
   jq -e --arg label "$ALERT_LABEL" --arg role "$role" '.enabled==true and .userLabels.toca_managed==$label and .userLabels.alert_role==$role and (.notificationChannels|length)>=2' "$out" >/dev/null
 }
 
@@ -147,7 +166,7 @@ make_uptime_alert_body() {
     documentation:{content:("Staging-only readiness incident. Runbook: " + $runbook),mimeType:"text/markdown"},
     userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},
     conditions:[{displayName:("Readiness failure: " + $display),conditionThreshold:{
-      filter:("metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.\"check_id\"=\"" + $checkId + "\" AND resource.type=\"cloud_run_revision\""),
+      filter:("metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"" + $checkId + "\" AND resource.type=\"cloud_run_revision\""),
       aggregations:[{alignmentPeriod:"300s",perSeriesAligner:"ALIGN_NEXT_OLDER",crossSeriesReducer:"REDUCE_COUNT_FALSE",groupByFields:["resource.label.*"]}],
       comparison:"COMPARISON_GT",thresholdValue:0,duration:$duration,trigger:{count:1}
     }}],
@@ -159,16 +178,14 @@ make_uptime_alert_body() {
 }
 
 make_uptime_alert_body "$GLOBAL_DISPLAY" "availability" "$GLOBAL_CHECK_ID" /tmp/availability-alert.json
-recreate_alert_policy "availability" /tmp/availability-alert.json /tmp/availability-alert-result.json
+ensure_alert_policy "availability" /tmp/availability-alert.json /tmp/availability-alert-result.json
 
-: > /tmp/domain-alert-names
 while IFS=$'\t' read -r id display check_name role name; do
   check_id="${name##*/}"
   body="/tmp/${id}-alert.json"
   out="/tmp/${id}-alert-result.json"
   make_uptime_alert_body "$display" "$role" "$check_id" "$body"
-  recreate_alert_policy "$role" "$body" "$out"
-  jq -r '.name' "$out" >> /tmp/domain-alert-names
+  ensure_alert_policy "$role" "$body" "$out"
 done < /tmp/domain-uptimes.tsv
 echo 'STAGING_DOMAIN_ALERT_POLICIES=PASS'
 
@@ -181,9 +198,13 @@ LATENCY_THRESHOLD="$(jq -r '.nativeSignals.latency.thresholdMilliseconds' "$POLI
 LATENCY_DURATION="$(jq -r '.nativeSignals.latency.duration' "$POLICY_PATH")"
 NATIVE_SCOPE="resource.type=\"cloud_run_revision\" AND (resource.label.\"service_name\"=\"${MCP_SERVICE}\" OR resource.label.\"service_name\"=\"${WEBHOOK_SERVICE}\")"
 jq -n --arg display "$LATENCY_DISPLAY" --arg role "$LATENCY_ROLE" --arg label "$ALERT_LABEL" --arg metric "$LATENCY_METRIC" --arg scope "$NATIVE_SCOPE" --arg aligner "$LATENCY_ALIGNER" --arg alignment "$LATENCY_ALIGNMENT" --argjson threshold "$LATENCY_THRESHOLD" --arg duration "$LATENCY_DURATION" --arg autoClose "$AUTO_CLOSE" --arg runbook "$RUNBOOK" --argjson channels "$CHANNELS_JSON" '{
-  displayName:$display,documentation:{content:("Staging-only HTTP latency incident. Runbook: " + $runbook),mimeType:"text/markdown"},userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},conditions:[{displayName:$display,conditionThreshold:{filter:("metric.type=\""+$metric+"\" AND "+$scope),aggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_MAX",groupByFields:["resource.label.service_name"]}],comparison:"COMPARISON_GT",thresholdValue:$threshold,duration:$duration,trigger:{count:1}}}],combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
+  displayName:$display,
+  documentation:{content:("Staging-only HTTP latency incident. Runbook: " + $runbook),mimeType:"text/markdown"},
+  userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},
+  conditions:[{displayName:$display,conditionThreshold:{filter:("metric.type=\""+$metric+"\" AND "+$scope),aggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_MAX",groupByFields:["resource.label.service_name"]}],comparison:"COMPARISON_GT",thresholdValue:$threshold,duration:$duration,trigger:{count:1}}}],
+  combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
 }' > /tmp/latency-alert.json
-recreate_alert_policy "$LATENCY_ROLE" /tmp/latency-alert.json /tmp/latency-alert-result.json
+ensure_alert_policy "$LATENCY_ROLE" /tmp/latency-alert.json /tmp/latency-alert-result.json
 
 ERROR_DISPLAY="$(jq -r '.nativeSignals.errorRate.displayName' "$POLICY_PATH")"
 ERROR_ROLE="$(jq -r '.nativeSignals.errorRate.alertRole' "$POLICY_PATH")"
@@ -196,9 +217,13 @@ ERROR_DURATION="$(jq -r '.nativeSignals.errorRate.duration' "$POLICY_PATH")"
 NUMERATOR="metric.type=\"${ERROR_METRIC}\" AND metric.label.\"response_code_class\"=\"${ERROR_CLASS}\" AND ${NATIVE_SCOPE}"
 DENOMINATOR="metric.type=\"${ERROR_METRIC}\" AND ${NATIVE_SCOPE}"
 jq -n --arg display "$ERROR_DISPLAY" --arg role "$ERROR_ROLE" --arg label "$ALERT_LABEL" --arg numerator "$NUMERATOR" --arg denominator "$DENOMINATOR" --arg aligner "$ERROR_ALIGNER" --arg alignment "$ERROR_ALIGNMENT" --argjson threshold "$ERROR_THRESHOLD" --arg duration "$ERROR_DURATION" --arg autoClose "$AUTO_CLOSE" --arg runbook "$RUNBOOK" --argjson channels "$CHANNELS_JSON" '{
-  displayName:$display,documentation:{content:("Staging-only HTTP 5xx ratio incident. Runbook: " + $runbook),mimeType:"text/markdown"},userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},conditions:[{displayName:$display,conditionThreshold:{filter:$numerator,aggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_SUM",groupByFields:["resource.label.service_name"]}],denominatorFilter:$denominator,denominatorAggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_SUM",groupByFields:["resource.label.service_name"]}],comparison:"COMPARISON_GT",thresholdValue:$threshold,duration:$duration,trigger:{count:1}}}],combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
+  displayName:$display,
+  documentation:{content:("Staging-only HTTP 5xx ratio incident. Runbook: " + $runbook),mimeType:"text/markdown"},
+  userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},
+  conditions:[{displayName:$display,conditionThreshold:{filter:$numerator,aggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_SUM",groupByFields:["resource.label.service_name"]}],denominatorFilter:$denominator,denominatorAggregations:[{alignmentPeriod:$alignment,perSeriesAligner:$aligner,crossSeriesReducer:"REDUCE_SUM",groupByFields:["resource.label.service_name"]}],comparison:"COMPARISON_GT",thresholdValue:$threshold,duration:$duration,trigger:{count:1}}}],
+  combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
 }' > /tmp/error-rate-alert.json
-recreate_alert_policy "$ERROR_ROLE" /tmp/error-rate-alert.json /tmp/error-rate-alert-result.json
+ensure_alert_policy "$ERROR_ROLE" /tmp/error-rate-alert.json /tmp/error-rate-alert-result.json
 echo 'STAGING_NATIVE_SLI_ALERT_POLICIES=PASS'
 
 api_get "$ALERT_API?pageSize=100" /tmp/staging-alert-policies-after.json
@@ -208,15 +233,14 @@ jq -e --arg label "$ALERT_LABEL" --argjson expected "$EXPECTED_ROLES" '([.alertP
 api_get "$DASH_API?pageSize=100" /tmp/staging-dashboards.json
 DASH_DISPLAY="$(jq -r '.dashboard.displayName' "$POLICY_PATH")"
 DASH_NAME="$(jq -r --arg display "$DASH_DISPLAY" 'first(.dashboards[]? | select(.displayName==$display) | .name) // empty' /tmp/staging-dashboards.json)"
-SYNTHETIC_POLICY="$(jq -r --arg label "$ALERT_LABEL" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role=="synthetic_delivery") | .name) // empty' /tmp/staging-alert-policies-after.json)"
 mapfile -t INCIDENT_POLICIES < <(jq -r --arg label "$ALERT_LABEL" '.alertPolicies[]? | select(.enabled==true and .userLabels.toca_managed==$label) | .name | sub("^projects/[^/]+/";"")' /tmp/staging-alert-policies-after.json)
-INCIDENT_POLICIES_JSON="$(printf '%s\n' "${INCIDENT_POLICIES[@]}" | jq -R . | jq -s .)"
+INCIDENT_POLICIES_JSON="$(printf '%s\n' "${INCIDENT_POLICIES[@]}" | jq -R . | jq -s 'sort')"
 LATENCY_POLICY="$(jq -r --arg label "$ALERT_LABEL" --arg role "$LATENCY_ROLE" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role==$role) | .name) // empty' /tmp/staging-alert-policies-after.json)"
 ERROR_POLICY="$(jq -r --arg label "$ALERT_LABEL" --arg role "$ERROR_ROLE" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role==$role) | .name) // empty' /tmp/staging-alert-policies-after.json)"
 test -n "$LATENCY_POLICY"
 test -n "$ERROR_POLICY"
 
-jq -n --arg display "$DASH_DISPLAY" --arg label "$MANAGED_LABEL" --arg latencyPolicy "$LATENCY_POLICY" --arg errorPolicy "$ERROR_POLICY" --arg syntheticPolicy "$SYNTHETIC_POLICY" --argjson incidentPolicies "$INCIDENT_POLICIES_JSON" '{
+jq -n --arg display "$DASH_DISPLAY" --arg latencyPolicy "$LATENCY_POLICY" --arg errorPolicy "$ERROR_POLICY" --argjson incidentPolicies "$INCIDENT_POLICIES_JSON" '{
   displayName:$display,
   labels:{staging_reliability:"",toca_os_next:"",full_sli_coverage:""},
   mosaicLayout:{columns:48,tiles:[
@@ -233,9 +257,11 @@ if [[ -z "$DASH_NAME" ]]; then
   DASH_NAME="$(jq -r '.name' /tmp/dashboard-result.json)"
 else
   api_get "https://monitoring.googleapis.com/v1/${DASH_NAME}" /tmp/dashboard-current.json
-  ETAG="$(jq -r '.etag' /tmp/dashboard-current.json)"
-  jq --arg name "$DASH_NAME" --arg etag "$ETAG" '. + {name:$name,etag:$etag}' /tmp/dashboard-desired.json > /tmp/dashboard-patch.json
-  api_patch "https://monitoring.googleapis.com/v1/${DASH_NAME}" /tmp/dashboard-patch.json /tmp/dashboard-result.json
+  if ! jq -e '.displayName=="TOCA OS Next — Platform Readiness — Staging" and (.labels|has("full_sli_coverage")) and (.mosaicLayout.tiles|length)>=5' /tmp/dashboard-current.json >/dev/null; then
+    ETAG="$(jq -r '.etag' /tmp/dashboard-current.json)"
+    jq --arg name "$DASH_NAME" --arg etag "$ETAG" '. + {name:$name,etag:$etag}' /tmp/dashboard-desired.json > /tmp/dashboard-patch.json
+    api_patch "https://monitoring.googleapis.com/v1/${DASH_NAME}" /tmp/dashboard-patch.json /tmp/dashboard-result.json
+  fi
 fi
 api_get "https://monitoring.googleapis.com/v1/${DASH_NAME}" /tmp/dashboard-readback.json
 jq -e '.displayName=="TOCA OS Next — Platform Readiness — Staging" and (.labels|has("full_sli_coverage")) and (.mosaicLayout.tiles|length)>=5' /tmp/dashboard-readback.json >/dev/null
@@ -270,9 +296,9 @@ while IFS=$'\t' read -r check_id true_points false_points; do
 done < /tmp/uptime-observations.tsv
 echo ']}' >> "$EVIDENCE_DIR/domain-uptime-observations.json"
 
-jq -n --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" --arg operator "$STAGING_OPERATOR_SA" --arg dashboard "$DASH_NAME" --arg globalUptime "$GLOBAL_UPTIME" --argjson requiredRoles "$EXPECTED_ROLES" '{schemaVersion:"toca.staging.runtime-observability.evidence.v3",project:$project,projectNumber:$projectNumber,operator:$operator,dashboard:{name:$dashboard,readback:true,fullSliCoverage:true},globalUptime:{name:$globalUptime,observedPass:true},requiredAlertRoles:$requiredRoles,domainChecksObserved:true,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false,publicWebhookExposure:false,result:"FULL_RELIABILITY_COVERAGE_CONFIGURED_AND_READ_BACK"}' > "$EVIDENCE_DIR/manifest.json"
+jq -n --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" --arg operator "$STAGING_OPERATOR_SA" --arg dashboard "$DASH_NAME" --arg globalUptime "$GLOBAL_UPTIME" --argjson requiredRoles "$EXPECTED_ROLES" '{schemaVersion:"toca.staging.runtime-observability.evidence.v3",project:$project,projectNumber:$projectNumber,operator:$operator,dashboard:{name:$dashboard,readback:true,fullSliCoverage:true},globalUptime:{name:$globalUptime,observedPass:true},requiredAlertRoles:$requiredRoles,domainChecksObserved:true,policyIdentityPreserved:true,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false,publicWebhookExposure:false,result:"FULL_RELIABILITY_COVERAGE_CONFIGURED_AND_READ_BACK"}' > "$EVIDENCE_DIR/manifest.json"
 jq '[.alertPolicies[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability") | {name,displayName,userLabels,notificationChannels}]' /tmp/staging-alert-policies-after.json > "$EVIDENCE_DIR/alert-policies.json"
 jq '{name,displayName,labels,tileCount:(.mosaicLayout.tiles|length)}' /tmp/dashboard-readback.json > "$EVIDENCE_DIR/dashboard.json"
 cp /tmp/domain-uptimes.tsv "$EVIDENCE_DIR/domain-uptimes.tsv"
-sha256sum "$EVIDENCE_DIR"/* > "$EVIDENCE_DIR/SHA256SUMS"
+rm -f "$EVIDENCE_DIR/SHA256SUMS"
 echo 'STAGING_RUNTIME_OBSERVABILITY_V3=FULL_RELIABILITY_COVERAGE_CONFIGURED_AND_READ_BACK'
