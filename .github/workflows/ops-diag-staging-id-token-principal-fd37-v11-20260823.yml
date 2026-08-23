@@ -1,5 +1,6 @@
 name: TEMP Staging ID Token Principal fd37 V11 2026-08-23
 
+# synchronize trigger after workflow creation
 on:
   pull_request:
     branches: [main]
