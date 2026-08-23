@@ -100,8 +100,8 @@ describe('staging runtime observability coverage contract', () => {
     expect(script).toContain(
       'contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}]',
     );
+    expect(script).toContain('LATENCY_ALIGNER="$(jq -r');
     expect(script).toContain('denominatorFilter:$denominator');
-    expect(script).toContain('ALIGN_PERCENTILE_95');
     expect(script).not.toContain('gcloud sql');
     expect(script).not.toContain('gcloud run services update');
     expect(script).not.toContain('gcloud run services replace');
