@@ -1,0 +1,169 @@
+name: TEMP Staging Private Invoke V11 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose-private-invoke:
+    if: github.head_ref == 'ops/diag-staging-private-invoke-v11-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          test "$GCP_REGION" = 'southamerica-east1'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Create isolated private service and bind staging deployer
+        id: create
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIAG_SERVICE='toca-diag-private-fd379915'
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com'
+          if gcloud run services describe "$DIAG_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+            echo 'Refusing to reuse existing diagnostic service' >&2
+            exit 1
+          fi
+
+          DEPLOY_RESULT=PASS
+          if ! gcloud run deploy "$DIAG_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image 'us-docker.pkg.dev/cloudrun/container/hello' \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --ingress all \
+            --min-instances 0 \
+            --max-instances 1 \
+            --memory 256Mi \
+            --cpu 1 \
+            --quiet > /tmp/private-deploy.out 2>/tmp/private-deploy.err; then
+            DEPLOY_RESULT=FAIL
+          fi
+          echo "deploy_result=$DEPLOY_RESULT" >> "$GITHUB_OUTPUT"
+
+          IAM_RESULT=not_run
+          SERVICE_URL=''
+          if [[ "$DEPLOY_RESULT" == PASS ]]; then
+            SERVICE_URL="$(gcloud run services describe "$DIAG_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+            test -n "$SERVICE_URL"
+            IAM_RESULT=PASS
+            if ! gcloud run services add-iam-policy-binding "$DIAG_SERVICE" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --member="serviceAccount:$GCP_DEPLOY_SERVICE_ACCOUNT" \
+              --role='roles/run.invoker' \
+              --quiet > /tmp/private-iam.out 2>/tmp/private-iam.err; then
+              IAM_RESULT=FAIL
+            fi
+          fi
+          echo "iam_result=$IAM_RESULT" >> "$GITHUB_OUTPUT"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint staging deployer ID token for fresh private service
+        if: steps.create.outputs.deploy_result == 'PASS' && steps.create.outputs.iam_result == 'PASS'
+        id: token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.create.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Probe fresh private service and publish sanitized result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+          SERVICE_URL: ${{ steps.create.outputs.service_url }}
+          DEPLOY_RESULT: ${{ steps.create.outputs.deploy_result }}
+          IAM_RESULT: ${{ steps.create.outputs.iam_result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP_RESULT=not_run
+          CONTENT_TYPE=not_run
+          REQUEST_LOG_COUNT=not_run
+          EFFECTIVE_PERMS='[]'
+          if [[ "$DEPLOY_RESULT" == PASS && "$IAM_RESULT" == PASS && -n "${ID_TOKEN:-}" ]]; then
+            HTTP_RESULT="$(curl --silent --show-error --output /tmp/private-body --write-out '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/" || true)"
+            CONTENT_TYPE="$(curl --silent --show-error -I -H "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]+:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' || true)"
+            sleep 2
+            REQUEST_LOG_COUNT="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"toca-diag-private-fd379915\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=20 --format=json 2>/dev/null | jq 'length' || echo unknown)"
+            ACCESS_TOKEN="$(gcloud auth print-access-token)"
+            EFFECTIVE_PERMS="$(curl --fail --silent --show-error --request POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data '{"permissions":["run.routes.invoke","run.services.get"]}' "https://run.googleapis.com/v2/projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/toca-diag-private-fd379915:testIamPermissions" | jq -c '.permissions // [] | sort')"
+            unset ACCESS_TOKEN
+          fi
+          cat > /tmp/comment.md <<EOF
+          STAGING_PRIVATE_INVOKE_DIAG_V11 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          EPHEMERAL_SERVICE=toca-diag-private-fd379915
+          RUNTIME_IDENTITY=CANONICAL_STAGING_MCP_SA
+          DEPLOY_RESULT=${DEPLOY_RESULT:-unknown}
+          INVOKER_BINDING_RESULT=${IAM_RESULT:-unknown}
+          EFFECTIVE_PERMISSIONS=${EFFECTIVE_PERMS}
+          AUTHENTICATED_HTTP_RESULT=${HTTP_RESULT}
+          CONTENT_TYPE=${CONTENT_TYPE:-unknown}
+          REQUEST_LOG_COUNT=${REQUEST_LOG_COUNT}
+          NO_SECRETS=true
+          NO_DATABASE=true
+          NO_EXTERNAL_PROVIDERS=true
+          PRODUCTION_ACCESS=false
+          CANONICAL_SERVICE_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
+
+      - name: Delete isolated diagnostic service
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_REGION" = 'southamerica-east1'
+          if gcloud run services describe toca-diag-private-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+            gcloud run services delete toca-diag-private-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          fi
+          if gcloud run services describe toca-diag-private-fd379915 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+            echo 'Diagnostic service cleanup failed' >&2
+            exit 1
+          fi
+          echo 'DIAGNOSTIC_SERVICE_CLEANUP=PASS'
