@@ -1,0 +1,55 @@
+name: TEMP Patch Unsupported Cloud Run Readiness 2026-08-23
+
+on:
+  push:
+    branches:
+      - fix/staging-gcloud-readiness-20260823
+    paths:
+      - .github/workflows/tmp-patch-readiness-20260823.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/staging-gcloud-readiness-20260823
+          fetch-depth: 1
+
+      - name: Remove unsupported flag and add regression coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/deploy-gcp-staging-canonical.yml')
+          text = workflow_path.read_text()
+          line = "            --readiness-probe 'httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' \\\n"
+          count = text.count(line)
+          if count != 2:
+              raise SystemExit(f'expected 2 readiness-probe lines, found {count}')
+          workflow_path.write_text(text.replace(line, ''))
+
+          test_path = Path('test/gcp-staging-canonical-workflow.test.ts')
+          test_text = test_path.read_text()
+          anchor = "  it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {\n"
+          if anchor not in test_text:
+              raise SystemExit('test anchor not found')
+          regression = """  it('does not use unsupported Cloud Run readiness-probe and keeps readiness fail-closed', () => {\n    expect(workflow).not.toContain('--readiness-probe');\n    expect(workflow).toContain(\"--startup-probe 'httpGet.path=/readyz\");\n    expect(workflow).toContain(\n      'Verify candidate health readiness and public route confinement before traffic',\n    );\n    expect(workflow).toContain('$MCP_URL/readyz');\n    expect(workflow).toContain('$WEBHOOK_URL/readyz');\n    expect(workflow).toContain(\".status == \\\"ready\\\" and (.checks | all(.ok == true))\");\n  });\n\n"""
+          if "does not use unsupported Cloud Run readiness-probe" not in test_text:
+              test_text = test_text.replace(anchor, regression + anchor)
+          test_path.write_text(test_text)
+          PY
+          git diff --check
+          git add .github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts
+          test "$(git diff --cached --numstat | wc -l)" -eq 2
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(staging): remove unsupported Cloud Run readiness flag'
+          git push origin HEAD:fix/staging-gcloud-readiness-20260823
