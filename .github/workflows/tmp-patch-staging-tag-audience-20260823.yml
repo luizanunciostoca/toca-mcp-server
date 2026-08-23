@@ -1,0 +1,74 @@
+name: TEMP Patch staging traffic-tag token audience 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'fix/staging-tag-audience-20260823' && !contains(github.event.pull_request.head.sha, 'never')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/staging-tag-audience-20260823
+          fetch-depth: 1
+
+      - name: Apply exact audience patch and focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/deploy-gcp-staging-canonical.yml')
+          workflow = workflow_path.read_text()
+
+          old = '''          test -n "$MCP_URL"; test -n "$WEBHOOK_URL"\n          echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"\n          echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"\n          echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"\n          echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"\n          echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"\n'''
+          new = '''          test -n "$MCP_URL"; test -n "$WEBHOOK_URL"\n          MCP_SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"\n          test -n "$MCP_SERVICE_URL"\n          [[ "$MCP_SERVICE_URL" == https://*.run.app ]]\n          test "$MCP_SERVICE_URL" != "$MCP_URL"\n          echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"\n          echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"\n          echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"\n          echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"\n          echo "mcp_tag_url=$MCP_URL" >> "$GITHUB_OUTPUT"\n          echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"\n'''
+          assert workflow.count(old) == 1
+          workflow = workflow.replace(old, new, 1)
+
+          old = '          id_token_audience: ${{ steps.candidate.outputs.mcp_url }}\n'
+          new = '          id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}\n'
+          assert workflow.count(old) == 1
+          workflow = workflow.replace(old, new, 1)
+          workflow_path.write_text(workflow)
+
+          test_path = Path('test/gcp-staging-canonical-workflow.test.ts')
+          test = test_path.read_text()
+          old = "    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');\n"
+          new = """    expect(workflow).toContain('echo \"mcp_tag_url=$MCP_URL\" >> \"$GITHUB_OUTPUT\"');\n    expect(workflow).toContain(\n      'echo \"mcp_service_url=$MCP_SERVICE_URL\" >> \"$GITHUB_OUTPUT\"',\n    );\n    expect(workflow).toContain(\n      'id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}',\n    );\n    expect(workflow).not.toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');\n"""
+          assert test.count(old) == 1
+          test = test.replace(old, new, 1)
+          marker = "  it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {\n"
+          addition = """  it('uses the canonical Cloud Run service URL as token audience while probing the tagged candidate URL', () => {\n    expect(workflow).toContain(\n      'MCP_SERVICE_URL=\"$(gcloud run services describe \"$GCP_CLOUD_RUN_MCP_SERVICE\"',\n    );\n    expect(workflow).toContain('test \"$MCP_SERVICE_URL\" != \"$MCP_URL\"');\n    expect(workflow).toContain('-H \"Authorization: Bearer $MCP_TOKEN\" \"$MCP_URL/healthz\"');\n    expect(workflow).toContain('-H \"Authorization: Bearer $MCP_TOKEN\" \"$MCP_URL/readyz\"');\n  });\n\n"""
+          assert test.count(marker) == 1
+          test = test.replace(marker, addition + marker, 1)
+          test_path.write_text(test)
+          PY
+
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm exec prettier --write test/gcp-staging-canonical-workflow.test.ts
+          git diff --check
+          pnpm vitest run test/gcp-staging-canonical-workflow.test.ts
+
+      - name: Persist validated snapshot outside workflow path
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp-staging-tag-audience
+          cp .github/workflows/deploy-gcp-staging-canonical.yml .tmp-staging-tag-audience/deploy-gcp-staging-canonical.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .tmp-staging-tag-audience/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'test(staging): persist validated service-audience patch snapshot [tag-audience-snapshot]'
+          git push origin HEAD:fix/staging-tag-audience-20260823
