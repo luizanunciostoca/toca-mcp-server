@@ -1,0 +1,48 @@
+name: Ops Final Second Wave Observer 2026-08-23
+
+on:
+  push:
+    branches: [ops/final-second-wave-live-20260823]
+    paths:
+      - '.github/workflows/ops-final-second-wave-observer-20260823.yml'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: ops-final-second-wave-observer-20260823
+  cancel-in-progress: true
+
+env:
+  FINAL_SHA: 771bb1f3c4cc625aa7a712af2a762c1191385756
+  ISSUE_NUMBER: '151'
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Observe final staging closeout runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report() {
+            local phase="$1"
+            local data
+            data="$(gh run list --repo "$GITHUB_REPOSITORY" --limit 100 --json databaseId,workflowName,headSha,headBranch,event,status,conclusion,url,createdAt | jq --arg sha "$FINAL_SHA" '[.[] | select(.headSha==$sha or .headBranch=="ops/final-second-wave-live-20260823") | select(.workflowName=="Ops Final Second Wave Staging Live 2026-08-23" or .workflowName=="Deploy TOCA MCP Next to GCP" or .workflowName=="Staging Runtime Capacity Observability" or .workflowName=="Staging Reliability Alerts" or .workflowName=="Staging Synthetic Alert Delivery")] | sort_by(.databaseId)')"
+            BODY="$(jq -r --arg phase "$phase" --arg sha "$FINAL_SHA" '"## Final staging observer — " + $phase + "\n\n`FINAL_SHA=" + $sha + "`\n\n```json\n" + (tojson) + "\n```"' <<<"$data")"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          }
+          report INITIAL
+          for attempt in $(seq 1 60); do
+            DATA="$(gh run list --repo "$GITHUB_REPOSITORY" --limit 100 --json databaseId,workflowName,headSha,headBranch,event,status,conclusion,url,createdAt | jq --arg sha "$FINAL_SHA" '[.[] | select(.headSha==$sha or .headBranch=="ops/final-second-wave-live-20260823") | select(.workflowName=="Ops Final Second Wave Staging Live 2026-08-23" or .workflowName=="Deploy TOCA MCP Next to GCP" or .workflowName=="Staging Runtime Capacity Observability" or .workflowName=="Staging Reliability Alerts" or .workflowName=="Staging Synthetic Alert Delivery")]')"
+            ORCH="$(jq '[.[] | select(.workflowName=="Ops Final Second Wave Staging Live 2026-08-23")] | length' <<<"$DATA")"
+            TERMINAL="$(jq '[.[] | select(.workflowName=="Ops Final Second Wave Staging Live 2026-08-23" and .status=="completed")] | length' <<<"$DATA")"
+            if [[ "$ORCH" -ge 1 && "$TERMINAL" -ge 1 ]]; then break; fi
+            sleep 30
+          done
+          report FINAL
