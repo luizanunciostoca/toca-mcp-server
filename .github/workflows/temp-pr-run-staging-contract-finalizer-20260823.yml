@@ -21,12 +21,20 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Apply permanent staging contract patch
+      - name: Apply permanent staging contract remediation
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/apply-staging-contract.py
-          python3 /tmp/apply-staging-contract.py
+          python3 -m py_compile \
+            ops/tmp-staging-contract-deploy-a.py \
+            ops/tmp-staging-contract-deploy-b.py \
+            ops/tmp-staging-contract-runtime.py \
+            ops/tmp-staging-contract-test.py
+          python3 ops/tmp-staging-contract-deploy-a.py
+          python3 ops/tmp-staging-contract-deploy-b.py
+          python3 ops/tmp-staging-contract-runtime.py
+          python3 ops/tmp-staging-contract-test.py
+          git diff --check
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -44,18 +52,38 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
-          pnpm exec prettier --write .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          pnpm exec prettier --write \
+            .github/workflows/deploy-gcp-staging-canonical.yml \
+            .github/workflows/staging-runtime-observability.yml \
+            test/gcp-staging-canonical-workflow.test.ts
           git diff --check
           pnpm exec vitest run test/gcp-staging-canonical-workflow.test.ts
 
-      - name: Commit only permanent remediation
+      - name: Commit permanent remediation with zero TEMP artifacts
         shell: bash
         run: |
           set -euo pipefail
           git rm .github/workflows/temp-finalize-staging-contract-20260823.yml
           git rm .github/workflows/temp-pr-run-staging-contract-finalizer-20260823.yml
           git rm .temp-finalize-staging-contract-trigger
-          git add .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          git rm ops/tmp-staging-contract-deploy-a.py
+          git rm ops/tmp-staging-contract-deploy-b.py
+          git rm ops/tmp-staging-contract-runtime.py
+          git rm ops/tmp-staging-contract-test.py
+
+          for forbidden in \
+            .github/workflows/ops-apply-staging-runtime-digest-rollback-20260823.yml \
+            .github/workflows/ops-run-staging-digest-rollback-patch-20260823.yml \
+            .github/workflows/ops-run-staging-digest-rollback-pr-20260823.yml \
+            .ops-trigger-staging-digest-rollback \
+            ops/tmp-apply-staging-digest-rollback.py; do
+            test ! -e "$forbidden"
+          done
+
+          git add \
+            .github/workflows/deploy-gcp-staging-canonical.yml \
+            .github/workflows/staging-runtime-observability.yml \
+            test/gcp-staging-canonical-workflow.test.ts
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
