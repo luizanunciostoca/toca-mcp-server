@@ -1,0 +1,449 @@
+name: Staging Runtime Capacity Observability
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_policy_sha256:
+        description: SHA-256 of infra/observability/staging-runtime-observability-policy.json
+        required: true
+        type: string
+      expected_candidate_sha:
+        description: Exact application/runtime candidate SHA expected in staging
+        required: true
+        type: string
+      expected_image_digest:
+        description: Exact immutable sha256 image digest expected in staging
+        required: true
+        type: string
+      run_capacity:
+        description: Run controlled read-only capacity sampling
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-runtime-capacity-observability
+  cancel-in-progress: false
+
+env:
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  CLOUD_SQL_INSTANCE: toca-mcp-next-staging-db
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
+  WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact workflow source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify immutable staging-only acceptance boundary
+        id: boundary
+        env:
+          EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          [[ "$EXPECTED_CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
+          test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
+          ACTUAL_CHECKOUT_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_CHECKOUT_SHA" = "$GITHUB_SHA"
+          jq -e '
+            .version == 3 and
+            .operation == "staging-runtime-capacity-observability-verification" and
+            .projectId == "toca-mcp-next-staging" and
+            .projectNumber == "729069789107" and
+            .productionProjectId == "toca-mcp-production" and
+            .productionProjectNumber == "990081828836" and
+            .region == "southamerica-east1" and
+            .operatorServiceAccount == "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com" and
+            .mcpService == "toca-mcp-next-staging" and
+            .webhookService == "toca-webhook-next-staging" and
+            .cloudSqlInstance == "toca-mcp-next-staging-db" and
+            .mcpRuntimeServiceAccount == "toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com" and
+            .webhookRuntimeServiceAccount == "toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com" and
+            .capacity.levels == [1,5,10,25] and
+            .capacity.requestsPerLevel == 50 and
+            .capacity.maxErrorRate == 0 and
+            .capacity.destructiveStress == false and
+            .forbid.productionAccess == true and
+            .forbid.productionMutation == true and
+            .forbid.providerMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.trafficMutation == true and
+            .forbid.cloudRunMutation == true and
+            .forbid.secretRead == true and
+            .forbid.secretMutation == true and
+            .forbid.destructiveStress == true
+          ' "$POLICY_PATH" >/dev/null
+          echo "actual_checkout_sha=$ACTUAL_CHECKOUT_SHA" >> "$GITHUB_OUTPUT"
+          echo "policy_sha256=$ACTUAL_POLICY_SHA256" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_ACCEPTANCE_BOUNDARY=PASS'
+
+      - name: Authenticate isolated staging operator only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify exact candidate revisions identities digests and traffic
+        id: runtime
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging-runtime-observability-evidence
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          inspect_service() {
+            local service="$1" expected_sa="$2" evidence="$3"
+            local service_json="/tmp/${service}-service.json"
+            local revision_json="/tmp/${service}-revision.json"
+            gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" --format=json > "$service_json"
+            local revision traffic_count traffic_sum
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' "$service_json")"
+            traffic_count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' "$service_json")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' "$service_json")"
+            test "$traffic_count" = 1
+            test "$traffic_sum" = 100
+            test -n "$revision"
+
+            gcloud run revisions describe "$revision" --project="$PROJECT_ID" --region="$REGION" --format=json > "$revision_json"
+            local release_sha runtime_sa image image_digest service_url
+            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "$revision_json")"
+            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "$revision_json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "$revision_json")"
+            image_digest="${image##*@}"
+            service_url="$(jq -r '.status.url // empty' "$service_json")"
+            test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"
+            test "$runtime_sa" = "$expected_sa"
+            test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"
+            [[ "$service_url" == https://*.run.app ]]
+
+            jq -n \
+              --arg service "$service" \
+              --arg revision "$revision" \
+              --arg releaseSha "$release_sha" \
+              --arg runtimeIdentity "$runtime_sa" \
+              --arg imageDigest "$image_digest" \
+              --arg serviceUrl "$service_url" \
+              '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageDigest:$imageDigest,serviceUrl:$serviceUrl}' \
+              > "staging-runtime-observability-evidence/${evidence}"
+            printf '%s\t%s\n' "$revision" "$service_url"
+          }
+
+          IFS=$'\t' read -r MCP_REVISION MCP_URL < <(inspect_service "$MCP_SERVICE" "$MCP_RUNTIME_SA" mcp-runtime.json)
+          IFS=$'\t' read -r WEBHOOK_REVISION WEBHOOK_URL < <(inspect_service "$WEBHOOK_SERVICE" "$WEBHOOK_RUNTIME_SA" webhook-runtime.json)
+          test -n "$MCP_REVISION"
+          test -n "$MCP_URL"
+          test -n "$WEBHOOK_REVISION"
+          test -n "$WEBHOOK_URL"
+          echo "mcp_revision=$MCP_REVISION" >> "$GITHUB_OUTPUT"
+          echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_revision=$WEBHOOK_REVISION" >> "$GITHUB_OUTPUT"
+          echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_EXACT_RUNTIME_IDENTITY=PASS'
+
+      - name: Mint MCP probe identity token through staging WIF
+        id: mcp_probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.mcp_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Mint webhook probe identity token through staging WIF
+        id: webhook_probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.webhook_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify health readiness and release runtime agreement
+        env:
+          MCP_URL: ${{ steps.runtime.outputs.mcp_url }}
+          WEBHOOK_URL: ${{ steps.runtime.outputs.webhook_url }}
+          MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
+          WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            local service="$1" base_url="$2" token="$3"
+            local request_id correlation_id
+            request_id="acceptance-${GITHUB_RUN_ID}-${service}-request"
+            correlation_id="acceptance-${GITHUB_RUN_ID}-${service}-correlation"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${token}" \
+              -H "X-Request-ID: ${request_id}" \
+              -H "X-Correlation-ID: ${correlation_id}" \
+              "${base_url}/health" > "staging-runtime-observability-evidence/${service}-healthz.json"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${token}" \
+              -H "X-Request-ID: ${request_id}-ready" \
+              -H "X-Correlation-ID: ${correlation_id}" \
+              "${base_url}/ready" > "staging-runtime-observability-evidence/${service}-readyz.json"
+            jq -e '.status == "ready" and (.checks | all(.ok == true))' \
+              "staging-runtime-observability-evidence/${service}-readyz.json" >/dev/null
+            unset token
+          }
+          probe mcp "$MCP_URL" "$MCP_TOKEN"
+          probe webhook "$WEBHOOK_URL" "$WEBHOOK_TOKEN"
+          echo 'STAGING_HEALTH_READY=PASS'
+
+      - name: Verify dashboard and authenticated uptime without mutation
+        id: observability
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v1/projects/${PROJECT_ID}/dashboards" > /tmp/dashboards.json
+          DASHBOARD_NAME="$(jq -r 'first(.dashboards[]? | select(.displayName == "TOCA OS Next — Platform Readiness — Staging") | .name) // empty' /tmp/dashboards.json)"
+          test -n "$DASHBOARD_NAME"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v1/${DASHBOARD_NAME}" > /tmp/dashboard.json
+          jq -e '.displayName == "TOCA OS Next — Platform Readiness — Staging" and (.labels | has("staging_reliability"))' /tmp/dashboard.json >/dev/null
+          jq '{name,displayName,labels,tileCount:(.mosaicLayout.tiles|length)}' /tmp/dashboard.json \
+            > staging-runtime-observability-evidence/dashboard.json
+
+          UPTIME_API="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$UPTIME_API" > /tmp/uptimes.json
+          UPTIME_NAME="$(jq -r 'first(.uptimeCheckConfigs[]? | select(.displayName == "TOCA Next Staging — Webhook Readiness") | .name) // empty' /tmp/uptimes.json)"
+          test -n "$UPTIME_NAME"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/${UPTIME_NAME}" > /tmp/uptime.json
+          jq -e '.httpCheck.path == "/ready" and .httpCheck.port == 443 and .httpCheck.useSsl == true and .httpCheck.serviceAgentAuthentication.type == "OIDC_TOKEN" and .period == "300s" and .timeout == "10s"' /tmp/uptime.json >/dev/null
+          CHECK_ID="${UPTIME_NAME##*/}"
+          START="$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          FILTER="metric.type = \"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id = \"${CHECK_ID}\" AND resource.type = \"cloud_run_revision\""
+          curl --fail --silent --show-error --get -H "Authorization: Bearer ${TOKEN}" \
+            --data-urlencode "filter=${FILTER}" \
+            --data-urlencode "interval.startTime=${START}" \
+            --data-urlencode "interval.endTime=${END}" \
+            --data-urlencode 'view=FULL' \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/timeSeries" > /tmp/uptime-series.json
+          TRUE_POINTS="$(jq '[.timeSeries[]?.points[]?.value.boolValue | select(. == true)] | length' /tmp/uptime-series.json)"
+          FALSE_POINTS="$(jq '[.timeSeries[]?.points[]?.value.boolValue | select(. == false)] | length' /tmp/uptime-series.json)"
+          test "$TRUE_POINTS" -ge 1
+          test "$FALSE_POINTS" = 0
+          jq -n \
+            --arg name "$UPTIME_NAME" \
+            --argjson truePoints "$TRUE_POINTS" \
+            --argjson falsePoints "$FALSE_POINTS" \
+            '{name:$name,authentication:"MONITORING_SERVICE_AGENT_OIDC",observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints}' \
+            > staging-runtime-observability-evidence/uptime-observation.json
+          echo "true_points=$TRUE_POINTS" >> "$GITHUB_OUTPUT"
+          echo "false_points=$FALSE_POINTS" >> "$GITHUB_OUTPUT"
+          unset TOKEN
+          echo 'STAGING_OBSERVABILITY_READBACK=PASS'
+
+      - name: Mint fresh MCP capacity identity token through staging WIF
+        if: ${{ inputs.run_capacity }}
+        id: capacity_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime.outputs.mcp_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Run controlled non-destructive capacity sampling
+        if: ${{ inputs.run_capacity }}
+        id: capacity
+        env:
+          MCP_URL: ${{ steps.runtime.outputs.mcp_url }}
+          TOKEN: ${{ steps.capacity_auth.outputs.id_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MCP_URL TOKEN
+          for warmup in $(seq 1 5); do
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready" >/dev/null
+          done
+
+          : > staging-runtime-observability-evidence/capacity.ndjson
+          BASELINE_P95=''
+          SATURATION_LEVEL='not_observed_through_25'
+          for concurrency in 1 5 10 25; do
+            sample="/tmp/capacity-${concurrency}.txt"
+            sorted="/tmp/capacity-${concurrency}-sorted.txt"
+            : > "$sample"
+            start_ns="$(date +%s%N)"
+            export sample
+            seq 1 50 | xargs -P "$concurrency" -I{} bash -c '
+              result="$(curl --silent --show-error --output /dev/null --write-out "%{http_code} %{time_total}" -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready")"
+              printf "%s\n" "$result" >> "$sample"
+            '
+            end_ns="$(date +%s%N)"
+            duration_ns="$((end_ns - start_ns))"
+            test "$(wc -l < "$sample")" = 50
+            sort -k2,2n "$sample" > "$sorted"
+            errors="$(awk '$1 != 200 { count++ } END { print count + 0 }' "$sample")"
+            test "$errors" = 0
+            p50_ms="$(awk 'NR == 25 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            p95_ms="$(awk 'NR == 48 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            p99_ms="$(awk 'NR == 50 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            throughput_rps="$(awk -v duration_ns="$duration_ns" 'BEGIN { printf "%.3f", 50 / (duration_ns / 1000000000) }')"
+            jq -n \
+              --argjson concurrency "$concurrency" \
+              --argjson requests 50 \
+              --argjson durationNs "$duration_ns" \
+              --argjson throughputRps "$throughput_rps" \
+              --argjson p50Ms "$p50_ms" \
+              --argjson p95Ms "$p95_ms" \
+              --argjson p99Ms "$p99_ms" \
+              '{concurrency:$concurrency,requests:$requests,durationNs:$durationNs,throughputRps:$throughputRps,p50Ms:$p50Ms,p95Ms:$p95Ms,p99Ms:$p99Ms,errors:0,errorRate:0}' \
+              > "/tmp/stage-${concurrency}.json"
+            cat "/tmp/stage-${concurrency}.json" >> staging-runtime-observability-evidence/capacity.ndjson
+            if [[ -z "$BASELINE_P95" ]]; then BASELINE_P95="$p95_ms"; fi
+            if [[ "$SATURATION_LEVEL" == not_observed_through_25 ]]; then
+              if awk -v p95="$p95_ms" -v base="$BASELINE_P95" \
+                'BEGIN { exit !(base > 0 && p95 > base * 3) }'; then
+                SATURATION_LEVEL="$concurrency"
+              fi
+            fi
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/ready" >/dev/null
+          done
+          jq -s \
+            --arg saturationLevel "$SATURATION_LEVEL" \
+            '{levels:.,saturationSignalLevel:$saturationLevel,recoveryAfterEachLevel:true,destructiveStress:false}' \
+            staging-runtime-observability-evidence/capacity.ndjson \
+            > staging-runtime-observability-evidence/capacity.json
+          echo "saturation_level=$SATURATION_LEVEL" >> "$GITHUB_OUTPUT"
+          unset TOKEN
+          echo 'STAGING_CONTROLLED_CAPACITY=PASS'
+
+      - name: Read Cloud Run and Cloud SQL telemetry after capacity
+        if: ${{ inputs.run_capacity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          START="$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          query_metric() {
+            local filter="$1" output="$2"
+            curl --fail --silent --show-error --get -H "Authorization: Bearer ${TOKEN}" \
+              --data-urlencode "filter=${filter}" \
+              --data-urlencode "interval.startTime=${START}" \
+              --data-urlencode "interval.endTime=${END}" \
+              --data-urlencode 'view=FULL' \
+              "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/timeSeries" > "$output"
+          }
+          query_metric \
+            "metric.type = \"run.googleapis.com/container/cpu/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/cpu.json
+          query_metric \
+            "metric.type = \"run.googleapis.com/container/memory/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/memory.json
+          query_metric \
+            "metric.type = \"run.googleapis.com/request_count\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/request-count.json
+          query_metric \
+            "metric.type = \"cloudsql.googleapis.com/database/postgresql/num_backends\" AND resource.type = \"cloudsql_database\" AND resource.labels.database_id = \"${PROJECT_ID}:${CLOUD_SQL_INSTANCE}\"" \
+            /tmp/db-connections.json
+          CPU_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/cpu.json)"
+          MEMORY_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/memory.json)"
+          REQUEST_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/request-count.json)"
+          DB_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/db-connections.json)"
+          test "$CPU_POINTS" -ge 1
+          test "$MEMORY_POINTS" -ge 1
+          test "$REQUEST_POINTS" -ge 1
+          test "$DB_POINTS" -ge 1
+          jq -n \
+            --argjson cpuPoints "$CPU_POINTS" \
+            --argjson memoryPoints "$MEMORY_POINTS" \
+            --argjson requestPoints "$REQUEST_POINTS" \
+            --argjson dbConnectionPoints "$DB_POINTS" \
+            '{cpuMetricPoints:$cpuPoints,memoryMetricPoints:$memoryPoints,requestMetricPoints:$requestPoints,dbConnectionMetricPoints:$dbConnectionPoints,connectionPoolMetric:"not_exposed_as_separate_runtime_metric",readOnly:true}' \
+            > staging-runtime-observability-evidence/resource-telemetry.json
+          unset TOKEN
+          echo 'STAGING_RESOURCE_TELEMETRY=PASS'
+
+      - name: Persist immutable sanitized acceptance evidence
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+          ACTUAL_CHECKOUT_SHA: ${{ steps.boundary.outputs.actual_checkout_sha }}
+          POLICY_SHA256: ${{ steps.boundary.outputs.policy_sha256 }}
+          MCP_REVISION: ${{ steps.runtime.outputs.mcp_revision }}
+          WEBHOOK_REVISION: ${{ steps.runtime.outputs.webhook_revision }}
+          TRUE_POINTS: ${{ steps.observability.outputs.true_points }}
+          FALSE_POINTS: ${{ steps.observability.outputs.false_points }}
+          RUN_CAPACITY: ${{ inputs.run_capacity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg triggerSha "$GITHUB_SHA" \
+            --arg actualCheckoutSha "$ACTUAL_CHECKOUT_SHA" \
+            --arg expectedCandidateSha "$EXPECTED_CANDIDATE_SHA" \
+            --arg expectedImageDigest "$EXPECTED_IMAGE_DIGEST" \
+            --arg policySha256 "$POLICY_SHA256" \
+            --arg mcpRevision "$MCP_REVISION" \
+            --arg webhookRevision "$WEBHOOK_REVISION" \
+            --argjson truePoints "$TRUE_POINTS" \
+            --argjson falsePoints "$FALSE_POINTS" \
+            --arg runCapacity "$RUN_CAPACITY" \
+            '{schemaVersion:"toca.staging.runtime-capacity-observability.evidence.v3",triggerSha:$triggerSha,actualCheckoutSha:$actualCheckoutSha,expectedCandidateSha:$expectedCandidateSha,expectedImageDigest:$expectedImageDigest,mcpRevision:$mcpRevision,webhookRevision:$webhookRevision,trafficPercent:100,policySha256:$policySha256,uptime:{observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints},capacityExecuted:($runCapacity=="true"),productionAccess:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretRead:false,secretMutation:false,destructiveStress:false,result:"PASS"}' \
+            > staging-runtime-observability-evidence/manifest.json
+          sha256sum staging-runtime-observability-evidence/* \
+            > staging-runtime-observability-evidence/SHA256SUMS
+          echo 'STAGING_RUNTIME_CAPACITY_OBSERVABILITY=PASS'
+
+      - name: Upload sanitized acceptance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-runtime-capacity-observability-${{ github.run_id }}
+          path: staging-runtime-observability-evidence
+          if-no-files-found: error
+          retention-days: 90
