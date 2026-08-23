@@ -18,6 +18,8 @@ on:
         default: '151'
         type: string
 
+permissions: {}
+
 concurrency:
   group: deploy-gcp-staging-canonical
   cancel-in-progress: false
