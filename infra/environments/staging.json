@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "environment": "staging",
+  "evidenceRef": "github-actions:32616588223",
+  "projectId": "toca-mcp-next-staging",
+  "projectNumber": "729069789107",
+  "region": "southamerica-east1",
+  "artifactRepository": "toca-mcp-staging",
+  "cloudSqlInstance": "toca-mcp-next-staging-db",
+  "mcpService": "toca-mcp-next-staging",
+  "webhookService": "toca-webhook-next-staging",
+  "workloadIdentityProvider": "projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging",
+  "deployServiceAccount": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "mcpRuntimeServiceAccount": "toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "webhookRuntimeServiceAccount": "toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "databaseIsolationMode": "DEDICATED_CLOUD_SQL",
+  "providerMode": "DISABLED",
+  "secretReferences": {
+    "databaseUrl": {
+      "id": "toca-next-staging-database-url",
+      "version": "latest"
+    }
+  },
+  "runtimeDefaults": {
+    "tenantId": "toca",
+    "workspaceId": "toca",
+    "organizationId": "toca",
+    "readyOutboxMaxLagSeconds": "300",
+    "metaEnabled": false,
+    "metaProviderVerified": false,
+    "metaWebhookEnabled": false,
+    "metaWebhookPersistenceEnabled": false,
+    "instagramReadEnabled": false,
+    "metaAdsReadEnabled": false,
+    "metaAdsWriteEnabled": false,
+    "whatsappEnabled": false,
+    "whatsappProviderVerified": false,
+    "emailSendgridEnabled": false,
+    "emailSendgridProviderVerified": false,
+    "googleAdsPhase": "OFF",
+    "googleAdsProviderVerified": false,
+    "ag01ModelEnabled": false,
+    "ag01ModelProviderVerified": false
+  }
+}
