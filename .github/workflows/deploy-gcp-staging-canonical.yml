@@ -335,11 +335,16 @@ jobs:
           test "$MCP_REVISION" = "$EXPECTED_MCP_REVISION"
           test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"
           test -n "$MCP_URL"; test -n "$WEBHOOK_URL"
+          MCP_SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+          test -n "$MCP_SERVICE_URL"
+          [[ "$MCP_SERVICE_URL" == https://*.run.app ]]
+          test "$MCP_SERVICE_URL" != "$MCP_URL"
           echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
           echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
           echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"
-          echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+          echo "mcp_tag_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+          echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"
 
       - name: Mint MCP readiness identity token through staging WIF
         id: mcp_probe_auth
@@ -348,7 +353,7 @@ jobs:
           workload_identity_provider: ${{ steps.config.outputs.wif }}
           service_account: ${{ steps.config.outputs.deployer_sa }}
           token_format: id_token
-          id_token_audience: ${{ steps.candidate.outputs.mcp_url }}
+          id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}
           create_credentials_file: false
           export_environment_variables: false
 

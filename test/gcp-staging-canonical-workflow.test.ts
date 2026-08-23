@@ -110,7 +110,10 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).not.toContain('gcloud auth print-identity-token');
     expect(workflow).toContain('id: mcp_probe_auth');
     expect(workflow).toContain('token_format: id_token');
-    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');
+    expect(workflow).toContain('echo "mcp_tag_url=$MCP_URL" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain('echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_service_url }}');
+    expect(workflow).not.toContain('id_token_audience: ${{ steps.candidate.outputs.mcp_url }}');
     expect(workflow).toContain('create_credentials_file: false');
     expect(workflow).toContain('export_environment_variables: false');
     expect(runtimeWorkflow).not.toContain('gcloud auth print-identity-token');
@@ -121,6 +124,15 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(runtimeWorkflow).toContain(
       'id_token_audience: ${{ steps.runtime.outputs.webhook_url }}',
     );
+  });
+
+  it('uses the canonical Cloud Run service URL as token audience while probing the tagged candidate URL', () => {
+    expect(workflow).toContain(
+      'MCP_SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE"',
+    );
+    expect(workflow).toContain('test "$MCP_SERVICE_URL" != "$MCP_URL"');
+    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz"');
+    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz"');
   });
 
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {
