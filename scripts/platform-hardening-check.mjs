@@ -4,14 +4,17 @@ const requiredFiles = [
   '.github/workflows/quality.yml',
   '.github/workflows/security-supply-chain.yml',
   '.github/workflows/deploy-gcp.yml',
+  '.github/workflows/deploy-gcp-staging-canonical.yml',
   'Dockerfile',
   'docs/operations/disaster-recovery-next-runbook.md',
   'docs/operations/observability-incident-runbook.md',
   'docs/operations/security-supply-chain-runbook.md',
+  'infra/environments/staging.json',
   'infra/observability/platform-hardening-alerts.json',
   'infra/observability/platform-hardening-dashboard.json',
   'infra/observability/platform-hardening-synthetics.json',
   'scripts/capture-platform-evidence.mjs',
+  'scripts/export-staging-deploy-config.mjs',
   'scripts/validate-gcp-deploy-environment.mjs',
   'src/core/policy.ts',
   'src/health/runtime-readiness.ts',
@@ -95,17 +98,40 @@ for (const marker of [
 ])
   forbid(deploy, marker, 'DEPLOY_FORBIDDEN_FALLBACK');
 
+const stagingDeploy = '.github/workflows/deploy-gcp-staging-canonical.yml';
+for (const marker of [
+  'needs: quality',
+  'environment: staging',
+  'Exact-head Quality in clean non-deployment environment',
+  'export-staging-deploy-config.mjs infra/environments/staging.json',
+  'steps.config.outputs.wif',
+  'steps.config.outputs.deployer_sa',
+  'pnpm migrate',
+  '--provenance=mode=max',
+  '--sbom=true',
+  '--no-traffic',
+  'TOCA_RELEASE_SHA=${GITHUB_SHA}',
+  'GOOGLE_ADS_PHASE=OFF',
+  'Read back exact final staging runtime',
+  'Automatic staging traffic rollback after failed post-promotion step',
+])
+  need(stagingDeploy, marker, 'STAGING_DEPLOY_CONTRACT_MISSING');
+for (const marker of ['PRODUCTION_GCP_', 'toca-mcp-production', 'postgresql://'])
+  forbid(stagingDeploy, marker, 'STAGING_DEPLOY_FORBIDDEN_DEPENDENCY');
+
 const validator = 'scripts/validate-gcp-deploy-environment.mjs';
 for (const marker of [
   'GCP_CLOUD_RUN_MCP_SERVICE',
   'GCP_CLOUD_RUN_WEBHOOK_SERVICE',
   'GCP_MCP_RUNTIME_SERVICE_ACCOUNT',
   'GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT',
-  'STAGING_PRODUCTION_COLLISION',
+  'STAGING_CONFIG_HASH_MISMATCH',
+  'STAGING_CONFIG_ENV_MISMATCH',
+  'STAGING_PRODUCTION_COORDINATE_FORBIDDEN',
+  'STAGING_PROJECT_NAME_FORBIDDEN',
   'DEDICATED_CLOUD_SQL',
   'STAGING_PROVIDER_MODE_INVALID',
   'STAGING_PROVIDER_MODE_CONFLICT',
-  'STAGING_PROVIDER_ISOLATION_EVIDENCE_REF',
   'STAGING_WIF_NOT_OWNED_BY_PROJECT',
   'STAGING_SERVICE_ACCOUNT_NOT_OWNED_BY_PROJECT',
   'GCP_SECRET_MUST_BE_PROJECT_LOCAL_ID',
@@ -113,6 +139,21 @@ for (const marker of [
   'PRODUCTION_PROVIDER_SECRET_VERSION_MUST_BE_PINNED',
 ])
   need(validator, marker, 'ISOLATION_GUARD_MISSING');
+
+const stagingConfig = 'infra/environments/staging.json';
+for (const marker of [
+  '"environment": "staging"',
+  '"projectId": "toca-mcp-next-staging"',
+  '"projectNumber": "729069789107"',
+  '"artifactRepository": "toca-mcp-staging"',
+  '"databaseIsolationMode": "DEDICATED_CLOUD_SQL"',
+  '"providerMode": "DISABLED"',
+  '"id": "toca-next-staging-database-url"',
+  '"googleAdsPhase": "OFF"',
+])
+  need(stagingConfig, marker, 'STAGING_CONFIG_CONTRACT_MISSING');
+for (const marker of ['postgresql://', 'password', 'api_key', 'access_token'])
+  forbid(stagingConfig, marker, 'STAGING_CONFIG_SECRET_PAYLOAD_FORBIDDEN');
 
 const readiness = 'src/health/runtime-readiness.ts';
 for (const check of [
