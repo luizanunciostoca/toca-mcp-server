@@ -93,7 +93,7 @@ describe('staging runtime observability coverage contract', () => {
     expect(Object.values(config.forbid).every(Boolean)).toBe(true);
   });
 
-  it('keeps domain probes read-only and isolated', () => {
+  it('keeps domain probes read-only, isolated, and incident-safe', () => {
     const script = readFileSync(reconcilePath, 'utf8');
     const acceptedStatuses =
       'acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]';
@@ -103,6 +103,9 @@ describe('staging runtime observability coverage contract', () => {
     expect(script).toContain(contentMatcher);
     expect(script).toContain('LATENCY_ALIGNER="$(jq -r');
     expect(script).toContain('denominatorFilter:$denominator');
+    expect(script).toContain('ALERT_POLICY_DRIFT_REQUIRES_COORDINATION');
+    expect(script).toContain('rm -f "$EVIDENCE_DIR/SHA256SUMS"');
+    expect(script).not.toContain('-X DELETE');
     expect(script).not.toContain('gcloud sql');
     expect(script).not.toContain('gcloud run services update');
     expect(script).not.toContain('gcloud run services replace');
@@ -117,6 +120,7 @@ describe('staging runtime observability coverage contract', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"');
     expect(workflow).toContain('bash "$RECONCILE_SCRIPT"');
     expect(workflow).toContain('roles/monitoring.alertPolicyEditor');
+    expect(workflow).toContain('sha256sum staging-runtime-observability-evidence/*');
     expect(workflow).not.toContain('gcloud run services update');
     expect(workflow).not.toContain('gcloud sql');
   });
