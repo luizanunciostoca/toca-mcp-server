@@ -133,22 +133,24 @@ jobs:
 
           inspect_service() {
             local service="$1" expected_sa="$2" evidence="$3"
-            gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" --format=json > "/tmp/${service}-service.json"
+            local service_json="/tmp/${service}-service.json"
+            local revision_json="/tmp/${service}-revision.json"
+            gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" --format=json > "$service_json"
             local revision traffic_count traffic_sum
-            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' "/tmp/${service}-service.json")"
-            traffic_count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' "/tmp/${service}-service.json")"
-            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/${service}-service.json")"
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' "$service_json")"
+            traffic_count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' "$service_json")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' "$service_json")"
             test "$traffic_count" = 1
             test "$traffic_sum" = 100
             test -n "$revision"
 
-            gcloud run revisions describe "$revision" --project="$PROJECT_ID" --region="$REGION" --format=json > "/tmp/${service}-revision.json"
+            gcloud run revisions describe "$revision" --project="$PROJECT_ID" --region="$REGION" --format=json > "$revision_json"
             local release_sha runtime_sa image image_digest service_url
-            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "/tmp/${service}-revision.json")"
-            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "/tmp/${service}-revision.json")"
-            image="$(jq -r '.spec.containers[0].image // empty' "/tmp/${service}-revision.json")"
+            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "$revision_json")"
+            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "$revision_json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "$revision_json")"
             image_digest="${image##*@}"
-            service_url="$(jq -r '.status.url // empty' "/tmp/${service}-service.json")"
+            service_url="$(jq -r '.status.url // empty' "$service_json")"
             test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"
             test "$runtime_sa" = "$expected_sa"
             test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"
@@ -168,8 +170,10 @@ jobs:
 
           IFS=$'\t' read -r MCP_REVISION MCP_URL < <(inspect_service "$MCP_SERVICE" "$MCP_RUNTIME_SA" mcp-runtime.json)
           IFS=$'\t' read -r WEBHOOK_REVISION WEBHOOK_URL < <(inspect_service "$WEBHOOK_SERVICE" "$WEBHOOK_RUNTIME_SA" webhook-runtime.json)
-          test -n "$MCP_REVISION"; test -n "$MCP_URL"
-          test -n "$WEBHOOK_REVISION"; test -n "$WEBHOOK_URL"
+          test -n "$MCP_REVISION"
+          test -n "$MCP_URL"
+          test -n "$WEBHOOK_REVISION"
+          test -n "$WEBHOOK_URL"
           echo "mcp_revision=$MCP_REVISION" >> "$GITHUB_OUTPUT"
           echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
           echo "webhook_revision=$WEBHOOK_REVISION" >> "$GITHUB_OUTPUT"
@@ -199,7 +203,8 @@ jobs:
               -H "X-Request-ID: ${request_id}-ready" \
               -H "X-Correlation-ID: ${correlation_id}" \
               "${base_url}/readyz" > "staging-runtime-observability-evidence/${service}-readyz.json"
-            jq -e '.status == "ready" and (.checks | all(.ok == true))' "staging-runtime-observability-evidence/${service}-readyz.json" >/dev/null
+            jq -e '.status == "ready" and (.checks | all(.ok == true))' \
+              "staging-runtime-observability-evidence/${service}-readyz.json" >/dev/null
             unset token
           }
           probe mcp "$MCP_URL"
@@ -219,7 +224,8 @@ jobs:
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
             "https://monitoring.googleapis.com/v1/${DASHBOARD_NAME}" > /tmp/dashboard.json
           jq -e '.displayName == "TOCA OS Next — Platform Readiness — Staging" and (.labels | has("staging_reliability"))' /tmp/dashboard.json >/dev/null
-          jq '{name,displayName,labels,tileCount:(.mosaicLayout.tiles|length)}' /tmp/dashboard.json > staging-runtime-observability-evidence/dashboard.json
+          jq '{name,displayName,labels,tileCount:(.mosaicLayout.tiles|length)}' /tmp/dashboard.json \
+            > staging-runtime-observability-evidence/dashboard.json
 
           UPTIME_API="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "$UPTIME_API" > /tmp/uptimes.json
@@ -242,7 +248,10 @@ jobs:
           FALSE_POINTS="$(jq '[.timeSeries[]?.points[]?.value.boolValue | select(. == false)] | length' /tmp/uptime-series.json)"
           test "$TRUE_POINTS" -ge 1
           test "$FALSE_POINTS" = 0
-          jq -n --arg name "$UPTIME_NAME" --argjson truePoints "$TRUE_POINTS" --argjson falsePoints "$FALSE_POINTS" \
+          jq -n \
+            --arg name "$UPTIME_NAME" \
+            --argjson truePoints "$TRUE_POINTS" \
+            --argjson falsePoints "$FALSE_POINTS" \
             '{name:$name,authentication:"MONITORING_SERVICE_AGENT_OIDC",observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints}' \
             > staging-runtime-observability-evidence/uptime-observation.json
           echo "true_points=$TRUE_POINTS" >> "$GITHUB_OUTPUT"
@@ -261,7 +270,8 @@ jobs:
           TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_URL")"
           export MCP_URL TOKEN
           for warmup in $(seq 1 5); do
-            curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
           done
 
           : > staging-runtime-observability-evidence/capacity.ndjson
@@ -269,6 +279,7 @@ jobs:
           SATURATION_LEVEL='not_observed_through_25'
           for concurrency in 1 5 10 25; do
             sample="/tmp/capacity-${concurrency}.txt"
+            sorted="/tmp/capacity-${concurrency}-sorted.txt"
             : > "$sample"
             start_ns="$(date +%s%N)"
             export sample
@@ -278,44 +289,40 @@ jobs:
             '
             end_ns="$(date +%s%N)"
             duration_ns="$((end_ns - start_ns))"
-            python3 - "$sample" "$concurrency" "$duration_ns" > "/tmp/stage-${concurrency}.json" <<'PY'
-import json, math, sys
-path, concurrency, duration_ns = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-rows = [line.split() for line in open(path, encoding='utf-8') if line.strip()]
-if len(rows) != 50:
-    raise SystemExit(f'capacity sample count mismatch: {len(rows)}')
-codes = [int(row[0]) for row in rows]
-lat = sorted(float(row[1]) * 1000 for row in rows)
-def pct(p):
-    return lat[max(0, math.ceil((p / 100) * len(lat)) - 1)]
-errors = sum(code != 200 for code in codes)
-result = {
-    'concurrency': concurrency,
-    'requests': len(rows),
-    'durationMs': duration_ns / 1_000_000,
-    'throughputRps': len(rows) / (duration_ns / 1_000_000_000),
-    'p50Ms': pct(50),
-    'p95Ms': pct(95),
-    'p99Ms': pct(99),
-    'errors': errors,
-    'errorRate': errors / len(rows),
-}
-print(json.dumps(result, separators=(',', ':')))
-if errors:
-    raise SystemExit('capacity stage returned non-200 response')
-PY
+            test "$(wc -l < "$sample")" = 50
+            sort -k2,2n "$sample" > "$sorted"
+            errors="$(awk '$1 != 200 { count++ } END { print count + 0 }' "$sample")"
+            test "$errors" = 0
+            p50_ms="$(awk 'NR == 25 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            p95_ms="$(awk 'NR == 48 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            p99_ms="$(awk 'NR == 50 { printf "%.3f", $2 * 1000 }' "$sorted")"
+            throughput_rps="$(awk -v duration_ns="$duration_ns" 'BEGIN { printf "%.3f", 50 / (duration_ns / 1000000000) }')"
+            jq -n \
+              --argjson concurrency "$concurrency" \
+              --argjson requests 50 \
+              --argjson durationNs "$duration_ns" \
+              --argjson throughputRps "$throughput_rps" \
+              --argjson p50Ms "$p50_ms" \
+              --argjson p95Ms "$p95_ms" \
+              --argjson p99Ms "$p99_ms" \
+              '{concurrency:$concurrency,requests:$requests,durationNs:$durationNs,throughputRps:$throughputRps,p50Ms:$p50Ms,p95Ms:$p95Ms,p99Ms:$p99Ms,errors:0,errorRate:0}' \
+              > "/tmp/stage-${concurrency}.json"
             cat "/tmp/stage-${concurrency}.json" >> staging-runtime-observability-evidence/capacity.ndjson
-            stage_p95="$(jq -r '.p95Ms' "/tmp/stage-${concurrency}.json")"
-            if [[ -z "$BASELINE_P95" ]]; then BASELINE_P95="$stage_p95"; fi
+            if [[ -z "$BASELINE_P95" ]]; then BASELINE_P95="$p95_ms"; fi
             if [[ "$SATURATION_LEVEL" == not_observed_through_25 ]]; then
-              if awk -v p95="$stage_p95" -v base="$BASELINE_P95" 'BEGIN { exit !(base > 0 && p95 > base * 3) }'; then
+              if awk -v p95="$p95_ms" -v base="$BASELINE_P95" \
+                'BEGIN { exit !(base > 0 && p95 > base * 3) }'; then
                 SATURATION_LEVEL="$concurrency"
               fi
             fi
-            curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${TOKEN}" "${MCP_URL}/readyz" >/dev/null
           done
-          jq -s --arg saturationLevel "$SATURATION_LEVEL" '{levels:.,saturationSignalLevel:$saturationLevel,recoveryAfterEachLevel:true,destructiveStress:false}' \
-            staging-runtime-observability-evidence/capacity.ndjson > staging-runtime-observability-evidence/capacity.json
+          jq -s \
+            --arg saturationLevel "$SATURATION_LEVEL" \
+            '{levels:.,saturationSignalLevel:$saturationLevel,recoveryAfterEachLevel:true,destructiveStress:false}' \
+            staging-runtime-observability-evidence/capacity.ndjson \
+            > staging-runtime-observability-evidence/capacity.json
           echo "saturation_level=$SATURATION_LEVEL" >> "$GITHUB_OUTPUT"
           unset TOKEN
           echo 'STAGING_CONTROLLED_CAPACITY=PASS'
@@ -337,10 +344,18 @@ PY
               --data-urlencode 'view=FULL' \
               "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/timeSeries" > "$output"
           }
-          query_metric "metric.type = \"run.googleapis.com/container/cpu/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" /tmp/cpu.json
-          query_metric "metric.type = \"run.googleapis.com/container/memory/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" /tmp/memory.json
-          query_metric "metric.type = \"run.googleapis.com/request_count\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" /tmp/request-count.json
-          query_metric "metric.type = \"cloudsql.googleapis.com/database/postgresql/num_backends\" AND resource.type = \"cloudsql_database\" AND resource.labels.database_id = \"${PROJECT_ID}:${CLOUD_SQL_INSTANCE}\"" /tmp/db-connections.json
+          query_metric \
+            "metric.type = \"run.googleapis.com/container/cpu/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/cpu.json
+          query_metric \
+            "metric.type = \"run.googleapis.com/container/memory/utilizations\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/memory.json
+          query_metric \
+            "metric.type = \"run.googleapis.com/request_count\" AND resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${MCP_SERVICE}\"" \
+            /tmp/request-count.json
+          query_metric \
+            "metric.type = \"cloudsql.googleapis.com/database/postgresql/num_backends\" AND resource.type = \"cloudsql_database\" AND resource.labels.database_id = \"${PROJECT_ID}:${CLOUD_SQL_INSTANCE}\"" \
+            /tmp/db-connections.json
           CPU_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/cpu.json)"
           MEMORY_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/memory.json)"
           REQUEST_POINTS="$(jq '[.timeSeries[]?.points[]?] | length' /tmp/request-count.json)"
@@ -386,7 +401,8 @@ PY
             --arg runCapacity "$RUN_CAPACITY" \
             '{schemaVersion:"toca.staging.runtime-capacity-observability.evidence.v3",triggerSha:$triggerSha,actualCheckoutSha:$actualCheckoutSha,expectedCandidateSha:$expectedCandidateSha,expectedImageDigest:$expectedImageDigest,mcpRevision:$mcpRevision,webhookRevision:$webhookRevision,trafficPercent:100,policySha256:$policySha256,uptime:{observedPass:true,truePoints:$truePoints,falsePoints:$falsePoints},capacityExecuted:($runCapacity=="true"),productionAccess:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretRead:false,secretMutation:false,destructiveStress:false,result:"PASS"}' \
             > staging-runtime-observability-evidence/manifest.json
-          sha256sum staging-runtime-observability-evidence/* > staging-runtime-observability-evidence/SHA256SUMS
+          sha256sum staging-runtime-observability-evidence/* \
+            > staging-runtime-observability-evidence/SHA256SUMS
           echo 'STAGING_RUNTIME_CAPACITY_OBSERVABILITY=PASS'
 
       - name: Upload sanitized acceptance evidence
