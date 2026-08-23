@@ -17,13 +17,19 @@ interface AcceptancePolicy {
   };
 }
 
-const WORKFLOW = readFileSync('.github/workflows/staging-runtime-observability.yml', 'utf8');
+const WORKFLOW = readFileSync(
+  '.github/workflows/staging-runtime-observability.yml',
+  'utf8',
+);
 const POLICY = JSON.parse(
-  readFileSync('infra/observability/staging-runtime-observability-policy.json', 'utf8'),
+  readFileSync(
+    'infra/observability/staging-runtime-observability-policy.json',
+    'utf8',
+  ),
 ) as AcceptancePolicy;
 
-describe('staging runtime capacity observability acceptance boundary', () => {
-  it('never authenticates to production or mutates IAM', () => {
+describe('staging runtime acceptance boundary', () => {
+  it('is staging only', () => {
     const forbidden = [
       'INFRA_WIF',
       'INFRA_ADMIN_SA',
@@ -31,25 +37,33 @@ describe('staging runtime capacity observability acceptance boundary', () => {
       'add-iam-policy-binding',
       'secrets versions access',
     ];
+    const stagingProvider =
+      'workloadIdentityPools/github-staging/providers/github-toca-mcp-staging';
 
     for (const token of forbidden) {
       expect(WORKFLOW).not.toContain(token);
     }
 
     expect(WORKFLOW).toContain('Authenticate isolated staging operator only');
-    expect(WORKFLOW).toContain('workloadIdentityPools/github-staging/providers/github-toca-mcp-staging');
+    expect(WORKFLOW).toContain(stagingProvider);
   });
 
-  it('pins workflow source and records trigger and checkout SHA independently', () => {
-    expect(WORKFLOW).toContain('ref: ${{ github.sha }}');
+  it('pins source and evidence SHA', () => {
+    const required = [
+      'ref: ${{ github.sha }}',
+      'ACTUAL_CHECKOUT_SHA="$(git rev-parse HEAD)"',
+      'test "$ACTUAL_CHECKOUT_SHA" = "$GITHUB_SHA"',
+      '--arg triggerSha "$GITHUB_SHA"',
+      '--arg actualCheckoutSha "$ACTUAL_CHECKOUT_SHA"',
+    ];
+
     expect(WORKFLOW).not.toContain('ref: main');
-    expect(WORKFLOW).toContain('ACTUAL_CHECKOUT_SHA="$(git rev-parse HEAD)"');
-    expect(WORKFLOW).toContain('test "$ACTUAL_CHECKOUT_SHA" = "$GITHUB_SHA"');
-    expect(WORKFLOW).toContain('--arg triggerSha "$GITHUB_SHA"');
-    expect(WORKFLOW).toContain('--arg actualCheckoutSha "$ACTUAL_CHECKOUT_SHA"');
+    for (const token of required) {
+      expect(WORKFLOW).toContain(token);
+    }
   });
 
-  it('requires exact candidate digest runtime identity and 100 percent traffic', () => {
+  it('requires exact runtime identity', () => {
     const required = [
       'expected_candidate_sha:',
       'expected_image_digest:',
@@ -67,7 +81,7 @@ describe('staging runtime capacity observability acceptance boundary', () => {
     }
   });
 
-  it('bounds capacity and requires recovery and resource telemetry', () => {
+  it('bounds capacity and telemetry', () => {
     const required = [
       'for concurrency in 1 5 10 25',
       'seq 1 50 | xargs -P "$concurrency"',
@@ -77,12 +91,13 @@ describe('staging runtime capacity observability acceptance boundary', () => {
       'container/memory/utilizations',
       'postgresql/num_backends',
     ];
+    const expectedOperation =
+      'staging-runtime-capacity-observability-verification';
 
     for (const token of required) {
       expect(WORKFLOW).toContain(token);
     }
 
-    const expectedOperation = 'staging-runtime-capacity-observability-verification';
     expect(POLICY.version).toBe(3);
     expect(POLICY.operation).toBe(expectedOperation);
     expect(POLICY.capacity.levels).toEqual([1, 5, 10, 25]);
