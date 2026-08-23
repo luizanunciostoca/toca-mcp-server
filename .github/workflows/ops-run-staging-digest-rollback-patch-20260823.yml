@@ -1,0 +1,53 @@
+name: TEMP Run Staging Digest Rollback Patch 2026-08-23
+
+on:
+  push:
+    branches: [fix/staging-runtime-digest-rollback-20260823]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout remediation branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/staging-runtime-digest-rollback-20260823
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: python3 ops/tmp-apply-staging-digest-rollback.py
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Format and validate affected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          git diff --check
+          pnpm exec vitest run test/gcp-staging-canonical-workflow.test.ts
+
+      - name: Persist validated snapshots only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ops-snapshots
+          cp .github/workflows/deploy-gcp-staging-canonical.yml .ops-snapshots/deploy-gcp-staging-canonical.yml
+          cp .github/workflows/staging-runtime-observability.yml .ops-snapshots/staging-runtime-observability.yml
+          cp test/gcp-staging-canonical-workflow.test.ts .ops-snapshots/gcp-staging-canonical-workflow.test.ts
+          git checkout -- .github/workflows/deploy-gcp-staging-canonical.yml .github/workflows/staging-runtime-observability.yml test/gcp-staging-canonical-workflow.test.ts
+          git add .ops-snapshots
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(validation): persist staging digest rollback snapshots'
+          git push origin HEAD:fix/staging-runtime-digest-rollback-20260823
