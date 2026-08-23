@@ -304,7 +304,9 @@ describe('WhatsApp fake timeout and restart boundary', () => {
       const store = new DurableMemoryStore();
       const provider = new TimeoutProvider();
 
-      await expect(runtime(store, provider).send(input())).rejects.toThrow('UND_ERR_CONNECT_TIMEOUT');
+      await expect(runtime(store, provider).send(input())).rejects.toThrow(
+        'UND_ERR_CONNECT_TIMEOUT',
+      );
       expect(store.dispatch).toMatchObject({
         state: 'DEAD_LETTER',
         attemptCount: 1,
