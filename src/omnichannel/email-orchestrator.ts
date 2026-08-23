@@ -265,9 +265,10 @@ export class EmailDispatchCoordinator {
       };
     } catch (error) {
       const retryable = isRetryableProviderSendError(error);
+      const retryExhausted = retryable && attemptCount >= retryPolicy.maximumAttempts;
       let state: EmailDeliveryState = 'FAILED';
       let nextRetryAt: string | null = null;
-      if (retryable && attemptCount < retryPolicy.maximumAttempts) {
+      if (retryable && !retryExhausted) {
         const delayMs = computeEmailRetryDelayMs(
           attemptCount,
           providerRetryAfterMs(error),
@@ -276,6 +277,7 @@ export class EmailDispatchCoordinator {
         state = 'DEFERRED';
         nextRetryAt = new Date(nowMs + delayMs).toISOString();
       }
+      const providerError = safeErrorCode(error);
       const failed = buildDispatch({
         input,
         provider: this.provider.binding.providerKey,
@@ -284,10 +286,12 @@ export class EmailDispatchCoordinator {
         providerMessageRef: prepared.providerMessageRef,
         attemptCount,
         nextRetryAt,
-        lastError: safeErrorCode(error),
+        lastError: retryExhausted ? `EMAIL_DEAD_LETTER:${providerError}` : providerError,
       });
       await this.store.saveDispatch(failed);
-      if (state === 'DEFERRED') return { dispatch: failed, reused: false, accepted: false };
+      if (state === 'DEFERRED' || retryExhausted) {
+        return { dispatch: failed, reused: false, accepted: false };
+      }
       throw error;
     }
   }
