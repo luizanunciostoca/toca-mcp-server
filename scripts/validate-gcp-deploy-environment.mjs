@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
 const environment = requireValue('DEPLOY_ENVIRONMENT');
 if (environment !== 'staging' && environment !== 'production') {
   fail('DEPLOY_ENVIRONMENT_INVALID', `unsupported environment ${environment}`);
@@ -25,11 +28,6 @@ assertDistinct(
   requireValue('GCP_CLOUD_RUN_MCP_SERVICE'),
   requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE'),
 );
-assertDistinct(
-  'MCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT',
-  requireValue('GCP_MCP_RUNTIME_SERVICE_ACCOUNT'),
-  requireValue('GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT'),
-);
 requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET');
 validateProviderMode();
 validateEnabledProviderSecretIds();
@@ -49,105 +47,93 @@ console.log(`GCP_DEPLOY_ENVIRONMENT_VALIDATED=${environment}`);
 function validateStagingIsolation() {
   const projectId = requireValue('GCP_PROJECT_ID');
   const projectNumber = requireValue('GCP_PROJECT_NUMBER');
-  const region = requireValue('GCP_REGION');
-  const productionProjectId = requireValue('PRODUCTION_GCP_PROJECT_ID');
-  const productionProjectNumber = requireValue('PRODUCTION_GCP_PROJECT_NUMBER');
-  const productionRegion = requireValue('PRODUCTION_GCP_REGION');
-
-  assertDistinct('GCP_PROJECT_ID', projectId, productionProjectId);
-  assertDistinct('GCP_PROJECT_NUMBER', projectNumber, productionProjectNumber);
-  assertDistinct(
-    'GCP_CLOUD_SQL_INSTANCE_NAME',
-    requireValue('GCP_CLOUD_SQL_INSTANCE'),
-    requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE'),
-  );
-  assertDistinct(
-    'GCP_CLOUD_SQL_RESOURCE',
-    `${projectId}:${region}:${requireValue('GCP_CLOUD_SQL_INSTANCE')}`,
-    `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_SQL_INSTANCE')}`,
-  );
-
-  for (const [label, stagingServiceName] of [
-    ['MCP_SERVICE', requireValue('GCP_CLOUD_RUN_MCP_SERVICE')],
-    ['WEBHOOK_SERVICE', requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE')],
-  ]) {
-    assertDistinct(
-      `${label}_NAME_VS_PRODUCTION_MCP`,
-      stagingServiceName,
-      requireValue('PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE'),
-    );
-    assertDistinct(
-      `${label}_NAME_VS_PRODUCTION_WEBHOOK`,
-      stagingServiceName,
-      requireValue('PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE'),
-    );
+  const configPath = requireValue('STAGING_CONFIG_PATH');
+  const expectedHash = requireValue('STAGING_CONFIG_SHA256');
+  const raw = readFileSync(configPath, 'utf8');
+  const actualHash = createHash('sha256').update(raw).digest('hex');
+  if (actualHash !== expectedHash) {
+    fail('STAGING_CONFIG_HASH_MISMATCH', `${actualHash} != ${expectedHash}`);
   }
 
-  const stagingMcp = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_MCP_SERVICE')}`;
-  const stagingWebhook = `${projectId}:${region}:${requireValue('GCP_CLOUD_RUN_WEBHOOK_SERVICE')}`;
-  const productionMcp = `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE')}`;
-  const productionWebhook = `${productionProjectId}:${productionRegion}:${requireValue('PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE')}`;
-  for (const [label, stagingService] of [
-    ['MCP_SERVICE', stagingMcp],
-    ['WEBHOOK_SERVICE', stagingWebhook],
-  ]) {
-    assertDistinct(`${label}_VS_PRODUCTION_MCP`, stagingService, productionMcp);
-    assertDistinct(`${label}_VS_PRODUCTION_WEBHOOK`, stagingService, productionWebhook);
+  let config;
+  try {
+    config = JSON.parse(raw);
+  } catch {
+    fail('STAGING_CONFIG_INVALID_JSON', configPath);
   }
 
-  assertDistinct(
-    'GCP_DATABASE_URL_SECRET_ID',
-    requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET'),
-    requireProjectLocalSecretId('PRODUCTION_GCP_DATABASE_URL_SECRET'),
-  );
-  assertDistinct(
-    'GCP_DATABASE_URL_SECRET_RESOURCE',
-    `${projectId}:${requireProjectLocalSecretId('GCP_DATABASE_URL_SECRET')}`,
-    `${productionProjectId}:${requireProjectLocalSecretId('PRODUCTION_GCP_DATABASE_URL_SECRET')}`,
-  );
-  assertDistinct(
-    'GCP_WORKLOAD_IDENTITY_PROVIDER',
-    requireValue('GCP_WORKLOAD_IDENTITY_PROVIDER'),
-    requireValue('PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER'),
-  );
-  assertDistinct(
-    'GCP_DEPLOY_SERVICE_ACCOUNT',
-    requireValue('GCP_DEPLOY_SERVICE_ACCOUNT'),
-    requireValue('PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT'),
-  );
-  assertDistinct(
-    'GCP_MCP_RUNTIME_SERVICE_ACCOUNT',
-    requireValue('GCP_MCP_RUNTIME_SERVICE_ACCOUNT'),
-    requireValue('PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT'),
-  );
-  assertDistinct(
-    'GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT',
-    requireValue('GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT'),
-    requireValue('PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT'),
-  );
+  if (config.schemaVersion !== 1 || config.environment !== 'staging') {
+    fail('STAGING_CONFIG_SCHEMA_INVALID', configPath);
+  }
+
+  const expected = {
+    GCP_PROJECT_ID: config.projectId,
+    GCP_PROJECT_NUMBER: config.projectNumber,
+    GCP_REGION: config.region,
+    GCP_ARTIFACT_REPOSITORY: config.artifactRepository,
+    GCP_CLOUD_SQL_INSTANCE: config.cloudSqlInstance,
+    GCP_CLOUD_RUN_MCP_SERVICE: config.mcpService,
+    GCP_CLOUD_RUN_WEBHOOK_SERVICE: config.webhookService,
+    GCP_WORKLOAD_IDENTITY_PROVIDER: config.workloadIdentityProvider,
+    GCP_DEPLOY_SERVICE_ACCOUNT: config.deployServiceAccount,
+    GCP_MCP_RUNTIME_SERVICE_ACCOUNT: config.mcpRuntimeServiceAccount,
+    GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: config.webhookRuntimeServiceAccount,
+    GCP_DATABASE_URL_SECRET: config.secretReferences?.databaseUrl?.id,
+    GCP_DATABASE_URL_SECRET_VERSION: config.secretReferences?.databaseUrl?.version,
+    STAGING_DATABASE_ISOLATION_MODE: config.databaseIsolationMode,
+    STAGING_PROVIDER_MODE: config.providerMode,
+  };
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    if (typeof expectedValue !== 'string' || expectedValue.length === 0) {
+      fail('STAGING_CONFIG_FIELD_MISSING', key);
+    }
+    if (requireValue(key) !== expectedValue) {
+      fail('STAGING_CONFIG_ENV_MISMATCH', key);
+    }
+  }
+
+  if (/production/i.test(projectId)) {
+    fail('STAGING_PROJECT_NAME_FORBIDDEN', projectId);
+  }
+  for (const key of [
+    'PRODUCTION_GCP_PROJECT_ID',
+    'PRODUCTION_GCP_PROJECT_NUMBER',
+    'PRODUCTION_GCP_REGION',
+    'PRODUCTION_GCP_CLOUD_SQL_INSTANCE',
+    'PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE',
+    'PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE',
+    'PRODUCTION_GCP_DATABASE_URL_SECRET',
+    'PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER',
+    'PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT',
+    'PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT',
+    'PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT',
+  ]) {
+    if (process.env[key]?.trim()) fail('STAGING_PRODUCTION_COORDINATE_FORBIDDEN', key);
+  }
 
   requireOwnWorkloadIdentity(projectNumber);
   requireOwnServiceAccount('GCP_DEPLOY_SERVICE_ACCOUNT', projectId);
   requireOwnServiceAccount('GCP_MCP_RUNTIME_SERVICE_ACCOUNT', projectId);
   requireOwnServiceAccount('GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT', projectId);
 
-  const isolationMode = requireValue('STAGING_DATABASE_ISOLATION_MODE');
-  if (isolationMode !== 'DEDICATED_CLOUD_SQL') {
+  if (requireValue('STAGING_DATABASE_ISOLATION_MODE') !== 'DEDICATED_CLOUD_SQL') {
     fail('STAGING_DATABASE_ISOLATION_MODE_INVALID', 'expected DEDICATED_CLOUD_SQL');
   }
-
-  if (providerMode() === 'ISOLATED') {
-    requireValue('STAGING_PROVIDER_ISOLATION_EVIDENCE_REF');
+  if (providerMode() !== 'DISABLED') {
+    fail('STAGING_PROVIDER_MODE_INVALID', 'canonical staging must remain DISABLED');
+  }
+  if (anyProviderEnabled()) {
+    fail('STAGING_PROVIDER_MODE_CONFLICT', 'providers must remain disabled in canonical staging');
   }
 }
 
 function validateProviderMode() {
   if (environment !== 'staging') return;
   const mode = providerMode();
-  if (mode !== 'DISABLED' && mode !== 'ISOLATED') {
-    fail('STAGING_PROVIDER_MODE_INVALID', 'expected DISABLED or ISOLATED');
+  if (mode !== 'DISABLED') {
+    fail('STAGING_PROVIDER_MODE_INVALID', 'expected DISABLED');
   }
-  if (mode === 'DISABLED' && anyProviderEnabled()) {
+  if (anyProviderEnabled()) {
     fail('STAGING_PROVIDER_MODE_CONFLICT', 'providers must remain disabled in DISABLED mode');
   }
 }
@@ -251,10 +237,8 @@ function requireProjectLocalSecretId(key) {
   return secret;
 }
 
-function assertDistinct(label, stagingValue, productionValue) {
-  if (stagingValue === productionValue) {
-    fail('STAGING_PRODUCTION_COLLISION', `${label} matches the prohibited reference`);
-  }
+function assertDistinct(label, left, right) {
+  if (left === right) fail('DEPLOY_CONFIGURATION_COLLISION', label);
 }
 
 function enabled(key) {

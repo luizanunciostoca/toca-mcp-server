@@ -5,6 +5,7 @@ const immutableCommitShaReference = /^[0-9a-f]{40}(?:\s*#.*)?$/i;
 const immutableContainerImageReference = /@sha256:[0-9a-f]{64}$/i;
 const actionUsePattern = /^\s*uses:\s*([^\s]+)\s*(?:#.*)?$/;
 const containerImagePattern = /^\s*image:\s*['"]?([^'"\s#]+)['"]?\s*(?:#.*)?$/;
+const explicitTopLevelPermissionsPattern = /^permissions:\s*(?:\{\})?\s*$/;
 const failures = [];
 
 const workflowFiles = (await readdir(workflowDirectory, { withFileTypes: true }))
@@ -54,7 +55,7 @@ for (const workflowPath of workflowFiles) {
 
   const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
   const preJobs = jobsIndex >= 0 ? lines.slice(0, jobsIndex) : lines;
-  if (!preJobs.some((line) => /^permissions:\s*$/.test(line))) {
+  if (!preJobs.some((line) => explicitTopLevelPermissionsPattern.test(line))) {
     failures.push(`${workflowPath}: missing explicit top-level permissions before jobs:`);
   }
 }

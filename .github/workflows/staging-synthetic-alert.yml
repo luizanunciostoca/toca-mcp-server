@@ -22,29 +22,24 @@ env:
   PROJECT_NUMBER: '729069789107'
   PRODUCTION_PROJECT_ID: toca-mcp-production
   PRODUCTION_PROJECT_NUMBER: '990081828836'
-  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
   STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
   SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
 
 jobs:
-  bootstrap:
+  fire:
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
-    timeout-minutes: 15
-    outputs:
-      policy_sha256: ${{ steps.policy.outputs.sha256 }}
+    environment: staging
+    timeout-minutes: 25
     steps:
       - name: Checkout exact main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Verify synthetic alert policy boundary
-        id: policy
+      - name: Verify synthetic alert staging-only boundary
         shell: bash
         env:
           EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
@@ -52,6 +47,13 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
           ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
           test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
           jq -e '
@@ -82,79 +84,9 @@ jobs:
             .forbid.projectOwner == true and
             .forbid.projectEditor == true
           ' "$POLICY_PATH" >/dev/null
-          echo "sha256=$ACTUAL_POLICY_SHA256" >> "$GITHUB_OUTPUT"
           echo 'STAGING_SYNTHETIC_POLICY_BOUNDARY=PASS'
 
-      - name: Authenticate infrastructure administrator
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.INFRA_WIF }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Fail closed on exact staging project
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
-          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
-          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
-          echo 'STAGING_SYNTHETIC_PROJECT_BOUNDARY=PASS'
-
-      - name: Bootstrap exact synthetic-alert operator roles
-        shell: bash
-        run: |
-          set -euo pipefail
-          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
-          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
-            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-              --member="$MEMBER" \
-              --role="$role" \
-              --condition=None \
-              --quiet
-          done
-          POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
-            jq -e --arg role "$role" --arg member "$MEMBER" \
-              'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' \
-              <<<"$POLICY" >/dev/null
-          done
-          echo 'STAGING_SYNTHETIC_OPERATOR_ROLES=PASS'
-
-  fire:
-    needs: bootstrap
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 20
-    steps:
-      - name: Checkout exact main
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-          persist-credentials: false
-
-      - name: Verify exact staging execution boundary
-        shell: bash
-        env:
-          EXPECTED_POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
-          BOOTSTRAP_POLICY_SHA256: ${{ needs.bootstrap.outputs.policy_sha256 }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
-          test "$GITHUB_REF" = 'refs/heads/main'
-          test "$PROJECT_ID" = 'toca-mcp-next-staging'
-          test "$PROJECT_NUMBER" = '729069789107'
-          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
-          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
-          ACTUAL_POLICY_SHA256="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
-          test "$ACTUAL_POLICY_SHA256" = "$EXPECTED_POLICY_SHA256"
-          test "$ACTUAL_POLICY_SHA256" = "$BOOTSTRAP_POLICY_SHA256"
-          echo 'STAGING_SYNTHETIC_EXECUTION_BOUNDARY=PASS'
-
-      - name: Authenticate isolated staging operator
+      - name: Authenticate isolated staging operator only
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
@@ -163,33 +95,31 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Verify staging operator and notification channels
+      - name: Verify staging operator roles and notification channels
         id: channels
         shell: bash
         run: |
           set -euo pipefail
           ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
           test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
-          ACTUAL_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-          test "$ACTUAL_NUMBER" = "$PROJECT_NUMBER"
-
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          PROJECT_POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
+          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
+            jq -e --arg role "$role" --arg member "$MEMBER" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$PROJECT_POLICY" >/dev/null
+          done
           TOKEN="$(gcloud auth print-access-token)"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" \
-            > /tmp/channels.json
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" > /tmp/channels.json
           unset TOKEN
-
           jq -e '[.notificationChannels[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability")] | length >= 2' /tmp/channels.json >/dev/null
           jq -e '[.notificationChannels[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability") | .type] | unique | sort == ["email","webhook_tokenauth"]' /tmp/channels.json >/dev/null
-
           EMAIL_CHANNEL="$(jq -r 'first(.notificationChannels[]? | select(.enabled==true and .type=="email" and .userLabels.toca_managed=="staging_reliability") | .name) // empty' /tmp/channels.json)"
           WEBHOOK_CHANNEL="$(jq -r 'first(.notificationChannels[]? | select(.enabled==true and .type=="webhook_tokenauth" and .userLabels.toca_managed=="staging_reliability") | .name) // empty' /tmp/channels.json)"
           test -n "$EMAIL_CHANNEL"
           test -n "$WEBHOOK_CHANNEL"
           printf 'email=%s\nwebhook=%s\n' "$EMAIL_CHANNEL" "$WEBHOOK_CHANNEL" >> "$GITHUB_OUTPUT"
           rm -f /tmp/channels.json
-          echo 'STAGING_SYNTHETIC_NOTIFICATION_CHANNELS=PASS'
+          echo 'STAGING_SYNTHETIC_PREEXISTING_ROLES_AND_CHANNELS=PASS'
 
       - name: Reconcile governed synthetic alert policy
         id: alert
@@ -202,71 +132,20 @@ jobs:
           mkdir -p staging-synthetic-alert-evidence
           TOKEN="$(gcloud auth print-access-token)"
           API_ROOT="https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}"
-
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${API_ROOT}/alertPolicies?pageSize=100" \
-            > /tmp/alert-policies.json
-
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${API_ROOT}/alertPolicies?pageSize=100" > /tmp/alert-policies.json
           POLICY_NAME="$(jq -r 'first(.alertPolicies[]? | select(.userLabels.toca_managed=="staging_reliability" and .userLabels.alert_role=="synthetic_delivery") | .name) // empty' /tmp/alert-policies.json)"
           EXPECTED_FILTER="logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.marker=\"${SYNTHETIC_MARKER}\""
-
           if [[ -z "$POLICY_NAME" ]]; then
-            jq -n \
-              --arg filter "$EXPECTED_FILTER" \
-              --arg email "$EMAIL_CHANNEL" \
-              --arg webhook "$WEBHOOK_CHANNEL" \
-              '{
-                displayName:"TOCA Next Staging - Synthetic Reliability Delivery",
-                combiner:"OR",
-                enabled:true,
-                userLabels:{toca_managed:"staging_reliability",alert_role:"synthetic_delivery"},
-                documentation:{content:"Synthetic, non-destructive staging-only notification delivery gate.",mimeType:"text/markdown"},
-                conditions:[{
-                  displayName:"TOCA staging synthetic log marker",
-                  conditionMatchedLog:{filter:$filter}
-                }],
-                notificationChannels:[$email,$webhook],
-                alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"}
-              }' > /tmp/alert-policy-create.json
-
-            CREATE_HTTP="$(curl --silent --show-error \
-              --output /tmp/alert-policy-created.json \
-              --write-out '%{http_code}' \
-              -X POST \
-              -H "Authorization: Bearer ${TOKEN}" \
-              -H 'Content-Type: application/json' \
-              --data-binary @/tmp/alert-policy-create.json \
-              "${API_ROOT}/alertPolicies")"
-            if [[ "$CREATE_HTTP" != 200 ]]; then
-              echo "STAGING_SYNTHETIC_ALERT_POLICY_CREATE_HTTP=${CREATE_HTTP}" >&2
-              jq -c '{error:{code:(.error.code // null),status:(.error.status // null),message:(.error.message // null)}}' /tmp/alert-policy-created.json >&2 || true
-              exit 1
-            fi
+            jq -n --arg filter "$EXPECTED_FILTER" --arg email "$EMAIL_CHANNEL" --arg webhook "$WEBHOOK_CHANNEL" '{displayName:"TOCA Next Staging - Synthetic Reliability Delivery",combiner:"OR",enabled:true,userLabels:{toca_managed:"staging_reliability",alert_role:"synthetic_delivery"},documentation:{content:"Synthetic, non-destructive staging-only notification delivery gate.",mimeType:"text/markdown"},conditions:[{displayName:"TOCA staging synthetic log marker",conditionMatchedLog:{filter:$filter}}],notificationChannels:[$email,$webhook],alertStrategy:{notificationRateLimit:{period:"300s"},autoClose:"1800s"}}' > /tmp/alert-policy-create.json
+            CREATE_HTTP="$(curl --silent --show-error --output /tmp/alert-policy-created.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/alert-policy-create.json "${API_ROOT}/alertPolicies")"
+            test "$CREATE_HTTP" = 200
             POLICY_NAME="$(jq -r '.name // empty' /tmp/alert-policy-created.json)"
           fi
-
           test -n "$POLICY_NAME"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "https://monitoring.googleapis.com/v3/${POLICY_NAME}" \
-            > /tmp/alert-policy-readback.json
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${POLICY_NAME}" > /tmp/alert-policy-readback.json
           unset TOKEN
-
-          jq -e --arg filter "$EXPECTED_FILTER" --arg email "$EMAIL_CHANNEL" --arg webhook "$WEBHOOK_CHANNEL" '
-            .enabled == true and
-            .combiner == "OR" and
-            .userLabels.toca_managed == "staging_reliability" and
-            .userLabels.alert_role == "synthetic_delivery" and
-            (.conditions | length) == 1 and
-            .conditions[0].conditionMatchedLog.filter == $filter and
-            (.notificationChannels | sort) == ([$email,$webhook] | sort) and
-            .alertStrategy.notificationRateLimit.period == "300s" and
-            .alertStrategy.autoClose == "1800s"
-          ' /tmp/alert-policy-readback.json >/dev/null
-
-          jq '{name,displayName,enabled,userLabels,conditions:[.conditions[] | {displayName,conditionMatchedLog}],notificationChannels,alertStrategy}' \
-            /tmp/alert-policy-readback.json > staging-synthetic-alert-evidence/alert-policy-sanitized.json
+          jq -e --arg filter "$EXPECTED_FILTER" --arg email "$EMAIL_CHANNEL" --arg webhook "$WEBHOOK_CHANNEL" '.enabled == true and .combiner == "OR" and .userLabels.toca_managed == "staging_reliability" and .userLabels.alert_role == "synthetic_delivery" and (.conditions | length) == 1 and .conditions[0].conditionMatchedLog.filter == $filter and (.notificationChannels | sort) == ([$email,$webhook] | sort) and .alertStrategy.notificationRateLimit.period == "300s" and .alertStrategy.autoClose == "1800s"' /tmp/alert-policy-readback.json >/dev/null
+          jq '{name,displayName,enabled,userLabels,conditions:[.conditions[] | {displayName,conditionMatchedLog}],notificationChannels,alertStrategy}' /tmp/alert-policy-readback.json > staging-synthetic-alert-evidence/alert-policy-sanitized.json
           rm -f /tmp/alert-policies.json /tmp/alert-policy-create.json /tmp/alert-policy-created.json /tmp/alert-policy-readback.json
           echo "policy_name=$POLICY_NAME" >> "$GITHUB_OUTPUT"
           echo 'STAGING_SYNTHETIC_ALERT_POLICY=PASS'
@@ -279,24 +158,11 @@ jobs:
         run: |
           set -euo pipefail
           RUN_MARKER="${SYNTHETIC_MARKER}:run:${GITHUB_RUN_ID}:sha:${GITHUB_SHA}"
-          gcloud logging write "$SYNTHETIC_LOG_ID" \
-            "{\"marker\":\"${SYNTHETIC_MARKER}\",\"runMarker\":\"${RUN_MARKER}\",\"githubRunId\":\"${GITHUB_RUN_ID}\",\"githubSha\":\"${GITHUB_SHA}\",\"alertPolicy\":\"${POLICY_NAME}\"}" \
-            --payload-type=json \
-            --severity=WARNING \
-            --project="$PROJECT_ID"
-
+          gcloud logging write "$SYNTHETIC_LOG_ID" "{\"marker\":\"${SYNTHETIC_MARKER}\",\"runMarker\":\"${RUN_MARKER}\",\"githubRunId\":\"${GITHUB_RUN_ID}\",\"githubSha\":\"${GITHUB_SHA}\",\"alertPolicy\":\"${POLICY_NAME}\"}" --payload-type=json --severity=WARNING --project="$PROJECT_ID"
           FOUND=0
           for attempt in $(seq 1 18); do
-            COUNT="$(gcloud logging read \
-              "logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${RUN_MARKER}\"" \
-              --project="$PROJECT_ID" \
-              --freshness=15m \
-              --limit=5 \
-              --format='value(insertId)' | wc -l | tr -d ' ')"
-            if [[ "$COUNT" -ge 1 ]]; then
-              FOUND=1
-              break
-            fi
+            COUNT="$(gcloud logging read "logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${RUN_MARKER}\"" --project="$PROJECT_ID" --freshness=15m --limit=5 --format='value(insertId)' | wc -l | tr -d ' ')"
+            if [[ "$COUNT" -ge 1 ]]; then FOUND=1; break; fi
             sleep 5
           done
           test "$FOUND" = 1
@@ -313,42 +179,9 @@ jobs:
           POLICY_SHA256: ${{ inputs.expected_policy_sha256 }}
         run: |
           set -euo pipefail
-          jq -n \
-            --arg project "$PROJECT_ID" \
-            --arg projectNumber "$PROJECT_NUMBER" \
-            --arg operator "$STAGING_OPERATOR_SA" \
-            --arg githubRunId "$GITHUB_RUN_ID" \
-            --arg githubSha "$GITHUB_SHA" \
-            --arg policySha256 "$POLICY_SHA256" \
-            --arg policyName "$POLICY_NAME" \
-            --arg runMarker "$RUN_MARKER" \
-            --arg emailChannel "$EMAIL_CHANNEL" \
-            --arg webhookChannel "$WEBHOOK_CHANNEL" \
-            '{
-              schemaVersion:"toca.staging.synthetic-alert.evidence.v1",
-              project:$project,
-              projectNumber:$projectNumber,
-              executionEnvironment:"staging",
-              operator:$operator,
-              githubRunId:$githubRunId,
-              githubSha:$githubSha,
-              policySha256:$policySha256,
-              alertPolicy:{name:$policyName,enabled:true},
-              syntheticSignal:{runMarker:$runMarker,ingested:true},
-              notificationChannels:[$emailChannel,$webhookChannel],
-              productionMutation:false,
-              providerMutation:false,
-              databaseMutation:false,
-              backupMutation:false,
-              drRestore:false,
-              trafficMutation:false,
-              cloudRunMutation:false,
-              secretMutation:false,
-              deliveryReadbackExecuted:false,
-              result:"FIRING_SIGNAL_EMITTED_WAITING_FOR_DELIVERY_READBACK"
-            }' > staging-synthetic-alert-evidence/manifest.json
+          jq -n --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" --arg operator "$STAGING_OPERATOR_SA" --arg githubRunId "$GITHUB_RUN_ID" --arg githubSha "$GITHUB_SHA" --arg policySha256 "$POLICY_SHA256" --arg policyName "$POLICY_NAME" --arg runMarker "$RUN_MARKER" --arg emailChannel "$EMAIL_CHANNEL" --arg webhookChannel "$WEBHOOK_CHANNEL" '{schemaVersion:"toca.staging.synthetic-alert.evidence.v2",project:$project,projectNumber:$projectNumber,executionEnvironment:"staging",operator:$operator,githubRunId:$githubRunId,githubSha:$githubSha,policySha256:$policySha256,alertPolicy:{name:$policyName,enabled:true},syntheticSignal:{runMarker:$runMarker,ingested:true},notificationChannels:[$emailChannel,$webhookChannel],productionAccess:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretMutation:false,iamMutation:false,deliveryReadbackExecuted:false,result:"FIRING_SIGNAL_EMITTED_WAITING_FOR_DELIVERY_READBACK"}' > staging-synthetic-alert-evidence/manifest.json
+          sha256sum staging-synthetic-alert-evidence/* > staging-synthetic-alert-evidence/SHA256SUMS
           echo 'STAGING_SYNTHETIC_ALERT_SIGNAL=EMITTED'
-          echo 'DELIVERY_READBACK=EXTERNAL_NEXT_GATE'
 
       - name: Upload synthetic firing evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
