@@ -78,11 +78,18 @@ describe('canonical isolated staging deployment workflow', () => {
   it('does not use unsupported Cloud Run readiness-probe and keeps readiness fail-closed', () => {
     expect(workflow).not.toContain('--readiness-probe');
     expect(workflow).toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(workflow).toContain("--liveness-probe 'httpGet.path=/healthz");
     expect(workflow).toContain(
       'Verify candidate health readiness and public route confinement before traffic',
     );
-    expect(workflow).toContain('$MCP_URL/readyz');
-    expect(workflow).toContain('$WEBHOOK_URL/readyz');
+    expect(workflow).toContain('$MCP_URL/ready');
+    expect(workflow).toContain('$WEBHOOK_URL/ready');
+    expect(workflow).toContain('$MCP_URL/health');
+    expect(workflow).toContain('$WEBHOOK_URL/health');
+    expect(workflow).not.toContain('$MCP_URL/healthz');
+    expect(workflow).not.toContain('$MCP_URL/readyz');
+    expect(workflow).not.toContain('$WEBHOOK_URL/healthz');
+    expect(workflow).not.toContain('$WEBHOOK_URL/readyz');
     expect(workflow).toContain('.status == "ready" and (.checks | all(.ok == true))');
   });
 
@@ -120,6 +127,10 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(runtimeWorkflow).toContain('id: mcp_probe_auth');
     expect(runtimeWorkflow).toContain('id: webhook_probe_auth');
     expect(runtimeWorkflow).toContain('id: capacity_auth');
+    expect(runtimeWorkflow).toContain('${base_url}/health');
+    expect(runtimeWorkflow).toContain('${base_url}/ready');
+    expect(runtimeWorkflow).not.toContain('/healthz');
+    expect(runtimeWorkflow).not.toContain('/readyz');
     expect(runtimeWorkflow).toContain('id_token_audience: ${{ steps.runtime.outputs.mcp_url }}');
     expect(runtimeWorkflow).toContain(
       'id_token_audience: ${{ steps.runtime.outputs.webhook_url }}',
@@ -131,8 +142,8 @@ describe('canonical isolated staging deployment workflow', () => {
       'MCP_SERVICE_URL="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE"',
     );
     expect(workflow).toContain('test "$MCP_SERVICE_URL" != "$MCP_URL"');
-    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz"');
-    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz"');
+    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/health"');
+    expect(workflow).toContain('-H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/ready"');
   });
 
   it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {

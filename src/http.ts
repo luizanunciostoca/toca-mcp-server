@@ -22,6 +22,7 @@ const WEBHOOK_SERVICE_ALLOWED_PATHS = new Set([
   '/health',
   '/healthz',
   '/readyz',
+  '/ready',
   '/webhooks/meta',
   SENDGRID_EVENT_WEBHOOK_PATH,
 ]);
