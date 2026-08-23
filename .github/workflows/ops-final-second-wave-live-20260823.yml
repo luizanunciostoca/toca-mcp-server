@@ -1,0 +1,211 @@
+name: Ops Final Second Wave Staging Live 2026-08-23
+
+on:
+  push:
+    branches: [ops/final-second-wave-live-20260823]
+    paths:
+      - '.github/workflows/ops-final-second-wave-live-20260823.yml'
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: ops-final-second-wave-live-20260823
+  cancel-in-progress: false
+
+env:
+  FINAL_SHA: 771bb1f3c4cc625aa7a712af2a762c1191385756
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  live-staging-closeout:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.FINAL_SHA }}
+          persist-credentials: false
+
+      - name: Verify immutable staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$(git rev-parse HEAD)" = "$FINAL_SHA"
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$REMOTE_MAIN" = "$FINAL_SHA"
+          mkdir -p final-second-wave-evidence
+          sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}' > /tmp/runtime-policy-sha
+          sha256sum infra/observability/staging-synthetic-alert-policy.json | awk '{print $1}' > /tmp/synthetic-policy-sha
+          echo 'FINAL_STAGING_BOUNDARY=PASS'
+
+      - name: Dispatch exact-candidate staging deployment
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run deploy-gcp.yml --repo "$GITHUB_REPOSITORY" --ref main -f environment=staging -f operation=deploy -f rollout=full
+          RUN_ID=''
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-gcp.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt | jq -r --arg sha "$FINAL_SHA" --arg start "$START" '[.[] | select(.headSha==$sha and .createdAt >= $start)] | sort_by(.databaseId) | last | .databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json databaseId,headSha,status,conclusion,url,workflowName > final-second-wave-evidence/deploy-run.json
+          jq -e --arg sha "$FINAL_SHA" '.headSha==$sha and .conclusion=="success"' final-second-wave-evidence/deploy-run.json >/dev/null
+          echo 'FINAL_STAGING_DEPLOY=PASS'
+
+      - name: Authenticate isolated staging operator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read back exact deployed runtime and immutable digest
+        id: runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          inspect() {
+            local service="$1" out="$2"
+            gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" --format=json > "/tmp/${service}-service.json"
+            local revision
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "") != "") | .revisionName) // empty' "/tmp/${service}-service.json")"
+            test -n "$revision"
+            test "$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/${service}-service.json")" = 100
+            gcloud run revisions describe "$revision" --project="$PROJECT_ID" --region="$REGION" --format=json > "/tmp/${service}-revision.json"
+            local release image digest
+            release="$(jq -r 'first(.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value) // empty' "/tmp/${service}-revision.json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "/tmp/${service}-revision.json")"
+            digest="${image##*@}"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              digest="$(jq -r '.status.imageDigest // empty' "/tmp/${service}-revision.json")"
+              digest="${digest##*@}"
+            fi
+            test "$release" = "$FINAL_SHA"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            jq -n --arg service "$service" --arg revision "$revision" --arg releaseSha "$release" --arg imageDigest "$digest" '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,imageDigest:$imageDigest}' > "$out"
+            printf '%s\n' "$digest"
+          }
+          MCP_DIGEST="$(inspect "$MCP_SERVICE" final-second-wave-evidence/mcp-runtime.json)"
+          WEBHOOK_DIGEST="$(inspect "$WEBHOOK_SERVICE" final-second-wave-evidence/webhook-runtime.json)"
+          test "$MCP_DIGEST" = "$WEBHOOK_DIGEST"
+          echo "image_digest=$MCP_DIGEST" >> "$GITHUB_OUTPUT"
+          echo 'FINAL_STAGING_RUNTIME_READBACK=PASS'
+
+      - name: Dispatch runtime capacity observability gate
+        id: runtime_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.runtime.outputs.image_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_SHA="$(cat /tmp/runtime-policy-sha)"
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run staging-runtime-observability.yml --repo "$GITHUB_REPOSITORY" --ref main -f expected_policy_sha256="$POLICY_SHA" -f expected_candidate_sha="$FINAL_SHA" -f expected_image_digest="$IMAGE_DIGEST" -f run_capacity=true
+          RUN_ID=''
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow staging-runtime-observability.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt | jq -r --arg sha "$FINAL_SHA" --arg start "$START" '[.[] | select(.headSha==$sha and .createdAt >= $start)] | sort_by(.databaseId) | last | .databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json databaseId,headSha,status,conclusion,url,workflowName > final-second-wave-evidence/runtime-capacity-run.json
+          jq -e --arg sha "$FINAL_SHA" '.headSha==$sha and .conclusion=="success"' final-second-wave-evidence/runtime-capacity-run.json >/dev/null
+          echo 'FINAL_STAGING_RUNTIME_CAPACITY=PASS'
+
+      - name: Dispatch reliability alert reconciliation gate
+        id: alerts_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_SHA="$(cat /tmp/runtime-policy-sha)"
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run staging-reliability-alerts.yml --repo "$GITHUB_REPOSITORY" --ref main -f expected_source_sha="$FINAL_SHA" -f expected_policy_sha256="$POLICY_SHA"
+          RUN_ID=''
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow staging-reliability-alerts.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt | jq -r --arg sha "$FINAL_SHA" --arg start "$START" '[.[] | select(.headSha==$sha and .createdAt >= $start)] | sort_by(.databaseId) | last | .databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json databaseId,headSha,status,conclusion,url,workflowName > final-second-wave-evidence/reliability-alerts-run.json
+          jq -e --arg sha "$FINAL_SHA" '.headSha==$sha and .conclusion=="success"' final-second-wave-evidence/reliability-alerts-run.json >/dev/null
+          echo 'FINAL_STAGING_ALERT_RECONCILIATION=PASS'
+
+      - name: Dispatch staging-only synthetic alert firing
+        id: synthetic_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_SHA="$(cat /tmp/synthetic-policy-sha)"
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run staging-synthetic-alert.yml --repo "$GITHUB_REPOSITORY" --ref main -f expected_policy_sha256="$POLICY_SHA"
+          RUN_ID=''
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow staging-synthetic-alert.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt | jq -r --arg sha "$FINAL_SHA" --arg start "$START" '[.[] | select(.headSha==$sha and .createdAt >= $start)] | sort_by(.databaseId) | last | .databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json databaseId,headSha,status,conclusion,url,workflowName > final-second-wave-evidence/synthetic-alert-run.json
+          jq -e --arg sha "$FINAL_SHA" '.headSha==$sha and .conclusion=="success"' final-second-wave-evidence/synthetic-alert-run.json >/dev/null
+          echo 'FINAL_STAGING_SYNTHETIC_FIRING=PASS'
+
+      - name: Build orchestration manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg finalSha "$FINAL_SHA" --arg project "$PROJECT_ID" --arg projectNumber "$PROJECT_NUMBER" --arg bridgeRunId "$GITHUB_RUN_ID" --arg deployRun "${{ steps.deploy.outputs.run_id }}" --arg runtimeRun "${{ steps.runtime_gate.outputs.run_id }}" --arg alertsRun "${{ steps.alerts_gate.outputs.run_id }}" --arg syntheticRun "${{ steps.synthetic_gate.outputs.run_id }}" '{schemaVersion:"toca.acceptance.final-staging.v1",finalSha:$finalSha,project:$project,projectNumber:$projectNumber,bridgeRunId:$bridgeRunId,deployRunId:$deployRun,runtimeCapacityRunId:$runtimeRun,reliabilityAlertsRunId:$alertsRun,syntheticAlertRunId:$syntheticRun,productionAccess:false,productionMutation:false,providerCalls:false}' > final-second-wave-evidence/manifest.json
+          sha256sum final-second-wave-evidence/* > final-second-wave-evidence/SHA256SUMS
+
+      - name: Upload final staging orchestration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: final-second-wave-staging-${{ github.run_id }}
+          path: final-second-wave-evidence
+          if-no-files-found: warn
+          retention-days: 90
