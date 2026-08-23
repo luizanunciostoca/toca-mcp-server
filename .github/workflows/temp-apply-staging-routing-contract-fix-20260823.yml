@@ -1,0 +1,93 @@
+name: TEMP Apply Staging Routing Contract Fix 2026-08-23
+
+on:
+  push:
+    branches: [fix/staging-cloud-run-routing-contract-20260823]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/staging-cloud-run-routing-contract-20260823
+          fetch-depth: 0
+
+      - name: Apply minimal canonical workflow and regression-test patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/deploy-gcp-staging-canonical.yml')
+          test_path = Path('test/gcp-staging-canonical-workflow.test.ts')
+
+          workflow = workflow_path.read_text()
+          old_mcp = """            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1 --no-allow-unauthenticated"""
+          new_mcp = """            --min-instances 0 --max-instances 1 --cpu-throttling --memory 512Mi --cpu 1 \\
+            --ingress all --default-url --invoker-iam-check --no-allow-unauthenticated"""
+          old_webhook = """            --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 --allow-unauthenticated"""
+          new_webhook = """            --min-instances 0 --max-instances 2 --cpu-throttling --memory 512Mi --cpu 1 \\
+            --ingress all --default-url --no-invoker-iam-check"""
+          if workflow.count(old_mcp) != 1:
+              raise SystemExit('expected exactly one private MCP deploy flag sequence')
+          if workflow.count(old_webhook) != 1:
+              raise SystemExit('expected exactly one public webhook deploy flag sequence')
+          workflow = workflow.replace(old_mcp, new_mcp).replace(old_webhook, new_webhook)
+          workflow_path.write_text(workflow)
+
+          test = test_path.read_text()
+          marker = """  it('requires exact frozen candidate, immutable digest, readiness before promotion and final readback', () => {"""
+          addition = """  it('pins canonical Cloud Run endpoint and invoker modes for staging', () => {
+    expect(workflow).toContain(
+      '--ingress all --default-url --invoker-iam-check --no-allow-unauthenticated',
+    );
+    expect(workflow).toContain('--ingress all --default-url --no-invoker-iam-check');
+    expect(workflow).not.toContain('--allow-unauthenticated');
+  });
+
+"""
+          if test.count(marker) != 1:
+              raise SystemExit('expected exact regression-test insertion marker')
+          test = test.replace(marker, addition + marker)
+          test_path.write_text(test)
+          PY
+
+          grep -q -- '--ingress all --default-url --invoker-iam-check --no-allow-unauthenticated' .github/workflows/deploy-gcp-staging-canonical.yml
+          grep -q -- '--ingress all --default-url --no-invoker-iam-check' .github/workflows/deploy-gcp-staging-canonical.yml
+          ! grep -qE '(^|[[:space:]])--allow-unauthenticated([[:space:]]|$)' .github/workflows/deploy-gcp-staging-canonical.yml
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Run affected regression test
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm vitest run test/gcp-staging-canonical-workflow.test.ts
+
+      - name: Commit fix and remove temporary patch workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/temp-apply-staging-routing-contract-fix-20260823.yml
+          git add .github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts
+          git diff --cached --check
+          git commit -m 'fix(staging): pin Cloud Run routing and public webhook mode'
+          git push origin HEAD:fix/staging-cloud-run-routing-contract-20260823
