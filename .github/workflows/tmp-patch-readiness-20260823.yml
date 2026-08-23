@@ -1,9 +1,9 @@
 name: TEMP Patch Unsupported Cloud Run Readiness 2026-08-23
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/staging-gcloud-readiness-20260823
+      - main
     paths:
       - .github/workflows/tmp-patch-readiness-20260823.yml
 
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   patch:
+    if: github.event.pull_request.head.ref == 'fix/staging-gcloud-readiness-20260823'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -21,11 +22,10 @@ jobs:
           ref: fix/staging-gcloud-readiness-20260823
           fetch-depth: 1
 
-      - name: Remove unsupported flag and add regression coverage
+      - name: Remove unsupported flag add regression coverage and self-delete
         shell: bash
         run: |
           set -euo pipefail
-          echo 'TEMP_READINESS_PATCH_TRIGGER=2'
           python3 - <<'PY'
           from pathlib import Path
 
@@ -47,9 +47,10 @@ jobs:
               test_text = test_text.replace(anchor, regression + anchor)
           test_path.write_text(test_text)
           PY
+          git rm .github/workflows/tmp-patch-readiness-20260823.yml
           git diff --check
           git add .github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts
-          test "$(git diff --cached --numstat | wc -l)" -eq 2
+          test "$(git diff --cached --name-only | sort | paste -sd ' ' -)" = ".github/workflows/deploy-gcp-staging-canonical.yml test/gcp-staging-canonical-workflow.test.ts"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(staging): remove unsupported Cloud Run readiness flag'
