@@ -1,0 +1,43 @@
+name: TEMP Fix Staging Canonical Workflow 2026-08-23
+
+on:
+  push:
+    branches:
+      - fix/staging-canonical-deploy-config-20260823
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/staging-canonical-deploy-config-20260823
+          fetch-depth: 1
+
+      - name: Apply fixup and push branch
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/tmp-fix-staging-canonical-workflow.mjs
+          git add .github/workflows/deploy-gcp-staging-canonical.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(staging): correct canonical workflow config handoff'
+          git push origin HEAD:fix/staging-canonical-deploy-config-20260823
+
+      - name: Publish temporary fixup result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.patch.outcome }}
+        shell: bash
+        run: |
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body "TEMP_CANONICAL_WORKFLOW_FIX_RUN=${GITHUB_RUN_ID} OUTCOME=${OUTCOME}"
