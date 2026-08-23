@@ -1,16 +1,21 @@
 {
-  "version": 2,
-  "operation": "staging-runtime-observability-bootstrap",
+  "version": 3,
+  "operation": "staging-runtime-capacity-observability-verification",
   "projectId": "toca-mcp-next-staging",
   "projectNumber": "729069789107",
   "productionProjectId": "toca-mcp-production",
   "productionProjectNumber": "990081828836",
   "region": "southamerica-east1",
   "operatorServiceAccount": "toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "mcpService": "toca-mcp-next-staging",
   "webhookService": "toca-webhook-next-staging",
+  "cloudSqlInstance": "toca-mcp-next-staging-db",
+  "mcpRuntimeServiceAccount": "toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com",
+  "webhookRuntimeServiceAccount": "toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com",
   "dashboard": {
     "displayName": "TOCA OS Next — Platform Readiness — Staging",
-    "managedLabel": "staging_reliability"
+    "managedLabel": "staging_reliability",
+    "requireReadback": true
   },
   "uptimeCheck": {
     "displayName": "TOCA Next Staging — Webhook Readiness",
@@ -22,12 +27,17 @@
     "authentication": "MONITORING_SERVICE_AGENT_OIDC",
     "requireObservedPass": true
   },
-  "requiredIamRoles": [
-    "roles/run.viewer",
-    "roles/monitoring.dashboardEditor",
-    "roles/monitoring.uptimeCheckConfigEditor"
-  ],
+  "capacity": {
+    "endpoint": "/readyz",
+    "levels": [1, 5, 10, 25],
+    "requestsPerLevel": 50,
+    "warmupRequests": 5,
+    "maxErrorRate": 0,
+    "requireRecoveryAfterEachLevel": true,
+    "destructiveStress": false
+  },
   "forbid": {
+    "productionAccess": true,
     "productionMutation": true,
     "providerMutation": true,
     "databaseMutation": true,
@@ -35,10 +45,12 @@
     "drRestore": true,
     "trafficMutation": true,
     "cloudRunMutation": true,
+    "secretRead": true,
     "secretMutation": true,
     "serviceAccountKey": true,
     "projectOwner": true,
     "projectEditor": true,
-    "publicWebhookExposure": true
+    "publicWebhookExposure": true,
+    "destructiveStress": true
   }
 }
