@@ -43,6 +43,7 @@ env:
   STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
   MCP_RUNTIME_SA: toca-next-stg-mcp@toca-mcp-next-staging.iam.gserviceaccount.com
   WEBHOOK_RUNTIME_SA: toca-next-stg-webhook@toca-mcp-next-staging.iam.gserviceaccount.com
+  ARTIFACT_REPOSITORY: toca-mcp-staging
 
 jobs:
   verify:
@@ -119,11 +120,45 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Resolve expected Cloud Run runtime manifest from attested image digest
+        id: image
+        env:
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          OCI_MANIFEST_JSON="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}@${EXPECTED_IMAGE_DIGEST}" --format '{{json .Manifest}}')"
+          RESOLVED_IMAGE_DIGEST="$(jq -r '.digest // empty' <<<"$OCI_MANIFEST_JSON")"
+          MEDIA_TYPE="$(jq -r '.mediaType // empty' <<<"$OCI_MANIFEST_JSON")"
+          test "$RESOLVED_IMAGE_DIGEST" = "$EXPECTED_IMAGE_DIGEST"
+          case "$MEDIA_TYPE" in
+            application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+              PLATFORM_MATCH_COUNT="$(jq '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64")] | length' <<<"$OCI_MANIFEST_JSON")"
+              test "$PLATFORM_MATCH_COUNT" = 1
+              RUNTIME_IMAGE_DIGEST="$(jq -r 'first(.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest) // empty' <<<"$OCI_MANIFEST_JSON")"
+              ;;
+            application/vnd.oci.image.manifest.v1+json|application/vnd.docker.distribution.manifest.v2+json)
+              OCI_IMAGE_JSON="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}@${EXPECTED_IMAGE_DIGEST}" --format '{{json .Image}}')"
+              test "$(jq -r '.os // empty' <<<"$OCI_IMAGE_JSON")" = linux
+              test "$(jq -r '.architecture // empty' <<<"$OCI_IMAGE_JSON")" = amd64
+              RUNTIME_IMAGE_DIGEST="$EXPECTED_IMAGE_DIGEST"
+              ;;
+            *)
+              echo "Unsupported or unknown OCI media type: $MEDIA_TYPE" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "runtime_digest=$RUNTIME_IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+
       - name: Verify exact candidate revisions identities digests and traffic
         id: runtime
         env:
           EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
-          EXPECTED_IMAGE_DIGEST: ${{ inputs.expected_image_digest }}
+          EXPECTED_IMAGE_INDEX_DIGEST: ${{ inputs.expected_image_digest }}
+          EXPECTED_RUNTIME_IMAGE_DIGEST: ${{ steps.image.outputs.runtime_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -153,7 +188,7 @@ jobs:
             service_url="$(jq -r '.status.url // empty' "$service_json")"
             test "$release_sha" = "$EXPECTED_CANDIDATE_SHA"
             test "$runtime_sa" = "$expected_sa"
-            test "$image_digest" = "$EXPECTED_IMAGE_DIGEST"
+            test "$image_digest" = "$EXPECTED_RUNTIME_IMAGE_DIGEST"
             [[ "$service_url" == https://*.run.app ]]
 
             jq -n \
@@ -161,9 +196,10 @@ jobs:
               --arg revision "$revision" \
               --arg releaseSha "$release_sha" \
               --arg runtimeIdentity "$runtime_sa" \
-              --arg imageDigest "$image_digest" \
+              --arg imageIndexDigest "$EXPECTED_IMAGE_INDEX_DIGEST" \
+              --arg runtimeImageDigest "$image_digest" \
               --arg serviceUrl "$service_url" \
-              '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageDigest:$imageDigest,serviceUrl:$serviceUrl}' \
+              '{service:$service,revision:$revision,trafficPercent:100,releaseSha:$releaseSha,runtimeIdentity:$runtimeIdentity,imageIndexDigest:$imageIndexDigest,runtimeImageDigest:$runtimeImageDigest,serviceUrl:$serviceUrl}' \
               > "staging-runtime-observability-evidence/${evidence}"
             printf '%s\t%s\n' "$revision" "$service_url"
           }
