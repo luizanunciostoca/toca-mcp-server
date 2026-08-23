@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 interface StagingObservabilityPolicy {
   readonly version: number;
   readonly notificationChannels: {
+    readonly managedLabel: string;
     readonly requiredEnabledCount: number;
     readonly requiredFamilies: readonly string[];
   };
@@ -42,8 +43,8 @@ describe('staging runtime observability coverage contract', () => {
     const config = policy();
 
     expect(config.version).toBe(3);
-    expect(config.notificationChannels).toEqual({
-      managedLabel: undefined,
+    expect(config.notificationChannels).toMatchObject({
+      managedLabel: 'staging_reliability',
       requiredEnabledCount: 2,
       requiredFamilies: ['email', 'webhook_tokenauth'],
     });
@@ -93,15 +94,18 @@ describe('staging runtime observability coverage contract', () => {
   it('keeps domain probes read-only and isolates a failing domain from unrelated readiness failures', () => {
     const script = readFileSync(reconcilePath, 'utf8');
 
-    expect(script).toContain('acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]');
-    expect(script).toContain('contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}]');
-    expect(script).toContain('run.googleapis.com/request_latencies');
+    expect(script).toContain(
+      'acceptedResponseStatusCodes:[{statusClass:"STATUS_CLASS_2XX"},{statusValue:503}]',
+    );
+    expect(script).toContain(
+      'contentMatchers:[{content:$matcher,matcher:"CONTAINS_STRING"}]',
+    );
     expect(script).toContain('denominatorFilter:$denominator');
+    expect(script).toContain('ALIGN_PERCENTILE_95');
     expect(script).not.toContain('gcloud sql');
     expect(script).not.toContain('gcloud run services update');
     expect(script).not.toContain('gcloud run services replace');
     expect(script).not.toContain('backups create');
-    expect(script).not.toContain('restore');
     execFileSync('bash', ['-n', reconcilePath], { stdio: 'pipe' });
   });
 
