@@ -105,7 +105,10 @@ jobs:
                 gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
                   -f body="STAGING_ACCEPTANCE_${label}_RUN=${run_id} status=${conclusion} candidate=${CANDIDATE_SHA}" \
                   >/dev/null
-                test "$conclusion" = success
+                if [[ "$conclusion" != success ]]; then
+                  echo "Child workflow ${workflow} failed with conclusion=${conclusion} run_id=${run_id}" >&2
+                  return 1
+                fi
                 printf '%s\n' "$run_id"
                 return 0
               fi
