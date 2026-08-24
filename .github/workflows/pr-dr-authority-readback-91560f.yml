@@ -1,0 +1,84 @@
+name: PR DR Authority Readback 91560f
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths: ['.github/workflows/pr-dr-authority-readback-91560f.yml']
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  EVIDENCE_ISSUE: '151'
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+      - name: Start evidence
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="DR_AUTHORITY_READBACK_STARTED run=${GITHUB_RUN_ID} candidate=${CANDIDATE_SHA}" >/dev/null
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe only
+        id: p
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source.json
+          test "$(jq -r '.state' /tmp/source.json)" = RUNNABLE
+          jq -e '.settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' /tmp/source.json >/dev/null
+          INST="$(gcloud sql instances list --project="$PROJECT_ID" --format='value(name)' | sort | tr '\n' ',' | sed 's/,$//')"
+          TOKEN="$(gcloud auth print-access-token)"
+          printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.list","cloudsql.instances.connect","cloudsql.instances.create","cloudsql.instances.clone","cloudsql.instances.update","cloudsql.instances.delete","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","iam.serviceAccounts.list","iam.serviceAccounts.create","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy"]}' >/tmp/perms.json
+          HTTP="$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          test "$HTTP" = 200
+          HELD="$(jq -c '.permissions // [] | sort' /tmp/out.json)"
+          SAHTTP="$(curl -sS -o /tmp/sa.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://iam.googleapis.com/v1/projects/${PROJECT_ID}/serviceAccounts?pageSize=100")"
+          unset TOKEN
+          SA_ACCESS=DENIED; SA_NAMES='[]'
+          if [[ "$SAHTTP" == 200 ]]; then SA_ACCESS=PASS; SA_NAMES="$(jq -c '[.accounts[]?.email | select(test("dr|disaster|recovery";"i"))] | sort' /tmp/sa.json)"; fi
+          DR=false; IAM=false
+          jq -e 'index("cloudsql.instances.create") and index("cloudsql.instances.clone") and index("cloudsql.instances.update") and index("cloudsql.instances.delete")' <<<"$HELD" >/dev/null && DR=true || true
+          jq -e 'index("resourcemanager.projects.setIamPolicy") and index("iam.serviceAccounts.create")' <<<"$HELD" >/dev/null && IAM=true || true
+          echo "inst=$INST" >> "$GITHUB_OUTPUT"; echo "held=$HELD" >> "$GITHUB_OUTPUT"; echo "sa_access=$SA_ACCESS" >> "$GITHUB_OUTPUT"; echo "sa_names=$SA_NAMES" >> "$GITHUB_OUTPUT"; echo "dr=$DR" >> "$GITHUB_OUTPUT"; echo "iam=$IAM" >> "$GITHUB_OUTPUT"
+      - name: Result evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INST: ${{ steps.p.outputs.inst }}
+          HELD: ${{ steps.p.outputs.held }}
+          SA_ACCESS: ${{ steps.p.outputs.sa_access }}
+          SA_NAMES: ${{ steps.p.outputs.sa_names }}
+          DR: ${{ steps.p.outputs.dr }}
+          IAM: ${{ steps.p.outputs.iam }}
+        shell: bash
+        run: |
+          BODY=$(printf '## DR_AUTHORITY_READBACK — 91560f — READ_ONLY\n\nRUN_ID=%s\nCANDIDATE_SHA=%s\nACTIVE_IDENTITY=%s\nCLOUD_SQL_INSTANCES=%s\nHELD_TESTED_PERMISSIONS=%s\nDR_CREATE_CLONE_UPDATE_DELETE_READY=%s\nIAM_BOOTSTRAP_READY=%s\nSERVICE_ACCOUNT_LIST_ACCESS=%s\nDISCOVERED_DR_SERVICE_ACCOUNTS=%s\nMUTATION_EXECUTED=NO\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$STAGING_OPERATOR_SA" "$INST" "$HELD" "$DR" "$IAM" "$SA_ACCESS" "$SA_NAMES")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
