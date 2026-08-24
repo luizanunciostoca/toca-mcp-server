@@ -2,57 +2,52 @@ name: Quality Gate
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  update-runtime-db-hardening-contract:
+  quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: true
-          fetch-depth: 0
-      - name: Replace stale production migration contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/platform-hardening-check.mjs')
-          text = path.read_text()
-          anchor = "const deploy = '.github/workflows/deploy-gcp.yml';"
-          start = text.index(anchor)
-          end = text.index("const stagingDeploy = '.github/workflows/deploy-gcp-staging-canonical.yml';", start)
-          production = text[start:end]
-          old = "  'pnpm migrate',\n"
-          replacement = (
-              "  'Apply repository migrations through runtime identity job',\n"
-              "  '--args dist/scripts/migrate.js',\n"
-              "  'DATABASE_MIGRATION_JOB_CLEANUP=PASS',\n"
-          )
-          if production.count(old) != 1:
-              raise SystemExit('unexpected production migration contract shape')
-          production = production.replace(old, replacement, 1)
-          text = text[:start] + production + text[end:]
-          path.write_text(text)
-          PY
-          node scripts/platform-hardening-check.mjs
-          git diff --check
-          test "$(git diff --name-only)" = "scripts/platform-hardening-check.mjs"
-      - name: Commit hardening contract only
-        env:
-          HEAD_BRANCH: ${{ github.head_ref }}
-        run: |
-          set -euo pipefail
-          git add scripts/platform-hardening-check.mjs
-          test "$(git diff --cached --name-only)" = "scripts/platform-hardening-check.mjs"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'test(hardening): require runtime-identity DB migrations'
-          git push origin "HEAD:${HEAD_BRANCH}"
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Verify permanent workflow supply chain
+        run: node scripts/check-workflow-supply-chain.mjs
+      - name: Verify platform hardening contracts
+        run: node scripts/platform-hardening-check.mjs
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format check
+        run: pnpm format:check
+      - name: Architecture check
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
