@@ -133,6 +133,9 @@ describe('GCP production bootstrap contract', () => {
     expect(resolver).toContain('--format=json');
     expect(resolver).toContain('/tmp/meta-resolver-service.json');
     expect(resolver).toContain(
+      'https://${GCP_REGION}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_NUMBER}/revisions/${SERVING_REVISION}',
+    );
+    expect(resolver).not.toContain(
       'https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}',
     );
     expect(resolver).toContain('/tmp/meta-resolver-revision-v1.json');
