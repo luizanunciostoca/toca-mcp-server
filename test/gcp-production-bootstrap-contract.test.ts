@@ -99,6 +99,27 @@ describe('GCP production bootstrap contract', () => {
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-meta-oauth-token'");
   });
 
+  it('validates exact production authorization', () => {
+    const start = workflow.indexOf('Require exact production authorization before mutation');
+    const end = workflow.indexOf('Fail closed on unverified provider activation', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const gate = workflow.slice(start, end);
+
+    expect(gate).toContain('https://github.com/${GITHUB_REPOSITORY}/issues/');
+    expect(gate).toContain(
+      'https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}',
+    );
+    expect(gate).toContain('--arg owner "$GITHUB_REPOSITORY_OWNER"');
+    expect(gate).toContain('(.user.login == $owner)');
+    expect(gate).toContain('(.state == "open")');
+    expect(gate).toContain('(has("pull_request") | not)');
+    expect(gate).toContain('AUTHORIZED_CANDIDATE_SHA=');
+    expect(gate).toContain('AUTHORIZATION_STATE=ACTIVE');
+    expect(gate).toContain('production-authorization.json');
+    expect(gate).toContain('exactShaMatched:true');
+  });
+
   it('resolves the Meta token from one serving revision with immutable source evidence', () => {
     const start = workflow.indexOf('Resolve production Meta token to exact numeric secret version');
     const end = workflow.indexOf(
@@ -111,7 +132,10 @@ describe('GCP production bootstrap contract', () => {
 
     expect(resolver).toContain('--format=json');
     expect(resolver).toContain('/tmp/meta-resolver-service.json');
-    expect(resolver).toContain('/tmp/meta-resolver-revision.json');
+    expect(resolver).toContain(
+      'https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}',
+    );
+    expect(resolver).toContain('/tmp/meta-resolver-revision-v1.json');
     expect(resolver).toContain(
       'Meta resolver could not identify exactly one 100%-serving MCP revision',
     );
@@ -124,10 +148,25 @@ describe('GCP production bootstrap contract', () => {
     expect(resolver).toContain('GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION');
     expect(resolver).toContain('secretPayloadDisclosed:false');
     expect(resolver).toContain('providerCallExecuted:false');
+    expect(resolver).not.toContain('gcloud run revisions describe "$SERVING_REVISION"');
     expect(resolver).not.toContain("--format='value(status.traffic[percent=100].revisionName)'");
     expect(resolver).not.toContain('test -n "$SERVING_REVISION"');
     expect(resolver).not.toContain('test -n "$CURRENT_IMAGE"');
     expect(workflow).toContain('Production Meta token must be pinned to a numeric version');
+  });
+
+  it('captures deterministic rollback targets', () => {
+    const start = workflow.indexOf('Capture known rollback targets');
+    const end = workflow.indexOf('Deploy private MCP candidate by digest with no traffic', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const rollback = workflow.slice(start, end);
+
+    expect(rollback).toContain('--format=json');
+    expect(rollback).toContain('.latestRevision');
+    expect(rollback).toContain('.status.latestReadyRevisionName');
+    expect(rollback).toContain('Production deployment requires one serving MCP rollback revision');
+    expect(rollback).not.toContain("--format='value(status.traffic[percent=100].revisionName)'");
   });
 
   it('scopes META_APP_ID to META_ENABLED instead of Meta Ads read-only mode', () => {
