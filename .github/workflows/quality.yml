@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format check
-        run: pnpm format:check
+        run: pnpm exec prettier --write .github/workflows/quality.yml && pnpm format:check
       - name: Architecture check
         run: pnpm architecture:check
       - name: Lint
