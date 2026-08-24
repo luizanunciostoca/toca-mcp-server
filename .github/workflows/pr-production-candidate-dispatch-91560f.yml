@@ -1,4 +1,4 @@
-name: PR Production Identity Readback 91560f
+name: PR Production Runtime Reference Readback 91560f
 
 on:
   pull_request:
@@ -15,15 +15,17 @@ env:
   CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
   PROJECT_ID: toca-mcp-production
   PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  MCP_SERVICE: toca-mcp-production
   DATABASE_SECRET_ID: toca-database-url
   AUTH_ISSUE: '205'
 
 jobs:
   readback:
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
+    environment: production
     timeout-minutes: 20
     steps:
       - name: Exact candidate guard
@@ -33,54 +35,47 @@ jobs:
           MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
           test "$MAIN_SHA" = "$CANDIDATE_SHA"
 
-      - name: Authenticate existing production infrastructure admin
+      - name: Authenticate canonical production deployer
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-          service_account: ${{ env.INFRA_ADMIN_SA }}
+          service_account: ${{ env.DEPLOYER_SA }}
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Inventory existing service accounts and secret metadata capability
+      - name: Read current MCP runtime reference metadata only
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$INFRA_ADMIN_SA"
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
 
-          set +e
-          gcloud iam service-accounts list --project="$PROJECT_ID" --format=json >/tmp/service-accounts.json 2>/tmp/sa.err
-          SA_RC=$?
-          set -e
-          if [[ "$SA_RC" -eq 0 ]]; then
-            SA_EMAILS="$(jq -r '.[].email' /tmp/service-accounts.json | sort)"
-            MATCHING="$(printf '%s\n' "$SA_EMAILS" | grep -E 'toca|next|webhook|mcp' | paste -sd, - || true)"
-            MCP_RUNTIME_EXISTS="$(printf '%s\n' "$SA_EMAILS" | grep -Fx 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' >/dev/null && echo true || echo false)"
-          else
-            MATCHING='UNREADABLE'
-            MCP_RUNTIME_EXISTS='UNREADABLE'
-          fi
+          gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/mcp.json
+          CURRENT_REV="$(jq -r '[.status.traffic[]? | select(.percent==100) | .revisionName][0] // empty' /tmp/mcp.json)"
+          CURRENT_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' /tmp/mcp.json)"
+          CURRENT_SA="$(jq -r '.spec.template.spec.serviceAccountName // empty' /tmp/mcp.json)"
+          DB_SECRET_NAME="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="DATABASE_URL") | .valueFrom.secretKeyRef.name][0] // empty' /tmp/mcp.json)"
+          DB_SECRET_VERSION="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="DATABASE_URL") | .valueFrom.secretKeyRef.key][0] // empty' /tmp/mcp.json)"
+          test -n "$CURRENT_REV"
+          test -n "$CURRENT_IMAGE"
+          test -n "$CURRENT_SA"
 
-          set +e
-          SECRET_NAME="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' 2>/tmp/secret.err)"
-          SECRET_RC=$?
-          set -e
-          SECRET_VERSION='UNRESOLVED'
-          if [[ "$SECRET_RC" -eq 0 && "$SECRET_NAME" =~ /versions/([0-9]+)$ ]]; then SECRET_VERSION="${BASH_REMATCH[1]}"; fi
+          if [[ -z "$DB_SECRET_NAME" ]]; then DB_SECRET_NAME='UNBOUND'; fi
+          if [[ -z "$DB_SECRET_VERSION" ]]; then DB_SECRET_VERSION='UNBOUND'; fi
 
           BODY=$(cat <<EOF
-          PRODUCTION_IDENTITY_READBACK=COMPLETE
+          PRODUCTION_RUNTIME_REFERENCE_READBACK=PASS
           candidate=${CANDIDATE_SHA}
-          service_account_list_rc=${SA_RC}
-          matching_service_accounts=${MATCHING:-none}
-          canonical_mcp_runtime_exists=${MCP_RUNTIME_EXISTS}
-          secret_version_metadata_rc=${SECRET_RC}
-          database_secret_numeric_version=${SECRET_VERSION}
-          iam_mutation_executed=NO
+          mcp_service=${MCP_SERVICE}
+          current_100pct_revision=${CURRENT_REV}
+          current_image=${CURRENT_IMAGE}
+          runtime_service_account=${CURRENT_SA}
+          database_secret_name=${DB_SECRET_NAME}
+          database_secret_bound_version=${DB_SECRET_VERSION}
           secret_payload_read=NO
-          production_runtime_mutation_executed=NO
+          mutation_executed=NO
           EOF
           )
           gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="$BODY" >/dev/null
