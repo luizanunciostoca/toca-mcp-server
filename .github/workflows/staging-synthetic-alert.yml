@@ -95,7 +95,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Verify staging operator roles and notification channels
+      - name: Verify staging operator capabilities and notification channels
         id: channels
         shell: bash
         run: |
@@ -103,12 +103,17 @@ jobs:
           ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
           test "$ACTIVE_ACCOUNT" = "$STAGING_OPERATOR_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
-          PROJECT_POLICY="$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json)"
-          for role in roles/logging.logWriter roles/logging.viewer roles/logging.configWriter roles/monitoring.alertPolicyEditor; do
-            jq -e --arg role "$role" --arg member "$MEMBER" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$PROJECT_POLICY" >/dev/null
-          done
           TOKEN="$(gcloud auth print-access-token)"
+          cat >/tmp/synthetic-permissions.json <<'JSON'
+          {"permissions":["logging.logEntries.create","logging.logEntries.list","logging.logMetrics.create","logging.logMetrics.get","logging.logMetrics.update","monitoring.alertPolicies.create","monitoring.alertPolicies.get","monitoring.alertPolicies.list","monitoring.alertPolicies.update","monitoring.notificationChannels.list"]}
+          JSON
+          PERMISSIONS_HTTP="$(curl --silent --show-error --output /tmp/synthetic-granted.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/synthetic-permissions.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          test "$PERMISSIONS_HTTP" = 200
+          jq -e '
+            (.permissions // []) as $p |
+            ["logging.logEntries.create","logging.logEntries.list","logging.logMetrics.create","logging.logMetrics.get","logging.logMetrics.update","monitoring.alertPolicies.create","monitoring.alertPolicies.get","monitoring.alertPolicies.list","monitoring.alertPolicies.update","monitoring.notificationChannels.list"] |
+            all(. as $required | $p | index($required) != null)
+          ' /tmp/synthetic-granted.json >/dev/null
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" > /tmp/channels.json
           unset TOKEN
           jq -e '[.notificationChannels[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability")] | length >= 2' /tmp/channels.json >/dev/null
@@ -118,7 +123,7 @@ jobs:
           test -n "$EMAIL_CHANNEL"
           test -n "$WEBHOOK_CHANNEL"
           printf 'email=%s\nwebhook=%s\n' "$EMAIL_CHANNEL" "$WEBHOOK_CHANNEL" >> "$GITHUB_OUTPUT"
-          rm -f /tmp/channels.json
+          rm -f /tmp/synthetic-permissions.json /tmp/synthetic-granted.json /tmp/channels.json
           echo 'STAGING_SYNTHETIC_PREEXISTING_ROLES_AND_CHANNELS=PASS'
 
       - name: Reconcile governed synthetic alert policy
