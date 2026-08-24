@@ -1,0 +1,265 @@
+name: Staging Acceptance Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: staging-acceptance-command
+  cancel-in-progress: false
+
+env:
+  EVIDENCE_ISSUE: '151'
+  COMMAND_PREFIX: '/toca-staging-final '
+  ALLOWED_ACTOR: 'luizanunciostoca'
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 151 &&
+      startsWith(github.event.comment.body, '/toca-staging-final ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Parse command and enforce exact current main
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$EVIDENCE_ISSUE"
+
+          CANDIDATE_SHA="${COMMENT_BODY#${COMMAND_PREFIX}}"
+          test "$CANDIDATE_SHA" != "$COMMENT_BODY"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CANDIDATE_SHA" = "$MAIN_SHA"
+
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
+            -f body="STAGING_ACCEPTANCE_COMMAND=ACCEPTED candidate=${CANDIDATE_SHA} controller_run=${GITHUB_RUN_ID}" >/dev/null
+
+      - name: Checkout exact candidate for policy hashes
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.gate.outputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve canonical policy hashes
+        id: policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.gate.outputs.candidate_sha }}"
+          RUNTIME_POLICY_SHA="$(sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}')"
+          SYNTHETIC_POLICY_SHA="$(sha256sum infra/observability/staging-synthetic-alert-policy.json | awk '{print $1}')"
+          [[ "$RUNTIME_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SYNTHETIC_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+          echo "runtime_policy_sha=$RUNTIME_POLICY_SHA" >> "$GITHUB_OUTPUT"
+          echo "synthetic_policy_sha=$SYNTHETIC_POLICY_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch and await canonical staging deploy
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg sha "$CANDIDATE_SHA" --arg issue "$EVIDENCE_ISSUE" \
+            '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:$issue}}' \
+            | gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-gcp-staging-canonical.yml/dispatches" --input - >/dev/null
+
+          RUN_ID=''
+          for attempt in $(seq 1 45); do
+            RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-gcp-staging-canonical.yml/runs?event=workflow_dispatch&branch=main&per_page=30" \
+              --jq ".workflow_runs | map(select(.head_sha == \"${CANDIDATE_SHA}\" and .created_at >= \"${START}\")) | sort_by(.created_at) | last | .id // empty")"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 4
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_DEPLOY_RUN=${RUN_ID} status=started candidate=${CANDIDATE_SHA}" >/dev/null
+
+          for attempt in $(seq 1 240); do
+            STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.status')"
+            CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.conclusion // ""')"
+            if [[ "$STATUS" == completed ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_DEPLOY_RUN=${RUN_ID} status=${CONCLUSION} candidate=${CANDIDATE_SHA}" >/dev/null
+              test "$CONCLUSION" = success
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Resolve fresh OCI image index digest from deploy evidence
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          DEPLOY_RUN_ID: ${{ steps.deploy.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/comments.ndjson
+          for page in $(seq 1 12); do
+            PAGE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments?per_page=100&page=${page}")"
+            jq -c '.[]' <<<"$PAGE" >> /tmp/comments.ndjson
+            [[ "$(jq 'length' <<<"$PAGE")" -lt 100 ]] && break
+          done
+          BODY="$(jq -rs --arg rid "RUN_ID=${DEPLOY_RUN_ID}" --arg sha "$CANDIDATE_SHA" '[.[] | select((.body|contains($rid)) and (.body|contains($sha)) and (.body|contains("imageIndexDigest")))] | last | .body // empty' /tmp/comments.ndjson)"
+          test -n "$BODY"
+          IMAGE_DIGEST="$(python3 - "$BODY" <<'PY'
+import re
+import sys
+
+match = re.search(r'"imageIndexDigest"\s*:\s*"(sha256:[0-9a-f]{64})"', sys.argv[1])
+if not match:
+    raise SystemExit(1)
+print(match.group(1))
+PY
+)"
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_IMAGE_INDEX_DIGEST=${IMAGE_DIGEST} deploy_run=${DEPLOY_RUN_ID}" >/dev/null
+
+      - name: Dispatch and await runtime capacity observability
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          RUNTIME_POLICY_SHA: ${{ steps.policy.outputs.runtime_policy_sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg policy "$RUNTIME_POLICY_SHA" --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" \
+            '{ref:"main",inputs:{expected_policy_sha256:$policy,expected_candidate_sha:$sha,expected_image_digest:$digest,run_capacity:"true"}}' \
+            | gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-runtime-observability.yml/dispatches" --input - >/dev/null
+
+          RUN_ID=''
+          for attempt in $(seq 1 45); do
+            RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-runtime-observability.yml/runs?event=workflow_dispatch&branch=main&per_page=30" \
+              --jq ".workflow_runs | map(select(.head_sha == \"${CANDIDATE_SHA}\" and .created_at >= \"${START}\")) | sort_by(.created_at) | last | .id // empty")"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 4
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_RUNTIME_RUN=${RUN_ID} status=started candidate=${CANDIDATE_SHA}" >/dev/null
+
+          for attempt in $(seq 1 180); do
+            STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.status')"
+            CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.conclusion // ""')"
+            if [[ "$STATUS" == completed ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_RUNTIME_RUN=${RUN_ID} status=${CONCLUSION} candidate=${CANDIDATE_SHA}" >/dev/null
+              test "$CONCLUSION" = success
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Dispatch and await reliability topology reconciliation
+        id: alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          RUNTIME_POLICY_SHA: ${{ steps.policy.outputs.runtime_policy_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg sha "$CANDIDATE_SHA" --arg policy "$RUNTIME_POLICY_SHA" \
+            '{ref:"main",inputs:{expected_source_sha:$sha,expected_policy_sha256:$policy}}' \
+            | gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-reliability-alerts.yml/dispatches" --input - >/dev/null
+
+          RUN_ID=''
+          for attempt in $(seq 1 45); do
+            RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-reliability-alerts.yml/runs?event=workflow_dispatch&branch=main&per_page=30" \
+              --jq ".workflow_runs | map(select(.head_sha == \"${CANDIDATE_SHA}\" and .created_at >= \"${START}\")) | sort_by(.created_at) | last | .id // empty")"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 4
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_ALERTS_RUN=${RUN_ID} status=started candidate=${CANDIDATE_SHA}" >/dev/null
+
+          for attempt in $(seq 1 180); do
+            STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.status')"
+            CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.conclusion // ""')"
+            if [[ "$STATUS" == completed ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_ALERTS_RUN=${RUN_ID} status=${CONCLUSION} candidate=${CANDIDATE_SHA}" >/dev/null
+              test "$CONCLUSION" = success
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Dispatch and await synthetic alert firing
+        id: synthetic
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          SYNTHETIC_POLICY_SHA: ${{ steps.policy.outputs.synthetic_policy_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg policy "$SYNTHETIC_POLICY_SHA" \
+            '{ref:"main",inputs:{expected_policy_sha256:$policy}}' \
+            | gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-synthetic-alert.yml/dispatches" --input - >/dev/null
+
+          RUN_ID=''
+          for attempt in $(seq 1 45); do
+            RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/staging-synthetic-alert.yml/runs?event=workflow_dispatch&branch=main&per_page=30" \
+              --jq ".workflow_runs | map(select(.head_sha == \"${CANDIDATE_SHA}\" and .created_at >= \"${START}\")) | sort_by(.created_at) | last | .id // empty")"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 4
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_SYNTHETIC_RUN=${RUN_ID} status=started candidate=${CANDIDATE_SHA}" >/dev/null
+
+          for attempt in $(seq 1 180); do
+            STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.status')"
+            CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.conclusion // ""')"
+            if [[ "$STATUS" == completed ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="STAGING_ACCEPTANCE_SYNTHETIC_RUN=${RUN_ID} status=${CONCLUSION} candidate=${CANDIDATE_SHA}" >/dev/null
+              test "$CONCLUSION" = success
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Publish staging canonical-chain result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          DEPLOY_RUN: ${{ steps.deploy.outputs.run_id }}
+          RUNTIME_RUN: ${{ steps.runtime.outputs.run_id }}
+          ALERTS_RUN: ${{ steps.alerts.outputs.run_id }}
+          SYNTHETIC_RUN: ${{ steps.synthetic.outputs.run_id }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY=$(printf '## STAGING_ACCEPTANCE_COMMAND — CANONICAL_CHAIN_PASS\n\nCANDIDATE_SHA=%s\nDEPLOY_RUN=%s\nRUNTIME_CAPACITY_RUN=%s\nRELIABILITY_ALERTS_RUN=%s\nSYNTHETIC_RUN=%s\nIMAGE_INDEX_DIGEST=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\nNEXT=INCIDENT_DELIVERY_READBACK_AND_STAGING_ONLY_DR' "$CANDIDATE_SHA" "$DEPLOY_RUN" "$RUNTIME_RUN" "$ALERTS_RUN" "$SYNTHETIC_RUN" "$IMAGE_DIGEST")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
