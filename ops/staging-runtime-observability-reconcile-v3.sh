@@ -60,7 +60,23 @@ echo 'STAGING_NOTIFICATION_CHANNELS=PASS'
 api_get "$UPTIME_API?pageSize=100" /tmp/staging-uptimes.json
 
 uptime_projection() {
-  jq -S '{displayName,monitoredResource,httpCheck,contentMatchers:(.contentMatchers // []),timeout,period}' "$1"
+  jq -S '{
+    displayName,
+    monitoredResource:{
+      type:.monitoredResource.type,
+      labels:{
+        project_id:.monitoredResource.labels.project_id,
+        location:.monitoredResource.labels.location,
+        service_name:.monitoredResource.labels.service_name,
+        configuration_name:(.monitoredResource.labels.configuration_name // ""),
+        revision_name:(.monitoredResource.labels.revision_name // "")
+      }
+    },
+    httpCheck,
+    contentMatchers:(.contentMatchers // []),
+    timeout,
+    period
+  }' "$1"
 }
 
 ensure_uptime() {
