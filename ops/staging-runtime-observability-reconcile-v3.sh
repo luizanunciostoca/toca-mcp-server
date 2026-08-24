@@ -150,7 +150,15 @@ alert_projection() {
     displayName,
     documentation,
     userLabels,
-    conditions:[.conditions[] | del(.name)],
+    conditions:[
+      .conditions[]
+      | del(.name)
+      | if .conditionThreshold then
+          .conditionThreshold.thresholdValue = (.conditionThreshold.thresholdValue // 0)
+        else
+          .
+        end
+    ],
     combiner,
     enabled,
     notificationChannels:(.notificationChannels | sort),
