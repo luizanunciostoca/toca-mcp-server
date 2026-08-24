@@ -270,7 +270,10 @@ function validateSecretVersions() {
     if (version === 'latest') {
       fail('PRODUCTION_PROVIDER_SECRET_VERSION_MUST_BE_PINNED', versionKey);
     }
-    if (version === 'RESOLVE_RUNTIME' && versionKey !== 'GCP_META_ACCESS_TOKEN_SECRET_VERSION') {
+    if (
+      version === 'RESOLVE_RUNTIME' &&
+      versionKey !== 'GCP_META_ACCESS_TOKEN_SECRET_VERSION'
+    ) {
       fail('PRODUCTION_PROVIDER_SECRET_VERSION_SENTINEL_FORBIDDEN', versionKey);
     }
     if (version !== 'RESOLVE_RUNTIME' && !/^\d+$/.test(version)) {
