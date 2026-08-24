@@ -1,0 +1,65 @@
+name: TEMP Apply Alert Threshold Normalization
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/temp-apply-alert-threshold-normalization-20260823.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/alert-threshold-zero-readback-20260823'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - name: Apply exact minimal patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script_path = Path('ops/staging-runtime-observability-reconcile-v3.sh')
+          script = script_path.read_text()
+          old = '    conditions:[.conditions[] | del(.name)],\n'
+          new = '''    conditions:[\n      .conditions[]\n      | del(.name)\n      | if .conditionThreshold then\n          .conditionThreshold.thresholdValue = (.conditionThreshold.thresholdValue // 0)\n        else\n          .\n        end\n    ],\n'''
+          if new not in script:
+              if script.count(old) != 1:
+                  raise SystemExit('expected alert projection target not found exactly once')
+              script = script.replace(old, new, 1)
+              script_path.write_text(script)
+
+          test_path = Path('test/staging-runtime-observability-contract.test.ts')
+          test = test_path.read_text()
+          anchor = "    expect(script).toContain('revision_name:');\n"
+          addition = "    expect(script).toContain(\n      '.conditionThreshold.thresholdValue = (.conditionThreshold.thresholdValue // 0)',\n    );\n"
+          if addition not in test:
+              if test.count(anchor) != 1:
+                  raise SystemExit('expected test anchor not found exactly once')
+              test = test.replace(anchor, anchor + addition, 1)
+              test_path.write_text(test)
+          PY
+          bash -n ops/staging-runtime-observability-reconcile-v3.sh
+          git diff --check
+
+      - name: Commit patch to fix branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'PATCH_ALREADY_APPLIED=YES'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/staging-runtime-observability-reconcile-v3.sh test/staging-runtime-observability-contract.test.ts
+          git commit -m 'fix(reliability): normalize omitted zero alert threshold'
+          git push origin HEAD:fix/alert-threshold-zero-readback-20260823
