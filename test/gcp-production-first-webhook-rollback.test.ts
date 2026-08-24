@@ -11,13 +11,9 @@ describe('GCP production first-webhook rollback contract', () => {
   });
 
   it('restores closed external exposure without deleting the webhook service', () => {
-    expect(workflow).toContain(
-      'gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"',
-    );
+    expect(workflow).toContain('gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"');
     expect(workflow).toContain('--no-default-url');
-    expect(workflow).not.toContain(
-      'gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"',
-    );
+    expect(workflow).not.toContain('gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"');
   });
 
   it('re-enables the intended default URL on a subsequent webhook deploy', () => {
@@ -31,14 +27,10 @@ describe('GCP production first-webhook rollback contract', () => {
     expect(workflow).not.toContain(
       "env.PREVIOUS_MCP_REVISION != '' && env.PREVIOUS_WEBHOOK_REVISION != ''",
     );
-    expect(workflow).toContain(
-      'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL',
-    );
+    expect(workflow).toContain('WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL');
   });
 
   it('fails closed instead of pretending a first-webhook canary split exists', () => {
-    expect(workflow).toContain(
-      'Production canary requires an existing serving webhook revision',
-    );
+    expect(workflow).toContain('Production canary requires an existing serving webhook revision');
   });
 });
