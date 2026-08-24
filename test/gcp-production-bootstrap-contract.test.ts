@@ -87,16 +87,22 @@ describe('GCP production bootstrap contract', () => {
     whatsappEnabled.WHATSAPP_ENABLED = 'true';
     const providerResult = runValidator(whatsappEnabled);
     expect(providerResult.status).toBe(1);
-    expect(output(providerResult)).toContain('PRODUCTION_PROVIDER_STATE_MISMATCH:WHATSAPP_ENABLED');
+    expect(output(providerResult)).toContain(
+      'PRODUCTION_PROVIDER_STATE_MISMATCH:WHATSAPP_ENABLED',
+    );
   });
 
   it('boots missing GitHub production variables from canonical non-secret fallbacks', () => {
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-mcp-production'");
     expect(workflow).toContain("inputs.environment == 'production' && '990081828836'");
-    expect(workflow).toContain("inputs.environment == 'production' && 'toca-webhook-next-production'");
+    expect(workflow).toContain(
+      "inputs.environment == 'production' && 'toca-webhook-next-production'",
+    );
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-database-url'");
     expect(workflow).toContain("inputs.environment == 'production' && '1'");
-    expect(workflow).toContain("inputs.environment == 'production' && 'toca-meta-oauth-token'");
+    expect(workflow).toContain(
+      "inputs.environment == 'production' && 'toca-meta-oauth-token'",
+    );
   });
 
   it('resolves the Meta token numerically without provider calls or payload evidence', () => {
