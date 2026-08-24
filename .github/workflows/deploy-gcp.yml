@@ -443,8 +443,10 @@ jobs:
           require_mcp_secret() { test -n "$2" || { echo "$1 secret id required" >&2; exit 1; }; test -n "$3" || { echo "$1 secret version required" >&2; exit 1; }; bind_mcp_secret "$1" "$2" "$3"; }
           require_webhook_secret() { test -n "$2" || { echo "$1 secret id required" >&2; exit 1; }; test -n "$3" || { echo "$1 secret version required" >&2; exit 1; }; bind_webhook_secret "$1" "$2" "$3"; }
 
-          if [[ "$META_ENABLED" == true || "$META_WEBHOOK_ENABLED" == true || "$WHATSAPP_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true ]]; then
+          if [[ "$META_ENABLED" == true ]]; then
             add_both META_APP_ID "${{ vars.META_APP_ID }}"
+          fi
+          if [[ "$META_ENABLED" == true || "$META_WEBHOOK_ENABLED" == true || "$WHATSAPP_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true ]]; then
             add_both META_GRAPH_API_VERSION "${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}"
             add_both META_GRAPH_BASE_URL "${{ vars.META_GRAPH_BASE_URL || 'https://graph.facebook.com' }}"
           fi
