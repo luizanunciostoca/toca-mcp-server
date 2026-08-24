@@ -22,6 +22,27 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Generate regional Cloud Run v1 remediation artifact
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/deploy-gcp.yml')
+          source = path.read_text()
+          old = 'https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}'
+          new = 'https://${GCP_REGION}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_NUMBER}/revisions/${SERVING_REVISION}'
+          if source.count(old) != 1:
+              raise SystemExit(f'expected exactly one legacy global v1 URL, found {source.count(old)}')
+          path.write_text(source.replace(old, new))
+          PY
+      - name: Upload regional Cloud Run v1 remediation artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: regional-v1-remediation-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .github/workflows/deploy-gcp.yml
+          if-no-files-found: error
+          retention-days: 1
+      - name: Restore source after remediation artifact
+        run: git checkout -- .github/workflows/deploy-gcp.yml
       - name: Verify exact candidate SHA
         run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
