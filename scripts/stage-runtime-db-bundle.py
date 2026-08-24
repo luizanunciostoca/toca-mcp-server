@@ -1,5 +1,7 @@
 from pathlib import Path
 import base64
+import gzip
+import hashlib
 import subprocess
 import textwrap
 
@@ -18,11 +20,7 @@ subprocess.run(
     ],
     check=True,
 )
-for label, path in [
-    ('DEPLOY', '.github/workflows/deploy-gcp.yml'),
-    ('DOCKERFILE', 'Dockerfile'),
-    ('EVIDENCE', 'scripts/capture-platform-evidence.mjs'),
-    ('TEST', 'test/gcp-deploy-cloud-sql-proxy.test.ts'),
-]:
-    payload = base64.b64encode(Path(path).read_bytes()).decode('ascii')
-    print(f'TOCA_RUNTIME_DB_BUNDLE_{label}={payload}')
+payload = Path('.github/workflows/deploy-gcp.yml').read_bytes()
+compressed = base64.b64encode(gzip.compress(payload, compresslevel=9)).decode('ascii')
+print(f'TOCA_RUNTIME_DB_DEPLOY_GZIP_BASE64={compressed}')
+print(f'TOCA_RUNTIME_DB_DEPLOY_SHA256={hashlib.sha256(payload).hexdigest()}')
