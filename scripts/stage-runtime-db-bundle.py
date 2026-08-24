@@ -3,13 +3,13 @@ import base64
 import gzip
 import hashlib
 import subprocess
-import textwrap
 
 quality = Path('.github/workflows/quality.yml').read_text()
 start_marker = "          python3 <<'PY'\n"
 end_marker = "\n          PY\n"
 code = quality.split(start_marker, 1)[1].split(end_marker, 1)[0]
-exec(textwrap.dedent(code), {})
+code = '\n'.join(line[10:] if line.startswith('          ') else line for line in code.splitlines())
+exec(code, {})
 subprocess.run(
     [
         'node_modules/.bin/prettier',
