@@ -1,0 +1,88 @@
+name: PR Incident Readback 91560f
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths: ['.github/workflows/pr-incident-readback-91560f.yml']
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  ALERT_ID: 0.obsu2cipn68y
+  POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
+  SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
+  SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+  EXPECTED_SYNTHETIC_RUN: '32683550983'
+  EVIDENCE_ISSUE: '151'
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+      - name: Start evidence
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="INCIDENT_DELIVERY_READBACK_STARTED run=${GITHUB_RUN_ID} candidate=${CANDIDATE_SHA} alert=${ALERT_ID}" >/dev/null
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read closure only
+        id: r
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          MARKER="${SYNTHETIC_MARKER}:run:${EXPECTED_SYNTHETIC_RUN}:sha:${CANDIDATE_SHA}"
+          COUNT="$(gcloud logging read "logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${MARKER}\"" --project="$PROJECT_ID" --freshness=2h --limit=5 --format='value(insertId)' | wc -l | tr -d ' ')"
+          test "$COUNT" -ge 1
+          TOKEN="$(gcloud auth print-access-token)"
+          STATE=''; OPEN=''; CLOSE=''; POLICY=''; DISPLAY=''; N=0
+          for i in $(seq 1 55); do
+            N=$i
+            HTTP="$(curl -sS -o /tmp/a.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
+            test "$HTTP" = 200
+            STATE="$(jq -r '.state // empty' /tmp/a.json)"; OPEN="$(jq -r '.open_time // .openTime // empty' /tmp/a.json)"; CLOSE="$(jq -r '.close_time // .closeTime // empty' /tmp/a.json)"; POLICY="$(jq -r '.policy.name // empty' /tmp/a.json)"; DISPLAY="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/a.json)"
+            test "$POLICY" = "$POLICY_NAME"
+            if [[ "$STATE" == CLOSED && -n "$CLOSE" ]]; then break; fi
+            sleep 20
+          done
+          unset TOKEN
+          test "$STATE" = CLOSED; test -n "$OPEN"; test -n "$CLOSE"
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"; echo "open=$OPEN" >> "$GITHUB_OUTPUT"; echo "close=$CLOSE" >> "$GITHUB_OUTPUT"; echo "display=$DISPLAY" >> "$GITHUB_OUTPUT"; echo "n=$N" >> "$GITHUB_OUTPUT"; echo "marker=$MARKER" >> "$GITHUB_OUTPUT"
+      - name: Result evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.r.outputs.state }}
+          OPEN: ${{ steps.r.outputs.open }}
+          CLOSE: ${{ steps.r.outputs.close }}
+          DISPLAY: ${{ steps.r.outputs.display }}
+          N: ${{ steps.r.outputs.n }}
+          MARKER: ${{ steps.r.outputs.marker }}
+        shell: bash
+        run: |
+          BODY=$(printf '## INCIDENT_DELIVERY_READBACK — 91560f\n\nRUN_ID=%s\nCANDIDATE_SHA=%s\nSYNTHETIC_RUN=%s\nALERT_ID=%s\nSTATE=%s\nOPEN_TIME=%s\nCLOSE_TIME=%s\nPOLICY=%s\nRUN_MARKER=%s\nPOLL_ATTEMPTS=%s\nRECOVERY_CLOSURE_OBSERVED=true\nMANUAL_CLOSE_EXECUTED=NO\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$EXPECTED_SYNTHETIC_RUN" "$ALERT_ID" "$STATE" "$OPEN" "$CLOSE" "$DISPLAY" "$MARKER" "$N")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
