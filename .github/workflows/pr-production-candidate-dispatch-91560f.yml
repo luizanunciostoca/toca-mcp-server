@@ -1,0 +1,106 @@
+name: PR Production Candidate Dispatch 91560f
+
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths:
+      - '.github/workflows/pr-production-candidate-dispatch-91560f.yml'
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  STAGING_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
+  PRODUCTION_AUTHORIZATION_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/205
+  ALERT_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
+  DR_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}
+      GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
+      WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
+      EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
+      GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+    steps:
+      - name: Fail closed on exact candidate and production scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
+          test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test -n "$GCP_PROJECT_NUMBER"
+          test "$GCP_REGION" = 'southamerica-east1'
+          test -n "$GCP_CLOUD_SQL_INSTANCE"
+          test -n "$GCP_CLOUD_RUN_MCP_SERVICE"
+          test -n "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"
+          test -n "$GCP_DATABASE_URL_SECRET_VERSION"
+          test "$GCP_DATABASE_URL_SECRET_VERSION" != latest
+          test "$WHATSAPP_ENABLED" = false
+          test "$EMAIL_SENDGRID_ENABLED" = false
+          test "$GOOGLE_ADS_PHASE" = OFF
+          echo 'PRODUCTION_PROVIDER_EXCLUSIONS=PASS whatsapp=false sendgrid=false google_ads=OFF'
+          echo "PRODUCTION_COORDINATES=PASS project=${GCP_PROJECT_ID} region=${GCP_REGION}"
+
+      - name: Dispatch canonical production candidate rollout
+        id: dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run deploy-gcp.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f environment=production \
+            -f operation=deploy \
+            -f rollout=candidate \
+            -f staging_evidence_ref="$STAGING_EVIDENCE_REF" \
+            -f production_authorization_ref="$PRODUCTION_AUTHORIZATION_REF" \
+            -f alert_evidence_ref="$ALERT_EVIDENCE_REF" \
+            -f dr_evidence_ref="$DR_EVIDENCE_REF"
+
+          RUN_ID=''
+          for attempt in $(seq 1 60); do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-gcp.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt,status --jq ".[] | select(.headSha == \"$CANDIDATE_SHA\" and .createdAt >= \"$STARTED_AT\") | .databaseId" | head -n1)"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/205/comments" -f body="PRODUCTION_CANDIDATE_DISPATCH_RUN=${RUN_ID} candidate=${CANDIDATE_SHA} rollout=candidate no_traffic_expected=true" >/dev/null
+          echo "PRODUCTION_CANDIDATE_RUN_ID=$RUN_ID"
+
+      - name: Wait for canonical production candidate result
+        env:
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RUN_ID"
+          for attempt in $(seq 1 360); do
+            STATUS="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json status --jq .status)"
+            if [[ "$STATUS" == completed ]]; then
+              CONCLUSION="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)"
+              gh api "repos/${GITHUB_REPOSITORY}/issues/205/comments" -f body="PRODUCTION_CANDIDATE_RESULT run=${RUN_ID} conclusion=${CONCLUSION}" >/dev/null
+              test "$CONCLUSION" = success
+              echo 'PRODUCTION_CANDIDATE_CANONICAL_RUN=PASS'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for canonical production candidate workflow' >&2
+          exit 1
