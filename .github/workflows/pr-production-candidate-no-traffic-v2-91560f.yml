@@ -1,0 +1,241 @@
+name: PR Production Candidate No Traffic V2 91560f
+
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths:
+      - '.github/workflows/pr-production-candidate-no-traffic-v2-91560f.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  ARTIFACT_REPOSITORY: toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-db
+  MCP_SERVICE: toca-mcp-production
+  WEBHOOK_SERVICE: toca-webhook-next-production
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DATABASE_SECRET_ID: toca-database-url
+  DATABASE_SECRET_VERSION: '1'
+  EXPECTED_PREVIOUS_MCP_REVISION: toca-mcp-production-00102-qgz
+  AUTH_ISSUE: '205'
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 65
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Fail closed on exact source and immutable prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-production
+          test "$PROJECT_NUMBER" = 990081828836
+          test "$REGION" = southamerica-east1
+          test "$DATABASE_SECRET_VERSION" = 1
+          test "$WEBHOOK_SERVICE" = toca-webhook-next-production
+
+      - name: Authenticate canonical production deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Live preflight and rollback capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/sql.json
+          jq -e '.state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and (.settings.backupConfiguration.transactionLogRetentionDays//0)>=7 and (.settings.backupConfiguration.backupRetentionSettings.retainedBackups//0)>=7' /tmp/sql.json >/dev/null
+          gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/mcp-before.json
+          PREV="$(jq -r '[.status.traffic[]? | select(.percent==100) | .revisionName][0] // empty' /tmp/mcp-before.json)"
+          test "$PREV" = "$EXPECTED_PREVIOUS_MCP_REVISION"
+          test "$(jq -r '.spec.template.spec.serviceAccountName' /tmp/mcp-before.json)" = "$RUNTIME_SA"
+          if gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" >/dev/null 2>&1; then
+            echo 'Webhook Next service already exists before V2; refusing ambiguous bootstrap' >&2
+            exit 1
+          fi
+          echo "PREVIOUS_MCP_REVISION=$PREV" >> "$GITHUB_ENV"
+          echo 'PRODUCTION_V2_PREFLIGHT=PASS providers_targeted=false'
+
+      - name: Configure isolated Buildx container driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILDER="toca-prod-${GITHUB_RUN_ID}"
+          docker buildx create --name "$BUILDER" --driver docker-container --use
+          docker buildx inspect --bootstrap
+          test "$(docker buildx inspect --format '{{.Driver}}')" = docker-container
+          echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
+
+      - name: Build push attest and resolve immutable candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          IMAGE_REPO="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPO}:next-${CANDIDATE_SHA}"
+          docker buildx build --pull --push --provenance=mode=max --sbom=true --metadata-file /tmp/build-metadata.json -t "$IMAGE_TAG" .
+          DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$DIGEST" == sha256:* ]]
+          REMOTE="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project="$PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$REMOTE" = "$DIGEST"
+          echo "IMAGE=${IMAGE_REPO}@${DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Create and verify pre-migration production backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESC="pre-next-${CANDIDATE_SHA:0:12}-${GITHUB_RUN_ID}"
+          gcloud sql backups create --instance="$CLOUD_SQL_INSTANCE" --project="$PROJECT_ID" --description="$DESC" --quiet
+          FOUND=0
+          for attempt in $(seq 1 60); do
+            gcloud sql backups list --instance="$CLOUD_SQL_INSTANCE" --project="$PROJECT_ID" --limit=20 --format=json >/tmp/backups.json
+            if jq -e --arg d "$DESC" 'any(.[]?; .description==$d and .status=="SUCCESSFUL")' /tmp/backups.json >/dev/null; then FOUND=1; break; fi
+            sleep 5
+          done
+          test "$FOUND" = 1
+          echo "PRE_MIGRATION_BACKUP_DESCRIPTION=$DESC" >> "$GITHUB_ENV"
+          echo 'PRODUCTION_PRE_MIGRATION_BACKUP=PASS'
+
+      - name: Apply candidate migrations under runtime identity and cleanup job
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-next-prod-migrate-${GITHUB_RUN_ID}"
+          cleanup(){ gcloud run jobs delete "$JOB" --project="$PROJECT_ID" --region="$REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" --image="$IMAGE" --project="$PROJECT_ID" --region="$REGION" --service-account="$RUNTIME_SA" --set-cloudsql-instances="${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" --set-secrets="DATABASE_URL=${DATABASE_SECRET_ID}:${DATABASE_SECRET_VERSION}" --set-env-vars="DATABASE_SSL=false" --command=node --args=dist/scripts/migrate.js --tasks=1 --max-retries=0 --task-timeout=600s --quiet
+          gcloud run jobs execute "$JOB" --project="$PROJECT_ID" --region="$REGION" --wait --quiet
+          cleanup
+          trap - EXIT
+          test -z "$(gcloud run jobs list --project="$PROJECT_ID" --region="$REGION" --filter="metadata.name=${JOB}" --format='value(metadata.name)')"
+          echo 'PRODUCTION_MIGRATIONS=PASS migration_job_cleanup=PASS'
+
+      - name: Verify production schema through runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-next-prod-dbcheck-${GITHUB_RUN_ID}"
+          cleanup(){ gcloud run jobs delete "$JOB" --project="$PROJECT_ID" --region="$REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          SCRIPT='import pg from "pg";const u=new URL(process.env.DATABASE_URL);for(const k of ["ssl","sslmode","sslcert","sslkey","sslrootcert","sslaccept"])u.searchParams.delete(k);const c=new pg.Client({connectionString:u.toString(),ssl:false});await c.connect();const m=Number((await c.query("select count(*) as c from schema_migrations")).rows[0].c);const a=(await c.query("select to_regclass(\u0027public.audit_events\u0027) is not null as ok")).rows[0].ok;const o=(await c.query("select to_regclass(\u0027public.event_outbox\u0027) is not null as ok")).rows[0].ok;const t=(await c.query("select to_regclass(\u0027public.tenants\u0027) is not null as ok")).rows[0].ok;await c.end();if(m!==27||!a||!o||!t)throw new Error(`schema_invalid_${m}_${a}_${o}_${t}`);console.log(`PRODUCTION_DB_VALIDATION=PASS migrations=${m} audit=${a} outbox=${o} tenants=${t}`);'
+          gcloud run jobs deploy "$JOB" --image="$IMAGE" --project="$PROJECT_ID" --region="$REGION" --service-account="$RUNTIME_SA" --set-cloudsql-instances="${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" --set-secrets="DATABASE_URL=${DATABASE_SECRET_ID}:${DATABASE_SECRET_VERSION}" --command=node --args="^~^--input-type=module~-e~${SCRIPT}" --tasks=1 --max-retries=0 --task-timeout=180s --quiet
+          gcloud run jobs execute "$JOB" --project="$PROJECT_ID" --region="$REGION" --wait --quiet
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project="$PROJECT_ID" --freshness=15m --limit=100 --order=asc --format='value(textPayload)' || true)"
+          printf '%s\n' "$LOGS" | grep -F 'PRODUCTION_DB_VALIDATION=PASS migrations=27 audit=true outbox=true tenants=true'
+          cleanup
+          trap - EXIT
+          test -z "$(gcloud run jobs list --project="$PROJECT_ID" --region="$REGION" --filter="metadata.name=${JOB}" --format='value(metadata.name)')"
+
+      - name: Deploy exact candidates with providers disabled and webhook private
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMON="NODE_ENV=production,TOCA_DEPLOY_ENVIRONMENT=production,TOCA_RELEASE_SHA=${CANDIDATE_SHA},TOCA_PLATFORM_KILL_SWITCH=false,TOCA_DEFAULT_TENANT_ID=toca,TOCA_DEFAULT_WORKSPACE_ID=toca,TOCA_DEFAULT_ORGANIZATION_ID=toca,TOCA_READY_OUTBOX_MAX_LAG_SECONDS=300,META_ENABLED=false,META_PROVIDER_VERIFIED=false,META_WEBHOOK_ENABLED=false,META_WEBHOOK_PERSISTENCE_ENABLED=false,INSTAGRAM_READ_ENABLED=false,META_ADS_READ_ENABLED=false,META_ADS_WRITE_ENABLED=false,WHATSAPP_ENABLED=false,WHATSAPP_RUNTIME_ENABLED=false,WHATSAPP_PROVIDER_VERIFIED=false,EMAIL_SENDGRID_ENABLED=false,EMAIL_SENDGRID_PROVIDER_VERIFIED=false,GOOGLE_ADS_PHASE=OFF,GOOGLE_ADS_PROVIDER_VERIFIED=false,AG01_MODEL_ENABLED=false,AG01_MODEL_PROVIDER_VERIFIED=false,GCP_PROJECT_ID=${PROJECT_ID}"
+          MCP_TAG="next-mcp-${CANDIDATE_SHA:0:8}"
+          WH_TAG="next-webhook-${CANDIDATE_SHA:0:8}"
+          gcloud run deploy "$MCP_SERVICE" --image="$IMAGE" --project="$PROJECT_ID" --region="$REGION" --revision-suffix="next-${CANDIDATE_SHA:0:8}" --tag="$MCP_TAG" --no-traffic --service-account="$RUNTIME_SA" --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" --update-secrets="DATABASE_URL=${DATABASE_SECRET_ID}:${DATABASE_SECRET_VERSION}" --update-env-vars="${COMMON},MCP_ENABLED=true,TOCA_SERVICE_ROLE=mcp" --startup-probe='httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' --readiness-probe='httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' --liveness-probe='httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' --min-instances=0 --max-instances=1 --cpu-throttling --memory=512Mi --cpu=1 --no-allow-unauthenticated --quiet
+          gcloud run deploy "$WEBHOOK_SERVICE" --image="$IMAGE" --project="$PROJECT_ID" --region="$REGION" --revision-suffix="next-${CANDIDATE_SHA:0:8}" --tag="$WH_TAG" --service-account="$RUNTIME_SA" --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" --update-secrets="DATABASE_URL=${DATABASE_SECRET_ID}:${DATABASE_SECRET_VERSION}" --update-env-vars="${COMMON},MCP_ENABLED=false,TOCA_SERVICE_ROLE=webhook" --startup-probe='httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' --readiness-probe='httpGet.path=/readyz,httpGet.port=8080,successThreshold=1,failureThreshold=3,timeoutSeconds=3,periodSeconds=5' --liveness-probe='httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' --min-instances=0 --max-instances=2 --cpu-throttling --memory=512Mi --cpu=1 --no-allow-unauthenticated --quiet
+          MCP_URL="$(gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format="value(status.traffic[tag=${MCP_TAG}].url)")"
+          MCP_REV="$(gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format="value(status.traffic[tag=${MCP_TAG}].revisionName)")"
+          WH_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          WH_REV="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.latestReadyRevisionName)')"
+          test -n "$MCP_URL"; test -n "$MCP_REV"; test -n "$WH_URL"; test -n "$WH_REV"
+          echo "MCP_CANDIDATE_URL=$MCP_URL" >> "$GITHUB_ENV"
+          echo "WEBHOOK_CANDIDATE_URL=$WH_URL" >> "$GITHUB_ENV"
+          echo "MCP_CANDIDATE_REVISION=$MCP_REV" >> "$GITHUB_ENV"
+          echo "WEBHOOK_CANDIDATE_REVISION=$WH_REV" >> "$GITHUB_ENV"
+
+      - name: Health readiness routing exact revision and containment readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_CANDIDATE_URL")"
+          WH_TOKEN="$(gcloud auth print-identity-token --audiences="$WEBHOOK_CANDIDATE_URL")"
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_CANDIDATE_URL/healthz" >/tmp/mcp-health.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_CANDIDATE_URL/readyz" >/tmp/mcp-ready.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $WH_TOKEN" "$WEBHOOK_CANDIDATE_URL/healthz" >/tmp/wh-health.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $WH_TOKEN" "$WEBHOOK_CANDIDATE_URL/readyz" >/tmp/wh-ready.json
+          jq -e '.status=="ready" and (.checks|all(.ok==true))' /tmp/mcp-ready.json >/dev/null
+          jq -e '.status=="ready" and (.checks|all(.ok==true))' /tmp/wh-ready.json >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WH_TOKEN" "$WEBHOOK_CANDIDATE_URL/mcp")" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $WH_TOKEN" "$WEBHOOK_CANDIDATE_URL/oauth/meta/start")" = 404
+          ANON="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_CANDIDATE_URL/healthz")"
+          [[ "$ANON" == 401 || "$ANON" == 403 ]]
+          gcloud run revisions describe "$MCP_CANDIDATE_REVISION" --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/mcp-rev.json
+          gcloud run revisions describe "$WEBHOOK_CANDIDATE_REVISION" --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/wh-rev.json
+          test "$(jq -r '.spec.containers[0].image' /tmp/mcp-rev.json)" = "$IMAGE"
+          test "$(jq -r '.spec.containers[0].image' /tmp/wh-rev.json)" = "$IMAGE"
+          test "$(jq -r '.spec.serviceAccountName' /tmp/mcp-rev.json)" = "$RUNTIME_SA"
+          test "$(jq -r '.spec.serviceAccountName' /tmp/wh-rev.json)" = "$RUNTIME_SA"
+          for f in /tmp/mcp-rev.json /tmp/wh-rev.json; do
+            jq -e --arg sha "$CANDIDATE_SHA" '[.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value][0]==$sha' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="META_ENABLED") | .value][0]=="false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="WHATSAPP_ENABLED") | .value][0]=="false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="EMAIL_SENDGRID_ENABLED") | .value][0]=="false"' "$f" >/dev/null
+            jq -e '[.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value][0]=="OFF"' "$f" >/dev/null
+          done
+          MCP_100="$(gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.traffic[percent=100].revisionName)')"
+          test "$MCP_100" = "$PREVIOUS_MCP_REVISION"
+          BODY=$(cat <<EOF
+          PRODUCTION_CANDIDATE_NO_TRAFFIC_V2=PASS
+          candidate=${CANDIDATE_SHA}
+          image_digest=${IMAGE_DIGEST}
+          previous_mcp_revision=${PREVIOUS_MCP_REVISION}
+          mcp_candidate_revision=${MCP_CANDIDATE_REVISION}
+          webhook_candidate_revision=${WEBHOOK_CANDIDATE_REVISION}
+          pre_migration_backup=${PRE_MIGRATION_BACKUP_DESCRIPTION}
+          database_secret_version=${DATABASE_SECRET_VERSION}
+          migrations=27
+          mcp_candidate_main_traffic_percent=0
+          webhook_anonymous_access=DENIED
+          providers_enabled=NO
+          EOF
+          )
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="$BODY" >/dev/null
+          echo "$BODY"
+
+      - name: Fail-closed runtime rollback on candidate failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${PREVIOUS_MCP_REVISION:-}" ]]; then
+            gcloud run services update-traffic "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --to-revisions="${PREVIOUS_MCP_REVISION}=100" --quiet >/dev/null 2>&1 || true
+          fi
+          gcloud run services delete "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --quiet >/dev/null 2>&1 || true
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="PRODUCTION_CANDIDATE_V2=FAILED_FAIL_CLOSED candidate=${CANDIDATE_SHA} mcp_rollback_target=${PREVIOUS_MCP_REVISION:-unknown} webhook_prestate_restored=absent" >/dev/null || true
+
+      - name: Cleanup Buildx builder
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${BUILDER_NAME:-}" ]]; then docker buildx rm "$BUILDER_NAME" >/dev/null 2>&1 || true; fi
