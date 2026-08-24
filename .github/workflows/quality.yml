@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,7 +21,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: true
+          persist-credentials: false
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -31,39 +33,21 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Verify permanent workflow supply chain
+        run: node scripts/check-workflow-supply-chain.mjs
+      - name: Verify platform hardening contracts
+        run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Stage Artifact Registry resolver remediation blobs
-        env:
-          TARGET_BRANCH: ${{ github.head_ref }}
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/deploy-gcp.yml')
-          text = workflow.read_text()
-          old = '''          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision-v1.json)"\n          [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }\n          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver serving revision has no resolved image digest: $SERVING_REVISION" >&2; exit 1; }'''
-          new = '''          [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }\n          EXPECTED_IMAGE_PREFIX="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/"\n          [[ "$SERVING_IMAGE" == "${EXPECTED_IMAGE_PREFIX}"* ]] || { echo "Meta resolver serving image is outside canonical Artifact Registry: $SERVING_IMAGE" >&2; exit 1; }\n          SERVING_DIGEST="$(gcloud artifacts docker images describe "$SERVING_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"\n          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver Artifact Registry digest readback failed: $SERVING_REVISION" >&2; exit 1; }'''
-          if old not in text:
-              raise SystemExit('resolver digest block not found exactly once')
-          text = text.replace(old, new, 1)
-          workflow.write_text(text)
-
-          test = Path('test/gcp-production-bootstrap-contract.test.ts')
-          text = test.read_text()
-          text = text.replace("    expect(resolver).toContain('.status.imageDigest');\n", "    expect(resolver).toContain('gcloud artifacts docker images describe \\\"$SERVING_IMAGE\\\"');\n    expect(resolver).toContain(\"--format='value(image_summary.digest)'\");\n    expect(resolver).toContain('EXPECTED_IMAGE_PREFIX=');\n    expect(resolver).not.toContain('.status.imageDigest');\n", 1)
-          test.write_text(text)
-          PY
-          pnpm exec prettier --write .github/workflows/deploy-gcp.yml test/gcp-production-bootstrap-contract.test.ts
-          mkdir -p .toca/tmp
-          cp .github/workflows/deploy-gcp.yml .toca/tmp/deploy-gcp-artifact-digest.yml
-          cp test/gcp-production-bootstrap-contract.test.ts .toca/tmp/gcp-production-bootstrap-contract.test.ts
-          git restore .github/workflows/deploy-gcp.yml test/gcp-production-bootstrap-contract.test.ts
-          git config user.name 'TOCA CI Remediation Stager'
-          git config user.email 'actions@users.noreply.github.com'
-          git add .toca/tmp/deploy-gcp-artifact-digest.yml .toca/tmp/gcp-production-bootstrap-contract.test.ts
-          git commit -m 'chore(diag): stage artifact-digest remediation blobs'
-          git push origin HEAD:"$TARGET_BRANCH"
-      - name: Verify exact candidate SHA
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Format check
+        run: pnpm format:check
+      - name: Architecture check
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
