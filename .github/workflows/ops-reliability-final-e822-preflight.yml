@@ -1,4 +1,4 @@
-name: Ops Reliability Final E822 Observer
+name: Ops Reliability Final E822 Gated Reconcile
 
 on:
   push:
@@ -6,20 +6,103 @@ on:
       - ops/reliability-final-e822-preflight-20260823
 
 permissions:
-  actions: read
   contents: read
+  id-token: write
   issues: write
 
+env:
+  CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  RECONCILE_SCRIPT: ops/staging-runtime-observability-reconcile-v3.sh
+
 jobs:
-  observe:
+  reconcile:
     runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
     steps:
-      - name: Publish recent branch runs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ops/reliability-final-e822-preflight-20260823
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Enforce frozen candidate and staging-only boundary
         shell: bash
         run: |
           set -euo pipefail
-          RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=10" --jq '[.workflow_runs[] | {id,name,status,conclusion,head_sha,created_at}]')"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — REPAIR_READBACK_OBSERVER\n\n```json\n%s\n```' "$RUNS")" >/dev/null
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          jq -e '.version==3 and .uptimeCheck.path=="/ready" and .forbid.productionAccess==true and .forbid.productionMutation==true and .forbid.providerMutation==true and .forbid.databaseMutation==true and .forbid.backupMutation==true and .forbid.drRestore==true and .forbid.trafficMutation==true and .forbid.cloudRunMutation==true and .forbid.secretRead==true and .forbid.secretMutation==true' "$POLICY_PATH" >/dev/null
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Gate on live global uptime canonical path
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DISPLAY="$(jq -r '.uptimeCheck.displayName' "$POLICY_PATH")"
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs?pageSize=100" >/tmp/uptimes.json
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/policies-before.json
+          unset TOKEN
+          PATH_NOW="$(jq -r --arg d "$DISPLAY" 'first(.uptimeCheckConfigs[]? | select(.displayName==$d) | .httpCheck.path)//empty' /tmp/uptimes.json)"
+          COUNT_BEFORE="$(jq '.alertPolicies//[]|length' /tmp/policies-before.json)"
+          BODY=$(printf '## RELIABILITY_FINAL_E822 — GATED_RECONCILE_PRE\n\nRUN_ID=%s\nUPTIME_PATH=%s\nPOLICY_COUNT=%s\nPRODUCTION_ACCESS=NO\nPROVIDER_ACCESS=NO' "$GITHUB_RUN_ID" "$PATH_NOW" "$COUNT_BEFORE")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$BODY" >/dev/null
+          test "$PATH_NOW" = /ready
+          echo "path=$PATH_NOW" >>"$GITHUB_OUTPUT"
+          echo "count_before=$COUNT_BEFORE" >>"$GITHUB_OUTPUT"
+          echo UPTIME_GATE=PASS
+      - name: Resolve isolated staging webhook target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          [[ "$SERVICE_URL" == https://*.run.app ]]
+          echo "host=${SERVICE_URL#https://}" >>"$GITHUB_OUTPUT"
+      - name: Apply frozen canonical reconciler
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+          EVIDENCE_DIR: staging-runtime-observability-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "$RECONCILE_SCRIPT"
+      - name: Verify and publish final topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/policies.json
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" >/tmp/channels.json
+          unset TOKEN
+          REQUIRED='["availability","ag01_readiness","approval_readiness","crm_readiness","db_readiness","outbox_dlq_readiness","workflow_readiness","http_latency","http_error_rate"]'
+          ROLES="$(jq -c '[.alertPolicies[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability") | .userLabels.alert_role//empty] | unique | sort' /tmp/policies.json)"
+          for role in $(jq -r '.[]' <<<"$REQUIRED"); do jq -e --arg r "$role" 'index($r)!=null' <<<"$ROLES" >/dev/null; done
+          CHANNELS="$(jq -c '[.notificationChannels[]? | select(.enabled!=false and .userLabels.toca_managed=="staging_reliability") | .type] | unique | sort' /tmp/channels.json)"
+          jq -e 'index("email")!=null and index("webhook_tokenauth")!=null' <<<"$CHANNELS" >/dev/null
+          COUNT="$(jq '.alertPolicies//[]|length' /tmp/policies.json)"
+          BODY=$(printf '## RELIABILITY_FINAL_E822 — GATED_RECONCILE_POST\n\nRUN_ID=%s\nUPTIME_PATH=/ready\nPOLICY_COUNT=%s\nMANAGED_ROLES=%s\nCHANNEL_FAMILIES=%s\nCONFIG_CHANGED=YES\nPRODUCTION_ACCESS=NO\nPROVIDER_ACCESS=NO' "$GITHUB_RUN_ID" "$COUNT" "$ROLES" "$CHANNELS")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$BODY" >/dev/null
+          echo ALERT_TOPOLOGY=PASS
