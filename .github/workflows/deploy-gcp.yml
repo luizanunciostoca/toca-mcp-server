@@ -314,7 +314,7 @@ jobs:
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H 'Content-Type: application/json' \
-            "https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}" \
+            "https://${GCP_REGION}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_NUMBER}/revisions/${SERVING_REVISION}" \
             > /tmp/meta-resolver-revision-v1.json
           unset ACCESS_TOKEN
           REVISION_NAME="$(jq -r '.metadata.name // empty' /tmp/meta-resolver-revision-v1.json)"

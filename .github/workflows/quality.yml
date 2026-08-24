@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,31 +21,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: true
-      - name: Stage regional Cloud Run v1 workflow blob
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          TARGET='.toca/tmp/deploy-gcp-regional-v1.yml'
-          if [[ -f "$TARGET" ]]; then
-            echo 'REGIONAL_V1_STAGING_BLOB_ALREADY_PRESENT=YES'
-            exit 0
-          fi
-          mkdir -p "$(dirname "$TARGET")"
-          python - <<'PY'
-          from pathlib import Path
-          source = Path('.github/workflows/deploy-gcp.yml').read_text()
-          old = 'https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}'
-          new = 'https://${GCP_REGION}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_NUMBER}/revisions/${SERVING_REVISION}'
-          if source.count(old) != 1:
-              raise SystemExit(f'expected exactly one legacy global v1 URL, found {source.count(old)}')
-          Path('.toca/tmp/deploy-gcp-regional-v1.yml').write_text(source.replace(old, new))
-          PY
-          git config user.name 'TOCA CI Remediation Stager'
-          git config user.email 'actions@users.noreply.github.com'
-          git add "$TARGET"
-          git commit -m 'chore(diag): stage regional v1 deploy workflow blob'
-          git push origin "HEAD:${GITHUB_HEAD_REF}"
+          persist-credentials: false
       - name: Verify exact candidate SHA
         run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
