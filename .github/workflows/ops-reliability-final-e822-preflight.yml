@@ -1,4 +1,4 @@
-name: Ops Reliability Final E822 Observer
+name: Ops Reliability Final E822 Alert Reconcile
 
 on:
   push:
@@ -6,20 +6,110 @@ on:
       - ops/reliability-final-e822-preflight-20260823
 
 permissions:
-  actions: read
   contents: read
+  id-token: write
   issues: write
 
+env:
+  CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  RECONCILE_SCRIPT: ops/staging-runtime-observability-reconcile-v3.sh
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-next-staging
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
 jobs:
-  observe:
+  reconcile:
     runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
     steps:
-      - name: Publish recent branch runs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ops/reliability-final-e822-preflight-20260823
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Enforce exact candidate and staging-only boundary
         shell: bash
         run: |
           set -euo pipefail
-          RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=10" --jq '[.workflow_runs[] | {id,name,status,conclusion,head_sha,created_at}]')"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_POLICY_INVENTORY_OBSERVER\n\n```json\n%s\n```' "$RUNS")" >/dev/null
+          test "$GITHUB_REPOSITORY" = luizanunciostoca/toca-mcp-server
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          test -f "$RECONCILE_SCRIPT"
+          jq -e '.version==3 and .projectId=="toca-mcp-next-staging" and .projectNumber=="729069789107" and .forbid.productionAccess==true and .forbid.productionMutation==true and .forbid.providerMutation==true and .forbid.databaseMutation==true and .forbid.backupMutation==true and .forbid.drRestore==true and .forbid.trafficMutation==true and .forbid.cloudRunMutation==true and .forbid.secretRead==true and .forbid.secretMutation==true' "$POLICY_PATH" >/dev/null
+          echo BOUNDARY=PASS
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Resolve staging webhook host and capture before state
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          SERVICE_URL="$(gcloud run services describe "$WEBHOOK_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          [[ "$SERVICE_URL" == https://*.run.app ]]
+          HOST="${SERVICE_URL#https://}"
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/before-policies.json
+          unset TOKEN
+          echo "host=$HOST" >>"$GITHUB_OUTPUT"
+          echo "before_count=$(jq '.alertPolicies//[]|length' /tmp/before-policies.json)" >>"$GITHUB_OUTPUT"
+          echo TARGET=PASS
+      - name: Apply canonical monitoring reconciliation
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+          EVIDENCE_DIR: staging-runtime-observability-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "$RECONCILE_SCRIPT"
+      - name: Verify post-reconcile canonical alert coverage
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/after-policies.json
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" >/tmp/channels.json
+          unset TOKEN
+          REQUIRED='["availability","ag01_readiness","approval_readiness","crm_readiness","db_readiness","outbox_dlq_readiness","workflow_readiness","http_latency","http_error_rate"]'
+          ROLES="$(jq -c '[.alertPolicies[]? | select(.enabled==true and .userLabels.toca_managed=="staging_reliability") | .userLabels.alert_role//empty] | unique | sort' /tmp/after-policies.json)"
+          for role in $(jq -r '.[]' <<<"$REQUIRED"); do jq -e --arg r "$role" 'index($r)!=null' <<<"$ROLES" >/dev/null; done
+          CHANNEL_TYPES="$(jq -c '[.notificationChannels[]? | select(.enabled!=false and .userLabels.toca_managed=="staging_reliability") | .type] | unique | sort' /tmp/channels.json)"
+          jq -e 'index("email")!=null and index("webhook_tokenauth")!=null' <<<"$CHANNEL_TYPES" >/dev/null
+          AFTER_COUNT="$(jq '.alertPolicies//[]|length' /tmp/after-policies.json)"
+          echo "after_count=$AFTER_COUNT" >>"$GITHUB_OUTPUT"
+          echo "roles=$ROLES" >>"$GITHUB_OUTPUT"
+          echo "channel_types=$CHANNEL_TYPES" >>"$GITHUB_OUTPUT"
+          echo ALERT_COVERAGE=PASS
+      - name: Publish sanitized reconciliation evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE_COUNT: ${{ steps.target.outputs.before_count }}
+          AFTER_COUNT: ${{ steps.verify.outputs.after_count }}
+          ROLES: ${{ steps.verify.outputs.roles }}
+          CHANNEL_TYPES: ${{ steps.verify.outputs.channel_types }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_SHA="$(sha256sum "$POLICY_PATH" | awk '{print $1}')"
+          EVIDENCE="$(jq -n --arg candidate "$CANDIDATE_SHA" --arg policySha "$POLICY_SHA" --argjson before "$BEFORE_COUNT" --argjson after "$AFTER_COUNT" --argjson roles "$ROLES" --argjson channels "$CHANNEL_TYPES" '{candidateSha:$candidate,policySha256:$policySha,beforePolicyCount:$before,afterPolicyCount:$after,requiredRolesObserved:$roles,channelFamilies:$channels,canonicalReconcilerApplied:true,configChanged:($after!=$before),productionAccess:false,productionMutation:false,providerMutation:false,databaseMutation:false,backupMutation:false,drRestore:false,trafficMutation:false,cloudRunMutation:false,secretRead:false,secretMutation:false}')"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_RECONCILIATION\n\n`RUN_ID=%s`\n\n```json\n%s\n```' "$GITHUB_RUN_ID" "$EVIDENCE")" >/dev/null
+          echo ALERT_RECONCILIATION=PASS
