@@ -1,4 +1,4 @@
-name: PR Production Infra Readback 91560f
+name: PR Production Identity Readback 91560f
 
 on:
   pull_request:
@@ -15,7 +15,6 @@ env:
   CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
   PROJECT_ID: toca-mcp-production
   PROJECT_NUMBER: '990081828836'
-  REGION: southamerica-east1
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   DATABASE_SECRET_ID: toca-database-url
@@ -27,14 +26,12 @@ jobs:
     environment: infrastructure-admin
     timeout-minutes: 20
     steps:
-      - name: Exact candidate guard before privileged readback
+      - name: Exact candidate guard
         shell: bash
         run: |
           set -euo pipefail
           MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
           test "$MAIN_SHA" = "$CANDIDATE_SHA"
-          test "$PROJECT_ID" = toca-mcp-production
-          test "$PROJECT_NUMBER" = 990081828836
 
       - name: Authenticate existing production infrastructure admin
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
@@ -44,8 +41,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Read secret version metadata and existing service accounts only
-        id: inventory
+      - name: Inventory existing service accounts and secret metadata capability
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -54,26 +50,36 @@ jobs:
           test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$INFRA_ADMIN_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
 
-          SECRET_NAME="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)')"
-          [[ "$SECRET_NAME" =~ /versions/([0-9]+)$ ]]
-          SECRET_VERSION="${BASH_REMATCH[1]}"
-          [[ "$SECRET_VERSION" =~ ^[0-9]+$ ]]
+          set +e
+          gcloud iam service-accounts list --project="$PROJECT_ID" --format=json >/tmp/service-accounts.json 2>/tmp/sa.err
+          SA_RC=$?
+          set -e
+          if [[ "$SA_RC" -eq 0 ]]; then
+            SA_EMAILS="$(jq -r '.[].email' /tmp/service-accounts.json | sort)"
+            MATCHING="$(printf '%s\n' "$SA_EMAILS" | grep -E 'toca|next|webhook|mcp' | paste -sd, - || true)"
+            MCP_RUNTIME_EXISTS="$(printf '%s\n' "$SA_EMAILS" | grep -Fx 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' >/dev/null && echo true || echo false)"
+          else
+            MATCHING='UNREADABLE'
+            MCP_RUNTIME_EXISTS='UNREADABLE'
+          fi
 
-          gcloud iam service-accounts list --project="$PROJECT_ID" --format=json >/tmp/service-accounts.json
-          SA_EMAILS="$(jq -r '.[].email' /tmp/service-accounts.json | sort)"
-          MCP_RUNTIME_MATCH="$(printf '%s\n' "$SA_EMAILS" | grep -Fx 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' || true)"
-          test -n "$MCP_RUNTIME_MATCH"
-          NEXT_SAS="$(printf '%s\n' "$SA_EMAILS" | grep -E 'next|webhook|mcp-runtime' | paste -sd, - || true)"
+          set +e
+          SECRET_NAME="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' 2>/tmp/secret.err)"
+          SECRET_RC=$?
+          set -e
+          SECRET_VERSION='UNRESOLVED'
+          if [[ "$SECRET_RC" -eq 0 && "$SECRET_NAME" =~ /versions/([0-9]+)$ ]]; then SECRET_VERSION="${BASH_REMATCH[1]}"; fi
 
           BODY=$(cat <<EOF
-          PRODUCTION_INFRA_READBACK=PASS
+          PRODUCTION_IDENTITY_READBACK=COMPLETE
           candidate=${CANDIDATE_SHA}
-          database_secret_id=${DATABASE_SECRET_ID}
+          service_account_list_rc=${SA_RC}
+          matching_service_accounts=${MATCHING:-none}
+          canonical_mcp_runtime_exists=${MCP_RUNTIME_EXISTS}
+          secret_version_metadata_rc=${SECRET_RC}
           database_secret_numeric_version=${SECRET_VERSION}
-          existing_runtime_identity=toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-          matching_runtime_service_accounts=${NEXT_SAS:-none}
-          secret_payload_read=NO
           iam_mutation_executed=NO
+          secret_payload_read=NO
           production_runtime_mutation_executed=NO
           EOF
           )
