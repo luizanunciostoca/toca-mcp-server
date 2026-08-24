@@ -1,4 +1,4 @@
-name: PR Production Bootstrap Permission Probe 91560f
+name: PR Production Infra Readback 91560f
 
 on:
   pull_request:
@@ -10,103 +10,71 @@ permissions:
   contents: read
   id-token: write
   issues: write
-  actions: write
 
 env:
   CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
   PROJECT_ID: toca-mcp-production
   PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
   DATABASE_SECRET_ID: toca-database-url
   AUTH_ISSUE: '205'
 
 jobs:
-  probe:
+  readback:
     runs-on: ubuntu-latest
-    environment: production
+    environment: infrastructure-admin
     timeout-minutes: 20
     steps:
-      - name: Exact candidate guard
+      - name: Exact candidate guard before privileged readback
         shell: bash
         run: |
           set -euo pipefail
           MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
           test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-production
+          test "$PROJECT_NUMBER" = 990081828836
 
-      - name: Authenticate production deployer
+      - name: Authenticate existing production infrastructure admin
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-          service_account: ${{ env.DEPLOYER_SA }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Probe secret metadata/access and GitHub env-variable API
-        id: probe
+      - name: Read secret version metadata and existing service accounts only
+        id: inventory
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          SECRET_VERSION='UNRESOLVED'
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$INFRA_ADMIN_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
 
-          set +e
-          META="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' 2>/tmp/meta.err)"
-          META_RC=$?
-          set -e
-          if [[ "$META_RC" -eq 0 && "$META" =~ /versions/([0-9]+)$ ]]; then
-            SECRET_VERSION="${BASH_REMATCH[1]}"
-          fi
+          SECRET_NAME="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)')"
+          [[ "$SECRET_NAME" =~ /versions/([0-9]+)$ ]]
+          SECRET_VERSION="${BASH_REMATCH[1]}"
+          [[ "$SECRET_VERSION" =~ ^[0-9]+$ ]]
 
-          ACCESS_HTTP='not_attempted'
-          if [[ "$SECRET_VERSION" == UNRESOLVED ]]; then
-            TOKEN="$(gcloud auth print-access-token)"
-            umask 077
-            ACCESS_HTTP="$(curl --silent --show-error --output /tmp/secret-access.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${DATABASE_SECRET_ID}/versions/latest:access" || true)"
-            unset TOKEN
-            if [[ "$ACCESS_HTTP" == 200 ]]; then
-              NAME="$(jq -r '.name // empty' /tmp/secret-access.json)"
-              if [[ "$NAME" =~ /versions/([0-9]+)$ ]]; then SECRET_VERSION="${BASH_REMATCH[1]}"; fi
-            fi
-            rm -f /tmp/secret-access.json
-          fi
+          gcloud iam service-accounts list --project="$PROJECT_ID" --format=json >/tmp/service-accounts.json
+          SA_EMAILS="$(jq -r '.[].email' /tmp/service-accounts.json | sort)"
+          MCP_RUNTIME_MATCH="$(printf '%s\n' "$SA_EMAILS" | grep -Fx 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' || true)"
+          test -n "$MCP_RUNTIME_MATCH"
+          NEXT_SAS="$(printf '%s\n' "$SA_EMAILS" | grep -E 'next|webhook|mcp-runtime' | paste -sd, - || true)"
 
-          set +e
-          gh api "repos/${GITHUB_REPOSITORY}/environments/production/variables" --paginate >/tmp/env-vars.json 2>/tmp/env-vars.err
-          VAR_RC=$?
-          set -e
-          if [[ "$VAR_RC" -eq 0 ]]; then
-            VAR_API='PASS'
-            VAR_NAMES="$(jq -r '.variables[]?.name' /tmp/env-vars.json | sort | paste -sd, -)"
-          else
-            VAR_API='DENIED'
-            VAR_NAMES='UNREADABLE'
-          fi
-
-          echo "secret_version=$SECRET_VERSION" >> "$GITHUB_OUTPUT"
-          echo "variable_api=$VAR_API" >> "$GITHUB_OUTPUT"
-          echo "PRODUCTION_SECRET_METADATA_RC=$META_RC"
-          echo "PRODUCTION_SECRET_ACCESS_HTTP=$ACCESS_HTTP"
-          echo "PRODUCTION_DB_SECRET_VERSION=$SECRET_VERSION"
-          echo "PRODUCTION_ENV_VARIABLE_API=$VAR_API"
-          echo "PRODUCTION_ENV_VARIABLE_NAMES=${VAR_NAMES:-none}"
-
-      - name: Record sanitized permission probe
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SECRET_VERSION: ${{ steps.probe.outputs.secret_version }}
-          VAR_API: ${{ steps.probe.outputs.variable_api }}
-        shell: bash
-        run: |
-          set -euo pipefail
           BODY=$(cat <<EOF
-          PRODUCTION_BOOTSTRAP_PERMISSION_PROBE=COMPLETE
+          PRODUCTION_INFRA_READBACK=PASS
           candidate=${CANDIDATE_SHA}
+          database_secret_id=${DATABASE_SECRET_ID}
           database_secret_numeric_version=${SECRET_VERSION}
-          github_environment_variable_api=${VAR_API}
-          secret_payload_disclosed=NO
-          production_mutation_executed=NO
+          existing_runtime_identity=toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+          matching_runtime_service_accounts=${NEXT_SAS:-none}
+          secret_payload_read=NO
+          iam_mutation_executed=NO
+          production_runtime_mutation_executed=NO
           EOF
           )
           gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="$BODY" >/dev/null
