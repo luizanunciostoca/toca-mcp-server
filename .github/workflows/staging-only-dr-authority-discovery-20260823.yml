@@ -1,0 +1,96 @@
+name: Staging-Only DR Authority Discovery 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/staging-only-dr-authority-discovery-20260823.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 12
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      SOURCE_INSTANCE: toca-mcp-next-staging-db
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Staging boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          echo 'DISCOVERY_BOUNDARY=PASS'
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read-only authority and residue discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          if gcloud sql instances list --project "$PROJECT_ID" --format=json >/tmp/instances.json 2>/tmp/instances.err; then
+            jq -r '.[].name' /tmp/instances.json | sort | sed 's/^/SQL_INSTANCE=/'
+            RESIDUE="$(jq --arg source "$SOURCE_INSTANCE" '[.[] | select(.name != $source) | select(.name | test("^(toca-next-(dr|lp-pitr|pitr)|toca-mcp-(dr|pitr))"))] | length' /tmp/instances.json)"
+            echo "DR_TEMP_INSTANCE_COUNT=$RESIDUE"
+          else
+            echo 'SQL_INSTANCE_INVENTORY=UNAVAILABLE'
+            cat /tmp/instances.err >&2
+          fi
+
+          if ! gcloud iam service-accounts list --project "$PROJECT_ID" --format='value(email)' >/tmp/sas.txt 2>/tmp/sas.err; then
+            echo 'SERVICE_ACCOUNT_INVENTORY=UNAVAILABLE'
+            cat /tmp/sas.err >&2
+            echo 'ALTERNATE_STAGING_DR_AUTHORITY=NOT_PROVEN'
+            exit 0
+          fi
+
+          sort /tmp/sas.txt | sed 's/^/STAGING_SERVICE_ACCOUNT=/'
+          mapfile -t CANDIDATES < <(grep -Ei '(dr|admin|operator|deployer)' /tmp/sas.txt || true)
+          FOUND=0
+          cat >/tmp/perms.json <<'JSON'
+          {"permissions":["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.create","cloudsql.instances.update","cloudsql.instances.delete","cloudsql.instances.connect","cloudsql.operations.get","serviceusage.services.use","iam.roles.create","iam.roles.get","iam.roles.update","iam.roles.delete","iam.serviceAccounts.create","iam.serviceAccounts.get","iam.serviceAccounts.delete","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy"]}
+          JSON
+          DR_REQ='["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.create","cloudsql.instances.update","cloudsql.instances.delete","cloudsql.instances.connect","cloudsql.operations.get","serviceusage.services.use"]'
+          IAM_REQ='["iam.roles.create","iam.roles.get","iam.roles.update","iam.roles.delete","iam.serviceAccounts.create","iam.serviceAccounts.get","iam.serviceAccounts.delete","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy"]'
+          for SA in "${CANDIDATES[@]}"; do
+            [[ "$SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]] || continue
+            [[ "$SA" == "$STAGING_OPERATOR_SA" ]] && continue
+            if gcloud auth print-access-token --impersonate-service-account="$SA" --project "$PROJECT_ID" >/tmp/alt-token 2>/tmp/imp.err; then
+              TOKEN="$(cat /tmp/alt-token)"
+              HTTP="$(curl -sS -o /tmp/alt-granted.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+              unset TOKEN
+              if [[ "$HTTP" == 200 ]]; then
+                GRANTED="$(jq -c '.permissions // [] | sort' /tmp/alt-granted.json)"
+                DR_MISSING="$(jq -cn --argjson r "$DR_REQ" --argjson g "$GRANTED" '$r-$g')"
+                IAM_MISSING="$(jq -cn --argjson r "$IAM_REQ" --argjson g "$GRANTED" '$r-$g')"
+                echo "ALT_IDENTITY=$SA"
+                echo "ALT_DR_MISSING=$DR_MISSING"
+                echo "ALT_IAM_MISSING=$IAM_MISSING"
+                if [[ "$DR_MISSING" == '[]' ]]; then FOUND=1; fi
+              fi
+            else
+              echo "ALT_IMPERSONATION_DENIED=$SA"
+            fi
+          done
+          if [[ "$FOUND" = 1 ]]; then echo 'ALTERNATE_STAGING_DR_AUTHORITY=PROVEN'; else echo 'ALTERNATE_STAGING_DR_AUTHORITY=NOT_PROVEN'; fi
+          echo 'PRODUCTION_TOUCHED=NO'
+          echo 'REAL_PROVIDERS_TOUCHED=NO'
