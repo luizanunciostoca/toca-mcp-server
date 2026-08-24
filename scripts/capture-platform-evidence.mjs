@@ -2,7 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import pg from 'pg';
 
-const outputPath = resolve(process.argv[2] ?? 'platform-evidence/database-runtime.json');
+const outputTarget = process.argv[2] ?? 'platform-evidence/database-runtime.json';
+const emitToStdout = outputTarget === '-';
+const outputPath = emitToStdout ? null : resolve(outputTarget);
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error('DATABASE_URL_REQUIRED_FOR_EVIDENCE');
 
@@ -112,9 +114,16 @@ try {
     },
   };
 
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
-  console.log(`PLATFORM_EVIDENCE_WRITTEN=${outputPath}`);
+  const serializedEvidence = `${JSON.stringify(evidence, null, 2)}\n`;
+  if (emitToStdout) {
+    console.log(
+      `PLATFORM_EVIDENCE_BASE64=${Buffer.from(serializedEvidence, 'utf8').toString('base64')}`,
+    );
+  } else {
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, serializedEvidence, 'utf8');
+    console.log(`PLATFORM_EVIDENCE_WRITTEN=${outputPath}`);
+  }
 } finally {
   await pool.end();
 }

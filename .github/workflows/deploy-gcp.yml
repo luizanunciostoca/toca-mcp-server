@@ -432,55 +432,6 @@ jobs:
           set -euo pipefail
           gcloud sql backups create --instance "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --description "pre-next-${GITHUB_SHA::12}"
 
-      - name: Start verified Cloud SQL Auth Proxy for repository database operations
-        if: inputs.operation == 'deploy'
-        run: |
-          set -euo pipefail
-          PROXY_VERSION='2.24.1'
-          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
-          curl --fail --silent --show-error --location \
-            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
-            --output /tmp/cloud-sql-proxy
-          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
-          chmod 0755 /tmp/cloud-sql-proxy
-          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 \
-            "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-            >/tmp/cloud-sql-proxy.log 2>&1 &
-          PROXY_PID=$!
-          echo "CLOUD_SQL_PROXY_PID=$PROXY_PID" >> "$GITHUB_ENV"
-          for attempt in {1..30}; do
-            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
-              echo 'CLOUD_SQL_PROXY_READY=true'
-              exit 0
-            fi
-            if ! kill -0 "$PROXY_PID" 2>/dev/null; then
-              echo 'Cloud SQL Auth Proxy exited before becoming ready' >&2
-              cat /tmp/cloud-sql-proxy.log >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          echo 'Cloud SQL Auth Proxy readiness timed out' >&2
-          cat /tmp/cloud-sql-proxy.log >&2
-          exit 1
-
-      - name: Apply repository migrations before traffic through authenticated proxy
-        if: inputs.operation == 'deploy'
-        run: |
-          set -euo pipefail
-          RAW_DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
-          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
-            const url = new URL(process.env.RAW_DATABASE_URL);
-            url.hostname = "127.0.0.1";
-            url.port = "5432";
-            for (const key of ["host", "port", "ssl", "sslmode", "sslcert", "sslkey", "sslrootcert", "sslaccept"]) url.searchParams.delete(key);
-            process.stdout.write(url.toString());
-          ')"
-          unset RAW_DATABASE_URL
-          export DATABASE_SSL=false
-          pnpm migrate
-          unset DATABASE_URL DATABASE_SSL
-
       - name: Configure Docker auth
         if: inputs.operation == 'deploy'
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
@@ -503,6 +454,55 @@ jobs:
           echo "WEBHOOK_TAG=${{ inputs.environment }}-webhook-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+
+      - name: Apply repository migrations through runtime identity job
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-db-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Database migration cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'DATABASE_MIGRATION_JOB_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
+            --set-env-vars "DATABASE_SSL=false" \
+            --command node \
+            --args dist/scripts/migrate.js \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          mkdir -p platform-evidence
+          jq -n \
+            --arg job "$JOB_NAME" --arg image "$IMAGE" \
+            --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
+            --arg cloudSql "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            '{schemaVersion:"toca.platform.database-migration-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,cloudSqlInstance:$cloudSql,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
+            > platform-evidence/database-migration-job.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Database migration job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
 
       - name: Build non-secret runtime configuration and Secret Manager bindings
         if: inputs.operation == 'deploy'
@@ -722,33 +722,65 @@ jobs:
           [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Public webhook surface exposed a forbidden route' >&2; exit 1; }
           jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
 
-      - name: Capture database Audit Outbox Workflow Privacy and migration refs through authenticated proxy
+      - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
-          RAW_DATABASE_URL="$(gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION" --secret "$GCP_DATABASE_URL_SECRET" --project "$GCP_PROJECT_ID")"
-          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
-            const url = new URL(process.env.RAW_DATABASE_URL);
-            url.hostname = "127.0.0.1";
-            url.port = "5432";
-            for (const key of ["host", "port", "ssl", "sslmode", "sslcert", "sslkey", "sslrootcert", "sslaccept"]) url.searchParams.delete(key);
-            process.stdout.write(url.toString());
-          ')"
-          unset RAW_DATABASE_URL
-          export DATABASE_SSL=false
-          export TOCA_RELEASE_SHA="$GITHUB_SHA"
-          export TOCA_DEPLOY_ENVIRONMENT="${{ inputs.environment }}"
-          node scripts/capture-platform-evidence.mjs platform-evidence/database-runtime.json
-          unset DATABASE_URL DATABASE_SSL
+          JOB_NAME="toca-db-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Database evidence cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'DATABASE_EVIDENCE_JOB_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
 
-      - name: Stop Cloud SQL Auth Proxy
-        if: always() && inputs.operation == 'deploy'
-        run: |
-          set -euo pipefail
-          if [[ -n "${CLOUD_SQL_PROXY_PID:-}" ]] && kill -0 "$CLOUD_SQL_PROXY_PID" 2>/dev/null; then
-            kill "$CLOUD_SQL_PROXY_PID"
-            wait "$CLOUD_SQL_PROXY_PID" || true
-          fi
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
+            --set-env-vars "DATABASE_SSL=false,TOCA_RELEASE_SHA=${GITHUB_SHA},TOCA_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}" \
+            --command node \
+            --args scripts/capture-platform-evidence.mjs,- \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=10m --limit=200 --order=asc \
+            --format='value(textPayload)' || true)"
+          EVIDENCE_B64="$(printf '%s\n' "$LOGS" | sed -n 's/.*PLATFORM_EVIDENCE_BASE64=\([A-Za-z0-9+\/=]*\).*/\1/p' | tail -n1)"
+          [[ -n "$EVIDENCE_B64" ]] || { echo 'Database evidence payload marker was not found' >&2; exit 1; }
+          mkdir -p platform-evidence
+          printf '%s' "$EVIDENCE_B64" | base64 --decode > platform-evidence/database-runtime.json
+          jq -e --arg sha "$GITHUB_SHA" --arg environment "$DEPLOY_ENVIRONMENT" '
+            .schemaVersion == "toca.platform.evidence.database-runtime.v2" and
+            .releaseSha == $sha and
+            .environment == $environment
+          ' platform-evidence/database-runtime.json >/dev/null
+          jq -n \
+            --arg job "$JOB_NAME" --arg image "$IMAGE" \
+            --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
+            '{schemaVersion:"toca.platform.database-evidence-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
+            > platform-evidence/database-evidence-job.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Database evidence job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
 
       - name: Capture non-secret deploy and provider evidence
         if: inputs.operation == 'deploy'
