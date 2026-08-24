@@ -1,4 +1,4 @@
-name: Ops Reliability Final E822 Alert Diagnostic
+name: Ops Reliability Final E822 Observer
 
 on:
   push:
@@ -6,71 +6,20 @@ on:
       - ops/reliability-final-e822-preflight-20260823
 
 permissions:
+  actions: read
   contents: read
-  id-token: write
   issues: write
 
-env:
-  CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
-  PROJECT_ID: toca-mcp-next-staging
-  PROJECT_NUMBER: '729069789107'
-  PRODUCTION_PROJECT_ID: toca-mcp-production
-  PRODUCTION_PROJECT_NUMBER: '990081828836'
-  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
-  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
-  MANAGED_LABEL: staging_reliability
-  SYNTHETIC_POLICY: TOCA Next Staging - Synthetic Reliability Delivery
-  HISTORICAL_INCIDENT: 0.obqbjhmrmmv8
-
 jobs:
-  diagnostic:
+  observe:
     runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          persist-credentials: false
-          fetch-depth: 1
-      - name: Enforce immutable staging-only boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
-          test "$PROJECT_ID" = toca-mcp-next-staging
-          test "$PROJECT_NUMBER" = 729069789107
-          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
-          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
-          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
-          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
-        with:
-          workload_identity_provider: ${{ env.STAGING_WIF }}
-          service_account: ${{ env.STAGING_OPERATOR_SA }}
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
-      - name: Collect sanitized live topology without mutation
+      - name: Publish recent branch runs
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ops/reliability-final-e822-preflight-20260823
         shell: bash
         run: |
           set -euo pipefail
-          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
-          TOKEN="$(gcloud auth print-access-token)"
-          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/policies.json
-          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" >/tmp/channels.json
-          INCIDENT_HTTP="$(curl --silent --show-error -o /tmp/incident.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${HISTORICAL_INCIDENT}")"
-          unset TOKEN
-
-          MANAGED_POLICIES="$(jq -c --arg m "$MANAGED_LABEL" '[.alertPolicies[]? | select(.userLabels.toca_managed==$m) | {displayName,enabled,alertRole:(.userLabels.alert_role//null),autoClose:(.alertStrategy.autoClose//null),channelCount:(.notificationChannels//[]|length)}] | sort_by(.alertRole,.displayName)' /tmp/policies.json)"
-          OBSERVED_ROLES="$(jq -c '[.[] | select(.enabled==true) | .alertRole // empty] | unique | sort' <<<"$MANAGED_POLICIES")"
-          SYNTHETIC="$(jq -c --arg n "$SYNTHETIC_POLICY" '[.alertPolicies[]? | select(.displayName==$n) | {name,displayName,enabled,userLabels,autoClose:(.alertStrategy.autoClose//null),channelCount:(.notificationChannels//[]|length)}]' /tmp/policies.json)"
-          CHANNELS="$(jq -c --arg m "$MANAGED_LABEL" '[.notificationChannels[]? | select(.userLabels.toca_managed==$m) | {type,enabled:(.enabled!=false),verificationStatus:(.verificationStatus//null)}] | sort_by(.type)' /tmp/channels.json)"
-          INCIDENT="$(if test "$INCIDENT_HTTP" = 200; then jq -c '{name,state,openTime:(.openTime//.open_time//null),closeTime:(.closeTime//.close_time//null),policy:(.policy//null)}' /tmp/incident.json; else jq -c '.' /tmp/incident.json; fi)"
-          REPO_AUTOCLOSE="$(jq -r '.automaticRecoveryClosureVerified' ops/evidence/staging-synthetic-incident-closure-2026-08-22.json)"
-          REPO_RECEIPT="$(jq -r '.positiveReceiverSideReceiptVerified' ops/evidence/staging-webhook-notification-receipt-2026-08-22.json)"
-          RUNBOOK_PRESENT=false; grep -Fq 'docs/operations/observability-incident-runbook.md' infra/observability/staging-runtime-observability-policy.json && RUNBOOK_PRESENT=true
-          EVIDENCE="$(jq -n --arg candidate "$CANDIDATE_SHA" --argjson managedPolicies "$MANAGED_POLICIES" --argjson observedRoles "$OBSERVED_ROLES" --argjson synthetic "$SYNTHETIC" --argjson channels "$CHANNELS" --arg incidentHttp "$INCIDENT_HTTP" --argjson incident "$INCIDENT" --arg repoAutoclose "$REPO_AUTOCLOSE" --arg repoReceipt "$REPO_RECEIPT" --arg runbookPresent "$RUNBOOK_PRESENT" '{candidateSha:$candidate,managedPolicies:$managedPolicies,observedRoles:$observedRoles,syntheticPolicy:$synthetic,managedChannels:$channels,historicalIncidentHttp:($incidentHttp|tonumber),historicalIncident:$incident,repoAutomaticRecoveryClosureVerified:($repoAutoclose=="true"),repoReceiverReceiptVerified:($repoReceipt=="true"),runbookPresent:($runbookPresent=="true"),productionAccess:false,providerAccess:false,syntheticSignalEmitted:false,monitoringMutation:false,databaseMutation:false,backupMutation:false,drRestore:false}')"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_DIAGNOSTIC\n\n`RUN_ID=%s`\n\n```json\n%s\n```' "$GITHUB_RUN_ID" "$EVIDENCE")" >/dev/null
-          echo ALERT_DIAGNOSTIC=PASS
+          RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=10" --jq '[.workflow_runs[] | {id,name,status,conclusion,head_sha,created_at}]')"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_DIAGNOSTIC_OBSERVER\n\n```json\n%s\n```' "$RUNS")" >/dev/null
