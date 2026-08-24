@@ -234,18 +234,63 @@ jobs:
           set -euo pipefail
           JOB_NAME="toca-meta-secret-version-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
-            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Meta resolver cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'META_RESOLVER_CLEANUP=PASS'
+            fi
+            set -e
           }
           trap cleanup EXIT
 
-          SERVING_REVISION="$(gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --format='value(status.traffic[percent=100].revisionName)')"
-          test -n "$SERVING_REVISION"
-          CURRENT_IMAGE="$(gcloud run revisions describe "$SERVING_REVISION" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --format='value(spec.containers[0].image)')"
-          test -n "$CURRENT_IMAGE"
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/meta-resolver-service.json
+          SERVING_REVISION="$(jq -r '
+            . as $service
+            | [($service.status.traffic // [])[]
+                | select((.percent // 0) == 100)
+                | if ((.revisionName // "") | length) > 0 then .revisionName
+                  elif (.latestRevision // false) == true then ($service.status.latestReadyRevisionName // empty)
+                  else empty
+                  end]
+            | unique
+            | if length == 1 then .[0] else empty end
+          ' /tmp/meta-resolver-service.json)"
+          if [[ -z "$SERVING_REVISION" ]]; then
+            echo 'Meta resolver could not identify exactly one 100%-serving MCP revision' >&2
+            jq -c '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),traffic:(.status.traffic // [])}' \
+              /tmp/meta-resolver-service.json >&2
+            exit 1
+          fi
+
+          gcloud run revisions describe "$SERVING_REVISION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/meta-resolver-revision.json
+          SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision.json)"
+          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision.json)"
+          [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }
+          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver serving revision has no resolved image digest: $SERVING_REVISION" >&2; exit 1; }
+          CURRENT_IMAGE="$(SERVING_IMAGE="$SERVING_IMAGE" SERVING_DIGEST="$SERVING_DIGEST" node --input-type=module -e '
+            const image = process.env.SERVING_IMAGE;
+            const digest = process.env.SERVING_DIGEST;
+            const slash = image.lastIndexOf("/");
+            const at = image.lastIndexOf("@");
+            const colon = image.lastIndexOf(":");
+            const cut = at > slash ? at : colon > slash ? colon : image.length;
+            process.stdout.write(`${image.slice(0, cut)}@${digest}`);
+          ')"
+          jq -n \
+            --arg revision "$SERVING_REVISION" \
+            --arg image "$CURRENT_IMAGE" \
+            --arg digest "$SERVING_DIGEST" \
+            '{schemaVersion:"toca.platform.meta-resolver-source.v1",servingRevision:$revision,immutableImage:$image,imageDigest:$digest}' \
+            > platform-evidence/meta-resolver-source.json
+          echo "META_RESOLVER_SOURCE_REVISION=$SERVING_REVISION"
 
           read -r -d '' RESOLVER_JS <<'JS' || true
           const metadataHeaders = {'Metadata-Flavor': 'Google'};
@@ -283,15 +328,19 @@ jobs:
           VERSION="$(printf '%s\n' "$LOGS" | sed -n 's/.*META_SECRET_VERSION=\([0-9][0-9]*\).*/\1/p' | tail -n1)"
           [[ "$VERSION" =~ ^[0-9]+$ ]] || { echo 'Meta secret numeric version could not be resolved' >&2; exit 1; }
           echo "GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION" >> "$GITHUB_ENV"
-          jq -n --arg secret "$GCP_META_ACCESS_TOKEN_SECRET" --arg version "$VERSION" \
-            '{schemaVersion:"toca.platform.secret-version-evidence.v1",secretId:$secret,numericVersion:$version,resolverIdentity:"production-runtime",secretPayloadDisclosed:false,providerCallExecuted:false}' \
+          jq -n \
+            --arg secret "$GCP_META_ACCESS_TOKEN_SECRET" \
+            --arg version "$VERSION" \
+            --arg sourceRevision "$SERVING_REVISION" \
+            --arg sourceImage "$CURRENT_IMAGE" \
+            '{schemaVersion:"toca.platform.secret-version-evidence.v2",secretId:$secret,numericVersion:$version,resolverIdentity:"production-runtime",sourceRevision:$sourceRevision,sourceImage:$sourceImage,secretPayloadDisclosed:false,providerCallExecuted:false}' \
             > platform-evidence/meta-secret-version.json
 
           cleanup
           trap - EXIT
           REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
-          test -z "$REMAINING"
+          [[ -z "$REMAINING" ]] || { echo "Meta resolver job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
 
       - name: Require exact numeric production provider secret versions after resolution
         if: inputs.operation == 'deploy' && inputs.environment == 'production'
