@@ -1,0 +1,138 @@
+name: Ops Incident Readback 91560f 2026-08-23
+
+on:
+  push:
+    branches: [ops/incident-readback-91560f-20260823]
+    paths:
+      - '.github/workflows/ops-incident-readback-91560f-20260823.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  ALERT_ID: 0.obsu2cipn68y
+  POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
+  SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
+  SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+  EXPECTED_RUN_ID: '32683550983'
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Enforce exact candidate and staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Verify exact synthetic signal and poll backend closure without mutation
+        id: readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          RUN_MARKER="${SYNTHETIC_MARKER}:run:${EXPECTED_RUN_ID}:sha:${CANDIDATE_SHA}"
+          FOUND=0
+          for attempt in $(seq 1 12); do
+            COUNT="$(gcloud logging read "logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${RUN_MARKER}\"" --project="$PROJECT_ID" --freshness=2h --limit=5 --format='value(insertId)' | wc -l | tr -d ' ')"
+            if [[ "$COUNT" -ge 1 ]]; then FOUND=1; break; fi
+            sleep 5
+          done
+          test "$FOUND" = 1
+
+          TOKEN="$(gcloud auth print-access-token)"
+          STATE=''
+          OPEN_TIME=''
+          CLOSE_TIME=''
+          POLICY=''
+          DISPLAY_NAME=''
+          ATTEMPTS=0
+          for attempt in $(seq 1 55); do
+            ATTEMPTS="$attempt"
+            HTTP_STATUS="$(curl --silent --show-error --output /tmp/alert.json --write-out '%{http_code}' \
+              -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
+              "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${ALERT_ID}")"
+            test "$HTTP_STATUS" = 200
+            STATE="$(jq -r '.state // empty' /tmp/alert.json)"
+            OPEN_TIME="$(jq -r '.open_time // .openTime // empty' /tmp/alert.json)"
+            CLOSE_TIME="$(jq -r '.close_time // .closeTime // empty' /tmp/alert.json)"
+            POLICY="$(jq -r '.policy.name // empty' /tmp/alert.json)"
+            DISPLAY_NAME="$(jq -r '.policy.displayName // .policy.display_name // empty' /tmp/alert.json)"
+            test -n "$STATE"
+            test -n "$OPEN_TIME"
+            test "$POLICY" = "$POLICY_NAME"
+            if [[ "$STATE" == CLOSED && -n "$CLOSE_TIME" ]]; then break; fi
+            sleep 20
+          done
+          unset TOKEN
+
+          CLOSED=false
+          if [[ "$STATE" == CLOSED ]]; then test -n "$CLOSE_TIME"; CLOSED=true; fi
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "open_time=$OPEN_TIME" >> "$GITHUB_OUTPUT"
+          echo "close_time=$CLOSE_TIME" >> "$GITHUB_OUTPUT"
+          echo "attempts=$ATTEMPTS" >> "$GITHUB_OUTPUT"
+          echo "closed=$CLOSED" >> "$GITHUB_OUTPUT"
+          echo "policy_display_name=$DISPLAY_NAME" >> "$GITHUB_OUTPUT"
+          echo "run_marker=$RUN_MARKER" >> "$GITHUB_OUTPUT"
+          test "$CLOSED" = true
+      - name: Publish sanitized readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.readback.outputs.state }}
+          OPEN_TIME: ${{ steps.readback.outputs.open_time }}
+          CLOSE_TIME: ${{ steps.readback.outputs.close_time }}
+          ATTEMPTS: ${{ steps.readback.outputs.attempts }}
+          CLOSED: ${{ steps.readback.outputs.closed }}
+          POLICY_DISPLAY_NAME: ${{ steps.readback.outputs.policy_display_name }}
+          RUN_MARKER: ${{ steps.readback.outputs.run_marker }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY=$(cat <<EOF
+## INCIDENT_DELIVERY_READBACK — 91560f
+
+CANDIDATE_SHA=${CANDIDATE_SHA}
+SYNTHETIC_RUN=${EXPECTED_RUN_ID}
+ALERT_ID=${ALERT_ID}
+STATE=${STATE}
+OPEN_TIME=${OPEN_TIME}
+CLOSE_TIME=${CLOSE_TIME}
+POLICY=${POLICY_DISPLAY_NAME}
+RUN_MARKER=${RUN_MARKER}
+POLL_ATTEMPTS=${ATTEMPTS}
+RECOVERY_CLOSURE_OBSERVED=${CLOSED}
+MANUAL_CLOSE_EXECUTED=NO
+PRODUCTION_TOUCHED=NO
+REAL_PROVIDERS_TOUCHED=NO
+EOF
+)
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$BODY" >/dev/null
