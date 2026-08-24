@@ -1,0 +1,503 @@
+name: PR Final Staging DR V5 91560f
+
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths:
+      - '.github/workflows/pr-dr-final-v5-91560f.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  APP_DB: toca_mcp_staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_SA: toca-next-stg-dr-operator@toca-mcp-next-staging.iam.gserviceaccount.com
+  DB_SECRET: toca-next-staging-database-url
+  TARGET_INSTANCE: toca-next-dr-pitr-v5-${{ github.run_id }}
+  EVIDENCE_ISSUE: '151'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Enforce exact candidate and staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$TARGET_INSTANCE" == toca-next-dr-pitr-v5-* ]]
+          test "$TARGET_INSTANCE" != "$SOURCE_INSTANCE"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Prove exact least-privilege DR authority and source readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          TOKEN="$(gcloud auth print-access-token)"
+          cat >/tmp/perms.json <<'JSON'
+          {"permissions":[
+            "cloudsql.instances.clone","cloudsql.instances.connect","cloudsql.instances.create","cloudsql.instances.delete","cloudsql.instances.get","cloudsql.instances.update","cloudsql.operations.get","cloudsql.users.list","cloudsql.users.update","resourcemanager.projects.get","serviceusage.services.use",
+            "resourcemanager.projects.setIamPolicy","iam.serviceAccounts.create","iam.serviceAccounts.setIamPolicy","run.services.update","secretmanager.versions.access","cloudsql.instances.export","cloudsql.backupRuns.delete"
+          ]}
+          JSON
+          HTTP="$(curl -sS -o /tmp/perms-out.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          unset TOKEN
+          test "$HTTP" = 200
+          EXPECTED='["cloudsql.instances.clone","cloudsql.instances.connect","cloudsql.instances.create","cloudsql.instances.delete","cloudsql.instances.get","cloudsql.instances.update","cloudsql.operations.get","cloudsql.users.list","cloudsql.users.update","resourcemanager.projects.get","serviceusage.services.use"]'
+          jq -e --argjson expected "$EXPECTED" '((.permissions // []) | sort) == ($expected | sort)' /tmp/perms-out.json >/dev/null
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source.json
+          jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '.project==$p and .region==$r and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and (.settings.backupConfiguration.transactionLogRetentionDays//0)>=7 and (.settings.backupConfiguration.backupRetentionSettings.retainedBackups//0)>=7' /tmp/source.json >/dev/null
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          echo 'DR_V5_PREFLIGHT=PASS permissions=11 forbidden_effective=0'
+
+  markers:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    outputs:
+      recovery_point: ${{ steps.markers.outputs.recovery_point }}
+      actual_rpo_seconds: ${{ steps.markers.outputs.actual_rpo_seconds }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Create bounded source markers around a real recovery point
+        id: markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "${PROJECT_ID}:${REGION}:${SOURCE_INSTANCE}" >/tmp/source-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+            kill -0 "$PROXY_PID" 2>/dev/null || { cat /tmp/source-proxy.log >&2; exit 1; }
+            sleep 1
+          done
+          RAW_DATABASE_URL="$(gcloud secrets versions access latest --secret="$DB_SECRET" --project="$PROJECT_ID")"
+          export RAW_DATABASE_URL
+          DB_USER="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.username))')"
+          DB_PASS="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.password))')"
+          SECRET_DB="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname;process.stdout.write(decodeURIComponent(p))')"
+          unset RAW_DATABASE_URL
+          echo "::add-mask::$DB_PASS"
+          test "$SECRET_DB" = "$APP_DB"
+          export PGPASSWORD="$DB_PASS"
+          test "$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -Atqc 'select current_database()')" = "$APP_DB"
+          test "$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -Atqc "select to_regclass('public.audit_events') is not null")" = t
+          EXPECTED_MIGRATIONS="$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -Atqc 'select count(*) from schema_migrations')" = "$EXPECTED_MIGRATIONS"
+          CORR_BEFORE="dr-acceptance-v5-${GITHUB_RUN_ID}-before"
+          CORR_AFTER="dr-acceptance-v5-${GITHUB_RUN_ID}-after"
+          psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -v ON_ERROR_STOP=1 -qc "delete from audit_events where correlation_id in ('$CORR_BEFORE','$CORR_AFTER')"
+          BEFORE_ISO="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -v ON_ERROR_STOP=1 -Atqc "insert into audit_events(correlation_id,actor_id,tool_name,risk_class,decision,normalized_payload) values ('$CORR_BEFORE','github-actions','internal.dr.acceptance','LOW','ALLOW',jsonb_build_object('runId','${GITHUB_RUN_ID}','phase','before')) returning to_char(created_at at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')")"
+          BEFORE_EPOCH="$(date -u -d "$BEFORE_ISO" +%s)"
+          TOKEN="$(gcloud auth print-access-token)"
+          RECOVERY_POINT=''
+          for attempt in $(seq 1 90); do
+            curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime" >/tmp/recovery.json
+            LATEST="$(jq -r '.latestRecoveryTime // empty' /tmp/recovery.json)"
+            if [[ -n "$LATEST" ]] && (( $(date -u -d "$LATEST" +%s) >= BEFORE_EPOCH + 2 )); then RECOVERY_POINT="$LATEST"; break; fi
+            sleep 5
+          done
+          test -n "$RECOVERY_POINT"
+          RECOVERY_EPOCH="$(date -u -d "$RECOVERY_POINT" +%s)"
+          (( RECOVERY_EPOCH > BEFORE_EPOCH ))
+          sleep 3
+          AFTER_ISO="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -v ON_ERROR_STOP=1 -Atqc "insert into audit_events(correlation_id,actor_id,tool_name,risk_class,decision,normalized_payload) values ('$CORR_AFTER','github-actions','internal.dr.acceptance','LOW','ALLOW',jsonb_build_object('runId','${GITHUB_RUN_ID}','phase','after')) returning to_char(created_at at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')")"
+          AFTER_EPOCH="$(date -u -d "$AFTER_ISO" +%s)"
+          (( RECOVERY_EPOCH < AFTER_EPOCH ))
+          AFTER_WAL=0
+          for attempt in $(seq 1 90); do
+            curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime" >/tmp/recovery-after.json
+            LATEST_AFTER="$(jq -r '.latestRecoveryTime // empty' /tmp/recovery-after.json)"
+            if [[ -n "$LATEST_AFTER" ]] && (( $(date -u -d "$LATEST_AFTER" +%s) >= AFTER_EPOCH )); then AFTER_WAL=1; break; fi
+            sleep 5
+          done
+          unset TOKEN
+          test "$AFTER_WAL" = 1
+          test "$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -Atqc "select count(*) from audit_events where correlation_id in ('$CORR_BEFORE','$CORR_AFTER')")" = 2
+          ACTUAL_RPO_SECONDS="$((AFTER_EPOCH-RECOVERY_EPOCH))"
+          (( ACTUAL_RPO_SECONDS >= 1 && ACTUAL_RPO_SECONDS <= 900 ))
+          echo "recovery_point=$RECOVERY_POINT" >> "$GITHUB_OUTPUT"
+          echo "actual_rpo_seconds=$ACTUAL_RPO_SECONDS" >> "$GITHUB_OUTPUT"
+          unset PGPASSWORD DB_PASS
+          echo "DR_V5_MARKERS=PASS recovery_point=${RECOVERY_POINT} actual_rpo_seconds=${ACTUAL_RPO_SECONDS}"
+
+  drill:
+    needs: [preflight, markers]
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 55
+    outputs:
+      rto_seconds: ${{ steps.validate.outputs.rto_seconds }}
+      runnable_seconds: ${{ steps.validate.outputs.runnable_seconds }}
+      database_ready_seconds: ${{ steps.validate.outputs.database_ready_seconds }}
+      migration_count: ${{ steps.validate.outputs.migration_count }}
+      critical_table_count: ${{ steps.validate.outputs.critical_table_count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Execute isolated point-in-time clone
+        id: restore
+        env:
+          RECOVERY_POINT: ${{ needs.markers.outputs.recovery_point }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DR_SA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -n "$RECOVERY_POINT"
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          RESTORE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          TOKEN="$(gcloud auth print-access-token)"
+          jq -n --arg target "$TARGET_INSTANCE" --arg point "$RECOVERY_POINT" '{cloneContext:{kind:"sql#cloneContext",destinationInstanceName:$target,pointInTime:$point}}' >/tmp/clone-request.json
+          HTTP="$(curl --silent --show-error --output /tmp/clone-response.json --write-out '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json; charset=utf-8' --data-binary @/tmp/clone-request.json "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/clone")"
+          unset TOKEN
+          test "$HTTP" = 200
+          jq -e --arg p "$PROJECT_ID" --arg t "$TARGET_INSTANCE" '(.name|length)>0 and .targetProject==$p and .targetId==$t and (.operationType=="CLONE" or .operationType=="CREATE")' /tmp/clone-response.json >/dev/null
+          TARGET_RUNNABLE=''
+          for attempt in $(seq 1 150); do
+            STATE="$(gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format='value(state)' 2>/dev/null || true)"
+            if [[ "$STATE" == RUNNABLE ]]; then TARGET_RUNNABLE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; break; fi
+            sleep 10
+          done
+          test -n "$TARGET_RUNNABLE"
+          echo "restore_started=$RESTORE_STARTED" >> "$GITHUB_OUTPUT"
+          echo "target_runnable=$TARGET_RUNNABLE" >> "$GITHUB_OUTPUT"
+          echo 'DR_V5_TARGET_RUNNABLE=PASS'
+      - name: Wait for restored PostgreSQL readiness and validate recovery
+        id: validate
+        env:
+          RESTORE_STARTED: ${{ steps.restore.outputs.restore_started }}
+          TARGET_RUNNABLE: ${{ steps.restore.outputs.target_runnable }}
+          ACTUAL_RPO_SECONDS: ${{ needs.markers.outputs.actual_rpo_seconds }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+
+          USERS_READY=0
+          for attempt in $(seq 1 120); do
+            set +e
+            gcloud sql users list --instance="$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/users.json 2>/tmp/users.err
+            RC=$?
+            set -e
+            if [[ "$RC" -eq 0 ]] && jq -e 'any(.[]?; .name=="postgres")' /tmp/users.json >/dev/null 2>&1; then USERS_READY=1; break; fi
+            if [[ "$RC" -ne 0 ]] && ! grep -Eqi 'shutting down|starting up|couldn.t connect|temporarily unavailable|409|another operation was already in progress|taking longer than expected|backend error' /tmp/users.err; then
+              cat /tmp/users.err >&2
+              exit "$RC"
+            fi
+            sleep 10
+          done
+          test "$USERS_READY" = 1
+
+          PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$PASSWORD"
+          UPDATED=0
+          for attempt in $(seq 1 120); do
+            set +e
+            gcloud sql users set-password postgres --instance="$TARGET_INSTANCE" --project="$PROJECT_ID" --password="$PASSWORD" --quiet >/tmp/setpass.out 2>/tmp/setpass.err
+            RC=$?
+            set -e
+            if [[ "$RC" -eq 0 ]]; then UPDATED=1; break; fi
+            if ! grep -Eqi 'shutting down|starting up|couldn.t connect|temporarily unavailable|409|another operation was already in progress|taking longer than expected|backend error' /tmp/setpass.err; then
+              cat /tmp/setpass.err >&2
+              exit "$RC"
+            fi
+            sleep 10
+          done
+          test "$UPDATED" = 1
+
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          CONNECTION_NAME="$(gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format='value(connectionName)')"
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "$CONNECTION_NAME" >/tmp/target-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+            kill -0 "$PROXY_PID" 2>/dev/null || { cat /tmp/target-proxy.log >&2; exit 1; }
+            sleep 1
+          done
+          export PGPASSWORD="$PASSWORD"
+          DB_READY=0
+          for attempt in $(seq 1 120); do
+            set +e
+            psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc 'select 1' >/tmp/psql-ready.out 2>/tmp/psql-ready.err
+            RC=$?
+            set -e
+            if [[ "$RC" -eq 0 ]] && [[ "$(cat /tmp/psql-ready.out)" = 1 ]]; then DB_READY=1; break; fi
+            if ! grep -Eqi 'shutting down|starting up|recovery mode|connection refused|server closed|password authentication failed|terminating connection|no response' /tmp/psql-ready.err; then
+              cat /tmp/psql-ready.err >&2
+              exit "$RC"
+            fi
+            sleep 10
+          done
+          test "$DB_READY" = 1
+          DATABASE_READY="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          test "$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc 'select current_database()')" = "$APP_DB"
+
+          find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort >/tmp/repo-migrations.txt
+          psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc 'select version from schema_migrations order by version' >/tmp/restored-migrations.txt
+          diff -u /tmp/repo-migrations.txt /tmp/restored-migrations.txt
+          MIGRATION_COUNT="$(wc -l </tmp/restored-migrations.txt | tr -d ' ')"
+          REQUIRED_TABLES=(schema_migrations tenants approval_records workflow_instances workflow_steps workflow_timers workflow_events workflow_human_tasks workflow_compensations event_outbox event_outbox_delivery_attempts event_consumer_receipts dead_letter_jobs audit_ledger_events audit_ledger_heads operational_signals privacy_ledger_events crm_conversations crm_messages event_records ag01_conversations ag01_message_records ag01_runtime_circuits email_dispatches email_provider_events whatsapp_dispatches whatsapp_provider_events omnichannel_prepared_content)
+          for table in "${REQUIRED_TABLES[@]}"; do
+            test "$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select to_regclass('public.${table}') is not null")" = t
+          done
+          CORR_BEFORE="dr-acceptance-v5-${GITHUB_RUN_ID}-before"
+          CORR_AFTER="dr-acceptance-v5-${GITHUB_RUN_ID}-after"
+          test "$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from audit_events where correlation_id='$CORR_BEFORE'")" = 1
+          test "$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from audit_events where correlation_id='$CORR_AFTER'")" = 0
+          for trigger in audit_ledger_events_append_only operational_signals_append_only privacy_ledger_no_update privacy_ledger_no_delete ag01_message_records_append_only whatsapp_provider_events_append_only; do
+            test "$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from pg_trigger where tgname='${trigger}' and tgenabled <> 'D'")" = 1
+          done
+          AUDIT_MISMATCH="$(psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc "select count(*) from audit_ledger_heads h left join lateral (select sequence,event_hash,correlation_id from audit_ledger_events e where e.execution_id=h.execution_id order by sequence desc limit 1) e on true where e.event_hash is null or h.last_sequence<>e.sequence or h.head_hash<>e.event_hash or h.correlation_id<>e.correlation_id")"
+          test "$AUDIT_MISMATCH" = 0
+          psql -h 127.0.0.1 -p 5432 -U postgres -d "$APP_DB" -Atqc 'select (select count(*) from workflow_instances), (select count(*) from event_outbox), (select count(*) from crm_conversations)' >/tmp/business-readiness.txt
+          test -s /tmp/business-readiness.txt
+
+          VALIDATION_COMPLETED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RTO_SECONDS="$(( $(date -u -d "$VALIDATION_COMPLETED" +%s) - $(date -u -d "$RESTORE_STARTED" +%s) ))"
+          RUNNABLE_SECONDS="$(( $(date -u -d "$TARGET_RUNNABLE" +%s) - $(date -u -d "$RESTORE_STARTED" +%s) ))"
+          DATABASE_READY_SECONDS="$(( $(date -u -d "$DATABASE_READY" +%s) - $(date -u -d "$RESTORE_STARTED" +%s) ))"
+          (( RTO_SECONDS >= 0 && RTO_SECONDS <= 3600 ))
+          (( RUNNABLE_SECONDS >= 0 && RUNNABLE_SECONDS <= 3600 ))
+          (( DATABASE_READY_SECONDS >= 0 && DATABASE_READY_SECONDS <= 3600 ))
+          (( ACTUAL_RPO_SECONDS >= 1 && ACTUAL_RPO_SECONDS <= 900 ))
+          echo "rto_seconds=$RTO_SECONDS" >> "$GITHUB_OUTPUT"
+          echo "runnable_seconds=$RUNNABLE_SECONDS" >> "$GITHUB_OUTPUT"
+          echo "database_ready_seconds=$DATABASE_READY_SECONDS" >> "$GITHUB_OUTPUT"
+          echo "migration_count=$MIGRATION_COUNT" >> "$GITHUB_OUTPUT"
+          echo "critical_table_count=${#REQUIRED_TABLES[@]}" >> "$GITHUB_OUTPUT"
+          unset PGPASSWORD PASSWORD
+          echo "DR_V5_VALIDATION=PASS rpo=${ACTUAL_RPO_SECONDS}s rto=${RTO_SECONDS}s db_ready=${DATABASE_READY_SECONDS}s migrations=${MIGRATION_COUNT} critical_tables=${#REQUIRED_TABLES[@]}"
+
+  cleanup-target:
+    needs: [preflight, markers, drill]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 35
+    outputs:
+      target_absent: ${{ steps.cleanup.outputs.target_absent }}
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Delete only deterministic temporary DR target
+        id: cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DR_SA"
+          [[ "$TARGET_INSTANCE" == toca-next-dr-pitr-v5-* ]]
+          for attempt in $(seq 1 120); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/target.json 2>/dev/null; then break; fi
+            if [[ "$(jq -r '.settings.deletionProtectionEnabled // false' /tmp/target.json)" == true ]]; then
+              set +e
+              gcloud sql instances patch "$TARGET_INSTANCE" --project="$PROJECT_ID" --no-deletion-protection --quiet >/tmp/patch.out 2>/tmp/patch.err
+              RC=$?
+              set -e
+              if [[ "$RC" -ne 0 ]] && ! grep -Eqi '409|another operation was already in progress|taking longer than expected' /tmp/patch.err; then cat /tmp/patch.err >&2; exit "$RC"; fi
+              sleep 10
+              continue
+            fi
+            set +e
+            gcloud sql instances delete "$TARGET_INSTANCE" --project="$PROJECT_ID" --quiet >/tmp/delete.out 2>/tmp/delete.err
+            RC=$?
+            set -e
+            if [[ "$RC" -eq 0 ]]; then break; fi
+            if ! grep -Eqi '409|another operation was already in progress|taking longer than expected' /tmp/delete.err; then cat /tmp/delete.err >&2; exit "$RC"; fi
+            sleep 10
+          done
+          for attempt in $(seq 1 120); do
+            if ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then break; fi
+            sleep 10
+          done
+          ! gcloud sql instances describe "$TARGET_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+          echo 'target_absent=true' >> "$GITHUB_OUTPUT"
+          echo 'DR_V5_TARGET_CLEANUP=PASS'
+
+  cleanup-source:
+    needs: [preflight, markers, drill, cleanup-target]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    outputs:
+      temp_count: ${{ steps.cleanup.outputs.temp_count }}
+      markers_remaining: ${{ steps.cleanup.outputs.markers_remaining }}
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Remove source markers and prove zero DR residue
+        id: cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "${PROJECT_ID}:${REGION}:${SOURCE_INSTANCE}" >/tmp/source-clean-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi; sleep 1; done
+          RAW_DATABASE_URL="$(gcloud secrets versions access latest --secret="$DB_SECRET" --project="$PROJECT_ID")"
+          export RAW_DATABASE_URL
+          DB_USER="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.username))')"
+          DB_PASS="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.password))')"
+          SECRET_DB="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname;process.stdout.write(decodeURIComponent(p))')"
+          unset RAW_DATABASE_URL
+          echo "::add-mask::$DB_PASS"
+          test "$SECRET_DB" = "$APP_DB"
+          export PGPASSWORD="$DB_PASS"
+          CORR_BEFORE="dr-acceptance-v5-${GITHUB_RUN_ID}-before"
+          CORR_AFTER="dr-acceptance-v5-${GITHUB_RUN_ID}-after"
+          psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -v ON_ERROR_STOP=1 -qc "delete from audit_events where correlation_id in ('$CORR_BEFORE','$CORR_AFTER')"
+          MARKERS_REMAINING="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$APP_DB" -Atqc "select count(*) from audit_events where correlation_id in ('$CORR_BEFORE','$CORR_AFTER')")"
+          test "$MARKERS_REMAINING" = 0
+          unset PGPASSWORD DB_PASS
+          mapfile -t INSTANCES < <(gcloud sql instances list --project="$PROJECT_ID" --format='value(name)' | sort)
+          test "${#INSTANCES[@]}" = 1
+          test "${INSTANCES[0]}" = "$SOURCE_INSTANCE"
+          TEMP_COUNT="$(gcloud sql instances list --project="$PROJECT_ID" --filter="name~'^toca-next-dr-pitr-'" --format='value(name)' | wc -l | tr -d ' ')"
+          test "$TEMP_COUNT" = 0
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/source-after.json
+          jq -e '.state=="RUNNABLE" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and (.settings.backupConfiguration.transactionLogRetentionDays//0)>=7 and (.settings.backupConfiguration.backupRetentionSettings.retainedBackups//0)>=7' /tmp/source-after.json >/dev/null
+          echo "temp_count=$TEMP_COUNT" >> "$GITHUB_OUTPUT"
+          echo "markers_remaining=$MARKERS_REMAINING" >> "$GITHUB_OUTPUT"
+          echo 'DR_V5_SOURCE_CLEANUP=PASS DR_TEMP_INSTANCE_COUNT=0 SOURCE_MARKERS=0'
+
+  final-gate:
+    needs: [preflight, markers, drill, cleanup-target, cleanup-source]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish final sanitized DR result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRE: ${{ needs.preflight.result }}
+          MARK: ${{ needs.markers.result }}
+          DRILL: ${{ needs.drill.result }}
+          CT: ${{ needs.cleanup-target.result }}
+          CS: ${{ needs.cleanup-source.result }}
+          RPO: ${{ needs.markers.outputs.actual_rpo_seconds }}
+          RTO: ${{ needs.drill.outputs.rto_seconds }}
+          RUNNABLE: ${{ needs.drill.outputs.runnable_seconds }}
+          DB_READY: ${{ needs.drill.outputs.database_ready_seconds }}
+          MIGRATIONS: ${{ needs.drill.outputs.migration_count }}
+          TABLES: ${{ needs.drill.outputs.critical_table_count }}
+          TEMP_COUNT: ${{ needs.cleanup-source.outputs.temp_count }}
+          MARKERS_REMAINING: ${{ needs.cleanup-source.outputs.markers_remaining }}
+          RECOVERY_POINT: ${{ needs.markers.outputs.recovery_point }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY=$(cat <<EOF
+          ## FINAL_STAGING_DR_V5 — ${CANDIDATE_SHA}
+
+          RUN_ID=${GITHUB_RUN_ID}
+          PREFLIGHT=${PRE}
+          RPO_MARKERS=${MARK}
+          PITR_DRILL=${DRILL}
+          CLEANUP_TARGET=${CT}
+          CLEANUP_SOURCE=${CS}
+          RECOVERY_POINT=${RECOVERY_POINT}
+          ACTUAL_RPO_SECONDS=${RPO}
+          RTO_SECONDS=${RTO}
+          RESTORE_TO_RUNNABLE_SECONDS=${RUNNABLE}
+          RESTORE_TO_DB_READY_SECONDS=${DB_READY}
+          RESTORED_MIGRATION_COUNT=${MIGRATIONS}
+          CRITICAL_TABLE_COUNT=${TABLES}
+          DR_TEMP_INSTANCE_COUNT=${TEMP_COUNT}
+          SOURCE_MARKERS_REMAINING=${MARKERS_REMAINING}
+          ACTIVE_DR_IDENTITY=${DR_SA}
+          SOURCE_INSTANCE=${SOURCE_INSTANCE}
+          TARGET_INSTANCE=${TARGET_INSTANCE}
+          PRODUCTION_TOUCHED=NO
+          REAL_PROVIDERS_TOUCHED=NO
+          SCHEMA_MIGRATION_CREATED=NO
+          EOF
+          )
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
+          test "$PRE" = success
+          test "$MARK" = success
+          test "$DRILL" = success
+          test "$CT" = success
+          test "$CS" = success
+          test "$TEMP_COUNT" = 0
+          test "$MARKERS_REMAINING" = 0
+          test -n "$RPO"; test -n "$RTO"; test -n "$DB_READY"
+          (( RPO >= 1 && RPO <= 900 ))
+          (( RTO >= 0 && RTO <= 3600 ))
+          (( DB_READY >= 0 && DB_READY <= 3600 ))
+          echo 'FINAL_STAGING_DR_V5=PASS'
