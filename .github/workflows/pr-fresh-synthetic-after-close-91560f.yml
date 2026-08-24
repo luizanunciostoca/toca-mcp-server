@@ -1,0 +1,101 @@
+name: PR Fresh Synthetic After Close 91560f
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths: ['.github/workflows/pr-fresh-synthetic-after-close-91560f.yml']
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  PREVIOUS_ALERT_ID: 0.obsu2cipn68y
+  POLICY_NAME: projects/toca-mcp-next-staging/alertPolicies/5562724679805698256
+  SYNTHETIC_LOG_ID: toca-staging-reliability-synthetic
+  SYNTHETIC_MARKER: TOCA_STAGING_RELIABILITY_SYNTHETIC_V1
+  EVIDENCE_ISSUE: '151'
+jobs:
+  fire-after-close:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Wait for previous backend auto-close without mutation
+        id: closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          TOKEN="$(gcloud auth print-access-token)"
+          STATE=''; CLOSE=''; OPEN=''; POLICY=''
+          for i in $(seq 1 60); do
+            HTTP="$(curl -sS -o /tmp/a.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alerts/${PREVIOUS_ALERT_ID}")"
+            test "$HTTP" = 200
+            STATE="$(jq -r '.state // empty' /tmp/a.json)"; OPEN="$(jq -r '.open_time // .openTime // empty' /tmp/a.json)"; CLOSE="$(jq -r '.close_time // .closeTime // empty' /tmp/a.json)"; POLICY="$(jq -r '.policy.name // empty' /tmp/a.json)"
+            test "$POLICY" = "$POLICY_NAME"
+            if [[ "$STATE" == CLOSED && -n "$CLOSE" ]]; then break; fi
+            sleep 20
+          done
+          unset TOKEN
+          test "$STATE" = CLOSED; test -n "$CLOSE"
+          echo "open=$OPEN" >> "$GITHUB_OUTPUT"; echo "close=$CLOSE" >> "$GITHUB_OUTPUT"
+      - name: Verify existing governed policy and channels read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl -fsS -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/${POLICY_NAME}" >/tmp/p.json
+          jq -e '.enabled==true and .userLabels.toca_managed=="staging_reliability" and .userLabels.alert_role=="synthetic_delivery" and .conditions[0].conditionMatchedLog.filter=="logName=\"projects/toca-mcp-next-staging/logs/toca-staging-reliability-synthetic\" AND jsonPayload.marker=\"TOCA_STAGING_RELIABILITY_SYNTHETIC_V1\"" and (.notificationChannels|length)==2 and .alertStrategy.autoClose=="1800s"' /tmp/p.json >/dev/null
+          unset TOKEN
+      - name: Emit fresh synthetic only after close
+        id: fire
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_MARKER="${SYNTHETIC_MARKER}:fresh-run:${GITHUB_RUN_ID}:sha:${CANDIDATE_SHA}"
+          gcloud logging write "$SYNTHETIC_LOG_ID" "{\"marker\":\"${SYNTHETIC_MARKER}\",\"runMarker\":\"${RUN_MARKER}\",\"githubRunId\":\"${GITHUB_RUN_ID}\",\"githubSha\":\"${CANDIDATE_SHA}\",\"alertPolicy\":\"${POLICY_NAME}\",\"acceptancePurpose\":\"fresh_incident_after_previous_autoclose\"}" --payload-type=json --severity=WARNING --project="$PROJECT_ID"
+          FOUND=0
+          for i in $(seq 1 18); do
+            COUNT="$(gcloud logging read "logName=\"projects/${PROJECT_ID}/logs/${SYNTHETIC_LOG_ID}\" AND jsonPayload.runMarker=\"${RUN_MARKER}\"" --project="$PROJECT_ID" --freshness=15m --limit=5 --format='value(insertId)' | wc -l | tr -d ' ')"
+            if [[ "$COUNT" -ge 1 ]]; then FOUND=1; break; fi
+            sleep 5
+          done
+          test "$FOUND" = 1
+          echo "marker=$RUN_MARKER" >> "$GITHUB_OUTPUT"
+      - name: Publish firing evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_OPEN: ${{ steps.closed.outputs.open }}
+          PREVIOUS_CLOSE: ${{ steps.closed.outputs.close }}
+          RUN_MARKER: ${{ steps.fire.outputs.marker }}
+        shell: bash
+        run: |
+          BODY=$(printf '## FRESH_SYNTHETIC_AFTER_AUTOCLOSE — EMITTED\n\nRUN_ID=%s\nCANDIDATE_SHA=%s\nPREVIOUS_ALERT_ID=%s\nPREVIOUS_OPEN_TIME=%s\nPREVIOUS_CLOSE_TIME=%s\nRUN_MARKER=%s\nSIGNAL_INGESTED=PASS\nMANUAL_CLOSE_EXECUTED=NO\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$PREVIOUS_ALERT_ID" "$PREVIOUS_OPEN" "$PREVIOUS_CLOSE" "$RUN_MARKER")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
