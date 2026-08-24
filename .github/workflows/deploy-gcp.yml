@@ -323,9 +323,11 @@ jobs:
             exit 1
           }
           SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision-v1.json)"
-          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision-v1.json)"
           [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }
-          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver serving revision has no resolved image digest: $SERVING_REVISION" >&2; exit 1; }
+          EXPECTED_IMAGE_PREFIX="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/"
+          [[ "$SERVING_IMAGE" == "${EXPECTED_IMAGE_PREFIX}"* ]] || { echo "Meta resolver serving image is outside canonical Artifact Registry: $SERVING_IMAGE" >&2; exit 1; }
+          SERVING_DIGEST="$(gcloud artifacts docker images describe "$SERVING_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver Artifact Registry digest readback failed: $SERVING_REVISION" >&2; exit 1; }
           CURRENT_IMAGE="$(SERVING_IMAGE="$SERVING_IMAGE" SERVING_DIGEST="$SERVING_DIGEST" node --input-type=module -e '
             const image = process.env.SERVING_IMAGE;
             const digest = process.env.SERVING_DIGEST;
