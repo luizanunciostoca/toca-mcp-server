@@ -104,6 +104,8 @@ describe('staging runtime observability coverage contract', () => {
     expect(script).toContain('LATENCY_ALIGNER="$(jq -r');
     expect(script).toContain('denominatorFilter:$denominator');
     expect(script).toContain('ALERT_POLICY_DRIFT_REQUIRES_COORDINATION');
+    expect(script).toContain('configuration_name:(.monitoredResource.labels.configuration_name // "")');
+    expect(script).toContain('revision_name:(.monitoredResource.labels.revision_name // "")');
     expect(script).toContain('rm -f "$EVIDENCE_DIR/SHA256SUMS"');
     expect(script).not.toContain('-X DELETE');
     expect(script).not.toContain('gcloud sql');
