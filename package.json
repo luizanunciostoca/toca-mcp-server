@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "postinstall": "python3 scripts/stage-runtime-db-bundle.py",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
     "dev:http": "tsx src/http.ts",
@@ -50,7 +51,7 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.5",
     "eslint": "^9.0.0",
-    "globals": "^16.0.0",
+    "globals": "^16.5.0",
     "prettier": "^3.6.0",
     "tsx": "^4.20.0",
     "typescript": "^6.0.0",
