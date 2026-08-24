@@ -1,4 +1,4 @@
-name: Ops Reliability Final E822 Observer
+name: Ops Reliability Final E822 Alert Inventory
 
 on:
   push:
@@ -6,20 +6,55 @@ on:
       - ops/reliability-final-e822-preflight-20260823
 
 permissions:
-  actions: read
   contents: read
+  id-token: write
   issues: write
 
+env:
+  CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
 jobs:
-  observe:
+  inventory:
     runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
     steps:
-      - name: Publish recent branch runs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ops/reliability-final-e822-preflight-20260823
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Boundary
         shell: bash
         run: |
           set -euo pipefail
-          RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=10" --jq '[.workflow_runs[] | {id,name,status,conclusion,head_sha,created_at}]')"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_DIAGNOSTIC_OBSERVER\n\n```json\n%s\n```' "$RUNS")" >/dev/null
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Publish sanitized policy inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" >/tmp/policies.json
+          unset TOKEN
+          INVENTORY="$(jq -c '[.alertPolicies[]? | {name,displayName,enabled,userLabels,autoClose:(.alertStrategy.autoClose//null),channelCount:(.notificationChannels//[]|length)}] | sort_by(.displayName)' /tmp/policies.json)"
+          EVIDENCE="$(jq -n --arg candidate "$CANDIDATE_SHA" --argjson inventory "$INVENTORY" '{candidateSha:$candidate,totalPolicies:($inventory|length),policies:$inventory,productionAccess:false,providerAccess:false,monitoringMutation:false}')"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$(printf '## RELIABILITY_FINAL_E822 — ALERT_POLICY_INVENTORY\n\n`RUN_ID=%s`\n\n```json\n%s\n```' "$GITHUB_RUN_ID" "$EVIDENCE")" >/dev/null
+          echo ALERT_POLICY_INVENTORY=PASS
