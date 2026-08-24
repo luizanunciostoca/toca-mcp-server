@@ -1,4 +1,4 @@
-name: PR Production Candidate Dispatch 91560f
+name: PR Production Live Discovery 91560f
 
 on:
   pull_request:
@@ -8,99 +8,103 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  id-token: write
   issues: write
 
 env:
   CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
-  STAGING_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
-  PRODUCTION_AUTHORIZATION_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/205
-  ALERT_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
-  DR_EVIDENCE_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/151
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  ARTIFACT_REPOSITORY: toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  AUTH_ISSUE: '205'
 
 jobs:
-  dispatch:
+  discovery:
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 75
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
-      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
-      GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE }}
-      GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
-      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION }}
-      WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
-      EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
-      GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+    timeout-minutes: 20
     steps:
-      - name: Fail closed on exact candidate and production scope
+      - name: Fail closed on exact candidate before production auth
         shell: bash
         run: |
           set -euo pipefail
           MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
           test "$MAIN_SHA" = "$CANDIDATE_SHA"
-          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
-          test -n "$GCP_PROJECT_NUMBER"
-          test "$GCP_REGION" = 'southamerica-east1'
-          test -n "$GCP_CLOUD_SQL_INSTANCE"
-          test -n "$GCP_CLOUD_RUN_MCP_SERVICE"
-          test -n "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"
-          test -n "$GCP_DATABASE_URL_SECRET_VERSION"
-          test "$GCP_DATABASE_URL_SECRET_VERSION" != latest
-          test "$WHATSAPP_ENABLED" = false
-          test "$EMAIL_SENDGRID_ENABLED" = false
-          test "$GOOGLE_ADS_PHASE" = OFF
-          echo 'PRODUCTION_PROVIDER_EXCLUSIONS=PASS whatsapp=false sendgrid=false google_ads=OFF'
-          echo "PRODUCTION_COORDINATES=PASS project=${GCP_PROJECT_ID} region=${GCP_REGION}"
+          test "$PROJECT_ID" = toca-mcp-production
+          test "$PROJECT_NUMBER" = 990081828836
+          echo 'PRODUCTION_DISCOVERY_BOUNDARY=PASS'
 
-      - name: Dispatch canonical production candidate rollout
-        id: dispatch
+      - name: Authenticate production deployer read-only usage
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Discover live production coordinates without mutation
         shell: bash
-        run: |
-          set -euo pipefail
-          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          gh workflow run deploy-gcp.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f environment=production \
-            -f operation=deploy \
-            -f rollout=candidate \
-            -f staging_evidence_ref="$STAGING_EVIDENCE_REF" \
-            -f production_authorization_ref="$PRODUCTION_AUTHORIZATION_REF" \
-            -f alert_evidence_ref="$ALERT_EVIDENCE_REF" \
-            -f dr_evidence_ref="$DR_EVIDENCE_REF"
-
-          RUN_ID=''
-          for attempt in $(seq 1 60); do
-            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-gcp.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt,status --jq ".[] | select(.headSha == \"$CANDIDATE_SHA\" and .createdAt >= \"$STARTED_AT\") | .databaseId" | head -n1)"
-            [[ -n "$RUN_ID" ]] && break
-            sleep 2
-          done
-          test -n "$RUN_ID"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          gh api "repos/${GITHUB_REPOSITORY}/issues/205/comments" -f body="PRODUCTION_CANDIDATE_DISPATCH_RUN=${RUN_ID} candidate=${CANDIDATE_SHA} rollout=candidate no_traffic_expected=true" >/dev/null
-          echo "PRODUCTION_CANDIDATE_RUN_ID=$RUN_ID"
-
-      - name: Wait for canonical production candidate result
         env:
-          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
-        shell: bash
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test -n "$RUN_ID"
-          for attempt in $(seq 1 360); do
-            STATUS="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json status --jq .status)"
-            if [[ "$STATUS" == completed ]]; then
-              CONCLUSION="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)"
-              gh api "repos/${GITHUB_REPOSITORY}/issues/205/comments" -f body="PRODUCTION_CANDIDATE_RESULT run=${RUN_ID} conclusion=${CONCLUSION}" >/dev/null
-              test "$CONCLUSION" = success
-              echo 'PRODUCTION_CANDIDATE_CANONICAL_RUN=PASS'
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'Timed out waiting for canonical production candidate workflow' >&2
-          exit 1
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud artifacts repositories describe "$ARTIFACT_REPOSITORY" --project="$PROJECT_ID" --location="$REGION" --format=json >/tmp/artifact.json
+          gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/services.json
+          gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project="$PROJECT_ID" --format=json >/tmp/sql.json
+
+          jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '.project==$p and .region==$r and .name=="toca-mcp-db" and .state=="RUNNABLE" and .databaseVersion=="POSTGRES_18" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' /tmp/sql.json >/dev/null
+
+          jq '[.[] | {
+            name:.metadata.name,
+            url:(.status.url // null),
+            latestReadyRevision:(.status.latestReadyRevisionName // null),
+            runtimeServiceAccount:(.spec.template.spec.serviceAccountName // null),
+            traffic:(.status.traffic // []),
+            providerFlags:([.spec.template.spec.containers[0].env[]? | select(.name=="MCP_ENABLED" or .name=="META_ENABLED" or .name=="META_WEBHOOK_ENABLED" or .name=="INSTAGRAM_READ_ENABLED" or .name=="META_ADS_READ_ENABLED" or .name=="META_ADS_WRITE_ENABLED" or .name=="WHATSAPP_ENABLED" or .name=="EMAIL_SENDGRID_ENABLED" or .name=="GOOGLE_ADS_PHASE" or .name=="AG01_MODEL_ENABLED") | {name:.name,value:(.value // "<secret-ref>")}])
+          }]' /tmp/services.json >/tmp/services-sanitized.json
+
+          SECRET_VERSION=''
+          if gcloud secrets versions list "$DATABASE_SECRET_ID" --project="$PROJECT_ID" --filter='state=ENABLED' --sort-by='~name' --limit=1 --format='value(name)' >/tmp/secret-version.txt 2>/tmp/secret-version.err; then
+            SECRET_VERSION="$(cat /tmp/secret-version.txt)"
+          fi
+
+          SERVICE_NAMES="$(jq -r '.[].name' /tmp/services-sanitized.json | sort | paste -sd, -)"
+          MCP_MATCHES="$(jq -r '[.[] | select(.name=="toca-mcp-production")] | length' /tmp/services-sanitized.json)"
+          test "$MCP_MATCHES" = 1
+          MCP_SA="$(jq -r '.[] | select(.name=="toca-mcp-production") | .runtimeServiceAccount // empty' /tmp/services-sanitized.json)"
+          MCP_REV="$(jq -r '.[] | select(.name=="toca-mcp-production") | ([.traffic[]? | select(.percent==100) | .revisionName][0] // .latestReadyRevision // empty)' /tmp/services-sanitized.json)"
+          test -n "$MCP_SA"
+          test -n "$MCP_REV"
+
+          UNAUTH_FLAGS="$(jq -c '[.[] | {name,flags:.providerFlags}]' /tmp/services-sanitized.json)"
+          BODY=$(cat <<EOF
+          PRODUCTION_LIVE_DISCOVERY=PASS
+          candidate=${CANDIDATE_SHA}
+          project=${PROJECT_ID}
+          project_number=${PROJECT_NUMBER}
+          region=${REGION}
+          artifact_repository=${ARTIFACT_REPOSITORY}
+          cloud_sql=${CLOUD_SQL_INSTANCE}
+          cloud_sql_state=$(jq -r '.state' /tmp/sql.json)
+          backup_enabled=$(jq -r '.settings.backupConfiguration.enabled' /tmp/sql.json)
+          pitr_enabled=$(jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled' /tmp/sql.json)
+          services=${SERVICE_NAMES}
+          mcp_service=toca-mcp-production
+          mcp_runtime_sa=${MCP_SA}
+          mcp_100pct_revision=${MCP_REV}
+          database_secret_id=${DATABASE_SECRET_ID}
+          latest_enabled_database_secret_version=${SECRET_VERSION:-UNREADABLE}
+          provider_flags_sanitized=${UNAUTH_FLAGS}
+          mutation_executed=NO
+          EOF
+          )
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="$BODY" >/dev/null
+          echo "$BODY"
