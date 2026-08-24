@@ -1,0 +1,96 @@
+name: Ops Staging Browser Read Bootstrap 2026-08-23
+
+on:
+  push:
+    branches: [ops/final-staging-verification-e8221698]
+    paths:
+      - '.github/workflows/ops-staging-browser-read-bootstrap-20260823.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+    env:
+      TARGET_PROJECT_ID: toca-mcp-next-staging
+      TARGET_PROJECT_NUMBER: '729069789107'
+      PRODUCTION_PROJECT_ID: toca-mcp-production
+      PRODUCTION_PROJECT_NUMBER: '990081828836'
+      INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      ROLE: roles/browser
+      EVIDENCE_ISSUE: '151'
+    steps:
+      - name: Checkout operational branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/final-staging-verification-e8221698
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Fail closed on staging-only mutation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/ops/final-staging-verification-e8221698'
+          test "$TARGET_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$TARGET_PROJECT_NUMBER" = '729069789107'
+          test "$TARGET_PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$TARGET_PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          test "$STAGING_OPERATOR_SA" = 'toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com'
+          test "$ROLE" = 'roles/browser'
+          echo 'STAGING_BROWSER_BOOTSTRAP_BOUNDARY=PASS'
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Grant read-only Browser role on staging project only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_NUMBER="$(gcloud projects describe "$TARGET_PROJECT_ID" --format='value(projectNumber)')"
+          test "$ACTUAL_NUMBER" = "$TARGET_PROJECT_NUMBER"
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          gcloud projects add-iam-policy-binding "$TARGET_PROJECT_ID" \
+            --member="$MEMBER" \
+            --role="$ROLE" \
+            --condition=None \
+            --quiet >/tmp/staging-browser-binding.json
+          echo 'STAGING_BROWSER_BINDING_APPLIED=PASS'
+
+      - name: Verify exact staging binding and no privileged role
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${STAGING_OPERATOR_SA}"
+          gcloud projects get-iam-policy "$TARGET_PROJECT_ID" --format=json > /tmp/staging-iam.json
+          jq -e --arg role "$ROLE" --arg member "$MEMBER" \
+            'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' /tmp/staging-iam.json >/dev/null
+          jq -e --arg member "$MEMBER" \
+            'all(.bindings[]?; ((.role != "roles/owner" and .role != "roles/editor") or ([.members[]?] | index($member) == null)))' /tmp/staging-iam.json >/dev/null
+          echo 'STAGING_BROWSER_BINDING_READBACK=PASS'
+          echo 'PRODUCTION_MUTATION=false'
+          echo 'PROVIDER_MUTATION=false'
+          echo 'SERVICE_ACCOUNT_KEY_CREATED=false'
+
+      - name: Publish sanitized evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="STAGING_BROWSER_READ_BOOTSTRAP=PASS target_project=${TARGET_PROJECT_ID} target_project_number=${TARGET_PROJECT_NUMBER} principal=${STAGING_OPERATOR_SA} role=${ROLE} run=${GITHUB_RUN_ID} production_mutation=false provider_mutation=false service_account_key_created=false"
+          gh issue comment "$EVIDENCE_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$BODY"
