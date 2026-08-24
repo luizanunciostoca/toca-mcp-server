@@ -143,7 +143,7 @@ describe('GCP production bootstrap contract', () => {
       'Meta resolver could not identify exactly one 100%-serving MCP revision',
     );
     expect(resolver).toContain('.status.latestReadyRevisionName');
-    expect(resolver).toContain('gcloud artifacts docker images describe \"$SERVING_IMAGE\"');
+    expect(resolver).toContain('gcloud artifacts docker images describe "$SERVING_IMAGE"');
     expect(resolver).toContain("--format='value(image_summary.digest)'");
     expect(resolver).toContain('EXPECTED_IMAGE_PREFIX=');
     expect(resolver).not.toContain('.status.imageDigest');
