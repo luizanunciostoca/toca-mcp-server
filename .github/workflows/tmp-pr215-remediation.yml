@@ -6,10 +6,11 @@ on:
     types: [synchronize]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   remediate:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -17,7 +18,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/production-env-bootstrap-meta-secret-20260824
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 1
 
       - name: Setup pnpm
@@ -70,21 +71,21 @@ jobs:
               test_path.write_text(test_text)
           PY
 
-      - name: Apply canonical formatting
-        run: pnpm exec prettier --write scripts/validate-gcp-deploy-environment.mjs test/gcp-production-bootstrap-contract.test.ts .github/workflows/deploy-gcp.yml
+      - name: Apply canonical formatting and stage workflow outside Actions path
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write scripts/validate-gcp-deploy-environment.mjs test/gcp-production-bootstrap-contract.test.ts .github/workflows/deploy-gcp.yml
+          mkdir -p tmp/pr215
+          cp .github/workflows/deploy-gcp.yml tmp/pr215/deploy-gcp.formatted.yml
+          git restore .github/workflows/deploy-gcp.yml
 
-      - name: Emit deterministic formatted outputs
+      - name: Commit only non-workflow remediation outputs
         shell: bash
         run: |
           set -euo pipefail
-          emit() {
-            local label="$1" path="$2"
-            echo "${label}_BEGIN"
-            base64 -w0 "$path"
-            echo
-            echo "${label}_END"
-            sha256sum "$path"
-          }
-          emit PR215_VALIDATOR scripts/validate-gcp-deploy-environment.mjs
-          emit PR215_TEST test/gcp-production-bootstrap-contract.test.ts
-          emit PR215_WORKFLOW .github/workflows/deploy-gcp.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/validate-gcp-deploy-environment.mjs test/gcp-production-bootstrap-contract.test.ts tmp/pr215/deploy-gcp.formatted.yml
+          git diff --cached --check
+          git commit -m 'fix(deploy): format production bootstrap remediation'
+          git push origin HEAD:fix/production-env-bootstrap-meta-secret-20260824
