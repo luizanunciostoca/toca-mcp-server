@@ -49,5 +49,38 @@ jobs:
         run: pnpm typecheck
       - name: Test
         run: pnpm test
+      - name: Export deterministic resolver remediation
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/production-meta-resolver-readback-20260824'
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/resolver-remediation
+          mkdir -p /tmp/resolver-remediation/.github/workflows /tmp/resolver-remediation/test
+          python3 scripts/temp-production-resolver-remediation.py > /tmp/resolver-remediation-generator.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+
+          log = Path('/tmp/resolver-remediation-generator.log').read_text().splitlines()
+          values = {}
+          for line in log:
+              if '=' in line:
+                  key, value = line.split('=', 1)
+                  if key in {'PATCH_WORKFLOW_BASE64', 'PATCH_TEST_BASE64'}:
+                      values[key] = value
+          required = {'PATCH_WORKFLOW_BASE64', 'PATCH_TEST_BASE64'}
+          if set(values) != required:
+              raise SystemExit('deterministic remediation payload missing')
+          Path('/tmp/resolver-remediation/.github/workflows/deploy-gcp.yml').write_bytes(base64.b64decode(values['PATCH_WORKFLOW_BASE64']))
+          Path('/tmp/resolver-remediation/test/gcp-production-bootstrap-contract.test.ts').write_bytes(base64.b64decode(values['PATCH_TEST_BASE64']))
+          PY
+          pnpm exec prettier --check /tmp/resolver-remediation/.github/workflows/deploy-gcp.yml /tmp/resolver-remediation/test/gcp-production-bootstrap-contract.test.ts
+      - name: Upload deterministic resolver remediation
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/production-meta-resolver-readback-20260824'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: resolver-remediation-${{ github.event.pull_request.head.sha }}
+          path: /tmp/resolver-remediation
+          if-no-files-found: error
+          retention-days: 1
       - name: Build
         run: pnpm build
