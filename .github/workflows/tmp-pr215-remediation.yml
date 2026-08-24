@@ -1,9 +1,9 @@
 name: Temporary PR 215 Remediation
 
 on:
-  push:
-    branches:
-      - fix/production-env-bootstrap-meta-secret-20260824
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 permissions:
   contents: write
@@ -43,8 +43,7 @@ jobs:
           from pathlib import Path
 
           workflow_path = Path('.github/workflows/deploy-gcp.yml')
-          text = workflow_path.read_text()
-          lines = text.splitlines()
+          lines = workflow_path.read_text().splitlines()
           app_indices = [i for i, line in enumerate(lines) if 'add_both META_APP_ID' in line]
           if len(app_indices) != 1:
               raise SystemExit(f'expected one META_APP_ID binding, found {len(app_indices)}')
