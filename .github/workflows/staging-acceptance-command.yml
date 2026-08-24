@@ -1,0 +1,148 @@
+name: Staging Acceptance Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: staging-acceptance-command
+  cancel-in-progress: false
+
+env:
+  EVIDENCE_ISSUE: '151'
+  COMMAND_PREFIX: '/toca-staging-final '
+  ALLOWED_ACTOR: 'luizanunciostoca'
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 151 &&
+      startsWith(github.event.comment.body, '/toca-staging-final ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Parse command and enforce exact current main
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$EVIDENCE_ISSUE"
+
+          CANDIDATE_SHA="${COMMENT_BODY#${COMMAND_PREFIX}}"
+          test "$CANDIDATE_SHA" != "$COMMENT_BODY"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CANDIDATE_SHA" = "$MAIN_SHA"
+
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
+            -f body="STAGING_ACCEPTANCE_COMMAND=ACCEPTED candidate=${CANDIDATE_SHA} controller_run=${GITHUB_RUN_ID}" \
+            >/dev/null
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.gate.outputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Run canonical staging acceptance chain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+          RUNTIME_POLICY_SHA="$(sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}')"
+          SYNTHETIC_POLICY_SHA="$(sha256sum infra/observability/staging-synthetic-alert-policy.json | awk '{print $1}')"
+          [[ "$RUNTIME_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SYNTHETIC_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+
+          dispatch_wait() {
+            local workflow="$1"
+            local payload="$2"
+            local label="$3"
+            local start run_id data status conclusion
+            start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/dispatches" \
+              --input - >/dev/null
+
+            run_id=''
+            for attempt in $(seq 1 45); do
+              data="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&branch=main&per_page=30")"
+              run_id="$(jq -r --arg sha "$CANDIDATE_SHA" --arg start "$start" \
+                '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $start)] | sort_by(.created_at) | last | .id // empty' \
+                <<<"$data")"
+              [[ -n "$run_id" ]] && break
+              sleep 4
+            done
+            test -n "$run_id"
+
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
+              -f body="STAGING_ACCEPTANCE_${label}_RUN=${run_id} status=started candidate=${CANDIDATE_SHA}" \
+              >/dev/null
+
+            for attempt in $(seq 1 240); do
+              data="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+              status="$(jq -r '.status' <<<"$data")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"$data")"
+              if [[ "$status" == completed ]]; then
+                gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
+                  -f body="STAGING_ACCEPTANCE_${label}_RUN=${run_id} status=${conclusion} candidate=${CANDIDATE_SHA}" \
+                  >/dev/null
+                test "$conclusion" = success
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+
+          DEPLOY_PAYLOAD="$(jq -cn --arg sha "$CANDIDATE_SHA" --arg issue "$EVIDENCE_ISSUE" \
+            '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:$issue}}')"
+          DEPLOY_RUN="$(dispatch_wait deploy-gcp-staging-canonical.yml "$DEPLOY_PAYLOAD" DEPLOY)"
+
+          : > /tmp/comments.ndjson
+          for page in $(seq 1 12); do
+            PAGE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments?per_page=100&page=${page}")"
+            jq -c '.[]' <<<"$PAGE" >> /tmp/comments.ndjson
+            [[ "$(jq 'length' <<<"$PAGE")" -lt 100 ]] && break
+          done
+          IMAGE_DIGEST="$(jq -rs --arg rid "RUN_ID=${DEPLOY_RUN}" --arg sha "$CANDIDATE_SHA" \
+            '[.[] | select((.body | contains($rid)) and (.body | contains($sha)) and (.body | contains("imageIndexDigest")))] | last | .body | capture("\\\"imageIndexDigest\\\"\\s*:\\s*\\\"(?<digest>sha256:[0-9a-f]{64})\\\"").digest' \
+            /tmp/comments.ndjson)"
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" \
+            -f body="STAGING_ACCEPTANCE_IMAGE_INDEX_DIGEST=${IMAGE_DIGEST} deploy_run=${DEPLOY_RUN}" \
+            >/dev/null
+
+          RUNTIME_PAYLOAD="$(jq -cn --arg policy "$RUNTIME_POLICY_SHA" --arg sha "$CANDIDATE_SHA" --arg digest "$IMAGE_DIGEST" \
+            '{ref:"main",inputs:{expected_policy_sha256:$policy,expected_candidate_sha:$sha,expected_image_digest:$digest,run_capacity:"true"}}')"
+          RUNTIME_RUN="$(dispatch_wait staging-runtime-observability.yml "$RUNTIME_PAYLOAD" RUNTIME)"
+
+          ALERTS_PAYLOAD="$(jq -cn --arg sha "$CANDIDATE_SHA" --arg policy "$RUNTIME_POLICY_SHA" \
+            '{ref:"main",inputs:{expected_source_sha:$sha,expected_policy_sha256:$policy}}')"
+          ALERTS_RUN="$(dispatch_wait staging-reliability-alerts.yml "$ALERTS_PAYLOAD" ALERTS)"
+
+          SYNTHETIC_PAYLOAD="$(jq -cn --arg policy "$SYNTHETIC_POLICY_SHA" \
+            '{ref:"main",inputs:{expected_policy_sha256:$policy}}')"
+          SYNTHETIC_RUN="$(dispatch_wait staging-synthetic-alert.yml "$SYNTHETIC_PAYLOAD" SYNTHETIC)"
+
+          BODY="$(printf '## STAGING_ACCEPTANCE_COMMAND — CANONICAL_CHAIN_PASS\n\nCANDIDATE_SHA=%s\nDEPLOY_RUN=%s\nRUNTIME_CAPACITY_RUN=%s\nRELIABILITY_ALERTS_RUN=%s\nSYNTHETIC_RUN=%s\nIMAGE_INDEX_DIGEST=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\nNEXT=INCIDENT_DELIVERY_READBACK_AND_STAGING_ONLY_DR' "$CANDIDATE_SHA" "$DEPLOY_RUN" "$RUNTIME_RUN" "$ALERTS_RUN" "$SYNTHETIC_RUN" "$IMAGE_DIGEST")"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
