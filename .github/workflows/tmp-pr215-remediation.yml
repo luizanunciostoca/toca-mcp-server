@@ -6,11 +6,10 @@ on:
     types: [synchronize]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   remediate:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -18,8 +17,8 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/production-env-bootstrap-meta-secret-20260824
-          persist-credentials: true
-          fetch-depth: 0
+          persist-credentials: false
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -74,14 +73,18 @@ jobs:
       - name: Apply canonical formatting
         run: pnpm exec prettier --write scripts/validate-gcp-deploy-environment.mjs test/gcp-production-bootstrap-contract.test.ts .github/workflows/deploy-gcp.yml
 
-      - name: Remove temporary workflow and commit remediation
+      - name: Emit deterministic formatted outputs
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/tmp-pr215-remediation.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/deploy-gcp.yml scripts/validate-gcp-deploy-environment.mjs test/gcp-production-bootstrap-contract.test.ts .github/workflows/tmp-pr215-remediation.yml
-          git diff --cached --check
-          git commit -m 'fix(deploy): finish production bootstrap remediation'
-          git push origin HEAD:fix/production-env-bootstrap-meta-secret-20260824
+          emit() {
+            local label="$1" path="$2"
+            echo "${label}_BEGIN"
+            base64 -w0 "$path"
+            echo
+            echo "${label}_END"
+            sha256sum "$path"
+          }
+          emit PR215_VALIDATOR scripts/validate-gcp-deploy-environment.mjs
+          emit PR215_TEST test/gcp-production-bootstrap-contract.test.ts
+          emit PR215_WORKFLOW .github/workflows/deploy-gcp.yml
