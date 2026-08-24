@@ -56,10 +56,8 @@ function validateProductionConfiguration() {
     GCP_CLOUD_RUN_WEBHOOK_SERVICE: 'toca-webhook-next-production',
     GCP_WORKLOAD_IDENTITY_PROVIDER:
       'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp',
-    GCP_DEPLOY_SERVICE_ACCOUNT:
-      'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
-    GCP_MCP_RUNTIME_SERVICE_ACCOUNT:
-      'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_DEPLOY_SERVICE_ACCOUNT: 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_MCP_RUNTIME_SERVICE_ACCOUNT: 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
     GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT:
       'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
     GCP_DATABASE_URL_SECRET: 'toca-database-url',
@@ -270,10 +268,7 @@ function validateSecretVersions() {
     if (version === 'latest') {
       fail('PRODUCTION_PROVIDER_SECRET_VERSION_MUST_BE_PINNED', versionKey);
     }
-    if (
-      version === 'RESOLVE_RUNTIME' &&
-      versionKey !== 'GCP_META_ACCESS_TOKEN_SECRET_VERSION'
-    ) {
+    if (version === 'RESOLVE_RUNTIME' && versionKey !== 'GCP_META_ACCESS_TOKEN_SECRET_VERSION') {
       fail('PRODUCTION_PROVIDER_SECRET_VERSION_SENTINEL_FORBIDDEN', versionKey);
     }
     if (version !== 'RESOLVE_RUNTIME' && !/^\d+$/.test(version)) {

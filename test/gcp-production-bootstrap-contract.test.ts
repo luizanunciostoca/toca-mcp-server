@@ -33,10 +33,8 @@ function productionEnv(): NodeJS.ProcessEnv {
     GCP_CLOUD_RUN_WEBHOOK_SERVICE: 'toca-webhook-next-production',
     GCP_WORKLOAD_IDENTITY_PROVIDER:
       'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp',
-    GCP_DEPLOY_SERVICE_ACCOUNT:
-      'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
-    GCP_MCP_RUNTIME_SERVICE_ACCOUNT:
-      'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_DEPLOY_SERVICE_ACCOUNT: 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_MCP_RUNTIME_SERVICE_ACCOUNT: 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
     GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT:
       'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
     GCP_DATABASE_URL_SECRET: 'toca-database-url',
@@ -87,9 +85,7 @@ describe('GCP production bootstrap contract', () => {
     whatsappEnabled.WHATSAPP_ENABLED = 'true';
     const providerResult = runValidator(whatsappEnabled);
     expect(providerResult.status).toBe(1);
-    expect(output(providerResult)).toContain(
-      'PRODUCTION_PROVIDER_STATE_MISMATCH:WHATSAPP_ENABLED',
-    );
+    expect(output(providerResult)).toContain('PRODUCTION_PROVIDER_STATE_MISMATCH:WHATSAPP_ENABLED');
   });
 
   it('boots missing GitHub production variables from canonical non-secret fallbacks', () => {
@@ -100,9 +96,7 @@ describe('GCP production bootstrap contract', () => {
     );
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-database-url'");
     expect(workflow).toContain("inputs.environment == 'production' && '1'");
-    expect(workflow).toContain(
-      "inputs.environment == 'production' && 'toca-meta-oauth-token'",
-    );
+    expect(workflow).toContain("inputs.environment == 'production' && 'toca-meta-oauth-token'");
   });
 
   it('resolves the Meta token numerically without provider calls or payload evidence', () => {
@@ -112,6 +106,20 @@ describe('GCP production bootstrap contract', () => {
     expect(workflow).toContain('secretPayloadDisclosed:false');
     expect(workflow).toContain('providerCallExecuted:false');
     expect(workflow).toContain('Production Meta token must be pinned to a numeric version');
+  });
+
+  it('scopes META_APP_ID to META_ENABLED instead of Meta Ads read-only mode', () => {
+    const appIdIndex = workflow.indexOf('add_both META_APP_ID');
+    const broadMetaIndex = workflow.indexOf(
+      'if [[ "$META_ENABLED" == true || "$META_WEBHOOK_ENABLED"',
+    );
+    const dedicatedMetaIndex = workflow.lastIndexOf(
+      'if [[ "$META_ENABLED" == true ]]; then',
+      appIdIndex,
+    );
+    expect(dedicatedMetaIndex).toBeGreaterThan(-1);
+    expect(appIdIndex).toBeGreaterThan(dedicatedMetaIndex);
+    expect(appIdIndex).toBeLessThan(broadMetaIndex);
   });
 
   it('keeps Meta token binding scoped away from the public webhook in this release', () => {
