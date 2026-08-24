@@ -183,7 +183,7 @@ jobs:
       - name: Prove environment isolation before any GCP access
         run: node scripts/validate-gcp-deploy-environment.mjs
 
-      - name: Require staging approval before production mutation
+      - name: Require exact production authorization before mutation
         if: inputs.environment == 'production'
         env:
           STAGING_EVIDENCE_REF: ${{ inputs.staging_evidence_ref }}
@@ -192,6 +192,45 @@ jobs:
           set -euo pipefail
           test -n "$STAGING_EVIDENCE_REF" || { echo 'staging_evidence_ref is required' >&2; exit 1; }
           test -n "$PRODUCTION_AUTHORIZATION_REF" || { echo 'production_authorization_ref is required' >&2; exit 1; }
+
+          AUTH_PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
+          [[ "$PRODUCTION_AUTHORIZATION_REF" == "${AUTH_PREFIX}"* ]] || {
+            echo 'production_authorization_ref must be a same-repository issue URL' >&2
+            exit 1
+          }
+          AUTH_ISSUE="${PRODUCTION_AUTHORIZATION_REF#${AUTH_PREFIX}}"
+          [[ "$AUTH_ISSUE" =~ ^[0-9]+$ ]] || {
+            echo 'production_authorization_ref must end in one numeric issue id' >&2
+            exit 1
+          }
+          AUTH_API="https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}"
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'User-Agent: toca-production-authorization-gate' \
+            "$AUTH_API" > /tmp/production-authorization.json
+          if ! jq -e \
+            --arg expectedUrl "$PRODUCTION_AUTHORIZATION_REF" \
+            --arg sha "$GITHUB_SHA" '
+              (.html_url == $expectedUrl) and
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.title | startswith("PRODUCTION AUTHORIZATION")) and
+              ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha)) and
+              ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE"))
+            ' /tmp/production-authorization.json >/dev/null; then
+            echo 'Production authorization is not active for the exact current SHA' >&2
+            jq -c '{html_url,state,title,hasPullRequest:has("pull_request")}' /tmp/production-authorization.json >&2
+            exit 1
+          fi
+          mkdir -p platform-evidence
+          jq -n \
+            --arg issue "$AUTH_ISSUE" \
+            --arg ref "$PRODUCTION_AUTHORIZATION_REF" \
+            --arg sha "$GITHUB_SHA" \
+            '{schemaVersion:"toca.platform.production-authorization.v1",issueNumber:($issue|tonumber),reference:$ref,state:"OPEN",authorizedCandidateSha:$sha,exactShaMatched:true}' \
+            > platform-evidence/production-authorization.json
+          echo "PRODUCTION_AUTHORIZATION_EXACT_SHA=PASS issue=${AUTH_ISSUE}"
 
       - name: Fail closed on unverified provider activation
         if: inputs.operation == 'deploy'
@@ -268,11 +307,20 @@ jobs:
             exit 1
           fi
 
-          gcloud run revisions describe "$SERVING_REVISION" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
-            > /tmp/meta-resolver-revision.json
-          SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision.json)"
-          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision.json)"
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_ID}/revisions/${SERVING_REVISION}" \
+            > /tmp/meta-resolver-revision-v1.json
+          unset ACCESS_TOKEN
+          REVISION_NAME="$(jq -r '.metadata.name // empty' /tmp/meta-resolver-revision-v1.json)"
+          [[ "$REVISION_NAME" == "$SERVING_REVISION" ]] || {
+            echo "Meta resolver Cloud Run v1 revision identity mismatch: expected $SERVING_REVISION" >&2
+            exit 1
+          }
+          SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision-v1.json)"
+          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision-v1.json)"
           [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }
           [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver serving revision has no resolved image digest: $SERVING_REVISION" >&2; exit 1; }
           CURRENT_IMAGE="$(SERVING_IMAGE="$SERVING_IMAGE" SERVING_DIGEST="$SERVING_DIGEST" node --input-type=module -e '
