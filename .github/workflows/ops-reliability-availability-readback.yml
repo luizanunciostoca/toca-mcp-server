@@ -1,0 +1,127 @@
+name: Ops Reliability Availability Readback
+
+on:
+  push:
+    branches:
+      - ops/reliability-availability-readback-20260823
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 7c668ffb1756e1a5f25258f8a4291a4e6a906b19
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  WEBHOOK_SERVICE: toca-webhook-next-staging
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  EVIDENCE_ISSUE: '151'
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Verify staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+
+      - name: Authenticate staging reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Read and compare availability policy
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          TOKEN="$(gcloud auth print-access-token)"
+          AUTH="Authorization: Bearer ${TOKEN}"
+
+          curl --fail --silent --show-error -H "$AUTH" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" > /tmp/channels.json
+          curl --fail --silent --show-error -H "$AUTH" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs?pageSize=100" > /tmp/uptimes.json
+          curl --fail --silent --show-error -H "$AUTH" "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" > /tmp/alerts.json
+          unset TOKEN AUTH
+
+          MANAGED_LABEL="$(jq -r '.notificationChannels.managedLabel' "$POLICY_PATH")"
+          ALERT_LABEL="$(jq -r '.alerting.managedLabel' "$POLICY_PATH")"
+          AUTO_CLOSE="$(jq -r '.alerting.autoClose' "$POLICY_PATH")"
+          UPTIME_DURATION="$(jq -r '.alerting.uptimeFailureDuration' "$POLICY_PATH")"
+          RUNBOOK="$(jq -r '.alerting.runbook' "$POLICY_PATH")"
+          GLOBAL_DISPLAY="$(jq -r '.uptimeCheck.displayName' "$POLICY_PATH")"
+
+          CHANNELS_JSON="$(jq -cS --arg label "$MANAGED_LABEL" '[.notificationChannels[]? | select(.enabled != false and .userLabels.toca_managed==$label) | .name] | sort' /tmp/channels.json)"
+          GLOBAL_UPTIME="$(jq -r --arg display "$GLOBAL_DISPLAY" 'first(.uptimeCheckConfigs[]? | select(.displayName==$display) | .name) // empty' /tmp/uptimes.json)"
+          test -n "$GLOBAL_UPTIME"
+          CHECK_ID="${GLOBAL_UPTIME##*/}"
+
+          jq -n --arg display "$GLOBAL_DISPLAY" --arg label "$ALERT_LABEL" --arg checkId "$CHECK_ID" --arg duration "$UPTIME_DURATION" --arg autoClose "$AUTO_CLOSE" --arg runbook "$RUNBOOK" --argjson channels "$CHANNELS_JSON" '{
+            displayName:($display + " Alert"),
+            documentation:{content:("Staging-only readiness incident. Runbook: " + $runbook),mimeType:"text/markdown"},
+            userLabels:{toca_managed:$label,alert_role:"availability",severity:"p1"},
+            conditions:[{displayName:("Readiness failure: " + $display),conditionThreshold:{
+              filter:("metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"" + $checkId + "\" AND resource.type=\"cloud_run_revision\""),
+              aggregations:[{alignmentPeriod:"300s",perSeriesAligner:"ALIGN_NEXT_OLDER",crossSeriesReducer:"REDUCE_COUNT_FALSE",groupByFields:["resource.label.*"]}],
+              comparison:"COMPARISON_GT",thresholdValue:0,duration:$duration,trigger:{count:1}
+            }}],
+            combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
+          }' > /tmp/desired.json
+
+          ACTUAL_NAME="$(jq -r --arg label "$ALERT_LABEL" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role=="availability") | .name) // empty' /tmp/alerts.json)"
+          test -n "$ACTUAL_NAME"
+          jq --arg name "$ACTUAL_NAME" '.alertPolicies[] | select(.name==$name)' /tmp/alerts.json > /tmp/actual-full.json
+
+          project() {
+            jq -S '{displayName,documentation,userLabels,conditions:[.conditions[] | del(.name)],combiner,enabled,notificationChannels:(.notificationChannels|sort),alertStrategy}' "$1"
+          }
+          project /tmp/desired.json > /tmp/desired-projected.json
+          project /tmp/actual-full.json > /tmp/actual-projected.json
+
+          if cmp -s /tmp/desired-projected.json /tmp/actual-projected.json; then
+            RESULT=EQUAL
+            DIFF='no diff'
+          else
+            RESULT=DRIFT
+            DIFF="$(diff -u /tmp/desired-projected.json /tmp/actual-projected.json || true)"
+          fi
+          printf '%s\n' "$RESULT" > /tmp/result.txt
+          printf '%s\n' "$DIFF" > /tmp/diff.txt
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT="$(cat /tmp/result.txt)"
+          DIFF="$(head -n 160 /tmp/diff.txt)"
+          BODY="$(printf '## RELIABILITY_AVAILABILITY_READBACK\n\nCANDIDATE_SHA=%s\nRESULT=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\n\n```diff\n%s\n```' "$CANDIDATE_SHA" "$RESULT" "$DIFF")"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
