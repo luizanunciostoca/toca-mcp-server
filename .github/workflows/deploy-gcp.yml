@@ -436,6 +436,12 @@ jobs:
         if: inputs.operation == 'deploy'
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
+      - name: Setup Docker Buildx for provenance and SBOM attestations
+        if: inputs.operation == 'deploy'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver: docker-container
+
       - name: Build attest push and resolve immutable image digest
         if: inputs.operation == 'deploy'
         run: |
