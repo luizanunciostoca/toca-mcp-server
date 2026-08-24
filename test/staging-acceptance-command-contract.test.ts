@@ -10,7 +10,9 @@ describe('staging acceptance command control-plane', () => {
     expect(workflow).toContain("ALLOWED_ACTOR: 'luizanunciostoca'");
     expect(workflow).toContain("EVIDENCE_ISSUE: '151'");
     expect(workflow).toContain('if [[ "$conclusion" != success ]]; then');
-    expect(workflow).toContain('Child workflow ${workflow} failed with conclusion=${conclusion} run_id=${run_id}');
+    expect(workflow).toContain(
+      'Child workflow ${workflow} failed with conclusion=${conclusion} run_id=${run_id}',
+    );
     expect(workflow).toContain('return 1');
 
     const syntheticDispatch = workflow.indexOf(
