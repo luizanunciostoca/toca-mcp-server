@@ -1,0 +1,176 @@
+name: TEMP production resolver remediation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-remediation:
+    if: github.head_ref == 'fix/production-meta-resolver-readback-20260824'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build deterministic remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/deploy-gcp.yml')
+          workflow = workflow_path.read_text()
+          start_marker = "      - name: Resolve production Meta token to exact numeric secret version\n"
+          end_marker = "      - name: Require exact numeric production provider secret versions after resolution\n"
+          start = workflow.index(start_marker)
+          end = workflow.index(end_marker, start)
+          replacement = r'''      - name: Resolve production Meta token to exact numeric secret version
+        if: inputs.operation == 'deploy' && inputs.environment == 'production' && env.GCP_META_ACCESS_TOKEN_SECRET_VERSION == 'RESOLVE_RUNTIME'
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-meta-secret-version-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Meta resolver cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'META_RESOLVER_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/meta-resolver-service.json
+          SERVING_REVISION="$(jq -r '
+            [(.status.traffic // [])[]
+              | select((.percent // 0) == 100)
+              | (.revisionName // empty)]
+            | unique
+            | if length == 1 then .[0] else empty end
+          ' /tmp/meta-resolver-service.json)"
+          if [[ -z "$SERVING_REVISION" ]]; then
+            echo 'Meta resolver could not identify exactly one 100%-serving MCP revision' >&2
+            jq -c '{traffic:(.status.traffic // [])}' /tmp/meta-resolver-service.json >&2
+            exit 1
+          fi
+
+          gcloud run revisions describe "$SERVING_REVISION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/meta-resolver-revision.json
+          SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision.json)"
+          SERVING_DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/meta-resolver-revision.json)"
+          [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }
+          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver serving revision has no resolved image digest: $SERVING_REVISION" >&2; exit 1; }
+          CURRENT_IMAGE="$(SERVING_IMAGE="$SERVING_IMAGE" SERVING_DIGEST="$SERVING_DIGEST" node --input-type=module -e '
+            const image = process.env.SERVING_IMAGE;
+            const digest = process.env.SERVING_DIGEST;
+            const slash = image.lastIndexOf("/");
+            const at = image.lastIndexOf("@");
+            const colon = image.lastIndexOf(":");
+            const cut = at > slash ? at : colon > slash ? colon : image.length;
+            process.stdout.write(`${image.slice(0, cut)}@${digest}`);
+          ')"
+          jq -n \
+            --arg revision "$SERVING_REVISION" \
+            --arg image "$CURRENT_IMAGE" \
+            --arg digest "$SERVING_DIGEST" \
+            '{schemaVersion:"toca.platform.meta-resolver-source.v1",servingRevision:$revision,immutableImage:$image,imageDigest:$digest}' \
+            > platform-evidence/meta-resolver-source.json
+          echo "META_RESOLVER_SOURCE_REVISION=$SERVING_REVISION"
+
+          read -r -d '' RESOLVER_JS <<'JS' || true
+          const metadataHeaders = {'Metadata-Flavor': 'Google'};
+          const tokenResponse = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', {headers: metadataHeaders});
+          if (!tokenResponse.ok) throw new Error(`metadata token status ${tokenResponse.status}`);
+          const {access_token: accessToken} = await tokenResponse.json();
+          const url = `https://secretmanager.googleapis.com/v1/projects/${process.env.RESOLVER_PROJECT}/secrets/${process.env.RESOLVER_SECRET}/versions/latest:access`;
+          const response = await fetch(url, {headers: {Authorization: `Bearer ${accessToken}`}});
+          if (!response.ok) throw new Error(`secret resolver status ${response.status}`);
+          const body = await response.json();
+          const match = String(body.name ?? '').match(/\/versions\/(\d+)$/);
+          if (!match) throw new Error('numeric secret version missing from resolver response name');
+          console.log(`META_SECRET_VERSION=${match[1]}`);
+          JS
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$CURRENT_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "RESOLVER_PROJECT=$GCP_PROJECT_ID,RESOLVER_SECRET=$GCP_META_ACCESS_TOKEN_SECRET" \
+            --command node \
+            --args="^@^--input-type=module@--eval@${RESOLVER_JS}" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=10m --limit=100 --order=asc \
+            --format='value(textPayload)' || true)"
+          VERSION="$(printf '%s\n' "$LOGS" | sed -n 's/.*META_SECRET_VERSION=\([0-9][0-9]*\).*/\1/p' | tail -n1)"
+          [[ "$VERSION" =~ ^[0-9]+$ ]] || { echo 'Meta secret numeric version could not be resolved' >&2; exit 1; }
+          echo "GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION" >> "$GITHUB_ENV"
+          jq -n \
+            --arg secret "$GCP_META_ACCESS_TOKEN_SECRET" \
+            --arg version "$VERSION" \
+            --arg sourceRevision "$SERVING_REVISION" \
+            --arg sourceImage "$CURRENT_IMAGE" \
+            '{schemaVersion:"toca.platform.secret-version-evidence.v2",secretId:$secret,numericVersion:$version,resolverIdentity:"production-runtime",sourceRevision:$sourceRevision,sourceImage:$sourceImage,secretPayloadDisclosed:false,providerCallExecuted:false}' \
+            > platform-evidence/meta-secret-version.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Meta resolver job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
+
+'''
+          workflow_path.write_text(workflow[:start] + replacement + workflow[end:])
+
+          test_path = Path('test/gcp-production-bootstrap-contract.test.ts')
+          test_text = test_path.read_text()
+          old_start = "  it('resolves the Meta token numerically without provider calls or payload evidence', () => {\n"
+          old_end = "  it('scopes META_APP_ID to META_ENABLED instead of Meta Ads read-only mode', () => {\n"
+          test_start = test_text.index(old_start)
+          test_end = test_text.index(old_end, test_start)
+          test_replacement = '''  it('resolves the Meta token numerically from the exact serving revision without silent readback failure', () => {\n    const resolverStart = workflow.indexOf(\n      'Resolve production Meta token to exact numeric secret version',\n    );\n    const resolverEnd = workflow.indexOf(\n      'Require exact numeric production provider secret versions after resolution',\n      resolverStart,\n    );\n    const resolver = workflow.slice(resolverStart, resolverEnd);\n\n    expect(resolver).toContain('--format=json');\n    expect(resolver).toContain('/tmp/meta-resolver-service.json');\n    expect(resolver).toContain(\n      'Meta resolver could not identify exactly one 100%-serving MCP revision',\n    );\n    expect(resolver).toContain('/tmp/meta-resolver-revision.json');\n    expect(resolver).toContain('.status.imageDigest // empty');\n    expect(resolver).toContain('META_RESOLVER_SOURCE_REVISION=');\n    expect(resolver).toContain('@${digest}');\n    expect(resolver).toContain('META_RESOLVER_CLEANUP=PASS');\n    expect(resolver).toContain('META_SECRET_VERSION=');\n    expect(resolver).toContain('GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION');\n    expect(resolver).toContain('secretPayloadDisclosed:false');\n    expect(resolver).toContain('providerCallExecuted:false');\n    expect(resolver).not.toContain(\n      "--format='value(status.traffic[percent=100].revisionName)'",\n    );\n    expect(resolver).not.toContain('test -n "$SERVING_REVISION"');\n    expect(resolver).not.toContain('test -n "$CURRENT_IMAGE"');\n    expect(workflow).toContain('Production Meta token must be pinned to a numeric version');\n  });\n\n'''
+          test_path.write_text(test_text[:test_start] + test_replacement + test_text[test_end:])
+          PY
+          pnpm exec prettier --write .github/workflows/deploy-gcp.yml test/gcp-production-bootstrap-contract.test.ts
+          pnpm vitest run test/gcp-production-bootstrap-contract.test.ts
+          mkdir -p /tmp/resolver-remediation/.github/workflows /tmp/resolver-remediation/test
+          cp .github/workflows/deploy-gcp.yml /tmp/resolver-remediation/.github/workflows/deploy-gcp.yml
+          cp test/gcp-production-bootstrap-contract.test.ts /tmp/resolver-remediation/test/gcp-production-bootstrap-contract.test.ts
+      - name: Upload deterministic remediation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: resolver-remediation-${{ github.event.pull_request.head.sha }}
+          path: /tmp/resolver-remediation
+          if-no-files-found: error
+          retention-days: 1
