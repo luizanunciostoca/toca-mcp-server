@@ -99,12 +99,34 @@ describe('GCP production bootstrap contract', () => {
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-meta-oauth-token'");
   });
 
-  it('resolves the Meta token numerically without provider calls or payload evidence', () => {
-    expect(workflow).toContain('Resolve production Meta token to exact numeric secret version');
-    expect(workflow).toContain('META_SECRET_VERSION=');
-    expect(workflow).toContain('GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION');
-    expect(workflow).toContain('secretPayloadDisclosed:false');
-    expect(workflow).toContain('providerCallExecuted:false');
+  it('resolves the Meta token from one serving revision with immutable source evidence', () => {
+    const start = workflow.indexOf('Resolve production Meta token to exact numeric secret version');
+    const end = workflow.indexOf(
+      'Require exact numeric production provider secret versions after resolution',
+      start,
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const resolver = workflow.slice(start, end);
+
+    expect(resolver).toContain('--format=json');
+    expect(resolver).toContain('/tmp/meta-resolver-service.json');
+    expect(resolver).toContain('/tmp/meta-resolver-revision.json');
+    expect(resolver).toContain(
+      'Meta resolver could not identify exactly one 100%-serving MCP revision',
+    );
+    expect(resolver).toContain('.status.latestReadyRevisionName');
+    expect(resolver).toContain('.status.imageDigest');
+    expect(resolver).toContain('meta-resolver-source.json');
+    expect(resolver).toContain('META_RESOLVER_SOURCE_REVISION=');
+    expect(resolver).toContain('META_RESOLVER_CLEANUP=PASS');
+    expect(resolver).toContain('META_SECRET_VERSION=');
+    expect(resolver).toContain('GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION');
+    expect(resolver).toContain('secretPayloadDisclosed:false');
+    expect(resolver).toContain('providerCallExecuted:false');
+    expect(resolver).not.toContain("--format='value(status.traffic[percent=100].revisionName)'");
+    expect(resolver).not.toContain('test -n "$SERVING_REVISION"');
+    expect(resolver).not.toContain('test -n "$CURRENT_IMAGE"');
     expect(workflow).toContain('Production Meta token must be pinned to a numeric version');
   });
 
