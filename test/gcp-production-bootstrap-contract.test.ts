@@ -99,7 +99,7 @@ describe('GCP production bootstrap contract', () => {
     expect(workflow).toContain("inputs.environment == 'production' && 'toca-meta-oauth-token'");
   });
 
-  it('requires an open same-repository authorization with exact candidate markers', () => {
+  it('requires an owner-authored open same-repository authorization with exact candidate markers', () => {
     const start = workflow.indexOf('Require exact production authorization before mutation');
     const end = workflow.indexOf('Fail closed on unverified provider activation', start);
     expect(start).toBeGreaterThan(-1);
@@ -108,6 +108,8 @@ describe('GCP production bootstrap contract', () => {
 
     expect(gate).toContain('https://github.com/${GITHUB_REPOSITORY}/issues/');
     expect(gate).toContain('https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}');
+    expect(gate).toContain('--arg owner "$GITHUB_REPOSITORY_OWNER"');
+    expect(gate).toContain('(.user.login == $owner)');
     expect(gate).toContain('(.state == "open")');
     expect(gate).toContain('(has("pull_request") | not)');
     expect(gate).toContain('AUTHORIZED_CANDIDATE_SHA=');
@@ -149,6 +151,20 @@ describe('GCP production bootstrap contract', () => {
     expect(resolver).not.toContain('test -n "$SERVING_REVISION"');
     expect(resolver).not.toContain('test -n "$CURRENT_IMAGE"');
     expect(workflow).toContain('Production Meta token must be pinned to a numeric version');
+  });
+
+  it('captures rollback targets with the same latestRevision fallback and requires an MCP target in production', () => {
+    const start = workflow.indexOf('Capture known rollback targets');
+    const end = workflow.indexOf('Deploy private MCP candidate by digest with no traffic', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const rollback = workflow.slice(start, end);
+
+    expect(rollback).toContain('--format=json');
+    expect(rollback).toContain('.latestRevision');
+    expect(rollback).toContain('.status.latestReadyRevisionName');
+    expect(rollback).toContain('Production deployment requires one serving MCP rollback revision');
+    expect(rollback).not.toContain("--format='value(status.traffic[percent=100].revisionName)'");
   });
 
   it('scopes META_APP_ID to META_ENABLED instead of Meta Ads read-only mode', () => {
