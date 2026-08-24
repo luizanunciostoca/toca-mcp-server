@@ -2,9 +2,15 @@ name: Quality Gate
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:
@@ -14,8 +20,10 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -25,230 +33,21 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Verify permanent workflow supply chain
+        run: node scripts/check-workflow-supply-chain.mjs
+      - name: Verify platform hardening contracts
+        run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Generate runtime-identity database remediation bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          workflow_path = Path('.github/workflows/deploy-gcp.yml')
-          workflow = workflow_path.read_text()
-          start = workflow.index('      - name: Start verified Cloud SQL Auth Proxy for repository database operations')
-          runtime_config = workflow.index('      - name: Build non-secret runtime configuration and Secret Manager bindings', start)
-          configure = workflow.index('      - name: Configure Docker auth', start)
-          build_section = workflow[configure:runtime_config]
-          migration_job = r'''      - name: Apply repository migrations through runtime identity job
-            if: inputs.operation == 'deploy'
-            run: |
-              set -euo pipefail
-              JOB_NAME="toca-db-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-              cleanup() {
-                set +e
-                gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
-                REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
-                if [[ -n "$REMAINING_CLEANUP" ]]; then
-                  echo "Database migration cleanup could not prove job absence: $JOB_NAME" >&2
-                else
-                  echo 'DATABASE_MIGRATION_JOB_CLEANUP=PASS'
-                fi
-                set -e
-              }
-              trap cleanup EXIT
-
-              gcloud run jobs deploy "$JOB_NAME" \
-                --image "$IMAGE" \
-                --project "$GCP_PROJECT_ID" \
-                --region "$GCP_REGION" \
-                --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
-                --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-                --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
-                --set-env-vars "DATABASE_SSL=false" \
-                --command node \
-                --args dist/scripts/migrate.js \
-                --tasks 1 \
-                --max-retries 0 \
-                --task-timeout 300s \
-                --quiet
-              gcloud run jobs execute "$JOB_NAME" \
-                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-
-              mkdir -p platform-evidence
-              jq -n \
-                --arg job "$JOB_NAME" --arg image "$IMAGE" \
-                --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
-                --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
-                --arg cloudSql "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-                '{schemaVersion:"toca.platform.database-migration-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,cloudSqlInstance:$cloudSql,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
-                > platform-evidence/database-migration-job.json
-
-              cleanup
-              trap - EXIT
-              REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
-              [[ -z "$REMAINING" ]] || { echo "Database migration job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
-
-'''
-          workflow = workflow[:start] + build_section + migration_job + workflow[runtime_config:]
-          evidence_start = workflow.index('      - name: Capture database Audit Outbox Workflow Privacy and migration refs through authenticated proxy')
-          evidence_end = workflow.index('      - name: Capture non-secret deploy and provider evidence', evidence_start)
-          evidence_job = r'''      - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
-            if: inputs.operation == 'deploy'
-            run: |
-              set -euo pipefail
-              JOB_NAME="toca-db-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-              cleanup() {
-                set +e
-                gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
-                REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
-                if [[ -n "$REMAINING_CLEANUP" ]]; then
-                  echo "Database evidence cleanup could not prove job absence: $JOB_NAME" >&2
-                else
-                  echo 'DATABASE_EVIDENCE_JOB_CLEANUP=PASS'
-                fi
-                set -e
-              }
-              trap cleanup EXIT
-
-              gcloud run jobs deploy "$JOB_NAME" \
-                --image "$IMAGE" \
-                --project "$GCP_PROJECT_ID" \
-                --region "$GCP_REGION" \
-                --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
-                --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
-                --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
-                --set-env-vars "DATABASE_SSL=false,TOCA_RELEASE_SHA=${GITHUB_SHA},TOCA_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}" \
-                --command node \
-                --args scripts/capture-platform-evidence.mjs,- \
-                --tasks 1 \
-                --max-retries 0 \
-                --task-timeout 180s \
-                --quiet
-              gcloud run jobs execute "$JOB_NAME" \
-                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-
-              LOGS="$(gcloud logging read \
-                "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
-                --project "$GCP_PROJECT_ID" --freshness=10m --limit=200 --order=asc \
-                --format='value(textPayload)' || true)"
-              EVIDENCE_B64="$(printf '%s\n' "$LOGS" | sed -n 's/.*PLATFORM_EVIDENCE_BASE64=\([A-Za-z0-9+\/=]*\).*/\1/p' | tail -n1)"
-              [[ -n "$EVIDENCE_B64" ]] || { echo 'Database evidence payload marker was not found' >&2; exit 1; }
-              mkdir -p platform-evidence
-              printf '%s' "$EVIDENCE_B64" | base64 --decode > platform-evidence/database-runtime.json
-              jq -e --arg sha "$GITHUB_SHA" --arg environment "$DEPLOY_ENVIRONMENT" '
-                .schemaVersion == "toca.platform.evidence.database-runtime.v2" and
-                .releaseSha == $sha and
-                .environment == $environment
-              ' platform-evidence/database-runtime.json >/dev/null
-              jq -n \
-                --arg job "$JOB_NAME" --arg image "$IMAGE" \
-                --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
-                --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
-                '{schemaVersion:"toca.platform.database-evidence-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
-                > platform-evidence/database-evidence-job.json
-
-              cleanup
-              trap - EXIT
-              REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
-              [[ -z "$REMAINING" ]] || { echo "Database evidence job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
-
-'''
-          workflow = workflow[:evidence_start] + evidence_job + workflow[evidence_end:]
-          workflow_path.write_text(workflow)
-
-          docker = Path('Dockerfile')
-          docker_text = docker.read_text()
-          needle = 'COPY --from=build /app/dist ./dist\n'
-          addition = needle + 'COPY --from=build /app/scripts/capture-platform-evidence.mjs ./scripts/capture-platform-evidence.mjs\n'
-          if 'capture-platform-evidence.mjs ./scripts/capture-platform-evidence.mjs' not in docker_text:
-              docker_text = docker_text.replace(needle, addition)
-          docker.write_text(docker_text)
-
-          capture = Path('scripts/capture-platform-evidence.mjs')
-          capture_text = capture.read_text()
-          capture_text = capture_text.replace(
-              "const outputPath = resolve(process.argv[2] ?? 'platform-evidence/database-runtime.json');",
-              "const outputTarget = process.argv[2] ?? 'platform-evidence/database-runtime.json';\nconst emitToStdout = outputTarget === '-';\nconst outputPath = emitToStdout ? null : resolve(outputTarget);",
-          )
-          capture_text = capture_text.replace(
-              "  await mkdir(dirname(outputPath), { recursive: true });\n  await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\\n`, 'utf8');\n  console.log(`PLATFORM_EVIDENCE_WRITTEN=${outputPath}`);",
-              "  const serializedEvidence = `${JSON.stringify(evidence, null, 2)}\\n`;\n  if (emitToStdout) {\n    console.log(`PLATFORM_EVIDENCE_BASE64=${Buffer.from(serializedEvidence, 'utf8').toString('base64')}`);\n  } else {\n    await mkdir(dirname(outputPath), { recursive: true });\n    await writeFile(outputPath, serializedEvidence, 'utf8');\n    console.log(`PLATFORM_EVIDENCE_WRITTEN=${outputPath}`);\n  }",
-          )
-          capture.write_text(capture_text)
-
-          test = Path('test/gcp-deploy-cloud-sql-proxy.test.ts')
-          test.write_text("""import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-
-const workflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
-const dockerfile = readFileSync('Dockerfile', 'utf8');
-const evidenceScript = readFileSync('scripts/capture-platform-evidence.mjs', 'utf8');
-
-describe('GCP deploy database least-privilege transport', () => {
-  it('builds an immutable candidate before running migrations under the runtime identity', () => {
-    const build = workflow.indexOf('Build attest push and resolve immutable image digest');
-    const migrate = workflow.indexOf('Apply repository migrations through runtime identity job');
-    expect(build).toBeGreaterThan(-1);
-    expect(migrate).toBeGreaterThan(build);
-    const block = workflow.slice(migrate, workflow.indexOf('Build non-secret runtime configuration', migrate));
-    expect(block).toContain('--image "$IMAGE"');
-    expect(block).toContain('--service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"');
-    expect(block).toContain('--set-cloudsql-instances');
-    expect(block).toContain('--set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}"');
-    expect(block).toContain('--args dist/scripts/migrate.js');
-    expect(block).toContain('DATABASE_MIGRATION_JOB_CLEANUP=PASS');
-    expect(block).toContain('secretPayloadDisclosed:false');
-    expect(block).toContain('providerCallExecuted:false');
-  });
-
-  it('never reads the database secret payload into the deployer runner', () => {
-    expect(workflow).not.toContain('RAW_DATABASE_URL=');
-    expect(workflow).not.toContain('CLOUD_SQL_PROXY_PID');
-    expect(workflow).not.toContain('cloud-sql-proxy');
-    expect(workflow).not.toContain('url.hostname = "127.0.0.1"');
-    expect(workflow).not.toContain('gcloud secrets versions access "$GCP_DATABASE_URL_SECRET_VERSION"');
-  });
-
-  it('captures sanitized database evidence under the same runtime identity and proves cleanup', () => {
-    const start = workflow.indexOf('Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job');
-    const end = workflow.indexOf('Capture non-secret deploy and provider evidence', start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = workflow.slice(start, end);
-    expect(block).toContain('--service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"');
-    expect(block).toContain('--set-cloudsql-instances');
-    expect(block).toContain('--args scripts/capture-platform-evidence.mjs,-');
-    expect(block).toContain('PLATFORM_EVIDENCE_BASE64=');
-    expect(block).toContain('database-runtime.json');
-    expect(block).toContain('DATABASE_EVIDENCE_JOB_CLEANUP=PASS');
-    expect(block).toContain('secretPayloadDisclosed:false');
-  });
-
-  it('ships only the sanitized evidence helper needed by the runtime-identity job', () => {
-    expect(dockerfile).toContain(
-      'COPY --from=build /app/scripts/capture-platform-evidence.mjs ./scripts/capture-platform-evidence.mjs',
-    );
-    expect(evidenceScript).toContain("const emitToStdout = outputTarget === '-';");
-    expect(evidenceScript).toContain('PLATFORM_EVIDENCE_BASE64=');
-  });
-
-  it('does not open Cloud SQL authorized networks as a workaround', () => {
-    expect(workflow).not.toContain('authorized-networks');
-    expect(workflow).not.toContain('0.0.0.0/0');
-  });
-});
-""")
-          PY
-          pnpm exec prettier --write .github/workflows/deploy-gcp.yml scripts/capture-platform-evidence.mjs test/gcp-deploy-cloud-sql-proxy.test.ts
-      - name: Upload remediation bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: runtime-db-remediation-${{ github.event.pull_request.head.sha }}
-          path: |
-            .github/workflows/deploy-gcp.yml
-            Dockerfile
-            scripts/capture-platform-evidence.mjs
-            test/gcp-deploy-cloud-sql-proxy.test.ts
-          if-no-files-found: error
-          retention-days: 7
+      - name: Format check
+        run: pnpm format:check
+      - name: Architecture check
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
