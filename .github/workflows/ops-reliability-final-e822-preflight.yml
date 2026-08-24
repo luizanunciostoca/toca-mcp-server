@@ -27,8 +27,7 @@ jobs:
     environment: staging
     timeout-minutes: 15
     steps:
-      - name: Checkout frozen candidate
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
@@ -49,16 +48,14 @@ jobs:
           [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
           echo BOUNDARY=PASS
 
-      - name: Authenticate staging WIF only
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:
           workload_identity_provider: ${{ env.STAGING_WIF }}
           service_account: ${{ env.STAGING_OPERATOR_SA }}
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Read backup PITR window and DR permissions
+      - name: Probe live staging capabilities without mutation
         id: probe
         shell: bash
         run: |
@@ -69,31 +66,33 @@ jobs:
           jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '.project==$p and .region==$r and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and .settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and (.settings.backupConfiguration.transactionLogRetentionDays//0)>=7 and (.settings.backupConfiguration.backupRetentionSettings.retainedBackups//0)>=7' /tmp/source.json >/dev/null
           TOKEN="$(gcloud auth print-access-token)"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime" >/tmp/recovery.json
-          EARLIEST="$(jq -r '.earliestRecoveryTime//empty' /tmp/recovery.json)"
-          LATEST="$(jq -r '.latestRecoveryTime//empty' /tmp/recovery.json)"
+          EARLIEST="$(jq -r '.earliestRecoveryTime//empty' /tmp/recovery.json)"; LATEST="$(jq -r '.latestRecoveryTime//empty' /tmp/recovery.json)"
           test -n "$EARLIEST"; test -n "$LATEST"
           curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/sql/v1beta4/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/backupRuns?maxResults=100" >/tmp/backups.json
-          BACKUPS="$(jq '[.items[]? | select(.status=="SUCCESSFUL")]|length' /tmp/backups.json)"
-          test "$BACKUPS" -ge 1
-          REQUIRED='["cloudsql.instances.clone","cloudsql.instances.connect","cloudsql.instances.delete","cloudsql.instances.get","cloudsql.instances.update","cloudsql.operations.get","cloudsql.users.list","cloudsql.users.update","resourcemanager.projects.get","serviceusage.services.use"]'
-          jq -n --argjson permissions "$REQUIRED" '{permissions:$permissions}' >/tmp/req.json
+          BACKUPS="$(jq '[.items[]? | select(.status=="SUCCESSFUL")]|length' /tmp/backups.json)"; test "$BACKUPS" -ge 1
+
+          DR_REQUIRED='["cloudsql.instances.clone","cloudsql.instances.connect","cloudsql.instances.delete","cloudsql.instances.get","cloudsql.instances.update","cloudsql.operations.get","cloudsql.users.list","cloudsql.users.update","resourcemanager.projects.get","serviceusage.services.use"]'
+          BOOTSTRAP_REQUIRED='["resourcemanager.projects.setIamPolicy","iam.roles.create","iam.roles.delete"]'
+          ALL_REQUIRED="$(jq -cn --argjson a "$DR_REQUIRED" --argjson b "$BOOTSTRAP_REQUIRED" '$a+$b|unique|sort')"
+          jq -n --argjson permissions "$ALL_REQUIRED" '{permissions:$permissions}' >/tmp/req.json
           curl --fail --silent --show-error -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/req.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions" >/tmp/perms.json
           unset TOKEN
           GRANTED="$(jq -c '.permissions//[]|sort' /tmp/perms.json)"
-          REQUIRED_SORTED="$(jq -c 'sort' <<<"$REQUIRED")"
-          DR_CAPABLE=false; test "$GRANTED" != "$REQUIRED_SORTED" || DR_CAPABLE=true
-          jq -n --arg candidate "$CANDIDATE_SHA" --arg earliest "$EARLIEST" --arg latest "$LATEST" --argjson backups "$BACKUPS" --argjson required "$REQUIRED_SORTED" --argjson granted "$GRANTED" --argjson drCapable "$DR_CAPABLE" --arg retained "$(jq -r '.settings.backupConfiguration.backupRetentionSettings.retainedBackups' /tmp/source.json)" --arg logs "$(jq -r '.settings.backupConfiguration.transactionLogRetentionDays' /tmp/source.json)" '{candidateSha:$candidate,backupEnabled:true,pitrEnabled:true,retainedBackups:($retained|tonumber),transactionLogRetentionDays:($logs|tonumber),successfulBackups:$backups,earliestRecoveryTime:$earliest,latestRecoveryTime:$latest,requiredDrPermissions:$required,grantedDrPermissions:$granted,stagingOperatorDrCapable:$drCapable,productionAccess:false,providerAccess:false,databaseMutation:false,backupMutation:false,drRestore:false}' >/tmp/evidence.json
+          DR_GRANTED="$(jq -cn --argjson required "$DR_REQUIRED" --argjson granted "$GRANTED" '$required|map(select(. as $p | $granted|index($p)))|sort')"
+          BOOTSTRAP_GRANTED="$(jq -cn --argjson required "$BOOTSTRAP_REQUIRED" --argjson granted "$GRANTED" '$required|map(select(. as $p | $granted|index($p)))|sort')"
+          DR_CAPABLE=false; test "$DR_GRANTED" != "$(jq -c 'sort' <<<"$DR_REQUIRED")" || DR_CAPABLE=true
+          BOOTSTRAP_CAPABLE=false; test "$BOOTSTRAP_GRANTED" != "$(jq -c 'sort' <<<"$BOOTSTRAP_REQUIRED")" || BOOTSTRAP_CAPABLE=true
+          jq -n --arg candidate "$CANDIDATE_SHA" --arg earliest "$EARLIEST" --arg latest "$LATEST" --argjson backups "$BACKUPS" --argjson drRequired "$DR_REQUIRED" --argjson drGranted "$DR_GRANTED" --argjson bootstrapRequired "$BOOTSTRAP_REQUIRED" --argjson bootstrapGranted "$BOOTSTRAP_GRANTED" --argjson drCapable "$DR_CAPABLE" --argjson bootstrapCapable "$BOOTSTRAP_CAPABLE" --arg retained "$(jq -r '.settings.backupConfiguration.backupRetentionSettings.retainedBackups' /tmp/source.json)" --arg logs "$(jq -r '.settings.backupConfiguration.transactionLogRetentionDays' /tmp/source.json)" '{candidateSha:$candidate,backupEnabled:true,pitrEnabled:true,retainedBackups:($retained|tonumber),transactionLogRetentionDays:($logs|tonumber),successfulBackups:$backups,earliestRecoveryTime:$earliest,latestRecoveryTime:$latest,drRequired:$drRequired,drGranted:$drGranted,stagingOperatorDrCapable:$drCapable,bootstrapRequired:$bootstrapRequired,bootstrapGranted:$bootstrapGranted,stagingOperatorBootstrapCapable:$bootstrapCapable,productionAccess:false,providerAccess:false,iamMutation:false,databaseMutation:false,backupMutation:false,drRestore:false}' >/tmp/evidence.json
           cat /tmp/evidence.json
-          echo "dr_capable=$DR_CAPABLE" >>"$GITHUB_OUTPUT"
-          echo BACKUP_PITR_PREFLIGHT=PASS
+          echo "bootstrap_capable=$BOOTSTRAP_CAPABLE" >>"$GITHUB_OUTPUT"
+          echo PRE_FLIGHT=PASS
 
       - name: Publish sanitized evidence
         env:
           GH_TOKEN: ${{ github.token }}
-          DR_CAPABLE: ${{ steps.probe.outputs.dr_capable }}
+          BOOTSTRAP_CAPABLE: ${{ steps.probe.outputs.bootstrap_capable }}
         shell: bash
         run: |
           set -euo pipefail
-          BODY=$(printf '## RELIABILITY_FINAL_E822 — STAGING_ONLY_PREFLIGHT\n\n`RUN_ID=%s`\n`CANDIDATE_SHA=%s`\n`DR_CAPABLE=%s`\n\n```json\n%s\n```\n\nNo production access; no provider, DB, backup or DR mutation.' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$DR_CAPABLE" "$(cat /tmp/evidence.json)")
+          BODY=$(printf '## RELIABILITY_FINAL_E822 — STAGING_ONLY_BOOTSTRAP_PROBE\n\n`RUN_ID=%s`\n`CANDIDATE_SHA=%s`\n`BOOTSTRAP_CAPABLE=%s`\n\n```json\n%s\n```\n\nRead-only probe. No production/provider/IAM/DB/backup/DR mutation.' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$BOOTSTRAP_CAPABLE" "$(cat /tmp/evidence.json)")
           gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$BODY" >/dev/null
-          echo EVIDENCE_PUBLISHED=PASS
