@@ -1,4 +1,4 @@
-name: PR Production Runtime Reference Readback 91560f
+name: PR Production DB Secret Version Resolver 91560f
 
 on:
   pull_request:
@@ -18,12 +18,13 @@ env:
   REGION: southamerica-east1
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  MCP_SERVICE: toca-mcp-production
+  RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DATABASE_SECRET_ID: toca-database-url
+  CURRENT_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:toca-managed-daemon-d36195f24e15a101edb70a48b267b23ebcc8ec94
   AUTH_ISSUE: '205'
 
 jobs:
-  readback:
+  resolve:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
@@ -43,7 +44,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Read current MCP runtime reference metadata only
+      - name: Resolve latest DB secret to numeric version under runtime identity
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -51,31 +52,39 @@ jobs:
           set -euo pipefail
           test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-
-          gcloud run services describe "$MCP_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json >/tmp/mcp.json
-          CURRENT_REV="$(jq -r '[.status.traffic[]? | select(.percent==100) | .revisionName][0] // empty' /tmp/mcp.json)"
-          CURRENT_IMAGE="$(jq -r '.spec.template.spec.containers[0].image // empty' /tmp/mcp.json)"
-          CURRENT_SA="$(jq -r '.spec.template.spec.serviceAccountName // empty' /tmp/mcp.json)"
-          DB_SECRET_NAME="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="DATABASE_URL") | .valueFrom.secretKeyRef.name][0] // empty' /tmp/mcp.json)"
-          DB_SECRET_VERSION="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="DATABASE_URL") | .valueFrom.secretKeyRef.key][0] // empty' /tmp/mcp.json)"
-          test -n "$CURRENT_REV"
-          test -n "$CURRENT_IMAGE"
-          test -n "$CURRENT_SA"
-
-          if [[ -z "$DB_SECRET_NAME" ]]; then DB_SECRET_NAME='UNBOUND'; fi
-          if [[ -z "$DB_SECRET_VERSION" ]]; then DB_SECRET_VERSION='UNBOUND'; fi
-
+          JOB="toca-prod-secret-version-${GITHUB_RUN_ID}"
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project="$PROJECT_ID" --region="$REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          SCRIPT='const h={"Metadata-Flavor":"Google"};const tr=await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",{headers:h});if(!tr.ok)throw new Error(`metadata_${tr.status}`);const t=await tr.json();const u=`https://secretmanager.googleapis.com/v1/projects/${process.env.PROJECT_ID}/secrets/${process.env.SECRET_ID}/versions/latest:access`;const r=await fetch(u,{headers:{Authorization:`Bearer ${t.access_token}`}});if(!r.ok)throw new Error(`secret_access_${r.status}`);const j=await r.json();const n=j.name||"";delete j.payload;const m=/\/versions\/([0-9]+)$/.exec(n);if(!m)throw new Error("numeric_version_unresolved");console.log(`DATABASE_SECRET_NUMERIC_VERSION=${m[1]}`);'
+          gcloud run jobs deploy "$JOB" \
+            --image="$CURRENT_IMAGE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --service-account="$RUNTIME_SA" \
+            --set-env-vars="PROJECT_ID=$PROJECT_ID,SECRET_ID=$DATABASE_SECRET_ID" \
+            --command=node \
+            --args="^~^-e~${SCRIPT}" \
+            --tasks=1 --max-retries=0 --task-timeout=120s --quiet
+          gcloud run jobs execute "$JOB" --project="$PROJECT_ID" --region="$REGION" --wait --quiet
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project="$PROJECT_ID" --freshness=15m --limit=100 --order=asc --format='value(textPayload)' || true)"
+          VERSION_LINE="$(printf '%s\n' "$LOGS" | grep '^DATABASE_SECRET_NUMERIC_VERSION=' | tail -n1)"
+          test -n "$VERSION_LINE"
+          VERSION="${VERSION_LINE#DATABASE_SECRET_NUMERIC_VERSION=}"
+          [[ "$VERSION" =~ ^[0-9]+$ ]]
+          cleanup
+          trap - EXIT
+          test -z "$(gcloud run jobs list --project="$PROJECT_ID" --region="$REGION" --filter="metadata.name=${JOB}" --format='value(metadata.name)')"
           BODY=$(cat <<EOF
-          PRODUCTION_RUNTIME_REFERENCE_READBACK=PASS
+          PRODUCTION_DB_SECRET_VERSION_RESOLVER=PASS
           candidate=${CANDIDATE_SHA}
-          mcp_service=${MCP_SERVICE}
-          current_100pct_revision=${CURRENT_REV}
-          current_image=${CURRENT_IMAGE}
-          runtime_service_account=${CURRENT_SA}
-          database_secret_name=${DB_SECRET_NAME}
-          database_secret_bound_version=${DB_SECRET_VERSION}
-          secret_payload_read=NO
-          mutation_executed=NO
+          database_secret_id=${DATABASE_SECRET_ID}
+          database_secret_numeric_version=${VERSION}
+          resolver_runtime_identity=${RUNTIME_SA}
+          resolver_job_cleanup=PASS
+          secret_payload_disclosed=NO
+          provider_call_executed=NO
           EOF
           )
           gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}/comments" -f body="$BODY" >/dev/null
