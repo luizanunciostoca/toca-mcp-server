@@ -56,6 +56,8 @@ jobs:
           test "$(jq -r '.state' /tmp/source.json)" = RUNNABLE
           jq -e '.settings.backupConfiguration.enabled==true and .settings.backupConfiguration.pointInTimeRecoveryEnabled==true' /tmp/source.json >/dev/null
           INST="$(gcloud sql instances list --project="$PROJECT_ID" --format='value(name)' | sort | tr '\n' ',' | sed 's/,$//')"
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json >/tmp/project-iam.json
+          DR_BINDINGS="$(jq -c '[.bindings[]? | select((.role|test("dr|disaster|recovery|cloudsql";"i")) or any(.members[]?; test("dr|disaster|recovery";"i"))) | {role, members:[.members[]? | select(test("serviceAccount:.*@toca-mcp-next-staging\\.iam\\.gserviceaccount\\.com|principalSet://|principal://"))]}] | map(select((.members|length)>0 or (.role|test("dr|disaster|recovery";"i"))))' /tmp/project-iam.json)"
           TOKEN="$(gcloud auth print-access-token)"
           printf '%s' '{"permissions":["cloudsql.instances.get","cloudsql.instances.list","cloudsql.instances.connect","cloudsql.instances.create","cloudsql.instances.clone","cloudsql.instances.update","cloudsql.instances.delete","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy","iam.serviceAccounts.list","iam.serviceAccounts.create","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy"]}' >/tmp/perms.json
           HTTP="$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
@@ -68,7 +70,7 @@ jobs:
           DR=false; IAM=false
           jq -e 'index("cloudsql.instances.create") and index("cloudsql.instances.clone") and index("cloudsql.instances.update") and index("cloudsql.instances.delete")' <<<"$HELD" >/dev/null && DR=true || true
           jq -e 'index("resourcemanager.projects.setIamPolicy") and index("iam.serviceAccounts.create")' <<<"$HELD" >/dev/null && IAM=true || true
-          echo "inst=$INST" >> "$GITHUB_OUTPUT"; echo "held=$HELD" >> "$GITHUB_OUTPUT"; echo "sa_access=$SA_ACCESS" >> "$GITHUB_OUTPUT"; echo "sa_names=$SA_NAMES" >> "$GITHUB_OUTPUT"; echo "dr=$DR" >> "$GITHUB_OUTPUT"; echo "iam=$IAM" >> "$GITHUB_OUTPUT"
+          echo "inst=$INST" >> "$GITHUB_OUTPUT"; echo "held=$HELD" >> "$GITHUB_OUTPUT"; echo "sa_access=$SA_ACCESS" >> "$GITHUB_OUTPUT"; echo "sa_names=$SA_NAMES" >> "$GITHUB_OUTPUT"; echo "dr=$DR" >> "$GITHUB_OUTPUT"; echo "iam=$IAM" >> "$GITHUB_OUTPUT"; echo "dr_bindings=$DR_BINDINGS" >> "$GITHUB_OUTPUT"
       - name: Result evidence
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,7 +80,8 @@ jobs:
           SA_NAMES: ${{ steps.p.outputs.sa_names }}
           DR: ${{ steps.p.outputs.dr }}
           IAM: ${{ steps.p.outputs.iam }}
+          DR_BINDINGS: ${{ steps.p.outputs.dr_bindings }}
         shell: bash
         run: |
-          BODY=$(printf '## DR_AUTHORITY_READBACK — 91560f — READ_ONLY\n\nRUN_ID=%s\nCANDIDATE_SHA=%s\nACTIVE_IDENTITY=%s\nCLOUD_SQL_INSTANCES=%s\nHELD_TESTED_PERMISSIONS=%s\nDR_CREATE_CLONE_UPDATE_DELETE_READY=%s\nIAM_BOOTSTRAP_READY=%s\nSERVICE_ACCOUNT_LIST_ACCESS=%s\nDISCOVERED_DR_SERVICE_ACCOUNTS=%s\nMUTATION_EXECUTED=NO\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$STAGING_OPERATOR_SA" "$INST" "$HELD" "$DR" "$IAM" "$SA_ACCESS" "$SA_NAMES")
+          BODY=$(printf '## DR_AUTHORITY_READBACK_V2 — 91560f — READ_ONLY\n\nRUN_ID=%s\nCANDIDATE_SHA=%s\nACTIVE_IDENTITY=%s\nCLOUD_SQL_INSTANCES=%s\nHELD_TESTED_PERMISSIONS=%s\nDR_CREATE_CLONE_UPDATE_DELETE_READY=%s\nIAM_BOOTSTRAP_READY=%s\nSERVICE_ACCOUNT_LIST_ACCESS=%s\nDISCOVERED_DR_SERVICE_ACCOUNTS=%s\nDR_RELEVANT_PROJECT_IAM_BINDINGS=%s\nMUTATION_EXECUTED=NO\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$STAGING_OPERATOR_SA" "$INST" "$HELD" "$DR" "$IAM" "$SA_ACCESS" "$SA_NAMES" "$DR_BINDINGS")
           gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
