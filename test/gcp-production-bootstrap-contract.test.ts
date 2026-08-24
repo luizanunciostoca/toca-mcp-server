@@ -101,16 +101,15 @@ describe('GCP production bootstrap contract', () => {
 
   it('validates exact production authorization', () => {
     const start = workflow.indexOf('Require exact production authorization before mutation');
-    const end = workflow.indexOf(
-      'Fail closed on unverified provider activation',
-      start,
-    );
+    const end = workflow.indexOf('Fail closed on unverified provider activation', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const gate = workflow.slice(start, end);
 
     expect(gate).toContain('https://github.com/${GITHUB_REPOSITORY}/issues/');
-    expect(gate).toContain('https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}');
+    expect(gate).toContain(
+      'https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}',
+    );
     expect(gate).toContain('--arg owner "$GITHUB_REPOSITORY_OWNER"');
     expect(gate).toContain('(.user.login == $owner)');
     expect(gate).toContain('(.state == "open")');
@@ -158,10 +157,7 @@ describe('GCP production bootstrap contract', () => {
 
   it('captures deterministic rollback targets', () => {
     const start = workflow.indexOf('Capture known rollback targets');
-    const end = workflow.indexOf(
-      'Deploy private MCP candidate by digest with no traffic',
-      start,
-    );
+    const end = workflow.indexOf('Deploy private MCP candidate by digest with no traffic', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const rollback = workflow.slice(start, end);
