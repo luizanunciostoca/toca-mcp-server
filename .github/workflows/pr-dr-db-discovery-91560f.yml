@@ -1,0 +1,115 @@
+name: PR DR Database Discovery 91560f
+
+on:
+  pull_request:
+    branches: [ops/base-91560f-readbacks-20260823]
+    paths:
+      - '.github/workflows/pr-dr-db-discovery-91560f.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  DEPLOYER_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+  DB_SECRET: toca-next-staging-database-url
+  EVIDENCE_ISSUE: '151'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = toca-mcp-next-staging
+          test "$PROJECT_NUMBER" = 729069789107
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Discover application database read-only
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$DEPLOYER_SA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "${PROJECT_ID}:${REGION}:${SOURCE_INSTANCE}" >/tmp/proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+            kill -0 "$PROXY_PID" 2>/dev/null || { cat /tmp/proxy.log >&2; exit 1; }
+            sleep 1
+          done
+          RAW_DATABASE_URL="$(gcloud secrets versions access latest --secret="$DB_SECRET" --project="$PROJECT_ID")"
+          export RAW_DATABASE_URL
+          DB_USER="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.username))')"
+          DB_PASS="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);process.stdout.write(decodeURIComponent(u.password))')"
+          SECRET_DB="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname;process.stdout.write(decodeURIComponent(p))')"
+          unset RAW_DATABASE_URL
+          echo "::add-mask::$DB_PASS"
+          export PGPASSWORD="$DB_PASS"
+          test -n "$SECRET_DB"
+          CURRENT_DB="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$SECRET_DB" -Atqc 'select current_database()')"
+          test "$CURRENT_DB" = "$SECRET_DB"
+          mapfile -t DBS < <(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$SECRET_DB" -Atqc "select datname from pg_database where datistemplate=false and datallowconn=true and datname <> 'cloudsqladmin' order by datname")
+          EXPECTED_MIGRATIONS="$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          printf '[]' >/tmp/dbs.json
+          APP_DB=''
+          for db in "${DBS[@]}"; do
+            set +e
+            SM="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$db" -Atqc "select to_regclass('public.schema_migrations') is not null" 2>/tmp/db.err)"
+            RC=$?
+            set -e
+            if [[ "$RC" -ne 0 ]]; then
+              jq --arg db "$db" '. + [{database:$db,connectable:false}]' /tmp/dbs.json >/tmp/dbs.next && mv /tmp/dbs.next /tmp/dbs.json
+              continue
+            fi
+            AE="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$db" -Atqc "select to_regclass('public.audit_events') is not null")"
+            MIG_COUNT=0
+            if [[ "$SM" == t ]]; then MIG_COUNT="$(psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$db" -Atqc 'select count(*) from schema_migrations')"; fi
+            jq --arg db "$db" --argjson sm "$([[ "$SM" == t ]] && echo true || echo false)" --argjson ae "$([[ "$AE" == t ]] && echo true || echo false)" --argjson mc "$MIG_COUNT" '. + [{database:$db,connectable:true,schemaMigrations:$sm,auditEvents:$ae,migrationCount:$mc}]' /tmp/dbs.json >/tmp/dbs.next && mv /tmp/dbs.next /tmp/dbs.json
+            if [[ "$SM" == t && "$AE" == t && "$MIG_COUNT" -eq "$EXPECTED_MIGRATIONS" ]]; then
+              [[ -z "$APP_DB" ]] || { echo 'More than one fully migrated app database found' >&2; exit 1; }
+              APP_DB="$db"
+            fi
+          done
+          test -n "$APP_DB"
+          echo "app_db=$APP_DB" >> "$GITHUB_OUTPUT"
+          jq -n --arg secretDb "$SECRET_DB" --arg appDb "$APP_DB" --argjson expected "$EXPECTED_MIGRATIONS" --slurpfile dbs /tmp/dbs.json '{secretDatabase:$secretDb,canonicalApplicationDatabase:$appDb,expectedMigrationCount:$expected,databases:$dbs[0],mutationExecuted:false,productionTouched:false,providersTouched:false}' >/tmp/evidence.json
+          cat /tmp/evidence.json
+          unset PGPASSWORD DB_PASS
+      - name: Publish sanitized discovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_DB: ${{ steps.discover.outputs.app_db }}
+        shell: bash
+        run: |
+          BODY=$(jq -c . /tmp/evidence.json)
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="DR_DATABASE_DISCOVERY=PASS RUN_ID=${GITHUB_RUN_ID} CANDIDATE=${CANDIDATE_SHA} APP_DB=${APP_DB} EVIDENCE=${BODY}" >/dev/null
