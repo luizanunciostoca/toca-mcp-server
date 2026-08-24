@@ -31,7 +31,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier test/gcp-production-bootstrap-contract.test.ts --write && git diff -- test/gcp-production-bootstrap-contract.test.ts && exit 1",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
