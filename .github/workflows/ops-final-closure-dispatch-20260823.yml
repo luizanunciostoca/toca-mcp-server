@@ -1,0 +1,227 @@
+name: Ops Final Closure Dispatch 2026-08-23
+
+on:
+  push:
+    branches: [ops/final-staging-verification-e8221698]
+    paths:
+      - '.github/workflows/ops-final-closure-dispatch-20260823.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CANDIDATE_SHA: 0386ef1e32fbd6d68b5041cb7319406968971026
+    steps:
+      - name: Checkout exact candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Fail closed on exact main and compute policy hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          MAIN_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          RUNTIME_POLICY_SHA="$(sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}')"
+          SYNTHETIC_POLICY_SHA="$(sha256sum infra/observability/staging-synthetic-alert-policy.json | awk '{print $1}')"
+          [[ "$RUNTIME_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SYNTHETIC_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+          echo "RUNTIME_POLICY_SHA=$RUNTIME_POLICY_SHA" >> "$GITHUB_ENV"
+          echo "SYNTHETIC_POLICY_SHA=$SYNTHETIC_POLICY_SHA" >> "$GITHUB_ENV"
+          echo 'FINAL_CANDIDATE_MAIN_BOUNDARY=PASS'
+
+      - name: Dispatch canonical deploy and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_wait() {
+            local workflow="$1" payload="$2" started run_id status conclusion
+            started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+            run_id=''
+            for attempt in $(seq 1 60); do
+              run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&per_page=30" | jq -r --arg sha "$CANDIDATE_SHA" --arg started "$started" '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)] | sort_by(.created_at) | last | .id // empty')"
+              [[ -n "$run_id" ]] && break
+              sleep 5
+            done
+            test -n "$run_id"
+            for attempt in $(seq 1 180); do
+              read -r status conclusion < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status, (.conclusion // "none")] | @tsv')
+              if [[ "$status" == completed ]]; then
+                test "$conclusion" = success
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            echo "Timed out waiting for $workflow run $run_id" >&2
+            return 1
+          }
+          PAYLOAD="$(jq -n --arg sha "$CANDIDATE_SHA" '{ref:"main",inputs:{candidate_sha:$sha,promote_full:"true",evidence_issue:"151"}}')"
+          DEPLOY_RUN_ID="$(dispatch_wait deploy-gcp-staging-canonical.yml "$PAYLOAD")"
+          echo "DEPLOY_RUN_ID=$DEPLOY_RUN_ID" >> "$GITHUB_ENV"
+          echo "CANONICAL_DEPLOY_RUN_ID=$DEPLOY_RUN_ID"
+          echo 'CANONICAL_DEPLOY_DISPATCH=PASS'
+
+      - name: Resolve deploy artifact and immutable image digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACTS="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DEPLOY_RUN_ID/artifacts?per_page=100")"
+          ARTIFACT_ID="$(jq -r --arg name "staging-canonical-deploy-${CANDIDATE_SHA}" 'first(.artifacts[]? | select(.name == $name) | .id) // empty' <<<"$ARTIFACTS")"
+          test -n "$ARTIFACT_ID"
+          rm -rf /tmp/canonical-deploy-artifact /tmp/canonical-deploy.zip
+          mkdir -p /tmp/canonical-deploy-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/canonical-deploy.zip
+          unzip -q /tmp/canonical-deploy.zip -d /tmp/canonical-deploy-artifact
+          MANIFEST="$(find /tmp/canonical-deploy-artifact -name manifest.json -type f | head -n1)"
+          test -n "$MANIFEST"
+          jq -e --arg sha "$CANDIDATE_SHA" '.candidateSha == $sha and .trafficPercent == 100 and .providersEnabled == false and .providerAccess == false and .productionAccess == false and .result == "PASS"' "$MANIFEST" >/dev/null
+          IMAGE_INDEX_DIGEST="$(jq -r '.imageIndexDigest // empty' "$MANIFEST")"
+          RUNTIME_IMAGE_DIGEST="$(jq -r '.runtimeImageDigest // empty' "$MANIFEST")"
+          MCP_REVISION="$(jq -r '.mcpRevision // empty' "$MANIFEST")"
+          WEBHOOK_REVISION="$(jq -r '.webhookRevision // empty' "$MANIFEST")"
+          [[ "$IMAGE_INDEX_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test -n "$MCP_REVISION"
+          test -n "$WEBHOOK_REVISION"
+          echo "IMAGE_INDEX_DIGEST=$IMAGE_INDEX_DIGEST" >> "$GITHUB_ENV"
+          echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
+          echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
+          echo "IMAGE_INDEX_DIGEST=$IMAGE_INDEX_DIGEST"
+          echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST"
+          echo "MCP_REVISION=$MCP_REVISION"
+          echo "WEBHOOK_REVISION=$WEBHOOK_REVISION"
+          echo 'CANONICAL_DEPLOY_ARTIFACT=PASS'
+
+      - name: Dispatch runtime capacity observability and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_wait() {
+            local workflow="$1" payload="$2" started run_id status conclusion
+            started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+            run_id=''
+            for attempt in $(seq 1 60); do
+              run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&per_page=30" | jq -r --arg sha "$CANDIDATE_SHA" --arg started "$started" '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)] | sort_by(.created_at) | last | .id // empty')"
+              [[ -n "$run_id" ]] && break
+              sleep 5
+            done
+            test -n "$run_id"
+            for attempt in $(seq 1 180); do
+              read -r status conclusion < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status, (.conclusion // "none")] | @tsv')
+              if [[ "$status" == completed ]]; then
+                test "$conclusion" = success
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+          PAYLOAD="$(jq -n --arg p "$RUNTIME_POLICY_SHA" --arg c "$CANDIDATE_SHA" --arg i "$IMAGE_INDEX_DIGEST" '{ref:"main",inputs:{expected_policy_sha256:$p,expected_candidate_sha:$c,expected_image_digest:$i,run_capacity:"true"}}')"
+          OBS_RUN_ID="$(dispatch_wait staging-runtime-observability.yml "$PAYLOAD")"
+          echo "OBS_RUN_ID=$OBS_RUN_ID" >> "$GITHUB_ENV"
+          echo "OBSERVABILITY_RUN_ID=$OBS_RUN_ID"
+          echo 'RUNTIME_CAPACITY_OBSERVABILITY_DISPATCH=PASS'
+
+      - name: Dispatch reliability topology reconcile and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_wait() {
+            local workflow="$1" payload="$2" started run_id status conclusion
+            started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+            run_id=''
+            for attempt in $(seq 1 60); do
+              run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&per_page=30" | jq -r --arg sha "$CANDIDATE_SHA" --arg started "$started" '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)] | sort_by(.created_at) | last | .id // empty')"
+              [[ -n "$run_id" ]] && break
+              sleep 5
+            done
+            test -n "$run_id"
+            for attempt in $(seq 1 180); do
+              read -r status conclusion < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status, (.conclusion // "none")] | @tsv')
+              if [[ "$status" == completed ]]; then
+                test "$conclusion" = success
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+          PAYLOAD="$(jq -n --arg s "$CANDIDATE_SHA" --arg p "$RUNTIME_POLICY_SHA" '{ref:"main",inputs:{expected_source_sha:$s,expected_policy_sha256:$p}}')"
+          RELIABILITY_RUN_ID="$(dispatch_wait staging-reliability-alerts.yml "$PAYLOAD")"
+          echo "RELIABILITY_RUN_ID=$RELIABILITY_RUN_ID" >> "$GITHUB_ENV"
+          echo "RELIABILITY_RUN_ID=$RELIABILITY_RUN_ID"
+          echo 'RELIABILITY_TOPOLOGY_DISPATCH=PASS'
+
+      - name: Dispatch synthetic firing and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_wait() {
+            local workflow="$1" payload="$2" started run_id status conclusion
+            started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" --input - >/dev/null
+            run_id=''
+            for attempt in $(seq 1 60); do
+              run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&per_page=30" | jq -r --arg sha "$CANDIDATE_SHA" --arg started "$started" '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)] | sort_by(.created_at) | last | .id // empty')"
+              [[ -n "$run_id" ]] && break
+              sleep 5
+            done
+            test -n "$run_id"
+            for attempt in $(seq 1 180); do
+              read -r status conclusion < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status, (.conclusion // "none")] | @tsv')
+              if [[ "$status" == completed ]]; then
+                test "$conclusion" = success
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+          PAYLOAD="$(jq -n --arg p "$SYNTHETIC_POLICY_SHA" '{ref:"main",inputs:{expected_policy_sha256:$p}}')"
+          SYNTHETIC_RUN_ID="$(dispatch_wait staging-synthetic-alert.yml "$PAYLOAD")"
+          echo "SYNTHETIC_RUN_ID=$SYNTHETIC_RUN_ID" >> "$GITHUB_ENV"
+          echo "SYNTHETIC_RUN_ID=$SYNTHETIC_RUN_ID"
+          echo "SYNTHETIC_RUN_MARKER=TOCA_STAGING_RELIABILITY_SYNTHETIC_V1:run:${SYNTHETIC_RUN_ID}:sha:${CANDIDATE_SHA}"
+          echo 'SYNTHETIC_FIRING_DISPATCH=PASS'
+
+      - name: Final immutable main recheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$MAIN_SHA" = "$CANDIDATE_SHA"
+          echo 'FINAL_MAIN_STILL_EXACT_CANDIDATE=PASS'
+          echo "FINAL_CANDIDATE_SHA=$CANDIDATE_SHA"
+          echo "DEPLOY_RUN_ID=$DEPLOY_RUN_ID"
+          echo "OBS_RUN_ID=$OBS_RUN_ID"
+          echo "RELIABILITY_RUN_ID=$RELIABILITY_RUN_ID"
+          echo "SYNTHETIC_RUN_ID=$SYNTHETIC_RUN_ID"
+          echo 'PRODUCTION_TOUCHED=NO_BY_THIS_ORCHESTRATOR'
+          echo 'REAL_PROVIDERS_TOUCHED=NO_BY_THIS_ORCHESTRATOR'
