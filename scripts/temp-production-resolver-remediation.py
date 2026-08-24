@@ -15,7 +15,7 @@ def patch_workflow(source: str) -> str:
     end_marker = "      - name: Require exact numeric production provider secret versions after resolution\n"
     start = source.index(start_marker)
     end = source.index(end_marker, start)
-    replacement = '''      - name: Resolve production Meta token to exact numeric secret version
+    replacement = r'''      - name: Resolve production Meta token to exact numeric secret version
         if: inputs.operation == 'deploy' && inputs.environment == 'production' && env.GCP_META_ACCESS_TOKEN_SECRET_VERSION == 'RESOLVE_RUNTIME'
         run: |
           set -euo pipefail
