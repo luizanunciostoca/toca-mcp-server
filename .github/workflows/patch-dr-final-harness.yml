@@ -1,0 +1,49 @@
+name: Patch Final DR Harness
+
+on:
+  push:
+    branches: [ops/dr-final-91560f-20260824]
+    paths:
+      - '.github/workflows/patch-dr-final-harness.yml'
+      - '.ops/patch-dr-final-harness.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ops/dr-final-91560f-20260824
+          fetch-depth: 0
+      - name: Guard and patch exactly two DB_NAME parser lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/pr-dr-final-91560f.yml')
+          lines = p.read_text().splitlines()
+          hits = [i for i, line in enumerate(lines) if 'DB_NAME="$(node --input-type=module' in line and 'u.pathname.replace' in line]
+          if len(hits) != 2:
+              raise SystemExit(f'expected exactly 2 parser lines, found {len(hits)}')
+          for i in hits:
+              indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+              lines[i] = indent + '''DB_NAME="$(node --input-type=module -e 'const u=new URL(process.env.RAW_DATABASE_URL);const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname;process.stdout.write(decodeURIComponent(p))')"'''
+          p.write_text('\n'.join(lines) + '\n')
+          Path('.github/workflows/patch-dr-final-harness.yml').unlink()
+          t = Path('.ops/patch-dr-final-harness.trigger')
+          if t.exists():
+              t.unlink()
+          PY
+          grep -Fq 'const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname' .github/workflows/pr-dr-final-91560f.yml
+          test "$(grep -Fc 'const p=u.pathname.startsWith("/")?u.pathname.slice(1):u.pathname' .github/workflows/pr-dr-final-91560f.yml)" = 2
+          ! grep -Fq 'u.pathname.replace' .github/workflows/pr-dr-final-91560f.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(ops): correct DR database URL parser'
+          git push origin HEAD:ops/dr-final-91560f-20260824
