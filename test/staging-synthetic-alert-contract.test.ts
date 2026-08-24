@@ -19,6 +19,11 @@ describe('staging synthetic alert workflow boundary', () => {
       'toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com',
     );
     expect(workflow).not.toContain('gcloud projects add-iam-policy-binding');
+    expect(workflow).not.toContain('gcloud projects get-iam-policy');
+    expect(workflow).toContain(':testIamPermissions');
+    expect(workflow).toContain('logging.logEntries.create');
+    expect(workflow).toContain('monitoring.alertPolicies.create');
+    expect(workflow).toContain('monitoring.notificationChannels.list');
     expect(workflow).toContain('STAGING_SYNTHETIC_PREEXISTING_ROLES_AND_CHANNELS=PASS');
     expect(workflow).toContain('productionAccess:false');
     expect(workflow).toContain('iamMutation:false');
