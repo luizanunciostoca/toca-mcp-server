@@ -1,4 +1,4 @@
-name: PR Production Bootstrap Preflight 91560f
+name: PR Production Bootstrap Permission Probe 91560f
 
 on:
   pull_request:
@@ -16,26 +16,23 @@ env:
   CANDIDATE_SHA: 91560f21856012b367efb9513044004a978ba6c9
   PROJECT_ID: toca-mcp-production
   PROJECT_NUMBER: '990081828836'
-  REGION: southamerica-east1
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   DEPLOYER_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   DATABASE_SECRET_ID: toca-database-url
   AUTH_ISSUE: '205'
 
 jobs:
-  bootstrap-preflight:
+  probe:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
     steps:
-      - name: Fail closed on exact candidate
+      - name: Exact candidate guard
         shell: bash
         run: |
           set -euo pipefail
           MAIN_SHA="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
           test "$MAIN_SHA" = "$CANDIDATE_SHA"
-          test "$PROJECT_ID" = toca-mcp-production
-          test "$PROJECT_NUMBER" = 990081828836
 
       - name: Authenticate production deployer
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
@@ -45,64 +42,69 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Resolve exact numeric database secret version without disclosure
-        id: secret
+      - name: Probe secret metadata/access and GitHub env-variable API
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=''
-          if META="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' 2>/dev/null)" && [[ "$META" =~ /versions/([0-9]+)$ ]]; then
-            VERSION="${BASH_REMATCH[1]}"
-          else
+          SECRET_VERSION='UNRESOLVED'
+
+          set +e
+          META="$(gcloud secrets versions describe latest --secret="$DATABASE_SECRET_ID" --project="$PROJECT_ID" --format='value(name)' 2>/tmp/meta.err)"
+          META_RC=$?
+          set -e
+          if [[ "$META_RC" -eq 0 && "$META" =~ /versions/([0-9]+)$ ]]; then
+            SECRET_VERSION="${BASH_REMATCH[1]}"
+          fi
+
+          ACCESS_HTTP='not_attempted'
+          if [[ "$SECRET_VERSION" == UNRESOLVED ]]; then
             TOKEN="$(gcloud auth print-access-token)"
             umask 077
-            HTTP="$(curl --silent --show-error --output /tmp/secret-access.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${DATABASE_SECRET_ID}/versions/latest:access")"
+            ACCESS_HTTP="$(curl --silent --show-error --output /tmp/secret-access.json --write-out '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${DATABASE_SECRET_ID}/versions/latest:access" || true)"
             unset TOKEN
-            test "$HTTP" = 200
-            NAME="$(jq -r '.name // empty' /tmp/secret-access.json)"
-            [[ "$NAME" =~ /versions/([0-9]+)$ ]]
-            VERSION="${BASH_REMATCH[1]}"
+            if [[ "$ACCESS_HTTP" == 200 ]]; then
+              NAME="$(jq -r '.name // empty' /tmp/secret-access.json)"
+              if [[ "$NAME" =~ /versions/([0-9]+)$ ]]; then SECRET_VERSION="${BASH_REMATCH[1]}"; fi
+            fi
             rm -f /tmp/secret-access.json
           fi
-          [[ "$VERSION" =~ ^[0-9]+$ ]]
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "PRODUCTION_DB_SECRET_PINNED_VERSION=$VERSION"
 
-      - name: Probe GitHub production environment variable API read access
-        id: vars
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
           set +e
           gh api "repos/${GITHUB_REPOSITORY}/environments/production/variables" --paginate >/tmp/env-vars.json 2>/tmp/env-vars.err
-          RC=$?
+          VAR_RC=$?
           set -e
-          if [[ "$RC" -eq 0 ]]; then
-            NAMES="$(jq -r '.variables[]?.name' /tmp/env-vars.json | sort | paste -sd, -)"
-            echo 'readable=true' >> "$GITHUB_OUTPUT"
-            echo "PRODUCTION_ENV_VARIABLE_API_READ=PASS names=${NAMES:-none}"
+          if [[ "$VAR_RC" -eq 0 ]]; then
+            VAR_API='PASS'
+            VAR_NAMES="$(jq -r '.variables[]?.name' /tmp/env-vars.json | sort | paste -sd, -)"
           else
-            echo 'readable=false' >> "$GITHUB_OUTPUT"
-            echo 'PRODUCTION_ENV_VARIABLE_API_READ=DENIED'
-            cat /tmp/env-vars.err >&2 || true
+            VAR_API='DENIED'
+            VAR_NAMES='UNREADABLE'
           fi
 
-      - name: Record sanitized bootstrap result
+          echo "secret_version=$SECRET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "variable_api=$VAR_API" >> "$GITHUB_OUTPUT"
+          echo "PRODUCTION_SECRET_METADATA_RC=$META_RC"
+          echo "PRODUCTION_SECRET_ACCESS_HTTP=$ACCESS_HTTP"
+          echo "PRODUCTION_DB_SECRET_VERSION=$SECRET_VERSION"
+          echo "PRODUCTION_ENV_VARIABLE_API=$VAR_API"
+          echo "PRODUCTION_ENV_VARIABLE_NAMES=${VAR_NAMES:-none}"
+
+      - name: Record sanitized permission probe
         env:
           GH_TOKEN: ${{ github.token }}
-          DB_VERSION: ${{ steps.secret.outputs.version }}
-          VAR_API_READABLE: ${{ steps.vars.outputs.readable }}
+          SECRET_VERSION: ${{ steps.probe.outputs.secret_version }}
+          VAR_API: ${{ steps.probe.outputs.variable_api }}
         shell: bash
         run: |
           set -euo pipefail
           BODY=$(cat <<EOF
-          PRODUCTION_BOOTSTRAP_PREFLIGHT=PASS
+          PRODUCTION_BOOTSTRAP_PERMISSION_PROBE=COMPLETE
           candidate=${CANDIDATE_SHA}
-          database_secret=${DATABASE_SECRET_ID}
-          database_secret_numeric_version=${DB_VERSION}
-          github_environment_variable_api_readable=${VAR_API_READABLE}
+          database_secret_numeric_version=${SECRET_VERSION}
+          github_environment_variable_api=${VAR_API}
           secret_payload_disclosed=NO
           production_mutation_executed=NO
           EOF
