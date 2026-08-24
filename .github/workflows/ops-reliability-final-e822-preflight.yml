@@ -1,0 +1,143 @@
+name: Ops Reliability Final E822 Preflight
+
+on:
+  push:
+    branches:
+      - ops/reliability-final-e822-preflight-20260823
+    paths:
+      - .github/workflows/ops-reliability-final-e822-preflight.yml
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    steps:
+      - name: Checkout frozen candidate for canonical policy evidence
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Enforce immutable staging-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          MAIN_HEAD="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
+          test "$MAIN_HEAD" = "$CANDIDATE_SHA"
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          echo 'BOUNDARY=PASS'
+
+      - name: Authenticate staging WIF only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Read backup PITR recovery window and DR permissions
+        id: readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project="$PROJECT_ID" --format=json > /tmp/source.json
+          jq -e --arg p "$PROJECT_ID" --arg r "$REGION" '
+            .project==$p and .region==$r and .name=="toca-mcp-next-staging-db" and .state=="RUNNABLE" and
+            .settings.backupConfiguration.enabled==true and
+            .settings.backupConfiguration.pointInTimeRecoveryEnabled==true and
+            (.settings.backupConfiguration.transactionLogRetentionDays // 0)>=7 and
+            (.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0)>=7
+          ' /tmp/source.json >/dev/null
+
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime" \
+            > /tmp/recovery.json
+          EARLIEST="$(jq -r '.earliestRecoveryTime // empty' /tmp/recovery.json)"
+          LATEST="$(jq -r '.latestRecoveryTime // empty' /tmp/recovery.json)"
+          test -n "$EARLIEST"
+          test -n "$LATEST"
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://sqladmin.googleapis.com/sql/v1beta4/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/backupRuns?maxResults=100" \
+            > /tmp/backups.json
+          SUCCESSFUL_BACKUPS="$(jq '[.items[]? | select(.status=="SUCCESSFUL")] | length' /tmp/backups.json)"
+          test "$SUCCESSFUL_BACKUPS" -ge 1
+
+          PERMS_JSON='["cloudsql.instances.clone","cloudsql.instances.connect","cloudsql.instances.delete","cloudsql.instances.get","cloudsql.instances.update","cloudsql.operations.get","cloudsql.users.list","cloudsql.users.update","resourcemanager.projects.get","serviceusage.services.use"]'
+          jq -n --argjson permissions "$PERMS_JSON" '{permissions:$permissions}' > /tmp/perm-request.json
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/perm-request.json \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions" \
+            > /tmp/perm-response.json
+          unset TOKEN
+
+          GRANTED="$(jq -c '.permissions // [] | sort' /tmp/perm-response.json)"
+          REQUIRED="$(jq -c 'sort' <<<"$PERMS_JSON")"
+          DR_CAPABLE=false
+          if test "$GRANTED" = "$REQUIRED"; then DR_CAPABLE=true; fi
+
+          jq -n \
+            --arg candidate "$CANDIDATE_SHA" \
+            --arg project "$PROJECT_ID" \
+            --arg projectNumber "$PROJECT_NUMBER" \
+            --arg operator "$STAGING_OPERATOR_SA" \
+            --arg earliest "$EARLIEST" \
+            --arg latest "$LATEST" \
+            --argjson successfulBackups "$SUCCESSFUL_BACKUPS" \
+            --argjson granted "$GRANTED" \
+            --argjson required "$REQUIRED" \
+            --argjson drCapable "$DR_CAPABLE" \
+            --arg retained "$(jq -r '.settings.backupConfiguration.backupRetentionSettings.retainedBackups' /tmp/source.json)" \
+            --arg logs "$(jq -r '.settings.backupConfiguration.transactionLogRetentionDays' /tmp/source.json)" \
+            '{candidateSha:$candidate,projectId:$project,projectNumber:$projectNumber,operator:$operator,backupEnabled:true,pitrEnabled:true,retainedBackups:($retained|tonumber),transactionLogRetentionDays:($logs|tonumber),successfulBackups:$successfulBackups,earliestRecoveryTime:$earliest,latestRecoveryTime:$latest,requiredDrPermissions:$required,grantedDrPermissions:$granted,stagingOperatorDrCapable:$drCapable,productionAccess:false,productionMutation:false,providerAccess:false,providerMutation:false,secretRead:false,databaseMutation:false,backupMutation:false,drRestore:false}' \
+            > /tmp/evidence.json
+          cat /tmp/evidence.json
+          echo "dr_capable=$DR_CAPABLE" >> "$GITHUB_OUTPUT"
+          echo 'BACKUP_PITR_PREFLIGHT=PASS'
+
+      - name: Publish sanitized preflight evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DR_CAPABLE: ${{ steps.readback.outputs.dr_capable }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$(cat /tmp/evidence.json)"
+          BODY=$(printf '## RELIABILITY_FINAL_E822 — STAGING_ONLY_PREFLIGHT\n\n`RUN_ID=%s`\n`CANDIDATE_SHA=%s`\n`DR_CAPABLE=%s`\n\n```json\n%s\n```\n\nNo production access, no provider access, no DB/backup/DR mutation.' "$GITHUB_RUN_ID" "$CANDIDATE_SHA" "$DR_CAPABLE" "$EVIDENCE")
+          gh api "repos/${GITHUB_REPOSITORY}/issues/151/comments" -f body="$BODY" >/dev/null
+          echo 'EVIDENCE_PUBLISHED=PASS'
