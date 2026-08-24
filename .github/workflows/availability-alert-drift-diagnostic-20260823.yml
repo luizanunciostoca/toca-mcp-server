@@ -1,0 +1,115 @@
+name: Availability Alert Drift Diagnostic 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/availability-alert-drift-diagnostic-20260823.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  POLICY_PATH: infra/observability/staging-runtime-observability-policy.json
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+  STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify read-only staging boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID"
+          test "$PROJECT_NUMBER" != "$PRODUCTION_PROJECT_NUMBER"
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          echo 'AVAILABILITY_DRIFT_DIAGNOSTIC_BOUNDARY=PASS'
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Compare desired and live availability alert projections
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          TOKEN="$(gcloud auth print-access-token)"
+          AUTH="Authorization: Bearer ${TOKEN}"
+          curl --fail --silent --show-error -H "$AUTH" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/notificationChannels?pageSize=100" > /tmp/channels.json
+          curl --fail --silent --show-error -H "$AUTH" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/uptimeCheckConfigs?pageSize=100" > /tmp/uptimes.json
+          curl --fail --silent --show-error -H "$AUTH" \
+            "https://monitoring.googleapis.com/v3/projects/${PROJECT_ID}/alertPolicies?pageSize=100" > /tmp/alerts.json
+          unset TOKEN AUTH
+
+          MANAGED_LABEL="$(jq -r '.notificationChannels.managedLabel' "$POLICY_PATH")"
+          ALERT_LABEL="$(jq -r '.alerting.managedLabel' "$POLICY_PATH")"
+          AUTO_CLOSE="$(jq -r '.alerting.autoClose' "$POLICY_PATH")"
+          UPTIME_DURATION="$(jq -r '.alerting.uptimeFailureDuration' "$POLICY_PATH")"
+          RUNBOOK="$(jq -r '.alerting.runbook' "$POLICY_PATH")"
+          GLOBAL_DISPLAY="$(jq -r '.uptimeCheck.displayName' "$POLICY_PATH")"
+
+          CHANNELS_JSON="$(jq -c --arg label "$MANAGED_LABEL" '[.notificationChannels[]? | select(.enabled != false and .userLabels.toca_managed==$label) | .name] | sort' /tmp/channels.json)"
+          UPTIME_NAME="$(jq -r --arg display "$GLOBAL_DISPLAY" 'first(.uptimeCheckConfigs[]? | select(.displayName==$display) | .name) // empty' /tmp/uptimes.json)"
+          test -n "$UPTIME_NAME"
+          CHECK_ID="${UPTIME_NAME##*/}"
+
+          ACTUAL_NAME="$(jq -r --arg label "$ALERT_LABEL" 'first(.alertPolicies[]? | select(.userLabels.toca_managed==$label and .userLabels.alert_role=="availability") | .name) // empty' /tmp/alerts.json)"
+          test -n "$ACTUAL_NAME"
+          TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" \
+            "https://monitoring.googleapis.com/v3/${ACTUAL_NAME}" > /tmp/actual.json
+          unset TOKEN
+
+          jq -n --arg display "$GLOBAL_DISPLAY" --arg role availability --arg label "$ALERT_LABEL" --arg checkId "$CHECK_ID" --arg duration "$UPTIME_DURATION" --arg autoClose "$AUTO_CLOSE" --arg runbook "$RUNBOOK" --argjson channels "$CHANNELS_JSON" '{
+            displayName:($display + " Alert"),
+            documentation:{content:("Staging-only readiness incident. Runbook: " + $runbook),mimeType:"text/markdown"},
+            userLabels:{toca_managed:$label,alert_role:$role,severity:"p1"},
+            conditions:[{displayName:("Readiness failure: " + $display),conditionThreshold:{
+              filter:("metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"" + $checkId + "\" AND resource.type=\"cloud_run_revision\""),
+              aggregations:[{alignmentPeriod:"300s",perSeriesAligner:"ALIGN_NEXT_OLDER",crossSeriesReducer:"REDUCE_COUNT_FALSE",groupByFields:["resource.label.*"]}],
+              comparison:"COMPARISON_GT",thresholdValue:0,duration:$duration,trigger:{count:1}
+            }}],
+            combiner:"OR",enabled:true,notificationChannels:$channels,alertStrategy:{autoClose:$autoClose}
+          }' > /tmp/desired.json
+
+          project() {
+            jq -S '{displayName,documentation,userLabels,conditions:[.conditions[] | del(.name)],combiner,enabled,notificationChannels:(.notificationChannels | sort),alertStrategy}' "$1"
+          }
+          project /tmp/desired.json > /tmp/desired-projection.json
+          project /tmp/actual.json > /tmp/actual-projection.json
+
+          echo '=== AVAILABILITY_DESIRED_PROJECTION ==='
+          cat /tmp/desired-projection.json
+          echo '=== AVAILABILITY_ACTUAL_PROJECTION ==='
+          cat /tmp/actual-projection.json
+          echo '=== AVAILABILITY_PROJECTION_DIFF ==='
+          diff -u /tmp/desired-projection.json /tmp/actual-projection.json || true
+          echo 'AVAILABILITY_DRIFT_DIAGNOSTIC_READ_ONLY=PASS'
+          echo 'PRODUCTION_TOUCHED=NO'
+          echo 'IAM_MUTATION=NO'
+          echo 'MONITORING_MUTATION=NO'
