@@ -46,6 +46,7 @@ jobs:
           test.write_text(text.replace(anchor, anchor + addition))
           PY
           rm .github/workflows/ops-apply-threshold-normalization.yml
+          rm -f ops/.threshold-normalization-trigger
           bash -n ops/staging-runtime-observability-reconcile-v3.sh
           pnpm install --frozen-lockfile
           pnpm exec prettier --check ops/staging-runtime-observability-reconcile-v3.sh test/staging-runtime-observability-contract.test.ts
@@ -56,7 +57,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/staging-runtime-observability-reconcile-v3.sh test/staging-runtime-observability-contract.test.ts .github/workflows/ops-apply-threshold-normalization.yml
+          git add -A
           git diff --cached --check
           git commit -m 'fix(reliability): normalize zero alert threshold readback'
           git push origin HEAD:fix/reliability-threshold-default-normalization-20260823
