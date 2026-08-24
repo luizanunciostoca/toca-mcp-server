@@ -13,7 +13,17 @@ const pool = new pg.Pool({
 });
 
 try {
-  const [migrations, audit, outbox, workflow, privacy] = await Promise.all([
+  const [
+    migrations,
+    audit,
+    outbox,
+    workflow,
+    privacy,
+    tables,
+    tenants,
+    tenantConfigurations,
+    tenantColumns,
+  ] = await Promise.all([
     pool.query('select version from schema_migrations order by version'),
     pool.query(`select event_id, execution_id, correlation_id, event_hash, status, created_at
                   from audit_ledger_events
@@ -32,14 +42,56 @@ try {
                  order by status`),
     pool.query(`select count(*)::int as event_count, max(ledger_sequence)::text as latest_sequence
                   from privacy_ledger_events`),
+    pool.query(`select table_name
+                  from information_schema.tables
+                 where table_schema = 'public'
+                   and table_type = 'BASE TABLE'
+                 order by table_name`),
+    pool.query(`select tenant_id, status, display_name
+                  from tenants
+                 order by tenant_id`),
+    pool.query(`select tenant_id, workspace_id, organization_id, config_version
+                  from tenant_configurations
+                 order by tenant_id`),
+    pool.query(`select table_name
+                  from information_schema.columns
+                 where table_schema = 'public'
+                   and column_name = 'tenant_id'
+                 order by table_name`),
   ]);
 
+  const migrationVersions = migrations.rows.map((row) => String(row.version));
+  const publicTables = tables.rows.map((row) => String(row.table_name));
+  const tenantScopedTables = tenantColumns.rows.map((row) => String(row.table_name));
+
   const evidence = {
-    schemaVersion: 'toca.platform.evidence.database-runtime.v1',
+    schemaVersion: 'toca.platform.evidence.database-runtime.v2',
     capturedAt: new Date().toISOString(),
     releaseSha: process.env.TOCA_RELEASE_SHA ?? null,
     environment: process.env.TOCA_DEPLOY_ENVIRONMENT ?? null,
-    migrations: migrations.rows.map((row) => String(row.version)),
+    migrations: migrationVersions,
+    migrationSummary: {
+      count: migrationVersions.length,
+      maximum: migrationVersions.at(-1) ?? null,
+      migration027Present: migrationVersions.some((version) => version.startsWith('027')),
+    },
+    schema: {
+      publicTableCount: publicTables.length,
+      publicTables,
+      tenantScopedTableCount: tenantScopedTables.length,
+      tenantScopedTables,
+    },
+    tenants: tenants.rows.map((row) => ({
+      tenantId: row.tenant_id,
+      status: row.status,
+      displayName: row.display_name,
+    })),
+    tenantConfigurations: tenantConfigurations.rows.map((row) => ({
+      tenantId: row.tenant_id,
+      workspaceId: row.workspace_id,
+      organizationId: row.organization_id,
+      configVersion: Number(row.config_version),
+    })),
     auditRefs: audit.rows.map((row) => ({
       eventId: row.event_id,
       executionId: row.execution_id,

@@ -25,7 +25,7 @@ on:
         required: false
         type: string
       rollback_webhook_revision:
-        description: Known webhook revision for explicit rollback
+        description: Known webhook revision, or ABSENT to restore closed external exposure when no prior webhook revision served traffic
         required: false
         type: string
       rollback_compatibility_ref:
@@ -241,10 +241,14 @@ jobs:
           set -euo pipefail
           PROXY_VERSION='2.24.1'
           PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
-          curl --fail --silent --show-error --location             "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"             --output /tmp/cloud-sql-proxy
+          curl --fail --silent --show-error --location \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
+            --output /tmp/cloud-sql-proxy
           echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
           chmod 0755 /tmp/cloud-sql-proxy
-          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432             "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}"             >/tmp/cloud-sql-proxy.log 2>&1 &
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 \
+            "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            >/tmp/cloud-sql-proxy.log 2>&1 &
           PROXY_PID=$!
           echo "CLOUD_SQL_PROXY_PID=$PROXY_PID" >> "$GITHUB_ENV"
           for attempt in {1..30}; do
@@ -417,8 +421,13 @@ jobs:
           current_revision() {
             gcloud run services describe "$1" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.traffic[percent=100].revisionName)' 2>/dev/null || true
           }
+          WEBHOOK_SERVICE_EXISTED=false
+          if gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+            WEBHOOK_SERVICE_EXISTED=true
+          fi
           echo "PREVIOUS_MCP_REVISION=$(current_revision "$GCP_CLOUD_RUN_MCP_SERVICE")" >> "$GITHUB_ENV"
           echo "PREVIOUS_WEBHOOK_REVISION=$(current_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED" >> "$GITHUB_ENV"
 
       - name: Deploy private MCP candidate by digest with no traffic
         if: inputs.operation == 'deploy'
@@ -446,7 +455,7 @@ jobs:
             --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_WEBHOOK_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_WEBHOOK_MAX_INSTANCES || '2' }}" \
-            --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --allow-unauthenticated
+            --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --default-url --allow-unauthenticated
 
       - name: Resolve exact candidate revisions and URLs
         if: inputs.operation == 'deploy'
@@ -524,14 +533,16 @@ jobs:
             --arg sourceSha "$GITHUB_SHA" --arg imageDigest "$IMAGE_DIGEST" --arg image "$IMAGE" \
             --arg mcpRevision "$MCP_REVISION" --arg webhookRevision "$WEBHOOK_REVISION" \
             --arg previousMcp "${PREVIOUS_MCP_REVISION:-}" --arg previousWebhook "${PREVIOUS_WEBHOOK_REVISION:-}" \
+            --arg previousWebhookServiceExisted "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" \
             --arg environment "${{ inputs.environment }}" --arg alertRef "${ALERT_EVIDENCE_REF:-}" --arg drRef "${DR_EVIDENCE_REF:-}" \
-            '{schemaVersion:"toca.platform.release-evidence.v1",environment:$environment,sourceSha:$sourceSha,imageDigest:$imageDigest,image:$image,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},rollbackTargets:{mcp:($previousMcp|select(length>0)),webhook:($previousWebhook|select(length>0))},alertEvidence:{ref:($alertRef|select(length>0)),state:(if ($alertRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)},drEvidence:{ref:($drRef|select(length>0)),state:(if ($drRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)}}' > platform-evidence/manifest.json
+            '{schemaVersion:"toca.platform.release-evidence.v1",environment:$environment,sourceSha:$sourceSha,imageDigest:$imageDigest,image:$image,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},rollbackTargets:{mcp:($previousMcp|select(length>0)),webhook:(if ($previousWebhook|length)>0 then $previousWebhook else "ABSENT" end),previousWebhookServiceExisted:($previousWebhookServiceExisted=="true")},alertEvidence:{ref:($alertRef|select(length>0)),state:(if ($alertRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)},drEvidence:{ref:($drRef|select(length>0)),state:(if ($drRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)}}' > platform-evidence/manifest.json
 
       - name: Promote production canary
         if: inputs.operation == 'deploy' && inputs.environment == 'production' && inputs.rollout == 'canary'
         run: |
           set -euo pipefail
-          test -n "${PREVIOUS_MCP_REVISION:-}"; test -n "${PREVIOUS_WEBHOOK_REVISION:-}"
+          test -n "${PREVIOUS_MCP_REVISION:-}"
+          test -n "${PREVIOUS_WEBHOOK_REVISION:-}" || { echo 'Production canary requires an existing serving webhook revision; first webhook introduction must use tagged no-traffic validation followed by full promotion.' >&2; exit 1; }
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=10,${PREVIOUS_MCP_REVISION}=90"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=10,${PREVIOUS_WEBHOOK_REVISION}=90"
 
@@ -568,9 +579,14 @@ jobs:
           set -euo pipefail
           test -n "$ROLLBACK_MCP_REVISION"; test -n "$ROLLBACK_WEBHOOK_REVISION"; test -n "$ROLLBACK_COMPATIBILITY_REF"
           gcloud run revisions list --service "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_MCP_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_MCP_REVISION"
-          gcloud run revisions list --service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_WEBHOOK_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_WEBHOOK_REVISION"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_MCP_REVISION}=100"
-          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_WEBHOOK_REVISION}=100"
+          if [[ "$ROLLBACK_WEBHOOK_REVISION" == ABSENT ]]; then
+            gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
+            echo 'WEBHOOK_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gcloud run revisions list --service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_WEBHOOK_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_WEBHOOK_REVISION"
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_WEBHOOK_REVISION}=100"
+          fi
           echo "ROLLBACK_COMPATIBILITY_REF=$ROLLBACK_COMPATIBILITY_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Activate emergency mutation kill switch
@@ -590,11 +606,16 @@ jobs:
           done
 
       - name: Automatic rollback after failed promotion
-        if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != '' && env.PREVIOUS_WEBHOOK_REVISION != ''
+        if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != ''
         run: |
           set -euo pipefail
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_MCP_REVISION}=100"
-          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
+          if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
+          else
+            gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
+            echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Deployment evidence summary
         if: always()
@@ -609,6 +630,7 @@ jobs:
             echo "- webhook revision: ${WEBHOOK_REVISION:-not-deployed}"
             echo "- previous MCP revision: ${PREVIOUS_MCP_REVISION:-none}"
             echo "- previous webhook revision: ${PREVIOUS_WEBHOOK_REVISION:-none}"
+            echo "- previous webhook service existed: ${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-unknown}"
             echo "- alert evidence: ${ALERT_EVIDENCE_REF:-NOT_PROVEN}"
             echo "- DR evidence: ${DR_EVIDENCE_REF:-NOT_PROVEN}"
           } >> "$GITHUB_STEP_SUMMARY"
