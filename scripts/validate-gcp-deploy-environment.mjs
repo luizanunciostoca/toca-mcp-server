@@ -41,8 +41,71 @@ if (environment === 'production' && process.env.GCP_DATABASE_URL_SECRET_VERSION 
 }
 
 if (environment === 'staging') validateStagingIsolation();
+if (environment === 'production') validateProductionConfiguration();
 
 console.log(`GCP_DEPLOY_ENVIRONMENT_VALIDATED=${environment}`);
+
+function validateProductionConfiguration() {
+  const expectedCoordinates = {
+    GCP_PROJECT_ID: 'toca-mcp-production',
+    GCP_PROJECT_NUMBER: '990081828836',
+    GCP_REGION: 'southamerica-east1',
+    GCP_ARTIFACT_REPOSITORY: 'toca-mcp',
+    GCP_CLOUD_SQL_INSTANCE: 'toca-mcp-db',
+    GCP_CLOUD_RUN_MCP_SERVICE: 'toca-mcp-production',
+    GCP_CLOUD_RUN_WEBHOOK_SERVICE: 'toca-webhook-next-production',
+    GCP_WORKLOAD_IDENTITY_PROVIDER:
+      'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp',
+    GCP_DEPLOY_SERVICE_ACCOUNT:
+      'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_MCP_RUNTIME_SERVICE_ACCOUNT:
+      'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT:
+      'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+    GCP_DATABASE_URL_SECRET: 'toca-database-url',
+    GCP_DATABASE_URL_SECRET_VERSION: '1',
+  };
+
+  for (const [key, expectedValue] of Object.entries(expectedCoordinates)) {
+    if (requireValue(key) !== expectedValue) {
+      fail('PRODUCTION_CONFIG_ENV_MISMATCH', key);
+    }
+  }
+
+  const expectedProviderState = {
+    META_ENABLED: 'false',
+    META_PROVIDER_VERIFIED: 'true',
+    META_WEBHOOK_ENABLED: 'false',
+    META_WEBHOOK_PERSISTENCE_ENABLED: 'false',
+    INSTAGRAM_READ_ENABLED: 'false',
+    META_ADS_READ_ENABLED: 'true',
+    META_ADS_WRITE_ENABLED: 'false',
+    WHATSAPP_ENABLED: 'false',
+    WHATSAPP_PROVIDER_VERIFIED: 'false',
+    EMAIL_SENDGRID_ENABLED: 'false',
+    EMAIL_SENDGRID_PROVIDER_VERIFIED: 'false',
+    GOOGLE_ADS_PHASE: 'OFF',
+    GOOGLE_ADS_PROVIDER_VERIFIED: 'false',
+    AG01_MODEL_ENABLED: 'false',
+    AG01_MODEL_PROVIDER_VERIFIED: 'false',
+  };
+  for (const [key, expectedValue] of Object.entries(expectedProviderState)) {
+    if (value(key, '') !== expectedValue) {
+      fail('PRODUCTION_PROVIDER_STATE_MISMATCH', key);
+    }
+  }
+
+  if (requireValue('GCP_META_ACCESS_TOKEN_SECRET') !== 'toca-meta-oauth-token') {
+    fail('PRODUCTION_META_TOKEN_SECRET_MISMATCH', 'GCP_META_ACCESS_TOKEN_SECRET');
+  }
+  const metaTokenVersion = requireValue('GCP_META_ACCESS_TOKEN_SECRET_VERSION');
+  if (metaTokenVersion !== 'RESOLVE_RUNTIME' && !/^\d+$/.test(metaTokenVersion)) {
+    fail(
+      'PRODUCTION_META_TOKEN_SECRET_VERSION_INVALID',
+      'expected numeric version or RESOLVE_RUNTIME',
+    );
+  }
+}
 
 function validateStagingIsolation() {
   const projectId = requireValue('GCP_PROJECT_ID');
@@ -206,6 +269,12 @@ function validateSecretVersions() {
     const version = requireValue(versionKey);
     if (version === 'latest') {
       fail('PRODUCTION_PROVIDER_SECRET_VERSION_MUST_BE_PINNED', versionKey);
+    }
+    if (version === 'RESOLVE_RUNTIME' && versionKey !== 'GCP_META_ACCESS_TOKEN_SECRET_VERSION') {
+      fail('PRODUCTION_PROVIDER_SECRET_VERSION_SENTINEL_FORBIDDEN', versionKey);
+    }
+    if (version !== 'RESOLVE_RUNTIME' && !/^\d+$/.test(version)) {
+      fail('PRODUCTION_PROVIDER_SECRET_VERSION_INVALID', versionKey);
     }
   }
 }
