@@ -1,0 +1,156 @@
+name: Staging-Only DR Final Acceptance 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/staging-only-dr-final-20260823.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 15
+    env:
+      PROJECT_ID: toca-mcp-next-staging
+      PROJECT_NUMBER: '729069789107'
+      REGION: southamerica-east1
+      SOURCE_INSTANCE: toca-mcp-next-staging-db
+      MCP_SERVICE: toca-mcp-next-staging
+      WEBHOOK_SERVICE: toca-webhook-next-staging
+      STAGING_WIF: projects/729069789107/locations/global/workloadIdentityPools/github-staging/providers/github-toca-mcp-staging
+      STAGING_OPERATOR_SA: toca-next-stg-deployer@toca-mcp-next-staging.iam.gserviceaccount.com
+      CANDIDATE_SHA: e8221698d36040c2c86da46f697121e34ca7258c
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Boundary gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$PROJECT_NUMBER" = '729069789107'
+          test "$SOURCE_INSTANCE" = 'toca-mcp-next-staging-db'
+          test "$CANDIDATE_SHA" = 'e8221698d36040c2c86da46f697121e34ca7258c'
+          [[ "$STAGING_WIF" == projects/${PROJECT_NUMBER}/* ]]
+          [[ "$STAGING_OPERATOR_SA" == *@${PROJECT_ID}.iam.gserviceaccount.com ]]
+          ! grep -R -E '990081828836|toca-mcp-production|toca-mcp-infra-admin@' .github/workflows/staging-only-dr-final-20260823.yml
+          echo 'BOUNDARY_STAGING_ONLY=PASS'
+
+      - name: Authenticate staging identity only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.STAGING_WIF }}
+          service_account: ${{ env.STAGING_OPERATOR_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Live readback and permission probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+          test "$ACTIVE" = "$STAGING_OPERATOR_SA"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud sql instances describe "$SOURCE_INSTANCE" --project "$PROJECT_ID" --format=json > /tmp/source.json
+          STATE="$(jq -r '.state' /tmp/source.json)"
+          VERSION="$(jq -r '.databaseVersion' /tmp/source.json)"
+          DB_REGION="$(jq -r '.region' /tmp/source.json)"
+          BACKUP="$(jq -r '.settings.backupConfiguration.enabled // false' /tmp/source.json)"
+          PITR="$(jq -r '.settings.backupConfiguration.pointInTimeRecoveryEnabled // false' /tmp/source.json)"
+          RETAINED="$(jq -r '.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0' /tmp/source.json)"
+          WAL="$(jq -r '.settings.backupConfiguration.transactionLogRetentionDays // 0' /tmp/source.json)"
+          NETWORK="$(jq -r '.settings.ipConfiguration.privateNetwork // "NONE"' /tmp/source.json)"
+          DISK_TYPE="$(jq -r '.settings.dataDiskType // "UNKNOWN"' /tmp/source.json)"
+          DISK_SIZE="$(jq -r '.settings.dataDiskSizeGb // 0' /tmp/source.json)"
+
+          gcloud sql backups list --instance "$SOURCE_INSTANCE" --project "$PROJECT_ID" --limit 50 --format=json > /tmp/backups.json
+          SUCCESSFUL="$(jq '[.[] | select(.status == "SUCCESSFUL")] | length' /tmp/backups.json)"
+          LATEST_BACKUP="$(jq -r '[.[] | select(.status == "SUCCESSFUL") | (.endTime // .startTime // empty)] | sort | last // empty' /tmp/backups.json)"
+
+          TOKEN="$(gcloud auth print-access-token)"
+          RECOVERY_HTTP="$(curl -sS -o /tmp/recovery.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SOURCE_INSTANCE}/getLatestRecoveryTime")"
+          test "$RECOVERY_HTTP" = 200
+          EARLIEST="$(jq -r '.earliestRecoveryTime' /tmp/recovery.json)"
+          LATEST="$(jq -r '.latestRecoveryTime' /tmp/recovery.json)"
+          NOW="$(date -u +%s)"
+          LATEST_EPOCH="$(date -u -d "$LATEST" +%s)"
+          LAG=$((NOW-LATEST_EPOCH))
+
+          cat >/tmp/perms.json <<'JSON'
+          {"permissions":["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.create","cloudsql.instances.update","cloudsql.instances.delete","cloudsql.instances.connect","cloudsql.operations.get","cloudsql.users.list","serviceusage.services.use","iam.roles.create","iam.roles.get","iam.roles.update","iam.roles.delete","iam.serviceAccounts.create","iam.serviceAccounts.get","iam.serviceAccounts.delete","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","iam.serviceAccounts.actAs","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy"]}
+          JSON
+          PERM_HTTP="$(curl -sS -o /tmp/granted.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/perms.json "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          unset TOKEN
+          test "$PERM_HTTP" = 200
+          GRANTED="$(jq -c '.permissions // [] | sort' /tmp/granted.json)"
+          DR_REQ='["cloudsql.instances.get","cloudsql.instances.clone","cloudsql.instances.create","cloudsql.instances.update","cloudsql.instances.delete","cloudsql.instances.connect","cloudsql.operations.get","serviceusage.services.use"]'
+          IAM_REQ='["iam.roles.create","iam.roles.get","iam.roles.update","iam.roles.delete","iam.serviceAccounts.create","iam.serviceAccounts.get","iam.serviceAccounts.delete","iam.serviceAccounts.getIamPolicy","iam.serviceAccounts.setIamPolicy","resourcemanager.projects.getIamPolicy","resourcemanager.projects.setIamPolicy"]'
+          DR_MISSING="$(jq -cn --argjson r "$DR_REQ" --argjson g "$GRANTED" '$r-$g')"
+          IAM_MISSING="$(jq -cn --argjson r "$IAM_REQ" --argjson g "$GRANTED" '$r-$g')"
+
+          runtime() {
+            local svc="$1"
+            gcloud run services describe "$svc" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/run.json
+            local rev
+            rev="$(jq -r 'first(.status.traffic[] | select((.percent//0)==100) | .revisionName) // empty' /tmp/run.json)"
+            test -n "$rev"
+            gcloud run revisions describe "$rev" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/rev.json
+            local sha
+            sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value) // empty' /tmp/rev.json)"
+            printf '%s|%s\n' "$rev" "$sha"
+          }
+          MCP="$(runtime "$MCP_SERVICE")"
+          WEBHOOK="$(runtime "$WEBHOOK_SERVICE")"
+          MCP_SHA="${MCP#*|}"
+          WEBHOOK_SHA="${WEBHOOK#*|}"
+          test "$MCP_SHA" = "$CANDIDATE_SHA"
+          test "$WEBHOOK_SHA" = "$CANDIDATE_SHA"
+
+          test "$STATE" = RUNNABLE
+          test "$DB_REGION" = "$REGION"
+          test "$BACKUP" = true
+          test "$PITR" = true
+          test "$RETAINED" -ge 7
+          test "$WAL" -ge 7
+          test "$SUCCESSFUL" -ge 1
+          test "$LAG" -ge 0
+          test "$LAG" -le 900
+
+          echo "ACTIVE_IDENTITY=$ACTIVE"
+          echo "SOURCE_STATE=$STATE"
+          echo "SOURCE_VERSION=$VERSION"
+          echo "SOURCE_REGION=$DB_REGION"
+          echo "BACKUP_ENABLED=$BACKUP"
+          echo "BACKUP_RETENTION=$RETAINED"
+          echo "SUCCESSFUL_BACKUPS=$SUCCESSFUL"
+          echo "LATEST_SUCCESSFUL_BACKUP=$LATEST_BACKUP"
+          echo "PITR_ENABLED=$PITR"
+          echo "WAL_RETENTION=$WAL"
+          echo "EARLIEST_RECOVERY_POINT=$EARLIEST"
+          echo "LATEST_RECOVERY_POINT=$LATEST"
+          echo "LATEST_RECOVERY_LAG_SECONDS=$LAG"
+          echo "NETWORK=$NETWORK"
+          echo "DISK_TYPE=$DISK_TYPE"
+          echo "DISK_SIZE_GB=$DISK_SIZE"
+          echo "MCP_RUNTIME=$MCP"
+          echo "WEBHOOK_RUNTIME=$WEBHOOK"
+          echo "GRANTED_PERMISSIONS=$GRANTED"
+          echo "DR_MISSING_PERMISSIONS=$DR_MISSING"
+          echo "IAM_BOOTSTRAP_MISSING_PERMISSIONS=$IAM_MISSING"
+          if [[ "$DR_MISSING" == '[]' ]]; then echo 'DR_PERMISSIONS_READY=YES'; else echo 'DR_PERMISSIONS_READY=NO'; fi
+          if [[ "$IAM_MISSING" == '[]' ]]; then echo 'IAM_BOOTSTRAP_READY=YES'; else echo 'IAM_BOOTSTRAP_READY=NO'; fi
+          echo 'PRODUCTION_TOUCHED=NO'
+          echo 'PRODUCTION_IAM_TOUCHED=NO'
+          echo 'PRODUCTION_DB_TOUCHED=NO'
+          echo 'PRODUCTION_BACKUPS_TOUCHED=NO'
+          echo 'PRODUCTION_DR_TOUCHED=NO'
+          echo 'REAL_PROVIDERS_TOUCHED=NO'
+          echo 'STAGING_ONLY_PREFLIGHT=PASS'
