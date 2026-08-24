@@ -4,18 +4,18 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout remediation branch
+      - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          persist-credentials: true
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -27,7 +27,7 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Stage runtime-identity database remediation blobs
+      - name: Generate runtime-identity database remediation bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -36,12 +36,10 @@ jobs:
 
           workflow_path = Path('.github/workflows/deploy-gcp.yml')
           workflow = workflow_path.read_text()
-
           start = workflow.index('      - name: Start verified Cloud SQL Auth Proxy for repository database operations')
           runtime_config = workflow.index('      - name: Build non-secret runtime configuration and Secret Manager bindings', start)
           configure = workflow.index('      - name: Configure Docker auth', start)
           build_section = workflow[configure:runtime_config]
-
           migration_job = r'''      - name: Apply repository migrations through runtime identity job
             if: inputs.operation == 'deploy'
             run: |
@@ -93,7 +91,6 @@ jobs:
 
 '''
           workflow = workflow[:start] + build_section + migration_job + workflow[runtime_config:]
-
           evidence_start = workflow.index('      - name: Capture database Audit Outbox Workflow Privacy and migration refs through authenticated proxy')
           evidence_end = workflow.index('      - name: Capture non-secret deploy and provider evidence', evidence_start)
           evidence_job = r'''      - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
@@ -243,15 +240,15 @@ describe('GCP deploy database least-privilege transport', () => {
 });
 """)
           PY
-
           pnpm exec prettier --write .github/workflows/deploy-gcp.yml scripts/capture-platform-evidence.mjs test/gcp-deploy-cloud-sql-proxy.test.ts
-          mkdir -p .toca/tmp
-          cp .github/workflows/deploy-gcp.yml .toca/tmp/deploy-gcp-runtime-db-jobs.yml
-          git checkout HEAD -- .github/workflows/deploy-gcp.yml
-          git config user.name 'TOCA CI Remediation Stager'
-          git config user.email 'actions@users.noreply.github.com'
-          git add Dockerfile scripts/capture-platform-evidence.mjs test/gcp-deploy-cloud-sql-proxy.test.ts .toca/tmp/deploy-gcp-runtime-db-jobs.yml
-          git commit -m 'chore(diag): stage runtime-identity database remediation blobs'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-      - name: Mark staging complete
-        run: echo 'RUNTIME_IDENTITY_DB_REMEDIATION_STAGED=YES'
+      - name: Upload remediation bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-db-remediation-${{ github.event.pull_request.head.sha }}
+          path: |
+            .github/workflows/deploy-gcp.yml
+            Dockerfile
+            scripts/capture-platform-evidence.mjs
+            test/gcp-deploy-cloud-sql-proxy.test.ts
+          if-no-files-found: error
+          retention-days: 7
