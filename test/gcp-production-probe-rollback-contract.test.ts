@@ -53,9 +53,10 @@ describe('GCP production startup and rollback safety contract', () => {
   it('resolves tagged candidate revision and URL from the Cloud Run traffic JSON', () => {
     const resolution = section(
       '- name: Resolve exact candidate revisions and URLs',
-      '- name: Verify health readiness and webhook route confinement',
+      '- name: Mint private MCP probe ID token through WIF',
     );
 
+    expect(resolution).toContain('id: resolve_candidates');
     expect(resolution).toContain('--format=json');
     expect(resolution).toContain('select((.tag // "") == $tag)');
     expect(resolution).toContain('"$MCP_TAG" revisionName)');
@@ -63,28 +64,42 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
     expect(resolution).toContain('"$WEBHOOK_TAG" url)');
     expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate');
+    expect(resolution).toContain('echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain('echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"');
     expect(resolution).not.toContain('status.traffic[tag=');
   });
 
-  it('impersonates the deploy service account for private candidate ID tokens', () => {
-    const verification = section(
-      '- name: Verify health readiness and webhook route confinement',
+  it('mints private candidate ID tokens directly through WIF without self-impersonation', () => {
+    const probeAuth = section(
+      '- name: Mint private MCP probe ID token through WIF',
       '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
     );
-    const unimpersonated = 'gcloud auth print-identity-token --audiences=';
 
-    expect(verification).toContain(
-      'MCP_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$MCP_URL")"',
+    expect(probeAuth).toContain('id: mcp_probe_auth');
+    expect(probeAuth).toContain('id: webhook_probe_auth');
+    expect(probeAuth).toContain(
+      'uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed',
     );
-    expect(verification).toContain(
-      'WEBHOOK_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$WEBHOOK_URL")"',
+    expect(probeAuth).toContain('token_format: id_token');
+    expect(probeAuth).toContain(
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_url }}',
     );
-    expect(verification).not.toContain(unimpersonated);
-    expect(verification).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
-    expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
-    expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
-    expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp"');
-    expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start"');
+    expect(probeAuth).toContain(
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_url }}',
+    );
+    expect(probeAuth).toContain('create_credentials_file: false');
+    expect(probeAuth).toContain('export_environment_variables: false');
+    expect(probeAuth).toContain('MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}');
+    expect(probeAuth).toContain('WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}');
+    expect(probeAuth).not.toContain('gcloud auth print-identity-token');
+    expect(probeAuth).not.toContain('--impersonate-service-account');
+    expect(probeAuth).toContain('test -n "$MCP_TOKEN"');
+    expect(probeAuth).toContain('test -n "$WEBHOOK_TOKEN"');
+    expect(probeAuth).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
+    expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
+    expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
+    expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp"');
+    expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start"');
   });
 
   it('marks promotion before the first traffic mutation for canary and full rollouts', () => {
