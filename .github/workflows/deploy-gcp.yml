@@ -710,12 +710,28 @@ jobs:
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
-          service_field() { gcloud run services describe "$1" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format="$2"; }
-          MCP_REVISION="$(service_field "$GCP_CLOUD_RUN_MCP_SERVICE" "value(status.traffic[tag=${MCP_TAG}].revisionName)")"
-          MCP_URL="$(service_field "$GCP_CLOUD_RUN_MCP_SERVICE" "value(status.traffic[tag=${MCP_TAG}].url)")"
-          WEBHOOK_REVISION="$(service_field "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "value(status.traffic[tag=${WEBHOOK_TAG}].revisionName)")"
-          WEBHOOK_URL="$(service_field "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "value(status.traffic[tag=${WEBHOOK_TAG}].url)")"
-          test -n "$MCP_REVISION"; test -n "$MCP_URL"; test -n "$WEBHOOK_REVISION"; test -n "$WEBHOOK_URL"
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-candidate-service.json
+          gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/webhook-candidate-service.json
+          tagged_target_field() {
+            local service_json="$1" tag="$2" field="$3"
+            jq -r --arg tag "$tag" --arg field "$field" '
+              [(.status.traffic // [])[]
+                | select((.tag // "") == $tag)
+                | .[$field] // empty]
+              | unique
+              | if length == 1 then .[0] else empty end
+            ' "$service_json"
+          }
+          MCP_REVISION="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" revisionName)"
+          MCP_URL="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" url)"
+          WEBHOOK_REVISION="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" revisionName)"
+          WEBHOOK_URL="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" url)"
+          if [[ -z "$MCP_REVISION" || -z "$MCP_URL" || -z "$WEBHOOK_REVISION" || -z "$WEBHOOK_URL" ]]; then
+            echo 'Could not resolve exact tagged Cloud Run candidate revision and URL' >&2
+            jq -c --arg tag "$MCP_TAG" '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/mcp-candidate-service.json >&2
+            jq -c --arg tag "$WEBHOOK_TAG" '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/webhook-candidate-service.json >&2
+            exit 1
+          fi
           echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
           echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
