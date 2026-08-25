@@ -58,8 +58,10 @@ describe('GCP production startup and rollback safety contract', () => {
 
     expect(resolution).toContain('--format=json');
     expect(resolution).toContain('select((.tag // "") == $tag)');
-    expect(resolution).toContain('.revisionName');
-    expect(resolution).toContain('.url');
+    expect(resolution).toContain('"$MCP_TAG" revisionName)');
+    expect(resolution).toContain('"$MCP_TAG" url)');
+    expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
+    expect(resolution).toContain('"$WEBHOOK_TAG" url)');
     expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate');
     expect(resolution).not.toContain('status.traffic[tag=');
   });
