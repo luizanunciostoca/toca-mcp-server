@@ -64,16 +64,10 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
     expect(resolution).toContain('"$WEBHOOK_TAG" url)');
     expect(resolution).toContain(
-      'MCP_AUDIENCE="$(jq -r \' .status.url // empty \' /tmp/mcp-candidate-service.json)"'.replaceAll(
-        "' ",
-        "'",
-      ).replaceAll(" \'", "'"),
+      `MCP_AUDIENCE="$(jq -r '.status.url // empty' /tmp/mcp-candidate-service.json)"`,
     );
     expect(resolution).toContain(
-      'WEBHOOK_AUDIENCE="$(jq -r \' .status.url // empty \' /tmp/webhook-candidate-service.json)"'.replaceAll(
-        "' ",
-        "'",
-      ).replaceAll(" \'", "'"),
+      `WEBHOOK_AUDIENCE="$(jq -r '.status.url // empty' /tmp/webhook-candidate-service.json)"`,
     );
     expect(resolution).toContain(
       'Could not resolve exact tagged Cloud Run candidate revision',
