@@ -682,19 +682,29 @@ jobs:
             --min-instances "${{ vars.GCP_MCP_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_MCP_MAX_INSTANCES || '1' }}" \
             --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" --no-allow-unauthenticated
 
-      - name: Deploy controlled public webhook candidate by digest with no traffic
+      - name: Deploy controlled webhook candidate by digest
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
+          WEBHOOK_TRAFFIC_ARGS=(--no-traffic)
+          WEBHOOK_AUTH_ARGS=(--allow-unauthenticated)
+          WEBHOOK_FIRST_INTRODUCTION=false
+          if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]]; then
+            WEBHOOK_TRAFFIC_ARGS=()
+            WEBHOOK_AUTH_ARGS=(--no-allow-unauthenticated)
+            WEBHOOK_FIRST_INTRODUCTION=true
+          fi
+          echo "WEBHOOK_FIRST_INTRODUCTION=$WEBHOOK_FIRST_INTRODUCTION" >> "$GITHUB_ENV"
           gcloud run deploy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --revision-suffix "$WEBHOOK_REVISION_SUFFIX" --tag "$WEBHOOK_TAG" --no-traffic \
+            --revision-suffix "$WEBHOOK_REVISION_SUFFIX" --tag "$WEBHOOK_TAG" \
             --service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "$WEBHOOK_RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
             --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_WEBHOOK_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_WEBHOOK_MAX_INSTANCES || '2' }}" \
-            --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --default-url --allow-unauthenticated
+            --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --default-url \
+            "${WEBHOOK_TRAFFIC_ARGS[@]}" "${WEBHOOK_AUTH_ARGS[@]}"
 
       - name: Resolve exact candidate revisions and URLs
         if: inputs.operation == 'deploy'
@@ -717,15 +727,17 @@ jobs:
           set -euo pipefail
           mkdir -p platform-evidence
           MCP_TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_URL")"
+          WEBHOOK_TOKEN="$(gcloud auth print-identity-token --audiences="$WEBHOOK_URL")"
+          WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" | tee platform-evidence/mcp-healthz.json
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" | tee platform-evidence/mcp-readyz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
           jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/mcp-readyz.json >/dev/null
           jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/webhook-readyz.json >/dev/null
-          MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/mcp")"
-          OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/oauth/meta/start")"
-          [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Public webhook surface exposed a forbidden route' >&2; exit 1; }
+          MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp")"
+          OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
+          [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Webhook candidate exposed a forbidden route' >&2; exit 1; }
           jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
 
       - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
@@ -814,7 +826,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${PREVIOUS_MCP_REVISION:-}"
-          test -n "${PREVIOUS_WEBHOOK_REVISION:-}" || { echo 'Production canary requires an existing serving webhook revision; first webhook introduction must use tagged no-traffic validation followed by full promotion.' >&2; exit 1; }
+          test -n "${PREVIOUS_WEBHOOK_REVISION:-}" || { echo 'Production canary requires an existing serving webhook revision; first webhook introduction must use private bootstrap validation followed by full promotion.' >&2; exit 1; }
           touch /tmp/toca-traffic-promotion-started
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=10,${PREVIOUS_MCP_REVISION}=90"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=10,${PREVIOUS_WEBHOOK_REVISION}=90"
@@ -826,6 +838,16 @@ jobs:
           touch /tmp/toca-traffic-promotion-started
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=100"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=100"
+          if [[ "${WEBHOOK_FIRST_INTRODUCTION:-false}" == true ]]; then
+            gcloud run services add-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/healthz" >/dev/null
+            PUBLIC_MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/mcp")"
+            PUBLIC_OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/oauth/meta/start")"
+            [[ "$PUBLIC_MCP_STATUS" == 404 && "$PUBLIC_OAUTH_STATUS" == 404 ]] || { echo 'Promoted public webhook exposed a forbidden route' >&2; exit 1; }
+            echo 'WEBHOOK_FIRST_INTRODUCTION_PUBLIC_VALIDATION=PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Read back final traffic state
         if: inputs.operation == 'deploy'
@@ -856,7 +878,10 @@ jobs:
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_MCP_REVISION}=100"
           if [[ "$ROLLBACK_WEBHOOK_REVISION" == ABSENT ]]; then
             gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
-            echo 'WEBHOOK_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL' >> "$GITHUB_STEP_SUMMARY"
+            gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            echo 'WEBHOOK_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
           else
             gcloud run revisions list --service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_WEBHOOK_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_WEBHOOK_REVISION"
             gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_WEBHOOK_REVISION}=100"
@@ -884,6 +909,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -f /tmp/toca-traffic-promotion-started ]]; then
+            if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]] && \
+              gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+              gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+              echo 'WEBHOOK_BOOTSTRAP_CLEANUP=DELETED_UNPROMOTED_SERVICE' >> "$GITHUB_STEP_SUMMARY"
+            fi
             echo 'AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -892,7 +922,10 @@ jobs:
             gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
           else
             gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
-            echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_NO_DEFAULT_URL' >> "$GITHUB_STEP_SUMMARY"
+            gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Deployment evidence summary
@@ -909,6 +942,7 @@ jobs:
             echo "- previous MCP revision: ${PREVIOUS_MCP_REVISION:-none}"
             echo "- previous webhook revision: ${PREVIOUS_WEBHOOK_REVISION:-none}"
             echo "- previous webhook service existed: ${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-unknown}"
+            echo "- first webhook introduction: ${WEBHOOK_FIRST_INTRODUCTION:-unknown}"
             echo "- alert evidence: ${ALERT_EVIDENCE_REF:-NOT_PROVEN}"
             echo "- DR evidence: ${DR_EVIDENCE_REF:-NOT_PROVEN}"
           } >> "$GITHUB_STEP_SUMMARY"
