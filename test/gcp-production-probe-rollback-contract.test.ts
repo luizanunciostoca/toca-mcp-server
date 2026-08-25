@@ -22,6 +22,17 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(workflow).toContain('"$WEBHOOK_URL/readyz"');
   });
 
+  it('keeps the production webhook traffic tag within the Cloud Run combined 46-character limit', () => {
+    const webhookService = 'toca-webhook-next-production';
+    const webhookTag = 'webhook-abcdef0';
+
+    expect(webhookService.length + webhookTag.length).toBeLessThanOrEqual(46);
+    expect(workflow).toContain('WEBHOOK_TAG=webhook-${GITHUB_SHA::7}');
+    expect(workflow).not.toContain(
+      'WEBHOOK_TAG=${{ inputs.environment }}-webhook-${GITHUB_SHA::7}',
+    );
+  });
+
   it('bootstraps a first webhook service privately instead of passing illegal no-traffic', () => {
     const webhookDeploy = section(
       '- name: Deploy controlled webhook candidate by digest',
