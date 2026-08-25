@@ -66,15 +66,20 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).not.toContain('status.traffic[tag=');
   });
 
-  it('validates webhook candidates with an identity token before any first public exposure', () => {
+  it('impersonates the deploy service account for private candidate ID tokens', () => {
     const verification = section(
       '- name: Verify health readiness and webhook route confinement',
       '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
     );
+    const unimpersonated = 'gcloud auth print-identity-token --audiences=';
 
     expect(verification).toContain(
-      'WEBHOOK_TOKEN="$(gcloud auth print-identity-token --audiences="$WEBHOOK_URL")"',
+      'MCP_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$MCP_URL")"',
     );
+    expect(verification).toContain(
+      'WEBHOOK_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$WEBHOOK_URL")"',
+    );
+    expect(verification).not.toContain(unimpersonated);
     expect(verification).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
     expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
     expect(verification).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
