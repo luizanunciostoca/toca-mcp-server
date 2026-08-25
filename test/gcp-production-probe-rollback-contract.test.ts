@@ -50,7 +50,7 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(webhookDeploy).toContain('"${WEBHOOK_TRAFFIC_ARGS[@]}" "${WEBHOOK_AUTH_ARGS[@]}"');
   });
 
-  it('resolves tagged candidate revision and URL from the Cloud Run traffic JSON', () => {
+  it('resolves tagged candidate request URLs separately from canonical Cloud Run token audiences', () => {
     const resolution = section(
       '- name: Resolve exact candidate revisions and URLs',
       '- name: Mint private MCP probe ID token through WIF',
@@ -63,13 +63,23 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).toContain('"$MCP_TAG" url)');
     expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
     expect(resolution).toContain('"$WEBHOOK_TAG" url)');
-    expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate');
+    expect(resolution).toContain(
+      'MCP_AUDIENCE="$(jq -r \'.status.url // empty\' /tmp/mcp-candidate-service.json)"',
+    );
+    expect(resolution).toContain(
+      'WEBHOOK_AUDIENCE="$(jq -r \'.status.url // empty\' /tmp/webhook-candidate-service.json)"',
+    );
+    expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate revision');
     expect(resolution).toContain('echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain('echo "mcp_audience=$MCP_AUDIENCE" >> "$GITHUB_OUTPUT"');
     expect(resolution).toContain('echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain(
+      'echo "webhook_audience=$WEBHOOK_AUDIENCE" >> "$GITHUB_OUTPUT"',
+    );
     expect(resolution).not.toContain('status.traffic[tag=');
   });
 
-  it('mints private candidate ID tokens directly through WIF without self-impersonation', () => {
+  it('mints WIF ID tokens for canonical service audiences while probing exact tagged candidates', () => {
     const probeAuth = section(
       '- name: Mint private MCP probe ID token through WIF',
       '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
@@ -82,9 +92,15 @@ describe('GCP production startup and rollback safety contract', () => {
     );
     expect(probeAuth).toContain('token_format: id_token');
     expect(probeAuth).toContain(
-      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_url }}',
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_audience }}',
     );
     expect(probeAuth).toContain(
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_audience }}',
+    );
+    expect(probeAuth).not.toContain(
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_url }}',
+    );
+    expect(probeAuth).not.toContain(
       'id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_url }}',
     );
     expect(probeAuth).toContain('create_credentials_file: false');
@@ -96,6 +112,8 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(probeAuth).toContain('test -n "$MCP_TOKEN"');
     expect(probeAuth).toContain('test -n "$WEBHOOK_TOKEN"');
     expect(probeAuth).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
+    expect(probeAuth).toContain('"$MCP_URL/healthz"');
+    expect(probeAuth).toContain('"$MCP_URL/readyz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp"');
