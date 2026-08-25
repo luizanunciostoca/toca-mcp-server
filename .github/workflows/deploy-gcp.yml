@@ -457,7 +457,7 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "MCP_TAG=${{ inputs.environment }}-mcp-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          echo "WEBHOOK_TAG=${{ inputs.environment }}-webhook-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_TAG=webhook-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
           echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
 
