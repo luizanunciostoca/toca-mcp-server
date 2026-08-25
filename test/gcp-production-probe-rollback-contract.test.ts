@@ -63,9 +63,14 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).toContain('"$MCP_TAG" url)');
     expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
     expect(resolution).toContain('"$WEBHOOK_TAG" url)');
+    expect(resolution).toContain('MCP_AUDIENCE="$(jq -r');
+    expect(resolution).toContain('WEBHOOK_AUDIENCE="$(jq -r');
+    expect(resolution).toContain('.status.url // empty');
     expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate');
     expect(resolution).toContain('echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain('mcp_audience=$MCP_AUDIENCE');
     expect(resolution).toContain('echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain('webhook_audience=$WEBHOOK_AUDIENCE');
     expect(resolution).not.toContain('status.traffic[tag=');
   });
 
@@ -82,10 +87,10 @@ describe('GCP production startup and rollback safety contract', () => {
     );
     expect(probeAuth).toContain('token_format: id_token');
     expect(probeAuth).toContain(
-      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_url }}',
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_audience }}',
     );
     expect(probeAuth).toContain(
-      'id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_url }}',
+      'id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_audience }}',
     );
     expect(probeAuth).toContain('create_credentials_file: false');
     expect(probeAuth).toContain('export_environment_variables: false');
@@ -96,6 +101,8 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(probeAuth).toContain('test -n "$MCP_TOKEN"');
     expect(probeAuth).toContain('test -n "$WEBHOOK_TOKEN"');
     expect(probeAuth).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
+    expect(probeAuth).toContain('"$MCP_URL/healthz"');
+    expect(probeAuth).toContain('"$MCP_URL/readyz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp"');
