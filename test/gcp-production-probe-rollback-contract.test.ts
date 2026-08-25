@@ -109,7 +109,7 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start"');
   });
 
-  it('temporarily enables only the authenticated production MCP run.app endpoint for tagged probes and restores it before promotion', () => {
+  it('temporarily opens and restores the authenticated MCP run.app probe endpoint', () => {
     const mcpDeploy = section(
       '- name: Deploy private MCP candidate by digest with no traffic',
       '- name: Deploy controlled webhook candidate by digest',
@@ -127,14 +127,20 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(mcpDeploy).not.toContain('--allow-unauthenticated');
     expect(mcpDeploy).not.toContain('--ingress all');
 
-    expect(restore).toContain("if [[ '$DEPLOY_ENVIRONMENT' == production ]]".replaceAll("'", '"'));
+    expect(restore).toContain('if [[ "$DEPLOY_ENVIRONMENT" == production ]]');
     expect(restore).toContain('--no-default-url');
     expect(restore).toContain('run.googleapis.com/default-url-disabled');
     expect(restore).toContain('MCP_DEFAULT_URL_POSTURE_RESTORED=PASS');
 
-    const verificationIndex = workflow.indexOf('- name: Verify health readiness and webhook route confinement');
-    const restoreIndex = workflow.indexOf('- name: Restore production MCP default endpoint posture after private probes');
-    const evidenceIndex = workflow.indexOf('- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job');
+    const verificationIndex = workflow.indexOf(
+      '- name: Verify health readiness and webhook route confinement',
+    );
+    const restoreIndex = workflow.indexOf(
+      '- name: Restore production MCP default endpoint posture after private probes',
+    );
+    const evidenceIndex = workflow.indexOf(
+      '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
+    );
     const promotionIndex = workflow.indexOf('- name: Promote production canary');
     expect(verificationIndex).toBeLessThan(restoreIndex);
     expect(restoreIndex).toBeLessThan(evidenceIndex);
