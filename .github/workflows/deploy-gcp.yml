@@ -742,8 +742,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p platform-evidence
-          MCP_TOKEN="$(gcloud auth print-identity-token --audiences="$MCP_URL")"
-          WEBHOOK_TOKEN="$(gcloud auth print-identity-token --audiences="$WEBHOOK_URL")"
+          MCP_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$MCP_URL")"
+          WEBHOOK_TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$GCP_DEPLOY_SERVICE_ACCOUNT" --audiences="$WEBHOOK_URL")"
           WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" | tee platform-evidence/mcp-healthz.json
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" | tee platform-evidence/mcp-readyz.json
