@@ -8,10 +8,11 @@ describe('GCP deploy Cloud Run probe contract', () => {
     expect(workflow).not.toContain('--readiness-probe');
   });
 
-  it('preserves startup and liveness probes for both services', () => {
+  it('preserves process-health startup and liveness probes for both services', () => {
     expect(workflow.match(/--startup-probe/g)).toHaveLength(2);
     expect(workflow.match(/--liveness-probe/g)).toHaveLength(2);
-    expect(workflow).toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(workflow.match(/--startup-probe 'httpGet\.path=\/healthz/g)).toHaveLength(2);
+    expect(workflow).not.toContain("--startup-probe 'httpGet.path=/readyz");
     expect(workflow).toContain("--liveness-probe 'httpGet.path=/healthz");
   });
 
