@@ -677,7 +677,7 @@ jobs:
             --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "$MCP_RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \
-            --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_MCP_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_MCP_MAX_INSTANCES || '1' }}" \
             --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" --no-allow-unauthenticated
@@ -691,7 +691,7 @@ jobs:
             --service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
             --update-secrets "$WEBHOOK_RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
-            --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_WEBHOOK_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_WEBHOOK_MAX_INSTANCES || '2' }}" \
             --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --default-url --allow-unauthenticated
@@ -815,6 +815,7 @@ jobs:
           set -euo pipefail
           test -n "${PREVIOUS_MCP_REVISION:-}"
           test -n "${PREVIOUS_WEBHOOK_REVISION:-}" || { echo 'Production canary requires an existing serving webhook revision; first webhook introduction must use tagged no-traffic validation followed by full promotion.' >&2; exit 1; }
+          touch /tmp/toca-traffic-promotion-started
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=10,${PREVIOUS_MCP_REVISION}=90"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=10,${PREVIOUS_WEBHOOK_REVISION}=90"
 
@@ -822,6 +823,7 @@ jobs:
         if: inputs.operation == 'deploy' && inputs.rollout == 'full'
         run: |
           set -euo pipefail
+          touch /tmp/toca-traffic-promotion-started
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=100"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=100"
 
@@ -881,6 +883,10 @@ jobs:
         if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != ''
         run: |
           set -euo pipefail
+          if [[ ! -f /tmp/toca-traffic-promotion-started ]]; then
+            echo 'AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_MCP_REVISION}=100"
           if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
             gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
