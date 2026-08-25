@@ -64,15 +64,27 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(resolution).toContain('"$WEBHOOK_TAG" revisionName)');
     expect(resolution).toContain('"$WEBHOOK_TAG" url)');
     expect(resolution).toContain(
-      'MCP_AUDIENCE="$(jq -r \'.status.url // empty\' /tmp/mcp-candidate-service.json)"',
+      'MCP_AUDIENCE="$(jq -r \' .status.url // empty \' /tmp/mcp-candidate-service.json)"'.replaceAll(
+        "' ",
+        "'",
+      ).replaceAll(" \'", "'"),
     );
     expect(resolution).toContain(
-      'WEBHOOK_AUDIENCE="$(jq -r \'.status.url // empty\' /tmp/webhook-candidate-service.json)"',
+      'WEBHOOK_AUDIENCE="$(jq -r \' .status.url // empty \' /tmp/webhook-candidate-service.json)"'.replaceAll(
+        "' ",
+        "'",
+      ).replaceAll(" \'", "'"),
     );
-    expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate revision');
+    expect(resolution).toContain(
+      'Could not resolve exact tagged Cloud Run candidate revision',
+    );
     expect(resolution).toContain('echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"');
-    expect(resolution).toContain('echo "mcp_audience=$MCP_AUDIENCE" >> "$GITHUB_OUTPUT"');
-    expect(resolution).toContain('echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"');
+    expect(resolution).toContain(
+      'echo "mcp_audience=$MCP_AUDIENCE" >> "$GITHUB_OUTPUT"',
+    );
+    expect(resolution).toContain(
+      'echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"',
+    );
     expect(resolution).toContain(
       'echo "webhook_audience=$WEBHOOK_AUDIENCE" >> "$GITHUB_OUTPUT"',
     );
