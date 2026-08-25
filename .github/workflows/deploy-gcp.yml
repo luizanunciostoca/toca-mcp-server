@@ -725,12 +725,14 @@ jobs:
           }
           MCP_REVISION="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" revisionName)"
           MCP_URL="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" url)"
+          MCP_AUDIENCE="$(jq -r '.status.url // empty' /tmp/mcp-candidate-service.json)"
           WEBHOOK_REVISION="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" revisionName)"
           WEBHOOK_URL="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" url)"
-          if [[ -z "$MCP_REVISION" || -z "$MCP_URL" || -z "$WEBHOOK_REVISION" || -z "$WEBHOOK_URL" ]]; then
-            echo 'Could not resolve exact tagged Cloud Run candidate revision and URL' >&2
-            jq -c --arg tag "$MCP_TAG" '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/mcp-candidate-service.json >&2
-            jq -c --arg tag "$WEBHOOK_TAG" '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/webhook-candidate-service.json >&2
+          WEBHOOK_AUDIENCE="$(jq -r '.status.url // empty' /tmp/webhook-candidate-service.json)"
+          if [[ -z "$MCP_REVISION" || -z "$MCP_URL" || -z "$MCP_AUDIENCE" || -z "$WEBHOOK_REVISION" || -z "$WEBHOOK_URL" || -z "$WEBHOOK_AUDIENCE" ]]; then
+            echo 'Could not resolve exact tagged Cloud Run candidate revision, tagged URL, and canonical service audience' >&2
+            jq -c --arg tag "$MCP_TAG" '{serviceUrl:(.status.url // null),latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/mcp-candidate-service.json >&2
+            jq -c --arg tag "$WEBHOOK_TAG" '{serviceUrl:(.status.url // null),latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/webhook-candidate-service.json >&2
             exit 1
           fi
           echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
@@ -738,7 +740,9 @@ jobs:
           echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
           echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"
           echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+          echo "mcp_audience=$MCP_AUDIENCE" >> "$GITHUB_OUTPUT"
           echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_audience=$WEBHOOK_AUDIENCE" >> "$GITHUB_OUTPUT"
 
       - name: Mint private MCP probe ID token through WIF
         id: mcp_probe_auth
@@ -748,7 +752,7 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
           token_format: id_token
-          id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_url }}
+          id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_audience }}
           create_credentials_file: false
           export_environment_variables: false
 
@@ -760,7 +764,7 @@ jobs:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
           token_format: id_token
-          id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_url }}
+          id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_audience }}
           create_credentials_file: false
           export_environment_variables: false
 
