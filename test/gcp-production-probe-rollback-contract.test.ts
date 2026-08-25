@@ -16,8 +16,11 @@ describe('GCP production startup and rollback safety contract', () => {
   it('uses process health for startup probes and preserves explicit readiness acceptance', () => {
     const startupProbes = workflow.match(/--startup-probe 'httpGet\.path=\/healthz/g) ?? [];
 
+    expect(workflow).not.toContain('--readiness-probe');
     expect(startupProbes).toHaveLength(2);
+    expect(workflow.match(/--liveness-probe/g)).toHaveLength(2);
     expect(workflow).not.toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(workflow).toContain("--liveness-probe 'httpGet.path=/healthz");
     expect(workflow).toContain('"$MCP_URL/readyz"');
     expect(workflow).toContain('"$WEBHOOK_URL/readyz"');
   });
