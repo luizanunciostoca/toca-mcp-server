@@ -11,7 +11,7 @@ describe('GCP deploy Cloud Run probe contract', () => {
   it('preserves startup and liveness probes for both services', () => {
     expect(workflow.match(/--startup-probe/g)).toHaveLength(2);
     expect(workflow.match(/--liveness-probe/g)).toHaveLength(2);
-    expect(workflow).toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(workflow).toContain("--startup-probe 'httpGet.path=/healthz");
     expect(workflow).toContain("--liveness-probe 'httpGet.path=/healthz");
   });
 
