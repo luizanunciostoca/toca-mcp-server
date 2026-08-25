@@ -50,6 +50,20 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(webhookDeploy).toContain('"${WEBHOOK_TRAFFIC_ARGS[@]}" "${WEBHOOK_AUTH_ARGS[@]}"');
   });
 
+  it('resolves tagged candidate revision and URL from the Cloud Run traffic JSON', () => {
+    const resolution = section(
+      '- name: Resolve exact candidate revisions and URLs',
+      '- name: Verify health readiness and webhook route confinement',
+    );
+
+    expect(resolution).toContain('--format=json');
+    expect(resolution).toContain('select((.tag // "") == $tag)');
+    expect(resolution).toContain('.revisionName');
+    expect(resolution).toContain('.url');
+    expect(resolution).toContain('Could not resolve exact tagged Cloud Run candidate');
+    expect(resolution).not.toContain('status.traffic[tag=');
+  });
+
   it('validates webhook candidates with an identity token before any first public exposure', () => {
     const verification = section(
       '- name: Verify health readiness and webhook route confinement',
