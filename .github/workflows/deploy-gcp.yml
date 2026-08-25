@@ -672,6 +672,10 @@ jobs:
         if: inputs.operation == 'deploy'
         run: |
           set -euo pipefail
+          MCP_PROBE_ENDPOINT_ARGS=()
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            MCP_PROBE_ENDPOINT_ARGS=(--default-url)
+          fi
           gcloud run deploy "$GCP_CLOUD_RUN_MCP_SERVICE" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --revision-suffix "$MCP_REVISION_SUFFIX" --tag "$MCP_TAG" --no-traffic \
             --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
@@ -680,7 +684,8 @@ jobs:
             --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_MCP_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_MCP_MAX_INSTANCES || '1' }}" \
-            --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" --no-allow-unauthenticated
+            --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \
+            "${MCP_PROBE_ENDPOINT_ARGS[@]}" --no-allow-unauthenticated
 
       - name: Deploy controlled webhook candidate by digest
         if: inputs.operation == 'deploy'
@@ -789,6 +794,15 @@ jobs:
           OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
           [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Webhook candidate exposed a forbidden route' >&2; exit 1; }
           jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
+
+      - name: Restore production MCP default endpoint posture after private probes
+        if: inputs.operation == 'deploy' && inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-endpoint-restored.json
+          jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' /tmp/mcp-endpoint-restored.json >/dev/null
+          echo 'MCP_DEFAULT_URL_POSTURE_RESTORED=PASS' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
         if: inputs.operation == 'deploy'
@@ -958,6 +972,12 @@ jobs:
         if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != ''
         run: |
           set -euo pipefail
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+            gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-endpoint-rollback.json
+            jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' /tmp/mcp-endpoint-rollback.json >/dev/null
+            echo 'MCP_DEFAULT_URL_POSTURE_ROLLBACK=PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [[ ! -f /tmp/toca-traffic-promotion-started ]]; then
             if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]] && \
               gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
