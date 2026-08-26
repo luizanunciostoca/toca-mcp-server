@@ -12,15 +12,19 @@ describe('GCP deploy Cloud Run probe contract', () => {
     expect(workflow.match(/--startup-probe/g)).toHaveLength(3);
     expect(workflow.match(/--liveness-probe/g)).toHaveLength(3);
     expect(workflow).toContain("--startup-probe 'httpGet.path=/healthz");
+    expect(workflow).toContain("--startup-probe 'httpGet.path=/readyz");
     expect(workflow).toContain("--liveness-probe 'httpGet.path=/healthz");
     expect(workflow).toContain('gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE"');
   });
 
-  it('keeps readiness as an explicit post-deploy fail-closed readback', () => {
+  it('keeps readiness fail-closed for staging, webhook, and production acceptance', () => {
     expect(workflow).toContain('Verify health readiness and webhook route confinement');
     expect(workflow).toContain('$MCP_URL/readyz');
     expect(workflow).toContain('$WEBHOOK_URL/readyz');
-    expect(workflow).toContain('${PROBE_URL}/readyz');
+    expect(workflow).toContain('PROBE_STARTUP_PATH=');
+    expect(workflow).toContain('[[ "$PROBE_STARTUP_PATH" == /readyz ]]');
+    expect(workflow).toContain('[[ "$CANDIDATE_READY" == True && "$PROBE_READY" == True ]]');
     expect(workflow).toContain('.status == "ready" and (.checks | all(.ok == true))');
+    expect(workflow).not.toContain('${PROBE_URL}/readyz');
   });
 });

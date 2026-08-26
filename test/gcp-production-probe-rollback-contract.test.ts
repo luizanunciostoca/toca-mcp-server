@@ -13,14 +13,16 @@ function section(start: string, end?: string): string {
 }
 
 describe('GCP production startup and rollback safety contract', () => {
-  it('uses process health for startup probes and preserves explicit readiness acceptance', () => {
-    const startupProbes = workflow.match(/--startup-probe 'httpGet\.path=\/healthz/g) ?? [];
+  it('uses process health for canonical startup and readiness for private acceptance sibling', () => {
+    const healthStartupProbes = workflow.match(/--startup-probe 'httpGet\.path=\/healthz/g) ?? [];
+    const readinessStartupProbes = workflow.match(/--startup-probe 'httpGet\.path=\/readyz/g) ?? [];
 
-    expect(startupProbes).toHaveLength(3);
-    expect(workflow).not.toContain("--startup-probe 'httpGet.path=/readyz");
+    expect(healthStartupProbes).toHaveLength(2);
+    expect(readinessStartupProbes).toHaveLength(1);
     expect(workflow).toContain('"$MCP_URL/readyz"');
     expect(workflow).toContain('"$WEBHOOK_URL/readyz"');
-    expect(workflow).toContain('"${PROBE_URL}/readyz"');
+    expect(workflow).toContain('[[ "$PROBE_STARTUP_PATH" == /readyz ]]');
+    expect(workflow).not.toContain('"${PROBE_URL}/readyz"');
   });
 
   it('keeps the production webhook traffic tag within the Cloud Run combined 46-character limit', () => {
