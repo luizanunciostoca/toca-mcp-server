@@ -51,6 +51,12 @@ export function approvalExpectationFromPolicy(
 }
 
 export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
+  if (tool.sideEffects && platformMutationKillSwitchActive(context)) {
+    return {
+      decision: 'DENY',
+      reason: 'Platform mutation kill switch is active.',
+    };
+  }
   const result = evaluateAutonomyGate(tool, context, {
     enforceOperationalReadiness: false,
   });
@@ -64,4 +70,10 @@ export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): Po
     return { decision: 'ALLOW', reason: 'Policy requirements satisfied.' };
   }
   return { decision: result.decision, reason: result.reason };
+}
+
+function platformMutationKillSwitchActive(context: PolicyContext): boolean {
+  if (context.platformKillSwitch !== undefined) return context.platformKillSwitch;
+  const configured = process.env.TOCA_PLATFORM_KILL_SWITCH?.trim().toLowerCase();
+  return configured === 'true' || configured === '1' || configured === 'on';
 }
