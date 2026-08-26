@@ -26,16 +26,10 @@ describe('GCP production internal MCP probe contract', () => {
 
     expect(production).toContain('gcloud scheduler jobs create http');
     expect(production).toContain('gcloud scheduler jobs run');
-    expect(production).toContain(
-      '--oidc-service-account-email="$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"',
-    );
+    expect(production).toContain('--oidc-service-account-email="$GCP_MCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(production).toContain('--oidc-token-audience="$MCP_AUDIENCE"');
-    expect(production).toContain(
-      'create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"',
-    );
-    expect(production).toContain(
-      'create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"',
-    );
+    expect(production).toContain('create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"');
+    expect(production).toContain('create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"');
     expect(production).toContain('resource.type=\\"cloud_scheduler_job\\"');
     expect(production).not.toMatch(/curl[^\n]*\$MCP_URL/);
   });
@@ -49,9 +43,7 @@ describe('GCP production internal MCP probe contract', () => {
     expect(verify).toContain('internal|internal-and-cloud-load-balancing');
     expect(verify).toContain('Production MCP ingress is not private');
     expect(verify).toContain('Production MCP must not expose roles/run.invoker to allUsers');
-    expect(verify).toContain(
-      'PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"',
-    );
+    expect(verify).toContain('PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"');
     expect(verify).not.toContain('--ingress all');
     expect(workflow).not.toContain(
       'gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --ingress',
@@ -64,9 +56,7 @@ describe('GCP production internal MCP probe contract', () => {
       '- name: Restore production MCP default endpoint posture after private probes',
     );
 
-    expect(verify).toContain(
-      'MCP_AUDIENCE: ${{ steps.resolve_candidates.outputs.mcp_audience }}',
-    );
+    expect(verify).toContain('MCP_AUDIENCE: ${{ steps.resolve_candidates.outputs.mcp_audience }}');
     expect(verify).toContain('--uri="$uri"');
     expect(verify).toContain('--oidc-token-audience="$MCP_AUDIENCE"');
     expect(verify).toContain('toca.platform.mcp-internal-probe.v1');
