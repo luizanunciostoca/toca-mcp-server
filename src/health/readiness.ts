@@ -21,8 +21,13 @@ export async function evaluateReadiness(
       }
     }),
   );
+  const failedChecks = results.filter((result) => !result.ok).map((result) => result.name);
+  const status = failedChecks.length === 0 ? 'ready' : 'not_ready';
+  if (status === 'not_ready') {
+    console.warn(`TOCA_READINESS_NOT_READY failed_checks=${failedChecks.join(',')}`);
+  }
   return {
-    status: results.every((result) => result.ok) ? 'ready' : 'not_ready',
+    status,
     checks: results,
   };
 }
