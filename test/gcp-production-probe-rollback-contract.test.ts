@@ -109,6 +109,46 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(probeAuth).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start"');
   });
 
+  it('temporarily opens and restores the authenticated MCP run.app probe endpoint', () => {
+    const mcpDeploy = section(
+      '- name: Deploy private MCP candidate by digest with no traffic',
+      '- name: Deploy controlled webhook candidate by digest',
+    );
+    const restore = section(
+      '- name: Restore production MCP default endpoint posture after private probes',
+      '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
+    );
+
+    expect(mcpDeploy).toContain('MCP_PROBE_ENDPOINT_ARGS=()');
+    expect(mcpDeploy).toContain('if [[ "$DEPLOY_ENVIRONMENT" == production ]]');
+    expect(mcpDeploy).toContain('MCP_PROBE_ENDPOINT_ARGS=(--default-url)');
+    expect(mcpDeploy).toContain('"${MCP_PROBE_ENDPOINT_ARGS[@]}"');
+    expect(mcpDeploy).toContain('--no-allow-unauthenticated');
+    expect(mcpDeploy).not.toContain('--allow-unauthenticated');
+    expect(mcpDeploy).not.toContain('--ingress all');
+
+    expect(restore).toContain(
+      "if: inputs.operation == 'deploy' && inputs.environment == 'production'",
+    );
+    expect(restore).toContain('--no-default-url');
+    expect(restore).toContain('run.googleapis.com/default-url-disabled');
+    expect(restore).toContain('MCP_DEFAULT_URL_POSTURE_RESTORED=PASS');
+
+    const verificationIndex = workflow.indexOf(
+      '- name: Verify health readiness and webhook route confinement',
+    );
+    const restoreIndex = workflow.indexOf(
+      '- name: Restore production MCP default endpoint posture after private probes',
+    );
+    const evidenceIndex = workflow.indexOf(
+      '- name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job',
+    );
+    const promotionIndex = workflow.indexOf('- name: Promote production canary');
+    expect(verificationIndex).toBeLessThan(restoreIndex);
+    expect(restoreIndex).toBeLessThan(evidenceIndex);
+    expect(restoreIndex).toBeLessThan(promotionIndex);
+  });
+
   it('marks promotion before the first traffic mutation for canary and full rollouts', () => {
     const marker = 'touch /tmp/toca-traffic-promotion-started';
     const trafficMutation = 'gcloud run services update-traffic';
@@ -148,6 +188,8 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(rollback).toContain(cleanup);
     expect(rollback).toContain('WEBHOOK_BOOTSTRAP_CLEANUP=DELETED_UNPROMOTED_SERVICE');
     expect(rollback).toContain('AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION');
+    expect(rollback).toContain('--no-default-url');
+    expect(rollback).toContain('MCP_DEFAULT_URL_POSTURE_ROLLBACK=PASS');
     expect(rollback.indexOf(guard)).toBeLessThan(rollback.indexOf(cleanup));
     expect(rollback.indexOf(cleanup)).toBeLessThan(rollback.indexOf(rollbackMutation));
   });
