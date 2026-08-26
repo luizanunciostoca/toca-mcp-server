@@ -673,8 +673,10 @@ jobs:
         run: |
           set -euo pipefail
           MCP_PROBE_ENDPOINT_ARGS=()
+          MCP_PRIVATE_INGRESS_ARGS=()
           if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
             MCP_PROBE_ENDPOINT_ARGS=(--default-url)
+            MCP_PRIVATE_INGRESS_ARGS=(--ingress internal)
           fi
           gcloud run deploy "$GCP_CLOUD_RUN_MCP_SERVICE" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --revision-suffix "$MCP_REVISION_SUFFIX" --tag "$MCP_TAG" --no-traffic \
@@ -685,7 +687,7 @@ jobs:
             --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
             --min-instances "${{ vars.GCP_MCP_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_MCP_MAX_INSTANCES || '1' }}" \
             --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \
-            "${MCP_PROBE_ENDPOINT_ARGS[@]}" --no-allow-unauthenticated
+            "${MCP_PROBE_ENDPOINT_ARGS[@]}" "${MCP_PRIVATE_INGRESS_ARGS[@]}" --no-allow-unauthenticated
 
       - name: Deploy controlled webhook candidate by digest
         if: inputs.operation == 'deploy'

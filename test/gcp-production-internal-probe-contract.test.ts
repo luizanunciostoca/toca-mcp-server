@@ -34,6 +34,20 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).not.toMatch(/curl[^\n]*\$MCP_URL/);
   });
 
+  it('pins production MCP ingress private without changing endpoint probe semantics', () => {
+    const deploy = section(
+      '- name: Deploy private MCP candidate by digest with no traffic',
+      '- name: Deploy controlled webhook candidate by digest',
+    );
+
+    expect(deploy).toContain('MCP_PROBE_ENDPOINT_ARGS=(--default-url)');
+    expect(deploy).toContain('MCP_PRIVATE_INGRESS_ARGS=()');
+    expect(deploy).toContain('MCP_PRIVATE_INGRESS_ARGS=(--ingress internal)');
+    expect(deploy).toContain('\"${MCP_PRIVATE_INGRESS_ARGS[@]}\"');
+    expect(deploy).toContain('--no-allow-unauthenticated');
+    expect(deploy).not.toContain('--ingress all');
+  });
+
   it('fails closed on private network and IAM posture without broadening ingress', () => {
     const verify = section(
       '- name: Verify health readiness and webhook route confinement',
