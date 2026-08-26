@@ -2,10 +2,12 @@
   "schemaVersion": "1.0.0",
   "evidenceId": "TOCA_AUTONOMY_READINESS_ACCEPTANCE_2026_08_26",
   "generatedAt": "2026-08-26T23:04:00-03:00",
+  "githubReadbackUpdatedAt": "2026-08-26T23:41:20Z",
   "baselineSha": "904210f2ed000ac1f99783d5f210e58da938e775",
+  "originalCandidateSha": "ac5d0335c07c6bff0868e59575b2a77c7ef72c8c",
   "branch": "feat/autonomy-readiness-hardening",
   "runtime": {
-    "node": "24",
+    "node": "24.19.0",
     "packageManager": "pnpm 10.15.0"
   },
   "qualityGate": {
@@ -15,7 +17,7 @@
     "infrastructureControlPlane": "PASS",
     "effectiveAutonomyPolicy": "PASS",
     "capabilityValidationEvidence": "PASS_WITH_ZERO_PROVIDER_VALIDATIONS",
-    "mainBranchProtectionDesiredState": "PASS_OFFLINE",
+    "mainBranchProtectionDesiredState": "PASS_REMOTE_READBACK",
     "lint": "PASS",
     "typecheck": "PASS",
     "testFilesPassed": 204,
@@ -24,18 +26,47 @@
     "testsSkippedExternal": 25,
     "build": "PASS"
   },
+  "githubRelease": {
+    "repository": "luizanunciostoca/toca-mcp-server",
+    "branchPush": "PASS",
+    "pullRequest": {
+      "number": 281,
+      "url": "https://github.com/luizanunciostoca/toca-mcp-server/pull/281",
+      "state": "OPEN",
+      "remoteChecks": "PASS",
+      "reviewDecision": "REVIEW_REQUIRED",
+      "mergeBlockedUntilHumanApproval": true
+    },
+    "branchProtection": {
+      "branch": "main",
+      "applyReadback": "PASS",
+      "requiredStatusCheckCount": 5,
+      "strictStatusChecks": true,
+      "enforceAdmins": true,
+      "requiredApprovingReviewCount": 1,
+      "requireCodeOwnerReviews": true,
+      "requireLastPushApproval": true,
+      "dismissStaleReviews": true,
+      "requiredLinearHistory": true,
+      "requiredConversationResolution": true,
+      "allowForcePushes": false,
+      "allowDeletions": false,
+      "blockCreations": false,
+      "blockCreationsRationale": "GitHub applies block_creations only with push restrictions, which are unavailable for a personal repository; all applicable main-branch controls remain enforced."
+    }
+  },
   "providerValidation": {
     "validatedCapabilities": [],
     "externalWritesAuthorized": false,
     "preapprovedClassesAuthorized": false
   },
   "externalReleaseGates": {
-    "githubPush": "BLOCKED_GITHUB_INTEGRATION_UNAVAILABLE",
-    "pullRequest": "BLOCKED_GITHUB_INTEGRATION_UNAVAILABLE",
-    "branchProtectionApplyReadback": "BLOCKED_GITHUB_ADMIN_AUTH_UNAVAILABLE",
+    "githubPush": "PASS",
+    "pullRequest": "PASS_CHECKS_GREEN_REVIEW_REQUIRED",
+    "branchProtectionApplyReadback": "PASS",
     "gcpDeploy": "BLOCKED_GCP_SESSION_UNAVAILABLE",
     "providerBackedAcceptance": "BLOCKED_PROVIDER_CREDENTIALS_AND_INFRASTRUCTURE_UNAVAILABLE",
     "driveWriteback": "BLOCKED_GOOGLE_WORKSPACE_TASK_BINDING_UNAVAILABLE"
   },
-  "safeDecision": "READY_FOR_AUTHENTICATED_PR_AND_CANDIDATE_VALIDATION_NOT_PRODUCTION_PROMOTION"
+  "safeDecision": "PR_READY_FOR_HUMAN_REVIEW_NOT_PRODUCTION_PROMOTION"
 }
