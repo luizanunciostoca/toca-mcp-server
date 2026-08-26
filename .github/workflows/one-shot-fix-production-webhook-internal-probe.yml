@@ -2,7 +2,8 @@ name: One-shot production webhook internal probe fix
 
 on:
   push:
-    branches: [fix/production-webhook-internal-probe-20260826]
+    branches:
+      - fix/production-webhook-internal-probe-20260826
 
 permissions:
   contents: write
@@ -30,318 +31,25 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Apply exact production-only webhook probe remediation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/deploy-gcp.yml')
-          text = path.read_text()
-
-          def replace_once(old: str, new: str, label: str) -> None:
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
-              text = text.replace(old, new, 1)
-
-          token_line = '          WEBHOOK_TOKEN: $' + '{{ steps.webhook_probe_auth.outputs.id_token }}\n'
-          audience_line = '          WEBHOOK_AUDIENCE: $' + '{{ steps.resolve_candidates.outputs.webhook_audience }}\n'
-          replace_once(token_line, token_line + audience_line, 'webhook audience env')
-
-          replace_once(
-              '''          mkdir -p platform-evidence
-          test -n "$WEBHOOK_TOKEN" || { echo 'Webhook private probe ID token missing' >&2; exit 1; }
-          WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
-
-          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-''',
-              '''          mkdir -p platform-evidence
-
-          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-''',
-              'production webhook token decoupling',
-          )
-
-          old_webhook_probe = '''          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
-          jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/webhook-readyz.json >/dev/null
-          MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp")"
-          OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
-          [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Webhook candidate exposed a forbidden route' >&2; exit 1; }
-          jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
-'''
-
-          new_webhook_probe = '''          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-            test -n "$WEBHOOK_REVISION" || { echo 'Webhook exact candidate revision missing' >&2; exit 1; }
-            test -n "$WEBHOOK_AUDIENCE" || { echo 'Webhook canonical audience missing' >&2; exit 1; }
-
-            # Production webhook candidate acceptance must originate inside Google Cloud. The
-            # short-lived Cloud Run Job uses the webhook runtime identity, obtains an OIDC token
-            # from the metadata server, and probes the exact traffic-tagged zero-traffic candidate.
-            WEBHOOK_PROBE_JOB="toca-webhook-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            WEBHOOK_PROBE_MEMBER="serviceAccount:${GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT}"
-            WEBHOOK_PROBE_BINDING_ADDED=false
-
-            cleanup_internal_webhook_probe() {
-              set +e
-              gcloud run jobs delete "$WEBHOOK_PROBE_JOB" \\
-                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
-              if [[ "$WEBHOOK_PROBE_BINDING_ADDED" == true ]]; then
-                gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \\
-                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \\
-                  --member="$WEBHOOK_PROBE_MEMBER" --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
-              fi
-              set -e
-            }
-            trap cleanup_internal_webhook_probe EXIT
-
-            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \\
-              > /tmp/webhook-internal-probe-iam-before.json
-            if ! jq -e --arg member "$WEBHOOK_PROBE_MEMBER" '
-              .bindings[]?
-              | select(.role == "roles/run.invoker" and (.condition == null))
-              | (.members // [])[]?
-              | select(. == "allUsers" or . == $member)
-            ' /tmp/webhook-internal-probe-iam-before.json >/dev/null; then
-              gcloud run services add-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \\
-                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \\
-                --member="$WEBHOOK_PROBE_MEMBER" --role=roles/run.invoker --quiet
-              WEBHOOK_PROBE_BINDING_ADDED=true
-            fi
-
-            read -r -d '' WEBHOOK_PROBE_JS <<'JS' || true
-            const target = process.env.WEBHOOK_URL;
-            const audience = process.env.WEBHOOK_AUDIENCE;
-            const revision = process.env.WEBHOOK_REVISION;
-            if (!target || !audience || !revision) throw new Error('webhook probe configuration missing');
-
-            const identityUrl = new URL('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity');
-            identityUrl.searchParams.set('audience', audience);
-            identityUrl.searchParams.set('format', 'full');
-            const tokenResponse = await fetch(identityUrl, { headers: { 'Metadata-Flavor': 'Google' } });
-            if (!tokenResponse.ok) throw new Error(`metadata identity status ${tokenResponse.status}`);
-            const idToken = (await tokenResponse.text()).trim();
-            if (!idToken) throw new Error('metadata identity token missing');
-
-            async function probe(path) {
-              const response = await fetch(`${target}${path}`, {
-                headers: { Authorization: `Bearer ${idToken}`, Accept: 'application/json' },
-                redirect: 'manual',
-              });
-              const text = await response.text();
-              let body = null;
-              if (text) {
-                try { body = JSON.parse(text); } catch { body = text; }
-              }
-              return { path, status: response.status, body };
-            }
-
-            const health = await probe('/healthz');
-            const ready = await probe('/readyz');
-            const mcp = await probe('/mcp');
-            const oauth = await probe('/oauth/meta/start');
-
-            if (health.status !== 200) throw new Error(`webhook health status ${health.status}`);
-            if (ready.status !== 200) throw new Error(`webhook readiness status ${ready.status}`);
-            if (!ready.body || ready.body.status !== 'ready' || !Array.isArray(ready.body.checks) || !ready.body.checks.every((check) => check?.ok === true)) {
-              throw new Error('webhook readiness body failed canonical contract');
-            }
-            if (mcp.status !== 404 || oauth.status !== 404) {
-              throw new Error(`webhook route confinement failed mcp=${mcp.status} oauth=${oauth.status}`);
-            }
-
-            const evidence = {
-              schemaVersion: 'toca.platform.webhook-internal-probe.v1',
-              mechanism: 'cloud-run-job-metadata-oidc',
-              candidateRevision: revision,
-              targetUrl: target,
-              audience,
-              health,
-              ready,
-              mcp: { path: mcp.path, status: mcp.status },
-              oauth: { path: oauth.path, status: oauth.status },
-              externalGitHubRunnerProbe: false,
-              productionTrafficMutation: false,
-              providerCallExecuted: false,
-              secretPayloadDisclosed: false,
-              result: 'PASS',
-            };
-            console.log(`WEBHOOK_PROBE_EVIDENCE_BASE64=${Buffer.from(JSON.stringify(evidence)).toString('base64')}`);
-            JS
-
-            gcloud run jobs deploy "$WEBHOOK_PROBE_JOB" \\
-              --image "$IMAGE" \\
-              --project "$GCP_PROJECT_ID" \\
-              --region "$GCP_REGION" \\
-              --service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \\
-              --set-env-vars "^|^WEBHOOK_URL=$WEBHOOK_URL|WEBHOOK_AUDIENCE=$WEBHOOK_AUDIENCE|WEBHOOK_REVISION=$WEBHOOK_REVISION" \\
-              --command node \\
-              --args="^@^--input-type=module@--eval@${WEBHOOK_PROBE_JS}" \\
-              --tasks 1 \\
-              --max-retries 0 \\
-              --task-timeout 120s \\
-              --quiet
-            gcloud run jobs execute "$WEBHOOK_PROBE_JOB" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-
-            WEBHOOK_PROBE_LOGS="$(gcloud logging read \\
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${WEBHOOK_PROBE_JOB}\"" \\
-              --project "$GCP_PROJECT_ID" --freshness=10m --limit=100 --order=asc \\
-              --format='value(textPayload)' || true)"
-            WEBHOOK_PROBE_EVIDENCE_B64="$(printf '%s\\n' "$WEBHOOK_PROBE_LOGS" | sed -n 's/.*WEBHOOK_PROBE_EVIDENCE_BASE64=\\([A-Za-z0-9+\\/=]*\\).*/\\1/p' | tail -n1)"
-            [[ -n "$WEBHOOK_PROBE_EVIDENCE_B64" ]] || { echo 'Webhook internal probe evidence marker was not found' >&2; exit 1; }
-            printf '%s' "$WEBHOOK_PROBE_EVIDENCE_B64" | base64 --decode > platform-evidence/webhook-internal-probe.json
-            jq -e --arg revision "$WEBHOOK_REVISION" '
-              .schemaVersion == "toca.platform.webhook-internal-probe.v1" and
-              .mechanism == "cloud-run-job-metadata-oidc" and
-              .candidateRevision == $revision and
-              .health.status == 200 and
-              .ready.status == 200 and
-              .ready.body.status == "ready" and
-              (.ready.body.checks | all(.ok == true)) and
-              .mcp.status == 404 and
-              .oauth.status == 404 and
-              .externalGitHubRunnerProbe == false and
-              .productionTrafficMutation == false and
-              .providerCallExecuted == false and
-              .secretPayloadDisclosed == false and
-              .result == "PASS"
-            ' platform-evidence/webhook-internal-probe.json >/dev/null
-            jq '.health.body' platform-evidence/webhook-internal-probe.json > platform-evidence/webhook-healthz.json
-            jq '.ready.body' platform-evidence/webhook-internal-probe.json > platform-evidence/webhook-readyz.json
-            jq '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:.mcp.status,webhookOauthStatus:.oauth.status,result:"PASS"}' \\
-              platform-evidence/webhook-internal-probe.json > platform-evidence/e2e-results.json
-
-            cleanup_internal_webhook_probe
-            trap - EXIT
-            if gcloud run jobs describe "$WEBHOOK_PROBE_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
-              echo "Webhook internal probe job remained after cleanup: $WEBHOOK_PROBE_JOB" >&2
-              exit 1
-            fi
-            if [[ "$WEBHOOK_PROBE_BINDING_ADDED" == true ]]; then
-              gcloud run services get-iam-policy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \\
-                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \\
-                > /tmp/webhook-internal-probe-iam-after.json
-              if jq -e --arg member "$WEBHOOK_PROBE_MEMBER" '
-                .bindings[]?
-                | select(.role == "roles/run.invoker" and (.condition == null))
-                | (.members // [])[]?
-                | select(. == $member)
-              ' /tmp/webhook-internal-probe-iam-after.json >/dev/null; then
-                echo 'Temporary webhook probe invoker binding remained after cleanup' >&2
-                exit 1
-              fi
-            fi
-            echo 'WEBHOOK_GCP_INTERNAL_PROBE=PASS' >> "$GITHUB_STEP_SUMMARY"
-          else
-            test -n "$WEBHOOK_TOKEN" || { echo 'Webhook private probe ID token missing' >&2; exit 1; }
-            WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
-            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
-            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
-            jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/webhook-readyz.json >/dev/null
-            MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp")"
-            OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
-            [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Webhook candidate exposed a forbidden route' >&2; exit 1; }
-            jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
-          fi
-'''
-
-          replace_once(old_webhook_probe, new_webhook_probe, 'production webhook candidate probe')
-          path.write_text(text)
-
-          test_path = Path('test/gcp-production-webhook-internal-probe-contract.test.ts')
-          test_path.write_text('''import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-
-const workflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
-
-function verifySection(): string {
-  const start = workflow.indexOf('- name: Verify health readiness and webhook route confinement');
-  const end = workflow.indexOf('- name: Restore production MCP default endpoint posture after private probes');
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  return workflow.slice(start, end);
-}
-
-describe('GCP production webhook internal probe contract', () => {
-  it('moves the production candidate probe into a short-lived Cloud Run Job', () => {
-    const verify = verifySection();
-    const marker = '# Production webhook candidate acceptance must originate inside Google Cloud.';
-    const start = verify.indexOf(marker);
-    const end = verify.indexOf('\\n          else\\n            test -n "$WEBHOOK_TOKEN"', start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const productionWebhook = verify.slice(start, end);
-
-    expect(productionWebhook).toContain('WEBHOOK_PROBE_JOB="toca-webhook-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"');
-    expect(productionWebhook).toContain('gcloud run jobs deploy "$WEBHOOK_PROBE_JOB"');
-    expect(productionWebhook).toContain('--service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT"');
-    expect(productionWebhook).toContain('metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity');
-    expect(productionWebhook).toContain('WEBHOOK_URL=$WEBHOOK_URL');
-    expect(productionWebhook).toContain('WEBHOOK_AUDIENCE=$WEBHOOK_AUDIENCE');
-    expect(productionWebhook).toContain("await probe('/healthz')");
-    expect(productionWebhook).toContain("await probe('/readyz')");
-    expect(productionWebhook).toContain("await probe('/mcp')");
-    expect(productionWebhook).toContain("await probe('/oauth/meta/start')");
-    expect(productionWebhook).toContain('.mcp.status == 404');
-    expect(productionWebhook).toContain('.oauth.status == 404');
-    expect(productionWebhook).toContain('.externalGitHubRunnerProbe == false');
-    expect(productionWebhook).toContain('.productionTrafficMutation == false');
-    expect(productionWebhook).not.toContain('curl --fail');
-    expect(productionWebhook).not.toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/');
-  });
-
-  it('preserves the existing external runner probe for staging only', () => {
-    const verify = verifySection();
-    const stagingStart = verify.indexOf('\\n          else\\n            test -n "$WEBHOOK_TOKEN"', verify.indexOf('WEBHOOK_GCP_INTERNAL_PROBE=PASS'));
-    expect(stagingStart).toBeGreaterThan(-1);
-    const stagingWebhook = verify.slice(stagingStart);
-
-    expect(stagingWebhook).toContain('WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")');
-    expect(stagingWebhook).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz"');
-    expect(stagingWebhook).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz"');
-    expect(stagingWebhook).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp"');
-    expect(stagingWebhook).toContain('"${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start"');
-  });
-
-  it('keeps cleanup fail-closed without mutating production traffic', () => {
-    const verify = verifySection();
-    expect(verify).toContain('trap cleanup_internal_webhook_probe EXIT');
-    expect(verify).toContain('gcloud run jobs delete "$WEBHOOK_PROBE_JOB"');
-    expect(verify).toContain('gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"');
-    expect(verify).toContain('Webhook internal probe job remained after cleanup');
-    expect(verify).toContain('Temporary webhook probe invoker binding remained after cleanup');
-    expect(verify).not.toContain('gcloud run services update-traffic');
-  });
-});
-''')
-          PY
+      - name: Apply remediation
+        run: python scripts/one-shot-fix-production-webhook-internal-probe.py
 
       - name: Validate affected contracts
-        shell: bash
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm exec prettier --write test/gcp-production-webhook-internal-probe-contract.test.ts
           git diff --check
-          pnpm exec vitest run \
-            test/gcp-production-webhook-internal-probe-contract.test.ts \
-            test/gcp-deploy-cloud-run-probes.test.ts \
-            test/gcp-production-internal-probe-contract.test.ts \
-            test/gcp-production-probe-rollback-contract.test.ts
+          pnpm exec vitest run test/gcp-production-webhook-internal-probe-contract.test.ts test/gcp-deploy-cloud-run-probes.test.ts test/gcp-production-internal-probe-contract.test.ts test/gcp-production-probe-rollback-contract.test.ts
 
-      - name: Commit remediation and remove one-shot workflow
-        shell: bash
+      - name: Commit clean remediation
         run: |
           set -euo pipefail
           rm .github/workflows/one-shot-fix-production-webhook-internal-probe.yml
+          rm scripts/one-shot-fix-production-webhook-internal-probe.py
           git diff --check
           git config user.name "TOCA OS Automation"
           git config user.email "actions@github.com"
-          git add .github/workflows/deploy-gcp.yml test/gcp-production-webhook-internal-probe-contract.test.ts .github/workflows/one-shot-fix-production-webhook-internal-probe.yml
+          git add -A
           git commit -m "fix(deploy): probe production webhook from GCP"
           git push origin HEAD:fix/production-webhook-internal-probe-20260826
