@@ -92,7 +92,7 @@ jobs:
               exit 1
             fi
 
-'''
+          '''
           block += wait
           text = text[:start] + block + text[end:]
 
