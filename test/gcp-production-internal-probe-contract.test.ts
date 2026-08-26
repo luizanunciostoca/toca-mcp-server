@@ -38,10 +38,26 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain(
       "--liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10'",
     );
+    expect(production).toContain('--min-instances 1 --max-instances 1');
     expect(production).toContain('--ingress internal --no-default-url --no-allow-unauthenticated');
+    expect(production).toContain('--no-deploy-health-check');
     expect(production).not.toContain('gcloud scheduler');
     expect(production).not.toContain('PROBE_URL=');
     expect(production).not.toContain('gcloud run services add-iam-policy-binding "$PROBE_SERVICE"');
+  });
+
+  it('waits boundedly and emits sanitized diagnostics when startup readiness fails', () => {
+    const production = productionVerify();
+
+    expect(production).toContain('.status.latestCreatedRevisionName // empty');
+    expect(production).toContain('PROBE_READY=Unknown');
+    expect(production).toContain('for _ in $(seq 1 18)');
+    expect(production).toContain('TOCA_READINESS_NOT_READY');
+    expect(production).toContain('toca.platform.mcp-internal-probe-failure.v1');
+    expect(production).toContain('secretPayloadDisclosed:false');
+    expect(production).toContain('providerCallExecuted:false');
+    expect(production).toContain('cleanup_internal_mcp_probe');
+    expect(production).toContain('exit 1');
   });
 
   it('proves the ephemeral acceptance runtime represents the exact production candidate', () => {
@@ -85,12 +101,14 @@ describe('GCP production internal MCP probe contract', () => {
   it('records exact native readiness evidence without production traffic mutation', () => {
     const production = productionVerify();
 
-    expect(production).toContain('toca.platform.mcp-internal-probe.v3');
-    expect(production).toContain('cloud-run-native-startup-readiness');
+    expect(production).toContain('toca.platform.mcp-internal-probe.v4');
+    expect(production).toContain('cloud-run-native-startup-readiness-controlled-wait');
     expect(production).toContain('startupProbePath:$startupPath');
     expect(production).toContain('livenessProbePath:$livenessPath');
     expect(production).toContain('acceptanceRevisionReady:true');
     expect(production).toContain('acceptanceDefaultUrlDisabled:true');
+    expect(production).toContain('deployHealthCheckWaitDisabled:true');
+    expect(production).toContain('temporaryMinInstance:1');
     expect(production).toContain('exactReleaseShaMatched:true');
     expect(production).toContain('sameRuntimeImageAsProductionCandidate:true');
     expect(production).toContain('productionTrafficMutation:false');
