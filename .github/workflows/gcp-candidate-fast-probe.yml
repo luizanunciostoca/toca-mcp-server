@@ -1,0 +1,328 @@
+name: GCP Candidate Fast Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gcp-candidate-fast-probe.yml'
+      - 'ops/gcp-fast-probe-target.json'
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Existing deployed candidate SHA to probe; empty uses ops/gcp-fast-probe-target.json
+        required: false
+        type: string
+      diagnostic_authorization_ref:
+        description: Diagnostic authorization issue URL; empty uses ops/gcp-fast-probe-target.json
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: gcp-candidate-fast-probe-production
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_PROJECT_NUMBER: '990081828836'
+  GCP_REGION: southamerica-east1
+  GCP_CLOUD_RUN_MCP_SERVICE: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_MCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout probe contract only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve bounded diagnostic target
+        id: target
+        shell: bash
+        env:
+          MANUAL_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
+          MANUAL_AUTHORIZATION_REF: ${{ github.event.inputs.diagnostic_authorization_ref || '' }}
+        run: |
+          set -euo pipefail
+          FILE_CANDIDATE_SHA="$(jq -r '.candidateSha // empty' ops/gcp-fast-probe-target.json)"
+          FILE_AUTHORIZATION_REF="$(jq -r '.authorizationRef // empty' ops/gcp-fast-probe-target.json)"
+          FILE_ENVIRONMENT="$(jq -r '.environment // empty' ops/gcp-fast-probe-target.json)"
+          FILE_EXPECTED_TAG="$(jq -r '.expectedMcpTag // empty' ops/gcp-fast-probe-target.json)"
+
+          CANDIDATE_SHA="${MANUAL_CANDIDATE_SHA:-$FILE_CANDIDATE_SHA}"
+          AUTHORIZATION_REF="${MANUAL_AUTHORIZATION_REF:-$FILE_AUTHORIZATION_REF}"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be one full lowercase 40-character SHA' >&2; exit 1; }
+          [[ "$AUTHORIZATION_REF" =~ ^https://github.com/luizanunciostoca/toca-mcp-server/issues/[0-9]+$ ]] || { echo 'diagnostic_authorization_ref must be a same-repository issue URL' >&2; exit 1; }
+          [[ "$FILE_ENVIRONMENT" == production ]] || { echo 'fast probe target must remain production-scoped' >&2; exit 1; }
+
+          MCP_TAG="production-mcp-${CANDIDATE_SHA:0:7}"
+          if [[ -z "$MANUAL_CANDIDATE_SHA" && -n "$FILE_EXPECTED_TAG" && "$FILE_EXPECTED_TAG" != "$MCP_TAG" ]]; then
+            echo "Target file tag mismatch: expected $MCP_TAG, found $FILE_EXPECTED_TAG" >&2
+            exit 1
+          fi
+
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "authorization_ref=$AUTHORIZATION_REF" >> "$GITHUB_OUTPUT"
+          echo "mcp_tag=$MCP_TAG" >> "$GITHUB_OUTPUT"
+          echo "FAST_PROBE_CANDIDATE=$CANDIDATE_SHA" >> "$GITHUB_ENV"
+          echo "FAST_PROBE_AUTHORIZATION=$AUTHORIZATION_REF" >> "$GITHUB_ENV"
+          echo "FAST_PROBE_MCP_TAG=$MCP_TAG" >> "$GITHUB_ENV"
+
+      - name: Require exact diagnostic authorization
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER="${FAST_PROBE_AUTHORIZATION##*/}"
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            > /tmp/diagnostic-authorization.json
+
+          jq -e \
+            --arg expectedUrl "$FAST_PROBE_AUTHORIZATION" \
+            --arg candidate "$FAST_PROBE_CANDIDATE" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" '
+              (.html_url == $expectedUrl) and
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION DIAGNOSTIC AUTHORIZATION")) and
+              ((.body // "") | contains("AUTHORIZED_PROBE_CANDIDATE_SHA=" + $candidate)) and
+              ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+              ((.body // "") | contains("NO_TRAFFIC_MUTATION=true")) and
+              ((.body // "") | contains("NO_PROVIDER_CALLS=true")) and
+              ((.body // "") | contains("NO_DATABASE_MUTATION=true"))
+            ' /tmp/diagnostic-authorization.json >/dev/null || {
+              echo 'Diagnostic authorization is not active for this exact candidate and bounded probe contract' >&2
+              exit 1
+            }
+
+      - name: Authenticate bounded production diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Probe canonical and exact tagged MCP routes without deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fast-probe-evidence
+
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/mcp-service.json
+
+          MCP_CANONICAL_URL="$(jq -r '.status.url // empty' /tmp/mcp-service.json)"
+          MCP_REVISION="$(jq -r --arg tag "$FAST_PROBE_MCP_TAG" '
+            [(.status.traffic // [])[] | select((.tag // "") == $tag) | .revisionName // empty]
+            | unique | if length == 1 then .[0] else empty end
+          ' /tmp/mcp-service.json)"
+          MCP_TAGGED_URL="$(jq -r --arg tag "$FAST_PROBE_MCP_TAG" '
+            [(.status.traffic // [])[] | select((.tag // "") == $tag) | .url // empty]
+            | unique | if length == 1 then .[0] else empty end
+          ' /tmp/mcp-service.json)"
+          MCP_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-service.json)"
+          MCP_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-service.json)"
+
+          test -n "$MCP_CANONICAL_URL" || { echo 'Canonical MCP URL missing' >&2; exit 1; }
+          test -n "$MCP_REVISION" || { echo "Exact candidate tag not found: $FAST_PROBE_MCP_TAG" >&2; exit 1; }
+          test -n "$MCP_TAGGED_URL" || { echo "Exact candidate tagged URL not found: $FAST_PROBE_MCP_TAG" >&2; exit 1; }
+          case "$MCP_INGRESS" in
+            internal|internal-and-cloud-load-balancing) ;;
+            *) echo "Production MCP ingress is not private: $MCP_INGRESS" >&2; exit 1 ;;
+          esac
+          [[ "$MCP_DEFAULT_URL_DISABLED" == false ]] || { echo 'Production MCP default run.app URL is disabled' >&2; exit 1; }
+
+          gcloud run revisions describe "$MCP_REVISION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/mcp-revision.json
+          REVISION_RELEASE_SHA="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/mcp-revision.json)"
+          REVISION_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // empty' /tmp/mcp-revision.json)"
+          [[ "$REVISION_RELEASE_SHA" == "$FAST_PROBE_CANDIDATE" ]] || { echo "Tagged revision release SHA mismatch: $REVISION_RELEASE_SHA" >&2; exit 1; }
+          [[ "$REVISION_READY" == True ]] || { echo "Tagged revision is not Ready=True: $REVISION_READY" >&2; exit 1; }
+
+          gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/mcp-iam-before.json
+          if jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' /tmp/mcp-iam-before.json >/dev/null; then
+            echo 'Production MCP exposes roles/run.invoker to allUsers' >&2
+            exit 1
+          fi
+
+          PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"
+          PROBE_BINDING_ADDED=false
+          JOBS=(
+            "toca-fp-ch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            "toca-fp-cr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            "toca-fp-thc-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            "toca-fp-trc-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            "toca-fp-tht-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          )
+
+          cleanup() {
+            set +e
+            for job in "${JOBS[@]}"; do
+              gcloud scheduler jobs delete "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            done
+            if [[ "$PROBE_BINDING_ADDED" == true ]]; then
+              gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_MCP_SERVICE" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                --member="$PROBE_MEMBER" --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          if ! jq -e --arg member "$PROBE_MEMBER" '
+            .bindings[]?
+            | select(.role == "roles/run.invoker" and (.condition == null))
+            | (.members // [])[]?
+            | select(. == $member)
+          ' /tmp/mcp-iam-before.json >/dev/null; then
+            gcloud run services add-iam-policy-binding "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member="$PROBE_MEMBER" --role=roles/run.invoker --quiet
+            PROBE_BINDING_ADDED=true
+          fi
+
+          create_probe() {
+            local job="$1" uri="$2" audience="$3"
+            gcloud scheduler jobs create http "$job" \
+              --project "$GCP_PROJECT_ID" --location "$GCP_REGION" \
+              --schedule='0 0 1 1 *' --time-zone='Etc/UTC' \
+              --uri="$uri" --http-method=GET \
+              --oidc-service-account-email="$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+              --oidc-token-audience="$audience" \
+              --attempt-deadline=30s --max-retry-attempts=0 --quiet
+          }
+
+          create_probe "${JOBS[0]}" "${MCP_CANONICAL_URL}/healthz" "$MCP_CANONICAL_URL"
+          create_probe "${JOBS[1]}" "${MCP_CANONICAL_URL}/readyz" "$MCP_CANONICAL_URL"
+          create_probe "${JOBS[2]}" "${MCP_TAGGED_URL}/healthz" "$MCP_CANONICAL_URL"
+          create_probe "${JOBS[3]}" "${MCP_TAGGED_URL}/readyz" "$MCP_CANONICAL_URL"
+          create_probe "${JOBS[4]}" "${MCP_TAGGED_URL}/healthz" "$MCP_TAGGED_URL"
+
+          for job in "${JOBS[@]}"; do
+            gcloud scheduler jobs run "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+          done
+
+          terminal_status() {
+            local job="$1" status
+            for _ in $(seq 1 30); do
+              status="$(gcloud logging read \
+                "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\"" \
+                --project "$GCP_PROJECT_ID" --freshness=5m --limit=1 --order=desc \
+                --format='value(httpRequest.status)' 2>/dev/null | head -n1)"
+              if [[ "$status" =~ ^[1-5][0-9]{2}$ ]]; then
+                printf '%s' "$status"
+                return 0
+              fi
+              sleep 1
+            done
+            printf '000'
+          }
+
+          CANONICAL_HEALTH_STATUS="$(terminal_status "${JOBS[0]}")"
+          CANONICAL_READY_STATUS="$(terminal_status "${JOBS[1]}")"
+          TAGGED_HEALTH_CANONICAL_AUD_STATUS="$(terminal_status "${JOBS[2]}")"
+          TAGGED_READY_CANONICAL_AUD_STATUS="$(terminal_status "${JOBS[3]}")"
+          TAGGED_HEALTH_TAGGED_AUD_STATUS="$(terminal_status "${JOBS[4]}")"
+
+          CANDIDATE_REQUEST_LOG_COUNT="$(gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.revision_name=\"${MCP_REVISION}\" AND logName=\"projects/${GCP_PROJECT_ID}/logs/run.googleapis.com%2Frequests\"" \
+            --project "$GCP_PROJECT_ID" --freshness=5m --limit=20 --format=json 2>/dev/null | jq 'length')"
+
+          CLASSIFICATION=UNCLASSIFIED
+          if [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" == 404 && "$TAGGED_READY_CANONICAL_AUD_STATUS" == 404 ]]; then
+            CLASSIFICATION=TAGGED_RUN_APP_ROUTE_REJECTED_BEFORE_CANDIDATE
+          elif [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" =~ ^2 && "$TAGGED_READY_CANONICAL_AUD_STATUS" =~ ^2 ]]; then
+            CLASSIFICATION=TAGGED_ROUTE_HEALTHY
+          elif [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" =~ ^(401|403)$ ]]; then
+            CLASSIFICATION=TAGGED_ROUTE_AUTHORIZATION_FAILURE
+          elif [[ ! "$CANONICAL_HEALTH_STATUS" =~ ^2 || ! "$CANONICAL_READY_STATUS" =~ ^2 ]]; then
+            CLASSIFICATION=CANONICAL_INTERNAL_ROUTE_FAILURE
+          fi
+
+          jq -n \
+            --arg schemaVersion 'toca.fast-candidate-probe.v1' \
+            --arg candidateSha "$FAST_PROBE_CANDIDATE" \
+            --arg revision "$MCP_REVISION" \
+            --arg tag "$FAST_PROBE_MCP_TAG" \
+            --arg canonicalUrl "$MCP_CANONICAL_URL" \
+            --arg taggedUrl "$MCP_TAGGED_URL" \
+            --arg ingress "$MCP_INGRESS" \
+            --arg ch "$CANONICAL_HEALTH_STATUS" \
+            --arg cr "$CANONICAL_READY_STATUS" \
+            --arg thc "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" \
+            --arg trc "$TAGGED_READY_CANONICAL_AUD_STATUS" \
+            --arg tht "$TAGGED_HEALTH_TAGGED_AUD_STATUS" \
+            --arg requestLogs "$CANDIDATE_REQUEST_LOG_COUNT" \
+            --arg classification "$CLASSIFICATION" \
+            --arg bindingAdded "$PROBE_BINDING_ADDED" \
+            '{schemaVersion:$schemaVersion,candidateSha:$candidateSha,revision:$revision,trafficTag:$tag,canonicalUrl:$canonicalUrl,taggedUrl:$taggedUrl,ingress:$ingress,status:{canonicalHealth:($ch|tonumber),canonicalReady:($cr|tonumber),taggedHealthCanonicalAudience:($thc|tonumber),taggedReadyCanonicalAudience:($trc|tonumber),taggedHealthTaggedAudience:($tht|tonumber)},candidateRequestLogCount:($requestLogs|tonumber),classification:$classification,temporaryInvokerBindingAdded:($bindingAdded=="true"),buildExecuted:false,migrationExecuted:false,backupExecuted:false,trafficMutationExecuted:false,providerCallExecuted:false}' \
+            > fast-probe-evidence/result.json
+
+          cleanup
+          trap - EXIT
+
+          for job in "${JOBS[@]}"; do
+            if gcloud scheduler jobs describe "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" >/dev/null 2>&1; then
+              echo "Fast probe cleanup left scheduler job behind: $job" >&2
+              exit 1
+            fi
+          done
+          if [[ "$PROBE_BINDING_ADDED" == true ]]; then
+            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-iam-after.json
+            if jq -e --arg member "$PROBE_MEMBER" '
+              .bindings[]?
+              | select(.role == "roles/run.invoker" and (.condition == null))
+              | (.members // [])[]?
+              | select(. == $member)
+            ' /tmp/mcp-iam-after.json >/dev/null; then
+              echo 'Temporary fast-probe invoker binding remained after cleanup' >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo '## GCP Candidate Fast Probe'
+            echo "- Candidate: \`$FAST_PROBE_CANDIDATE\`"
+            echo "- Revision: \`$MCP_REVISION\`"
+            echo "- Ingress: \`$MCP_INGRESS\`"
+            echo "- Canonical /healthz: \`$CANONICAL_HEALTH_STATUS\`"
+            echo "- Canonical /readyz: \`$CANONICAL_READY_STATUS\`"
+            echo "- Tagged /healthz + canonical audience: \`$TAGGED_HEALTH_CANONICAL_AUD_STATUS\`"
+            echo "- Tagged /readyz + canonical audience: \`$TAGGED_READY_CANONICAL_AUD_STATUS\`"
+            echo "- Tagged /healthz + tagged audience: \`$TAGGED_HEALTH_TAGGED_AUD_STATUS\`"
+            echo "- Candidate request-log count: \`$CANDIDATE_REQUEST_LOG_COUNT\`"
+            echo "- Classification: **$CLASSIFICATION**"
+            echo '- Build: `SKIPPED`'
+            echo '- Migration: `SKIPPED`'
+            echo '- Backup: `SKIPPED`'
+            echo '- Traffic mutation: `NONE`'
+            echo '- Provider calls: `NONE`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat fast-probe-evidence/result.json
