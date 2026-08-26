@@ -43,7 +43,7 @@ describe('GCP production internal MCP probe contract', () => {
     expect(deploy).toContain('MCP_PROBE_ENDPOINT_ARGS=(--default-url)');
     expect(deploy).toContain('MCP_PRIVATE_INGRESS_ARGS=()');
     expect(deploy).toContain('MCP_PRIVATE_INGRESS_ARGS=(--ingress internal)');
-    expect(deploy).toContain('\"${MCP_PRIVATE_INGRESS_ARGS[@]}\"');
+    expect(deploy).toContain('"${MCP_PRIVATE_INGRESS_ARGS[@]}"');
     expect(deploy).toContain('--no-allow-unauthenticated');
     expect(deploy).not.toContain('--ingress all');
   });
