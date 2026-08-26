@@ -34,19 +34,11 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain('gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE"');
     expect(production).toContain('--ingress internal --default-url --no-allow-unauthenticated');
     expect(production).toContain('PROBE_URL="$(jq -r');
-    expect(production).toContain(
-      'create_scheduler_probe "$HEALTH_JOB" "${PROBE_URL}/healthz"',
-    );
-    expect(production).toContain(
-      'create_scheduler_probe "$READY_JOB" "${PROBE_URL}/readyz"',
-    );
+    expect(production).toContain('create_scheduler_probe "$HEALTH_JOB" "${PROBE_URL}/healthz"');
+    expect(production).toContain('create_scheduler_probe "$READY_JOB" "${PROBE_URL}/readyz"');
     expect(production).toContain('--oidc-token-audience="$PROBE_URL"');
-    expect(production).not.toContain(
-      'create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"',
-    );
-    expect(production).not.toContain(
-      'create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"',
-    );
+    expect(production).not.toContain('create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"');
+    expect(production).not.toContain('create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"');
   });
 
   it('proves the ephemeral acceptance runtime represents the exact production candidate', () => {
@@ -56,9 +48,7 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain('gcloud run revisions describe "$PROBE_REVISION"');
     expect(production).toContain('CANDIDATE_RUNTIME_IMAGE=');
     expect(production).toContain('PROBE_RUNTIME_IMAGE=');
-    expect(production).toContain(
-      '[[ "$CANDIDATE_RUNTIME_IMAGE" == "$PROBE_RUNTIME_IMAGE" ]]',
-    );
+    expect(production).toContain('[[ "$CANDIDATE_RUNTIME_IMAGE" == "$PROBE_RUNTIME_IMAGE" ]]');
     expect(production).toContain('CANDIDATE_RELEASE_SHA=');
     expect(production).toContain('PROBE_RELEASE_SHA=');
     expect(production).toContain(
@@ -67,9 +57,7 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain(
       '[[ "$CANDIDATE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" && "$PROBE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" ]]',
     );
-    expect(production).toContain(
-      '[[ "$CANDIDATE_READY" == True && "$PROBE_READY" == True ]]',
-    );
+    expect(production).toContain('[[ "$CANDIDATE_READY" == True && "$PROBE_READY" == True ]]');
   });
 
   it('keeps both production and acceptance ingress private without allUsers exposure', () => {
@@ -79,7 +67,9 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain('Production MCP ingress is not private');
     expect(production).toContain('Production MCP must not expose roles/run.invoker to allUsers');
     expect(production).toContain('[[ "$PROBE_INGRESS" == internal ]]');
-    expect(production).toContain('Ephemeral MCP acceptance service must not expose roles/run.invoker to allUsers');
+    expect(production).toContain(
+      'Ephemeral MCP acceptance service must not expose roles/run.invoker to allUsers',
+    );
     expect(production).toContain(
       'PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"',
     );
