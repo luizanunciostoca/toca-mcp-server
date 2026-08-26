@@ -4,15 +4,15 @@ workflow_path = Path('.github/workflows/deploy-gcp.yml')
 text = workflow_path.read_text()
 
 
-def replace_once(old: str, new: str, label: str) -> None:
-    global text
-    count = text.count(old)
+def replace_once(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
     if count != 1:
         raise SystemExit(f'{label}: expected exactly one match, found {count}')
-    text = text.replace(old, new, 1)
+    return source.replace(old, new, 1)
 
 
-replace_once(
+text = replace_once(
+    text,
     '''      - name: Verify health readiness and webhook route confinement
         if: inputs.operation == 'deploy'
         env:
@@ -52,9 +52,10 @@ split_replacement = '''            jq -e '.status == "ready" and (.checks | all(
           if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
             test -n "$WEBHOOK_REVISION" || { echo 'Webhook exact candidate revision missing' >&2; exit 1; }
 '''
-replace_once(split_marker, split_replacement, 'MCP/webhook run-step split')
+text = replace_once(text, split_marker, split_replacement, 'MCP/webhook run-step split')
 
-replace_once(
+text = replace_once(
+    text,
     '''                status="$(gcloud logging read \\
                   "resource.type="cloud_scheduler_job" AND resource.labels.job_id="${job}" AND httpRequest.status>0" \\
 ''',
@@ -66,19 +67,49 @@ replace_once(
 
 workflow_path.write_text(text)
 
-for test_name in (
-    'test/gcp-deploy-cloud-run-probes.test.ts',
-    'test/gcp-production-internal-probe-contract.test.ts',
-    'test/gcp-production-probe-rollback-contract.test.ts',
-    'test/gcp-production-webhook-internal-probe-contract.test.ts',
-):
-    path = Path(test_name)
-    source = path.read_text()
-    old = '- name: Verify health readiness and webhook route confinement'
-    count = source.count(old)
-    if count != 1:
-        raise SystemExit(f'{test_name}: expected one old verification marker, found {count}')
-    path.write_text(source.replace(old, '- name: Verify MCP health readiness and internal acceptance', 1))
+# Update contracts deliberately by semantic boundary rather than a generic marker rewrite.
+path = Path('test/gcp-deploy-cloud-run-probes.test.ts')
+source = path.read_text()
+source = replace_once(
+    source,
+    "    expect(workflow).toContain('Verify health readiness and webhook route confinement');\n",
+    "    expect(workflow).toContain('Verify MCP health readiness and internal acceptance');\n"
+    "    expect(workflow).toContain('Verify production webhook health readiness and route confinement');\n",
+    'cloud-run probe verification names',
+)
+path.write_text(source)
+
+path = Path('test/gcp-production-internal-probe-contract.test.ts')
+source = path.read_text()
+source = source.replace(
+    "'- name: Verify health readiness and webhook route confinement',\n      '- name: Restore production MCP default endpoint posture after private probes',",
+    "'- name: Verify MCP health readiness and internal acceptance',\n      '- name: Verify production webhook health readiness and route confinement',",
+)
+if source.count("'- name: Verify MCP health readiness and internal acceptance'") != 2:
+    raise SystemExit('production MCP contract: expected two MCP section starts after rewrite')
+path.write_text(source)
+
+path = Path('test/gcp-production-probe-rollback-contract.test.ts')
+source = path.read_text()
+source = replace_once(
+    source,
+    "      '- name: Verify health readiness and webhook route confinement',\n",
+    "      '- name: Verify MCP health readiness and internal acceptance',\n",
+    'rollback verification ordering marker',
+)
+path.write_text(source)
+
+path = Path('test/gcp-production-webhook-internal-probe-contract.test.ts')
+source = path.read_text()
+source = replace_once(
+    source,
+    "  const start = workflow.indexOf('- name: Verify health readiness and webhook route confinement');\n",
+    "  const start = workflow.indexOf(\n"
+    "    '- name: Verify production webhook health readiness and route confinement',\n"
+    "  );\n",
+    'webhook verification section start',
+)
+path.write_text(source)
 
 limit_test = Path('test/gcp-workflow-run-length-contract.test.ts')
 limit_test.write_text('''import { readFileSync } from 'node:fs';
