@@ -127,7 +127,9 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(mcpDeploy).not.toContain('--allow-unauthenticated');
     expect(mcpDeploy).not.toContain('--ingress all');
 
-    expect(restore).toContain("if: inputs.operation == 'deploy' && inputs.environment == 'production'");
+    expect(restore).toContain(
+      "if: inputs.operation == 'deploy' && inputs.environment == 'production'",
+    );
     expect(restore).toContain('--no-default-url');
     expect(restore).toContain('run.googleapis.com/default-url-disabled');
     expect(restore).toContain('MCP_DEFAULT_URL_POSTURE_RESTORED=PASS');
