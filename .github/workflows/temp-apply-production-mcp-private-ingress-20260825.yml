@@ -25,42 +25,21 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           workflow_path = Path('.github/workflows/deploy-gcp.yml')
           test_path = Path('test/gcp-production-internal-probe-contract.test.ts')
-
           workflow = workflow_path.read_text()
-          old = '''          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-            MCP_PROBE_ENDPOINT_ARGS=(--default-url)
-          fi'''
-          new = '''          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-            MCP_PROBE_ENDPOINT_ARGS=(--default-url --ingress internal)
-          fi'''
+          old = '          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then\n            MCP_PROBE_ENDPOINT_ARGS=(--default-url)\n          fi'
+          new = '          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then\n            MCP_PROBE_ENDPOINT_ARGS=(--default-url --ingress internal)\n          fi'
           if workflow.count(old) != 1:
               raise SystemExit('expected exactly one production MCP probe endpoint argument block')
-          workflow = workflow.replace(old, new)
-          workflow_path.write_text(workflow)
-
+          workflow_path.write_text(workflow.replace(old, new))
           test = test_path.read_text()
-          marker = '''  it('fails closed on private network and IAM posture without broadening ingress', () => {'''
-          addition = '''  it('pins the production MCP candidate deploy to private ingress', () => {
-    const deploy = section(
-      '- name: Deploy private MCP candidate by digest with no traffic',
-      '- name: Deploy controlled webhook candidate by digest',
-    );
-
-    expect(deploy).toContain('MCP_PROBE_ENDPOINT_ARGS=(--default-url --ingress internal)');
-    expect(deploy).toContain('"${MCP_PROBE_ENDPOINT_ARGS[@]}" --no-allow-unauthenticated');
-    expect(deploy).not.toContain('--ingress all');
-  });
-
-'''
+          marker = "  it('fails closed on private network and IAM posture without broadening ingress', () => {"
+          addition = "  it('pins the production MCP candidate deploy to private ingress', () => {\n    const deploy = section(\n      '- name: Deploy private MCP candidate by digest with no traffic',\n      '- name: Deploy controlled webhook candidate by digest',\n    );\n\n    expect(deploy).toContain('MCP_PROBE_ENDPOINT_ARGS=(--default-url --ingress internal)');\n    expect(deploy).toContain('\\\"${MCP_PROBE_ENDPOINT_ARGS[@]}\\\" --no-allow-unauthenticated');\n    expect(deploy).not.toContain('--ingress all');\n  });\n\n"
           if test.count(marker) != 1:
               raise SystemExit('expected exact production internal probe regression marker')
-          test = test.replace(marker, addition + marker)
-          test_path.write_text(test)
+          test_path.write_text(test.replace(marker, addition + marker))
           PY
-
           grep -q -- 'MCP_PROBE_ENDPOINT_ARGS=(--default-url --ingress internal)' .github/workflows/deploy-gcp.yml
           ! grep -A25 -F -- '- name: Deploy private MCP candidate by digest with no traffic' .github/workflows/deploy-gcp.yml | grep -q -- '--ingress all'
 
