@@ -58,7 +58,7 @@ describe('GCP production internal MCP probe contract', () => {
     );
   });
 
-  it('uses exact tagged targets with canonical audience and records immutable probe evidence', () => {
+  it('uses exact tagged targets with canonical audience', () => {
     const verify = section(
       '- name: Verify health readiness and webhook route confinement',
       '- name: Restore production MCP default endpoint posture after private probes',
