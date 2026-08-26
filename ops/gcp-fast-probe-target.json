@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "toca.fast-probe-target.v1",
+  "candidateSha": "b54f960a4b973bdf424ca6eeb7c1c24347a225f4",
+  "authorizationRef": "https://github.com/luizanunciostoca/toca-mcp-server/issues/262",
+  "environment": "production",
+  "expectedMcpTag": "production-mcp-b54f960"
+}
