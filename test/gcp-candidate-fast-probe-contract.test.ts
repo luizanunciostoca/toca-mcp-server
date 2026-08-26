@@ -43,7 +43,7 @@ describe('GCP candidate fast probe contract', () => {
     expect(workflow).toContain('EXPECTED_PREFIX="https://${FAST_PROBE_MCP_TAG}---"');
     expect(workflow).toContain('MCP_DEFAULT_URL_DISABLED');
     expect(workflow).toContain('CLASSIFICATION=DEFAULT_RUN_APP_URL_DISABLED');
-    expect(workflow).not.toContain("Canonical MCP URL missing");
+    expect(workflow).not.toContain('Canonical MCP URL missing');
     expect(workflow).not.toContain("Production MCP default run.app URL is disabled' >&2; exit 1");
   });
 
