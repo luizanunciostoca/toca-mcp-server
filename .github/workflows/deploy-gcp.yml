@@ -777,18 +777,154 @@ jobs:
         if: inputs.operation == 'deploy'
         env:
           MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
+          MCP_AUDIENCE: ${{ steps.resolve_candidates.outputs.mcp_audience }}
           WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
         run: |
           set -euo pipefail
           mkdir -p platform-evidence
-          test -n "$MCP_TOKEN" || { echo 'MCP private probe ID token missing' >&2; exit 1; }
           test -n "$WEBHOOK_TOKEN" || { echo 'Webhook private probe ID token missing' >&2; exit 1; }
           WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" | tee platform-evidence/mcp-healthz.json
-          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" | tee platform-evidence/mcp-readyz.json
+
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            test -n "$MCP_URL" || { echo 'MCP exact tagged probe URL missing' >&2; exit 1; }
+            test -n "$MCP_AUDIENCE" || { echo 'MCP canonical probe audience missing' >&2; exit 1; }
+
+            gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-internal-probe-posture.json
+            MCP_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-internal-probe-posture.json)"
+            MCP_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-internal-probe-posture.json)"
+            case "$MCP_INGRESS" in
+              internal|internal-and-cloud-load-balancing) ;;
+              *) echo "Production MCP ingress is not private: $MCP_INGRESS" >&2; exit 1 ;;
+            esac
+            [[ "$MCP_DEFAULT_URL_DISABLED" == false ]] || { echo 'Production MCP default URL must be enabled only during the private probe window' >&2; exit 1; }
+
+            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-internal-probe-iam-before.json
+            if jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' \
+              /tmp/mcp-internal-probe-iam-before.json >/dev/null; then
+              echo 'Production MCP must not expose roles/run.invoker to allUsers' >&2
+              exit 1
+            fi
+
+            PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"
+            PROBE_BINDING_ADDED=false
+            HEALTH_JOB="toca-mcp-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            READY_JOB="toca-mcp-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+            cleanup_internal_mcp_probe() {
+              set +e
+              for job in "$HEALTH_JOB" "$READY_JOB"; do
+                gcloud scheduler jobs delete "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              done
+              if [[ "$PROBE_BINDING_ADDED" == true ]]; then
+                gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_MCP_SERVICE" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --member="$PROBE_MEMBER" --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+              fi
+              set -e
+            }
+            trap cleanup_internal_mcp_probe EXIT
+
+            if ! jq -e --arg member "$PROBE_MEMBER" '
+              .bindings[]?
+              | select(.role == "roles/run.invoker" and (.condition == null))
+              | (.members // [])[]?
+              | select(. == $member)
+            ' /tmp/mcp-internal-probe-iam-before.json >/dev/null; then
+              gcloud run services add-iam-policy-binding "$GCP_CLOUD_RUN_MCP_SERVICE" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                --member="$PROBE_MEMBER" --role=roles/run.invoker --quiet
+              PROBE_BINDING_ADDED=true
+            fi
+
+            create_scheduler_probe() {
+              local job="$1" uri="$2"
+              gcloud scheduler jobs create http "$job" \
+                --project "$GCP_PROJECT_ID" --location "$GCP_REGION" \
+                --schedule='0 0 1 1 *' --time-zone='Etc/UTC' \
+                --uri="$uri" --http-method=GET \
+                --oidc-service-account-email="$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+                --oidc-token-audience="$MCP_AUDIENCE" \
+                --attempt-deadline=30s --max-retry-attempts=0 --quiet
+            }
+
+            wait_for_scheduler_2xx() {
+              local job="$1" status
+              gcloud scheduler jobs run "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+              for _ in $(seq 1 45); do
+                status="$(gcloud logging read \
+                  "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\" AND httpRequest.status>=200 AND httpRequest.status<300" \
+                  --project "$GCP_PROJECT_ID" --freshness=10m --limit=1 --order=desc \
+                  --format='value(httpRequest.status)' 2>/dev/null | head -n1)"
+                if [[ "$status" =~ ^2[0-9]{2}$ ]]; then
+                  printf '%s' "$status"
+                  return 0
+                fi
+                status="$(gcloud logging read \
+                  "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\" AND httpRequest.status>=300" \
+                  --project "$GCP_PROJECT_ID" --freshness=10m --limit=1 --order=desc \
+                  --format='value(httpRequest.status)' 2>/dev/null | head -n1)"
+                if [[ "$status" =~ ^[345][0-9]{2}$ ]]; then
+                  echo "Internal MCP scheduler probe $job failed with HTTP $status" >&2
+                  return 1
+                fi
+                sleep 2
+              done
+              echo "Internal MCP scheduler probe $job timed out without a terminal HTTP status" >&2
+              return 1
+            }
+
+            create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"
+            create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"
+            HEALTH_STATUS="$(wait_for_scheduler_2xx "$HEALTH_JOB")"
+            READY_STATUS="$(wait_for_scheduler_2xx "$READY_JOB")"
+
+            jq -n \
+              --arg ingress "$MCP_INGRESS" \
+              --arg target "$MCP_URL" \
+              --arg audience "$MCP_AUDIENCE" \
+              --arg identity "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+              --arg bindingAdded "$PROBE_BINDING_ADDED" \
+              --arg health "$HEALTH_STATUS" \
+              --arg ready "$READY_STATUS" \
+              '{schemaVersion:"toca.platform.mcp-internal-probe.v1",mechanism:"cloud-scheduler",ingress:$ingress,exactTaggedTarget:$target,canonicalAudience:$audience,oidcServiceAccount:$identity,temporaryInvokerBindingAdded:($bindingAdded=="true"),healthHttpStatus:($health|tonumber),readyHttpStatus:($ready|tonumber),externalGitHubRunnerProbe:false,result:"PASS"}' \
+              > platform-evidence/mcp-internal-probe.json
+
+            cleanup_internal_mcp_probe
+            trap - EXIT
+            for job in "$HEALTH_JOB" "$READY_JOB"; do
+              if gcloud scheduler jobs describe "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" >/dev/null 2>&1; then
+                echo "Internal MCP probe cleanup left scheduler job behind: $job" >&2
+                exit 1
+              fi
+            done
+            if [[ "$PROBE_BINDING_ADDED" == true ]]; then
+              gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+                > /tmp/mcp-internal-probe-iam-after.json
+              if jq -e --arg member "$PROBE_MEMBER" '
+                .bindings[]?
+                | select(.role == "roles/run.invoker" and (.condition == null))
+                | (.members // [])[]?
+                | select(. == $member)
+              ' /tmp/mcp-internal-probe-iam-after.json >/dev/null; then
+                echo 'Temporary MCP probe invoker binding remained after cleanup' >&2
+                exit 1
+              fi
+            fi
+            echo 'MCP_INTERNAL_ORIGIN_PROBE=PASS' >> "$GITHUB_STEP_SUMMARY"
+          else
+            test -n "$MCP_TOKEN" || { echo 'MCP private probe ID token missing' >&2; exit 1; }
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" | tee platform-evidence/mcp-healthz.json
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" | tee platform-evidence/mcp-readyz.json
+            jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/mcp-readyz.json >/dev/null
+          fi
+
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
           curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
-          jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/mcp-readyz.json >/dev/null
           jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/webhook-readyz.json >/dev/null
           MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp")"
           OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
