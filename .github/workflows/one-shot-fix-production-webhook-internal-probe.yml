@@ -32,13 +32,15 @@ jobs:
           cache: pnpm
 
       - name: Apply remediation
-        run: python scripts/one-shot-fix-production-webhook-internal-probe.py
+        run: |
+          python scripts/one-shot-fix-production-webhook-internal-probe.py
+          python scripts/one-shot-update-webhook-probe-tests.py
 
       - name: Validate affected contracts
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
-          pnpm exec prettier --write test/gcp-production-webhook-internal-probe-contract.test.ts
+          pnpm exec prettier --write test/gcp-production-webhook-internal-probe-contract.test.ts test/gcp-deploy-cloud-run-probes.test.ts test/gcp-production-internal-probe-contract.test.ts test/gcp-production-probe-rollback-contract.test.ts
           git diff --check
           pnpm exec vitest run test/gcp-production-webhook-internal-probe-contract.test.ts test/gcp-deploy-cloud-run-probes.test.ts test/gcp-production-internal-probe-contract.test.ts test/gcp-production-probe-rollback-contract.test.ts
 
@@ -47,6 +49,7 @@ jobs:
           set -euo pipefail
           rm .github/workflows/one-shot-fix-production-webhook-internal-probe.yml
           rm scripts/one-shot-fix-production-webhook-internal-probe.py
+          rm scripts/one-shot-update-webhook-probe-tests.py
           git diff --check
           git config user.name "TOCA OS Automation"
           git config user.email "actions@github.com"
