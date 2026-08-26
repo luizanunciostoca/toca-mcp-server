@@ -36,6 +36,17 @@ describe('GCP candidate fast probe contract', () => {
     expect(workflow).toContain('CANONICAL_INTERNAL_ROUTE_FAILURE');
   });
 
+  it('diagnoses missing status.url instead of stopping before the HTTP matrix', () => {
+    expect(workflow).toContain('MCP_STATUS_URL="$(jq -r');
+    expect(workflow).toContain('CANONICAL_URL_SOURCE=status.url');
+    expect(workflow).toContain('CANONICAL_URL_SOURCE=derived-from-tagged-url');
+    expect(workflow).toContain('EXPECTED_PREFIX="https://${FAST_PROBE_MCP_TAG}---"');
+    expect(workflow).toContain('MCP_DEFAULT_URL_DISABLED');
+    expect(workflow).toContain('CLASSIFICATION=DEFAULT_RUN_APP_URL_DISABLED');
+    expect(workflow).not.toContain("Canonical MCP URL missing");
+    expect(workflow).not.toContain("Production MCP default run.app URL is disabled' >&2; exit 1");
+  });
+
   it('requires exact candidate identity and private production posture', () => {
     expect(workflow).toContain('REVISION_RELEASE_SHA');
     expect(workflow).toContain('[[ "$REVISION_RELEASE_SHA" == "$FAST_PROBE_CANDIDATE" ]]');
