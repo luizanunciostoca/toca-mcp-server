@@ -848,43 +848,42 @@ jobs:
             [[ "$PROBE_DEFAULT_URL_DISABLED" == true ]] || { echo 'Ephemeral MCP acceptance default URL must remain disabled' >&2; exit 1; }
 
 
-  # Cloud Run still owns the /readyz startup gate. The workflow owns only the bounded
-  # wait so a rejected revision can emit sanitized failed-check diagnostics before cleanup.
-  PROBE_READY=Unknown
-  PROBE_READY_REASON=Pending
-  for _ in $(seq 1 18); do
-    if gcloud run revisions describe "$PROBE_REVISION" \
-      --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
-      > /tmp/mcp-acceptance-revision.json 2>/dev/null; then
-      PROBE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
-      PROBE_READY_REASON="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .reason] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
-      [[ "$PROBE_READY" == True ]] && break
-    fi
-    sleep 5
-  done
+            # Cloud Run still owns the /readyz startup gate. The workflow owns only the bounded
+            # wait so a rejected revision can emit sanitized failed-check diagnostics before cleanup.
+            PROBE_READY=Unknown
+            PROBE_READY_REASON=Pending
+            for _ in $(seq 1 18); do
+              if gcloud run revisions describe "$PROBE_REVISION" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+                > /tmp/mcp-acceptance-revision.json 2>/dev/null; then
+                PROBE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
+                PROBE_READY_REASON="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .reason] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
+                [[ "$PROBE_READY" == True ]] && break
+              fi
+              sleep 5
+            done
 
-  if [[ "$PROBE_READY" != True ]]; then
-    READINESS_DIAGNOSTICS="$(gcloud logging read \
-      "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${PROBE_SERVICE}\" AND resource.labels.revision_name=\"${PROBE_REVISION}\" AND textPayload:\"TOCA_READINESS_NOT_READY\"" \
-      --project "$GCP_PROJECT_ID" --freshness=10m --limit=20 --order=desc \
-      --format='value(textPayload)' 2>/dev/null \
-      | grep -E '^TOCA_READINESS_NOT_READY failed_checks=[A-Za-z0-9_,.-]*$' \
-      | head -n 5 || true)"
-    jq -n \
-      --arg probeService "$PROBE_SERVICE" \
-      --arg probeRevision "$PROBE_REVISION" \
-      --arg readyStatus "$PROBE_READY" \
-      --arg readyReason "$PROBE_READY_REASON" \
-      --arg readinessDiagnostics "$READINESS_DIAGNOSTICS" \
-      '{schemaVersion:"toca.platform.mcp-internal-probe-failure.v1",probeService:$probeService,probeRevision:$probeRevision,readyStatus:$readyStatus,readyReason:$readyReason,readinessDiagnostics:($readinessDiagnostics|split("\n")|map(select(length>0))),secretPayloadDisclosed:false,providerCallExecuted:false,result:"FAIL"}' \
-      > platform-evidence/mcp-internal-probe-failure.json
-    printf 'Ephemeral MCP acceptance failed Ready gate: status=%s reason=%s\n' "$PROBE_READY" "$PROBE_READY_REASON" >&2
-    [[ -z "$READINESS_DIAGNOSTICS" ]] || printf '%s\n' "$READINESS_DIAGNOSTICS" >&2
-    cleanup_internal_mcp_probe
-    trap - EXIT
-    exit 1
-  fi
-
+            if [[ "$PROBE_READY" != True ]]; then
+              READINESS_DIAGNOSTICS="$(gcloud logging read \
+                "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${PROBE_SERVICE}\" AND resource.labels.revision_name=\"${PROBE_REVISION}\" AND textPayload:\"TOCA_READINESS_NOT_READY\"" \
+                --project "$GCP_PROJECT_ID" --freshness=10m --limit=20 --order=desc \
+                --format='value(textPayload)' 2>/dev/null \
+                | grep -E '^TOCA_READINESS_NOT_READY failed_checks=[A-Za-z0-9_,.-]*$' \
+                | head -n 5 || true)"
+              jq -n \
+                --arg probeService "$PROBE_SERVICE" \
+                --arg probeRevision "$PROBE_REVISION" \
+                --arg readyStatus "$PROBE_READY" \
+                --arg readyReason "$PROBE_READY_REASON" \
+                --arg readinessDiagnostics "$READINESS_DIAGNOSTICS" \
+                '{schemaVersion:"toca.platform.mcp-internal-probe-failure.v1",probeService:$probeService,probeRevision:$probeRevision,readyStatus:$readyStatus,readyReason:$readyReason,readinessDiagnostics:($readinessDiagnostics|split("\n")|map(select(length>0))),secretPayloadDisclosed:false,providerCallExecuted:false,result:"FAIL"}' \
+                > platform-evidence/mcp-internal-probe-failure.json
+              printf 'Ephemeral MCP acceptance failed Ready gate: status=%s reason=%s\n' "$PROBE_READY" "$PROBE_READY_REASON" >&2
+              [[ -z "$READINESS_DIAGNOSTICS" ]] || printf '%s\n' "$READINESS_DIAGNOSTICS" >&2
+              cleanup_internal_mcp_probe
+              trap - EXIT
+              exit 1
+            fi
             gcloud run revisions describe "$MCP_REVISION" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
               > /tmp/mcp-production-candidate-revision.json
