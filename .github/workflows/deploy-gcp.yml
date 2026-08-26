@@ -811,11 +811,11 @@ jobs:
             fi
 
             # Cloud Scheduler is an internal Cloud Run source only when it invokes a service's
-            # default run.app URL. A traffic-tagged run.app hostname is rejected by the Cloud Run
-            # frontend before revision routing under internal ingress. Validate the exact immutable
-            # candidate through a short-lived sibling service that keeps the same runtime image,
-            # identity, Cloud SQL attachment, secrets, env and probes, but exposes its canonical
-            # default URL only to authenticated internal callers.
+            # deterministic default run.app URL. A traffic-tagged or legacy hash run.app hostname
+            # is rejected by the Cloud Run frontend before revision routing under internal ingress.
+            # Validate the exact immutable candidate through a short-lived sibling service that
+            # keeps the same runtime image, identity, Cloud SQL attachment, secrets, env and probes,
+            # but exposes its deterministic default URL only to authenticated internal callers.
             PROBE_SERVICE="toca-mcp-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"
             HEALTH_JOB="toca-mcp-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -847,11 +847,11 @@ jobs:
             gcloud run services describe "$PROBE_SERVICE" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
               > /tmp/mcp-acceptance-service.json
-            PROBE_URL="$(jq -r '.status.url // empty' /tmp/mcp-acceptance-service.json)"
+            PROBE_URL="https://${PROBE_SERVICE}-${GCP_PROJECT_NUMBER}.${GCP_REGION}.run.app"
             PROBE_REVISION="$(jq -r '.status.latestReadyRevisionName // empty' /tmp/mcp-acceptance-service.json)"
             PROBE_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-acceptance-service.json)"
             PROBE_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-acceptance-service.json)"
-            test -n "$PROBE_URL" || { echo 'Ephemeral MCP acceptance service has no canonical run.app URL' >&2; exit 1; }
+            test -n "$PROBE_URL" || { echo 'Ephemeral MCP acceptance service has no deterministic canonical run.app URL' >&2; exit 1; }
             test -n "$PROBE_REVISION" || { echo 'Ephemeral MCP acceptance service has no Ready revision' >&2; exit 1; }
             [[ "$PROBE_INGRESS" == internal ]] || { echo "Ephemeral MCP acceptance ingress is not internal: $PROBE_INGRESS" >&2; exit 1; }
             [[ "$PROBE_DEFAULT_URL_DISABLED" == false ]] || { echo 'Ephemeral MCP acceptance default URL is disabled' >&2; exit 1; }
