@@ -1,0 +1,1376 @@
+name: Deploy GCP Next
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [staging, production]
+      operation:
+        description: Governed deployment or recovery operation
+        required: true
+        default: deploy
+        type: choice
+        options: [deploy, rollback, kill_switch, clear_kill_switch]
+      rollout:
+        description: Traffic promotion after candidate readiness
+        required: true
+        default: candidate
+        type: choice
+        options: [candidate, canary, full]
+      rollback_mcp_revision:
+        description: Known MCP/Core revision for explicit rollback
+        required: false
+        type: string
+      rollback_webhook_revision:
+        description: Known webhook revision, or ABSENT to restore closed external exposure when no prior webhook revision served traffic
+        required: false
+        type: string
+      rollback_compatibility_ref:
+        description: Evidence that rollback revisions are schema-compatible
+        required: false
+        type: string
+      staging_evidence_ref:
+        description: Approved staging evidence package required before production
+        required: false
+        type: string
+      production_authorization_ref:
+        description: Coordinator authorization required before production mutation
+        required: false
+        type: string
+      alert_evidence_ref:
+        description: Alert firing/readback evidence reference
+        required: false
+        type: string
+      dr_evidence_ref:
+        description: Isolated DR drill evidence reference
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-gcp-next-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.environment != 'production' || github.ref == 'refs/heads/main'
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || (inputs.environment == 'production' && 'toca-mcp-production') || '' }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER || (inputs.environment == 'production' && '990081828836') || '' }}
+      GCP_REGION: ${{ vars.GCP_REGION || (inputs.environment == 'production' && 'southamerica-east1') || '' }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || (inputs.environment == 'production' && 'toca-mcp') || '' }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE || (inputs.environment == 'production' && 'toca-mcp-db') || '' }}
+      GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE || (inputs.environment == 'production' && 'toca-mcp-production') || '' }}
+      GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.GCP_CLOUD_RUN_WEBHOOK_SERVICE || (inputs.environment == 'production' && 'toca-webhook-next-production') || '' }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || (inputs.environment == 'production' && 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp') || '' }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || (inputs.environment == 'production' && 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com') || '' }}
+      GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || (inputs.environment == 'production' && 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com') || '' }}
+      GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT || (inputs.environment == 'production' && 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com') || '' }}
+      GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET || (inputs.environment == 'production' && 'toca-database-url') || '' }}
+      GCP_DATABASE_URL_SECRET_VERSION: ${{ vars.GCP_DATABASE_URL_SECRET_VERSION || (inputs.environment == 'production' && '1') || '' }}
+      PRODUCTION_GCP_PROJECT_ID: ${{ vars.PRODUCTION_GCP_PROJECT_ID }}
+      PRODUCTION_GCP_PROJECT_NUMBER: ${{ vars.PRODUCTION_GCP_PROJECT_NUMBER }}
+      PRODUCTION_GCP_REGION: ${{ vars.PRODUCTION_GCP_REGION }}
+      PRODUCTION_GCP_CLOUD_SQL_INSTANCE: ${{ vars.PRODUCTION_GCP_CLOUD_SQL_INSTANCE }}
+      PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_MCP_SERVICE }}
+      PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE: ${{ vars.PRODUCTION_GCP_CLOUD_RUN_WEBHOOK_SERVICE }}
+      PRODUCTION_GCP_DATABASE_URL_SECRET: ${{ vars.PRODUCTION_GCP_DATABASE_URL_SECRET }}
+      PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.PRODUCTION_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_DEPLOY_SERVICE_ACCOUNT }}
+      PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_MCP_RUNTIME_SERVICE_ACCOUNT }}
+      PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PRODUCTION_GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT }}
+      STAGING_DATABASE_ISOLATION_MODE: ${{ vars.STAGING_DATABASE_ISOLATION_MODE }}
+      STAGING_PROVIDER_MODE: ${{ vars.STAGING_PROVIDER_MODE || 'DISABLED' }}
+      STAGING_PROVIDER_ISOLATION_EVIDENCE_REF: ${{ vars.STAGING_PROVIDER_ISOLATION_EVIDENCE_REF }}
+      GCP_META_ACCESS_TOKEN_SECRET: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET || (inputs.environment == 'production' && 'toca-meta-oauth-token') || '' }}
+      GCP_META_ACCESS_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_ACCESS_TOKEN_SECRET_VERSION || (inputs.environment == 'production' && 'RESOLVE_RUNTIME') || '' }}
+      GCP_META_APP_SECRET: ${{ vars.GCP_META_APP_SECRET }}
+      GCP_META_APP_SECRET_VERSION: ${{ vars.GCP_META_APP_SECRET_VERSION }}
+      GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET }}
+      GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION: ${{ vars.GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION }}
+      GCP_SENDGRID_API_KEY_SECRET: ${{ vars.GCP_SENDGRID_API_KEY_SECRET }}
+      GCP_SENDGRID_API_KEY_SECRET_VERSION: ${{ vars.GCP_SENDGRID_API_KEY_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION }}
+      GCP_AG01_MODEL_API_KEY_SECRET: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET }}
+      GCP_AG01_MODEL_API_KEY_SECRET_VERSION: ${{ vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION }}
+      TOCA_DEFAULT_TENANT_ID: ${{ vars.TOCA_DEFAULT_TENANT_ID || 'toca' }}
+      TOCA_DEFAULT_WORKSPACE_ID: ${{ vars.TOCA_DEFAULT_WORKSPACE_ID || 'toca' }}
+      TOCA_DEFAULT_ORGANIZATION_ID: ${{ vars.TOCA_DEFAULT_ORGANIZATION_ID || 'toca' }}
+      META_ENABLED: ${{ vars.META_ENABLED || 'false' }}
+      META_PROVIDER_VERIFIED: ${{ vars.META_PROVIDER_VERIFIED || (inputs.environment == 'production' && 'true') || 'false' }}
+      META_WEBHOOK_ENABLED: ${{ vars.META_WEBHOOK_ENABLED || 'false' }}
+      META_WEBHOOK_PERSISTENCE_ENABLED: ${{ vars.META_WEBHOOK_PERSISTENCE_ENABLED || 'false' }}
+      INSTAGRAM_READ_ENABLED: ${{ vars.INSTAGRAM_READ_ENABLED || 'false' }}
+      META_ADS_READ_ENABLED: ${{ vars.META_ADS_READ_ENABLED || (inputs.environment == 'production' && 'true') || 'false' }}
+      META_ADS_WRITE_ENABLED: ${{ vars.META_ADS_WRITE_ENABLED || 'false' }}
+      WHATSAPP_ENABLED: ${{ vars.WHATSAPP_ENABLED || 'false' }}
+      WHATSAPP_BUSINESS_ID: ${{ vars.WHATSAPP_BUSINESS_ID }}
+      WHATSAPP_PROVIDER_VERIFIED: ${{ vars.WHATSAPP_PROVIDER_VERIFIED || 'false' }}
+      EMAIL_SENDGRID_ENABLED: ${{ vars.EMAIL_SENDGRID_ENABLED || 'false' }}
+      EMAIL_SENDGRID_PROVIDER_VERIFIED: ${{ vars.EMAIL_SENDGRID_PROVIDER_VERIFIED || 'false' }}
+      GOOGLE_ADS_PHASE: ${{ vars.GOOGLE_ADS_PHASE || 'OFF' }}
+      GOOGLE_ADS_PROVIDER_VERIFIED: ${{ vars.GOOGLE_ADS_PROVIDER_VERIFIED || 'false' }}
+      AG01_MODEL_ENABLED: ${{ vars.AG01_MODEL_ENABLED || 'false' }}
+      AG01_MODEL_PROVIDER_VERIFIED: ${{ vars.AG01_MODEL_PROVIDER_VERIFIED || 'false' }}
+      ALERT_EVIDENCE_REF: ${{ inputs.alert_evidence_ref }}
+      DR_EVIDENCE_REF: ${{ inputs.dr_evidence_ref }}
+
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Initialize immutable evidence package
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          mkdir -p platform-evidence
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg environment "${{ inputs.environment }}" \
+            --arg operation "${{ inputs.operation }}" \
+            --arg rollout "${{ inputs.rollout }}" \
+            --arg stagingRef "${{ inputs.staging_evidence_ref }}" \
+            --arg authorizationRef "${{ inputs.production_authorization_ref }}" \
+            '{schemaVersion:"toca.platform.preflight.v1",sourceSha:$sourceSha,environment:$environment,operation:$operation,rollout:$rollout,stagingEvidenceRef:$stagingRef,productionAuthorizationRef:$authorizationRef}' \
+            > platform-evidence/preflight.json
+
+      - name: Setup pnpm
+        if: inputs.operation == 'deploy'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: ${{ inputs.operation == 'deploy' && 'pnpm' || '' }}
+
+      - name: Install and run exact-head Quality
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          env -u GCP_PROJECT_ID \
+            -u GCP_META_ACCESS_TOKEN_SECRET \
+            -u GCP_META_ACCESS_TOKEN_SECRET_VERSION \
+            META_ENABLED=false \
+            META_PROVIDER_VERIFIED=false \
+            META_ADS_READ_ENABLED=false \
+            META_ADS_WRITE_ENABLED=false \
+            pnpm quality
+
+      - name: Prove environment isolation before any GCP access
+        run: node scripts/validate-gcp-deploy-environment.mjs
+
+      - name: Require exact production authorization before mutation
+        if: inputs.environment == 'production'
+        env:
+          STAGING_EVIDENCE_REF: ${{ inputs.staging_evidence_ref }}
+          PRODUCTION_AUTHORIZATION_REF: ${{ inputs.production_authorization_ref }}
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_EVIDENCE_REF" || { echo 'staging_evidence_ref is required' >&2; exit 1; }
+          test -n "$PRODUCTION_AUTHORIZATION_REF" || { echo 'production_authorization_ref is required' >&2; exit 1; }
+
+          AUTH_PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
+          [[ "$PRODUCTION_AUTHORIZATION_REF" == "${AUTH_PREFIX}"* ]] || {
+            echo 'production_authorization_ref must be a same-repository issue URL' >&2
+            exit 1
+          }
+          AUTH_ISSUE="${PRODUCTION_AUTHORIZATION_REF#${AUTH_PREFIX}}"
+          [[ "$AUTH_ISSUE" =~ ^[0-9]+$ ]] || {
+            echo 'production_authorization_ref must end in one numeric issue id' >&2
+            exit 1
+          }
+          AUTH_API="https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}"
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'User-Agent: toca-production-authorization-gate' \
+            "$AUTH_API" > /tmp/production-authorization.json
+          if ! jq -e \
+            --arg expectedUrl "$PRODUCTION_AUTHORIZATION_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" '
+              (.html_url == $expectedUrl) and
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION AUTHORIZATION")) and
+              ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha)) and
+              ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE"))
+            ' /tmp/production-authorization.json >/dev/null; then
+            echo 'Production authorization is not active for the exact current SHA and repository owner' >&2
+            jq -c '{html_url,state,title,author:(.user.login // null),hasPullRequest:has("pull_request")}' /tmp/production-authorization.json >&2
+            exit 1
+          fi
+          mkdir -p platform-evidence
+          jq -n \
+            --arg issue "$AUTH_ISSUE" \
+            --arg ref "$PRODUCTION_AUTHORIZATION_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            '{schemaVersion:"toca.platform.production-authorization.v1",issueNumber:($issue|tonumber),reference:$ref,state:"OPEN",authorizedCandidateSha:$sha,authorizedBy:$owner,exactShaMatched:true}' \
+            > platform-evidence/production-authorization.json
+          echo "PRODUCTION_AUTHORIZATION_EXACT_SHA=PASS issue=${AUTH_ISSUE}"
+
+      - name: Fail closed on unverified provider activation
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          assert_boolean() { case "$2" in true|false) ;; *) echo "$1 must be true or false" >&2; exit 1 ;; esac; }
+          gate() {
+            local name="$1" enabled="$2" verified="$3"
+            assert_boolean "${name}_enabled" "$enabled"
+            assert_boolean "${name}_verified" "$verified"
+            if [[ "$enabled" == true && "$verified" != true ]]; then
+              echo "Refusing ${name}: PROVIDER_VERIFIED evidence is absent" >&2
+              exit 1
+            fi
+          }
+          gate META "$META_ENABLED" "$META_PROVIDER_VERIFIED"
+          gate WHATSAPP "$WHATSAPP_ENABLED" "$WHATSAPP_PROVIDER_VERIFIED"
+          gate EMAIL_SENDGRID "$EMAIL_SENDGRID_ENABLED" "$EMAIL_SENDGRID_PROVIDER_VERIFIED"
+          gate AG01_MODEL "$AG01_MODEL_ENABLED" "$AG01_MODEL_PROVIDER_VERIFIED"
+          if [[ "$GOOGLE_ADS_PHASE" != OFF && "$GOOGLE_ADS_PROVIDER_VERIFIED" != true ]]; then
+            echo 'Refusing Google Ads activation without provider verification' >&2
+            exit 1
+          fi
+          if [[ "$META_WEBHOOK_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true || "$WHATSAPP_ENABLED" == true ]]; then
+            [[ "$META_PROVIDER_VERIFIED" == true ]] || { echo 'Meta-backed capability requires META_PROVIDER_VERIFIED=true' >&2; exit 1; }
+          fi
+
+      - name: Authenticate with environment-specific WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve production Meta token to exact numeric secret version
+        if: inputs.operation == 'deploy' && inputs.environment == 'production' && env.GCP_META_ACCESS_TOKEN_SECRET_VERSION == 'RESOLVE_RUNTIME'
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-meta-secret-version-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Meta resolver cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'META_RESOLVER_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/meta-resolver-service.json
+          SERVING_REVISION="$(jq -r '
+            . as $service
+            | [($service.status.traffic // [])[]
+                | select((.percent // 0) == 100)
+                | if ((.revisionName // "") | length) > 0 then .revisionName
+                  elif (.latestRevision // false) == true then ($service.status.latestReadyRevisionName // empty)
+                  else empty
+                  end]
+            | unique
+            | if length == 1 then .[0] else empty end
+          ' /tmp/meta-resolver-service.json)"
+          if [[ -z "$SERVING_REVISION" ]]; then
+            echo 'Meta resolver could not identify exactly one 100%-serving MCP revision' >&2
+            jq -c '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),traffic:(.status.traffic // [])}' \
+              /tmp/meta-resolver-service.json >&2
+            exit 1
+          fi
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "https://${GCP_REGION}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${GCP_PROJECT_NUMBER}/revisions/${SERVING_REVISION}" \
+            > /tmp/meta-resolver-revision-v1.json
+          unset ACCESS_TOKEN
+          REVISION_NAME="$(jq -r '.metadata.name // empty' /tmp/meta-resolver-revision-v1.json)"
+          [[ "$REVISION_NAME" == "$SERVING_REVISION" ]] || {
+            echo "Meta resolver Cloud Run v1 revision identity mismatch: expected $SERVING_REVISION" >&2
+            exit 1
+          }
+          SERVING_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/meta-resolver-revision-v1.json)"
+          [[ -n "$SERVING_IMAGE" ]] || { echo "Meta resolver serving revision has no container image: $SERVING_REVISION" >&2; exit 1; }
+          EXPECTED_IMAGE_PREFIX="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/"
+          [[ "$SERVING_IMAGE" == "${EXPECTED_IMAGE_PREFIX}"* ]] || { echo "Meta resolver serving image is outside canonical Artifact Registry: $SERVING_IMAGE" >&2; exit 1; }
+          SERVING_DIGEST="$(gcloud artifacts docker images describe "$SERVING_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$SERVING_DIGEST" == sha256:* ]] || { echo "Meta resolver Artifact Registry digest readback failed: $SERVING_REVISION" >&2; exit 1; }
+          CURRENT_IMAGE="$(SERVING_IMAGE="$SERVING_IMAGE" SERVING_DIGEST="$SERVING_DIGEST" node --input-type=module -e '
+            const image = process.env.SERVING_IMAGE;
+            const digest = process.env.SERVING_DIGEST;
+            const slash = image.lastIndexOf("/");
+            const at = image.lastIndexOf("@");
+            const colon = image.lastIndexOf(":");
+            const cut = at > slash ? at : colon > slash ? colon : image.length;
+            process.stdout.write(`${image.slice(0, cut)}@${digest}`);
+          ')"
+          jq -n \
+            --arg revision "$SERVING_REVISION" \
+            --arg image "$CURRENT_IMAGE" \
+            --arg digest "$SERVING_DIGEST" \
+            '{schemaVersion:"toca.platform.meta-resolver-source.v1",servingRevision:$revision,immutableImage:$image,imageDigest:$digest}' \
+            > platform-evidence/meta-resolver-source.json
+          echo "META_RESOLVER_SOURCE_REVISION=$SERVING_REVISION"
+
+          read -r -d '' RESOLVER_JS <<'JS' || true
+          const metadataHeaders = {'Metadata-Flavor': 'Google'};
+          const tokenResponse = await fetch('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', {headers: metadataHeaders});
+          if (!tokenResponse.ok) throw new Error(`metadata token status ${tokenResponse.status}`);
+          const {access_token: accessToken} = await tokenResponse.json();
+          const url = `https://secretmanager.googleapis.com/v1/projects/${process.env.RESOLVER_PROJECT}/secrets/${process.env.RESOLVER_SECRET}/versions/latest:access`;
+          const response = await fetch(url, {headers: {Authorization: `Bearer ${accessToken}`}});
+          if (!response.ok) throw new Error(`secret resolver status ${response.status}`);
+          const body = await response.json();
+          const match = String(body.name ?? '').match(/\/versions\/(\d+)$/);
+          if (!match) throw new Error('numeric secret version missing from resolver response name');
+          console.log(`META_SECRET_VERSION=${match[1]}`);
+          JS
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$CURRENT_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "RESOLVER_PROJECT=$GCP_PROJECT_ID,RESOLVER_SECRET=$GCP_META_ACCESS_TOKEN_SECRET" \
+            --command node \
+            --args="^@^--input-type=module@--eval@${RESOLVER_JS}" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=10m --limit=100 --order=asc \
+            --format='value(textPayload)' || true)"
+          VERSION="$(printf '%s\n' "$LOGS" | sed -n 's/.*META_SECRET_VERSION=\([0-9][0-9]*\).*/\1/p' | tail -n1)"
+          [[ "$VERSION" =~ ^[0-9]+$ ]] || { echo 'Meta secret numeric version could not be resolved' >&2; exit 1; }
+          echo "GCP_META_ACCESS_TOKEN_SECRET_VERSION=$VERSION" >> "$GITHUB_ENV"
+          jq -n \
+            --arg secret "$GCP_META_ACCESS_TOKEN_SECRET" \
+            --arg version "$VERSION" \
+            --arg sourceRevision "$SERVING_REVISION" \
+            --arg sourceImage "$CURRENT_IMAGE" \
+            '{schemaVersion:"toca.platform.secret-version-evidence.v2",secretId:$secret,numericVersion:$version,resolverIdentity:"production-runtime",sourceRevision:$sourceRevision,sourceImage:$sourceImage,secretPayloadDisclosed:false,providerCallExecuted:false}' \
+            > platform-evidence/meta-secret-version.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Meta resolver job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
+
+      - name: Require exact numeric production provider secret versions after resolution
+        if: inputs.operation == 'deploy' && inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          if [[ "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true ]]; then
+            [[ "$GCP_META_ACCESS_TOKEN_SECRET_VERSION" =~ ^[0-9]+$ ]] || { echo 'Production Meta token must be pinned to a numeric version' >&2; exit 1; }
+          fi
+
+      - name: Validate current Cloud Run service identities when present
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          for spec in "${GCP_CLOUD_RUN_MCP_SERVICE}:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}" "${GCP_CLOUD_RUN_WEBHOOK_SERVICE}:${GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT}"; do
+            SERVICE="${spec%%:*}"
+            EXPECTED_SA="${spec#*:}"
+            if gcloud run services describe "$SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json 2>/dev/null; then
+              ACTUAL_SA="$(jq -r '.spec.template.spec.serviceAccountName // empty' /tmp/service.json)"
+              [[ -z "$ACTUAL_SA" || "$ACTUAL_SA" == "$EXPECTED_SA" ]] || { echo "Unexpected runtime identity on $SERVICE" >&2; exit 1; }
+            fi
+          done
+
+      - name: Verify Cloud SQL backup PITR and retention
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format=json > /tmp/cloud-sql.json
+          jq -e '.settings.backupConfiguration.enabled == true' /tmp/cloud-sql.json >/dev/null
+          jq -e '.settings.backupConfiguration.pointInTimeRecoveryEnabled == true' /tmp/cloud-sql.json >/dev/null
+          jq -e '(.settings.backupConfiguration.transactionLogRetentionDays // 0) >= 7' /tmp/cloud-sql.json >/dev/null
+          jq -e '(.settings.backupConfiguration.backupRetentionSettings.retainedBackups // 0) >= 7' /tmp/cloud-sql.json >/dev/null
+
+      - name: Create production pre-migration backup
+        if: inputs.operation == 'deploy' && inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          gcloud sql backups create --instance "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --description "pre-next-${GITHUB_SHA::12}"
+
+      - name: Configure Docker auth
+        if: inputs.operation == 'deploy'
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Setup Docker Buildx for provenance and SBOM attestations
+        if: inputs.operation == 'deploy'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver: docker-container
+
+      - name: Build attest push and resolve immutable image digest
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          IMAGE_REPOSITORY="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker buildx build --pull --push --provenance=mode=max --sbom=true --metadata-file /tmp/build-metadata.json -t "$IMAGE_TAG" .
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$IMAGE_DIGEST" == sha256:* ]] || { echo 'Image digest missing' >&2; exit 1; }
+          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$REMOTE_DIGEST" == "$IMAGE_DIGEST" ]] || { echo 'Artifact Registry digest readback mismatch' >&2; exit 1; }
+          echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "MCP_TAG=${{ inputs.environment }}-mcp-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_TAG=webhook-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+
+      - name: Apply repository migrations through runtime identity job
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-db-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Database migration cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'DATABASE_MIGRATION_JOB_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
+            --set-env-vars "DATABASE_SSL=false" \
+            --command node \
+            --args dist/scripts/migrate.js \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          mkdir -p platform-evidence
+          jq -n \
+            --arg job "$JOB_NAME" --arg image "$IMAGE" \
+            --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
+            --arg cloudSql "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            '{schemaVersion:"toca.platform.database-migration-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,cloudSqlInstance:$cloudSql,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
+            > platform-evidence/database-migration-job.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Database migration job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
+
+      - name: Build non-secret runtime configuration and Secret Manager bindings
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          MCP_ENV=(
+            "NODE_ENV=production" "MCP_ENABLED=true" "TOCA_SERVICE_ROLE=mcp"
+            "TOCA_DEPLOY_ENVIRONMENT=${{ inputs.environment }}" "TOCA_RELEASE_SHA=${GITHUB_SHA}"
+            "TOCA_PLATFORM_KILL_SWITCH=false"
+            "TOCA_DEFAULT_TENANT_ID=${TOCA_DEFAULT_TENANT_ID}" "TOCA_DEFAULT_WORKSPACE_ID=${TOCA_DEFAULT_WORKSPACE_ID}" "TOCA_DEFAULT_ORGANIZATION_ID=${TOCA_DEFAULT_ORGANIZATION_ID}"
+            "TOCA_READY_OUTBOX_MAX_LAG_SECONDS=${{ vars.TOCA_READY_OUTBOX_MAX_LAG_SECONDS || '300' }}"
+            "META_ENABLED=${META_ENABLED}" "META_PROVIDER_VERIFIED=${META_PROVIDER_VERIFIED}" "META_WEBHOOK_ENABLED=false" "META_WEBHOOK_PERSISTENCE_ENABLED=false"
+            "INSTAGRAM_READ_ENABLED=${INSTAGRAM_READ_ENABLED}" "META_ADS_READ_ENABLED=${META_ADS_READ_ENABLED}" "META_ADS_WRITE_ENABLED=${META_ADS_WRITE_ENABLED}"
+            "WHATSAPP_ENABLED=${WHATSAPP_ENABLED}" "WHATSAPP_RUNTIME_ENABLED=false" "WHATSAPP_PROVIDER_VERIFIED=${WHATSAPP_PROVIDER_VERIFIED}"
+            "EMAIL_SENDGRID_ENABLED=${EMAIL_SENDGRID_ENABLED}" "EMAIL_SENDGRID_PROVIDER_VERIFIED=${EMAIL_SENDGRID_PROVIDER_VERIFIED}"
+            "GOOGLE_ADS_PHASE=${GOOGLE_ADS_PHASE}" "GOOGLE_ADS_PROVIDER_VERIFIED=${GOOGLE_ADS_PROVIDER_VERIFIED}"
+            "AG01_MODEL_ENABLED=${AG01_MODEL_ENABLED}" "AG01_MODEL_PROVIDER_VERIFIED=${AG01_MODEL_PROVIDER_VERIFIED}"
+            "GCP_PROJECT_ID=${GCP_PROJECT_ID}"
+          )
+          WEBHOOK_ENV=(
+            "NODE_ENV=production" "MCP_ENABLED=false" "TOCA_SERVICE_ROLE=webhook"
+            "TOCA_DEPLOY_ENVIRONMENT=${{ inputs.environment }}" "TOCA_RELEASE_SHA=${GITHUB_SHA}"
+            "TOCA_PLATFORM_KILL_SWITCH=false"
+            "TOCA_DEFAULT_TENANT_ID=${TOCA_DEFAULT_TENANT_ID}" "TOCA_DEFAULT_WORKSPACE_ID=${TOCA_DEFAULT_WORKSPACE_ID}" "TOCA_DEFAULT_ORGANIZATION_ID=${TOCA_DEFAULT_ORGANIZATION_ID}"
+            "TOCA_READY_OUTBOX_MAX_LAG_SECONDS=${{ vars.TOCA_READY_OUTBOX_MAX_LAG_SECONDS || '300' }}"
+            "META_ENABLED=${META_ENABLED}" "META_PROVIDER_VERIFIED=${META_PROVIDER_VERIFIED}" "META_WEBHOOK_ENABLED=${META_WEBHOOK_ENABLED}" "META_WEBHOOK_PERSISTENCE_ENABLED=${META_WEBHOOK_PERSISTENCE_ENABLED}"
+            "INSTAGRAM_READ_ENABLED=false" "META_ADS_READ_ENABLED=false" "META_ADS_WRITE_ENABLED=false"
+            "WHATSAPP_ENABLED=${WHATSAPP_ENABLED}" "WHATSAPP_RUNTIME_ENABLED=${WHATSAPP_ENABLED}" "WHATSAPP_PROVIDER_VERIFIED=${WHATSAPP_PROVIDER_VERIFIED}"
+            "EMAIL_SENDGRID_ENABLED=${EMAIL_SENDGRID_ENABLED}" "EMAIL_SENDGRID_PROVIDER_VERIFIED=${EMAIL_SENDGRID_PROVIDER_VERIFIED}"
+            "GOOGLE_ADS_PHASE=OFF" "GOOGLE_ADS_PROVIDER_VERIFIED=false" "AG01_MODEL_ENABLED=false" "AG01_MODEL_PROVIDER_VERIFIED=false"
+            "GCP_PROJECT_ID=${GCP_PROJECT_ID}"
+          )
+          MCP_SECRETS=("DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}")
+          WEBHOOK_SECRETS=("DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}")
+          add_both() { MCP_ENV+=("$1=$2"); WEBHOOK_ENV+=("$1=$2"); }
+          add_mcp() { MCP_ENV+=("$1=$2"); }
+          add_webhook() { WEBHOOK_ENV+=("$1=$2"); }
+          bind_mcp_secret() { MCP_SECRETS+=("$1=$2:$3"); }
+          bind_webhook_secret() { WEBHOOK_SECRETS+=("$1=$2:$3"); }
+          require_mcp_secret() { test -n "$2" || { echo "$1 secret id required" >&2; exit 1; }; test -n "$3" || { echo "$1 secret version required" >&2; exit 1; }; bind_mcp_secret "$1" "$2" "$3"; }
+          require_webhook_secret() { test -n "$2" || { echo "$1 secret id required" >&2; exit 1; }; test -n "$3" || { echo "$1 secret version required" >&2; exit 1; }; bind_webhook_secret "$1" "$2" "$3"; }
+
+          if [[ "$META_ENABLED" == true ]]; then
+            add_both META_APP_ID "${{ vars.META_APP_ID }}"
+          fi
+          if [[ "$META_ENABLED" == true || "$META_WEBHOOK_ENABLED" == true || "$WHATSAPP_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true ]]; then
+            add_both META_GRAPH_API_VERSION "${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}"
+            add_both META_GRAPH_BASE_URL "${{ vars.META_GRAPH_BASE_URL || 'https://graph.facebook.com' }}"
+          fi
+          if [[ "$META_ENABLED" == true || "$INSTAGRAM_READ_ENABLED" == true || "$META_ADS_READ_ENABLED" == true || "$META_ADS_WRITE_ENABLED" == true || "$WHATSAPP_ENABLED" == true ]]; then
+            add_mcp META_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
+            require_mcp_secret TOCA_SECRET_META_ACCESS_TOKEN "$GCP_META_ACCESS_TOKEN_SECRET" "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
+          fi
+          if [[ "$META_WEBHOOK_ENABLED" == true ]]; then
+            add_webhook META_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
+            require_webhook_secret TOCA_SECRET_META_ACCESS_TOKEN "$GCP_META_ACCESS_TOKEN_SECRET" "$GCP_META_ACCESS_TOKEN_SECRET_VERSION"
+          fi
+          if [[ "$META_ENABLED" == true ]]; then
+            add_both META_APP_SECRET_PROVIDER env
+            add_both META_APP_SECRET_KEY TOCA_SECRET_META_APP_SECRET
+            add_mcp META_AUTHORIZATION_ENDPOINT "${{ vars.META_AUTHORIZATION_ENDPOINT || 'https://www.facebook.com/dialog/oauth' }}"
+            add_mcp META_TOKEN_ENDPOINT "${{ vars.META_TOKEN_ENDPOINT || 'https://graph.facebook.com/oauth/access_token' }}"
+            add_mcp META_REDIRECT_URI "${{ vars.META_REDIRECT_URI }}"
+            add_mcp META_REQUESTED_SCOPES "${{ vars.META_REQUESTED_SCOPES }}"
+            require_mcp_secret TOCA_SECRET_META_APP_SECRET "$GCP_META_APP_SECRET" "$GCP_META_APP_SECRET_VERSION"
+            if [[ "$META_WEBHOOK_ENABLED" == true ]]; then
+              require_webhook_secret TOCA_SECRET_META_APP_SECRET "$GCP_META_APP_SECRET" "$GCP_META_APP_SECRET_VERSION"
+            fi
+          fi
+          if [[ "$META_WEBHOOK_ENABLED" == true ]]; then
+            add_webhook META_WEBHOOK_VERIFY_TOKEN_KEY TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN
+            require_webhook_secret TOCA_SECRET_META_WEBHOOK_VERIFY_TOKEN "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET" "$GCP_META_WEBHOOK_VERIFY_TOKEN_SECRET_VERSION"
+          fi
+          if [[ "$WHATSAPP_ENABLED" == true ]]; then
+            test -n "$WHATSAPP_BUSINESS_ID" || { echo 'WHATSAPP_BUSINESS_ID is required when WhatsApp is enabled' >&2; exit 1; }
+            add_both WHATSAPP_ACCESS_TOKEN_ENV_KEY TOCA_SECRET_META_ACCESS_TOKEN
+            add_both WHATSAPP_BINDING_STATE "${{ vars.WHATSAPP_BINDING_STATE }}"
+            add_both WHATSAPP_BINDING_ID "${{ vars.WHATSAPP_BINDING_ID }}"
+            add_both WHATSAPP_META_APP_ID "${{ vars.WHATSAPP_META_APP_ID }}"
+            add_both WHATSAPP_BUSINESS_ID "$WHATSAPP_BUSINESS_ID"
+            add_both WHATSAPP_WABA_ID "${{ vars.WHATSAPP_WABA_ID }}"
+            add_both WHATSAPP_PHONE_NUMBER_ID "${{ vars.WHATSAPP_PHONE_NUMBER_ID }}"
+          fi
+          if [[ "$EMAIL_SENDGRID_ENABLED" == true ]]; then
+            add_both EMAIL_SENDGRID_BINDING_STATE "${{ vars.EMAIL_SENDGRID_BINDING_STATE }}"
+            add_both EMAIL_SENDGRID_BINDING_ID "${{ vars.EMAIL_SENDGRID_BINDING_ID }}"
+            add_both EMAIL_SENDGRID_API_KEY_SECRET_PROVIDER env
+            add_both EMAIL_SENDGRID_API_KEY_SECRET_KEY TOCA_SECRET_SENDGRID_API_KEY
+            add_both EMAIL_SENDGRID_SENDING_DOMAIN "${{ vars.EMAIL_SENDGRID_SENDING_DOMAIN }}"
+            add_both EMAIL_SENDGRID_FROM_EMAIL "${{ vars.EMAIL_SENDGRID_FROM_EMAIL }}"
+            add_both EMAIL_SENDGRID_FROM_NAME "${{ vars.EMAIL_SENDGRID_FROM_NAME }}"
+            add_both EMAIL_SENDGRID_REPLY_TO_EMAIL "${{ vars.EMAIL_SENDGRID_REPLY_TO_EMAIL }}"
+            require_mcp_secret TOCA_SECRET_SENDGRID_API_KEY "$GCP_SENDGRID_API_KEY_SECRET" "$GCP_SENDGRID_API_KEY_SECRET_VERSION"
+            require_webhook_secret TOCA_SECRET_SENDGRID_API_KEY "$GCP_SENDGRID_API_KEY_SECRET" "$GCP_SENDGRID_API_KEY_SECRET_VERSION"
+          fi
+          if [[ "$GOOGLE_ADS_PHASE" != OFF ]]; then
+            add_mcp GOOGLE_ADS_CUSTOMER_ID "${{ vars.GOOGLE_ADS_CUSTOMER_ID }}"
+            add_mcp GOOGLE_ADS_ALLOWED_CUSTOMER_ID "${{ vars.GOOGLE_ADS_ALLOWED_CUSTOMER_ID }}"
+            add_mcp GOOGLE_ADS_ALLOWED_CURRENCY "${{ vars.GOOGLE_ADS_ALLOWED_CURRENCY }}"
+            add_mcp GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS "${{ vars.GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS }}"
+            add_mcp GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS "${{ vars.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS }}"
+            add_mcp GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS "${{ vars.GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS }}"
+            add_mcp GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS "${{ vars.GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS }}"
+            add_mcp GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN
+            add_mcp GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_ID
+            add_mcp GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET
+            add_mcp GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN
+            require_mcp_secret TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET" "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION"
+            require_mcp_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_ID "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET" "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION"
+            require_mcp_secret TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET" "$GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION"
+            require_mcp_secret TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET" "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION"
+          fi
+          if [[ "$AG01_MODEL_ENABLED" == true ]]; then
+            add_mcp AG01_MODEL_API_KEY_ENV_KEY TOCA_SECRET_AG01_MODEL_API_KEY
+            add_mcp AG01_MODEL_PROVIDER "${{ vars.AG01_MODEL_PROVIDER }}"
+            add_mcp AG01_MODEL_NAME "${{ vars.AG01_MODEL_NAME }}"
+            require_mcp_secret TOCA_SECRET_AG01_MODEL_API_KEY "$GCP_AG01_MODEL_API_KEY_SECRET" "$GCP_AG01_MODEL_API_KEY_SECRET_VERSION"
+          fi
+
+          { IFS='|'; echo "MCP_RUNTIME_ENV=^|^${MCP_ENV[*]}"; } >> "$GITHUB_ENV"
+          { IFS='|'; echo "WEBHOOK_RUNTIME_ENV=^|^${WEBHOOK_ENV[*]}"; } >> "$GITHUB_ENV"
+          { IFS='|'; echo "MCP_RUNTIME_SECRETS=^|^${MCP_SECRETS[*]}"; } >> "$GITHUB_ENV"
+          { IFS='|'; echo "WEBHOOK_RUNTIME_SECRETS=^|^${WEBHOOK_SECRETS[*]}"; } >> "$GITHUB_ENV"
+
+      - name: Capture known rollback targets
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          current_revision() {
+            local service="$1" service_json
+            if ! service_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null)"; then
+              return 0
+            fi
+            printf '%s' "$service_json" | jq -r '
+              . as $service
+              | [($service.status.traffic // [])[]
+                  | select((.percent // 0) == 100)
+                  | if ((.revisionName // "") | length) > 0 then .revisionName
+                    elif (.latestRevision // false) == true then ($service.status.latestReadyRevisionName // empty)
+                    else empty
+                    end]
+              | unique
+              | if length == 1 then .[0] else empty end
+            '
+          }
+          WEBHOOK_SERVICE_EXISTED=false
+          if gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+            WEBHOOK_SERVICE_EXISTED=true
+          fi
+          PREVIOUS_MCP_REVISION="$(current_revision "$GCP_CLOUD_RUN_MCP_SERVICE")"
+          PREVIOUS_WEBHOOK_REVISION="$(current_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")"
+          if [[ "$DEPLOY_ENVIRONMENT" == production && -z "$PREVIOUS_MCP_REVISION" ]]; then
+            echo 'Production deployment requires one serving MCP rollback revision' >&2
+            exit 1
+          fi
+          echo "PREVIOUS_MCP_REVISION=$PREVIOUS_MCP_REVISION" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_REVISION=$PREVIOUS_WEBHOOK_REVISION" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED" >> "$GITHUB_ENV"
+
+      - name: Deploy private MCP candidate by digest with no traffic
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          MCP_PROBE_ENDPOINT_ARGS=()
+          MCP_PRIVATE_INGRESS_ARGS=()
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            MCP_PROBE_ENDPOINT_ARGS=(--default-url)
+            MCP_PRIVATE_INGRESS_ARGS=(--ingress internal)
+          fi
+          gcloud run deploy "$GCP_CLOUD_RUN_MCP_SERVICE" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --revision-suffix "$MCP_REVISION_SUFFIX" --tag "$MCP_TAG" --no-traffic \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --update-secrets "$MCP_RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+            --min-instances "${{ vars.GCP_MCP_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_MCP_MAX_INSTANCES || '1' }}" \
+            --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \
+            "${MCP_PROBE_ENDPOINT_ARGS[@]}" "${MCP_PRIVATE_INGRESS_ARGS[@]}" --no-allow-unauthenticated
+
+      - name: Deploy controlled webhook candidate by digest
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          WEBHOOK_TRAFFIC_ARGS=(--no-traffic)
+          WEBHOOK_AUTH_ARGS=(--allow-unauthenticated)
+          WEBHOOK_FIRST_INTRODUCTION=false
+          if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]]; then
+            WEBHOOK_TRAFFIC_ARGS=()
+            WEBHOOK_AUTH_ARGS=(--no-allow-unauthenticated)
+            WEBHOOK_FIRST_INTRODUCTION=true
+          fi
+          echo "WEBHOOK_FIRST_INTRODUCTION=$WEBHOOK_FIRST_INTRODUCTION" >> "$GITHUB_ENV"
+          gcloud run deploy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --revision-suffix "$WEBHOOK_REVISION_SUFFIX" --tag "$WEBHOOK_TAG" \
+            --service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --update-secrets "$WEBHOOK_RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=20,timeoutSeconds=3,periodSeconds=3' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+            --min-instances "${{ vars.GCP_WEBHOOK_MIN_INSTANCES || '0' }}" --max-instances "${{ vars.GCP_WEBHOOK_MAX_INSTANCES || '2' }}" \
+            --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" --default-url \
+            "${WEBHOOK_TRAFFIC_ARGS[@]}" "${WEBHOOK_AUTH_ARGS[@]}"
+
+      - name: Resolve exact candidate revisions and URLs
+        id: resolve_candidates
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-candidate-service.json
+          gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/webhook-candidate-service.json
+          tagged_target_field() {
+            local service_json="$1" tag="$2" field="$3"
+            jq -r --arg tag "$tag" --arg field "$field" '
+              [(.status.traffic // [])[]
+                | select((.tag // "") == $tag)
+                | .[$field] // empty]
+              | unique
+              | if length == 1 then .[0] else empty end
+            ' "$service_json"
+          }
+          MCP_REVISION="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" revisionName)"
+          MCP_URL="$(tagged_target_field /tmp/mcp-candidate-service.json "$MCP_TAG" url)"
+          MCP_AUDIENCE="$(jq -r '.status.url // empty' /tmp/mcp-candidate-service.json)"
+          WEBHOOK_REVISION="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" revisionName)"
+          WEBHOOK_URL="$(tagged_target_field /tmp/webhook-candidate-service.json "$WEBHOOK_TAG" url)"
+          WEBHOOK_AUDIENCE="$(jq -r '.status.url // empty' /tmp/webhook-candidate-service.json)"
+          if [[ -z "$MCP_REVISION" || -z "$MCP_URL" || -z "$MCP_AUDIENCE" || -z "$WEBHOOK_REVISION" || -z "$WEBHOOK_URL" || -z "$WEBHOOK_AUDIENCE" ]]; then
+            echo 'Could not resolve exact tagged Cloud Run candidate revision, tagged URL, and canonical service audience' >&2
+            jq -c --arg tag "$MCP_TAG" '{serviceUrl:(.status.url // null),latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/mcp-candidate-service.json >&2
+            jq -c --arg tag "$WEBHOOK_TAG" '{serviceUrl:(.status.url // null),latestReadyRevisionName:(.status.latestReadyRevisionName // null),matchingTraffic:[(.status.traffic // [])[] | select((.tag // "") == $tag)]}' /tmp/webhook-candidate-service.json >&2
+            exit 1
+          fi
+          echo "MCP_REVISION=$MCP_REVISION" >> "$GITHUB_ENV"
+          echo "MCP_URL=$MCP_URL" >> "$GITHUB_ENV"
+          echo "WEBHOOK_REVISION=$WEBHOOK_REVISION" >> "$GITHUB_ENV"
+          echo "WEBHOOK_URL=$WEBHOOK_URL" >> "$GITHUB_ENV"
+          echo "mcp_url=$MCP_URL" >> "$GITHUB_OUTPUT"
+          echo "mcp_audience=$MCP_AUDIENCE" >> "$GITHUB_OUTPUT"
+          echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_audience=$WEBHOOK_AUDIENCE" >> "$GITHUB_OUTPUT"
+
+      - name: Mint private MCP probe ID token through WIF
+        id: mcp_probe_auth
+        if: inputs.operation == 'deploy'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve_candidates.outputs.mcp_audience }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Mint private webhook probe ID token through WIF
+        id: webhook_probe_auth
+        if: inputs.operation == 'deploy'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.resolve_candidates.outputs.webhook_audience }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify MCP health readiness and internal acceptance
+        if: inputs.operation == 'deploy'
+        env:
+          MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
+          MCP_AUDIENCE: ${{ steps.resolve_candidates.outputs.mcp_audience }}
+        run: |
+          set -euo pipefail
+          mkdir -p platform-evidence
+
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            test -n "$MCP_REVISION" || { echo 'MCP exact candidate revision missing' >&2; exit 1; }
+
+            gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-internal-probe-posture.json
+            MCP_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-internal-probe-posture.json)"
+            MCP_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-internal-probe-posture.json)"
+            case "$MCP_INGRESS" in
+              internal|internal-and-cloud-load-balancing) ;;
+              *) echo "Production MCP ingress is not private: $MCP_INGRESS" >&2; exit 1 ;;
+            esac
+            [[ "$MCP_DEFAULT_URL_DISABLED" == false ]] || { echo 'Production MCP default URL must be enabled only during the private probe window' >&2; exit 1; }
+
+            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-internal-probe-iam-before.json
+            if jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' \
+              /tmp/mcp-internal-probe-iam-before.json >/dev/null; then
+              echo 'Production MCP must not expose roles/run.invoker to allUsers' >&2
+              exit 1
+            fi
+
+            # Use Cloud Run's own startup probe as the production readiness acceptance transport.
+            # The sibling service reuses the exact immutable runtime configuration while remaining
+            # private and having no default run.app endpoint. /readyz returns 200 only when all
+            # runtime readiness checks pass; any 503 keeps the revision from becoming Ready.
+            PROBE_SERVICE="toca-mcp-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+            cleanup_internal_mcp_probe() {
+              set +e
+              gcloud run services delete "$PROBE_SERVICE" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              set -e
+            }
+            trap cleanup_internal_mcp_probe EXIT
+
+            gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --revision-suffix "probe-${GITHUB_SHA::8}" \
+              --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+              --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+              --update-secrets "$MCP_RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \
+              --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=12,timeoutSeconds=5,periodSeconds=5' \
+              --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+              --min-instances 1 --max-instances 1 \
+              --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \
+              --ingress internal --no-default-url --no-allow-unauthenticated \
+              --no-deploy-health-check --quiet
+
+            gcloud run services describe "$PROBE_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-acceptance-service.json
+            PROBE_REVISION="$(jq -r '.status.latestCreatedRevisionName // empty' /tmp/mcp-acceptance-service.json)"
+            PROBE_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-acceptance-service.json)"
+            PROBE_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-acceptance-service.json)"
+            test -n "$PROBE_REVISION" || { echo 'Ephemeral MCP acceptance service has no created revision' >&2; exit 1; }
+            [[ "$PROBE_INGRESS" == internal ]] || { echo "Ephemeral MCP acceptance ingress is not internal: $PROBE_INGRESS" >&2; exit 1; }
+            [[ "$PROBE_DEFAULT_URL_DISABLED" == true ]] || { echo 'Ephemeral MCP acceptance default URL must remain disabled' >&2; exit 1; }
+
+
+            # Cloud Run still owns the /readyz startup gate. The workflow owns only the bounded
+            # wait so a rejected revision can emit sanitized failed-check diagnostics before cleanup.
+            PROBE_READY=Unknown
+            PROBE_READY_REASON=Pending
+            for _ in $(seq 1 18); do
+              if gcloud run revisions describe "$PROBE_REVISION" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+                > /tmp/mcp-acceptance-revision.json 2>/dev/null; then
+                PROBE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
+                PROBE_READY_REASON="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .reason] | last // "Unknown"' /tmp/mcp-acceptance-revision.json)"
+                [[ "$PROBE_READY" == True ]] && break
+              fi
+              sleep 5
+            done
+
+            if [[ "$PROBE_READY" != True ]]; then
+              READINESS_DIAGNOSTICS="$(gcloud logging read \
+                "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${PROBE_SERVICE}\" AND resource.labels.revision_name=\"${PROBE_REVISION}\" AND textPayload:\"TOCA_READINESS_NOT_READY\"" \
+                --project "$GCP_PROJECT_ID" --freshness=10m --limit=20 --order=desc \
+                --format='value(textPayload)' 2>/dev/null \
+                | grep -E '^TOCA_READINESS_NOT_READY failed_checks=[A-Za-z0-9_,.-]*$' \
+                | head -n 5 || true)"
+              jq -n \
+                --arg probeService "$PROBE_SERVICE" \
+                --arg probeRevision "$PROBE_REVISION" \
+                --arg readyStatus "$PROBE_READY" \
+                --arg readyReason "$PROBE_READY_REASON" \
+                --arg readinessDiagnostics "$READINESS_DIAGNOSTICS" \
+                '{schemaVersion:"toca.platform.mcp-internal-probe-failure.v1",probeService:$probeService,probeRevision:$probeRevision,readyStatus:$readyStatus,readyReason:$readyReason,readinessDiagnostics:($readinessDiagnostics|split("\n")|map(select(length>0))),secretPayloadDisclosed:false,providerCallExecuted:false,result:"FAIL"}' \
+                > platform-evidence/mcp-internal-probe-failure.json
+              printf 'Ephemeral MCP acceptance failed Ready gate: status=%s reason=%s\n' "$PROBE_READY" "$PROBE_READY_REASON" >&2
+              [[ -z "$READINESS_DIAGNOSTICS" ]] || printf '%s\n' "$READINESS_DIAGNOSTICS" >&2
+              cleanup_internal_mcp_probe
+              trap - EXIT
+              exit 1
+            fi
+            gcloud run revisions describe "$MCP_REVISION" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-production-candidate-revision.json
+            gcloud run revisions describe "$PROBE_REVISION" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-acceptance-revision.json
+
+            CANDIDATE_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/mcp-production-candidate-revision.json)"
+            PROBE_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/mcp-acceptance-revision.json)"
+            CANDIDATE_RELEASE_SHA="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/mcp-production-candidate-revision.json)"
+            PROBE_RELEASE_SHA="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/mcp-acceptance-revision.json)"
+            CANDIDATE_RUNTIME_SA="$(jq -r '.spec.serviceAccountName // empty' /tmp/mcp-production-candidate-revision.json)"
+            PROBE_RUNTIME_SA="$(jq -r '.spec.serviceAccountName // empty' /tmp/mcp-acceptance-revision.json)"
+            CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // empty' /tmp/mcp-production-candidate-revision.json)"
+            PROBE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // empty' /tmp/mcp-acceptance-revision.json)"
+            PROBE_STARTUP_PATH="$(jq -r '.spec.containers[0].startupProbe.httpGet.path // empty' /tmp/mcp-acceptance-revision.json)"
+            PROBE_LIVENESS_PATH="$(jq -r '.spec.containers[0].livenessProbe.httpGet.path // empty' /tmp/mcp-acceptance-revision.json)"
+
+            test -n "$CANDIDATE_RUNTIME_IMAGE" || { echo 'Production candidate runtime image missing' >&2; exit 1; }
+            [[ "$CANDIDATE_RUNTIME_IMAGE" == "$PROBE_RUNTIME_IMAGE" ]] || { echo 'Ephemeral acceptance runtime image differs from production candidate runtime image' >&2; exit 1; }
+            [[ "$CANDIDATE_RELEASE_SHA" == "$GITHUB_SHA" && "$PROBE_RELEASE_SHA" == "$GITHUB_SHA" ]] || { echo 'Production candidate or ephemeral acceptance release SHA mismatch' >&2; exit 1; }
+            [[ "$CANDIDATE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" && "$PROBE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Production candidate or ephemeral acceptance runtime identity mismatch' >&2; exit 1; }
+            [[ "$CANDIDATE_READY" == True && "$PROBE_READY" == True ]] || { echo 'Production candidate or ephemeral acceptance revision is not Ready=True' >&2; exit 1; }
+            [[ "$PROBE_STARTUP_PATH" == /readyz ]] || { echo "Ephemeral MCP acceptance startup probe is not /readyz: $PROBE_STARTUP_PATH" >&2; exit 1; }
+            [[ "$PROBE_LIVENESS_PATH" == /healthz ]] || { echo "Ephemeral MCP acceptance liveness probe is not /healthz: $PROBE_LIVENESS_PATH" >&2; exit 1; }
+
+            gcloud run services get-iam-policy "$PROBE_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/mcp-acceptance-iam.json
+            if jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' /tmp/mcp-acceptance-iam.json >/dev/null; then
+              echo 'Ephemeral MCP acceptance service must not expose roles/run.invoker to allUsers' >&2
+              exit 1
+            fi
+
+            jq -n \
+              --arg ingress "$MCP_INGRESS" \
+              --arg productionCandidateRevision "$MCP_REVISION" \
+              --arg probeService "$PROBE_SERVICE" \
+              --arg probeRevision "$PROBE_REVISION" \
+              --arg identity "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+              --arg runtimeImage "$PROBE_RUNTIME_IMAGE" \
+              --arg startupPath "$PROBE_STARTUP_PATH" \
+              --arg livenessPath "$PROBE_LIVENESS_PATH" \
+              '{schemaVersion:"toca.platform.mcp-internal-probe.v4",mechanism:"cloud-run-native-startup-readiness-controlled-wait",ingress:$ingress,productionCandidateRevision:$productionCandidateRevision,probeService:$probeService,probeRevision:$probeRevision,oidcServiceAccount:$identity,runtimeImage:$runtimeImage,startupProbePath:$startupPath,livenessProbePath:$livenessPath,acceptanceRevisionReady:true,acceptanceDefaultUrlDisabled:true,deployHealthCheckWaitDisabled:true,temporaryMinInstance:1,exactReleaseShaMatched:true,sameRuntimeImageAsProductionCandidate:true,externalGitHubRunnerProbe:false,schedulerProbe:false,productionTrafficMutation:false,providerCallExecuted:false,result:"PASS"}' \
+              > platform-evidence/mcp-internal-probe.json
+
+            cleanup_internal_mcp_probe
+            trap - EXIT
+            if gcloud run services describe "$PROBE_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+              echo "Ephemeral MCP acceptance service remained after cleanup: $PROBE_SERVICE" >&2
+              exit 1
+            fi
+            echo 'MCP_CLOUD_RUN_NATIVE_READINESS_PROBE=PASS' >> "$GITHUB_STEP_SUMMARY"
+
+          else
+            test -n "$MCP_TOKEN" || { echo 'MCP private probe ID token missing' >&2; exit 1; }
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/healthz" | tee platform-evidence/mcp-healthz.json
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 -H "Authorization: Bearer $MCP_TOKEN" "$MCP_URL/readyz" | tee platform-evidence/mcp-readyz.json
+            jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/mcp-readyz.json >/dev/null
+          fi
+
+      - name: Verify production webhook health readiness and route confinement
+        if: inputs.operation == 'deploy'
+        env:
+          WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p platform-evidence
+
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            test -n "$WEBHOOK_REVISION" || { echo 'Webhook exact candidate revision missing' >&2; exit 1; }
+
+            # Cloud Scheduler is a supported internal Cloud Run caller only through a service's
+            # canonical default run.app URL. Validate the production webhook candidate through a
+            # short-lived sibling that reuses the exact immutable image and runtime configuration,
+            # while the real candidate remains at zero traffic.
+            WEBHOOK_PROBE_SERVICE="toca-webhook-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            WEBHOOK_PROBE_MEMBER="serviceAccount:${GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT}"
+            WEBHOOK_HEALTH_JOB="toca-wh-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            WEBHOOK_READY_JOB="toca-wh-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            WEBHOOK_MCP_JOB="toca-wh-mcp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            WEBHOOK_OAUTH_JOB="toca-wh-oauth-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+            cleanup_internal_webhook_probe() {
+              set +e
+              for job in "$WEBHOOK_HEALTH_JOB" "$WEBHOOK_READY_JOB" "$WEBHOOK_MCP_JOB" "$WEBHOOK_OAUTH_JOB"; do
+                gcloud scheduler jobs delete "$job" \
+                  --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              done
+              gcloud run services delete "$WEBHOOK_PROBE_SERVICE" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              set -e
+            }
+            trap cleanup_internal_webhook_probe EXIT
+
+            gcloud run deploy "$WEBHOOK_PROBE_SERVICE" --image "$IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --revision-suffix "probe-${GITHUB_SHA::8}" \
+              --service-account "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+              --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+              --update-secrets "$WEBHOOK_RUNTIME_SECRETS" --update-env-vars "$WEBHOOK_RUNTIME_ENV" \
+              --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=12,timeoutSeconds=5,periodSeconds=5' \
+              --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \
+              --min-instances 1 --max-instances 1 \
+              --cpu-throttling --memory "${{ vars.GCP_WEBHOOK_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_WEBHOOK_CPU || '1' }}" \
+              --ingress internal --default-url --no-allow-unauthenticated \
+              --no-deploy-health-check --quiet
+
+            gcloud run services describe "$WEBHOOK_PROBE_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/webhook-acceptance-service.json
+            WEBHOOK_PROBE_URL="$(jq -r '.status.url // empty' /tmp/webhook-acceptance-service.json)"
+            WEBHOOK_PROBE_REVISION="$(jq -r '.status.latestCreatedRevisionName // empty' /tmp/webhook-acceptance-service.json)"
+            WEBHOOK_PROBE_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/webhook-acceptance-service.json)"
+            WEBHOOK_PROBE_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/webhook-acceptance-service.json)"
+            test -n "$WEBHOOK_PROBE_URL" || { echo 'Ephemeral webhook acceptance service has no canonical run.app URL' >&2; exit 1; }
+            test -n "$WEBHOOK_PROBE_REVISION" || { echo 'Ephemeral webhook acceptance service has no created revision' >&2; exit 1; }
+            [[ "$WEBHOOK_PROBE_INGRESS" == internal ]] || { echo "Ephemeral webhook acceptance ingress is not internal: $WEBHOOK_PROBE_INGRESS" >&2; exit 1; }
+            [[ "$WEBHOOK_PROBE_DEFAULT_URL_DISABLED" == false ]] || { echo 'Ephemeral webhook acceptance default URL is disabled' >&2; exit 1; }
+
+            WEBHOOK_PROBE_READY=Unknown
+            WEBHOOK_PROBE_READY_REASON=Pending
+            for _ in $(seq 1 18); do
+              if gcloud run revisions describe "$WEBHOOK_PROBE_REVISION" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+                > /tmp/webhook-acceptance-revision.json 2>/dev/null; then
+                WEBHOOK_PROBE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Unknown"' /tmp/webhook-acceptance-revision.json)"
+                WEBHOOK_PROBE_READY_REASON="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .reason] | last // "Unknown"' /tmp/webhook-acceptance-revision.json)"
+                [[ "$WEBHOOK_PROBE_READY" == True ]] && break
+              fi
+              sleep 5
+            done
+            if [[ "$WEBHOOK_PROBE_READY" != True ]]; then
+              echo "Ephemeral webhook acceptance failed Ready gate: status=$WEBHOOK_PROBE_READY reason=$WEBHOOK_PROBE_READY_REASON" >&2
+              exit 1
+            fi
+
+            gcloud run revisions describe "$WEBHOOK_REVISION" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/webhook-production-candidate-revision.json
+            gcloud run revisions describe "$WEBHOOK_PROBE_REVISION" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/webhook-acceptance-revision.json
+            WEBHOOK_CANDIDATE_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/webhook-production-candidate-revision.json)"
+            WEBHOOK_PROBE_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/webhook-acceptance-revision.json)"
+            WEBHOOK_CANDIDATE_RELEASE_SHA="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/webhook-production-candidate-revision.json)"
+            WEBHOOK_PROBE_RELEASE_SHA="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/webhook-acceptance-revision.json)"
+            WEBHOOK_CANDIDATE_RUNTIME_SA="$(jq -r '.spec.serviceAccountName // empty' /tmp/webhook-production-candidate-revision.json)"
+            WEBHOOK_PROBE_RUNTIME_SA="$(jq -r '.spec.serviceAccountName // empty' /tmp/webhook-acceptance-revision.json)"
+            WEBHOOK_CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // empty' /tmp/webhook-production-candidate-revision.json)"
+            WEBHOOK_PROBE_STARTUP_PATH="$(jq -r '.spec.containers[0].startupProbe.httpGet.path // empty' /tmp/webhook-acceptance-revision.json)"
+            WEBHOOK_PROBE_LIVENESS_PATH="$(jq -r '.spec.containers[0].livenessProbe.httpGet.path // empty' /tmp/webhook-acceptance-revision.json)"
+
+            test -n "$WEBHOOK_CANDIDATE_RUNTIME_IMAGE" || { echo 'Production webhook candidate runtime image missing' >&2; exit 1; }
+            [[ "$WEBHOOK_CANDIDATE_RUNTIME_IMAGE" == "$WEBHOOK_PROBE_RUNTIME_IMAGE" ]] || { echo 'Ephemeral webhook acceptance runtime image differs from production candidate' >&2; exit 1; }
+            [[ "$WEBHOOK_CANDIDATE_RELEASE_SHA" == "$GITHUB_SHA" && "$WEBHOOK_PROBE_RELEASE_SHA" == "$GITHUB_SHA" ]] || { echo 'Production webhook candidate or acceptance release SHA mismatch' >&2; exit 1; }
+            [[ "$WEBHOOK_CANDIDATE_RUNTIME_SA" == "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" && "$WEBHOOK_PROBE_RUNTIME_SA" == "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Production webhook candidate or acceptance runtime identity mismatch' >&2; exit 1; }
+            [[ "$WEBHOOK_CANDIDATE_READY" == True && "$WEBHOOK_PROBE_READY" == True ]] || { echo 'Production webhook candidate or acceptance revision is not Ready=True' >&2; exit 1; }
+            [[ "$WEBHOOK_PROBE_STARTUP_PATH" == /readyz ]] || { echo "Ephemeral webhook acceptance startup probe is not /readyz: $WEBHOOK_PROBE_STARTUP_PATH" >&2; exit 1; }
+            [[ "$WEBHOOK_PROBE_LIVENESS_PATH" == /healthz ]] || { echo "Ephemeral webhook acceptance liveness probe is not /healthz: $WEBHOOK_PROBE_LIVENESS_PATH" >&2; exit 1; }
+
+            gcloud run services add-iam-policy-binding "$WEBHOOK_PROBE_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member="$WEBHOOK_PROBE_MEMBER" --role=roles/run.invoker --quiet
+            gcloud run services get-iam-policy "$WEBHOOK_PROBE_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/webhook-acceptance-iam.json
+            jq -e --arg member "$WEBHOOK_PROBE_MEMBER" '
+              .bindings[]?
+              | select(.role == "roles/run.invoker" and (.condition == null))
+              | (.members // [])[]?
+              | select(. == $member)
+            ' /tmp/webhook-acceptance-iam.json >/dev/null || { echo 'Ephemeral webhook acceptance invoker binding missing' >&2; exit 1; }
+            if jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' /tmp/webhook-acceptance-iam.json >/dev/null; then
+              echo 'Ephemeral webhook acceptance service must not expose roles/run.invoker to allUsers' >&2
+              exit 1
+            fi
+
+            create_webhook_scheduler_probe() {
+              local job="$1" uri="$2"
+              gcloud scheduler jobs create http "$job" \
+                --project "$GCP_PROJECT_ID" --location "$GCP_REGION" \
+                --schedule='0 0 1 1 *' --time-zone='Etc/UTC' \
+                --uri="$uri" --http-method=GET \
+                --oidc-service-account-email="$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+                --oidc-token-audience="$WEBHOOK_PROBE_URL" \
+                --attempt-deadline=30s --max-retry-attempts=0 --quiet
+            }
+
+            run_webhook_scheduler_probe() {
+              local job="$1"
+              gcloud scheduler jobs run "$job" \
+                --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+            }
+
+            wait_for_webhook_scheduler_status() {
+              local job="$1" expected="$2" status
+              for _ in $(seq 1 45); do
+                status="$(gcloud logging read \
+                  "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\" AND httpRequest.status>0" \
+                  --project "$GCP_PROJECT_ID" --freshness=10m --limit=1 --order=desc \
+                  --format='value(httpRequest.status)' 2>/dev/null | head -n1)"
+                if [[ "$status" == "$expected" ]]; then
+                  printf '%s' "$status"
+                  return 0
+                fi
+                if [[ "$status" =~ ^[1-5][0-9]{2}$ ]]; then
+                  echo "Internal webhook scheduler probe $job returned HTTP $status, expected $expected" >&2
+                  return 1
+                fi
+                sleep 2
+              done
+              echo "Internal webhook scheduler probe $job timed out waiting for HTTP $expected" >&2
+              return 1
+            }
+
+            create_webhook_scheduler_probe "$WEBHOOK_HEALTH_JOB" "${WEBHOOK_PROBE_URL}/healthz"
+            create_webhook_scheduler_probe "$WEBHOOK_READY_JOB" "${WEBHOOK_PROBE_URL}/readyz"
+            create_webhook_scheduler_probe "$WEBHOOK_MCP_JOB" "${WEBHOOK_PROBE_URL}/mcp"
+            create_webhook_scheduler_probe "$WEBHOOK_OAUTH_JOB" "${WEBHOOK_PROBE_URL}/oauth/meta/start"
+            run_webhook_scheduler_probe "$WEBHOOK_HEALTH_JOB"
+            run_webhook_scheduler_probe "$WEBHOOK_READY_JOB"
+            run_webhook_scheduler_probe "$WEBHOOK_MCP_JOB"
+            run_webhook_scheduler_probe "$WEBHOOK_OAUTH_JOB"
+            WEBHOOK_HEALTH_STATUS="$(wait_for_webhook_scheduler_status "$WEBHOOK_HEALTH_JOB" 200)"
+            WEBHOOK_READY_STATUS="$(wait_for_webhook_scheduler_status "$WEBHOOK_READY_JOB" 200)"
+            WEBHOOK_MCP_STATUS="$(wait_for_webhook_scheduler_status "$WEBHOOK_MCP_JOB" 404)"
+            WEBHOOK_OAUTH_STATUS="$(wait_for_webhook_scheduler_status "$WEBHOOK_OAUTH_JOB" 404)"
+
+            jq -n \
+              --arg candidateRevision "$WEBHOOK_REVISION" \
+              --arg probeService "$WEBHOOK_PROBE_SERVICE" \
+              --arg probeRevision "$WEBHOOK_PROBE_REVISION" \
+              --arg runtimeImage "$WEBHOOK_PROBE_RUNTIME_IMAGE" \
+              --arg identity "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" \
+              --arg startupPath "$WEBHOOK_PROBE_STARTUP_PATH" \
+              --arg livenessPath "$WEBHOOK_PROBE_LIVENESS_PATH" \
+              --arg health "$WEBHOOK_HEALTH_STATUS" --arg ready "$WEBHOOK_READY_STATUS" \
+              --arg mcp "$WEBHOOK_MCP_STATUS" --arg oauth "$WEBHOOK_OAUTH_STATUS" \
+              '{schemaVersion:"toca.platform.webhook-internal-probe.v1",mechanism:"cloud-scheduler-ephemeral-canonical-service",productionCandidateRevision:$candidateRevision,probeService:$probeService,probeRevision:$probeRevision,runtimeImage:$runtimeImage,oidcServiceAccount:$identity,startupProbePath:$startupPath,livenessProbePath:$livenessPath,healthHttpStatus:($health|tonumber),readyHttpStatus:($ready|tonumber),webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),exactReleaseShaMatched:true,sameRuntimeImageAsProductionCandidate:true,externalGitHubRunnerProbe:false,productionTrafficMutation:false,providerCallExecuted:false,secretPayloadDisclosed:false,result:"PASS"}' \
+              > platform-evidence/webhook-internal-probe.json
+            jq -n '{status:"ok",transport:"cloud-run-native-healthz",source:"ephemeral-production-acceptance"}' > platform-evidence/webhook-healthz.json
+            jq -n '{status:"ready",checks:[{name:"cloud-run-startup-readyz",ok:true}],source:"ephemeral-production-acceptance"}' > platform-evidence/webhook-readyz.json
+            jq -n --arg mcp "$WEBHOOK_MCP_STATUS" --arg oauth "$WEBHOOK_OAUTH_STATUS" \
+              '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' \
+              > platform-evidence/e2e-results.json
+
+            cleanup_internal_webhook_probe
+            trap - EXIT
+            for job in "$WEBHOOK_HEALTH_JOB" "$WEBHOOK_READY_JOB" "$WEBHOOK_MCP_JOB" "$WEBHOOK_OAUTH_JOB"; do
+              if gcloud scheduler jobs describe "$job" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" >/dev/null 2>&1; then
+                echo "Webhook internal probe cleanup left scheduler job behind: $job" >&2
+                exit 1
+              fi
+            done
+            if gcloud run services describe "$WEBHOOK_PROBE_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1; then
+              echo "Ephemeral webhook acceptance service remained after cleanup: $WEBHOOK_PROBE_SERVICE" >&2
+              exit 1
+            fi
+            echo 'WEBHOOK_GCP_INTERNAL_PROBE=PASS' >> "$GITHUB_STEP_SUMMARY"
+          else
+            test -n "$WEBHOOK_TOKEN" || { echo 'Webhook private probe ID token missing' >&2; exit 1; }
+            WEBHOOK_AUTH=(-H "Authorization: Bearer $WEBHOOK_TOKEN")
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/healthz" | tee platform-evidence/webhook-healthz.json
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/readyz" | tee platform-evidence/webhook-readyz.json
+            jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/webhook-readyz.json >/dev/null
+            MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/mcp")"
+            OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${WEBHOOK_AUTH[@]}" "$WEBHOOK_URL/oauth/meta/start")"
+            [[ "$MCP_STATUS" == 404 && "$OAUTH_STATUS" == 404 ]] || { echo 'Webhook candidate exposed a forbidden route' >&2; exit 1; }
+            jq -n --arg mcp "$MCP_STATUS" --arg oauth "$OAUTH_STATUS" '{schemaVersion:"toca.platform.e2e.v1",webhookMcpStatus:($mcp|tonumber),webhookOauthStatus:($oauth|tonumber),result:"PASS"}' > platform-evidence/e2e-results.json
+          fi
+
+      - name: Restore production MCP default endpoint posture after private probes
+        if: inputs.operation == 'deploy' && inputs.environment == 'production'
+        run: |
+          set -euo pipefail
+          gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-endpoint-restored.json
+          jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' /tmp/mcp-endpoint-restored.json >/dev/null
+          echo 'MCP_DEFAULT_URL_POSTURE_RESTORED=PASS' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture database Audit Outbox Workflow Privacy and migration refs through runtime identity job
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-db-evidence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1
+            REMAINING_CLEANUP="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)' 2>/dev/null)"
+            if [[ -n "$REMAINING_CLEANUP" ]]; then
+              echo "Database evidence cleanup could not prove job absence: $JOB_NAME" >&2
+            else
+              echo 'DATABASE_EVIDENCE_JOB_CLEANUP=PASS'
+            fi
+            set -e
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \
+            --set-secrets "DATABASE_URL=${GCP_DATABASE_URL_SECRET}:${GCP_DATABASE_URL_SECRET_VERSION}" \
+            --set-env-vars "DATABASE_SSL=false,TOCA_RELEASE_SHA=${GITHUB_SHA},TOCA_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}" \
+            --command node \
+            --args scripts/capture-platform-evidence.mjs,- \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=10m --limit=200 --order=asc \
+            --format='value(textPayload)' || true)"
+          EVIDENCE_B64="$(printf '%s\n' "$LOGS" | sed -n 's/.*PLATFORM_EVIDENCE_BASE64=\([A-Za-z0-9+\/=]*\).*/\1/p' | tail -n1)"
+          [[ -n "$EVIDENCE_B64" ]] || { echo 'Database evidence payload marker was not found' >&2; exit 1; }
+          mkdir -p platform-evidence
+          printf '%s' "$EVIDENCE_B64" | base64 --decode > platform-evidence/database-runtime.json
+          jq -e --arg sha "$GITHUB_SHA" --arg environment "$DEPLOY_ENVIRONMENT" '
+            .schemaVersion == "toca.platform.evidence.database-runtime.v2" and
+            .releaseSha == $sha and
+            .environment == $environment
+          ' platform-evidence/database-runtime.json >/dev/null
+          jq -n \
+            --arg job "$JOB_NAME" --arg image "$IMAGE" \
+            --arg serviceAccount "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg secret "$GCP_DATABASE_URL_SECRET" --arg secretVersion "$GCP_DATABASE_URL_SECRET_VERSION" \
+            '{schemaVersion:"toca.platform.database-evidence-job.v1",job:$job,image:$image,serviceAccount:$serviceAccount,databaseSecretId:$secret,databaseSecretVersion:$secretVersion,secretPayloadDisclosed:false,providerCallExecuted:false,result:"PASS"}' \
+            > platform-evidence/database-evidence-job.json
+
+          cleanup
+          trap - EXIT
+          REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=${JOB_NAME}" --format='value(metadata.name)')"
+          [[ -z "$REMAINING" ]] || { echo "Database evidence job still exists after cleanup: $JOB_NAME" >&2; exit 1; }
+
+      - name: Capture non-secret deploy and provider evidence
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          gcloud run revisions describe "$MCP_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq '{revision:.metadata.name,image:.spec.containers[0].image,serviceAccount:.spec.serviceAccountName}' > platform-evidence/mcp-revision.json
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq '{revision:.metadata.name,image:.spec.containers[0].image,serviceAccount:.spec.serviceAccountName}' > platform-evidence/webhook-revision.json
+          jq -n \
+            --arg metaEnabled "$META_ENABLED" --arg metaVerified "$META_PROVIDER_VERIFIED" \
+            --arg metaAdsRead "$META_ADS_READ_ENABLED" --arg metaAdsWrite "$META_ADS_WRITE_ENABLED" \
+            --arg whatsappEnabled "$WHATSAPP_ENABLED" --arg whatsappVerified "$WHATSAPP_PROVIDER_VERIFIED" \
+            --arg emailEnabled "$EMAIL_SENDGRID_ENABLED" --arg emailVerified "$EMAIL_SENDGRID_PROVIDER_VERIFIED" \
+            --arg googlePhase "$GOOGLE_ADS_PHASE" --arg googleVerified "$GOOGLE_ADS_PROVIDER_VERIFIED" \
+            '{meta:{enabled:($metaEnabled=="true"),providerVerified:($metaVerified=="true"),adsReadEnabled:($metaAdsRead=="true"),adsWriteEnabled:($metaAdsWrite=="true")},whatsapp:{enabled:($whatsappEnabled=="true"),providerVerified:($whatsappVerified=="true")},email:{enabled:($emailEnabled=="true"),providerVerified:($emailVerified=="true")},googleAds:{phase:$googlePhase,providerVerified:($googleVerified=="true")}}' > platform-evidence/provider-states.json
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" --arg imageDigest "$IMAGE_DIGEST" --arg image "$IMAGE" \
+            --arg mcpRevision "$MCP_REVISION" --arg webhookRevision "$WEBHOOK_REVISION" \
+            --arg previousMcp "${PREVIOUS_MCP_REVISION:-}" --arg previousWebhook "${PREVIOUS_WEBHOOK_REVISION:-}" \
+            --arg previousWebhookServiceExisted "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" \
+            --arg environment "${{ inputs.environment }}" --arg alertRef "${ALERT_EVIDENCE_REF:-}" --arg drRef "${DR_EVIDENCE_REF:-}" \
+            '{schemaVersion:"toca.platform.release-evidence.v1",environment:$environment,sourceSha:$sourceSha,imageDigest:$imageDigest,image:$image,revisions:{mcp:$mcpRevision,webhook:$webhookRevision},rollbackTargets:{mcp:($previousMcp|select(length>0)),webhook:(if ($previousWebhook|length)>0 then $previousWebhook else "ABSENT" end),previousWebhookServiceExisted:($previousWebhookServiceExisted=="true")},alertEvidence:{ref:($alertRef|select(length>0)),state:(if ($alertRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)},drEvidence:{ref:($drRef|select(length>0)),state:(if ($drRef|length)>0 then "REFERENCED" else "NOT_PROVEN" end)}}' > platform-evidence/manifest.json
+
+      - name: Promote production canary
+        if: inputs.operation == 'deploy' && inputs.environment == 'production' && inputs.rollout == 'canary'
+        run: |
+          set -euo pipefail
+          test -n "${PREVIOUS_MCP_REVISION:-}"
+          test -n "${PREVIOUS_WEBHOOK_REVISION:-}" || { echo 'Production canary requires an existing serving webhook revision; first webhook introduction must use private bootstrap validation followed by full promotion.' >&2; exit 1; }
+          touch /tmp/toca-traffic-promotion-started
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=10,${PREVIOUS_MCP_REVISION}=90"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=10,${PREVIOUS_WEBHOOK_REVISION}=90"
+
+      - name: Promote full traffic
+        if: inputs.operation == 'deploy' && inputs.rollout == 'full'
+        run: |
+          set -euo pipefail
+          touch /tmp/toca-traffic-promotion-started
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_REVISION}=100"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_REVISION}=100"
+          if [[ "${WEBHOOK_FIRST_INTRODUCTION:-false}" == true ]]; then
+            gcloud run services add-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "$WEBHOOK_URL/healthz" >/dev/null
+            PUBLIC_MCP_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/mcp")"
+            PUBLIC_OAUTH_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/oauth/meta/start")"
+            [[ "$PUBLIC_MCP_STATUS" == 404 && "$PUBLIC_OAUTH_STATUS" == 404 ]] || { echo 'Promoted public webhook exposed a forbidden route' >&2; exit 1; }
+            echo 'WEBHOOK_FIRST_INTRODUCTION_PUBLIC_VALIDATION=PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Read back final traffic state
+        if: inputs.operation == 'deploy'
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq '{latestReadyRevisionName:.status.latestReadyRevisionName,traffic:.status.traffic}' > platform-evidence/mcp-traffic.json
+          gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq '{latestReadyRevisionName:.status.latestReadyRevisionName,traffic:.status.traffic}' > platform-evidence/webhook-traffic.json
+
+      - name: Upload immutable evidence package
+        if: always() && inputs.operation == 'deploy'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toca-platform-${{ inputs.environment }}-${{ github.sha }}
+          path: platform-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Roll back both services to explicit known revisions
+        if: inputs.operation == 'rollback'
+        env:
+          ROLLBACK_MCP_REVISION: ${{ inputs.rollback_mcp_revision }}
+          ROLLBACK_WEBHOOK_REVISION: ${{ inputs.rollback_webhook_revision }}
+          ROLLBACK_COMPATIBILITY_REF: ${{ inputs.rollback_compatibility_ref }}
+        run: |
+          set -euo pipefail
+          test -n "$ROLLBACK_MCP_REVISION"; test -n "$ROLLBACK_WEBHOOK_REVISION"; test -n "$ROLLBACK_COMPATIBILITY_REF"
+          gcloud run revisions list --service "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_MCP_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_MCP_REVISION"
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_MCP_REVISION}=100"
+          if [[ "$ROLLBACK_WEBHOOK_REVISION" == ABSENT ]]; then
+            gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
+            gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            echo 'WEBHOOK_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gcloud run revisions list --service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_WEBHOOK_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_WEBHOOK_REVISION"
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_WEBHOOK_REVISION}=100"
+          fi
+          echo "ROLLBACK_COMPATIBILITY_REF=$ROLLBACK_COMPATIBILITY_REF" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Activate emergency mutation kill switch
+        if: inputs.operation == 'kill_switch'
+        run: |
+          set -euo pipefail
+          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
+            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=true
+          done
+
+      - name: Clear emergency mutation kill switch
+        if: inputs.operation == 'clear_kill_switch'
+        run: |
+          set -euo pipefail
+          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
+            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=false
+          done
+
+      - name: Automatic rollback after failed promotion
+        if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != ''
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+            gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-endpoint-rollback.json
+            jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' /tmp/mcp-endpoint-rollback.json >/dev/null
+            echo 'MCP_DEFAULT_URL_POSTURE_ROLLBACK=PASS' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ ! -f /tmp/toca-traffic-promotion-started ]]; then
+            if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]] && \
+              gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+              gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+              echo 'WEBHOOK_BOOTSTRAP_CLEANUP=DELETED_UNPROMOTED_SERVICE' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo 'AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_MCP_REVISION}=100"
+          if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
+          else
+            gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
+            gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --member=allUsers --role=roles/run.invoker --quiet
+            echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Deployment evidence summary
+        if: always()
+        run: |
+          {
+            echo '### TOCA OS Next platform operation'
+            echo "- environment: ${{ inputs.environment }}"
+            echo "- operation: ${{ inputs.operation }}"
+            echo "- source SHA: ${GITHUB_SHA}"
+            echo "- image digest: ${IMAGE_DIGEST:-not-built}"
+            echo "- MCP revision: ${MCP_REVISION:-not-deployed}"
+            echo "- webhook revision: ${WEBHOOK_REVISION:-not-deployed}"
+            echo "- previous MCP revision: ${PREVIOUS_MCP_REVISION:-none}"
+            echo "- previous webhook revision: ${PREVIOUS_WEBHOOK_REVISION:-none}"
+            echo "- previous webhook service existed: ${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-unknown}"
+            echo "- first webhook introduction: ${WEBHOOK_FIRST_INTRODUCTION:-unknown}"
+            echo "- alert evidence: ${ALERT_EVIDENCE_REF:-NOT_PROVEN}"
+            echo "- DR evidence: ${DR_EVIDENCE_REF:-NOT_PROVEN}"
+          } >> "$GITHUB_STEP_SUMMARY"
