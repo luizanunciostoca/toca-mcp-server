@@ -1,0 +1,243 @@
+name: GCP Incident Readback
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gcp-incident-readback.yml'
+      - 'ops/gcp-fast-probe-target.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: gcp-incident-readback-production
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_PROJECT_NUMBER: '990081828836'
+  GCP_REGION: southamerica-east1
+  GCP_CLOUD_RUN_MCP_SERVICE: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  INCIDENT_DEPLOY_RUN_ID: '32921717336'
+  INCIDENT_RUN_ATTEMPT: '1'
+  INCIDENT_WINDOW_START: '2026-08-26T02:16:30Z'
+  INCIDENT_WINDOW_END: '2026-08-26T02:18:30Z'
+
+jobs:
+  readback:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout read-only incident contract
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve exact historical incident target
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_SHA="$(jq -r '.candidateSha // empty' ops/gcp-fast-probe-target.json)"
+          AUTHORIZATION_REF="$(jq -r '.authorizationRef // empty' ops/gcp-fast-probe-target.json)"
+          EXPECTED_TAG="$(jq -r '.expectedMcpTag // empty' ops/gcp-fast-probe-target.json)"
+          TARGET_ENVIRONMENT="$(jq -r '.environment // empty' ops/gcp-fast-probe-target.json)"
+
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Incident candidate must be one full lowercase SHA' >&2; exit 1; }
+          [[ "$TARGET_ENVIRONMENT" == production ]] || { echo 'Incident readback target must remain production-scoped' >&2; exit 1; }
+          [[ "$EXPECTED_TAG" == "production-mcp-${CANDIDATE_SHA:0:7}" ]] || { echo 'Incident tag does not match candidate SHA' >&2; exit 1; }
+          [[ "$AUTHORIZATION_REF" =~ ^https://github.com/luizanunciostoca/toca-mcp-server/issues/[0-9]+$ ]] || { echo 'Incident authorization must be a same-repository issue URL' >&2; exit 1; }
+
+          echo "INCIDENT_CANDIDATE_SHA=$CANDIDATE_SHA" >> "$GITHUB_ENV"
+          echo "INCIDENT_AUTHORIZATION_REF=$AUTHORIZATION_REF" >> "$GITHUB_ENV"
+          echo "INCIDENT_EXPECTED_TAG=$EXPECTED_TAG" >> "$GITHUB_ENV"
+          echo "INCIDENT_HEALTH_JOB=toca-mcp-health-${INCIDENT_DEPLOY_RUN_ID}-${INCIDENT_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "INCIDENT_READY_JOB=toca-mcp-ready-${INCIDENT_DEPLOY_RUN_ID}-${INCIDENT_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Require bounded diagnostic authorization
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER="${INCIDENT_AUTHORIZATION_REF##*/}"
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            > /tmp/diagnostic-authorization.json
+
+          jq -e \
+            --arg expectedUrl "$INCIDENT_AUTHORIZATION_REF" \
+            --arg candidate "$INCIDENT_CANDIDATE_SHA" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" '
+              (.html_url == $expectedUrl) and
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION DIAGNOSTIC AUTHORIZATION")) and
+              ((.body // "") | contains("AUTHORIZED_PROBE_CANDIDATE_SHA=" + $candidate)) and
+              ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+              ((.body // "") | contains("NO_TRAFFIC_MUTATION=true")) and
+              ((.body // "") | contains("NO_PROVIDER_CALLS=true")) and
+              ((.body // "") | contains("NO_DATABASE_MUTATION=true"))
+            ' /tmp/diagnostic-authorization.json >/dev/null || {
+              echo 'Diagnostic authorization is not active for this historical candidate' >&2
+              exit 1
+            }
+
+      - name: Authenticate read-only production evidence identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read historical scheduler and Cloud Run evidence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p incident-readback-evidence
+
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/current-service.json
+
+          CURRENT_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/current-service.json)"
+          CURRENT_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/current-service.json)"
+          CURRENT_STATUS_URL="$(jq -r '.status.url // empty' /tmp/current-service.json)"
+          CURRENT_TAG_PRESENT="$(jq -r --arg tag "$INCIDENT_EXPECTED_TAG" 'any((.status.traffic // [])[]; (.tag // "") == $tag)' /tmp/current-service.json)"
+          jq '{latestReadyRevisionName:(.status.latestReadyRevisionName // null),latestCreatedRevisionName:(.status.latestCreatedRevisionName // null),traffic:(.status.traffic // [])}' \
+            /tmp/current-service.json > incident-readback-evidence/current-service-traffic.json
+
+          gcloud run revisions list \
+            --service "$GCP_CLOUD_RUN_MCP_SERVICE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --format='value(metadata.name)' > /tmp/revision-names.txt
+
+          CANDIDATE_REVISION=''
+          CANDIDATE_READY=''
+          while IFS= read -r revision; do
+            [[ -n "$revision" ]] || continue
+            gcloud run revisions describe "$revision" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              > /tmp/revision.json
+            release_sha="$(jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | unique | if length == 1 then .[0] else empty end' /tmp/revision.json)"
+            if [[ "$release_sha" == "$INCIDENT_CANDIDATE_SHA" ]]; then
+              CANDIDATE_REVISION="$revision"
+              CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // empty' /tmp/revision.json)"
+              jq '{name:.metadata.name,creationTimestamp:.metadata.creationTimestamp,ready:([.status.conditions[]? | select(.type == "Ready") | .status] | last // null),serviceAccount:(.spec.serviceAccountName // null),containerImage:(.spec.containers[0].image // null)}' \
+                /tmp/revision.json > incident-readback-evidence/candidate-revision.json
+              break
+            fi
+          done < /tmp/revision-names.txt
+
+          scheduler_logs() {
+            local job="$1" output="$2"
+            gcloud logging read \
+              "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\" AND timestamp>=\"${INCIDENT_WINDOW_START}\" AND timestamp<=\"${INCIDENT_WINDOW_END}\"" \
+              --project "$GCP_PROJECT_ID" --limit=50 --order=asc --format=json \
+              > "$output"
+          }
+          scheduler_logs "$INCIDENT_HEALTH_JOB" /tmp/health-scheduler.json
+          scheduler_logs "$INCIDENT_READY_JOB" /tmp/ready-scheduler.json
+
+          jq '[.[] | {timestamp,job:(.resource.labels.job_id // null),httpStatus:(.httpRequest.status // null),requestUrl:(.httpRequest.requestUrl // null),severity:(.severity // null),status:(.jsonPayload.status // null)}]' \
+            /tmp/health-scheduler.json > incident-readback-evidence/health-scheduler.json
+          jq '[.[] | {timestamp,job:(.resource.labels.job_id // null),httpStatus:(.httpRequest.status // null),requestUrl:(.httpRequest.requestUrl // null),severity:(.severity // null),status:(.jsonPayload.status // null)}]' \
+            /tmp/ready-scheduler.json > incident-readback-evidence/ready-scheduler.json
+
+          HEALTH_STATUS="$(jq -r '[.[] | .httpRequest.status // empty] | last // empty' /tmp/health-scheduler.json)"
+          READY_STATUS="$(jq -r '[.[] | .httpRequest.status // empty] | last // empty' /tmp/ready-scheduler.json)"
+          HEALTH_REQUEST_URL="$(jq -r '[.[] | .httpRequest.requestUrl // empty] | last // empty' /tmp/health-scheduler.json)"
+          READY_REQUEST_URL="$(jq -r '[.[] | .httpRequest.requestUrl // empty] | last // empty' /tmp/ready-scheduler.json)"
+
+          CANDIDATE_REQUEST_LOG_COUNT=0
+          CANDIDATE_404_LOG_COUNT=0
+          if [[ -n "$CANDIDATE_REVISION" ]]; then
+            gcloud logging read \
+              "resource.type=\"cloud_run_revision\" AND resource.labels.revision_name=\"${CANDIDATE_REVISION}\" AND logName=\"projects/${GCP_PROJECT_ID}/logs/run.googleapis.com%2Frequests\" AND timestamp>=\"${INCIDENT_WINDOW_START}\" AND timestamp<=\"${INCIDENT_WINDOW_END}\"" \
+              --project "$GCP_PROJECT_ID" --limit=100 --order=asc --format=json \
+              > /tmp/candidate-requests.json
+            CANDIDATE_REQUEST_LOG_COUNT="$(jq 'length' /tmp/candidate-requests.json)"
+            CANDIDATE_404_LOG_COUNT="$(jq '[.[] | select((.httpRequest.status // 0) == 404)] | length' /tmp/candidate-requests.json)"
+            jq '[.[] | {timestamp,httpStatus:(.httpRequest.status // null),requestUrl:(.httpRequest.requestUrl // null),latency:(.httpRequest.latency // null),trace:(.trace // null)}]' \
+              /tmp/candidate-requests.json > incident-readback-evidence/candidate-requests.json
+          else
+            printf '[]\n' > incident-readback-evidence/candidate-requests.json
+          fi
+
+          gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${GCP_CLOUD_RUN_MCP_SERVICE}\" AND logName=\"projects/${GCP_PROJECT_ID}/logs/run.googleapis.com%2Frequests\" AND httpRequest.status=404 AND timestamp>=\"${INCIDENT_WINDOW_START}\" AND timestamp<=\"${INCIDENT_WINDOW_END}\"" \
+            --project "$GCP_PROJECT_ID" --limit=100 --order=asc --format=json \
+            > /tmp/service-404-requests.json
+          SERVICE_404_LOG_COUNT="$(jq 'length' /tmp/service-404-requests.json)"
+          jq '[.[] | {timestamp,revision:(.resource.labels.revision_name // null),httpStatus:(.httpRequest.status // null),requestUrl:(.httpRequest.requestUrl // null)}]' \
+            /tmp/service-404-requests.json > incident-readback-evidence/service-404-requests.json
+
+          CLASSIFICATION=HISTORICAL_EVIDENCE_INCONCLUSIVE
+          if [[ -z "$CANDIDATE_REVISION" ]]; then
+            CLASSIFICATION=CANDIDATE_REVISION_NOT_PRESENT_CURRENTLY
+          elif [[ "$HEALTH_STATUS" == 404 && "$CANDIDATE_REQUEST_LOG_COUNT" == 0 && "$SERVICE_404_LOG_COUNT" == 0 ]]; then
+            CLASSIFICATION=ORIGINAL_404_REJECTED_BEFORE_CLOUD_RUN_REVISION
+          elif [[ "$HEALTH_STATUS" == 404 && "$CANDIDATE_404_LOG_COUNT" -gt 0 ]]; then
+            CLASSIFICATION=ORIGINAL_404_REACHED_CANDIDATE_REVISION
+          elif [[ "$HEALTH_STATUS" == 404 && "$CANDIDATE_REQUEST_LOG_COUNT" == 0 ]]; then
+            CLASSIFICATION=ORIGINAL_404_NOT_OBSERVED_AT_CANDIDATE_REVISION
+          elif [[ "$HEALTH_STATUS" =~ ^2[0-9]{2}$ ]]; then
+            CLASSIFICATION=ORIGINAL_HEALTH_PROBE_WAS_2XX
+          fi
+
+          jq -n \
+            --arg schemaVersion 'toca.gcp-incident-readback.v1' \
+            --arg candidateSha "$INCIDENT_CANDIDATE_SHA" \
+            --arg expectedTag "$INCIDENT_EXPECTED_TAG" \
+            --arg candidateRevision "$CANDIDATE_REVISION" \
+            --arg candidateReady "$CANDIDATE_READY" \
+            --arg ingress "$CURRENT_INGRESS" \
+            --arg defaultUrlDisabled "$CURRENT_DEFAULT_URL_DISABLED" \
+            --arg statusUrl "$CURRENT_STATUS_URL" \
+            --arg tagPresent "$CURRENT_TAG_PRESENT" \
+            --arg healthJob "$INCIDENT_HEALTH_JOB" \
+            --arg readyJob "$INCIDENT_READY_JOB" \
+            --arg healthStatus "$HEALTH_STATUS" \
+            --arg readyStatus "$READY_STATUS" \
+            --arg healthRequestUrl "$HEALTH_REQUEST_URL" \
+            --arg readyRequestUrl "$READY_REQUEST_URL" \
+            --arg candidateRequestLogCount "$CANDIDATE_REQUEST_LOG_COUNT" \
+            --arg candidate404LogCount "$CANDIDATE_404_LOG_COUNT" \
+            --arg service404LogCount "$SERVICE_404_LOG_COUNT" \
+            --arg classification "$CLASSIFICATION" \
+            --arg windowStart "$INCIDENT_WINDOW_START" \
+            --arg windowEnd "$INCIDENT_WINDOW_END" \
+            '{schemaVersion:$schemaVersion,candidateSha:$candidateSha,expectedTag:$expectedTag,candidateRevision:(if $candidateRevision=="" then null else $candidateRevision end),candidateRevisionReady:(if $candidateReady=="" then null else ($candidateReady=="True") end),currentPosture:{ingress:$ingress,defaultUrlDisabled:($defaultUrlDisabled=="true"),statusUrl:(if $statusUrl=="" then null else $statusUrl end),candidateTagPresent:($tagPresent=="true")},incidentWindow:{start:$windowStart,end:$windowEnd},scheduler:{healthJob:$healthJob,readyJob:$readyJob,healthStatus:(if $healthStatus=="" then null else ($healthStatus|tonumber) end),readyStatus:(if $readyStatus=="" then null else ($readyStatus|tonumber) end),healthRequestUrl:(if $healthRequestUrl=="" then null else $healthRequestUrl end),readyRequestUrl:(if $readyRequestUrl=="" then null else $readyRequestUrl end)},cloudRunEvidence:{candidateRequestLogCount:($candidateRequestLogCount|tonumber),candidate404LogCount:($candidate404LogCount|tonumber),service404LogCount:($service404LogCount|tonumber)},classification:$classification,readOnly:true,buildExecuted:false,deployExecuted:false,migrationExecuted:false,backupExecuted:false,trafficMutationExecuted:false,iamMutationExecuted:false,schedulerMutationExecuted:false,providerCallExecuted:false}' \
+            > incident-readback-evidence/result.json
+
+          {
+            echo '## GCP Incident Readback'
+            echo "- Historical candidate: \`$INCIDENT_CANDIDATE_SHA\`"
+            echo "- Candidate revision now: \`${CANDIDATE_REVISION:-ABSENT}\`"
+            echo "- Candidate tag now present: \`$CURRENT_TAG_PRESENT\`"
+            echo "- Current ingress: \`$CURRENT_INGRESS\`"
+            echo "- Current default run.app disabled: \`$CURRENT_DEFAULT_URL_DISABLED\`"
+            echo "- Original health Scheduler status: \`${HEALTH_STATUS:-NOT_FOUND}\`"
+            echo "- Original ready Scheduler status: \`${READY_STATUS:-NOT_FOUND}\`"
+            echo "- Candidate request logs in incident window: \`$CANDIDATE_REQUEST_LOG_COUNT\`"
+            echo "- Candidate 404 logs in incident window: \`$CANDIDATE_404_LOG_COUNT\`"
+            echo "- Service 404 logs in incident window: \`$SERVICE_404_LOG_COUNT\`"
+            echo "- Classification: **$CLASSIFICATION**"
+            echo '- Production mutation: `NONE`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat incident-readback-evidence/result.json
