@@ -33,8 +33,10 @@
       "number": 281,
       "url": "https://github.com/luizanunciostoca/toca-mcp-server/pull/281",
       "state": "OPEN",
-      "remoteChecks": "PASS",
+      "remoteChecks": "PENDING_FINAL_HEAD",
       "reviewDecision": "REVIEW_REQUIRED",
+      "requestedReviewer": "luizidebook",
+      "codeOwners": ["luizanunciostoca", "luizidebook"],
       "mergeBlockedUntilHumanApproval": true
     },
     "branchProtection": {
@@ -62,11 +64,11 @@
   },
   "externalReleaseGates": {
     "githubPush": "PASS",
-    "pullRequest": "PASS_CHECKS_GREEN_REVIEW_REQUIRED",
+    "pullRequest": "PASS_REVIEW_REQUESTED_CHECKS_PENDING_FINAL_HEAD",
     "branchProtectionApplyReadback": "PASS",
     "gcpDeploy": "BLOCKED_GCP_SESSION_UNAVAILABLE",
     "providerBackedAcceptance": "BLOCKED_PROVIDER_CREDENTIALS_AND_INFRASTRUCTURE_UNAVAILABLE",
     "driveWriteback": "BLOCKED_GOOGLE_WORKSPACE_TASK_BINDING_UNAVAILABLE"
   },
-  "safeDecision": "PR_READY_FOR_HUMAN_REVIEW_NOT_PRODUCTION_PROMOTION"
+  "safeDecision": "PR_READY_FOR_INDEPENDENT_HUMAN_REVIEW_NOT_PRODUCTION_PROMOTION"
 }

@@ -15,30 +15,30 @@ A branch implementa a fundação técnica requerida para elevar o Marketing Auto
 
 O gate oficial completo foi executado localmente com Node 24 e concluiu formatação, arquitetura, lint, typecheck, **204 arquivos de teste aprovados, 999 testes aprovados e build TypeScript**. Dezessete arquivos e 25 testes provider-backed/PostgreSQL permaneceram ignorados porque exigem infraestrutura externa não disponível nesta execução. Esses skips não são tratados como evidência de produção.[4]
 
-> **Conclusão segura:** a branch foi publicada no GitHub, o [PR #281](https://github.com/luizanunciostoca/toca-mcp-server/pull/281) recebeu checks remotos verdes e a proteção da `main` foi aplicada com readback `PASS`. O merge permanece bloqueado pela aprovação humana exigida; também não existe sessão GCP autenticada para acceptance e deploy. O manifesto provider-backed contém zero validações, as capabilities `instagram.publish.*` permanecem `PLANNED` e o runtime continua fail-closed.
+> **Conclusão segura:** a branch foi publicada no GitHub, o [PR #281](https://github.com/luizanunciostoca/toca-mcp-server/pull/281) recebeu checks remotos verdes nos candidatos anteriores e a proteção da `main` foi aplicada com readback `PASS`. `@luizidebook` foi adicionado como co-CODEOWNER e sua revisão independente foi solicitada; o merge permanece bloqueado até a aprovação e os checks do exact-head final. Também não existe sessão GCP autenticada para acceptance e deploy. O manifesto provider-backed contém zero validações, as capabilities `instagram.publish.*` permanecem `PLANNED` e o runtime continua fail-closed.
 
 ## 2. Requisitos e implementação
 
-| Requisito                         | Implementação principal                                                                        | Evidência automatizada                                                      | Estado                                     |
-| --------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------ |
-| Política efetiva única            | `control/effective-autonomy-policy.v1.json` e compiler `src/governance/autonomy-policy.ts`     | `check-effective-autonomy-policy.mjs` e `effective-autonomy-policy.test.ts` | Concluído localmente                       |
-| Scheduling canônico               | `TOCA_MANAGED_SCHEDULING`, `TOCA_SCHEDULED` e `TOCA_SCHEDULE`                                  | `marketing-autopilot-scheduling.test.ts`                                    | Concluído localmente                       |
-| Autonomy Gate único               | `src/core/autonomy-gate.ts`, integrado ao executor e à superfície MCP                          | `autonomy-gate.test.ts` e testes do Core                                    | Concluído localmente                       |
-| Readiness Gate fail-closed        | `src/health/autopilot-readiness.ts` e `src/core/autonomy-runtime-context.ts`                   | `autopilot-readiness.test.ts`                                               | Concluído localmente                       |
-| Modos graduais                    | `OFF`, `OBSERVE`, `ASSISTED`, `SUPERVISED_AUTO` e `PREAPPROVED_AUTO`                           | `autonomy-rollout.test.ts`                                                  | Concluído localmente                       |
-| Kill switches granulares          | Global, tenant, provider e capability no contexto do Autonomy Gate                             | `autonomy-gate.test.ts`                                                     | Concluído localmente                       |
-| Circuit breaker e provider health | Health/circuit por tenant e provider antes do side effect                                      | `autonomy-gate.test.ts`                                                     | Concluído localmente                       |
-| Scheduler resiliente              | Watchdog, `updatedAt`, last poll/claim, backlog, lag, DLQ e latência                           | `scheduler-watchdog.test.ts` e testes do worker                             | Concluído localmente                       |
-| Reconciliação periódica           | `src/scheduler/scheduler-reconciler.ts`, provider readback e reparo injetável seguro           | `scheduler-reconciler.test.ts`                                              | Concluído localmente                       |
-| Aprovação em lote                 | UX agregada com hash, escopo, reserva e consumo independentes                                  | `approval-batch.test.ts` e atomicidade existente                            | Concluído localmente                       |
-| Shadow e canary                   | Agreement exato, amostras mínimas, promoção humana e rollback                                  | `autonomy-rollout.test.ts`                                                  | Concluído localmente                       |
-| Governança R31                    | Recomendações auditáveis; autoelevação proibida                                                | `learning-governance.test.ts`                                               | Concluído localmente                       |
-| Métricas do Autopilot             | Shadow agreement, approval latency, scheduler lag, provider errors, intervenção e adoção       | `platform-slo-catalog.test.ts`                                              | Concluído localmente                       |
-| Fault injection                   | Crash windows, 429/500, token, rede, duplicate webhook, clock, stale approval, drift e parcial | `autopilot-fault-injection.test.ts`                                         | Concluído localmente                       |
-| Lifecycle provider-backed         | Evidence package individual por capability e exact-head                                        | `capability-validation-evidence.test.ts`                                    | Gate concluído; validações reais pendentes |
-| Autonomy Safety CI                | Workflow dedicado com exact candidate e testes críticos                                        | `.github/workflows/autonomy-safety.yml`                                     | Executado no PR; PASS                      |
-| Branch protection                 | Desired state com cinco checks, review, CODEOWNERS e bloqueios destrutivos                     | `check-main-branch-protection-policy.mjs`                                   | Aplicado; readback `PASS`                  |
-| Deploy controlado                 | Gates existentes preservados; nenhuma promoção sem evidence package                            | Gate completo e contratos GCP existentes                                    | Não executado nesta sessão                 |
+| Requisito                         | Implementação principal                                                                        | Evidência automatizada                                                      | Estado                                                |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Política efetiva única            | `control/effective-autonomy-policy.v1.json` e compiler `src/governance/autonomy-policy.ts`     | `check-effective-autonomy-policy.mjs` e `effective-autonomy-policy.test.ts` | Concluído localmente                                  |
+| Scheduling canônico               | `TOCA_MANAGED_SCHEDULING`, `TOCA_SCHEDULED` e `TOCA_SCHEDULE`                                  | `marketing-autopilot-scheduling.test.ts`                                    | Concluído localmente                                  |
+| Autonomy Gate único               | `src/core/autonomy-gate.ts`, integrado ao executor e à superfície MCP                          | `autonomy-gate.test.ts` e testes do Core                                    | Concluído localmente                                  |
+| Readiness Gate fail-closed        | `src/health/autopilot-readiness.ts` e `src/core/autonomy-runtime-context.ts`                   | `autopilot-readiness.test.ts`                                               | Concluído localmente                                  |
+| Modos graduais                    | `OFF`, `OBSERVE`, `ASSISTED`, `SUPERVISED_AUTO` e `PREAPPROVED_AUTO`                           | `autonomy-rollout.test.ts`                                                  | Concluído localmente                                  |
+| Kill switches granulares          | Global, tenant, provider e capability no contexto do Autonomy Gate                             | `autonomy-gate.test.ts`                                                     | Concluído localmente                                  |
+| Circuit breaker e provider health | Health/circuit por tenant e provider antes do side effect                                      | `autonomy-gate.test.ts`                                                     | Concluído localmente                                  |
+| Scheduler resiliente              | Watchdog, `updatedAt`, last poll/claim, backlog, lag, DLQ e latência                           | `scheduler-watchdog.test.ts` e testes do worker                             | Concluído localmente                                  |
+| Reconciliação periódica           | `src/scheduler/scheduler-reconciler.ts`, provider readback e reparo injetável seguro           | `scheduler-reconciler.test.ts`                                              | Concluído localmente                                  |
+| Aprovação em lote                 | UX agregada com hash, escopo, reserva e consumo independentes                                  | `approval-batch.test.ts` e atomicidade existente                            | Concluído localmente                                  |
+| Shadow e canary                   | Agreement exato, amostras mínimas, promoção humana e rollback                                  | `autonomy-rollout.test.ts`                                                  | Concluído localmente                                  |
+| Governança R31                    | Recomendações auditáveis; autoelevação proibida                                                | `learning-governance.test.ts`                                               | Concluído localmente                                  |
+| Métricas do Autopilot             | Shadow agreement, approval latency, scheduler lag, provider errors, intervenção e adoção       | `platform-slo-catalog.test.ts`                                              | Concluído localmente                                  |
+| Fault injection                   | Crash windows, 429/500, token, rede, duplicate webhook, clock, stale approval, drift e parcial | `autopilot-fault-injection.test.ts`                                         | Concluído localmente                                  |
+| Lifecycle provider-backed         | Evidence package individual por capability e exact-head                                        | `capability-validation-evidence.test.ts`                                    | Gate concluído; validações reais pendentes            |
+| Autonomy Safety CI                | Workflow dedicado com exact candidate e testes críticos                                        | `.github/workflows/autonomy-safety.yml`                                     | PASS nos candidatos verificados; rerun final pendente |
+| Branch protection                 | Desired state com cinco checks, review, CODEOWNERS e bloqueios destrutivos                     | `check-main-branch-protection-policy.mjs`                                   | Aplicado; readback `PASS`; co-CODEOWNER ativo         |
+| Deploy controlado                 | Gates existentes preservados; nenhuma promoção sem evidence package                            | Gate completo e contratos GCP existentes                                    | Não executado nesta sessão                            |
 
 ## 3. Decisão de autonomia efetiva
 
@@ -92,25 +92,25 @@ A sequência obrigatória de rollout é: merge via PR com checks verdes; deploy 
 
 ## 8. Gates executados
 
-| Gate                                 | Resultado                                                                     |
-| ------------------------------------ | ----------------------------------------------------------------------------- |
-| Prettier                             | Pass                                                                          |
-| Architecture e infrastructure checks | Pass                                                                          |
-| Effective autonomy policy            | Pass                                                                          |
-| Capability validation evidence       | Pass, com `validations=0`                                                     |
-| Main branch desired state            | Pass remoto com readback, cinco contexts                                      |
-| ESLint                               | Pass                                                                          |
-| TypeScript typecheck                 | Pass                                                                          |
-| Vitest                               | 204 arquivos e 999 testes aprovados; 17 arquivos/25 testes externos ignorados |
-| TypeScript build                     | Pass                                                                          |
-| Provider-backed acceptance           | Não executado: credenciais/infraestrutura indisponíveis                       |
-| GitHub push/PR/protection readback   | Pass: branch publicada, PR #281 verde e proteção da `main` verificada         |
-| GCP deploy/readiness/readback        | Não executado: sessão GCP indisponível                                        |
-| TOCA OS Drive writeback              | Não executado: conector de escrita indisponível nesta tarefa                  |
+| Gate                                 | Resultado                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------- |
+| Prettier                             | Pass                                                                              |
+| Architecture e infrastructure checks | Pass                                                                              |
+| Effective autonomy policy            | Pass                                                                              |
+| Capability validation evidence       | Pass, com `validations=0`                                                         |
+| Main branch desired state            | Pass remoto com readback, cinco contexts                                          |
+| ESLint                               | Pass                                                                              |
+| TypeScript typecheck                 | Pass                                                                              |
+| Vitest                               | 204 arquivos e 999 testes aprovados; 17 arquivos/25 testes externos ignorados     |
+| TypeScript build                     | Pass                                                                              |
+| Provider-backed acceptance           | Não executado: credenciais/infraestrutura indisponíveis                           |
+| GitHub push/PR/protection readback   | Branch e proteção: Pass; revisão solicitada; checks do exact-head final pendentes |
+| GCP deploy/readiness/readback        | Não executado: sessão GCP indisponível                                            |
+| TOCA OS Drive writeback              | Não executado: conector de escrita indisponível nesta tarefa                      |
 
 ## 9. Próximas ações externas obrigatórias
 
-A primeira ação restante é obter a aprovação humana exigida e realizar o merge pelo [PR #281](https://github.com/luizanunciostoca/toca-mcp-server/pull/281), sem bypass administrativo. A segunda ação é executar o pipeline de deploy com GCP autenticado sem habilitar publicação direta. A terceira é produzir evidence packages provider-backed, um por capability, somente após write real e readback no exact-head. A quarta é sincronizar este documento e os artifacts no TOCA OS Drive.
+A primeira ação restante é `@luizidebook` aprovar o [PR #281](https://github.com/luizanunciostoca/toca-mcp-server/pull/281) como co-CODEOWNER após os checks do exact-head final; o merge deve ocorrer sem bypass administrativo. A segunda ação é executar o pipeline de deploy com GCP autenticado sem habilitar publicação direta. A terceira é produzir evidence packages provider-backed, um por capability, somente após write real e readback no exact-head. A quarta é sincronizar este documento e os artifacts no TOCA OS Drive.
 
 Até esses passos serem comprovados, a política correta é manter capabilities externas em `PLANNED`, classes pré-aprovadas vazias e autonomia externa no máximo supervisionada.
 
