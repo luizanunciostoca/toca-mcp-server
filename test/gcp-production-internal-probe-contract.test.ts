@@ -38,7 +38,9 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain(
       "--liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10'",
     );
-    expect(production).toContain('--ingress internal --no-default-url --no-allow-unauthenticated');
+    expect(production).toContain(
+      '--ingress internal --no-default-url --no-allow-unauthenticated',
+    );
     expect(production).not.toContain('gcloud scheduler');
     expect(production).not.toContain('PROBE_URL=');
     expect(production).not.toContain(
