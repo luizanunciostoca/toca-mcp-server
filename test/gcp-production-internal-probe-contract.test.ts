@@ -36,7 +36,7 @@ describe('GCP production internal MCP probe contract', () => {
     expect(production).toContain(
       'PROBE_URL="https://${PROBE_SERVICE}-${GCP_PROJECT_NUMBER}.${GCP_REGION}.run.app"',
     );
-    expect(production).not.toContain("PROBE_URL=\"$(jq -r '.status.url");
+    expect(production).not.toContain('PROBE_URL="$(jq -r');
     expect(production).toContain('create_scheduler_probe "$HEALTH_JOB" "${PROBE_URL}/healthz"');
     expect(production).toContain('create_scheduler_probe "$READY_JOB" "${PROBE_URL}/readyz"');
     expect(production).toContain('--oidc-token-audience="$PROBE_URL"');
