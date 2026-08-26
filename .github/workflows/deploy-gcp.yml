@@ -775,12 +775,11 @@ jobs:
           create_credentials_file: false
           export_environment_variables: false
 
-      - name: Verify health readiness and webhook route confinement
+      - name: Verify MCP health readiness and internal acceptance
         if: inputs.operation == 'deploy'
         env:
           MCP_TOKEN: ${{ steps.mcp_probe_auth.outputs.id_token }}
           MCP_AUDIENCE: ${{ steps.resolve_candidates.outputs.mcp_audience }}
-          WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
         run: |
           set -euo pipefail
           mkdir -p platform-evidence
@@ -943,6 +942,14 @@ jobs:
             jq -e '.status == "ready" and (.checks | all(.ok == true))' platform-evidence/mcp-readyz.json >/dev/null
           fi
 
+      - name: Verify production webhook health readiness and route confinement
+        if: inputs.operation == 'deploy'
+        env:
+          WEBHOOK_TOKEN: ${{ steps.webhook_probe_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p platform-evidence
+
           if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
             test -n "$WEBHOOK_REVISION" || { echo 'Webhook exact candidate revision missing' >&2; exit 1; }
 
@@ -1073,7 +1080,7 @@ jobs:
               local job="$1" expected="$2" status
               for _ in $(seq 1 45); do
                 status="$(gcloud logging read \
-                  "resource.type="cloud_scheduler_job" AND resource.labels.job_id="${job}" AND httpRequest.status>0" \
+                  "resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${job}\" AND httpRequest.status>0" \
                   --project "$GCP_PROJECT_ID" --freshness=10m --limit=1 --order=desc \
                   --format='value(httpRequest.status)' 2>/dev/null | head -n1)"
                 if [[ "$status" == "$expected" ]]; then
