@@ -132,7 +132,7 @@ jobs:
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
             > /tmp/mcp-service.json
 
-          MCP_CANONICAL_URL="$(jq -r '.status.url // empty' /tmp/mcp-service.json)"
+          MCP_STATUS_URL="$(jq -r '.status.url // empty' /tmp/mcp-service.json)"
           MCP_REVISION="$(jq -r --arg tag "$FAST_PROBE_MCP_TAG" '
             [(.status.traffic // [])[] | select((.tag // "") == $tag) | .revisionName // empty]
             | unique | if length == 1 then .[0] else empty end
@@ -144,14 +144,25 @@ jobs:
           MCP_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-service.json)"
           MCP_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-service.json)"
 
-          test -n "$MCP_CANONICAL_URL" || { echo 'Canonical MCP URL missing' >&2; exit 1; }
           test -n "$MCP_REVISION" || { echo "Exact candidate tag not found: $FAST_PROBE_MCP_TAG" >&2; exit 1; }
           test -n "$MCP_TAGGED_URL" || { echo "Exact candidate tagged URL not found: $FAST_PROBE_MCP_TAG" >&2; exit 1; }
           case "$MCP_INGRESS" in
             internal|internal-and-cloud-load-balancing) ;;
             *) echo "Production MCP ingress is not private: $MCP_INGRESS" >&2; exit 1 ;;
           esac
-          [[ "$MCP_DEFAULT_URL_DISABLED" == false ]] || { echo 'Production MCP default run.app URL is disabled' >&2; exit 1; }
+
+          MCP_CANONICAL_URL="$MCP_STATUS_URL"
+          CANONICAL_URL_SOURCE=status.url
+          if [[ -z "$MCP_CANONICAL_URL" ]]; then
+            EXPECTED_PREFIX="https://${FAST_PROBE_MCP_TAG}---"
+            [[ "$MCP_TAGGED_URL" == "$EXPECTED_PREFIX"* ]] || {
+              echo "Cannot derive canonical run.app URL from tagged URL: $MCP_TAGGED_URL" >&2
+              exit 1
+            }
+            MCP_CANONICAL_URL="https://${MCP_TAGGED_URL#${EXPECTED_PREFIX}}"
+            CANONICAL_URL_SOURCE=derived-from-tagged-url
+          fi
+          test -n "$MCP_CANONICAL_URL" || { echo 'Canonical MCP URL could not be resolved' >&2; exit 1; }
 
           gcloud run revisions describe "$MCP_REVISION" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
@@ -253,7 +264,9 @@ jobs:
             --project "$GCP_PROJECT_ID" --freshness=5m --limit=20 --format=json 2>/dev/null | jq 'length')"
 
           CLASSIFICATION=UNCLASSIFIED
-          if [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" == 404 && "$TAGGED_READY_CANONICAL_AUD_STATUS" == 404 ]]; then
+          if [[ "$MCP_DEFAULT_URL_DISABLED" == true ]]; then
+            CLASSIFICATION=DEFAULT_RUN_APP_URL_DISABLED
+          elif [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" == 404 && "$TAGGED_READY_CANONICAL_AUD_STATUS" == 404 ]]; then
             CLASSIFICATION=TAGGED_RUN_APP_ROUTE_REJECTED_BEFORE_CANDIDATE
           elif [[ "$CANONICAL_HEALTH_STATUS" =~ ^2 && "$CANONICAL_READY_STATUS" =~ ^2 && "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" =~ ^2 && "$TAGGED_READY_CANONICAL_AUD_STATUS" =~ ^2 ]]; then
             CLASSIFICATION=TAGGED_ROUTE_HEALTHY
@@ -264,13 +277,17 @@ jobs:
           fi
 
           jq -n \
-            --arg schemaVersion 'toca.fast-candidate-probe.v1' \
+            --arg schemaVersion 'toca.fast-candidate-probe.v2' \
             --arg candidateSha "$FAST_PROBE_CANDIDATE" \
             --arg revision "$MCP_REVISION" \
             --arg tag "$FAST_PROBE_MCP_TAG" \
+            --arg statusUrl "$MCP_STATUS_URL" \
             --arg canonicalUrl "$MCP_CANONICAL_URL" \
+            --arg canonicalUrlSource "$CANONICAL_URL_SOURCE" \
             --arg taggedUrl "$MCP_TAGGED_URL" \
             --arg ingress "$MCP_INGRESS" \
+            --arg defaultUrlDisabled "$MCP_DEFAULT_URL_DISABLED" \
+            --arg revisionReady "$REVISION_READY" \
             --arg ch "$CANONICAL_HEALTH_STATUS" \
             --arg cr "$CANONICAL_READY_STATUS" \
             --arg thc "$TAGGED_HEALTH_CANONICAL_AUD_STATUS" \
@@ -279,7 +296,7 @@ jobs:
             --arg requestLogs "$CANDIDATE_REQUEST_LOG_COUNT" \
             --arg classification "$CLASSIFICATION" \
             --arg bindingAdded "$PROBE_BINDING_ADDED" \
-            '{schemaVersion:$schemaVersion,candidateSha:$candidateSha,revision:$revision,trafficTag:$tag,canonicalUrl:$canonicalUrl,taggedUrl:$taggedUrl,ingress:$ingress,status:{canonicalHealth:($ch|tonumber),canonicalReady:($cr|tonumber),taggedHealthCanonicalAudience:($thc|tonumber),taggedReadyCanonicalAudience:($trc|tonumber),taggedHealthTaggedAudience:($tht|tonumber)},candidateRequestLogCount:($requestLogs|tonumber),classification:$classification,temporaryInvokerBindingAdded:($bindingAdded=="true"),buildExecuted:false,migrationExecuted:false,backupExecuted:false,trafficMutationExecuted:false,providerCallExecuted:false}' \
+            '{schemaVersion:$schemaVersion,candidateSha:$candidateSha,revision:$revision,trafficTag:$tag,statusUrl:$statusUrl,canonicalUrl:$canonicalUrl,canonicalUrlSource:$canonicalUrlSource,taggedUrl:$taggedUrl,ingress:$ingress,defaultUrlDisabled:($defaultUrlDisabled=="true"),revisionReady:($revisionReady=="True"),status:{canonicalHealth:($ch|tonumber),canonicalReady:($cr|tonumber),taggedHealthCanonicalAudience:($thc|tonumber),taggedReadyCanonicalAudience:($trc|tonumber),taggedHealthTaggedAudience:($tht|tonumber)},candidateRequestLogCount:($requestLogs|tonumber),classification:$classification,temporaryInvokerBindingAdded:($bindingAdded=="true"),buildExecuted:false,migrationExecuted:false,backupExecuted:false,trafficMutationExecuted:false,providerCallExecuted:false}' \
             > fast-probe-evidence/result.json
 
           cleanup
@@ -310,7 +327,10 @@ jobs:
             echo '## GCP Candidate Fast Probe'
             echo "- Candidate: \`$FAST_PROBE_CANDIDATE\`"
             echo "- Revision: \`$MCP_REVISION\`"
+            echo "- Revision ready: \`$REVISION_READY\`"
             echo "- Ingress: \`$MCP_INGRESS\`"
+            echo "- Default run.app disabled: \`$MCP_DEFAULT_URL_DISABLED\`"
+            echo "- Canonical URL source: \`$CANONICAL_URL_SOURCE\`"
             echo "- Canonical /healthz: \`$CANONICAL_HEALTH_STATUS\`"
             echo "- Canonical /readyz: \`$CANONICAL_READY_STATUS\`"
             echo "- Tagged /healthz + canonical audience: \`$TAGGED_HEALTH_CANONICAL_AUD_STATUS\`"
