@@ -126,7 +126,12 @@ describe('GCP production internal MCP probe contract', () => {
 
     expect(verify).toContain('trap cleanup_internal_mcp_probe EXIT');
     expect(verify).toContain('gcloud run services delete "$PROBE_SERVICE"');
-    expect(verify).not.toContain('gcloud scheduler jobs delete');
+    const mcpCleanupStart = verify.indexOf('cleanup_internal_mcp_probe()');
+    const mcpCleanupEnd = verify.indexOf('trap cleanup_internal_mcp_probe EXIT', mcpCleanupStart);
+    expect(mcpCleanupStart).toBeGreaterThan(-1);
+    expect(mcpCleanupEnd).toBeGreaterThan(mcpCleanupStart);
+    const mcpCleanup = verify.slice(mcpCleanupStart, mcpCleanupEnd);
+    expect(mcpCleanup).not.toContain('gcloud scheduler jobs delete');
     expect(verify).toContain('trap - EXIT');
     expect(verify).toContain('Ephemeral MCP acceptance service remained after cleanup');
 

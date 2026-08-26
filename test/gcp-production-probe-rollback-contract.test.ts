@@ -18,7 +18,7 @@ describe('GCP production startup and rollback safety contract', () => {
     const readinessStartupProbes = workflow.match(/--startup-probe 'httpGet\.path=\/readyz/g) ?? [];
 
     expect(healthStartupProbes).toHaveLength(2);
-    expect(readinessStartupProbes).toHaveLength(1);
+    expect(readinessStartupProbes).toHaveLength(2);
     expect(workflow).toContain('"$MCP_URL/readyz"');
     expect(workflow).toContain('"$WEBHOOK_URL/readyz"');
     expect(workflow).toContain('[[ "$PROBE_STARTUP_PATH" == /readyz ]]');
