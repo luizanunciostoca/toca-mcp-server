@@ -16,7 +16,8 @@ The repository is beyond bootstrap. The production foundation currently includes
 - an autonomous singleton Cloud Run daemon that claims due jobs from PostgreSQL;
 - idempotent Instagram publication with provider-backed reconciliation before retry;
 - private GCS asset delivery through short-lived signed URLs;
-- audit, dead-letter and fail-closed execution controls.
+- audit, dead-letter and fail-closed execution controls;
+- a single Autonomy Gate, Autopilot Readiness Gate, scoped kill switches, shadow/canary governance and provider-backed capability evidence gating.
 
 `TOCA_OS / Google Drive` remains the business source of truth. GitHub is the source of truth for code, schemas, tests and infrastructure. External providers remain authoritative for external side effects.
 
@@ -53,5 +54,6 @@ pnpm build
 ```
 
 See `docs/architecture/README.md`, `docs/architecture/routes-capabilities-v1.md`,
-`docs/architecture/toca-managed-instagram-scheduler-v1.md` and
-`docs/operations/infrastructure-control-plane.md` for the current contracts.
+`docs/architecture/toca-managed-instagram-scheduler-v1.md`,
+`docs/operations/infrastructure-control-plane.md` and
+`docs/operations/autonomy-readiness-closeout-2026-08-26.md` for the current contracts and release evidence.

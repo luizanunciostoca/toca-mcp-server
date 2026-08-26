@@ -5,6 +5,7 @@ import {
   VIDEO_CONTENT_TECHNICAL_EXTENSION_CAPABILITY_SET,
 } from '../content/capability-ids.js';
 import { createToolRegistry } from '../registry.js';
+import { loadCapabilityValidationEvidenceManifest } from './capability-validation-evidence.js';
 import {
   CAPABILITY_CONTRACT_OVERRIDES,
   permissionRequirementsForCapability,
@@ -118,9 +119,14 @@ const implementedInternal = new Set([
   'evidence.validate',
 ]);
 
+const capabilityValidationEvidenceManifest = loadCapabilityValidationEvidenceManifest();
+
 const runtimeDefinitions = new Map<string, ToolDefinition>(
   createToolRegistry({
     instagramReadsEnabled: true,
+    instagramPublicationWritesEnabled: true,
+    instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
+    exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha,
     metaAdsReadsEnabled: true,
     metaAdsWritesEnabled: true,
     paidMediaDecisionEnabled: true,

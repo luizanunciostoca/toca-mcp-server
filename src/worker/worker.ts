@@ -5,6 +5,7 @@ import {
   type Scheduler,
 } from '../scheduler/scheduler-contracts.js';
 import type { Telemetry } from '../core/observability.js';
+import type { SchedulerWatchdog } from '../scheduler/scheduler-watchdog.js';
 
 export interface JobHandler {
   execute(payload: unknown, job: ScheduledJob): Promise<void>;
@@ -51,6 +52,7 @@ export interface WorkerOptions {
   readonly claimToolName?: string;
   readonly now?: () => Date;
   readonly createId?: () => string;
+  readonly watchdog?: SchedulerWatchdog;
 }
 
 function normalizeError(error: unknown): string {
@@ -85,11 +87,13 @@ export class SchedulerWorker {
 
   async runOnce(): Promise<number> {
     const startedAt = this.#now();
+    this.options.watchdog?.recordPoll(startedAt.toISOString());
     const jobs = await this.options.scheduler.claimDue(
       startedAt.toISOString(),
       this.#batchSize,
       this.options.claimToolName,
     );
+    this.options.watchdog?.recordClaim(this.#now().toISOString());
     this.options.telemetry.record('worker.claimed_jobs', jobs.length);
     const recovered = jobs.filter((job) =>
       job.lastError?.startsWith(SCHEDULER_STALE_RECOVERY_MARKER),
@@ -114,7 +118,7 @@ export class SchedulerWorker {
       return;
     }
 
-    const started = Date.now();
+    const started = this.#now().getTime();
     this.options.logger.info('worker.job.started', {
       jobId: job.id,
       toolName: job.toolName,
@@ -125,12 +129,16 @@ export class SchedulerWorker {
       await handler.execute(job.payload, job);
       await this.options.scheduler.markSucceeded(job.id);
       this.options.telemetry.increment('worker.job.succeeded', { toolName: job.toolName });
-      this.options.telemetry.record('worker.job.duration_ms', Date.now() - started, {
+      const latencyMs = Math.max(0, this.#now().getTime() - started);
+      this.options.telemetry.record('worker.job.duration_ms', latencyMs, {
         toolName: job.toolName,
         outcome: 'success',
       });
+      this.options.watchdog?.recordExecution('SUCCEEDED', latencyMs, this.#now().toISOString());
       this.options.logger.info('worker.job.succeeded', { jobId: job.id, toolName: job.toolName });
     } catch (error) {
+      const latencyMs = Math.max(0, this.#now().getTime() - started);
+      this.options.watchdog?.recordExecution('FAILED', latencyMs, this.#now().toISOString());
       await this.failOrDeadLetter(job, attempt, normalizeError(error));
     }
   }
@@ -157,6 +165,11 @@ export class SchedulerWorker {
         await this.options.deadLetters.put(record);
       }
       this.options.telemetry.increment('worker.job.dead_lettered', { toolName: job.toolName });
+      if (this.options.watchdog) {
+        this.options.watchdog.setDeadLetterBacklog(
+          this.options.watchdog.state().deadLetterBacklog + 1,
+        );
+      }
     } else {
       const delay = retryDelayMs(attempt, this.options.retry);
       const retryAt = new Date(this.#now().getTime() + delay).toISOString();

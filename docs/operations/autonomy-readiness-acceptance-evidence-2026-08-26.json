@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0.0",
+  "evidenceId": "TOCA_AUTONOMY_READINESS_ACCEPTANCE_2026_08_26",
+  "generatedAt": "2026-08-26T23:04:00-03:00",
+  "baselineSha": "904210f2ed000ac1f99783d5f210e58da938e775",
+  "branch": "feat/autonomy-readiness-hardening",
+  "runtime": {
+    "node": "24",
+    "packageManager": "pnpm 10.15.0"
+  },
+  "qualityGate": {
+    "status": "PASS",
+    "format": "PASS",
+    "architecture": "PASS",
+    "infrastructureControlPlane": "PASS",
+    "effectiveAutonomyPolicy": "PASS",
+    "capabilityValidationEvidence": "PASS_WITH_ZERO_PROVIDER_VALIDATIONS",
+    "mainBranchProtectionDesiredState": "PASS_OFFLINE",
+    "lint": "PASS",
+    "typecheck": "PASS",
+    "testFilesPassed": 204,
+    "testFilesSkippedExternal": 17,
+    "testsPassed": 999,
+    "testsSkippedExternal": 25,
+    "build": "PASS"
+  },
+  "providerValidation": {
+    "validatedCapabilities": [],
+    "externalWritesAuthorized": false,
+    "preapprovedClassesAuthorized": false
+  },
+  "externalReleaseGates": {
+    "githubPush": "BLOCKED_GITHUB_INTEGRATION_UNAVAILABLE",
+    "pullRequest": "BLOCKED_GITHUB_INTEGRATION_UNAVAILABLE",
+    "branchProtectionApplyReadback": "BLOCKED_GITHUB_ADMIN_AUTH_UNAVAILABLE",
+    "gcpDeploy": "BLOCKED_GCP_SESSION_UNAVAILABLE",
+    "providerBackedAcceptance": "BLOCKED_PROVIDER_CREDENTIALS_AND_INFRASTRUCTURE_UNAVAILABLE",
+    "driveWriteback": "BLOCKED_GOOGLE_WORKSPACE_TASK_BINDING_UNAVAILABLE"
+  },
+  "safeDecision": "READY_FOR_AUTHENTICATED_PR_AND_CANDIDATE_VALIDATION_NOT_PRODUCTION_PROMOTION"
+}

@@ -36,7 +36,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-photo-to-video-contract.mjs",
+    "architecture:check": "node scripts/architecture-check.mjs && node scripts/infrastructure-control-plane-check.mjs && node scripts/check-creative-truth-contract.mjs && node scripts/check-photo-to-video-contract.mjs && node scripts/check-effective-autonomy-policy.mjs && node scripts/check-capability-validation-evidence.mjs && node scripts/check-main-branch-protection-policy.mjs",
     "quality": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

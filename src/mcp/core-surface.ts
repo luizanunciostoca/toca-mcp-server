@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import type { AuditSink } from '../core/audit.js';
 import type { AuditLedgerRecord, AuditLedgerVerification } from '../core/audit-ledger.js';
+import type { AutonomyRuntimeContextResolver } from '../core/autonomy-runtime-context.js';
 import type { ExecutionIdentity, ExecutionIdentityResolver } from '../core/identity.js';
 import { requiresFormalApproval } from '../core/policy.js';
 import type { ToolRegistry } from '../core/tool-registry.js';
@@ -54,6 +55,7 @@ export interface TocaCoreSurfaceDependencies {
   readonly approvalStore?: ApprovalStore;
   readonly auditStore?: CoreAuditQuerySink;
   readonly eventStore?: EventRecordStore;
+  readonly autonomyContextResolver?: AutonomyRuntimeContextResolver;
 }
 
 const readAnnotations = {
@@ -591,6 +593,9 @@ export function registerTocaCoreSurface(
           runtimeResolver: dependencies.runtimeResolver,
           auditSink: auditStore,
           ...(approvalStore ? { approvalStore } : {}),
+          ...(dependencies.autonomyContextResolver
+            ? { autonomyContextResolver: dependencies.autonomyContextResolver }
+            : {}),
         }),
       );
     },

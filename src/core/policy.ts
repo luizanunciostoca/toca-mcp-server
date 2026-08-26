@@ -1,29 +1,16 @@
-import type { RiskClass, ToolDefinition } from './tool-registry.js';
-import { authorizeExecution, type ExecutionIdentity } from './identity.js';
-import {
-  verifyApproval,
-  type ApprovalExpectation,
-  type ApprovalRecord,
-} from '../governance/approval-governance.js';
+import type { ApprovalExpectation, ApprovalRecord } from '../governance/approval-governance.js';
 import { getCapabilityDefinition } from '../governance/capability-catalog.js';
+import {
+  evaluateAutonomyGate,
+  requiresFormalApproval,
+  type AutonomyGateContext,
+} from './autonomy-gate.js';
+import type { ToolDefinition } from './tool-registry.js';
 
 export type PolicyDecision = 'ALLOW' | 'REQUIRE_APPROVAL' | 'DENY';
 
-export interface PolicyContext {
-  readonly identity?: ExecutionIdentity | undefined;
-  /** @deprecated Use identity.principal.principalId. Kept only for non-mutating compatibility paths. */
-  readonly requester?: string;
-  readonly connectedAccount?: string;
+export interface PolicyContext extends AutonomyGateContext {
   readonly approval?: ApprovalRecord;
-  readonly descriptorSha256?: string;
-  readonly requiredApprovalScope?: readonly string[];
-  readonly financialAmountMinor?: number;
-  readonly currency?: string;
-  readonly now?: string;
-  /** Optional deterministic override for tests/control-plane composition. Runtime defaults to env. */
-  readonly platformKillSwitch?: boolean;
-  /** @deprecated A boolean never authorizes a side effect. Supply a verified ApprovalRecord. */
-  readonly approved?: boolean;
 }
 
 export interface PolicyResult {
@@ -31,15 +18,7 @@ export interface PolicyResult {
   readonly reason: string;
 }
 
-const approvalRiskClasses: ReadonlySet<RiskClass> = new Set([
-  'WRITE_EXTERNAL',
-  'FINANCIAL_IMPACT',
-  'DESTRUCTIVE',
-]);
-
-export function requiresFormalApproval(tool: ToolDefinition): boolean {
-  return approvalRiskClasses.has(tool.riskClass);
-}
+export { requiresFormalApproval };
 
 export function approvalExpectationFromPolicy(
   tool: ToolDefinition,
@@ -72,75 +51,17 @@ export function approvalExpectationFromPolicy(
 }
 
 export function evaluatePolicy(tool: ToolDefinition, context: PolicyContext): PolicyResult {
-  if (tool.sideEffects && platformMutationKillSwitchActive(context)) {
+  const result = evaluateAutonomyGate(tool, context, {
+    enforceOperationalReadiness: false,
+  });
+  if (result.reasonCode === 'KILL_SWITCH_GLOBAL') {
     return {
-      decision: 'DENY',
+      decision: result.decision,
       reason: 'Platform mutation kill switch is active.',
     };
   }
-
-  if (
-    tool.capabilityStatus === 'SUSPENDED' ||
-    tool.capabilityStatus === 'REMOVED' ||
-    tool.capabilityStatus === 'DISABLED' ||
-    tool.capabilityStatus === 'RETIRED' ||
-    tool.capabilityStatus === 'BLOCKED'
-  ) {
-    return {
-      decision: 'DENY',
-      reason: `Capability is ${tool.capabilityStatus}.`,
-    };
+  if (result.decision === 'ALLOW') {
+    return { decision: 'ALLOW', reason: 'Policy requirements satisfied.' };
   }
-
-  if (tool.capabilityStatus !== 'PRODUCTION_VALIDATED' && tool.sideEffects) {
-    return {
-      decision: 'DENY',
-      reason: 'Write capability is not production validated.',
-    };
-  }
-
-  const capability = getCapabilityDefinition(tool.name);
-  if (tool.sideEffects) {
-    const routeId = capability?.primary_route_id ?? capability?.route_id;
-    const authorization = authorizeExecution(context.identity, {
-      capabilityId: tool.name,
-      riskClass: tool.riskClass,
-      ...(routeId && routeId !== 'TRANSVERSAL' ? { routeId } : {}),
-      ...(context.connectedAccount ? { targetAccount: context.connectedAccount } : {}),
-      ...(context.now ? { now: context.now } : {}),
-    });
-    if (!authorization.allowed) {
-      return {
-        decision: 'DENY',
-        reason: authorization.reason,
-      };
-    }
-  }
-
-  if (requiresFormalApproval(tool)) {
-    const expectation = approvalExpectationFromPolicy(tool, context);
-    if (!context.approval || !expectation) {
-      return {
-        decision: 'REQUIRE_APPROVAL',
-        reason: `Risk class ${tool.riskClass} requires a formal ApprovalRecord bound to the authenticated principal.`,
-      };
-    }
-
-    const verification = verifyApproval(context.approval, expectation, context.now);
-    if (!verification.valid) {
-      return {
-        decision: 'REQUIRE_APPROVAL',
-        reason: `ApprovalRecord failed validation: ${verification.reasons.join(',')}.`,
-      };
-    }
-  }
-
-  return { decision: 'ALLOW', reason: 'Policy requirements satisfied.' };
-}
-
-function platformMutationKillSwitchActive(context: PolicyContext): boolean {
-  if (context.platformKillSwitch !== undefined) return context.platformKillSwitch;
-  const configured = process.env.TOCA_PLATFORM_KILL_SWITCH?.trim();
-  if (!configured || configured === 'false') return false;
-  return true;
+  return { decision: result.decision, reason: result.reason };
 }

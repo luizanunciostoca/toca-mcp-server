@@ -1,61 +1,60 @@
 # Repository Governance — Foundation V1
 
-Status: **REPOSITORY CONTROLS PREPARED / HOST ENFORCEMENT UNVERIFIED / CI_VERIFIED PENDING**
+Status: **LOCAL CONTROLS VERIFIED / HOST ENFORCEMENT UNVERIFIED / REMOTE CI PENDING**
 
-Repository: `luizidebook/toca-mcp-server`
+Repository: `luizanunciostoca/toca-mcp-server`
 
-Canonical audit baseline: `main@868c64ac0dcfa4c2b28994198b1a8c9af87f7a7c` on 2026-08-17.
+Autonomy/readiness audit baseline: `main@904210f2ed000ac1f99783d5f210e58da938e775` on 2026-08-26.
 
 ## Current observed state
 
-- At the audit-start authoritative recheck, the only open PR was #185 (`fix/v1-instagram-direct-publication`).
-- During this closeout, concurrent work opened PR #188 (`chore/local-reproducible-quality-ci`) and PR #189 (`docs/r29-outbox-slo-closeout-20260817`). The final recheck therefore found **three** open PRs: #185, #188 and #189.
-- PR #185 is Instagram feature work, #188 is the dedicated CI/Quality-local path, and #189 is the R29/outbox/SLO closeout. None is reimplemented by this governance closeout.
-- `.github/CODEOWNERS` exists and assigns the repository and governance-sensitive paths to `@luizidebook`.
+- `.github/CODEOWNERS` assigns the repository and governance-sensitive paths to `@luizanunciostoca`.
 - The canonical Quality workflow remains `.github/workflows/quality.yml` (`Quality Gate`).
-- GitHub Actions is currently unavailable for the closeout round. No current-head `CI_VERIFIED` claim is made.
-- The GitHub rulesets endpoint returned `403` with the plan-level message requiring GitHub Pro or public visibility; therefore this closeout cannot truthfully claim that a hosted ruleset is active or read back.
-- The branch-protection endpoint returned `403 Resource not accessible by integration`; therefore branch-protection enforcement is also not independently verified by this audit.
-- Historical hosted-control evidence remains historical evidence only. It must not be restated as current host enforcement without a fresh readback.
+- Security Supply Chain remains mandatory for dependency, secret, filesystem, container, SBOM and CodeQL evidence.
+- `.github/workflows/autonomy-safety.yml` adds an exact-candidate gate for policy, readiness, scheduler, approval, rollout, fault injection and provider-backed lifecycle contracts.
+- `control/github-main-branch-protection.v1.json` is the canonical desired state; its offline validator passes with five required contexts.
+- Hosted enforcement is not claimed because this task has no authenticated GitHub integration or administrative branch-protection readback.
+- Historical hosted-control evidence remains historical evidence only and must not be restated as current enforcement without a fresh readback.
 
 ## ACL baseline
 
-Until a second trusted maintainer exists:
+The target ACL and review baseline is:
 
-- retain only the repository owner as `admin`;
-- do not add broad organization/team write access;
+- retain only explicitly trusted administrators and do not add broad organization/team write access;
 - provider/service credentials belong in GitHub/GCP managed secret stores, never repository files containing raw secrets;
-- production deploy identities remain separate from developer identities and scoped to the minimum provider/project resources;
+- production deploy identities remain separate from developer identities and scoped to minimum resources;
 - CODEOWNERS identifies governance-sensitive paths;
-- a required human approval count of zero is acceptable only for the solo-maintainer state and is not a substitute for CI or exact-head validation.
+- every merge to `main` requires at least one approving review, required CODEOWNERS review, stale-review dismissal and approval of the last push;
+- lack of a second maintainer is an operational staffing blocker, not permission to reduce the desired protection policy.
 
-When a second trusted maintainer is added, require at least one approving review and required CODEOWNERS review for protected paths, with stale approvals dismissed after new commits.
+## Target hosted `main` protection / ruleset
 
-## Target hosted `main` protection / ruleset for final reactivation
+The canonical desired state is versioned in `control/github-main-branch-protection.v1.json` and requires:
 
-When the hosted control can be configured and read back again, the V1 target is:
+1. pull request before merge and a branch updated with current `main`;
+2. `Quality Gate / quality`;
+3. `Security Supply Chain / dependency-review`;
+4. `Security Supply Chain / vulnerability-secret-container-sbom`;
+5. `Security Supply Chain / codeql`;
+6. `Autonomy Safety / autonomy-safety`;
+7. one approving review, CODEOWNERS review, stale-review dismissal and last-push approval;
+8. conversation resolution and linear history;
+9. no force-push, branch deletion or normal-development bypass;
+10. merge only from the exact head SHA that passed all required checks.
 
-1. pull request required before merge;
-2. exact required status check from the canonical `Quality Gate` (`quality` job/check name as exposed by GitHub);
-3. required check evaluated against the current `main` / branch must be up to date;
-4. conversation resolution required before merge;
-5. no force/non-fast-forward updates;
-6. no branch deletion;
-7. no normal-development bypass actor;
-8. merge only from the exact head SHA that passed the required checks;
-9. with two or more trusted maintainers: at least one approval, CODEOWNERS review and stale-approval dismissal.
-
-These are **target controls**, not a statement that the host currently enforces them. Final governance closure requires a fresh hosted readback once the account/plan/integration permits it.
+These remain **target hosted controls**, not a statement that GitHub currently enforces them. Closure requires `node scripts/apply-main-branch-protection.mjs --apply` with administrator credentials followed by `BRANCH_PROTECTION_READBACK=PASS`.
 
 ## CI truth
 
-Historical green runs remain evidence for the exact SHAs on which they ran. They do not certify a new governance/doc-only head.
+Historical green runs remain evidence only for their exact SHAs. The autonomy/readiness branch passed the full local `pnpm quality` gate with 999 tests, but local success does not certify hosted controls or provider-backed production.
 
 Current closeout state:
 
-`CI_VERIFIED = PENDING_FINAL_ACTIONS_ROUND`
+`LOCAL_CI_VERIFIED = TRUE`
 
-When GitHub Actions becomes available, the final exact head must pass the repository-required gates before this flag can become true. GitHub Actions startup failure, missing jobs or absent check-runs are not accepted as successful CI.
+`REMOTE_CI_VERIFIED = PENDING_AUTHENTICATED_PR`
+
+When GitHub Actions becomes available, the final exact head must pass every required hosted check before remote CI can become true. Startup failure, missing jobs, skipped required jobs or absent check-runs are not success.
 
 ## Supply-chain baseline
 

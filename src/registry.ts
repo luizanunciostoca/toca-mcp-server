@@ -1,6 +1,10 @@
 import { VIDEO_CONTENT_CAPABILITY_CONTRACT_OVERRIDES } from './content/capability-contracts.js';
 import { ToolRegistry, type ToolDefinition } from './core/tool-registry.js';
 import { CRM_SALES_RUNTIME_TOOL_DEFINITIONS } from './crm/runtime.js';
+import {
+  indexProviderCapabilityEvidence,
+  type ProviderCapabilityValidationEvidence,
+} from './governance/capability-validation-evidence.js';
 import { OMNICHANNEL_READBACK_RUNTIME_TOOL_DEFINITIONS } from './omnichannel/runtime-tool-definitions.js';
 import {
   googleAdsPhaseAtLeast,
@@ -451,16 +455,23 @@ const directInstagramPublicationToolNames = new Set([
 ]);
 
 function publicationTools(options: ToolRegistryOptions): readonly ToolDefinition[] {
-  const promoteDirectPublication =
-    options.instagramPublicationWritesEnabled === true ||
-    (options.instagramPublicationWritesEnabled === undefined &&
-      options.tocaManagedInstagramSchedulerEnabled === true);
-  if (!promoteDirectPublication) return plannedInstagramPublicationTools;
-  return plannedInstagramPublicationTools.map((tool) =>
-    directInstagramPublicationToolNames.has(tool.name)
-      ? { ...tool, capabilityStatus: 'PRODUCTION_VALIDATED' as const }
-      : tool,
+  if (options.instagramPublicationWritesEnabled !== true) return plannedInstagramPublicationTools;
+  const evidenceByCapability = indexProviderCapabilityEvidence(
+    options.instagramPublicationValidationEvidence ?? [],
+    {
+      ...(options.exactHeadSha ? { exactHeadSha: options.exactHeadSha } : {}),
+      ...(options.validationNow ? { now: options.validationNow } : {}),
+    },
   );
+  return plannedInstagramPublicationTools.map((tool) => {
+    if (!directInstagramPublicationToolNames.has(tool.name)) return tool;
+    const evidence = evidenceByCapability.get(tool.name);
+    if (!evidence) return tool;
+    if (evidence.provider !== tool.provider) {
+      throw new Error(`CAPABILITY_EVIDENCE_PROVIDER_MISMATCH:${tool.name}`);
+    }
+    return { ...tool, capabilityStatus: 'PRODUCTION_VALIDATED' as const };
+  });
 }
 
 const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
@@ -479,6 +490,9 @@ const videoContentRuntimeTools: readonly ToolDefinition[] = Object.entries(
 export interface ToolRegistryOptions {
   readonly instagramReadsEnabled?: boolean;
   readonly instagramPublicationWritesEnabled?: boolean;
+  readonly instagramPublicationValidationEvidence?: readonly ProviderCapabilityValidationEvidence[];
+  readonly exactHeadSha?: string;
+  readonly validationNow?: string;
   readonly metaAdsReadsEnabled?: boolean;
   readonly metaAdsWritesEnabled?: boolean;
   readonly paidMediaDecisionEnabled?: boolean;

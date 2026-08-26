@@ -18,6 +18,7 @@ type Row = {
   idempotency_key: string;
   status: ScheduledJob['status'];
   attempts: number;
+  updated_at: Date;
   last_error: string | null;
 };
 
@@ -37,6 +38,7 @@ function mapRow<TPayload = unknown>(row: Row, expectedTenantId: string): Schedul
     idempotencyKey: row.idempotency_key,
     status: row.status,
     attempts: row.attempts,
+    updatedAt: row.updated_at.toISOString(),
     ...(row.last_error ? { lastError: row.last_error } : {}),
   };
 }
