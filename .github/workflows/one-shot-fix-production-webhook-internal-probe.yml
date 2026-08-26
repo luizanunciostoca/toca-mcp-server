@@ -20,23 +20,36 @@ jobs:
           ref: fix/production-webhook-internal-probe-20260826
           fetch-depth: 1
 
+      - name: Detect staged payload
+        id: state
+        run: |
+          if [[ -f tmp/deploy-gcp.patched.yml ]]; then
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'already=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup pnpm
+        if: steps.state.outputs.already != 'true'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.15.0
 
       - name: Setup Node
+        if: steps.state.outputs.already != 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
 
       - name: Apply remediation
+        if: steps.state.outputs.already != 'true'
         run: |
           python scripts/one-shot-fix-production-webhook-internal-probe.py
           python scripts/one-shot-update-webhook-probe-tests.py
 
       - name: Validate affected contracts
+        if: steps.state.outputs.already != 'true'
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
@@ -44,15 +57,16 @@ jobs:
           git diff --check
           pnpm exec vitest run test/gcp-production-webhook-internal-probe-contract.test.ts test/gcp-deploy-cloud-run-probes.test.ts test/gcp-production-internal-probe-contract.test.ts test/gcp-production-probe-rollback-contract.test.ts
 
-      - name: Commit clean remediation
+      - name: Stage validated payload without workflow mutation
+        if: steps.state.outputs.already != 'true'
         run: |
           set -euo pipefail
-          rm .github/workflows/one-shot-fix-production-webhook-internal-probe.yml
-          rm scripts/one-shot-fix-production-webhook-internal-probe.py
-          rm scripts/one-shot-update-webhook-probe-tests.py
+          mkdir -p tmp
+          cp .github/workflows/deploy-gcp.yml tmp/deploy-gcp.patched.yml
+          git checkout -- .github/workflows/deploy-gcp.yml
           git diff --check
           git config user.name "TOCA OS Automation"
           git config user.email "actions@github.com"
-          git add -A
-          git commit -m "fix(deploy): probe production webhook from GCP"
+          git add tmp/deploy-gcp.patched.yml test/gcp-production-webhook-internal-probe-contract.test.ts test/gcp-deploy-cloud-run-probes.test.ts test/gcp-production-internal-probe-contract.test.ts test/gcp-production-probe-rollback-contract.test.ts
+          git commit -m "chore(ops): stage validated webhook probe payload"
           git push origin HEAD:fix/production-webhook-internal-probe-20260826
