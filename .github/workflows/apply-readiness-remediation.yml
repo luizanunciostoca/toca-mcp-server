@@ -27,54 +27,36 @@ jobs:
 
           path = Path('.github/workflows/deploy-gcp.yml')
           text = path.read_text()
-          old = '''            gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \\
-              --revision-suffix "probe-${GITHUB_SHA::8}" \\
-              --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \\
-              --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \\
-              --update-secrets "$MCP_RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \\
-              --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=12,timeoutSeconds=5,periodSeconds=5' \\
-              --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \\
-              --min-instances 0 --max-instances 1 \\
-              --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \\
-              --ingress internal --no-default-url --no-allow-unauthenticated --quiet
+          start_marker = '            gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE"'
+          end_marker = '            gcloud run revisions describe "$MCP_REVISION"'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          block = text[start:end]
 
-            gcloud run services describe "$PROBE_SERVICE" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \\
-              > /tmp/mcp-acceptance-service.json
-            PROBE_REVISION="$(jq -r '.status.latestReadyRevisionName // empty' /tmp/mcp-acceptance-service.json)"
-            PROBE_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-acceptance-service.json)"
-            PROBE_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-acceptance-service.json)"
-            test -n "$PROBE_REVISION" || { echo 'Ephemeral MCP acceptance service has no Ready revision' >&2; exit 1; }
-            [[ "$PROBE_INGRESS" == internal ]] || { echo "Ephemeral MCP acceptance ingress is not internal: $PROBE_INGRESS" >&2; exit 1; }
-            [[ "$PROBE_DEFAULT_URL_DISABLED" == true ]] || { echo 'Ephemeral MCP acceptance default URL must remain disabled' >&2; exit 1; }
-'''
-          new = '''            # Keep /readyz as the actual Cloud Run startup gate, but let the workflow own
-            # the bounded wait so a failed revision can emit sanitized readiness diagnostics.
-            # One temporary min instance starts the zero-exposure sibling without invoking it.
-            gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \\
-              --revision-suffix "probe-${GITHUB_SHA::8}" \\
-              --service-account "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" \\
-              --add-cloudsql-instances "${GCP_PROJECT_ID}:${GCP_REGION}:${GCP_CLOUD_SQL_INSTANCE}" \\
-              --update-secrets "$MCP_RUNTIME_SECRETS" --update-env-vars "$MCP_RUNTIME_ENV" \\
-              --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=12,timeoutSeconds=5,periodSeconds=5' \\
-              --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10' \\
-              --min-instances 1 --max-instances 1 \\
-              --cpu-throttling --memory "${{ vars.GCP_MCP_MEMORY || '512Mi' }}" --cpu "${{ vars.GCP_MCP_CPU || '1' }}" \\
-              --ingress internal --no-default-url --no-allow-unauthenticated \\
-              --no-deploy-health-check --quiet
+          required = [
+              '--min-instances 0 --max-instances 1',
+              '--ingress internal --no-default-url --no-allow-unauthenticated --quiet',
+              '.status.latestReadyRevisionName // empty',
+              "test -n \"$PROBE_REVISION\" || { echo 'Ephemeral MCP acceptance service has no Ready revision' >&2; exit 1; }",
+          ]
+          for token in required:
+              if block.count(token) != 1:
+                  raise SystemExit(f'acceptance patch token count mismatch: {token!r} -> {block.count(token)}')
 
-            gcloud run services describe "$PROBE_SERVICE" \\
-              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \\
-              > /tmp/mcp-acceptance-service.json
-            PROBE_REVISION="$(jq -r '.status.latestCreatedRevisionName // empty' /tmp/mcp-acceptance-service.json)"
-            PROBE_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' /tmp/mcp-acceptance-service.json)"
-            PROBE_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' /tmp/mcp-acceptance-service.json)"
-            test -n "$PROBE_REVISION" || { echo 'Ephemeral MCP acceptance service has no created revision' >&2; exit 1; }
-            [[ "$PROBE_INGRESS" == internal ]] || { echo "Ephemeral MCP acceptance ingress is not internal: $PROBE_INGRESS" >&2; exit 1; }
-            [[ "$PROBE_DEFAULT_URL_DISABLED" == true ]] || { echo 'Ephemeral MCP acceptance default URL must remain disabled' >&2; exit 1; }
+          block = block.replace('--min-instances 0 --max-instances 1', '--min-instances 1 --max-instances 1')
+          block = block.replace(
+              '--ingress internal --no-default-url --no-allow-unauthenticated --quiet',
+              '--ingress internal --no-default-url --no-allow-unauthenticated \\\n              --no-deploy-health-check --quiet',
+          )
+          block = block.replace('.status.latestReadyRevisionName // empty', '.status.latestCreatedRevisionName // empty')
+          block = block.replace(
+              "test -n \"$PROBE_REVISION\" || { echo 'Ephemeral MCP acceptance service has no Ready revision' >&2; exit 1; }",
+              "test -n \"$PROBE_REVISION\" || { echo 'Ephemeral MCP acceptance service has no created revision' >&2; exit 1; }",
+          )
 
+          wait = '''
+            # Cloud Run still owns the /readyz startup gate. The workflow owns only the bounded
+            # wait so a rejected revision can emit sanitized failed-check diagnostics before cleanup.
             PROBE_READY=Unknown
             PROBE_READY_REASON=Pending
             for _ in $(seq 1 18); do
@@ -104,29 +86,29 @@ jobs:
                 '{schemaVersion:"toca.platform.mcp-internal-probe-failure.v1",probeService:$probeService,probeRevision:$probeRevision,readyStatus:$readyStatus,readyReason:$readyReason,readinessDiagnostics:($readinessDiagnostics|split("\\n")|map(select(length>0))),secretPayloadDisclosed:false,providerCallExecuted:false,result:"FAIL"}' \\
                 > platform-evidence/mcp-internal-probe-failure.json
               printf 'Ephemeral MCP acceptance failed Ready gate: status=%s reason=%s\\n' "$PROBE_READY" "$PROBE_READY_REASON" >&2
-              if [[ -n "$READINESS_DIAGNOSTICS" ]]; then
-                printf '%s\\n' "$READINESS_DIAGNOSTICS" >&2
-              fi
+              [[ -z "$READINESS_DIAGNOSTICS" ]] || printf '%s\\n' "$READINESS_DIAGNOSTICS" >&2
               cleanup_internal_mcp_probe
               trap - EXIT
               exit 1
             fi
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exactly one acceptance block, found {text.count(old)}')
-          text = text.replace(old, new)
 
-          old_evidence = '''{schemaVersion:"toca.platform.mcp-internal-probe.v3",mechanism:"cloud-run-native-startup-readiness",ingress:$ingress,productionCandidateRevision:$productionCandidateRevision,probeService:$probeService,probeRevision:$probeRevision,oidcServiceAccount:$identity,runtimeImage:$runtimeImage,startupProbePath:$startupPath,livenessProbePath:$livenessPath,acceptanceRevisionReady:true,acceptanceDefaultUrlDisabled:true,exactReleaseShaMatched:true,sameRuntimeImageAsProductionCandidate:true,externalGitHubRunnerProbe:false,schedulerProbe:false,productionTrafficMutation:false,providerCallExecuted:false,result:"PASS"}'''
-          new_evidence = '''{schemaVersion:"toca.platform.mcp-internal-probe.v4",mechanism:"cloud-run-native-startup-readiness-controlled-wait",ingress:$ingress,productionCandidateRevision:$productionCandidateRevision,probeService:$probeService,probeRevision:$probeRevision,oidcServiceAccount:$identity,runtimeImage:$runtimeImage,startupProbePath:$startupPath,livenessProbePath:$livenessPath,acceptanceRevisionReady:true,acceptanceDefaultUrlDisabled:true,deployHealthCheckWaitDisabled:true,temporaryMinInstance:1,exactReleaseShaMatched:true,sameRuntimeImageAsProductionCandidate:true,externalGitHubRunnerProbe:false,schedulerProbe:false,productionTrafficMutation:false,providerCallExecuted:false,result:"PASS"}'''
-          if text.count(old_evidence) != 1:
-              raise SystemExit(f'expected exactly one v3 evidence object, found {text.count(old_evidence)}')
-          text = text.replace(old_evidence, new_evidence)
+'''
+          block += wait
+          text = text[:start] + block + text[end:]
+
+          if text.count('toca.platform.mcp-internal-probe.v3') != 1:
+              raise SystemExit('expected exactly one v3 success evidence object')
+          text = text.replace('toca.platform.mcp-internal-probe.v3', 'toca.platform.mcp-internal-probe.v4')
+          text = text.replace('mechanism:"cloud-run-native-startup-readiness"', 'mechanism:"cloud-run-native-startup-readiness-controlled-wait"')
+          text = text.replace(
+              'acceptanceDefaultUrlDisabled:true,exactReleaseShaMatched:true',
+              'acceptanceDefaultUrlDisabled:true,deployHealthCheckWaitDisabled:true,temporaryMinInstance:1,exactReleaseShaMatched:true',
+          )
           path.write_text(text)
           PY
 
           rm .github/workflows/apply-readiness-remediation.yml
           git diff --check
-          git diff -- .github/workflows/deploy-gcp.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .github/workflows/deploy-gcp.yml .github/workflows/apply-readiness-remediation.yml
