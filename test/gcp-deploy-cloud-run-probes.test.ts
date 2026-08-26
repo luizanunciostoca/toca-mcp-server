@@ -19,7 +19,8 @@ describe('GCP deploy Cloud Run probe contract', () => {
   });
 
   it('keeps readiness fail-closed for staging, webhook, and production acceptance', () => {
-    expect(workflow).toContain('Verify health readiness and webhook route confinement');
+    expect(workflow).toContain('Verify MCP health readiness and internal acceptance');
+    expect(workflow).toContain('Verify production webhook health readiness and route confinement');
     expect(workflow).toContain('$MCP_URL/readyz');
     expect(workflow).toContain('$WEBHOOK_URL/readyz');
     expect(workflow).toContain('PROBE_STARTUP_PATH=');

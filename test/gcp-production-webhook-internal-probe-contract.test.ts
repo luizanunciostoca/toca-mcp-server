@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 const workflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
 
 function verifySection(): string {
-  const start = workflow.indexOf('- name: Verify health readiness and webhook route confinement');
+  const start = workflow.indexOf(
+    '- name: Verify production webhook health readiness and route confinement',
+  );
   const end = workflow.indexOf(
     '- name: Restore production MCP default endpoint posture after private probes',
   );

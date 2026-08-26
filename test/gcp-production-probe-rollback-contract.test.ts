@@ -138,7 +138,7 @@ describe('GCP production startup and rollback safety contract', () => {
     expect(restore).toContain('MCP_DEFAULT_URL_POSTURE_RESTORED=PASS');
 
     const verificationIndex = workflow.indexOf(
-      '- name: Verify health readiness and webhook route confinement',
+      '- name: Verify MCP health readiness and internal acceptance',
     );
     const restoreIndex = workflow.indexOf(
       '- name: Restore production MCP default endpoint posture after private probes',

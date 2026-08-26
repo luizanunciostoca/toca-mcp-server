@@ -15,8 +15,8 @@ function section(start: string, end?: string): string {
 describe('GCP production internal MCP probe contract', () => {
   function productionVerify(): string {
     const verify = section(
-      '- name: Verify health readiness and webhook route confinement',
-      '- name: Restore production MCP default endpoint posture after private probes',
+      '- name: Verify MCP health readiness and internal acceptance',
+      '- name: Verify production webhook health readiness and route confinement',
     );
     const start = verify.indexOf('if [[ "$DEPLOY_ENVIRONMENT" == production ]]');
     const end = verify.indexOf('\n          else\n', start);
@@ -120,8 +120,8 @@ describe('GCP production internal MCP probe contract', () => {
 
   it('cleans only the ephemeral acceptance service before promotion', () => {
     const verify = section(
-      '- name: Verify health readiness and webhook route confinement',
-      '- name: Restore production MCP default endpoint posture after private probes',
+      '- name: Verify MCP health readiness and internal acceptance',
+      '- name: Verify production webhook health readiness and route confinement',
     );
 
     expect(verify).toContain('trap cleanup_internal_mcp_probe EXIT');
