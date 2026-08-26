@@ -25,23 +25,25 @@ describe('GCP production internal MCP probe contract', () => {
     return verify.slice(start, end);
   }
 
-  it('validates production MCP through an ephemeral canonical internal service', () => {
+  it('validates production MCP with Cloud Run native startup readiness', () => {
     const production = productionVerify();
 
     expect(production).toContain(
       'PROBE_SERVICE="toca-mcp-accept-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
     );
     expect(production).toContain('gcloud run deploy "$PROBE_SERVICE" --image "$IMAGE"');
-    expect(production).toContain('--ingress internal --default-url --no-allow-unauthenticated');
     expect(production).toContain(
-      'PROBE_URL="https://${PROBE_SERVICE}-${GCP_PROJECT_NUMBER}.${GCP_REGION}.run.app"',
+      "--startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=12,timeoutSeconds=5,periodSeconds=5'",
     );
-    expect(production).not.toContain('PROBE_URL="$(jq -r');
-    expect(production).toContain('create_scheduler_probe "$HEALTH_JOB" "${PROBE_URL}/healthz"');
-    expect(production).toContain('create_scheduler_probe "$READY_JOB" "${PROBE_URL}/readyz"');
-    expect(production).toContain('--oidc-token-audience="$PROBE_URL"');
-    expect(production).not.toContain('create_scheduler_probe "$HEALTH_JOB" "${MCP_URL}/healthz"');
-    expect(production).not.toContain('create_scheduler_probe "$READY_JOB" "${MCP_URL}/readyz"');
+    expect(production).toContain(
+      "--liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=10'",
+    );
+    expect(production).toContain('--ingress internal --no-default-url --no-allow-unauthenticated');
+    expect(production).not.toContain('gcloud scheduler');
+    expect(production).not.toContain('PROBE_URL=');
+    expect(production).not.toContain(
+      'gcloud run services add-iam-policy-binding "$PROBE_SERVICE"',
+    );
   });
 
   it('proves the ephemeral acceptance runtime represents the exact production candidate', () => {
@@ -61,20 +63,20 @@ describe('GCP production internal MCP probe contract', () => {
       '[[ "$CANDIDATE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" && "$PROBE_RUNTIME_SA" == "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" ]]',
     );
     expect(production).toContain('[[ "$CANDIDATE_READY" == True && "$PROBE_READY" == True ]]');
+    expect(production).toContain('[[ "$PROBE_STARTUP_PATH" == /readyz ]]');
+    expect(production).toContain('[[ "$PROBE_LIVENESS_PATH" == /healthz ]]');
   });
 
-  it('keeps both production and acceptance ingress private without allUsers exposure', () => {
+  it('keeps production and acceptance ingress private without public invoker exposure', () => {
     const production = productionVerify();
 
     expect(production).toContain('internal|internal-and-cloud-load-balancing');
     expect(production).toContain('Production MCP ingress is not private');
     expect(production).toContain('Production MCP must not expose roles/run.invoker to allUsers');
     expect(production).toContain('[[ "$PROBE_INGRESS" == internal ]]');
+    expect(production).toContain('[[ "$PROBE_DEFAULT_URL_DISABLED" == true ]]');
     expect(production).toContain(
       'Ephemeral MCP acceptance service must not expose roles/run.invoker to allUsers',
-    );
-    expect(production).toContain(
-      'PROBE_MEMBER="serviceAccount:${GCP_MCP_RUNTIME_SERVICE_ACCOUNT}"',
     );
     expect(production).not.toContain('--ingress all');
     expect(workflow).not.toContain(
@@ -82,32 +84,34 @@ describe('GCP production internal MCP probe contract', () => {
     );
   });
 
-  it('records exact canonical acceptance evidence without production traffic mutation', () => {
+  it('records exact native readiness evidence without production traffic mutation', () => {
     const production = productionVerify();
 
-    expect(production).toContain('toca.platform.mcp-internal-probe.v2');
-    expect(production).toContain('cloud-scheduler-ephemeral-canonical-service');
+    expect(production).toContain('toca.platform.mcp-internal-probe.v3');
+    expect(production).toContain('cloud-run-native-startup-readiness');
+    expect(production).toContain('startupProbePath:$startupPath');
+    expect(production).toContain('livenessProbePath:$livenessPath');
+    expect(production).toContain('acceptanceRevisionReady:true');
+    expect(production).toContain('acceptanceDefaultUrlDisabled:true');
     expect(production).toContain('exactReleaseShaMatched:true');
     expect(production).toContain('sameRuntimeImageAsProductionCandidate:true');
     expect(production).toContain('productionTrafficMutation:false');
     expect(production).toContain('providerCallExecuted:false');
     expect(production).toContain('externalGitHubRunnerProbe:false');
-    expect(production).toContain('healthHttpStatus:($health|tonumber)');
-    expect(production).toContain('readyHttpStatus:($ready|tonumber)');
+    expect(production).toContain('schedulerProbe:false');
     expect(production).not.toContain('gcloud run services update-traffic');
   });
 
-  it('cleans Scheduler jobs and ephemeral acceptance service before promotion', () => {
+  it('cleans only the ephemeral acceptance service before promotion', () => {
     const verify = section(
       '- name: Verify health readiness and webhook route confinement',
       '- name: Restore production MCP default endpoint posture after private probes',
     );
 
     expect(verify).toContain('trap cleanup_internal_mcp_probe EXIT');
-    expect(verify).toContain('gcloud scheduler jobs delete');
     expect(verify).toContain('gcloud run services delete "$PROBE_SERVICE"');
+    expect(verify).not.toContain('gcloud scheduler jobs delete');
     expect(verify).toContain('trap - EXIT');
-    expect(verify).toContain('Internal MCP probe cleanup left scheduler job behind');
     expect(verify).toContain('Ephemeral MCP acceptance service remained after cleanup');
 
     const restoreIndex = workflow.indexOf(
