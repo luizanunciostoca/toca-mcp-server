@@ -7,9 +7,9 @@ describe('resolveTocaManagedInstagramTenantId', () => {
   });
 
   it('preserves an explicit tenant override', () => {
-    expect(
-      resolveTocaManagedInstagramTenantId({ TOCA_DEFAULT_TENANT_ID: 'tenant-isolated' }),
-    ).toBe('tenant-isolated');
+    expect(resolveTocaManagedInstagramTenantId({ TOCA_DEFAULT_TENANT_ID: 'tenant-isolated' })).toBe(
+      'tenant-isolated',
+    );
   });
 
   it('falls back when the override contains only whitespace', () => {
