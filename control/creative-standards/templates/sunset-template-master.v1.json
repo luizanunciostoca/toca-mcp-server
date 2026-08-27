@@ -88,9 +88,27 @@
       "fontRole": "EDITORIAL_DIDONE_HEADLINE"
     },
     "supportStrips": [
-      { "id": "SUPPORT_1", "text": "Vem curtir um", "box": { "x": 81, "y": 888, "width": 424, "height": 66 }, "fill": "#FFFFFF", "textColor": "#111111" },
-      { "id": "SUPPORT_2", "text": "dia inesquecível", "box": { "x": 81, "y": 965, "width": 475, "height": 68 }, "fill": "#FFFFFF", "textColor": "#111111" },
-      { "id": "SUPPORT_3", "text": "na Toca!", "box": { "x": 81, "y": 1044, "width": 260, "height": 66 }, "fill": "#FFFFFF", "textColor": "#111111" }
+      {
+        "id": "SUPPORT_1",
+        "text": "Vem curtir um",
+        "box": { "x": 81, "y": 888, "width": 424, "height": 66 },
+        "fill": "#FFFFFF",
+        "textColor": "#111111"
+      },
+      {
+        "id": "SUPPORT_2",
+        "text": "dia inesquecível",
+        "box": { "x": 81, "y": 965, "width": 475, "height": 68 },
+        "fill": "#FFFFFF",
+        "textColor": "#111111"
+      },
+      {
+        "id": "SUPPORT_3",
+        "text": "na Toca!",
+        "box": { "x": 81, "y": 1044, "width": 260, "height": 66 },
+        "fill": "#FFFFFF",
+        "textColor": "#111111"
+      }
     ],
     "supportSharedStyle": {
       "fontRole": "GEOMETRIC_SANS_SUPPORT",
@@ -193,9 +211,28 @@
   "productionMethod": {
     "mode": "DETERMINISTIC_COMPOSITOR",
     "fullImageGenerationPerStoryAllowed": false,
-    "pipeline": ["REAL_PHOTO", "CROP_ENGINE", "FIXED_RENDERER", "TEXT_AND_BOXES", "CTA", "OFFICIAL_LOGOS", "LOCAL_CONTRAST", "FINAL_PNG"],
-    "aiMayAssist": ["SOURCE_PHOTO_SELECTION", "CROP_ANALYSIS", "PROTECTED_SUBJECT_DETECTION", "CONTRAST_ASSESSMENT"],
-    "deterministicRequired": ["TEXT_RENDERING", "LOGO_INSERTION", "ELEMENT_COORDINATES", "TYPOGRAPHY_AFTER_FONT_PIN"]
+    "pipeline": [
+      "REAL_PHOTO",
+      "CROP_ENGINE",
+      "FIXED_RENDERER",
+      "TEXT_AND_BOXES",
+      "CTA",
+      "OFFICIAL_LOGOS",
+      "LOCAL_CONTRAST",
+      "FINAL_PNG"
+    ],
+    "aiMayAssist": [
+      "SOURCE_PHOTO_SELECTION",
+      "CROP_ANALYSIS",
+      "PROTECTED_SUBJECT_DETECTION",
+      "CONTRAST_ASSESSMENT"
+    ],
+    "deterministicRequired": [
+      "TEXT_RENDERING",
+      "LOGO_INSERTION",
+      "ELEMENT_COORDINATES",
+      "TYPOGRAPHY_AFTER_FONT_PIN"
+    ]
   },
   "publicationBoundary": {
     "visualApprovalAuthorizesPublish": false,

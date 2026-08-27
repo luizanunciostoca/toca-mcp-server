@@ -108,11 +108,7 @@
       "preferredColor": "#FFFFFF",
       "officialAssetsOnly": true,
       "aiReconstructionAllowed": false,
-      "order": [
-        "CORONA",
-        "RED_BULL",
-        "MORRO_DIGITAL"
-      ],
+      "order": ["CORONA", "RED_BULL", "MORRO_DIGITAL"],
       "approximateBoxes": {
         "CORONA": { "x": 204, "y": 1680, "width": 191, "height": 113 },
         "RED_BULL": { "x": 477, "y": 1695, "width": 161, "height": 94 },

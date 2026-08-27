@@ -103,12 +103,7 @@
       "w": 788,
       "h": 145
     },
-    "brandOrder": [
-      "TOCA_DO_MORCEGO",
-      "CORONA",
-      "RED_BULL",
-      "MORRO_DIGITAL"
-    ],
+    "brandOrder": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
     "allowAiBrandReconstruction": false,
     "colorMode": "WHITE"

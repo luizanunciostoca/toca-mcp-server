@@ -61,10 +61,7 @@
   "elements": {
     "headline": {
       "kind": "TWO_LINE_EDITORIAL_HEADLINE",
-      "lines": [
-        "Temos drinks especiais",
-        "para o Pôr do Sol"
-      ],
+      "lines": ["Temos drinks especiais", "para o Pôr do Sol"],
       "region": { "x": 101, "y": 1280, "width": 873, "height": 194 },
       "textColor": "#FFFFFF",
       "alignment": "CENTER",
@@ -89,12 +86,7 @@
       "preferredColor": "#FFFFFF",
       "officialAssetsOnly": true,
       "aiReconstructionAllowed": false,
-      "order": [
-        "TOCA_DO_MORCEGO",
-        "CORONA",
-        "RED_BULL",
-        "MORRO_DIGITAL"
-      ],
+      "order": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
       "opticalCentersX": {
         "TOCA_DO_MORCEGO": 189,
         "CORONA": 403,

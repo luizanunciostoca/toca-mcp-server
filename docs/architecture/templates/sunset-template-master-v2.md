@@ -40,13 +40,13 @@ There is **no CTA** and **no support copy** in this template.
 
 ## Fixed regions — 1080×1920
 
-| Element | Region |
-| --- | --- |
-| Time box | `x=489, y=240, w=523, h=96` |
-| `PÔR DO` | `x=76, y=388, w=953, h=178` |
-| `SOL` | `x=62, y=598, w=982, h=425` |
+| Element              | Region                       |
+| -------------------- | ---------------------------- |
+| Time box             | `x=489, y=240, w=523, h=96`  |
+| `PÔR DO`             | `x=76, y=388, w=953, h=178`  |
+| `SOL`                | `x=62, y=598, w=982, h=425`  |
 | Embedded Toca symbol | `x=523, y=752, w=155, h=152` |
-| Footer | approximately `y=1660..1810` |
+| Footer               | approximately `y=1660..1810` |
 
 ## Time box
 

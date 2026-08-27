@@ -38,14 +38,14 @@ Editor-only placeholders such as `INSIRA A IMAGEM DE FUNDO`, repeated placeholde
 
 ## Fixed safe areas on the 1080×1920 canvas
 
-| Element | Coordinates / region |
-| --- | --- |
-| Time | `x=345..743`, `y=208..291` |
-| Main headline | `x=80..1005`, `y=350..485` |
-| `na Toca` | `x=255..825`, `y=495..640` |
-| Editorial support | `x=81..556`, `y=888..1112` |
-| CTA | `x=83..559`, `y=1198..1276` |
-| Brand footer | `y=1650..1810` |
+| Element           | Coordinates / region        |
+| ----------------- | --------------------------- |
+| Time              | `x=345..743`, `y=208..291`  |
+| Main headline     | `x=80..1005`, `y=350..485`  |
+| `na Toca`         | `x=255..825`, `y=495..640`  |
+| Editorial support | `x=81..556`, `y=888..1112`  |
+| CTA               | `x=83..559`, `y=1198..1276` |
+| Brand footer      | `y=1650..1810`              |
 
 Faces, products, hands, horizon lines and other essential photographic subjects should not occupy these areas. Resolve conflicts by changing the crop, never by shifting template elements.
 
@@ -86,18 +86,22 @@ The exact production font asset must be pinned before declaring a renderer pixel
 The support text is rendered as three independent white strips, not a single container.
 
 ### Strip 1
+
 - Text: `Vem curtir um`
 - Box: `x=81`, `y=888`, `w=424`, `h=66`
 
 ### Strip 2
+
 - Text: `dia inesquecível`
 - Box: `x=81`, `y=965`, `w=475`, `h=68`
 
 ### Strip 3
+
 - Text: `na Toca!`
 - Box: `x=81`, `y=1044`, `w=260`, `h=66`
 
 Shared style:
+
 - Background: `#FFFFFF` / `#F7F7F5`
 - Text: `#111111`
 - Role: geometric/semi-humanist sans-serif
@@ -118,6 +122,7 @@ The CTA must never be converted into a white filled button for this template.
 ## Brand footer
 
 Required order from left to right:
+
 1. `TOCA_DO_MORCEGO`
 2. `CORONA`
 3. `RED_BULL`
@@ -126,6 +131,7 @@ Required order from left to right:
 All logos must be inserted from official brand assets. AI recreation, tracing or generative replacement is prohibited.
 
 Approximate optical centers on the 1080 px canvas:
+
 - Toca: `x≈184`
 - Corona: `x≈405`
 - Red Bull: `x≈650`
@@ -140,6 +146,7 @@ Optical balance takes precedence over forcing identical mathematical widths.
 Do not apply an automatic global orange or black filter. Preserve the real photograph.
 
 Localized contrast treatment is allowed when required:
+
 - headline zone: black overlay approximately `10–30%`;
 - CTA zone: `0–25%`;
 - logo footer: `15–35%` when background luminance is too high.
@@ -149,6 +156,7 @@ Use broad feathering and avoid visible rectangular dark patches.
 ## Subtle decorative arcs
 
 The approved reference contains extremely subtle line arcs/circles. When used:
+
 - white outline;
 - approximately `1px`;
 - opacity around `8–15%`;
@@ -157,6 +165,7 @@ The approved reference contains extremely subtle line arcs/circles. When used:
 ## Invariants
 
 The following are fixed and may not be reinterpreted per image:
+
 - canvas and aspect ratio;
 - time position and box proportions;
 - headline and subheadline position/proportions;
@@ -178,6 +187,7 @@ The photo is adapted to the template. The template is not adapted to the photo.
 ## Quality gate
 
 A derivative may enter `PENDING_REVIEW` only when all of the following pass:
+
 - final canvas is exactly `1080×1920`;
 - final aspect ratio is `9:16`;
 - background photograph is full-bleed;
@@ -209,6 +219,7 @@ Visual approval does not authorize publication. The final creative remains subje
 ## Library evolution
 
 This is the first deterministic master template. Each additional approved Sunset layout should receive the same package:
+
 1. immutable visual reference;
 2. technical manual;
 3. machine-readable descriptor;

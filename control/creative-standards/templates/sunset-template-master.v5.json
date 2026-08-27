@@ -87,12 +87,7 @@
   },
   "footer": {
     "region": { "x": 191, "y": 1705, "w": 708, "h": 119 },
-    "brandOrder": [
-      "CORONA",
-      "TOCA_DO_MORCEGO",
-      "RED_BULL",
-      "MORRO_DIGITAL"
-    ],
+    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
     "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
     "allowAiBrandReconstruction": false,
     "colorMode": "WHITE"
