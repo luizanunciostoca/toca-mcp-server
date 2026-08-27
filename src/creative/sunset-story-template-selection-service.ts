@@ -98,8 +98,9 @@ export class SunsetStoryTemplateSelectionService {
       intent: request.intent,
       ...(request.history ? { history: request.history } : {}),
     });
+    const previewEvaluator = this.previewEvaluator;
 
-    if (!this.previewEvaluator) {
+    if (!previewEvaluator) {
       return {
         profile,
         selection: decideSunsetStoryTemplate(ranked),
@@ -110,7 +111,7 @@ export class SunsetStoryTemplateSelectionService {
     const topCandidates = ranked.filter((candidate) => !candidate.hardRejected).slice(0, 3);
     const previewEvaluations = await Promise.all(
       topCandidates.map((candidate) =>
-        this.previewEvaluator?.evaluate({
+        previewEvaluator.evaluate({
           assetId: request.assetId,
           imageBytes: request.imageBytes,
           profile,
@@ -118,11 +119,8 @@ export class SunsetStoryTemplateSelectionService {
         }),
       ),
     );
-    const resolvedEvaluations = previewEvaluations.filter(
-      (evaluation): evaluation is SunsetStoryPreviewEvaluation => evaluation !== undefined,
-    );
     const evaluationsByTemplate = new Map(
-      resolvedEvaluations.map((evaluation) => [evaluation.templateId, evaluation]),
+      previewEvaluations.map((evaluation) => [evaluation.templateId, evaluation]),
     );
     const previewRanked = topCandidates
       .map((candidate) => {
@@ -138,7 +136,7 @@ export class SunsetStoryTemplateSelectionService {
     return {
       profile,
       selection: decideSunsetStoryTemplate(previewRanked),
-      previewEvaluations: resolvedEvaluations,
+      previewEvaluations,
     };
   }
 }
