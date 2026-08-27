@@ -95,7 +95,11 @@ describe('Sunset Story AI dynamic replication', () => {
     );
     expect(candidate).toBeDefined();
     if (!candidate) throw new Error('TEST_CANDIDATE_MISSING');
-    const plan = buildCanonicalSunsetStoryRenderPlan(contract, selected.profile, candidate.cropPlan);
+    const plan = buildCanonicalSunsetStoryRenderPlan(
+      contract,
+      selected.profile,
+      candidate.cropPlan,
+    );
     const first = plan.texts[0];
     expect(first).toBeDefined();
     if (!first) throw new Error('TEST_TEXT_MISSING');
@@ -162,7 +166,9 @@ describe('Sunset Story AI dynamic replication', () => {
     };
     const aiPlanner: SunsetStoryAiRenderPlannerPort = {
       plan: ({ canonicalContract, imageProfile, cropPlan }) =>
-        Promise.resolve(buildCanonicalSunsetStoryRenderPlan(canonicalContract, imageProfile, cropPlan)),
+        Promise.resolve(
+          buildCanonicalSunsetStoryRenderPlan(canonicalContract, imageProfile, cropPlan),
+        ),
     };
     const renderer = new SunsetStoryDynamicSvgRenderer(brandAssetResolver, fontResolver);
     const service = new SunsetStoryDynamicReplicationService(
@@ -199,7 +205,9 @@ describe('Sunset Story AI dynamic replication', () => {
     });
     const aiPlanner: SunsetStoryAiRenderPlannerPort = {
       plan: ({ canonicalContract, imageProfile, cropPlan }) =>
-        Promise.resolve(buildCanonicalSunsetStoryRenderPlan(canonicalContract, imageProfile, cropPlan)),
+        Promise.resolve(
+          buildCanonicalSunsetStoryRenderPlan(canonicalContract, imageProfile, cropPlan),
+        ),
     };
     const service = new SunsetStoryDynamicReplicationService(
       selector,

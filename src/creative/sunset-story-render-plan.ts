@@ -122,9 +122,15 @@ function cropMatches(left: NormalizedRect, right: NormalizedRect): boolean {
   );
 }
 
-function editorOnlyLeak(plan: SunsetStoryRenderPlan, contract: SunsetStoryCanonicalTemplateContract): boolean {
+function editorOnlyLeak(
+  plan: SunsetStoryRenderPlan,
+  contract: SunsetStoryCanonicalTemplateContract,
+): boolean {
   if (contract.editorOnlyStrings.length === 0) return false;
-  const renderedText = plan.texts.map((item) => item.text).join('\n').toLocaleLowerCase('pt-BR');
+  const renderedText = plan.texts
+    .map((item) => item.text)
+    .join('\n')
+    .toLocaleLowerCase('pt-BR');
   return contract.editorOnlyStrings.some((item) => {
     const normalized = item.trim().toLocaleLowerCase('pt-BR');
     return normalized.length >= 4 && renderedText.includes(normalized);
@@ -153,12 +159,18 @@ function validateTexts(
     if (!rectMatches(actual.region, expected.region)) {
       throw new Error(`SUNSET_RENDER_TEXT_REGION_DRIFT:${expected.id}`);
     }
-    if (actual.fontRole !== expected.fontRole) throw new Error(`SUNSET_RENDER_FONT_ROLE_DRIFT:${expected.id}`);
-    if (actual.color !== expected.color) throw new Error(`SUNSET_RENDER_TEXT_COLOR_DRIFT:${expected.id}`);
+    if (actual.fontRole !== expected.fontRole)
+      throw new Error(`SUNSET_RENDER_FONT_ROLE_DRIFT:${expected.id}`);
+    if (actual.color !== expected.color)
+      throw new Error(`SUNSET_RENDER_TEXT_COLOR_DRIFT:${expected.id}`);
     if (actual.alignment !== expected.alignment) {
       throw new Error(`SUNSET_RENDER_ALIGNMENT_DRIFT:${expected.id}`);
     }
-    if (!Number.isFinite(actual.fontScale) || actual.fontScale < MIN_FONT_SCALE || actual.fontScale > MAX_FONT_SCALE) {
+    if (
+      !Number.isFinite(actual.fontScale) ||
+      actual.fontScale < MIN_FONT_SCALE ||
+      actual.fontScale > MAX_FONT_SCALE
+    ) {
       throw new Error(`SUNSET_RENDER_FONT_SCALE_INVALID:${expected.id}`);
     }
   }
@@ -194,7 +206,8 @@ function validateAssets(
   for (const expected of canonical) {
     const actual = proposedById.get(expected.id);
     if (!actual) throw new Error(`SUNSET_RENDER_ASSET_MISSING:${expected.id}`);
-    if (actual.assetId !== expected.assetId) throw new Error(`SUNSET_RENDER_ASSET_ID_DRIFT:${expected.id}`);
+    if (actual.assetId !== expected.assetId)
+      throw new Error(`SUNSET_RENDER_ASSET_ID_DRIFT:${expected.id}`);
     if (!rectMatches(actual.region, expected.region)) {
       throw new Error(`SUNSET_RENDER_ASSET_REGION_DRIFT:${expected.id}`);
     }
@@ -261,7 +274,10 @@ export function validateSunsetStoryAiRenderPlan(
   if (plan.canvas.width !== 1080 || plan.canvas.height !== 1920) {
     throw new Error('SUNSET_RENDER_CANVAS_DRIFT');
   }
-  if (plan.sourcePhoto.sourceWidth !== profile.width || plan.sourcePhoto.sourceHeight !== profile.height) {
+  if (
+    plan.sourcePhoto.sourceWidth !== profile.width ||
+    plan.sourcePhoto.sourceHeight !== profile.height
+  ) {
     throw new Error('SUNSET_RENDER_SOURCE_DIMENSIONS_DRIFT');
   }
   assertUnitRect(plan.sourcePhoto.cropWindow);

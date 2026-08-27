@@ -143,7 +143,10 @@ function splitFooterRegion(
   }));
 }
 
-function resolveAssetId(pathParts: readonly string[], node: Record<string, unknown>): string | null {
+function resolveAssetId(
+  pathParts: readonly string[],
+  node: Record<string, unknown>,
+): string | null {
   const explicit = node.assetId ?? node.brandId;
   if (typeof explicit === 'string' && explicit.length > 0) return footerAssetId(explicit);
   const kind = typeof node.kind === 'string' ? node.kind : '';
@@ -171,7 +174,8 @@ function addFooterAssets(
   accumulator: ContractAccumulator,
 ): boolean {
   const orderValue = node.brandOrder ?? node.order;
-  if (!Array.isArray(orderValue) || !orderValue.every((item) => typeof item === 'string')) return false;
+  if (!Array.isArray(orderValue) || !orderValue.every((item) => typeof item === 'string'))
+    return false;
   const order = orderValue as string[];
   const approximateBoxes = node.approximateBoxes;
   if (isRecord(approximateBoxes)) {
@@ -198,7 +202,9 @@ function walkContract(
   accumulator: ContractAccumulator,
 ): void {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => walkContract(item, [...pathParts, String(index + 1)], inherited, accumulator));
+    value.forEach((item, index) =>
+      walkContract(item, [...pathParts, String(index + 1)], inherited, accumulator),
+    );
     return;
   }
   if (!isRecord(value) || value.present === false) return;
@@ -206,7 +212,8 @@ function walkContract(
   const fontRole = typeof value.fontRole === 'string' ? value.fontRole : inherited.fontRole;
   const colorValue = value.textColor ?? value.color ?? value.preferredColor;
   const color = typeof colorValue === 'string' ? colorValue : inherited.color;
-  const alignment = value.alignment === undefined ? inherited.alignment : normalizeAlignment(value.alignment);
+  const alignment =
+    value.alignment === undefined ? inherited.alignment : normalizeAlignment(value.alignment);
   const style: WalkStyle = { fontRole, color, alignment };
   const region = readRect(value.region ?? value.box);
   const id = pathParts.join('.').toUpperCase();
@@ -226,7 +233,10 @@ function walkContract(
       accumulator.shapes.push({
         id: `${id}.BOX`,
         region,
-        fill: typeof backgroundValue === 'string' && backgroundValue !== 'TRANSPARENT' ? backgroundValue : 'none',
+        fill:
+          typeof backgroundValue === 'string' && backgroundValue !== 'TRANSPARENT'
+            ? backgroundValue
+            : 'none',
         stroke: typeof strokeValue === 'string' ? strokeValue : null,
         strokeWidthPx,
       });
@@ -250,7 +260,8 @@ function walkContract(
     if (key === 'region' || key === 'box' || key === 'approximateBoxes') continue;
     if (key === 'text' || key === 'fontRole' || key === 'textColor' || key === 'color') continue;
     if (key === 'alignment' || key === 'brandOrder' || key === 'order') continue;
-    if (key === 'stroke' || key === 'borderColor' || key === 'background' || key === 'fill') continue;
+    if (key === 'stroke' || key === 'borderColor' || key === 'background' || key === 'fill')
+      continue;
     walkContract(child, [...pathParts, key], style, accumulator);
   }
 }
@@ -272,7 +283,8 @@ export function normalizeSunsetStoryTemplateContract(
   if (!SUNSET_STORY_TEMPLATE_IDS.includes(templateId as SunsetStoryTemplateId)) {
     throw new Error('SUNSET_TEMPLATE_ID_INVALID');
   }
-  if (value.status !== 'APPROVED_VISUAL_CONTRACT') throw new Error('SUNSET_TEMPLATE_STATUS_INVALID');
+  if (value.status !== 'APPROVED_VISUAL_CONTRACT')
+    throw new Error('SUNSET_TEMPLATE_STATUS_INVALID');
   if (value.runtimeEligible !== false) throw new Error('SUNSET_TEMPLATE_RUNTIME_BOUNDARY_INVALID');
   if (!isRecord(value.canvas) || value.canvas.width !== 1080 || value.canvas.height !== 1920) {
     throw new Error('SUNSET_TEMPLATE_CANVAS_INVALID');

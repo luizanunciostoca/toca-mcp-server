@@ -23,9 +23,7 @@ export interface SunsetStoryTemplateContractLoaderPort {
   load(templateId: SunsetStoryTemplateId): Promise<SunsetStoryCanonicalTemplateContract>;
 }
 
-export class RepositorySunsetStoryTemplateContractLoader
-  implements SunsetStoryTemplateContractLoaderPort
-{
+export class RepositorySunsetStoryTemplateContractLoader implements SunsetStoryTemplateContractLoaderPort {
   constructor(private readonly repositoryRoot = process.cwd()) {}
 
   async load(templateId: SunsetStoryTemplateId): Promise<SunsetStoryCanonicalTemplateContract> {

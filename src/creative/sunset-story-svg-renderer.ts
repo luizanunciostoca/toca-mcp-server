@@ -96,10 +96,7 @@ function textX(
   return region.x + region.width / 2;
 }
 
-function renderText(
-  item: SunsetStoryRenderPlan['texts'][number],
-  fontFamily: string,
-): string {
+function renderText(item: SunsetStoryRenderPlan['texts'][number], fontFamily: string): string {
   const size = fontSizeForRegion(item.text, item.region.width, item.region.height, item.fontScale);
   const x = textX(item.alignment, item.region);
   const y = item.region.y + item.region.height / 2;
@@ -139,7 +136,9 @@ export class SunsetStoryDynamicSvgRenderer {
     }
 
     const uniqueAssetIds = [...new Set(plan.assets.map((item) => item.assetId))];
-    const resolvedAssets = await Promise.all(uniqueAssetIds.map((assetId) => this.brandAssets.resolve(assetId)));
+    const resolvedAssets = await Promise.all(
+      uniqueAssetIds.map((assetId) => this.brandAssets.resolve(assetId)),
+    );
     const assetsById = new Map(resolvedAssets.map((asset) => [asset.assetId, asset]));
     const assetShas: Record<string, string> = {};
     for (const asset of resolvedAssets) {
