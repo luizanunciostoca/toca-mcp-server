@@ -6,6 +6,7 @@ import { JsonConsoleLogger } from './core/structured-logger.js';
 import { runFoundationDailyControl } from './operations/foundation-daily-control.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
+import { resolveTocaManagedInstagramTenantId } from './scheduler/toca-managed-instagram-runtime-config.js';
 import {
   TocaManagedInstagramScheduler,
   hashTocaManagedInstagramApprovalDescriptor,
@@ -15,11 +16,7 @@ import {
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
-const tenantId: string = (() => {
-  const value = process.env.TOCA_DEFAULT_TENANT_ID?.trim();
-  if (!value) throw new Error('TOCA_DEFAULT_TENANT_ID_REQUIRED');
-  return value;
-})();
+const tenantId = resolveTocaManagedInstagramTenantId(process.env);
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
 
 if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) {
