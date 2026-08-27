@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "commandId": "bootstrap-marketing-publish-now-20260827",
-  "action": "NOOP",
-  "issuedAt": "2026-08-27T13:23:32-03:00",
-  "timezone": "America/Bahia"
+  "commandId": "publish-now-MKT-20260827-SUNSET-FEED-1500-1348",
+  "action": "PUBLISH_NOW",
+  "issuedAt": "2026-08-27T13:48:31-03:00",
+  "timezone": "America/Bahia",
+  "operation": "SUNSET",
+  "channel": "INSTAGRAM",
+  "format": "FEED_IMAGE",
+  "contentItemId": "MKT-20260827-SUNSET-FEED-1500",
+  "assetId": "MM-SUN-0284-V1",
+  "driveFileId": "1Aub5fZm5xrhhuekloVrNJX4P1IXmlohc",
+  "contentType": "image/jpeg",
+  "expectedAssetSha256": "70393104d6dd28eb74219dfa9a9b43758022fbaf16286126899ae9fcd86805c1",
+  "instagramAccountId": "17841402033495654",
+  "caption": "Conforto, vista e hospitalidade se encontram para fazer do fim de tarde uma experiência completa.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
+  "correlationId": "CORR-MKT-20260827-SUNSET-FEED-1500-SHARENOW-1348",
+  "idempotencyKey": "MKT-20260827-SUNSET-FEED-1500-SHARENOW-V3",
+  "approvalMode": "EXPLICIT_APPROVAL",
+  "approvalStatus": "APPROVED",
+  "publicationIntent": "SHARE_NOW"
 }
