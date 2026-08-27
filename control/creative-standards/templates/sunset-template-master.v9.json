@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "1.0.0",
+  "templateId": "SUNSET_TEMPLATE_MASTER_V9",
+  "status": "APPROVED_VISUAL_CONTRACT",
+  "runtimeEligible": false,
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "aspectRatio": "9:16",
+    "colorSpace": "sRGB",
+    "exportFormat": "PNG"
+  },
+  "reference": {
+    "fileName": "SUNSET_TEMPLATE_MASTER_V9_REFERENCE.jpeg",
+    "sourceWidth": 864,
+    "sourceHeight": 1536,
+    "sha256": "0ee7a17d1ca0cf678e63c9f0b8e6bdee8bb6d9de131dff7045caa41040ba55f1",
+    "driveFileId": "123mZsKJJwnKXZfl_BuNUniKRk3qujRPE",
+    "manualDriveFileId": "1seSp3GmQ4alvbzPK35FXkLyLvq1W7XQ7y2LAt6SJctE"
+  },
+  "background": {
+    "mode": "FULL_BLEED_PHOTO",
+    "fit": "COVER",
+    "distort": false,
+    "subjectConflictPolicy": "REPOSITION_OR_CROP_PHOTO_NEVER_MOVE_LAYOUT",
+    "localDarkeningAllowed": true,
+    "globalColorCastRequired": false
+  },
+  "layers": [
+    "BACKGROUND_PHOTO",
+    "OPTIONAL_LOCAL_DARKENING",
+    "HASHTAG",
+    "HEADLINE",
+    "CTA",
+    "FOOTER_BRANDS"
+  ],
+  "editorOnly": {
+    "outerDashedFrame": true,
+    "dashedX": true,
+    "repeatedGuidanceText": "INSIRA A IMAGEM DE FUNDO",
+    "centerImageIcon": true,
+    "centerTechnicalTitle": "INSIRA A IMAGEM DE FUNDO",
+    "centerTechnicalInstruction": "Substitua este fundo pela imagem desejada para o seu pôr do sol.",
+    "removeBeforeExport": true
+  },
+  "hashtag": {
+    "text": "#VemPraToca",
+    "region": {
+      "x": 390,
+      "y": 805,
+      "w": 290,
+      "h": 58
+    },
+    "background": "TRANSPARENT",
+    "borderColor": "#FFFFFF",
+    "textColor": "#FFFFFF",
+    "fontRole": "SANS_MEDIUM",
+    "alignment": "CENTER"
+  },
+  "headline": {
+    "lines": [
+      {
+        "text": "Hoje tem um pôr do sol",
+        "region": {
+          "x": 196,
+          "y": 895,
+          "w": 688,
+          "h": 76
+        }
+      },
+      {
+        "text": "inesquecível",
+        "region": {
+          "x": 110,
+          "y": 968,
+          "w": 858,
+          "h": 158
+        }
+      }
+    ],
+    "fontRole": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
+    "color": "#FFFFFF",
+    "alignment": "CENTER",
+    "dominantLine": 2
+  },
+  "cta": {
+    "text": "Garanta seu ingresso",
+    "region": {
+      "x": 299,
+      "y": 1146,
+      "w": 470,
+      "h": 60
+    },
+    "background": "TRANSPARENT",
+    "borderColor": "#FFFFFF",
+    "textColor": "#FFFFFF",
+    "alignment": "CENTER"
+  },
+  "footer": {
+    "region": {
+      "x": 146,
+      "y": 1585,
+      "w": 788,
+      "h": 145
+    },
+    "brandOrder": [
+      "TOCA_DO_MORCEGO",
+      "CORONA",
+      "RED_BULL",
+      "MORRO_DIGITAL"
+    ],
+    "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
+    "allowAiBrandReconstruction": false,
+    "colorMode": "WHITE"
+  },
+  "protectedRegions": [
+    {
+      "id": "HASHTAG",
+      "x": 390,
+      "y": 805,
+      "w": 290,
+      "h": 58
+    },
+    {
+      "id": "HEADLINE",
+      "x": 110,
+      "y": 895,
+      "w": 858,
+      "h": 231
+    },
+    {
+      "id": "CTA",
+      "x": 299,
+      "y": 1146,
+      "w": 470,
+      "h": 60
+    },
+    {
+      "id": "FOOTER",
+      "x": 146,
+      "y": 1585,
+      "w": 788,
+      "h": 145
+    }
+  ],
+  "invariants": [
+    "FIXED_HASHTAG_COPY_AND_POSITION",
+    "FIXED_TWO_LINE_HEADLINE_AND_HIERARCHY",
+    "DOMINANT_INESQUECIVEL_LINE",
+    "FIXED_CTA",
+    "FIXED_FOOTER_ORDER",
+    "FIXED_TYPOGRAPHY_ROLES",
+    "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
+    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT"
+  ],
+  "qualityGate": [
+    "CANVAS_1080X1920",
+    "ASPECT_RATIO_9_16",
+    "BACKGROUND_FULL_BLEED",
+    "PHOTO_NOT_DISTORTED",
+    "HASHTAG_MATCHES_CONTRACT",
+    "HEADLINE_MATCHES_CONTRACT",
+    "DOMINANT_LINE_HIERARCHY_MATCHES",
+    "CTA_MATCHES_CONTRACT",
+    "OFFICIAL_BRAND_ASSETS",
+    "FOOTER_ORDER_MATCHES",
+    "EDITOR_GUIDANCE_REMOVED",
+    "SUFFICIENT_CONTRAST",
+    "NO_AI_RECONSTRUCTED_LOGOS",
+    "NO_CROSS_TEMPLATE_MIXING",
+    "NO_TECHNICAL_GUIDANCE_IN_EXPORT"
+  ],
+  "runtimeBoundary": {
+    "preparePublishAuthorized": false,
+    "providerMutationAuthorized": false,
+    "requirementsBeforeRuntimeEligible": [
+      "PIN_EXACT_FONTS",
+      "PIN_EXACT_BRAND_ASSETS",
+      "IMPLEMENT_RENDERER_TEMPLATE",
+      "PASS_DETERMINISTIC_VISUAL_REGRESSION"
+    ]
+  }
+}
