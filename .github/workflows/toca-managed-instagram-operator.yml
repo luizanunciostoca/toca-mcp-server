@@ -81,7 +81,7 @@ jobs:
                 .pageId == $page and
                 (.contentType | IN("image/jpeg", "image/png", "image/webp")) and
                 (.contentItemId | type == "string" and length > 0) and
-                (.scheduledFor | fromdateiso8601? // false) != false and
+                (.scheduledFor | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-03:00$")) and
                 (.driveFileId | type == "string" and test("^[A-Za-z0-9_-]{10,128}$")) and
                 (.assetId | type == "string" and length > 0) and
                 (.caption | type == "string" and length > 0) and
@@ -93,7 +93,7 @@ jobs:
               .approvedBy == "luizanunciostoca" and
               (.approvedDescriptorSha256 | test("^[a-f0-9]{64}$")) and
               (.descriptorB64 | type == "string" and length > 20) and
-              (.requestedAt | fromdateiso8601? // false) != false
+              (.requestedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-03:00$"))
             ' /tmp/operator-command.json >/dev/null
           fi
 
@@ -281,7 +281,7 @@ jobs:
           jq -e \
             --arg ig "$INSTAGRAM_ACCOUNT_ID" --arg page "$FACEBOOK_PAGE_ID" '
               .account.instagramAccountId == $ig and .account.pageId == $page and
-              (.scheduledFor | fromdateiso8601? // false) != false
+              (.scheduledFor | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-03:00$"))
             ' .operator-descriptor.json >/dev/null
           test "$(date -d "$(jq -r .scheduledFor .operator-descriptor.json)" +%s)" -gt "$(date +%s)"
 
