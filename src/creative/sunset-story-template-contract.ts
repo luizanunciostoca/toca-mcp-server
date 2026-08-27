@@ -176,7 +176,7 @@ function addFooterAssets(
   const orderValue = node.brandOrder ?? node.order;
   if (!Array.isArray(orderValue) || !orderValue.every((item) => typeof item === 'string'))
     return false;
-  const order = orderValue as string[];
+  const order = orderValue;
   const approximateBoxes = node.approximateBoxes;
   if (isRecord(approximateBoxes)) {
     for (const [index, assetId] of order.entries()) {
