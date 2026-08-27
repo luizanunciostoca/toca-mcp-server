@@ -115,14 +115,17 @@ export class SunsetStoryDynamicReplicationService {
     }
 
     const contract = await this.contractLoader.load(templateId);
-    const proposal = await this.aiPlanner.plan({
+    const plannerRequest = {
       templateId,
       intent: request.intent,
       imageProfile: selection.profile,
       cropPlan: candidate.cropPlan,
       canonicalContract: contract,
+      sourceImageBytes: request.imageBytes,
+      sourceImageMimeType: request.imageMimeType,
       ...(request.referenceImageBytes ? { referenceImageBytes: request.referenceImageBytes } : {}),
-    });
+    };
+    const proposal = await this.aiPlanner.plan(plannerRequest);
     const plan = validateSunsetStoryAiRenderPlan(
       proposal,
       contract,

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "SUNSET_STORY_RUNTIME_ADAPTER_POLICY_V1",
+  "status": "IMPLEMENTATION_CANDIDATE",
+  "templateAuthority": "GOOGLE_DRIVE_MANUALS_AND_V1_V9_DESCRIPTORS",
+  "multimodalPlanner": {
+    "providerClass": "VERTEX_GEMINI",
+    "temperature": 0,
+    "sourcePhotoBytesRequired": true,
+    "sourcePhotoMimeRequired": true,
+    "referenceImageOptionalForPlanning": true,
+    "allowedMutations": ["FONT_OPTICAL_SCALE", "BRAND_ASSET_OPTICAL_SCALE", "LOCAL_DARKENING"],
+    "forbiddenMutations": [
+      "COPY_REWRITE",
+      "LAYOUT_REGION_MOVE",
+      "TEMPLATE_MIXING",
+      "CROP_OVERRIDE",
+      "TYPOGRAPHY_ROLE_SUBSTITUTION",
+      "BRAND_PIXEL_GENERATION"
+    ]
+  },
+  "renderer": {
+    "mode": "DYNAMIC_VECTOR_COMPOSITION",
+    "flattenedTemplateOverlayAllowed": false,
+    "manualDerivedTypographyRequired": true,
+    "officialBrandAssetsOnly": true,
+    "brandAssetSha256Required": true,
+    "outputCanvas": "1080x1920"
+  },
+  "rasterizer": {
+    "engine": "IMAGEMAGICK",
+    "output": "PNG",
+    "stripNondeterministicMetadata": true
+  },
+  "visualQa": {
+    "referenceComparisonRequiredBeforePromotion": true,
+    "minimumLayoutSimilarity": 0.92,
+    "minimumTypographySimilarity": 0.9,
+    "brandIntegrityRequired": 1
+  },
+  "runtimeBoundary": {
+    "exactFontBinaryPinRequired": true,
+    "deterministicVisualRegressionRequired": true,
+    "storyReady": false,
+    "publicationEligible": false,
+    "prepareAllowed": false,
+    "publishAllowed": false
+  }
+}
