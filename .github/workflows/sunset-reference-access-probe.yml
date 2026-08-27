@@ -1,4 +1,4 @@
-name: Sunset Reference Access Probe
+name: Sunset Reference Regression Probe
 
 on:
   push:
@@ -9,10 +9,31 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  calibration:
     runs-on: ubuntu-24.04
     steps:
-      - name: Verify canonical Google Drive references
+      - name: Checkout calibration branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify ImageMagick toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          convert -version
+          compare -version
+      - name: Fetch and normalize canonical Google Drive references
         shell: bash
         run: |
           set -euo pipefail
@@ -21,14 +42,16 @@ jobs:
             local version="$1"
             local id="$2"
             local expected="$3"
-            local out="refs/v${version}"
+            local raw="refs/v${version}.raw"
+            local out="refs/v${version}.png"
             curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               "https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t" \
-              --output "${out}"
+              --output "${raw}"
             local observed
-            observed="$(sha256sum "${out}" | awk '{print $1}')"
+            observed="$(sha256sum "${raw}" | awk '{print $1}')"
             printf 'V%s_SHA256=%s\n' "${version}" "${observed}"
             test "${observed}" = "${expected}"
+            convert "${raw}" -resize 1080x1920! -strip "${out}"
           }
           fetch_ref 1 1uABkuHwKm5PNRNw5TP38Yzt4s4GTiwH_ b1ffa818a923c3ea94f43a10beb8ee3034d0661bdc437e937a7558042cb905a0
           fetch_ref 2 1UMBo_aSOojs95VOFw1kKH_p_cysih7LM da4d13a4e71388eb0f0edf8f90023c5b9d352d13c2a0d5d4e5c116e11c5a4d48
@@ -39,3 +62,20 @@ jobs:
           fetch_ref 7 1mJAwGR1nX7lEfhKcK4r5g8axdgHh_lV8 2e178606e1f9cbd0f624d26d658d6652aa7bd3d79c880153e2b2a30f57d4b18b
           fetch_ref 8 1IiayW0SlsoxDqW9iQs7YwPQfCorraBqD 766429270261ae7d99c7f9081c12a6ab6ca7565b76193c5ab43fe223eea95ed8
           fetch_ref 9 123mZsKJJwnKXZfl_BuNUniKRk3qujRPE 0ee7a17d1ca0cf678e63c9f0b8e6bdee8bb6d9de131dff7045caa41040ba55f1
+      - name: Calibrate V1-V9 regional SSIM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p regression
+          for version in 1 2 3 4 5 6 7 8 9; do
+            pnpm tsx scripts/sunset-reference-regression-probe.ts \
+              "${version}" "refs/v${version}.png" regression
+          done
+          printf '%s\n' '--- CALIBRATION SUMMARY ---'
+          for file in regression/v*.metrics.json; do
+            node -e '
+              const fs = require("node:fs");
+              const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              console.log(`${data.templateId} minText=${data.minTextSsim} avgText=${data.averageTextSsim} minShape=${data.minShapeSsim}`);
+            ' "${file}"
+          done
