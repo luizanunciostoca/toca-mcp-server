@@ -18,6 +18,7 @@ import {
   isMetaAdsPixelAssignedToAccount,
   type MetaAdsProviderSmokeSnapshot,
 } from './providers/meta-ads/meta-ads-smoke-readiness.js';
+import { MetaApiError } from './providers/meta/meta-api-client.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
 const config = loadConfig(process.env);
@@ -42,14 +43,28 @@ const geoRadiusKm = parsePositiveNumber(process.env.META_ADS_SMOKE_GEO_RADIUS_KM
 const api = createMetaPublicationApiClient(config);
 const provider = new MetaAdsControlledGraphProvider(api);
 
-if (mode === 'PREPARE') {
-  const prepared = await preparePlan();
-  console.log(`META_ADS_SMOKE_PREPARE_RESULT=${JSON.stringify(prepared)}`);
-} else if (mode === 'EXECUTE') {
-  const executed = await executePlan();
-  console.log(`META_ADS_SMOKE_EXECUTE_RESULT=${JSON.stringify(executed)}`);
-} else {
-  throw new Error('META_ADS_SMOKE_MODE_UNSUPPORTED');
+try {
+  if (mode === 'PREPARE') {
+    const prepared = await preparePlan();
+    console.log(`META_ADS_SMOKE_PREPARE_RESULT=${JSON.stringify(prepared)}`);
+  } else if (mode === 'EXECUTE') {
+    const executed = await executePlan();
+    console.log(`META_ADS_SMOKE_EXECUTE_RESULT=${JSON.stringify(executed)}`);
+  } else {
+    throw new Error('META_ADS_SMOKE_MODE_UNSUPPORTED');
+  }
+} catch (error) {
+  console.error(
+    `META_ADS_SMOKE_FAILURE=${JSON.stringify({
+      schemaVersion: 1,
+      mode,
+      smokeId,
+      errorCode: sanitizeSmokeFailureCode(error),
+      secretPayloadDisclosed: false,
+      providerMutationExecuted: mode === 'EXECUTE',
+    })}`,
+  );
+  throw error;
 }
 
 async function preparePlan(): Promise<{
@@ -553,6 +568,21 @@ function parsePositiveNumber(value: string): number {
 
 function normalizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function sanitizeSmokeFailureCode(error: unknown): string {
+  if (error instanceof MetaApiError) {
+    return [
+      error.code,
+      `META_STATUS_${error.status}`,
+      ...(error.providerCode === undefined ? [] : [`META_CODE_${error.providerCode}`]),
+      ...(error.providerSubcode === undefined ? [] : [`META_SUBCODE_${error.providerSubcode}`]),
+    ].join('|');
+  }
+  const message = normalizeError(error);
+  return /^[A-Z][A-Z0-9_.:-]{0,199}$/.test(message)
+    ? message
+    : 'META_ADS_SMOKE_UNCLASSIFIED_FAILURE';
 }
 
 function delay(milliseconds: number): Promise<void> {

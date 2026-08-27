@@ -171,8 +171,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXECUTION_STATUS=0
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet || EXECUTION_STATUS=$?
           RESULT_JSON=''
+          if [ "$EXECUTION_STATUS" -ne 0 ]; then
+            FAILURE_JSON=''
+            for attempt in $(seq 1 12); do
+              LINE="$(gcloud logging read \
+                "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_SMOKE_FAILURE=\"" \
+                --project "$GCP_PROJECT_ID" --freshness=15m --limit=50 --order=desc \
+                --format='value(textPayload)' | grep 'META_ADS_SMOKE_FAILURE=' | head -n1 || true)"
+              if [ -n "$LINE" ]; then FAILURE_JSON="${LINE#META_ADS_SMOKE_FAILURE=}"; break; fi
+              sleep 5
+            done
+            if [ -z "$FAILURE_JSON" ]; then
+              FAILURE_JSON="$(jq -cn --arg smoke "$SMOKE_ID" \
+                '{schemaVersion:1,mode:"PREPARE",smokeId:$smoke,errorCode:"META_ADS_PREPARE_JOB_FAILED_NO_STRUCTURED_RESULT",secretPayloadDisclosed:false,providerMutationExecuted:false}')"
+            fi
+            printf '%s' "$FAILURE_JSON" | jq -e \
+              --arg smoke "$SMOKE_ID" '
+                .schemaVersion == 1 and
+                .mode == "PREPARE" and
+                .smokeId == $smoke and
+                (.errorCode | type == "string" and length > 0) and
+                .secretPayloadDisclosed == false and
+                .providerMutationExecuted == false
+              ' >/dev/null
+            printf '%s\n' "$FAILURE_JSON" | jq . > meta-ads-provider-prepare-failure.json
+            exit "$EXECUTION_STATUS"
+          fi
           for attempt in $(seq 1 12); do
             LINE="$(gcloud logging read \
               "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_SMOKE_PREPARE_RESULT=\"" \
@@ -201,11 +228,11 @@ jobs:
           echo "META_ADS_PREPARED_PLAN_BASE64=$(printf '%s' "$RESULT_JSON" | jq -r .planBase64)"
 
       - name: Upload PREPARE evidence
-        if: steps.request.outputs.phase == 'PREPARE'
+        if: always() && steps.request.outputs.phase == 'PREPARE'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: meta-ads-provider-prepare-${{ steps.request.outputs.smoke_id }}
-          path: meta-ads-provider-prepare.json
+          path: meta-ads-provider-prepare*.json
           if-no-files-found: error
           retention-days: 30
 
