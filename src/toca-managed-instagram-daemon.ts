@@ -15,11 +15,9 @@ import {
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
-const tenantId: string = (() => {
-  const value = process.env.TOCA_DEFAULT_TENANT_ID?.trim();
-  if (!value) throw new Error('TOCA_DEFAULT_TENANT_ID_REQUIRED');
-  return value;
-})();
+// Keep the daemon aligned with the canonical AG-01 production tenant default.
+// Explicit TOCA_DEFAULT_TENANT_ID still wins for any future isolated tenant deployment.
+const tenantId = process.env.TOCA_DEFAULT_TENANT_ID?.trim() || 'toca';
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
 
 if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) {
