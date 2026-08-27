@@ -43,7 +43,8 @@ export class LocalImagemagickSunsetStoryRenderer {
   constructor(
     private readonly commandRunner: LocalSunsetStoryRenderCommandRunner = defaultCommandRunner,
     private readonly convertBinary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
-    private readonly identifyBinary = process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() || 'identify',
+    private readonly identifyBinary = process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() ||
+      'identify',
   ) {}
 
   async renderPreview(
@@ -169,12 +170,7 @@ function cropPixels(
 
 function detectContentType(bytes: Uint8Array): 'image/jpeg' | 'image/png' | 'image/webp' {
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
-  if (
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47
-  ) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
     return 'image/png';
   }
   if (

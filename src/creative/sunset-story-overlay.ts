@@ -23,7 +23,11 @@ export function validateSunsetStoryOverlayAsset(
     throw new ExecutionError('QUALITY_GATE_FAILED', 'SUNSET_OVERLAY_TEMPLATE_MISMATCH', false);
   }
   if (asset.width !== 1080 || asset.height !== 1920) {
-    throw new ExecutionError('OUTPUT_TECH_SPEC_MISMATCH', 'SUNSET_OVERLAY_DIMENSIONS_INVALID', false);
+    throw new ExecutionError(
+      'OUTPUT_TECH_SPEC_MISMATCH',
+      'SUNSET_OVERLAY_DIMENSIONS_INVALID',
+      false,
+    );
   }
   if (asset.source !== 'PINNED_APPROVED_OVERLAY') {
     throw new ExecutionError('POLICY_DENIED', 'SUNSET_OVERLAY_SOURCE_NOT_APPROVED', false);

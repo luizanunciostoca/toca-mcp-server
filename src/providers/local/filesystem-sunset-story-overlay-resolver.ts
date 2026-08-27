@@ -33,10 +33,18 @@ export class FilesystemSunsetStoryOverlayResolver implements SunsetStoryOverlayR
     const manifest = await this.loadManifest();
     const entry = manifest.entries.find((candidate) => candidate.templateId === templateId);
     if (!entry) {
-      throw new ExecutionError('CAPABILITY_UNAVAILABLE', `SUNSET_OVERLAY_NOT_REGISTERED:${templateId}`, false);
+      throw new ExecutionError(
+        'CAPABILITY_UNAVAILABLE',
+        `SUNSET_OVERLAY_NOT_REGISTERED:${templateId}`,
+        false,
+      );
     }
     if (entry.status !== 'APPROVED_PINNED') {
-      throw new ExecutionError('CAPABILITY_UNAVAILABLE', `SUNSET_OVERLAY_NOT_PINNED:${templateId}`, false);
+      throw new ExecutionError(
+        'CAPABILITY_UNAVAILABLE',
+        `SUNSET_OVERLAY_NOT_PINNED:${templateId}`,
+        false,
+      );
     }
     if (
       !entry.path?.trim() ||
@@ -44,7 +52,11 @@ export class FilesystemSunsetStoryOverlayResolver implements SunsetStoryOverlayR
       entry.width !== 1080 ||
       entry.height !== 1920
     ) {
-      throw new ExecutionError('QUALITY_GATE_FAILED', `SUNSET_OVERLAY_MANIFEST_INVALID:${templateId}`, false);
+      throw new ExecutionError(
+        'QUALITY_GATE_FAILED',
+        `SUNSET_OVERLAY_MANIFEST_INVALID:${templateId}`,
+        false,
+      );
     }
 
     const root = dirname(this.manifestPath);

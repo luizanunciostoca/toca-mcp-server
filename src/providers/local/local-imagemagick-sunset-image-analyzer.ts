@@ -24,7 +24,8 @@ export class LocalImagemagickSunsetStoryImageAnalyzer implements SunsetStoryImag
   constructor(
     private readonly semanticAnalyzer: SunsetStorySemanticAnalyzerPort | null = null,
     private readonly commandRunner: LocalImagemagickSunsetAnalyzerCommandRunner = defaultCommandRunner,
-    private readonly identifyBinary = process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() || 'identify',
+    private readonly identifyBinary = process.env.IMAGE_MAGICK_IDENTIFY_BINARY?.trim() ||
+      'identify',
     private readonly convertBinary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
   ) {}
 
@@ -128,8 +129,7 @@ function analyzeGrid(raw: string): GridSignal {
   let warmthSum = 0;
   for (const sample of samples) {
     const zone = zoneForGridPoint(sample.x, sample.y);
-    const luma =
-      (0.2126 * sample.red + 0.7152 * sample.green + 0.0722 * sample.blue) / 255;
+    const luma = (0.2126 * sample.red + 0.7152 * sample.green + 0.0722 * sample.blue) / 255;
     const bucket = lumaBuckets.get(zone) ?? [];
     bucket.push(luma);
     lumaBuckets.set(zone, bucket);
@@ -140,8 +140,7 @@ function analyzeGrid(raw: string): GridSignal {
   const negativeSpaceZones: SunsetStoryZone[] = [];
   for (const [zone, values] of lumaBuckets) {
     const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-    const variance =
-      values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+    const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
     const standardDeviation = Math.sqrt(variance);
     regionLuma[zone] = round(mean, 4);
     if (standardDeviation <= 0.11) negativeSpaceZones.push(zone);
@@ -200,16 +199,9 @@ function cropFitness(width: number, height: number): number {
   return round(Math.min(1, retainedArea) * 100, 2);
 }
 
-function detectContentType(
-  bytes: Uint8Array,
-): 'image/jpeg' | 'image/png' | 'image/webp' {
+function detectContentType(bytes: Uint8Array): 'image/jpeg' | 'image/png' | 'image/webp' {
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
-  if (
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47
-  ) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
     return 'image/png';
   }
   if (

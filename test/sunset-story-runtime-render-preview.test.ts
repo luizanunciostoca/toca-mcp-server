@@ -38,9 +38,8 @@ describe('Sunset runtime render and analysis foundation', () => {
           sceneHints: ['PEOPLE_GOLDEN_HOUR'],
         }),
     };
-    const analyzer = new LocalImagemagickSunsetStoryImageAnalyzer(
-      semanticAnalyzer,
-      (command) => Promise.resolve(command === 'identify' ? '1080,1920' : gridText()),
+    const analyzer = new LocalImagemagickSunsetStoryImageAnalyzer(semanticAnalyzer, (command) =>
+      Promise.resolve(command === 'identify' ? '1080,1920' : gridText()),
     );
 
     const observation = await analyzer.analyze({ assetId: 'asset-1', imageBytes: JPEG_BYTES });
