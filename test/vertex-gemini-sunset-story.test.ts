@@ -6,7 +6,7 @@ import { VertexGeminiSunsetStoryAiPlanner } from '../src/providers/gcp/vertex-ge
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
 describe('Vertex Gemini Sunset Story planner', () => {
-  it('sends the exact source photo bytes and MIME type to the multimodal planner', async () => {
+  it('sends the exact source photo bytes, MIME type and manual provenance to the multimodal planner', async () => {
     let observedBody = '';
     const fetchImpl: typeof fetch = (_input, init) => {
       if (typeof init?.body !== 'string') {
@@ -81,7 +81,7 @@ describe('Vertex Gemini Sunset Story planner', () => {
     expect(plan.templateId).toBe('SUNSET_TEMPLATE_MASTER_V9');
     expect(observedBody).toContain('"mimeType":"image/png"');
     expect(observedBody).toContain(Buffer.from(PNG_BYTES).toString('base64'));
-    expect(observedBody).toContain('GOOGLE_DRIVE');
+    expect(observedBody).toContain('1seSp3GmQ4alvbzPK35FXkLyLvq1W7XQ7y2LAt6SJctE');
     expect(observedBody).toContain('Manual-derived typography');
   });
 });
