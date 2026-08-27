@@ -1,0 +1,342 @@
+name: TOCA Managed Instagram Operator
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: toca-managed-instagram-operator
+  cancel-in-progress: false
+
+env:
+  CONTROL_ISSUE: '308'
+  COMMAND_PREFIX: '/toca-managed-instagram '
+  ALLOWED_ACTOR: 'luizanunciostoca'
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  FACEBOOK_PAGE_ID: '306103746115875'
+  STAGE_JOB_NAME: toca-managed-schedule-asset-stage
+  CREATE_JOB_NAME: toca-managed-schedule-command
+
+jobs:
+  operator:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 308 &&
+      startsWith(github.event.comment.body, '/toca-managed-instagram ')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - name: Parse command and bind exact main
+        id: command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$CONTROL_ISSUE"
+
+          RAW="${COMMENT_BODY#${COMMAND_PREFIX}}"
+          test "$RAW" != "$COMMENT_BODY"
+          printf '%s' "$RAW" > /tmp/operator-command.json
+          jq -e '.schemaVersion == 1 and (.action | IN("PREPARE", "CREATE"))' /tmp/operator-command.json >/dev/null
+
+          EXACT_MAIN_SHA="$(jq -r .exactMainSha /tmp/operator-command.json)"
+          [[ "$EXACT_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          LIVE_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$EXACT_MAIN_SHA" = "$LIVE_MAIN_SHA"
+
+          COMMAND_ID="$(jq -r .commandId /tmp/operator-command.json)"
+          printf '%s' "$COMMAND_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          ACTION="$(jq -r .action /tmp/operator-command.json)"
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "exact_main_sha=$EXACT_MAIN_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "$ACTION" = PREPARE ]; then
+            jq -e \
+              --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+              --arg page "$FACEBOOK_PAGE_ID" '
+                .timezone == "America/Bahia" and
+                .mediaType == "IMAGE" and
+                .instagramAccountId == $ig and
+                .pageId == $page and
+                (.contentType | IN("image/jpeg", "image/png", "image/webp")) and
+                (.contentItemId | type == "string" and length > 0) and
+                (.scheduledFor | fromdateiso8601? // false) != false and
+                (.driveFileId | type == "string" and test("^[A-Za-z0-9_-]{10,128}$")) and
+                (.assetId | type == "string" and length > 0) and
+                (.caption | type == "string" and length > 0) and
+                (.correlationId | type == "string" and length > 0) and
+                (.publicationIdempotencyKey | type == "string" and length > 0)
+              ' /tmp/operator-command.json >/dev/null
+          else
+            jq -e '
+              .approvedBy == "luizanunciostoca" and
+              (.approvedDescriptorSha256 | test("^[a-f0-9]{64}$")) and
+              (.descriptorB64 | type == "string" and length > 20) and
+              (.requestedAt | fromdateiso8601? // false) != false
+            ' /tmp/operator-command.json >/dev/null
+          fi
+
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.command.outputs.exact_main_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Prepare exact future descriptor
+        if: steps.command.outputs.action == 'PREPARE'
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMAND=/tmp/operator-command.json
+          CONTENT_ITEM_ID="$(jq -r .contentItemId "$COMMAND")"
+          SCHEDULED_FOR="$(jq -r .scheduledFor "$COMMAND")"
+          DRIVE_FILE_ID="$(jq -r .driveFileId "$COMMAND")"
+          ASSET_ID="$(jq -r .assetId "$COMMAND")"
+          CONTENT_TYPE="$(jq -r .contentType "$COMMAND")"
+          CAPTION="$(jq -r .caption "$COMMAND")"
+          CORRELATION_ID="$(jq -r .correlationId "$COMMAND")"
+          PUBLICATION_IDEMPOTENCY_KEY="$(jq -r .publicationIdempotencyKey "$COMMAND")"
+
+          NOW_EPOCH="$(date +%s)"
+          DUE_EPOCH="$(date -d "$SCHEDULED_FOR" +%s)"
+          test "$DUE_EPOCH" -gt "$NOW_EPOCH"
+          test $((DUE_EPOCH - NOW_EPOCH)) -le 2592000
+
+          mkdir -p .operator
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}?alt=media" \
+            --output .operator/asset.bin
+          test -s .operator/asset.bin
+          DETECTED_TYPE="$(file --brief --mime-type .operator/asset.bin)"
+          test "$DETECTED_TYPE" = "$CONTENT_TYPE"
+          SOURCE_SHA256="$(sha256sum .operator/asset.bin | awk '{print $1}')"
+          [[ "$SOURCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+
+          BASE_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:toca-managed-operator-base-${GITHUB_SHA}"
+          STAGE_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:toca-managed-operator-stage-${GITHUB_SHA}"
+          docker build -t "$BASE_IMAGE" .
+          docker push "$BASE_IMAGE"
+          cat >/tmp/operator-stage.Dockerfile <<'EOF'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          USER root
+          COPY .operator/asset.bin /app/toca-managed-schedule-asset.bin
+          RUN chown node:node /app/toca-managed-schedule-asset.bin && chmod 0444 /app/toca-managed-schedule-asset.bin
+          USER node
+          EOF
+          docker build --build-arg "BASE_IMAGE=$BASE_IMAGE" -f /tmp/operator-stage.Dockerfile -t "$STAGE_IMAGE" .
+          docker push "$STAGE_IMAGE"
+
+          gcloud run jobs deploy "$STAGE_JOB_NAME" \
+            --image "$STAGE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/instagram-publication-asset-staging.js \
+            --set-env-vars "^@^GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_ASSET_BUCKET@INSTAGRAM_PUBLICATION_ASSET_ID=$ASSET_ID@INSTAGRAM_PUBLICATION_CORRELATION_ID=$CORRELATION_ID@INSTAGRAM_PUBLICATION_ASSET_SOURCE_PATH=/app/toca-managed-schedule-asset.bin@INSTAGRAM_PUBLICATION_ASSET_CONTENT_TYPE=$CONTENT_TYPE" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          gcloud run jobs execute "$STAGE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${STAGE_JOB_NAME} AND textPayload:\"${SOURCE_SHA256}\"" \
+              --project "$PROJECT_ID" --freshness=20m --limit=50 --order=desc --format='value(textPayload)' \
+              | grep "${SOURCE_SHA256}" | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          printf '%s' "$RESULT_LINE" | jq -e \
+            --arg sha "$SOURCE_SHA256" --arg type "$CONTENT_TYPE" '
+              .sha256 == $sha and .contentType == $type and
+              (.objectName | startswith("instagram/"))
+            ' >/dev/null
+          OBJECT_NAME="$(printf '%s' "$RESULT_LINE" | jq -r .objectName)"
+
+          jq -cn \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg scheduledFor "$SCHEDULED_FOR" \
+            --arg pageId "$FACEBOOK_PAGE_ID" \
+            --arg instagramAccountId "$INSTAGRAM_ACCOUNT_ID" \
+            --arg assetId "$ASSET_ID" \
+            --arg objectName "$OBJECT_NAME" \
+            --arg sha256 "$SOURCE_SHA256" \
+            --arg contentType "$CONTENT_TYPE" \
+            --arg caption "$CAPTION" \
+            --arg correlationId "$CORRELATION_ID" \
+            --arg publicationIdempotencyKey "$PUBLICATION_IDEMPOTENCY_KEY" \
+            '{schemaVersion:1,contentItemId:$contentItemId,scheduledFor:$scheduledFor,timezone:"America/Bahia",account:{pageId:$pageId,instagramAccountId:$instagramAccountId},mediaType:"IMAGE",asset:{assetId:$assetId,objectName:$objectName,sha256:$sha256,contentType:$contentType},caption:$caption,correlationId:$correlationId,publicationIdempotencyKey:$publicationIdempotencyKey}' \
+            > .operator/descriptor.json
+
+          DESCRIPTOR_SHA256="$(node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { hashTocaManagedInstagramApprovalDescriptor } from './dist/src/scheduler/toca-managed-instagram-scheduler.js';
+          const descriptor = JSON.parse(readFileSync('.operator/descriptor.json', 'utf8'));
+          process.stdout.write(hashTocaManagedInstagramApprovalDescriptor(descriptor));
+          NODE
+          )"
+          [[ "$DESCRIPTOR_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          DESCRIPTOR_B64="$(base64 -w0 .operator/descriptor.json)"
+          jq -n \
+            --arg commandId "${{ steps.command.outputs.command_id }}" \
+            --arg descriptorSha256 "$DESCRIPTOR_SHA256" \
+            --arg descriptorB64 "$DESCRIPTOR_B64" \
+            --slurpfile descriptor .operator/descriptor.json \
+            '{commandId:$commandId,descriptorSha256:$descriptorSha256,descriptorB64:$descriptorB64,descriptor:$descriptor[0]}' \
+            > .operator/preparation-evidence.json
+
+          BODY="$(jq -r '
+            "## TOCA_MANAGED_SCHEDULE_PREPARED\n\n" +
+            "commandId=`" + .commandId + "`\n\n" +
+            "contentItemId=`" + .descriptor.contentItemId + "`\n\n" +
+            "scheduledFor=`" + .descriptor.scheduledFor + "`\n\n" +
+            "assetId=`" + .descriptor.asset.assetId + "`\n\n" +
+            "assetSha256=`" + .descriptor.asset.sha256 + "`\n\n" +
+            "descriptorSha256=`" + .descriptorSha256 + "`\n\n" +
+            "caption: " + .descriptor.caption + "\n\n" +
+            "DESCRIPTOR_B64=`" + .descriptorB64 + "`\n\n" +
+            "STATE=READY_FOR_EXPLICIT_APPROVAL\nPROVIDER_WRITE=NO\nSCHEDULER_JOB_CREATED=NO"
+          ' .operator/preparation-evidence.json)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_ISSUE}/comments" -f body="$BODY" >/dev/null
+
+      - name: Create exact approved schedule
+        if: steps.command.outputs.action == 'CREATE'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMAND=/tmp/operator-command.json
+          DESCRIPTOR_B64="$(jq -r .descriptorB64 "$COMMAND")"
+          APPROVED_SHA="$(jq -r .approvedDescriptorSha256 "$COMMAND")"
+          REQUESTED_AT="$(jq -r .requestedAt "$COMMAND")"
+          APPROVED_BY="$(jq -r .approvedBy "$COMMAND")"
+          printf '%s' "$DESCRIPTOR_B64" | base64 --decode > .operator-descriptor.json
+          jq -e '.schemaVersion == 1 and .timezone == "America/Bahia" and .mediaType == "IMAGE"' .operator-descriptor.json >/dev/null
+          COMPUTED_SHA="$(node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { hashTocaManagedInstagramApprovalDescriptor } from './dist/src/scheduler/toca-managed-instagram-scheduler.js';
+          const descriptor = JSON.parse(readFileSync('.operator-descriptor.json', 'utf8'));
+          process.stdout.write(hashTocaManagedInstagramApprovalDescriptor(descriptor));
+          NODE
+          )"
+          test "$COMPUTED_SHA" = "$APPROVED_SHA"
+          jq -e \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" --arg page "$FACEBOOK_PAGE_ID" '
+              .account.instagramAccountId == $ig and .account.pageId == $page and
+              (.scheduledFor | fromdateiso8601? // false) != false
+            ' .operator-descriptor.json >/dev/null
+          test "$(date -d "$(jq -r .scheduledFor .operator-descriptor.json)" +%s)" -gt "$(date +%s)"
+
+          jq -n \
+            --arg commandId "${{ steps.command.outputs.command_id }}" \
+            --arg requestedBy "$APPROVED_BY" \
+            --arg requestedAt "$REQUESTED_AT" \
+            --arg approvedSha "$APPROVED_SHA" \
+            --slurpfile descriptor .operator-descriptor.json \
+            '{schemaVersion:1,action:"CREATE",commandId:$commandId,requestedBy:$requestedBy,requestedAt:$requestedAt,payload:($descriptor[0] + {approval:{mode:"EXPLICIT_APPROVAL",status:"APPROVED",approvedDescriptorSha256:$approvedSha}})}' \
+            > .operator-envelope.json
+          ENVELOPE_B64="$(base64 -w0 .operator-envelope.json)"
+
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:toca-managed-schedule-command-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          gcloud run jobs deploy "$CREATE_JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/toca-managed-instagram-schedule-command.js \
+            --set-env-vars "^@^NODE_ENV=production@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_DEFAULT_TENANT_ID=toca@TOCA_SCHEDULE_COMMAND_B64=$ENVELOPE_B64" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          gcloud run jobs execute "$CREATE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+          CONTENT_ITEM_ID="$(jq -r .contentItemId .operator-descriptor.json)"
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${CREATE_JOB_NAME} AND textPayload:\"TOCA_SCHEDULE_COMMAND_RESULT=\" AND textPayload:\"${CONTENT_ITEM_ID}\"" \
+              --project "$PROJECT_ID" --freshness=20m --limit=50 --order=desc --format='value(textPayload)' \
+              | grep 'TOCA_SCHEDULE_COMMAND_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#TOCA_SCHEDULE_COMMAND_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e \
+            --arg item "$CONTENT_ITEM_ID" --arg sha "$APPROVED_SHA" '
+              .contentItemId == $item and .approvedDescriptorSha256 == $sha and
+              .status == "SCHEDULED" and (.jobId | length > 0)
+            ' >/dev/null
+          BODY="$(printf '%s' "$RESULT_JSON" | jq -r '
+            "## TOCA_MANAGED_SCHEDULE_CREATED\n\n" +
+            "contentItemId=`" + .contentItemId + "`\n\n" +
+            "jobId=`" + .jobId + "`\n\n" +
+            "runAt=`" + .runAt + "`\n\n" +
+            "descriptorSha256=`" + .approvedDescriptorSha256 + "`\n\n" +
+            "schedulerStatus=`TOCA_SCHEDULED`\n\nPROVIDER_WRITE=NO\nPOSTGRES_READBACK=PASS\nAUDIT=PASS"
+          ')"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_ISSUE}/comments" -f body="$BODY" >/dev/null
