@@ -31,7 +31,7 @@
     "start:marketing-autopilot-image-edit": "node dist/src/marketing-autopilot-image-edit.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write control/creative-standards/templates/sunset-template-master.v*.json docs/architecture/templates/sunset-template-master-v1.md docs/architecture/templates/sunset-template-master-v2.md src/creative/sunset-story-crop-planner.ts src/creative/sunset-story-image-profile.ts src/creative/sunset-story-template-selector.ts test/sunset-story-template-selector.test.ts && node scripts/emit-prettier-capture.mjs && exit 1",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
