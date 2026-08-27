@@ -71,7 +71,13 @@ function assertFinite(value: number, code: string): void {
 }
 
 function assertUnitRect(rect: NormalizedRect): void {
-  for (const [key, value] of Object.entries(rect)) {
+  const entries = [
+    ['x', rect.x],
+    ['y', rect.y],
+    ['width', rect.width],
+    ['height', rect.height],
+  ] as const;
+  for (const [key, value] of entries) {
     assertFinite(value, `SUNSET_RENDER_CROP_${key.toUpperCase()}_INVALID`);
   }
   if (
