@@ -59,7 +59,8 @@ jobs:
       - name: Audit Node dependency vulnerabilities
         run: pnpm audit --audit-level high
 
-      - name: Scan pull-request commits for secrets
+      - name: Scan event-scoped commits for secrets
+        if: github.event_name != 'workflow_dispatch'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
