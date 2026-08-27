@@ -139,10 +139,7 @@ function buildCandidate(
     template.protectedRegions,
   );
   const subjectPlacementScore = placementScore(transformedPrimarySubject, [targetX, targetY]);
-  const planScore =
-    subjectCoverage * 55 +
-    (1 - protectedOverlap) * 30 +
-    subjectPlacementScore * 15;
+  const planScore = subjectCoverage * 55 + (1 - protectedOverlap) * 30 + subjectPlacementScore * 15;
 
   return {
     cropWindow,
