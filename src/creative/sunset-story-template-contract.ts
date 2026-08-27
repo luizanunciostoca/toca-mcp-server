@@ -121,6 +121,22 @@ function collectStrings(value: unknown, target: string[]): void {
   for (const item of Object.values(value)) collectStrings(item, target);
 }
 
+function collectEditorOnlyStrings(value: unknown, target: string[], editorOnly = false): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectEditorOnlyStrings(item, target, editorOnly);
+    return;
+  }
+  if (!isRecord(value)) return;
+  const nodeIsEditorOnly = editorOnly || value.kind === 'EDITOR_ONLY';
+  if (nodeIsEditorOnly) {
+    collectStrings(value, target);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectEditorOnlyStrings(child, target, key === 'editorOnly');
+  }
+}
+
 function footerAssetId(value: string): string {
   return value === 'TOCA' ? 'TOCA_DO_MORCEGO' : value;
 }
@@ -140,6 +156,19 @@ function splitFooterRegion(
       height: region.height,
     },
     colorMode: 'WHITE',
+  }));
+}
+
+function splitTextLineRegions(
+  region: SunsetStoryPixelRect,
+  lineCount: number,
+): readonly SunsetStoryPixelRect[] {
+  const lineHeight = region.height / lineCount;
+  return Array.from({ length: lineCount }, (_, index) => ({
+    x: region.x,
+    y: region.y + lineHeight * index,
+    width: region.width,
+    height: lineHeight,
   }));
 }
 
@@ -195,6 +224,35 @@ function addFooterAssets(
   return true;
 }
 
+function addTextShape(
+  node: Record<string, unknown>,
+  id: string,
+  fallbackRegion: SunsetStoryPixelRect,
+  accumulator: ContractAccumulator,
+): void {
+  const strokeValue = node.borderColor ?? node.stroke;
+  const backgroundValue = node.background ?? node.fill;
+  if (typeof strokeValue !== 'string' && typeof backgroundValue !== 'string') return;
+  const strokeWidthValue = node.strokeWidthPx;
+  const strokeWidthPx =
+    typeof strokeWidthValue === 'number'
+      ? strokeWidthValue
+      : isRecord(strokeWidthValue) && typeof strokeWidthValue.min === 'number'
+        ? strokeWidthValue.min
+        : 1;
+  const shapeRegion = readRect(node.outlineBox) ?? fallbackRegion;
+  accumulator.shapes.push({
+    id: `${id}.BOX`,
+    region: shapeRegion,
+    fill:
+      typeof backgroundValue === 'string' && backgroundValue !== 'TRANSPARENT'
+        ? backgroundValue
+        : 'none',
+    stroke: typeof strokeValue === 'string' ? strokeValue : null,
+    strokeWidthPx,
+  });
+}
+
 function walkContract(
   value: unknown,
   pathParts: readonly string[],
@@ -207,7 +265,7 @@ function walkContract(
     );
     return;
   }
-  if (!isRecord(value) || value.present === false) return;
+  if (!isRecord(value) || value.present === false || value.kind === 'EDITOR_ONLY') return;
 
   const fontRole = typeof value.fontRole === 'string' ? value.fontRole : inherited.fontRole;
   const colorValue = value.textColor ?? value.color ?? value.preferredColor;
@@ -216,31 +274,32 @@ function walkContract(
     value.alignment === undefined ? inherited.alignment : normalizeAlignment(value.alignment);
   const style: WalkStyle = { fontRole, color, alignment };
   const region = readRect(value.region ?? value.box);
+  const textRegion = readRect(value.textRegion) ?? region;
   const id = pathParts.join('.').toUpperCase();
 
-  if (typeof value.text === 'string' && region) {
-    accumulator.texts.push({ id, text: value.text, region, fontRole, color, alignment });
-    const strokeValue = value.borderColor ?? value.stroke;
-    const backgroundValue = value.background ?? value.fill;
-    if (typeof strokeValue === 'string' || typeof backgroundValue === 'string') {
-      const strokeWidthValue = value.strokeWidthPx;
-      const strokeWidthPx =
-        typeof strokeWidthValue === 'number'
-          ? strokeWidthValue
-          : isRecord(strokeWidthValue) && typeof strokeWidthValue.min === 'number'
-            ? strokeWidthValue.min
-            : 1;
-      accumulator.shapes.push({
-        id: `${id}.BOX`,
-        region,
-        fill:
-          typeof backgroundValue === 'string' && backgroundValue !== 'TRANSPARENT'
-            ? backgroundValue
-            : 'none',
-        stroke: typeof strokeValue === 'string' ? strokeValue : null,
-        strokeWidthPx,
+  if (typeof value.text === 'string' && textRegion) {
+    accumulator.texts.push({ id, text: value.text, region: textRegion, fontRole, color, alignment });
+    addTextShape(value, id, textRegion, accumulator);
+  }
+
+  const lineValues = value.lines;
+  if (
+    region &&
+    Array.isArray(lineValues) &&
+    lineValues.length > 0 &&
+    lineValues.every((line) => typeof line === 'string')
+  ) {
+    const lineRegions = splitTextLineRegions(region, lineValues.length);
+    lineValues.forEach((text, index) => {
+      accumulator.texts.push({
+        id: `${id}.LINES.${index + 1}`,
+        text,
+        region: lineRegions[index]!,
+        fontRole,
+        color,
+        alignment,
       });
-    }
+    });
   }
 
   if (region && addFooterAssets(value, region, accumulator)) return;
@@ -257,8 +316,22 @@ function walkContract(
 
   for (const [key, child] of Object.entries(value)) {
     if (IGNORED_TREE_KEYS.has(key)) continue;
-    if (key === 'region' || key === 'box' || key === 'approximateBoxes') continue;
-    if (key === 'text' || key === 'fontRole' || key === 'textColor' || key === 'color') continue;
+    if (
+      key === 'region' ||
+      key === 'box' ||
+      key === 'textRegion' ||
+      key === 'outlineBox' ||
+      key === 'approximateBoxes'
+    )
+      continue;
+    if (
+      key === 'text' ||
+      key === 'lines' ||
+      key === 'fontRole' ||
+      key === 'textColor' ||
+      key === 'color'
+    )
+      continue;
     if (key === 'alignment' || key === 'brandOrder' || key === 'order') continue;
     if (key === 'stroke' || key === 'borderColor' || key === 'background' || key === 'fill')
       continue;
@@ -302,7 +375,7 @@ export function normalizeSunsetStoryTemplateContract(
   }
 
   const editorOnlyStrings: string[] = [];
-  collectStrings(value.editorOnly, editorOnlyStrings);
+  collectEditorOnlyStrings(value, editorOnlyStrings);
 
   return {
     schemaVersion: typeof value.schemaVersion === 'string' ? value.schemaVersion : 'UNKNOWN',
