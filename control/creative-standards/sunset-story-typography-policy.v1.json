@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "SUNSET_STORY_TYPOGRAPHY_POLICY_V1",
+  "status": "MANUAL_DERIVED_CANONICAL_PROFILE",
+  "runtimeEligible": false,
+  "authority": "GOOGLE_DRIVE_TEMPLATE_MANUALS_V1_V9",
+  "roles": {
+    "EDITORIAL_DIDONE_HEADLINE": {
+      "class": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
+      "preferredFamilies": ["Didot", "Bodoni Moda"],
+      "defaultWeight": 400,
+      "defaultLetterSpacingEm": -0.02,
+      "fontAssetPinRequired": true
+    },
+    "GEOMETRIC_SANS_DISPLAY_HEAVY": {
+      "class": "GEOMETRIC_GROTESK_SANS_HEAVY",
+      "preferredFamilies": ["Montserrat", "Gotham", "Helvetica Neue"],
+      "defaultWeight": 900,
+      "defaultLetterSpacingEm": -0.03,
+      "fontAssetPinRequired": true
+    },
+    "GEOMETRIC_SANS_SUPPORT": {
+      "class": "GEOMETRIC_HUMANIST_SANS_SUPPORT",
+      "preferredFamilies": ["Montserrat", "Poppins", "Avenir"],
+      "defaultWeight": 600,
+      "defaultLetterSpacingEm": 0,
+      "fontAssetPinRequired": true
+    },
+    "CLEAN_SANS_TIME": {
+      "class": "CLEAN_GEOMETRIC_SANS_UTILITY",
+      "preferredFamilies": ["Montserrat", "Poppins", "Avenir"],
+      "defaultWeight": 500,
+      "defaultLetterSpacingEm": 0,
+      "fontAssetPinRequired": true
+    },
+    "CLEAN_SANS_CTA": {
+      "class": "CLEAN_GEOMETRIC_SANS_UTILITY",
+      "preferredFamilies": ["Montserrat", "Poppins", "Avenir"],
+      "defaultWeight": 500,
+      "defaultLetterSpacingEm": 0,
+      "fontAssetPinRequired": true
+    },
+    "CLEAN_SANS_HASHTAG": {
+      "class": "CLEAN_GEOMETRIC_SANS_UTILITY",
+      "preferredFamilies": ["Montserrat", "Poppins", "Avenir"],
+      "defaultWeight": 500,
+      "defaultLetterSpacingEm": 0,
+      "fontAssetPinRequired": true
+    }
+  },
+  "templates": {
+    "SUNSET_TEMPLATE_MASTER_V1": {
+      "manualDocumentId": "1TIyMvn4w_WANPjD7jICSWjsUBtoU7nA6oTc3GjJJ8FY",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "subheadline": "EDITORIAL_DIDONE_HEADLINE",
+      "support": "GEOMETRIC_SANS_SUPPORT",
+      "cta": "CLEAN_SANS_CTA",
+      "time": "CLEAN_SANS_TIME"
+    },
+    "SUNSET_TEMPLATE_MASTER_V2": {
+      "manualDocumentId": "1eAPaQywMVWkNOSZbBtzCUy5dkO_mzZJaIafrIV1_67U",
+      "headline": "GEOMETRIC_SANS_DISPLAY_HEAVY",
+      "time": "CLEAN_SANS_TIME"
+    },
+    "SUNSET_TEMPLATE_MASTER_V3": {
+      "manualDocumentId": "1ykBBMROCVwZZifQn067QFAuLhQ15lMKnuarplWdFI4c",
+      "headline": "GEOMETRIC_SANS_DISPLAY_HEAVY",
+      "time": "CLEAN_SANS_TIME"
+    },
+    "SUNSET_TEMPLATE_MASTER_V4": {
+      "manualDocumentId": "1MAYim7kFREF1F5x5xnqelPZB8eKX9TRAOstYIPJHNKM",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "cta": "CLEAN_SANS_CTA"
+    },
+    "SUNSET_TEMPLATE_MASTER_V5": {
+      "manualDocumentId": "11U_zPmQIEApQQYEzOJjrAp-q82rYLG9SeELyYXaRK4M",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "subheadline": "EDITORIAL_DIDONE_HEADLINE",
+      "support": "GEOMETRIC_SANS_SUPPORT",
+      "cta": "CLEAN_SANS_CTA"
+    },
+    "SUNSET_TEMPLATE_MASTER_V6": {
+      "manualDocumentId": "1lFkBQZuyMBtQ-sdXuQiPJHhLIZXJPKzpU8d56zJkCCs",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "support": "GEOMETRIC_SANS_SUPPORT",
+      "cta": "CLEAN_SANS_CTA",
+      "supportLineWeights": [700, 500, 700, 700]
+    },
+    "SUNSET_TEMPLATE_MASTER_V7": {
+      "manualDocumentId": "1nQZa6yNoJCTCGYXkORCdhgZBMNypSS8l7n3JsdCVuKg",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "support": "GEOMETRIC_SANS_SUPPORT",
+      "cta": "CLEAN_SANS_CTA"
+    },
+    "SUNSET_TEMPLATE_MASTER_V8": {
+      "manualDocumentId": "1UohaVZnzvzbQAa-50wZf_CG6U0jngmo6eMp5zKSNXKI",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "subheadline": "EDITORIAL_DIDONE_HEADLINE",
+      "support": "GEOMETRIC_SANS_SUPPORT",
+      "cta": "CLEAN_SANS_CTA"
+    },
+    "SUNSET_TEMPLATE_MASTER_V9": {
+      "manualDocumentId": "1seSp3GmQ4alvbzPK35FXkLyLvq1W7XQ7y2LAt6SJctE",
+      "headline": "EDITORIAL_DIDONE_HEADLINE",
+      "hashtag": "CLEAN_SANS_HASHTAG",
+      "cta": "CLEAN_SANS_CTA"
+    }
+  },
+  "runtimeBoundary": {
+    "exactFontBinaryPinRequired": true,
+    "visualRegressionRequired": true,
+    "publicationEligible": false
+  }
+}
