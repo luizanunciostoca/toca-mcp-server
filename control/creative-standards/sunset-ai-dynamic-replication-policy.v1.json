@@ -1,0 +1,62 @@
+{
+  "policyId": "SUNSET_AI_DYNAMIC_REPLICATION_V1",
+  "version": "1.0.0",
+  "status": "ACTIVE_PRE_RUNTIME",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "STORIES",
+    "templates": [
+      "SUNSET_TEMPLATE_MASTER_V1",
+      "SUNSET_TEMPLATE_MASTER_V2",
+      "SUNSET_TEMPLATE_MASTER_V3",
+      "SUNSET_TEMPLATE_MASTER_V4",
+      "SUNSET_TEMPLATE_MASTER_V5",
+      "SUNSET_TEMPLATE_MASTER_V6",
+      "SUNSET_TEMPLATE_MASTER_V7",
+      "SUNSET_TEMPLATE_MASTER_V8",
+      "SUNSET_TEMPLATE_MASTER_V9"
+    ]
+  },
+  "renderingModel": {
+    "templatePngOverlayAllowed": false,
+    "dynamicCompositionRequired": true,
+    "aiMayPlan": [
+      "LOCAL_CONTRAST",
+      "TYPOGRAPHIC_OPTICAL_SCALE_WITHIN_BOUNDS",
+      "OFFICIAL_ASSET_OPTICAL_SCALE_WITHIN_BOUNDS"
+    ],
+    "deterministicFromContract": [
+      "COPY",
+      "ELEMENT_REGIONS",
+      "BRAND_ASSET_IDENTITIES",
+      "BRAND_ORDER",
+      "CANVAS",
+      "PHOTO_CROP",
+      "TEMPLATE_ID"
+    ],
+    "officialAssetsOnly": true,
+    "pinnedFontsRequired": true,
+    "crossTemplateComponentMixingAllowed": false,
+    "editorGuidanceAllowedInFinal": false
+  },
+  "quality": {
+    "failClosed": true,
+    "minimumLayoutSimilarity": 0.92,
+    "minimumTypographySimilarity": 0.9,
+    "minimumBrandIntegrity": 1.0,
+    "referenceComparisonRequiredBeforeStoryReady": true
+  },
+  "runtimeBoundary": {
+    "storyReadyAuthorized": false,
+    "preparePublishAuthorized": false,
+    "providerMutationAuthorized": false,
+    "requirementsBeforeRuntimeEligible": [
+      "PIN_EXACT_FONT_ASSETS",
+      "PIN_OFFICIAL_BRAND_ASSETS",
+      "IMPLEMENT_PRODUCTION_RASTERIZER",
+      "PASS_V1_V9_VISUAL_REGRESSION",
+      "PASS_REFERENCE_COMPARATOR_ACCEPTANCE"
+    ]
+  }
+}
