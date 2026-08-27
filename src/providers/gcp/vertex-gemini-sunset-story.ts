@@ -6,6 +6,7 @@ import {
   type SunsetStoryRenderPlan,
 } from '../../creative/sunset-story-render-plan.js';
 import type { SunsetStoryTemplateId } from '../../creative/sunset-story-template-registry.js';
+import { resolveSunsetStoryManualTypography } from '../../creative/sunset-story-typography.js';
 
 const DEFAULT_METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
@@ -91,8 +92,16 @@ interface VertexGenerateContentResponse {
   };
 }
 
+type SupportedImageMimeType = 'image/jpeg' | 'image/png';
+
+type VertexPlannerRequest = SunsetStoryAiRenderPlannerRequest & {
+  readonly sourceImageBytes?: Uint8Array;
+  readonly sourceImageMimeType?: SupportedImageMimeType;
+};
+
 function endpoint(location: string, projectId: string, model: string): string {
-  const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+  const host =
+    location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
   return `https://${host}/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
 }
 
@@ -149,13 +158,39 @@ function jsonSchemaForVisualQa(): Readonly<Record<string, unknown>> {
   };
 }
 
-function imagePart(bytes: Uint8Array, mimeType: 'image/jpeg' | 'image/png'): Record<string, unknown> {
+function imagePart(bytes: Uint8Array, mimeType: SupportedImageMimeType): Record<string, unknown> {
   return {
     inlineData: {
       mimeType,
       data: Buffer.from(bytes).toString('base64'),
     },
   };
+}
+
+function detectImageMimeType(bytes: Uint8Array): SupportedImageMimeType {
+  if (bytes.byteLength >= 8) {
+    const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (png.every((value, index) => bytes[index] === value)) return 'image/png';
+  }
+  if (bytes.byteLength >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
+  throw new Error('VERTEX_SUNSET_IMAGE_MIME_UNRESOLVED');
+}
+
+function sourceImage(request: SunsetStoryAiRenderPlannerRequest): {
+  readonly bytes: Uint8Array;
+  readonly mimeType: SupportedImageMimeType;
+} {
+  const extended = request as VertexPlannerRequest;
+  if (!extended.sourceImageBytes || extended.sourceImageBytes.byteLength === 0) {
+    throw new Error('VERTEX_SUNSET_SOURCE_IMAGE_BYTES_MISSING');
+  }
+  if (
+    extended.sourceImageMimeType !== 'image/jpeg' &&
+    extended.sourceImageMimeType !== 'image/png'
+  ) {
+    throw new Error('VERTEX_SUNSET_SOURCE_IMAGE_MIME_MISSING');
+  }
+  return { bytes: extended.sourceImageBytes, mimeType: extended.sourceImageMimeType };
 }
 
 function responseText(payload: VertexGenerateContentResponse): string {
@@ -166,7 +201,9 @@ function responseText(payload: VertexGenerateContentResponse): string {
       `VERTEX_GEMINI_BLOCKED:${blocked}:${typeof detail === 'string' ? detail.slice(0, 300) : ''}`,
     );
   }
-  const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === 'string')?.text;
+  const text = payload.candidates?.[0]?.content?.parts?.find(
+    (part) => typeof part.text === 'string',
+  )?.text;
   if (typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('VERTEX_GEMINI_RESPONSE_TEXT_MISSING');
   }
@@ -279,9 +316,15 @@ export class VertexGeminiSunsetStoryAiPlanner
   implements SunsetStoryAiRenderPlannerPort
 {
   async plan(request: SunsetStoryAiRenderPlannerRequest): Promise<SunsetStoryRenderPlan> {
+    const source = sourceImage(request);
+    const typography = request.canonicalContract.texts.map((item) => ({
+      id: item.id,
+      ...resolveSunsetStoryManualTypography(request.templateId, item.id),
+    }));
     const prompt = [
       'You are a constrained visual composition planner for TOCA OS Sunset Stories.',
-      'The approved template contract is immutable. Never rewrite copy, move regions, replace assets, change crop, or invent brand pixels.',
+      'The approved Google Drive template manual and canonical template contract are immutable.',
+      'Never rewrite copy, move regions, replace assets, change crop, invent brand pixels, or substitute typography roles.',
       'Only propose small optical font scales, small official-asset optical scales, and optional local darkening behind text.',
       'Return empty arrays when no adjustment is necessary.',
       `Template: ${request.templateId}`,
@@ -289,31 +332,22 @@ export class VertexGeminiSunsetStoryAiPlanner
       `Image profile: ${JSON.stringify(request.imageProfile)}`,
       `Crop plan: ${JSON.stringify(request.cropPlan.cropWindow)}`,
       `Texts: ${JSON.stringify(request.canonicalContract.texts)}`,
+      `Manual-derived typography: ${JSON.stringify(typography)}`,
       `Assets: ${JSON.stringify(request.canonicalContract.assets)}`,
       'Allowed font scale range: 0.90 to 1.08.',
       'Allowed asset scale range: 0.92 to 1.08.',
       'Allowed local darkening opacity: 0 to 0.40. Maximum 8 regions.',
     ].join('\n');
-    const parts: Record<string, unknown>[] = [
-      { text: prompt },
-      imagePart(request.imageProfile.width > 0 ? requestImageBytes(request) : new Uint8Array(), 'image/jpeg'),
-    ];
+    const parts: Record<string, unknown>[] = [{ text: prompt }, imagePart(source.bytes, source.mimeType)];
     if (request.referenceImageBytes && request.referenceImageBytes.byteLength > 0) {
       parts.push({ text: 'Approved visual reference:' });
-      parts.push(imagePart(request.referenceImageBytes, 'image/jpeg'));
+      parts.push(
+        imagePart(request.referenceImageBytes, detectImageMimeType(request.referenceImageBytes)),
+      );
     }
     const raw = await this.generate(parts, jsonSchemaForPlanner());
     return applyPlannerResponse(request, plannerResponseSchema.parse(JSON.parse(raw) as unknown));
   }
-}
-
-function requestImageBytes(request: SunsetStoryAiRenderPlannerRequest): Uint8Array {
-  const value = (request as SunsetStoryAiRenderPlannerRequest & { readonly sourceImageBytes?: Uint8Array })
-    .sourceImageBytes;
-  if (!value || value.byteLength === 0) {
-    throw new Error('VERTEX_SUNSET_SOURCE_IMAGE_BYTES_MISSING');
-  }
-  return value;
 }
 
 export interface SunsetStoryRasterVisualQaRequest {
@@ -342,14 +376,14 @@ export class VertexGeminiSunsetStoryRasterVisualQa
       {
         text: [
           'Compare the approved Sunset Story reference with the newly rendered candidate.',
-          'Judge only template fidelity: element placement, typography hierarchy, fixed copy, and official brand integrity.',
+          'Judge only template fidelity: element placement, manual-defined typography hierarchy, fixed copy, and official brand integrity.',
           'The background photo is expected to differ and must not reduce layout similarity by itself.',
           'brandIntegrity must be 1 only when logos appear intact, in the approved order, without reconstruction or deformation.',
           `Template: ${request.templateId}`,
           'First image: approved reference. Second image: rendered candidate.',
         ].join('\n'),
       },
-      imagePart(request.referenceImageBytes, 'image/jpeg'),
+      imagePart(request.referenceImageBytes, detectImageMimeType(request.referenceImageBytes)),
       imagePart(request.renderedPngBytes, 'image/png'),
     ];
     const raw = await this.generate(parts, jsonSchemaForVisualQa());
