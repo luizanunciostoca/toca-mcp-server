@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export interface SunsetStoryRasterizeRequest {
   readonly svgBytes: Uint8Array;
@@ -47,23 +50,30 @@ export class ImageMagickSunsetStoryRasterizer implements SunsetStoryRasterizerPo
 
   async rasterize(request: SunsetStoryRasterizeRequest): Promise<SunsetStoryRasterizeResult> {
     if (request.svgBytes.byteLength === 0) throw new Error('SUNSET_RASTERIZER_SVG_EMPTY');
-    const output = await this.runConvert(request.svgBytes);
-    if (!hasPngSignature(output)) throw new Error('SUNSET_RASTERIZER_OUTPUT_NOT_PNG');
-    return {
-      mimeType: 'image/png',
-      bytes: output,
-      sha256: sha256(output),
-      width: 1080,
-      height: 1920,
-    };
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'toca-sunset-raster-'));
+    const svgPath = join(temporaryDirectory, 'input.svg');
+    try {
+      await writeFile(svgPath, request.svgBytes, { mode: 0o600 });
+      const output = await this.runConvert(svgPath);
+      if (!hasPngSignature(output)) throw new Error('SUNSET_RASTERIZER_OUTPUT_NOT_PNG');
+      return {
+        mimeType: 'image/png',
+        bytes: output,
+        sha256: sha256(output),
+        width: 1080,
+        height: 1920,
+      };
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   }
 
-  private runConvert(svgBytes: Uint8Array): Promise<Uint8Array> {
+  private runConvert(svgPath: string): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.command,
         [
-          'svg:-',
+          svgPath,
           '-resize',
           '1080x1920!',
           '-strip',
@@ -71,11 +81,12 @@ export class ImageMagickSunsetStoryRasterizer implements SunsetStoryRasterizerPo
           'png:exclude-chunk=date,time',
           'png:-',
         ],
-        { stdio: ['pipe', 'pipe', 'pipe'] },
+        { stdio: ['ignore', 'pipe', 'pipe'] },
       );
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       let outputBytes = 0;
+      let stderrBytes = 0;
       let settled = false;
 
       const finishWithError = (error: Error): void => {
@@ -102,7 +113,9 @@ export class ImageMagickSunsetStoryRasterizer implements SunsetStoryRasterizerPo
         stdout.push(chunk);
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        if (stderr.reduce((sum, item) => sum + item.byteLength, 0) < 32_000) stderr.push(chunk);
+        if (stderrBytes >= 32_000) return;
+        stderrBytes += chunk.byteLength;
+        stderr.push(chunk);
       });
       child.on('close', (code) => {
         if (settled) return;
@@ -115,9 +128,6 @@ export class ImageMagickSunsetStoryRasterizer implements SunsetStoryRasterizerPo
         }
         resolve(new Uint8Array(Buffer.concat(stdout)));
       });
-
-      child.stdin.on('error', () => undefined);
-      child.stdin.end(Buffer.from(svgBytes));
     });
   }
 }
