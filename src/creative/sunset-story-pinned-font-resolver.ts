@@ -25,14 +25,15 @@ const MONTSERRAT: SunsetStoryPinnedFontAsset = {
   sha256: '0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7',
 };
 
-const FONT_ASSET_BY_ROLE: Readonly<Record<SunsetStoryTypographyRole, SunsetStoryPinnedFontAsset>> = {
-  EDITORIAL_DIDONE_HEADLINE: BODONI_MODA,
-  GEOMETRIC_SANS_DISPLAY_HEAVY: MONTSERRAT,
-  GEOMETRIC_SANS_SUPPORT: MONTSERRAT,
-  CLEAN_SANS_TIME: MONTSERRAT,
-  CLEAN_SANS_CTA: MONTSERRAT,
-  CLEAN_SANS_HASHTAG: MONTSERRAT,
-};
+const FONT_ASSET_BY_ROLE: Readonly<Record<SunsetStoryTypographyRole, SunsetStoryPinnedFontAsset>> =
+  {
+    EDITORIAL_DIDONE_HEADLINE: BODONI_MODA,
+    GEOMETRIC_SANS_DISPLAY_HEAVY: MONTSERRAT,
+    GEOMETRIC_SANS_SUPPORT: MONTSERRAT,
+    CLEAN_SANS_TIME: MONTSERRAT,
+    CLEAN_SANS_CTA: MONTSERRAT,
+    CLEAN_SANS_HASHTAG: MONTSERRAT,
+  };
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
