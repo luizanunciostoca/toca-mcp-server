@@ -15,6 +15,7 @@ function sha256(bytes: Uint8Array): string {
 const assetBytes = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="white"/></svg>',
 );
+const fontBytes = new TextEncoder().encode('pinned-test-font');
 
 const brandAssets: SunsetStoryBrandAssetResolverPort = {
   resolve: (assetId) =>
@@ -52,20 +53,30 @@ const cropPlan = {
   planScore: 100,
 };
 
+function pinnedFont(fontRole: string, family: string) {
+  return {
+    fontRole,
+    family,
+    mimeType: 'font/ttf' as const,
+    bytes: fontBytes,
+    sha256: sha256(fontBytes),
+  };
+}
+
 describe('Sunset Story renderer typography', () => {
-  it('requests and emits the heavy manual-defined sans role for V2', async () => {
+  it('requests, pins and embeds the heavy manual-defined sans role for V2', async () => {
     const requestedRoles: string[] = [];
     const fonts: SunsetStoryFontResolverPort = {
       resolve: (fontRole) => {
         requestedRoles.push(fontRole);
-        return Promise.resolve({
-          fontRole,
-          family:
+        return Promise.resolve(
+          pinnedFont(
+            fontRole,
             fontRole === 'GEOMETRIC_SANS_DISPLAY_HEAVY'
               ? 'Manual Heavy Sans'
               : 'Manual Utility Sans',
-          sha256: 'b'.repeat(64),
-        });
+          ),
+        );
       },
     };
     const contract = await loadSunsetStoryTemplateContract('SUNSET_TEMPLATE_MASTER_V2');
@@ -81,6 +92,8 @@ describe('Sunset Story renderer typography', () => {
     expect(requestedRoles).toContain('CLEAN_SANS_TIME');
     expect(svg).toContain('font-family="Manual Heavy Sans"');
     expect(svg).toContain('font-weight="900"');
+    expect(svg).toContain('@font-face');
+    expect(svg).toContain(`data:font/ttf;base64,${Buffer.from(fontBytes).toString('base64')}`);
   });
 
   it('requests Didone and support sans roles for the V5 manual contract', async () => {
@@ -88,7 +101,7 @@ describe('Sunset Story renderer typography', () => {
     const fonts: SunsetStoryFontResolverPort = {
       resolve: (fontRole) => {
         requestedRoles.push(fontRole);
-        return Promise.resolve({ fontRole, family: fontRole, sha256: 'c'.repeat(64) });
+        return Promise.resolve(pinnedFont(fontRole, fontRole));
       },
     };
     const contract = await loadSunsetStoryTemplateContract('SUNSET_TEMPLATE_MASTER_V5');
@@ -102,5 +115,25 @@ describe('Sunset Story renderer typography', () => {
     expect(requestedRoles).toContain('EDITORIAL_DIDONE_HEADLINE');
     expect(requestedRoles).toContain('GEOMETRIC_SANS_SUPPORT');
     expect(requestedRoles).toContain('CLEAN_SANS_CTA');
+  });
+
+  it('fails closed when a font resolver returns bytes that do not match its pin', async () => {
+    const fonts: SunsetStoryFontResolverPort = {
+      resolve: (fontRole) =>
+        Promise.resolve({
+          ...pinnedFont(fontRole, 'Tampered Font'),
+          sha256: '0'.repeat(64),
+        }),
+    };
+    const contract = await loadSunsetStoryTemplateContract('SUNSET_TEMPLATE_MASTER_V3');
+    const renderer = new SunsetStoryDynamicSvgRenderer(brandAssets, fonts);
+
+    await expect(
+      renderer.render({
+        imageBytes: new Uint8Array([0xff, 0xd8, 0xff]),
+        imageMimeType: 'image/jpeg',
+        plan: buildCanonicalSunsetStoryRenderPlan(contract, profile(), cropPlan),
+      }),
+    ).rejects.toThrow('SUNSET_RENDER_FONT_SHA_MISMATCH');
   });
 });
