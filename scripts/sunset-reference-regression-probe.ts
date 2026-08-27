@@ -79,12 +79,14 @@ function runCommand(
   });
 }
 
-function parseSsim(value: string): number {
-  const match = /(?:^|\s)([01](?:\.\d+)?(?:e[-+]?\d+)?)(?:\s|$|\s*\()/i.exec(value.trim());
-  if (!match?.[1]) throw new Error(`SUNSET_REGRESSION_SSIM_UNPARSEABLE:${value.slice(0, 120)}`);
+function parseNormalizedRmse(value: string): number {
+  const match = /\(([0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?)\)/iu.exec(value.trim());
+  if (!match?.[1]) {
+    throw new Error(`SUNSET_REGRESSION_RMSE_UNPARSEABLE:${value.slice(0, 120)}`);
+  }
   const score = Number(match[1]);
   if (!Number.isFinite(score) || score < 0 || score > 1) {
-    throw new Error(`SUNSET_REGRESSION_SSIM_INVALID:${match[1]}`);
+    throw new Error(`SUNSET_REGRESSION_RMSE_INVALID:${match[1]}`);
   }
   return score;
 }
@@ -153,7 +155,7 @@ await writeFile(renderedPath, png.bytes);
 const metrics: Array<{
   readonly id: string;
   readonly kind: 'TEXT' | 'SHAPE';
-  readonly ssim: number;
+  readonly normalizedRmse: number;
 }> = [];
 for (const item of regions) {
   const x = Math.round(item.region.x);
@@ -166,18 +168,28 @@ for (const item of regions) {
   const renderedCrop = path.join(outputDirectory, `${base}.rendered.png`);
   await runCommand('convert', [sourcePath, '-crop', geometry, '+repage', referenceCrop]);
   await runCommand('convert', [renderedPath, '-crop', geometry, '+repage', renderedCrop]);
-  const comparison = await runCommand('compare', ['-metric', 'SSIM', referenceCrop, renderedCrop, 'null:'], [0, 1]);
-  const ssim = parseSsim(comparison.stderr);
-  metrics.push({ id: item.id, kind: item.kind, ssim });
-  console.log(`SUNSET_REGRESSION_REGION=V${version}:${item.kind}:${item.id}:SSIM=${ssim.toFixed(9)}`);
+  const comparison = await runCommand(
+    'compare',
+    ['-metric', 'RMSE', referenceCrop, renderedCrop, 'null:'],
+    [0, 1],
+  );
+  const normalizedRmse = parseNormalizedRmse(comparison.stderr);
+  metrics.push({ id: item.id, kind: item.kind, normalizedRmse });
+  console.log(
+    `SUNSET_REGRESSION_REGION=V${version}:${item.kind}:${item.id}:RMSE=${normalizedRmse.toFixed(9)}`,
+  );
   await Promise.all([rm(referenceCrop, { force: true }), rm(renderedCrop, { force: true })]);
 }
 
-const textScores = metrics.filter((item) => item.kind === 'TEXT').map((item) => item.ssim);
-const shapeScores = metrics.filter((item) => item.kind === 'SHAPE').map((item) => item.ssim);
-const minTextSsim = textScores.length > 0 ? Math.min(...textScores) : null;
-const minShapeSsim = shapeScores.length > 0 ? Math.min(...shapeScores) : null;
-const averageTextSsim =
+const textScores = metrics
+  .filter((item) => item.kind === 'TEXT')
+  .map((item) => item.normalizedRmse);
+const shapeScores = metrics
+  .filter((item) => item.kind === 'SHAPE')
+  .map((item) => item.normalizedRmse);
+const maxTextRmse = textScores.length > 0 ? Math.max(...textScores) : null;
+const maxShapeRmse = shapeScores.length > 0 ? Math.max(...shapeScores) : null;
+const averageTextRmse =
   textScores.length > 0 ? textScores.reduce((sum, value) => sum + value, 0) / textScores.length : null;
 
 await writeFile(
@@ -188,9 +200,9 @@ await writeFile(
       referenceSha256: contract.referenceSha256,
       renderedSha256: png.sha256,
       fontShas: svg.fontShas,
-      minTextSsim,
-      averageTextSsim,
-      minShapeSsim,
+      maxTextRmse,
+      averageTextRmse,
+      maxShapeRmse,
       metrics,
     },
     null,
@@ -200,7 +212,7 @@ await writeFile(
 );
 console.log(`SUNSET_REGRESSION_RENDERED=${templateId}`);
 console.log(`SUNSET_REGRESSION_REGIONS=${regions.length}`);
-console.log(`SUNSET_REGRESSION_MIN_TEXT_SSIM=${minTextSsim ?? 'NONE'}`);
-console.log(`SUNSET_REGRESSION_AVG_TEXT_SSIM=${averageTextSsim ?? 'NONE'}`);
-console.log(`SUNSET_REGRESSION_MIN_SHAPE_SSIM=${minShapeSsim ?? 'NONE'}`);
+console.log(`SUNSET_REGRESSION_MAX_TEXT_RMSE=${maxTextRmse ?? 'NONE'}`);
+console.log(`SUNSET_REGRESSION_AVG_TEXT_RMSE=${averageTextRmse ?? 'NONE'}`);
+console.log(`SUNSET_REGRESSION_MAX_SHAPE_RMSE=${maxShapeRmse ?? 'NONE'}`);
 console.log(`SUNSET_REGRESSION_FONT_SHAS=${JSON.stringify(svg.fontShas)}`);
