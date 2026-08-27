@@ -4,6 +4,34 @@
   "status": "MANUAL_DERIVED_CANONICAL_PROFILE",
   "runtimeEligible": false,
   "authority": "GOOGLE_DRIVE_TEMPLATE_MANUALS_V1_V9",
+  "manualCatalogueDocumentId": "1bnidj7jlQ3oUBa69O-qFwwQ-ZvAq8gDbROTqFHbQNAo",
+  "fontIdentityStatus": "VISUAL_MATCH_CANDIDATE_NOT_PROVEN_FROM_FLATTENED_PNG",
+  "fontAssets": {
+    "BODONI_MODA_VARIABLE": {
+      "family": "Bodoni Moda",
+      "path": "assets/fonts/BodoniModa-Variable.ttf",
+      "sha256": "550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf",
+      "byteLength": 162104,
+      "gitBlobSha": "c5d582f8003ae692761dd8e9ce69de23cb9fea53",
+      "source": "HISTORICAL_PR_285_EXACT_BLOB",
+      "roles": ["EDITORIAL_DIDONE_HEADLINE"]
+    },
+    "MONTSERRAT_VARIABLE": {
+      "family": "Montserrat",
+      "path": "assets/fonts/Montserrat-Variable.ttf",
+      "sha256": "0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7",
+      "byteLength": 744936,
+      "gitBlobSha": "c97aca18592834d8706549c279cb8d5ac5d85f69",
+      "source": "HISTORICAL_PR_285_EXACT_BLOB",
+      "roles": [
+        "GEOMETRIC_SANS_DISPLAY_HEAVY",
+        "GEOMETRIC_SANS_SUPPORT",
+        "CLEAN_SANS_TIME",
+        "CLEAN_SANS_CTA",
+        "CLEAN_SANS_HASHTAG"
+      ]
+    }
+  },
   "roles": {
     "EDITORIAL_DIDONE_HEADLINE": {
       "class": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
@@ -108,6 +136,8 @@
   },
   "runtimeBoundary": {
     "exactFontBinaryPinRequired": true,
+    "candidateFontBinaryPinsSatisfied": true,
+    "exactOriginalCampaignFontIdentityProven": false,
     "visualRegressionRequired": true,
     "publicationEligible": false
   }
