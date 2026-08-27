@@ -17,9 +17,7 @@ const SUNSET_BRAND_BINDINGS: Readonly<Record<string, SunsetBrandRegistryBinding>
   MORRO_DIGITAL: { brand: 'MORRO_DIGITAL', variant: 'WHITE' },
 };
 
-export class CreativeTruthSunsetStoryBrandAssetResolver
-  implements SunsetStoryBrandAssetResolverPort
-{
+export class CreativeTruthSunsetStoryBrandAssetResolver implements SunsetStoryBrandAssetResolverPort {
   constructor(
     private readonly registry: GoogleSheetsCreativeTruthRegistry,
     private readonly loader: CreativeTruthBrandAssetLoader,

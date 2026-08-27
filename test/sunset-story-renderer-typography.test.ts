@@ -60,7 +60,10 @@ describe('Sunset Story renderer typography', () => {
         requestedRoles.push(fontRole);
         return Promise.resolve({
           fontRole,
-          family: fontRole === 'GEOMETRIC_SANS_DISPLAY_HEAVY' ? 'Manual Heavy Sans' : 'Manual Utility Sans',
+          family:
+            fontRole === 'GEOMETRIC_SANS_DISPLAY_HEAVY'
+              ? 'Manual Heavy Sans'
+              : 'Manual Utility Sans',
           sha256: 'b'.repeat(64),
         });
       },

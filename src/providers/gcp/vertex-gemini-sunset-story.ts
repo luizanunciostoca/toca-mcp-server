@@ -268,7 +268,8 @@ abstract class VertexGeminiSunsetStoryBase {
     this.location = options.location ?? 'global';
     this.model = options.model ?? 'gemini-2.5-flash';
     this.accessTokenProvider =
-      options.accessTokenProvider ?? new GcpMetadataAccessTokenProvider({ fetchImpl: this.fetchImpl });
+      options.accessTokenProvider ??
+      new GcpMetadataAccessTokenProvider({ fetchImpl: this.fetchImpl });
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
@@ -338,7 +339,10 @@ export class VertexGeminiSunsetStoryAiPlanner
       'Allowed asset scale range: 0.92 to 1.08.',
       'Allowed local darkening opacity: 0 to 0.40. Maximum 8 regions.',
     ].join('\n');
-    const parts: Record<string, unknown>[] = [{ text: prompt }, imagePart(source.bytes, source.mimeType)];
+    const parts: Record<string, unknown>[] = [
+      { text: prompt },
+      imagePart(source.bytes, source.mimeType),
+    ];
     if (request.referenceImageBytes && request.referenceImageBytes.byteLength > 0) {
       parts.push({ text: 'Approved visual reference:' });
       parts.push(
@@ -371,7 +375,9 @@ export class VertexGeminiSunsetStoryRasterVisualQa
   extends VertexGeminiSunsetStoryBase
   implements SunsetStoryRasterVisualQaPort
 {
-  async evaluate(request: SunsetStoryRasterVisualQaRequest): Promise<SunsetStoryRasterVisualQaResult> {
+  async evaluate(
+    request: SunsetStoryRasterVisualQaRequest,
+  ): Promise<SunsetStoryRasterVisualQaResult> {
     const parts: Record<string, unknown>[] = [
       {
         text: [
