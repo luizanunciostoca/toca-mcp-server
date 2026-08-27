@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { LocalStoryComposer } from '../src/providers/local/local-story-composer.js';
 import type { SunsetStoryTemplatePlan } from '../src/creative/sunset-story-template-engine.js';
@@ -129,8 +130,8 @@ describe('LocalStoryComposer pure template integration', () => {
       referenceReviewStatus: 'PENDING',
     });
     const [, args = []] = runner.mock.calls[0] ?? [];
-    expect(args).toContain('/home/ubuntu/toca-mcp-server/assets/fonts/BodoniModa-Variable.ttf');
-    expect(args).toContain('/home/ubuntu/toca-mcp-server/assets/fonts/Montserrat-Variable.ttf');
+    expect(args).toContain(resolve(process.cwd(), 'assets/fonts/BodoniModa-Variable.ttf'));
+    expect(args).toContain(resolve(process.cwd(), 'assets/fonts/Montserrat-Variable.ttf'));
     expect(args.join(' ')).not.toContain('DejaVu-Serif');
   });
 });
