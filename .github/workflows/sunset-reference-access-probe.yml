@@ -1,0 +1,41 @@
+name: Sunset Reference Access Probe
+
+on:
+  push:
+    branches:
+      - feat/sunset-visual-regression-20260827
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify canonical Google Drive references
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p refs
+          fetch_ref() {
+            local version="$1"
+            local id="$2"
+            local expected="$3"
+            local out="refs/v${version}"
+            curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              "https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t" \
+              --output "${out}"
+            local observed
+            observed="$(sha256sum "${out}" | awk '{print $1}')"
+            printf 'V%s_SHA256=%s\n' "${version}" "${observed}"
+            test "${observed}" = "${expected}"
+          }
+          fetch_ref 1 1uABkuHwKm5PNRNw5TP38Yzt4s4GTiwH_ b1ffa818a923c3ea94f43a10beb8ee3034d0661bdc437e937a7558042cb905a0
+          fetch_ref 2 1UMBo_aSOojs95VOFw1kKH_p_cysih7LM da4d13a4e71388eb0f0edf8f90023c5b9d352d13c2a0d5d4e5c116e11c5a4d48
+          fetch_ref 3 17iBMe59tJ6Dgc-wSUF7NxljMWrobyGfl 7719597166cb8048c1b5eef065a20b74cc95cf483e6679d847cf04d15f3f657f
+          fetch_ref 4 1ZVe1Od9ZXNrYybV9VGB9M6E8etvAm4Si 38fe256a82af8a762017913a34a382b376fae09d6e065ac17a1cb6657d2b2822
+          fetch_ref 5 1qDQBcJYllOMin2nqdfA70MNz7e9K3LmV 4addb6828fdc37e1a90468c938102f2c576053cdd3a5e6d789a12e71c34a766a
+          fetch_ref 6 1YLd6ylU2Gmd7xYxt2Nby1oONxffqqdhr 6f1196b8aa1f6c47d6d7b5445511afbd540427cfd9ec9304059d2d08110ac8c0
+          fetch_ref 7 1mJAwGR1nX7lEfhKcK4r5g8axdgHh_lV8 2e178606e1f9cbd0f624d26d658d6652aa7bd3d79c880153e2b2a30f57d4b18b
+          fetch_ref 8 1IiayW0SlsoxDqW9iQs7YwPQfCorraBqD 766429270261ae7d99c7f9081c12a6ab6ca7565b76193c5ab43fe223eea95ed8
+          fetch_ref 9 123mZsKJJwnKXZfl_BuNUniKRk3qujRPE 0ee7a17d1ca0cf678e63c9f0b8e6bdee8bb6d9de131dff7045caa41040ba55f1
