@@ -42,12 +42,15 @@ function lifestyleObservation(): SunsetStoryImageObservation {
   };
 }
 
+const testFontBytes = new TextEncoder().encode('pinned dynamic replication test font');
 const fontResolver: SunsetStoryFontResolverPort = {
   resolve: (fontRole) =>
     Promise.resolve({
       fontRole,
       family: 'Pinned Test Font',
-      sha256: 'a'.repeat(64),
+      mimeType: 'font/ttf',
+      bytes: testFontBytes,
+      sha256: sha256(testFontBytes),
     }),
 };
 
