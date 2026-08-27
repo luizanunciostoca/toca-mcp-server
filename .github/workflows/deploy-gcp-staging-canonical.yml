@@ -253,10 +253,13 @@ jobs:
           echo "IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" >> "$GITHUB_ENV"
+          RUN_ID_SUFFIX="${GITHUB_RUN_ID: -10}"
+          [[ "$RUN_ID_SUFFIX" =~ ^[0-9]{1,10}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]{1,3}$ ]]
           echo "MCP_TAG=staging-mcp-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "WEBHOOK_TAG=wh-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
-          echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          echo "MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}-${RUN_ID_SUFFIX}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}-${RUN_ID_SUFFIX}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
 
       - name: Build provider-disabled runtime configuration
         shell: bash
