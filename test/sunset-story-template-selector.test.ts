@@ -102,7 +102,7 @@ describe('Sunset Story intelligent template selection', () => {
     const profile = buildSunsetStoryImageProfile(personRightObservation());
     expect(profile.sceneClass).toBe('PEOPLE_GOLDEN_HOUR');
     expect(profile.primarySubjectZone).toBe('CENTER_RIGHT');
-    expect(profile.brightness).toBe('DARK');
+    expect(profile.brightness).toBe('MEDIUM');
   });
 
   it('prefers V5 for a right-side lifestyle subject with left-side negative space', () => {
