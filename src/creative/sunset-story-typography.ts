@@ -65,13 +65,18 @@ function supportLineNumber(elementId: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isDisplayHeadlineId(templateId: SunsetStoryTemplateId, id: string): boolean {
+  if (id.includes('HEADLINE') || id.includes('SUBHEADLINE')) return true;
+  return templateId === 'SUNSET_TEMPLATE_MASTER_V2' && id.includes('DISPLAYLINE');
+}
+
 export function resolveSunsetStoryManualTypography(
   templateId: SunsetStoryTemplateId,
   elementId: string,
 ): SunsetStoryTypographyAssignment {
   const id = elementId.toUpperCase();
 
-  if (id.includes('HEADLINE') || id.includes('SUBHEADLINE')) {
+  if (isDisplayHeadlineId(templateId, id)) {
     if (templateId === 'SUNSET_TEMPLATE_MASTER_V2' || templateId === 'SUNSET_TEMPLATE_MASTER_V3') {
       return withManual(templateId, {
         ...HEAVY_SANS,
