@@ -5,18 +5,18 @@ import {
   validateSunsetStoryAiRenderPlan,
 } from './sunset-story-render-plan.js';
 import type { SunsetStorySelectionHistoryItem } from './sunset-story-template-selector.js';
-import {
+import type {
   SunsetStoryTemplateSelectionService,
-  type SunsetStoryTemplateSelectionServiceResult,
+  SunsetStoryTemplateSelectionServiceResult,
 } from './sunset-story-template-selection-service.js';
 import type { SunsetStoryIntent, SunsetStoryTemplateId } from './sunset-story-template-registry.js';
 import {
   loadSunsetStoryTemplateContract,
   type SunsetStoryCanonicalTemplateContract,
 } from './sunset-story-template-contract.js';
-import {
+import type {
   SunsetStoryDynamicSvgRenderer,
-  type SunsetStorySvgRenderResult,
+  SunsetStorySvgRenderResult,
 } from './sunset-story-svg-renderer.js';
 
 export interface SunsetStoryTemplateContractLoaderPort {
