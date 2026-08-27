@@ -63,9 +63,21 @@ Every signal used for incident triage must preserve the existing correlation cha
 
 WhatsApp and Email SLO contracts are declared at `>=99% / 60m` but remain disabled until each provider reaches the required implementation/provider evidence. Declaring an SLO must not be interpreted as provider availability.
 
+### Approval
+
+`approval.response_p95_seconds <= 900s / 24h`. Confirm that the ApprovalRecord remains `REQUESTED`, unexpired and bound to the current descriptor SHA. Do not broaden scope, replace per-item records with a batch boolean or bypass authority to reduce latency.
+
+### Scheduler watchdog
+
+`scheduler.publication_lag_p95_seconds <= 300s / 60m`. Inspect the watchdog snapshot: last poll, last claim, oldest due job, RUNNING stale, DLQ, execution latency and last reconciliation. If an external call may have started, reconcile provider truth before retrying. A non-zero DLQ or stale RUNNING count opens a P1 incident.
+
+### Autopilot rollout
+
+`autopilot.shadow_exact_agreement_ratio = 100% / 24h`, `provider.external_error_ratio <= 1% / 60m` and `autopilot.human_intervention_ratio <= 25% / 24h`. Any shadow divergence, provider circuit opening, readiness failure, readback gap or critical incident requires rollback to `SUPERVISED_AUTO`. Promotion is never an incident-recovery action and always requires an evidence-bearing human decision.
+
 ### R31
 
-`r31.feedback_loop_success_ratio >= 99% / 24h` is declared for the future R31 feedback/optimization loop. It remains inactive until R31 is implemented and its source signals exist.
+`r31.feedback_loop_success_ratio >= 99% / 24h` and `r31.recommendation_adoption_ratio >= 10% / 7d`. R31 can recommend configuration, rules or autonomy changes, but it cannot grant authority. Low adoption is P2 evidence for review, never a reason for automatic policy mutation.
 
 ## Alert triage
 

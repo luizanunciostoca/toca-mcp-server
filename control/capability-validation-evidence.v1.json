@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1.0.0",
+  "manifestId": "TOCA_CAPABILITY_VALIDATION_EVIDENCE_V1",
+  "status": "ACTIVE_CANONICAL",
+  "exactHeadSha": "904210f2ed000ac1f99783d5f210e58da938e775",
+  "generatedAt": "2026-08-26T22:00:00-03:00",
+  "validations": []
+}

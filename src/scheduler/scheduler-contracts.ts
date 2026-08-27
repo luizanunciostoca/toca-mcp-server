@@ -13,6 +13,7 @@ export interface ScheduledJob<TPayload = unknown> {
   readonly idempotencyKey: string;
   readonly status: ScheduledJobStatus;
   readonly attempts: number;
+  readonly updatedAt?: string;
   readonly lastError?: string;
 }
 

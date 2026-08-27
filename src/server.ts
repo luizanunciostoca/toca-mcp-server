@@ -6,6 +6,7 @@ import {
   type ExecutionIdentity,
   type ExecutionIdentityResolver,
 } from './core/identity.js';
+import { createEnvironmentAutonomyRuntimeContextResolver } from './core/autonomy-runtime-context.js';
 import { EnvironmentSecretResolver } from './core/secrets.js';
 import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { registerTocaControlCenterSurface } from './mcp/human-control-center.js';
@@ -39,6 +40,7 @@ import { MetaAdsReadProvider } from './providers/meta-ads/meta-ads-read-provider
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
 import { createToolRegistry } from './registry.js';
 import { isTenantScopedApprovalStore } from './governance/approval-scope.js';
+import { loadCapabilityValidationEvidenceManifest } from './governance/capability-validation-evidence.js';
 import { resolveRuntimeTenantIdentity } from './runtime/tenant-identity.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
 import { TocaManagedInstagramScheduler } from './scheduler/toca-managed-instagram-scheduler.js';
@@ -91,6 +93,7 @@ export function createTocaRuntimeComposition(
 export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const env = options.env ?? process.env;
   const config = loadConfig(env);
+  const autonomyContextResolver = createEnvironmentAutonomyRuntimeContextResolver(env);
   const defaultTenantId =
     options.defaultTenantId?.trim() || env.TOCA_DEFAULT_TENANT_ID?.trim() || DEFAULT_TOCA_TENANT_ID;
   const defaultWorkspaceId =
@@ -122,6 +125,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ? createPostgresPool({ connectionString: config.DATABASE_URL })
     : undefined;
   const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
+  const releaseSha = env.TOCA_RELEASE_SHA?.trim();
+  const capabilityValidationEvidenceManifest = loadCapabilityValidationEvidenceManifest({
+    ...(releaseSha ? { exactHeadSha: releaseSha } : {}),
+  });
   const googleAdsOauthCredentialRefs = [
     config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY,
     config.GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY,
@@ -139,6 +146,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
+    instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
+    exactHeadSha: releaseSha ?? capabilityValidationEvidenceManifest.exactHeadSha,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     paidMediaDecisionEnabled: true,
@@ -439,6 +448,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ...(approvalStore ? { approvalStore } : {}),
     ...(auditStore ? { auditStore } : {}),
     ...(eventStore ? { eventStore } : {}),
+    autonomyContextResolver,
   });
 
   registerTocaControlCenterSurface(server, {

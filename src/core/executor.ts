@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditEvent, AuditSink } from './audit.js';
+import { evaluateAutonomyGate } from './autonomy-gate.js';
 import { ExecutionError } from './errors.js';
 import {
   approvalExpectationFromPolicy,
-  evaluatePolicy,
   requiresFormalApproval,
   type PolicyContext,
 } from './policy.js';
@@ -32,6 +32,7 @@ export interface ExecuteToolOptions<T> {
   readonly action: () => Promise<T>;
   readonly approvalExecution?: ApprovalExecutionOptions<T>;
   readonly createExecutionId?: () => string;
+  readonly enforceOperationalReadiness?: boolean;
 }
 
 function createAuditEvent<T>(
@@ -39,7 +40,7 @@ function createAuditEvent<T>(
   policyContext: PolicyContext,
   executionId: string,
   status: AuditEvent['status'],
-  extra: Partial<Pick<AuditEvent, 'errorCode' | 'externalResourceId'>> = {},
+  extra: Partial<Pick<AuditEvent, 'errorCode' | 'externalResourceId' | 'evidence'>> = {},
 ): AuditEvent {
   const principal = policyContext.identity?.principal;
   const authorization = policyContext.identity?.authorization;
@@ -80,24 +81,28 @@ export async function executeTool<T>(options: ExecuteToolOptions<T>): Promise<T>
   }
 
   const effectiveOptions = { ...options, policyContext } satisfies ExecuteToolOptions<T>;
-  const policy = evaluatePolicy(options.tool, policyContext);
+  const policy = evaluateAutonomyGate(options.tool, policyContext, {
+    enforceOperationalReadiness: options.enforceOperationalReadiness ?? false,
+  });
 
   if (policy.decision === 'REQUIRE_APPROVAL') {
     await options.auditSink.write(
       createAuditEvent(effectiveOptions, policyContext, executionId, 'DENIED', {
         errorCode: 'APPROVAL_REQUIRED',
+        evidence: [...policy.evidence, `autonomy:reason:${policy.reasonCode}`],
       }),
     );
-    throw new ExecutionError('APPROVAL_REQUIRED', policy.reason);
+    throw new ExecutionError('APPROVAL_REQUIRED', `${policy.reasonCode}: ${policy.reason}`);
   }
 
   if (policy.decision === 'DENY') {
     await options.auditSink.write(
       createAuditEvent(effectiveOptions, policyContext, executionId, 'DENIED', {
         errorCode: 'POLICY_DENIED',
+        evidence: [...policy.evidence, `autonomy:reason:${policy.reasonCode}`],
       }),
     );
-    throw new ExecutionError('POLICY_DENIED', policy.reason);
+    throw new ExecutionError('POLICY_DENIED', `${policy.reasonCode}: ${policy.reason}`);
   }
 
   if (formalApproval) {
@@ -121,7 +126,9 @@ export async function executeTool<T>(options: ExecuteToolOptions<T>): Promise<T>
   }
 
   await options.auditSink.write(
-    createAuditEvent(effectiveOptions, policyContext, executionId, 'STARTED'),
+    createAuditEvent(effectiveOptions, policyContext, executionId, 'STARTED', {
+      evidence: [...policy.evidence, `autonomy:reason:${policy.reasonCode}`],
+    }),
   );
 
   try {

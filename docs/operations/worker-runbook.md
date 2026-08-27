@@ -51,7 +51,15 @@ The older Cloud Run Job heartbeat design and per-content Cloud Scheduler jobs re
 
 Worker lifecycle events are emitted as structured JSON with severity, event name and correlation fields. Metrics include claimed jobs, successes, failures, retry scheduling, stale-claim recovery, dead-letter events and execution duration.
 
+The scheduler watchdog emits one structured snapshot per batch with last poll, last claim, last successful execution, last reconciliation, oldest due job, due/running/failed backlog, stale `RUNNING` count, DLQ count, execution latency and publication lag. `UNHEALTHY` snapshots or any DLQ entry open an incident; a snapshot must never be made green by deleting jobs or hiding provider outcomes.
+
 Raw secrets, access tokens, database credentials and authorization headers must never be logged.
+
+## Independent reconciliation
+
+The periodic reconciler is separate from the primary claim/execute loop. It lists scheduler state, obtains one provider observation per job and detects duplicate idempotency keys, stale `RUNNING`, provider unavailable, local success without provider proof and provider-confirmed publication not yet reflected locally.
+
+Automatic repair is limited to promoting local state after provider readback proves publication with an external resource ID and evidence. Unknown or partial outcomes, duplicate idempotency keys and local/provider contradictions remain blocked for human review. Reconciliation must update the watchdog heartbeat even when no repair is applied.
 
 ## Incident flow
 
@@ -63,7 +71,8 @@ Raw secrets, access tokens, database credentials and authorization headers must 
 6. Reconcile provider state before deciding whether any external mutation can be repeated.
 7. Resolve provider, permission, payload or infrastructure cause.
 8. Re-run validation, authorization, policy and approval checks.
-9. Replay only through an explicit operator-controlled Core path.
+9. Inspect the most recent watchdog snapshot and reconciliation report.
+10. Replay only through an explicit operator-controlled Core path.
 
 ## Promotion gate
 

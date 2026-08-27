@@ -43,6 +43,12 @@ Every provider mutation and every application mutation with side effects must fo
 
 Application writes such as TOCA-managed scheduling are not exempt from the generic policy/audit pipeline. Capability-specific checks such as immutable descriptor SHA approval are additive controls, not replacements for core policy.
 
+## Autonomy and readiness boundary
+
+Every external side effect is evaluated by the single Autonomy Gate. The gate combines identity, tenant, capability lifecycle, effective policy, ApprovalRecord, descriptor SHA, idempotency, provider health, circuit state, readiness, autonomy mode and scoped kill switches. Missing or stale evidence is a denial, not an implicit approval.
+
+The canonical machine-readable policy is `control/effective-autonomy-policy.v1.json`. Provider-backed lifecycle promotion is controlled by `control/capability-validation-evidence.v1.json`; runtime flags can bind an implementation but cannot promote a capability from `PLANNED`. Operational rollout and release evidence are maintained in `docs/operations/autonomy-readiness-closeout-2026-08-26.md`.
+
 For governed external, financial and destructive operations, approval means a formal R27
 `ApprovalRecord` bound to requester, route, capability, immutable descriptor hash, target, scope,
 expiry and evidence. A boolean such as `approved: true` has no authorizing effect.
@@ -80,3 +86,5 @@ OAuth to Meta authenticates/authorizes TOCA MCP against Meta. Authentication pro
 7. Scheduling is application state persisted in PostgreSQL; deployment pipelines must not be used as the normal scheduling transport.
 8. Production services must remain private unless an explicit externally authenticated boundary is reviewed and approved.
 9. `PUBLISHING`, uncertain provider results and stale local state must fail closed until provider-backed reconciliation is performed.
+10. R31 may recommend configuration, rules or autonomy changes, but only an evidence-bearing human decision may grant additional authority or activate a pre-approved class.
+11. Shadow/canary promotion requires exact decision agreement, verified provider readback and healthy SLOs; any divergence or circuit/readiness failure rolls autonomy back to `SUPERVISED_AUTO`.

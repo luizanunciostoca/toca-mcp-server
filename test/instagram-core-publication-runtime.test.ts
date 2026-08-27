@@ -25,41 +25,67 @@ function publishedResult(mediaId = 'media-1') {
 }
 
 describe('Instagram direct publication Core runtime', () => {
-  it('promotes only direct publish capabilities while generic scheduling remains planned', () => {
-    const registry = createToolRegistry({ instagramPublicationWritesEnabled: true });
+  it('promotes only a direct capability with a valid provider-backed evidence package', () => {
+    const exactHeadSha = 'a'.repeat(40);
+    const flagOnlyRegistry = createToolRegistry({ instagramPublicationWritesEnabled: true });
     for (const capabilityId of [
       'instagram.publish.image',
       'instagram.publish.carousel',
       'instagram.publish.reel',
       'instagram.publish.story',
     ]) {
-      expect(registry.get(capabilityId)).toMatchObject({
-        capabilityStatus: 'PRODUCTION_VALIDATED',
-        riskClass: 'WRITE_EXTERNAL',
-        sideEffects: true,
-        idempotent: true,
-      });
+      expect(flagOnlyRegistry.get(capabilityId)?.capabilityStatus).toBe('PLANNED');
     }
-    expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
-    expect(registry.get('instagram.publication.reschedule')?.capabilityStatus).toBe('PLANNED');
 
-    const disabledRuntimeRegistry = createToolRegistry({
-      instagramPublicationWritesEnabled: false,
-      tocaManagedInstagramSchedulerEnabled: true,
+    const registry = createToolRegistry({
+      instagramPublicationWritesEnabled: true,
+      exactHeadSha,
+      validationNow: '2026-08-26T22:00:00Z',
+      instagramPublicationValidationEvidence: [
+        {
+          validationId: 'validation-image-1',
+          capabilityId: 'instagram.publish.image',
+          provider: 'Meta/Instagram',
+          environment: 'production',
+          status: 'PRODUCTION_VALIDATED',
+          exactHeadSha,
+          validatedAt: '2026-08-26T21:00:00Z',
+          expiresAt: '2026-09-26T21:00:00Z',
+          checks: {
+            providerWriteSucceeded: true,
+            providerReadbackVerified: true,
+            idempotencyVerified: true,
+            reconciliationVerified: true,
+            unknownOutcomeFailClosed: true,
+          },
+          externalResourceId: 'ig_media_1',
+          evidence: [
+            'provider:instagram:ig_media_1',
+            'readback:instagram:ig_media_1',
+            'acceptance:run:1',
+          ],
+        },
+      ],
+    });
+    expect(registry.get('instagram.publish.image')).toMatchObject({
+      capabilityStatus: 'PRODUCTION_VALIDATED',
+      riskClass: 'WRITE_EXTERNAL',
+      sideEffects: true,
+      idempotent: true,
     });
     for (const capabilityId of [
-      'instagram.publish.image',
       'instagram.publish.carousel',
       'instagram.publish.reel',
       'instagram.publish.story',
     ]) {
-      expect(disabledRuntimeRegistry.get(capabilityId)?.capabilityStatus).toBe('PLANNED');
+      expect(registry.get(capabilityId)?.capabilityStatus).toBe('PLANNED');
     }
+    expect(registry.get('instagram.publication.schedule')?.capabilityStatus).toBe('PLANNED');
 
-    const catalogRegistry = createToolRegistry({ tocaManagedInstagramSchedulerEnabled: true });
-    expect(catalogRegistry.get('instagram.publish.image')?.capabilityStatus).toBe(
-      'PRODUCTION_VALIDATED',
-    );
+    const schedulerOnlyRegistry = createToolRegistry({
+      tocaManagedInstagramSchedulerEnabled: true,
+    });
+    expect(schedulerOnlyRegistry.get('instagram.publish.image')?.capabilityStatus).toBe('PLANNED');
   });
 
   it('binds image publication to the configured account, deterministic idempotency and provider readback', async () => {

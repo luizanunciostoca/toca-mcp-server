@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "TOCA_EFFECTIVE_AUTONOMY_POLICY_V1",
+  "policyVersion": "1.1.0",
+  "status": "ACTIVE_CANONICAL",
+  "source": {
+    "driveDocumentId": "1QvLTbwSjT2OhsTz3YkJ6rdQGeM40AgPbQNSkoj5Yb2c",
+    "title": "TOCA OS — POLÍTICA DE APROVAÇÃO DO MARKETING AUTOPILOT v1.1",
+    "lastReconciledAt": "2026-08-26T00:00:00-03:00",
+    "derivedArtifact": true
+  },
+  "defaults": {
+    "nonSideEffectAuthority": "AUTO_INTERNAL",
+    "sideEffectAuthority": "EXPLICIT_APPROVAL",
+    "missingCapabilityDecision": "DENY",
+    "unknownHealthDecision": "DENY"
+  },
+  "scheduling": {
+    "canonicalPolicy": "TOCA_MANAGED_SCHEDULING",
+    "publicationIntent": "TOCA_SCHEDULE",
+    "scheduledState": "TOCA_SCHEDULED",
+    "nativeScheduledState": "SCHEDULED",
+    "supersedes": ["NATIVE_PROVIDER_SCHEDULING_ONLY", "MANUAL_HANDOFF_REQUIRED"],
+    "shareNowRequiresExplicitIntent": true,
+    "nativeProviderEvidenceRequired": true
+  },
+  "authority": {
+    "levels": ["AUTO_INTERNAL", "AUTO_EXTERNAL_PREAPPROVED", "EXPLICIT_APPROVAL"],
+    "gateStates": ["HUMAN_REVIEW", "BLOCKED"],
+    "preapprovedClassSelfPromotionForbidden": true,
+    "authorityPromotionRequiresHumanDecision": true
+  },
+  "modes": {
+    "default": "SUPERVISED_AUTO",
+    "values": {
+      "OFF": {
+        "internalActions": false,
+        "externalActions": false,
+        "shadowDecisions": false
+      },
+      "OBSERVE": {
+        "internalActions": false,
+        "externalActions": false,
+        "shadowDecisions": true
+      },
+      "ASSISTED": {
+        "internalActions": true,
+        "externalActions": false,
+        "shadowDecisions": true
+      },
+      "SUPERVISED_AUTO": {
+        "internalActions": true,
+        "externalActions": true,
+        "shadowDecisions": true
+      },
+      "PREAPPROVED_AUTO": {
+        "internalActions": true,
+        "externalActions": true,
+        "shadowDecisions": true
+      }
+    }
+  },
+  "readinessRequiredChecks": [
+    "POLICY_CONSISTENT",
+    "RUNTIME_HEALTHY",
+    "DB_HEALTHY",
+    "PROVIDER_HEALTHY",
+    "APPROVAL_ENGINE_HEALTHY",
+    "SCHEDULER_HEALTHY",
+    "OBSERVABILITY_HEALTHY",
+    "NO_CRITICAL_INCIDENT",
+    "EXACT_HEAD_CERTIFIED"
+  ],
+  "canary": {
+    "shadowDecisionsMinimum": 10,
+    "supervisedExternalActionsMinimum": 5,
+    "rollbackMode": "SUPERVISED_AUTO",
+    "rollbackOnAnyDivergence": true
+  },
+  "killSwitchScopes": ["GLOBAL", "TENANT", "PROVIDER", "CAPABILITY"],
+  "rules": [
+    {
+      "ruleId": "INTERNAL_DEFAULT",
+      "capabilityIds": ["*"],
+      "operations": ["READ", "PLAN", "PREPARE", "CLASSIFY", "GENERATE", "VERIFY"],
+      "providers": ["*"],
+      "tenantIds": ["*"],
+      "riskClasses": ["READ"],
+      "sideEffect": false,
+      "authority": "AUTO_INTERNAL",
+      "allowedModes": ["ASSISTED", "SUPERVISED_AUTO", "PREAPPROVED_AUTO"]
+    },
+    {
+      "ruleId": "INSTAGRAM_DIRECT_PUBLICATION",
+      "capabilityIds": [
+        "instagram.publish.image",
+        "instagram.publish.carousel",
+        "instagram.publish.reel",
+        "instagram.publish.story"
+      ],
+      "operations": ["PUBLISH"],
+      "providers": ["Meta/Instagram"],
+      "tenantIds": ["*"],
+      "riskClasses": ["WRITE_EXTERNAL"],
+      "sideEffect": true,
+      "authority": "EXPLICIT_APPROVAL",
+      "allowedModes": ["SUPERVISED_AUTO"]
+    },
+    {
+      "ruleId": "TOCA_MANAGED_SCHEDULE_MUTATION",
+      "capabilityIds": [
+        "instagram.toca_schedule.create",
+        "instagram.toca_schedule.reschedule",
+        "instagram.toca_schedule.cancel"
+      ],
+      "operations": ["SCHEDULE", "RESCHEDULE", "CANCEL"],
+      "providers": ["toca-mcp"],
+      "tenantIds": ["*"],
+      "riskClasses": ["WRITE_REVERSIBLE"],
+      "sideEffect": true,
+      "authority": "EXPLICIT_APPROVAL",
+      "allowedModes": ["SUPERVISED_AUTO"]
+    }
+  ],
+  "preapprovedClasses": []
+}

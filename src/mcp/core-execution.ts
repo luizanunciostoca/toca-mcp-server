@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditEvent, AuditSink } from '../core/audit.js';
+import type { AutonomyRuntimeContextResolver } from '../core/autonomy-runtime-context.js';
 import { executeTool, type ProviderReadbackResult } from '../core/executor.js';
 import { ExecutionError } from '../core/errors.js';
 import { authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
@@ -49,6 +50,7 @@ export interface CoreExecutionDependencies {
   readonly auditSink: AuditSink;
   readonly approvalStore?: ApprovalStore;
   readonly createExecutionId?: () => string;
+  readonly autonomyContextResolver?: AutonomyRuntimeContextResolver;
 }
 
 export interface CoreExecuteInput {
@@ -153,11 +155,16 @@ export async function executeCoreCapability(
       }
     : undefined;
 
+  const autonomyContext = dependencies.autonomyContextResolver
+    ? await dependencies.autonomyContextResolver({ tool: resolved.tool, identity })
+    : undefined;
   const policyContext = {
     identity,
     ...(resolved.targetAccount ? { connectedAccount: resolved.targetAccount } : {}),
     descriptorSha256: resolved.descriptorSha256,
+    ...(resolved.idempotencyKey ? { idempotencyKey: resolved.idempotencyKey } : {}),
     requiredApprovalScope: [resolved.capabilityId],
+    ...(autonomyContext ?? {}),
     ...(resolved.financialContext
       ? {
           financialAmountMinor: resolved.financialContext.amountMinor,
@@ -213,6 +220,7 @@ export async function executeCoreCapability(
     action,
     ...(approvalExecution ? { approvalExecution } : {}),
     createExecutionId: () => executionId,
+    enforceOperationalReadiness: Boolean(dependencies.autonomyContextResolver),
   });
 
   return {

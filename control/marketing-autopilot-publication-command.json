@@ -19,6 +19,6 @@
   "approvalMode": "EXPLICIT_APPROVAL",
   "approvalStatus": "PENDING_REVIEW",
   "approvedRequestSha256": "",
-  "schedulingPolicy": "SHARE_NOW",
-  "publicationIntent": "SHARE_NOW"
+  "schedulingPolicy": "TOCA_MANAGED_SCHEDULING",
+  "publicationIntent": "TOCA_SCHEDULE"
 }
