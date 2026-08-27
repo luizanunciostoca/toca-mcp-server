@@ -145,11 +145,9 @@ function antiRepeatScore(
 function weightedScore(components: SunsetStoryScoreComponents): number {
   const value =
     components.subjectPreservation * SUNSET_TEMPLATE_SELECTION_WEIGHTS.subjectPreservation +
-    components.textSpaceCompatibility *
-      SUNSET_TEMPLATE_SELECTION_WEIGHTS.textSpaceCompatibility +
+    components.textSpaceCompatibility * SUNSET_TEMPLATE_SELECTION_WEIGHTS.textSpaceCompatibility +
     components.collisionClearance * SUNSET_TEMPLATE_SELECTION_WEIGHTS.collisionClearance +
-    components.semanticCompatibility *
-      SUNSET_TEMPLATE_SELECTION_WEIGHTS.semanticCompatibility +
+    components.semanticCompatibility * SUNSET_TEMPLATE_SELECTION_WEIGHTS.semanticCompatibility +
     components.contrastReadability * SUNSET_TEMPLATE_SELECTION_WEIGHTS.contrastReadability +
     components.cropQuality * SUNSET_TEMPLATE_SELECTION_WEIGHTS.cropQuality +
     components.antiRepeat * SUNSET_TEMPLATE_SELECTION_WEIGHTS.antiRepeat;
@@ -163,9 +161,7 @@ function scoreTemplate(
   const history = request.history ?? [];
   const cropPlan = planSunsetStoryCrop(request.profile, template);
   const rejectionReasons: string[] = [];
-  if (
-    request.profile.crop9x16Fitness < SUNSET_TEMPLATE_SELECTION_THRESHOLDS.minimumCropFitness
-  ) {
+  if (request.profile.crop9x16Fitness < SUNSET_TEMPLATE_SELECTION_THRESHOLDS.minimumCropFitness) {
     rejectionReasons.push('CROP_9X16_FITNESS_TOO_LOW');
   }
   if (
@@ -184,8 +180,7 @@ function scoreTemplate(
     collisionClearance: (1 - cropPlan.protectedOverlap) * 100,
     semanticCompatibility: semanticScore(template, request.profile, request.intent),
     contrastReadability: contrastScore(template, request.profile),
-    cropQuality:
-      request.profile.crop9x16Fitness * 0.6 + Math.min(100, cropPlan.planScore) * 0.4,
+    cropQuality: request.profile.crop9x16Fitness * 0.6 + Math.min(100, cropPlan.planScore) * 0.4,
     antiRepeat: antiRepeatScore(template.templateId, history),
   };
   const hardRejected = rejectionReasons.length > 0;
