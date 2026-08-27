@@ -1,0 +1,64 @@
+name: Sunset Format Helper
+
+on:
+  push:
+    branches:
+      - docs/sunset-template-masters-v1-v9-20260827-r4
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format exact Sunset contract files
+        run: |
+          pnpm prettier --write \
+            control/creative-standards/templates/sunset-template-master.v1.json \
+            control/creative-standards/templates/sunset-template-master.v2.json \
+            control/creative-standards/templates/sunset-template-master.v4.json \
+            control/creative-standards/templates/sunset-template-master.v5.json \
+            control/creative-standards/templates/sunset-template-master.v6.json \
+            control/creative-standards/templates/sunset-template-master.v7.json \
+            control/creative-standards/templates/sunset-template-master.v8.json \
+            control/creative-standards/templates/sunset-template-master.v9.json \
+            docs/architecture/templates/sunset-template-master-v1.md \
+            docs/architecture/templates/sunset-template-master-v2.md
+      - name: Commit formatting only when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "SUNSET_FORMAT_NO_CHANGES=1"
+            exit 0
+          fi
+          git config user.name "TOCA OS CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            control/creative-standards/templates/sunset-template-master.v1.json \
+            control/creative-standards/templates/sunset-template-master.v2.json \
+            control/creative-standards/templates/sunset-template-master.v4.json \
+            control/creative-standards/templates/sunset-template-master.v5.json \
+            control/creative-standards/templates/sunset-template-master.v6.json \
+            control/creative-standards/templates/sunset-template-master.v7.json \
+            control/creative-standards/templates/sunset-template-master.v8.json \
+            control/creative-standards/templates/sunset-template-master.v9.json \
+            docs/architecture/templates/sunset-template-master-v1.md \
+            docs/architecture/templates/sunset-template-master-v2.md
+          git commit -m "style(stories): format Sunset template contracts"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
