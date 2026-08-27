@@ -30,9 +30,16 @@ describe('Sunset Story manual-derived typography', () => {
     });
   });
 
-  it('uses the heavy geometric display family for V2 and V3 headlines', () => {
+  it('uses the heavy geometric display family for the canonical V2 and V3 headline IDs', () => {
     expect(
-      resolveSunsetStoryManualTypography('SUNSET_TEMPLATE_MASTER_V2', 'ELEMENTS.HEADLINE.LINE1'),
+      resolveSunsetStoryManualTypography('SUNSET_TEMPLATE_MASTER_V2', 'ELEMENTS.DISPLAYLINE1'),
+    ).toMatchObject({
+      fontRole: 'GEOMETRIC_SANS_DISPLAY_HEAVY',
+      fontWeight: 900,
+      letterSpacingEm: -0.03,
+    });
+    expect(
+      resolveSunsetStoryManualTypography('SUNSET_TEMPLATE_MASTER_V2', 'ELEMENTS.DISPLAYLINE2'),
     ).toMatchObject({
       fontRole: 'GEOMETRIC_SANS_DISPLAY_HEAVY',
       fontWeight: 900,
