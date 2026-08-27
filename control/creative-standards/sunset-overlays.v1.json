@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "policyId": "SUNSET_OVERLAY_MANIFEST_V1",
+  "status": "PINNING_REQUIRED",
+  "entries": [
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V1", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V2", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V3", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V4", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V5", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V6", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V7", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V8", "status": "PENDING_ASSET_PIN" },
+    { "templateId": "SUNSET_TEMPLATE_MASTER_V9", "status": "PENDING_ASSET_PIN" }
+  ],
+  "invariants": [
+    "OVERLAY_MUST_BE_1080X1920_PNG_WITH_ALPHA",
+    "OVERLAY_SHA256_MUST_BE_PINNED",
+    "OVERLAY_MUST_CONTAIN_ONLY_APPROVED_FIXED_GRAPHICS",
+    "EDITOR_GUIDES_MUST_BE_ABSENT",
+    "OFFICIAL_BRAND_ASSETS_ONLY",
+    "NO_RUNTIME_AI_LAYOUT_RECONSTRUCTION"
+  ],
+  "runtimeEligible": false
+}
