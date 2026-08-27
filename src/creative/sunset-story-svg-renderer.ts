@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { SunsetStoryRenderPlan } from './sunset-story-render-plan.js';
+import {
+  resolveSunsetStoryManualTypography,
+  type SunsetStoryTypographyAssignment,
+} from './sunset-story-typography.js';
 
 export interface SunsetStoryOfficialBrandAsset {
   readonly assetId: string;
@@ -96,11 +100,16 @@ function textX(
   return region.x + region.width / 2;
 }
 
-function renderText(item: SunsetStoryRenderPlan['texts'][number], fontFamily: string): string {
+function renderText(
+  item: SunsetStoryRenderPlan['texts'][number],
+  fontFamily: string,
+  typography: SunsetStoryTypographyAssignment,
+): string {
   const size = fontSizeForRegion(item.text, item.region.width, item.region.height, item.fontScale);
   const x = textX(item.alignment, item.region);
   const y = item.region.y + item.region.height / 2;
-  return `<text x="${x}" y="${y}" fill="${escapeXml(item.color)}" font-family="${escapeXml(fontFamily)}" font-size="${size}" text-anchor="${textAnchor(item.alignment)}" dominant-baseline="middle">${escapeXml(item.text)}</text>`;
+  const letterSpacingPx = size * typography.letterSpacingEm;
+  return `<text x="${x}" y="${y}" fill="${escapeXml(item.color)}" font-family="${escapeXml(fontFamily)}" font-size="${size}" font-weight="${typography.fontWeight}" letter-spacing="${letterSpacingPx}" text-anchor="${textAnchor(item.alignment)}" dominant-baseline="middle">${escapeXml(item.text)}</text>`;
 }
 
 function scaledAssetBox(
@@ -125,7 +134,15 @@ export class SunsetStoryDynamicSvgRenderer {
 
   async render(request: SunsetStorySvgRenderRequest): Promise<SunsetStorySvgRenderResult> {
     const plan = request.plan;
-    const fontRoles = [...new Set(plan.texts.map((item) => item.fontRole))];
+    const typographyById = new Map(
+      plan.texts.map((item) => [
+        item.id,
+        resolveSunsetStoryManualTypography(plan.templateId, item.id),
+      ]),
+    );
+    const fontRoles = [
+      ...new Set([...typographyById.values()].map((assignment) => assignment.fontRole)),
+    ];
     const pinnedFonts = await Promise.all(fontRoles.map((role) => this.fonts.resolve(role)));
     const fontsByRole = new Map(pinnedFonts.map((font) => [font.fontRole, font]));
     const fontShas: Record<string, string> = {};
@@ -156,9 +173,11 @@ export class SunsetStoryDynamicSvgRenderer {
     const shapes = plan.shapes.map(renderShape).join('');
     const textElements = plan.texts
       .map((item) => {
-        const font = fontsByRole.get(item.fontRole);
-        if (!font) throw new Error(`SUNSET_RENDER_FONT_NOT_RESOLVED:${item.fontRole}`);
-        return renderText(item, font.family);
+        const typography = typographyById.get(item.id);
+        if (!typography) throw new Error(`SUNSET_RENDER_TYPOGRAPHY_NOT_RESOLVED:${item.id}`);
+        const font = fontsByRole.get(typography.fontRole);
+        if (!font) throw new Error(`SUNSET_RENDER_FONT_NOT_RESOLVED:${typography.fontRole}`);
+        return renderText(item, font.family, typography);
       })
       .join('');
     const assetElements = plan.assets
