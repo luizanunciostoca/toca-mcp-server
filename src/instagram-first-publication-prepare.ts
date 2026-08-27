@@ -1,8 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import * as z from 'zod/v4';
 import { loadConfig } from './config.js';
 import { GcsPublicationAssetStager } from './providers/gcp/gcs-publication-asset-stager.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 import { createInstagramPublicationApprovalManifest } from './worker/instagram-publication-approval-manifest.js';
+import { resolvePublishNowCreativeTruthRequestFields } from './worker/instagram-publish-now-creative-truth.js';
 
 const envSchema = z.object({
   GCP_PROJECT_ID: z.string().min(1),
@@ -47,6 +49,7 @@ const caption = Buffer.from(env.INSTAGRAM_FIRST_PUBLICATION_CAPTION_BASE64, 'bas
 );
 if (!caption.trim()) throw new Error('INSTAGRAM_FIRST_PUBLICATION_CAPTION_EMPTY');
 
+const creativeTruthFields = await readMatchingPublishNowCreativeTruthFields(asset.sha256);
 const manifest = createInstagramPublicationApprovalManifest({
   account: {
     pageId,
@@ -57,11 +60,44 @@ const manifest = createInstagramPublicationApprovalManifest({
   caption,
   correlationId: env.INSTAGRAM_PUBLICATION_CORRELATION_ID,
   idempotencyKey: env.INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY,
+  ...(creativeTruthFields ?? {}),
 });
 
 process.stdout.write(
   `INSTAGRAM_FIRST_PUBLICATION_PREPARE_RESULT=${JSON.stringify({ asset, manifest })}\n`,
 );
+
+async function readMatchingPublishNowCreativeTruthFields(stagedAssetSha256: string) {
+  let raw: string;
+  try {
+    raw = await readFile('control/marketing-publish-now-command.json', 'utf8');
+  } catch (error) {
+    if (isMissingFile(error)) return undefined;
+    throw error;
+  }
+
+  let command: unknown;
+  try {
+    command = JSON.parse(raw);
+  } catch {
+    throw new Error('INSTAGRAM_PUBLISH_NOW_COMMAND_JSON_INVALID');
+  }
+
+  return resolvePublishNowCreativeTruthRequestFields(command, {
+    correlationId: env.INSTAGRAM_PUBLICATION_CORRELATION_ID,
+    idempotencyKey: env.INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY,
+    stagedAssetSha256,
+  });
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
 
 function findPageIdForInstagramAccount(value: unknown, instagramAccountId: string): string {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

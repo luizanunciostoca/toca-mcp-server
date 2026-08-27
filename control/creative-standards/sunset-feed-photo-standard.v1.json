@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+  "standardId": "SUNSET_FEED_PHOTO_V1",
+  "standardVersion": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "SINGLE_IMAGE"
+  },
+  "sourceOfTruth": {
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
+  },
+  "creativeClass": "PHOTO_ONLY",
+  "canvases": [
+    { "width": 1080, "height": 1350, "aspectRatio": "4:5", "priority": 1 },
+    { "width": 1080, "height": 1080, "aspectRatio": "1:1", "priority": 2 }
+  ],
+  "photography": {
+    "realVenueVerifiedAssetRequired": true,
+    "marketingReadyMasterRequired": true,
+    "sourceFaithfulDerivativeOnly": true,
+    "syntheticVenueReplacementForbidden": true,
+    "generativeSceneExpansionForbidden": true
+  },
+  "composition": {
+    "textOverlayAllowed": false,
+    "logoOverlayAllowed": false,
+    "deterministicBrandInsertion": false,
+    "captionCarriesMessageAndCta": true
+  },
+  "allowedTransformations": [
+    "SOURCE_FAITHFUL_RESTORATION",
+    "CROP",
+    "RESIZE",
+    "COLORSPACE_NORMALIZATION",
+    "JPEG_EXPORT"
+  ],
+  "qualityGate": {
+    "failClosed": true,
+    "requiresParentPolicyGates": true,
+    "rejectOn": [
+      "UNVERIFIED_VENUE",
+      "SYNTHETIC_VENUE_REPLACEMENT",
+      "SCENE_EXPANSION",
+      "ARCHITECTURE_DRIFT",
+      "ASSET_LINEAGE_MISSING",
+      "WRONG_DIMENSIONS"
+    ]
+  }
+}
