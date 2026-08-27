@@ -19,6 +19,8 @@ export interface SunsetStoryBrandAssetResolverPort {
 export interface SunsetStoryPinnedFont {
   readonly fontRole: string;
   readonly family: string;
+  readonly mimeType: 'font/ttf';
+  readonly bytes: Uint8Array;
   readonly sha256: string;
 }
 
@@ -58,8 +60,17 @@ function escapeXml(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
+function escapeCssString(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+}
+
 function dataUri(mimeType: string, bytes: Uint8Array): string {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+}
+
+function renderFontFace(font: SunsetStoryPinnedFont): string {
+  const family = escapeCssString(font.family);
+  return `@font-face{font-family:"${family}";src:url("${dataUri(font.mimeType, font.bytes)}") format("truetype");font-style:normal;font-weight:100 900;font-display:block;}`;
 }
 
 function renderShape(shape: SunsetStoryRenderPlan['shapes'][number]): string {
@@ -147,10 +158,14 @@ export class SunsetStoryDynamicSvgRenderer {
     const fontsByRole = new Map(pinnedFonts.map((font) => [font.fontRole, font]));
     const fontShas: Record<string, string> = {};
     for (const font of pinnedFonts) {
-      if (!/^[a-f0-9]{64}$/i.test(font.sha256)) throw new Error('SUNSET_RENDER_FONT_SHA_INVALID');
+      assertPinnedSha(font.bytes, font.sha256, 'SUNSET_RENDER_FONT');
       if (font.family.trim().length === 0) throw new Error('SUNSET_RENDER_FONT_FAMILY_MISSING');
       fontShas[font.fontRole] = font.sha256.toLowerCase();
     }
+    const uniqueFonts = [
+      ...new Map(pinnedFonts.map((font) => [font.sha256.toLowerCase(), font])).values(),
+    ];
+    const fontStyles = `<style type="text/css">${uniqueFonts.map(renderFontFace).join('')}</style>`;
 
     const uniqueAssetIds = [...new Set(plan.assets.map((item) => item.assetId))];
     const resolvedAssets = await Promise.all(
@@ -189,7 +204,7 @@ export class SunsetStoryDynamicSvgRenderer {
       })
       .join('');
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">${background}${darkening}${shapes}${textElements}${assetElements}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">${fontStyles}${background}${darkening}${shapes}${textElements}${assetElements}</svg>`;
     const bytes = new TextEncoder().encode(svg);
     return {
       mimeType: 'image/svg+xml',
