@@ -8,28 +8,32 @@ const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 describe('Vertex Gemini Sunset Story planner', () => {
   it('sends the exact source photo bytes and MIME type to the multimodal planner', async () => {
     let observedBody = '';
-    const fetchImpl: typeof fetch = async (_input, init) => {
-      if (typeof init?.body !== 'string') throw new Error('TEST_VERTEX_BODY_MISSING');
+    const fetchImpl: typeof fetch = (_input, init) => {
+      if (typeof init?.body !== 'string') {
+        return Promise.reject(new Error('TEST_VERTEX_BODY_MISSING'));
+      }
       observedBody = init.body;
-      return new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    text: JSON.stringify({
-                      fontScales: [],
-                      assetScales: [],
-                      localDarkening: [],
-                    }),
-                  },
-                ],
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        fontScales: [],
+                        assetScales: [],
+                        localDarkening: [],
+                      }),
+                    },
+                  ],
+                },
               },
-            },
-          ],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
       );
     };
 
