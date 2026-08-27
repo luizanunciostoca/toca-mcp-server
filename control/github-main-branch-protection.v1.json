@@ -8,11 +8,11 @@
     "required_status_checks": {
       "strict": true,
       "contexts": [
-        "Quality Gate / quality",
-        "Security Supply Chain / dependency-review",
-        "Security Supply Chain / vulnerability-secret-container-sbom",
-        "Security Supply Chain / codeql",
-        "Autonomy Safety / autonomy-safety"
+        "quality",
+        "dependency-review",
+        "vulnerability-secret-container-sbom",
+        "codeql",
+        "autonomy-safety"
       ]
     },
     "enforce_admins": true,

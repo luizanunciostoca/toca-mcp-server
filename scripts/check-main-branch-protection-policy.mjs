@@ -36,31 +36,31 @@ for (const [field, expected] of Object.entries({
 
 const workflows = [
   {
-    context: 'Quality Gate / quality',
+    context: 'quality',
     path: '.github/workflows/quality.yml',
     workflow: 'Quality Gate',
     job: 'quality',
   },
   {
-    context: 'Security Supply Chain / dependency-review',
+    context: 'dependency-review',
     path: '.github/workflows/security-supply-chain.yml',
     workflow: 'Security Supply Chain',
     job: 'dependency-review',
   },
   {
-    context: 'Security Supply Chain / vulnerability-secret-container-sbom',
+    context: 'vulnerability-secret-container-sbom',
     path: '.github/workflows/security-supply-chain.yml',
     workflow: 'Security Supply Chain',
     job: 'vulnerability-secret-container-sbom',
   },
   {
-    context: 'Security Supply Chain / codeql',
+    context: 'codeql',
     path: '.github/workflows/security-supply-chain.yml',
     workflow: 'Security Supply Chain',
     job: 'codeql',
   },
   {
-    context: 'Autonomy Safety / autonomy-safety',
+    context: 'autonomy-safety',
     path: '.github/workflows/autonomy-safety.yml',
     workflow: 'Autonomy Safety',
     job: 'autonomy-safety',
