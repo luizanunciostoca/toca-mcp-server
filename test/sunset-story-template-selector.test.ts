@@ -73,9 +73,7 @@ function fakeCandidate(
   return {
     templateId,
     templateClass:
-      templateId === 'SUNSET_TEMPLATE_MASTER_V9'
-        ? 'SUNSET_VIEW_SCENERY'
-        : 'SUNSET_HERO_LIFESTYLE',
+      templateId === 'SUNSET_TEMPLATE_MASTER_V9' ? 'SUNSET_VIEW_SCENERY' : 'SUNSET_HERO_LIFESTYLE',
     score,
     hardRejected: false,
     rejectionReasons: [],
