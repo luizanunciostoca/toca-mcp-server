@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "policyId": "SUNSET_TEMPLATE_SELECTION_POLICY_V1",
+  "status": "ACTIVE_CANONICAL_CANDIDATE",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "STORIES",
+    "templateIds": [
+      "SUNSET_TEMPLATE_MASTER_V1",
+      "SUNSET_TEMPLATE_MASTER_V2",
+      "SUNSET_TEMPLATE_MASTER_V3",
+      "SUNSET_TEMPLATE_MASTER_V4",
+      "SUNSET_TEMPLATE_MASTER_V5",
+      "SUNSET_TEMPLATE_MASTER_V6",
+      "SUNSET_TEMPLATE_MASTER_V7",
+      "SUNSET_TEMPLATE_MASTER_V8",
+      "SUNSET_TEMPLATE_MASTER_V9"
+    ]
+  },
+  "selectionFlow": [
+    "ANALYZE_IMAGE",
+    "BUILD_IMAGE_PROFILE",
+    "APPLY_HARD_COMPATIBILITY_FILTERS",
+    "PLAN_TEMPLATE_SPECIFIC_CROP",
+    "SCORE_ALL_TEMPLATES",
+    "RANK_CANDIDATES",
+    "PREVIEW_TOP_3_WHEN_EVALUATOR_AVAILABLE",
+    "APPLY_ANTI_REPEAT_PENALTY",
+    "CONFIDENCE_GATE",
+    "SELECT_OR_REQUIRE_REVIEW"
+  ],
+  "weights": {
+    "subjectPreservation": 0.3,
+    "textSpaceCompatibility": 0.2,
+    "collisionClearance": 0.2,
+    "semanticCompatibility": 0.1,
+    "contrastReadability": 0.1,
+    "cropQuality": 0.05,
+    "antiRepeat": 0.05
+  },
+  "thresholds": {
+    "autoSelectScore": 85,
+    "reviewScore": 70,
+    "minimumWinningMargin": 5,
+    "minimumCropFitness": 35,
+    "minimumSubjectCoverage": 0.78
+  },
+  "previewEvaluation": {
+    "candidateCount": 3,
+    "baseScoreWeight": 0.85,
+    "previewQualityWeight": 0.15,
+    "blockingFindingFailsCandidateClosed": true
+  },
+  "antiRepeat": {
+    "sameAsLatestPenalty": 30,
+    "recentThreePenaltyPerUse": 8,
+    "recentThreePenaltyCap": 25,
+    "antiRepeatMayNeverOverrideHardCompatibility": true
+  },
+  "invariants": [
+    "PHOTO_IS_MOVED_OR_CROPPED_TO_FIT_TEMPLATE",
+    "TEMPLATE_LAYOUT_MUST_NOT_MOVE_TO_FIT_PHOTO",
+    "PRIMARY_SUBJECT_MUST_BE_PRESERVED",
+    "PROTECTED_LAYOUT_REGIONS_MUST_REMAIN_CLEAR",
+    "EDITOR_ONLY_GUIDES_MUST_NOT_APPEAR_IN_FINAL_EXPORT",
+    "OFFICIAL_LOGOS_ONLY",
+    "AI_MUST_NOT_RECONSTRUCT_LOGOS",
+    "TEMPLATE_RUNTIME_ELIGIBILITY_REMAINS_FALSE_UNTIL_RENDERER_AND_VISUAL_REGRESSION_CLOSEOUT"
+  ],
+  "failClosed": {
+    "noSafeTemplate": "REQUIRE_HUMAN_REVIEW_OR_NEW_ASSET",
+    "lowWinningMargin": "REQUIRE_REVIEW",
+    "previewBlockingFinding": "REJECT_CANDIDATE",
+    "invalidImageAnalysis": "REJECT_SELECTION"
+  }
+}
