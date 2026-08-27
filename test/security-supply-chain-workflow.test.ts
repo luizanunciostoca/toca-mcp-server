@@ -18,6 +18,24 @@ describe('Security Supply Chain workflow', () => {
     );
   });
 
+  it('installs the exact Gitleaks CLI with a pinned SHA-256 before the ancestry scan', () => {
+    const installStep = workflow.indexOf(
+      'Install verified Gitleaks CLI for exact candidate ancestry',
+    );
+    const fullAncestryStep = workflow.indexOf('Scan complete candidate ancestry for secrets');
+
+    expect(installStep).toBeGreaterThanOrEqual(0);
+    expect(fullAncestryStep).toBeGreaterThan(installStep);
+    expect(workflow.slice(installStep, fullAncestryStep)).toContain('VERSION=8.24.3');
+    expect(workflow.slice(installStep, fullAncestryStep)).toContain(
+      '9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c',
+    );
+    expect(workflow.slice(installStep, fullAncestryStep)).toContain('sha256sum --check --strict');
+    expect(workflow.slice(installStep, fullAncestryStep)).toContain(
+      'gitleaks version | grep -F "$VERSION"',
+    );
+  });
+
   it('always scans the exact candidate HEAD ancestry and uploads evidence', () => {
     const fullAncestryStep = workflow.indexOf('Scan complete candidate ancestry for secrets');
     const evidenceStep = workflow.indexOf('Upload complete-history secret-scan evidence');
