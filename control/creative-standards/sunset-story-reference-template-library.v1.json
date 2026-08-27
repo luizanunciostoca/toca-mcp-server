@@ -1,0 +1,517 @@
+{
+  "library_id": "SUNSET_REFERENCE_TEMPLATE_LIBRARY",
+  "version": "1.0",
+  "status": "ACTIVE_DRAFT_FOR_HUMAN_APPROVAL",
+  "created_at": "2026-08-26",
+  "source": "11_USER_ATTACHED_SUNSET_STORIES",
+  "purpose": "Biblioteca de templates visuais reutilizáveis para Stories Sunset. Cada referência deve ser tratada como um template distinto; não aplicar um compositor único ao lote.",
+  "font_policy": {
+    "headline_family_candidate": "BODONI_DIDOT_CLASS",
+    "headline_runtime_candidate": "Bodoni Moda",
+    "functional_sans_family_candidate": "MONTSERRAT_AVENIR_CLASS",
+    "functional_sans_runtime_candidate": "Montserrat",
+    "exact_font_status": "VISUAL_MATCH_CANDIDATE_NOT_PROVEN_FROM_FLATTENED_PNG",
+    "prohibition": "Não declarar identidade tipográfica pixel-identical sem arquivo editável ou pacote de fontes original.",
+    "rule": "No máximo duas famílias: serif editorial para headline aspiracional e sans geométrica para apoio, horário e CTA."
+  },
+  "global_rules": {
+    "canvas": [1080, 1920],
+    "photo": "FULL_BLEED_REAL_PHOTOGRAPHY",
+    "headline_case": "TITLE_CASE_BY_DEFAULT",
+    "contrast_rule": "BLACK_ON_LIGHT_FREE_AREA_WHITE_ON_DARK_FREE_AREA",
+    "text_placement": "Só em safe_regions analisadas individualmente; nunca sobre faces, mãos, drinks, luminárias, sol, logos existentes ou elementos essenciais.",
+    "footer": "Usar somente logos oficiais white do Brand Kit; escala e modo variam por template.",
+    "prohibited": [
+      "global_black_scrim",
+      "technical_label",
+      "automatic_uppercase_outside_functional_template",
+      "heavy_black_footer_band",
+      "fixed_text_coordinates_for_all_images",
+      "ai_recreated_logos"
+    ],
+    "required_fields": [
+      "reference_template_id",
+      "reference_file",
+      "template_family",
+      "headline_font_role",
+      "sans_font_role",
+      "layout_anchor",
+      "safe_regions",
+      "protected_regions",
+      "headline_color",
+      "badge_color",
+      "footer_mode",
+      "overlap_check",
+      "contrast_check"
+    ]
+  },
+  "templates": [
+    {
+      "reference_template_id": "SUNSET_REF_01_ORANGE_INFO_HOURS",
+      "reference_file": "66698419-A7D5-4DD9-A042-A656D61F7552.png",
+      "reference_dimensions": [941, 1672],
+      "template_family": "INFO_HOURS_ORANGE",
+      "visual_role": "Informar o produto Sunset e seu horário com impacto de campanha.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": [
+          "time_badge",
+          "functional_headline",
+          "support_strip",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "TOP_CENTER_TO_LOWER_CENTER",
+        "orange_usage": "Bloco laranja amplo localizado no terço inferior ou faixa laranja de informação; não cobrir o sujeito principal.",
+        "support_treatment": "Uma ou duas faixas brancas individuais, alinhadas à esquerda ou centralizadas.",
+        "cta_treatment": "Caixa de contorno branco fino, sem preenchimento pesado.",
+        "footer_mode": "FOUR_LOGOS_WHITE_OR_REDUCED_IF_TOCA_TOP_SIGNATURE"
+      },
+      "typography": {
+        "headline_role": "Sans funcional semibold para PÔR DO SOL quando o título for informativo; serif Bodoni/Didot pode ser usada em subtítulo aspiracional.",
+        "support_role": "Montserrat Regular/Medium candidate.",
+        "time_role": "Montserrat Semibold candidate, caixa alta.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "FUNCTIONAL_UPPERCASE_ALLOWED_ONLY_HERE"
+      },
+      "safe_regions": [
+        { "name": "top_time", "bbox_norm": [0.28, 0.06, 0.78, 0.15] },
+        { "name": "headline_clear_area", "bbox_norm": [0.1, 0.18, 0.9, 0.48] },
+        { "name": "support_transition", "bbox_norm": [0.08, 0.5, 0.92, 0.68] }
+      ],
+      "protected_regions": ["hero_subject", "face_or_product", "critical_sky_or_horizon"],
+      "selection_rules": [
+        "Usar quando o slot precisa comunicar horário do Sunset.",
+        "Usar em fotos com área de transição limpa para bloco laranja."
+      ],
+      "negative_constraints": [
+        "Não usar headline serif pequena no topo.",
+        "Não usar faixa preta global.",
+        "Não inserir label técnico."
+      ],
+      "quality_gate": "TIME_READABLE_AND_ORANGE_BLOCK_CONTEXTUAL"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_02_HERO_DARK_FOOTER",
+      "reference_file": "79841366-D602-4109-8398-56B6DB4DE542.png",
+      "reference_dimensions": [941, 1672],
+      "template_family": "HERO_SERIF_DARK",
+      "visual_role": "Hero emocional com fotografia protagonista e assinatura institucional no rodapé escuro.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": [
+          "optional_badge",
+          "hero_headline",
+          "optional_support",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "CENTER_OR_LOWER_CENTER",
+        "orange_usage": "Optional, only as a small accent or natural warm grade.",
+        "support_treatment": "None or one short white translucent strip.",
+        "cta_treatment": "Outlined white, centered below headline.",
+        "footer_mode": "FOUR_LOGOS_WHITE_OVER_LOCAL_DARKENING"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate, regular/light weight.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Optional Montserrat Medium.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "center_negative_space", "bbox_norm": [0.12, 0.25, 0.88, 0.64] },
+        { "name": "lower_dark_transition", "bbox_norm": [0.08, 0.58, 0.92, 0.78] }
+      ],
+      "protected_regions": ["faces", "hands", "hero_subject", "bright_sun_or_light_source"],
+      "selection_rules": [
+        "Usar para cenas de pessoas, encontro ou atmosfera noturna.",
+        "Escolher quando a própria foto oferece área escura para CTA e footer."
+      ],
+      "negative_constraints": [
+        "Não aplicar bloco laranja obrigatório.",
+        "Não usar headline em caixa alta.",
+        "Não cobrir o rosto do sujeito."
+      ],
+      "quality_gate": "HERO_FOCAL_POINT_VISIBLE_AND_CTA_CONTRASTED"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_03_ORANGE_LOWER_THIRD",
+      "reference_file": "CD01BC5A-F359-45E8-9A64-C7E461B33DAA.png",
+      "reference_dimensions": [941, 1672],
+      "template_family": "ORANGE_LOWER_THIRD",
+      "visual_role": "Peça de campanha com transição laranja forte e assinatura completa de marcas.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED_WITH_ORANGE_LOWER_THIRD",
+        "element_order": [
+          "optional_badge",
+          "hero_headline",
+          "optional_support",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "CENTER_TO_LOWER_CENTER",
+        "orange_usage": "Bloco/gradiente laranja do terço inferior, integrado à fotografia.",
+        "support_treatment": "White strips only when copy needs explanation.",
+        "cta_treatment": "White outlined box centered in orange transition.",
+        "footer_mode": "FOUR_LOGOS_WHITE_ON_ORANGE"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate, large and title case.",
+        "support_role": "Montserrat Regular/Medium candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "upper_negative_space", "bbox_norm": [0.08, 0.16, 0.92, 0.44] },
+        { "name": "orange_transition", "bbox_norm": [0.08, 0.55, 0.92, 0.82] }
+      ],
+      "protected_regions": ["hero_subject", "product", "face_or_hands", "sunset_horizon"],
+      "selection_rules": [
+        "Usar para fotos com narrativa de campanha e espaço para uma assinatura laranja.",
+        "Preferir em experiências, drinks ou cenas com grande área negativa."
+      ],
+      "negative_constraints": [
+        "Não transformar todo o canvas em laranja.",
+        "Não usar scrim preto global.",
+        "Não reduzir a headline a um label técnico."
+      ],
+      "quality_gate": "ORANGE_TRANSITION_SUPPORTS_COPY_WITHOUT_ERASING_PHOTO"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_04_LIGHT_ORANGE_HEADLINE",
+      "reference_file": "IMG_0350.png",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "LIGHT_FIELD_ORANGE_HEADLINE",
+      "visual_role": "Campanha de alto impacto com headline laranja sobre área clara da fotografia.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": [
+          "time_badge",
+          "orange_headline",
+          "support_orange_on_white",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "TOP_OR_CENTER_NEGATIVE_SPACE",
+        "orange_usage": "Headline ou faixa laranja sobre fundo claro; bloco limitado à zona de respiro.",
+        "support_treatment": "White strip with orange/dark sans text.",
+        "cta_treatment": "Thin white outline where background permits; otherwise dark outline on light field.",
+        "footer_mode": "FOUR_LOGOS_WHITE_OR_LOCAL_DARKENING"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot serif or high-contrast campaign display; orange when light field demands it.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Montserrat Medium candidate.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "light_negative_field", "bbox_norm": [0.08, 0.12, 0.92, 0.46] },
+        { "name": "support_field", "bbox_norm": [0.08, 0.48, 0.92, 0.68] }
+      ],
+      "protected_regions": ["faces", "hands", "bright_highlights", "product_or_subject"],
+      "selection_rules": [
+        "Usar quando a foto tem fundo claro e vazio suficiente para texto laranja/escuro.",
+        "Usar para campanha, convite ou anúncio de atmosfera."
+      ],
+      "negative_constraints": [
+        "Não usar texto branco sobre fundo claro.",
+        "Não criar uma faixa preta para resolver contraste.",
+        "Não cobrir o sujeito."
+      ],
+      "quality_gate": "HEADLINE_COLOR_MATCHES_LIGHT_FIELD_AND_SUBJECT_REMAINS_VISIBLE"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_05_CTA_ABOVE_HERO",
+      "reference_file": "IMG_0604.png",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "FULLBLEED_CTA_TOP",
+      "visual_role": "Peça editorial limpa em que CTA precede a headline e a fotografia continua dominante.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED_NO_ORANGE_BLOCK",
+        "element_order": [
+          "optional_badge",
+          "outlined_cta",
+          "hero_headline",
+          "support_strips",
+          "footer_logos"
+        ],
+        "layout_anchor": "CENTER_OR_LOWER_CENTER",
+        "orange_usage": "Only as small accent in badge or copy, never as global block.",
+        "support_treatment": "Individual white strips with orange or dark sans text.",
+        "cta_treatment": "Outlined white CTA above or beside headline.",
+        "footer_mode": "FOUR_LOGOS_WHITE_SMALL"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "cta_clear_area", "bbox_norm": [0.1, 0.22, 0.9, 0.35] },
+        { "name": "hero_headline_area", "bbox_norm": [0.08, 0.38, 0.92, 0.7] }
+      ],
+      "protected_regions": ["faces", "hands", "hero_subject", "product"],
+      "selection_rules": [
+        "Usar quando a foto é forte e não precisa de bloco gráfico.",
+        "Usar quando a ação deve ser lida antes da frase aspiracional."
+      ],
+      "negative_constraints": [
+        "Não usar bloco laranja inferior por padrão.",
+        "Não colocar CTA em posição fixa se o espaço estiver ocupado."
+      ],
+      "quality_gate": "CTA_AND_HEADLINE_SEPARATED_WITH_PHOTO_DOMINANT"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_06_SILHOUETTE_LOWER_HEADLINE",
+      "reference_file": "IMG_0965.jpeg",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "SILHOUETTE_LOWER_HEADLINE",
+      "visual_role": "Peça de atmosfera com grande área negativa e headline na metade inferior.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": ["support_strips", "outlined_cta", "hero_headline", "minimal_footer"],
+        "layout_anchor": "LOWER_CENTER",
+        "orange_usage": "None or very small accent.",
+        "support_treatment": "White strips with orange/dark sans text in middle third.",
+        "cta_treatment": "Outlined CTA above headline.",
+        "footer_mode": "FOUR_LOGOS_WHITE_MINIMAL"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate, white on dark silhouette.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "middle_negative_space", "bbox_norm": [0.08, 0.34, 0.92, 0.58] },
+        { "name": "lower_silhouette_field", "bbox_norm": [0.08, 0.58, 0.92, 0.78] }
+      ],
+      "protected_regions": ["silhouette_subject", "sun", "horizon", "faces_or_hands"],
+      "selection_rules": [
+        "Usar para silhuetas, pôr do sol e paisagens com grande vazio.",
+        "Usar quando headline pode respirar na parte inferior sem cobrir o sujeito."
+      ],
+      "negative_constraints": [
+        "Não posicionar headline no centro do rosto ou sobre o sol.",
+        "Não usar scrim preto uniforme."
+      ],
+      "quality_gate": "LOWER_HEADLINE_CLEARS_SILHOUETTE_AND_HORIZON"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_07_WHITE_STRIPS_LOWER",
+      "reference_file": "IMG_0890.jpeg",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "SUPPORT_STRIPS_LOWER",
+      "visual_role": "Experiência editorial com apoio em strips e headline concentrada abaixo.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": ["support_strips", "outlined_cta", "hero_headline", "footer_logos"],
+        "layout_anchor": "LOWER_LEFT_OR_LOWER_CENTER",
+        "orange_usage": "Accent in support text; no mandatory block.",
+        "support_treatment": "Two or three separate white strips with soft shadow.",
+        "cta_treatment": "Outlined white box adjacent to or above headline.",
+        "footer_mode": "FOUR_LOGOS_WHITE_SMALL"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate.",
+        "support_role": "Montserrat Regular/Medium candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "support_side_field", "bbox_norm": [0.06, 0.28, 0.72, 0.52] },
+        { "name": "headline_lower_field", "bbox_norm": [0.06, 0.56, 0.94, 0.76] }
+      ],
+      "protected_regions": ["faces", "hands", "drink_or_product", "subject_silhouette"],
+      "selection_rules": [
+        "Usar quando o apoio precisa ser lido em partes curtas.",
+        "Usar em fotos com área lateral ou superior livre para strips."
+      ],
+      "negative_constraints": [
+        "Não juntar todo o apoio em uma caixa preta.",
+        "Não centralizar tudo por obrigação."
+      ],
+      "quality_gate": "EACH_SUPPORT_LINE_IS_READABLE_AND_HEADLINE_HAS_CLEAR_SPACE"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_08_ASYMMETRIC_SUPPORT",
+      "reference_file": "IMG_0837.jpeg",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "ASYMMETRIC_SUPPORT_STRIPS",
+      "visual_role": "Peça assimétrica de lifestyle que usa a área negativa lateral para criar ritmo.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED",
+        "element_order": [
+          "optional_badge",
+          "support_strips",
+          "hero_headline",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "TOP_LEFT_OR_LOWER_LEFT",
+        "orange_usage": "Orange text accent or small badge only.",
+        "support_treatment": "White strips aligned to one side, with visible separation between lines.",
+        "cta_treatment": "Outlined CTA near headline, not at fixed global y.",
+        "footer_mode": "FOUR_LOGOS_WHITE_SMALL"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot high-contrast serif candidate.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "lateral_negative_space", "bbox_norm": [0.06, 0.18, 0.6, 0.56] },
+        { "name": "lower_lateral_headline", "bbox_norm": [0.06, 0.56, 0.7, 0.8] }
+      ],
+      "protected_regions": ["main_person", "face", "hands", "architectural_anchor"],
+      "selection_rules": [
+        "Usar para lifestyle com assimetria e área lateral livre.",
+        "Usar quando centralização reduzir a força da fotografia."
+      ],
+      "negative_constraints": [
+        "Não cobrir o personagem principal.",
+        "Não transformar strips em um painel opaco."
+      ],
+      "quality_gate": "ASYMMETRY_IS_INTENTIONAL_AND_MAIN_SUBJECT_UNOBSTRUCTED"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_09_DRINK_ORANGE_BLOCK",
+      "reference_file": "IMG_3138.png",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "DRINK_ORANGE_LOWER_THIRD",
+      "visual_role": "Produto/ritual de drink com bloco laranja forte e headline central na transição.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED_WITH_ORANGE_LOWER_THIRD",
+        "element_order": [
+          "optional_support_strip",
+          "hero_headline",
+          "outlined_cta",
+          "footer_logos"
+        ],
+        "layout_anchor": "LOWER_CENTER",
+        "orange_usage": "Strong orange block rises from lower third up to the product transition, preserving drink shape and label.",
+        "support_treatment": "Optional white strip above block.",
+        "cta_treatment": "Outlined white CTA below headline.",
+        "footer_mode": "FOUR_LOGOS_WHITE_ON_ORANGE_OR_LOCAL_DARKENING"
+      },
+      "typography": {
+        "headline_role": "Bodoni/Didot serif candidate, white over orange transition.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Optional.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "TITLE_CASE"
+      },
+      "safe_regions": [
+        { "name": "product_clear_field", "bbox_norm": [0.08, 0.18, 0.92, 0.55] },
+        { "name": "orange_text_field", "bbox_norm": [0.06, 0.56, 0.94, 0.82] }
+      ],
+      "protected_regions": ["drink", "glass_rim", "hands", "label_or_brand_detail"],
+      "selection_rules": [
+        "Usar para drinks, gastronomia e ritual de consumo.",
+        "Usar quando a fotografia suporta uma transição laranja sem esconder o produto."
+      ],
+      "negative_constraints": [
+        "Não deformar ou redesenhar o produto.",
+        "Não colocar texto sobre o drink principal."
+      ],
+      "quality_gate": "PRODUCT_SHAPE_AND_LABEL_UNCHANGED"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_10_INFO_TOP_LOGO",
+      "reference_file": "IMG_6170.png",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "INFO_HOURS_TOP_LOGO",
+      "visual_role": "Informação funcional com assinatura Toca no topo e rodapé reduzido.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED_WITH_FUNCTIONAL_ORANGE_ZONE",
+        "element_order": [
+          "toca_top_signature",
+          "functional_headline",
+          "time_badge",
+          "support_or_cta",
+          "reduced_footer"
+        ],
+        "layout_anchor": "TOP_RIGHT_TO_CENTER",
+        "orange_usage": "Orange band or block behind the functional message.",
+        "support_treatment": "Minimal; prefer one short sans line.",
+        "cta_treatment": "Optional outlined CTA only if it does not compete with time.",
+        "footer_mode": "THREE_LOGOS_WHITE_WITH_TOCA_TOP"
+      },
+      "typography": {
+        "headline_role": "Montserrat Semibold candidate for functional PÔR DO SOL; optional Bodoni secondary line.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Montserrat Semibold candidate.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "FUNCTIONAL_UPPERCASE_ALLOWED"
+      },
+      "safe_regions": [
+        { "name": "top_logo", "bbox_norm": [0.72, 0.05, 0.96, 0.16] },
+        { "name": "functional_message", "bbox_norm": [0.08, 0.2, 0.92, 0.52] },
+        { "name": "time_area", "bbox_norm": [0.08, 0.5, 0.92, 0.66] }
+      ],
+      "protected_regions": ["hero_subject", "face", "product", "critical_horizon"],
+      "selection_rules": [
+        "Usar quando a informação de horário for o principal objetivo.",
+        "Usar quando a foto tiver área limpa no topo para assinatura Toca."
+      ],
+      "negative_constraints": [
+        "Não repetir quatro logos no footer se Toca já está no topo sem necessidade.",
+        "Não usar headline editorial longa."
+      ],
+      "quality_gate": "TOCA_SIGNATURE_AND_TIME_HIERARCHY_CLEAR"
+    },
+    {
+      "reference_template_id": "SUNSET_REF_11_INFO_ORANGE_BLUE",
+      "reference_file": "IMG_2216.png",
+      "reference_dimensions": [1080, 1920],
+      "template_family": "INFO_ORANGE_BLUE_ACCENT",
+      "visual_role": "Peça funcional de campanha com laranja dominante e acento azul/cinza para contraste.",
+      "composition": {
+        "photo_coverage": "FULL_BLEED_WITH_ORANGE_FUNCTIONAL_BLOCK",
+        "element_order": [
+          "toca_top_signature",
+          "functional_headline",
+          "time_badge",
+          "support_or_cta",
+          "reduced_footer"
+        ],
+        "layout_anchor": "TOP_RIGHT_TO_LOWER_CENTER",
+        "orange_usage": "Orange block or band with secondary blue/gray contrast panel when needed.",
+        "support_treatment": "Sans short line, optionally inside white/gray strip.",
+        "cta_treatment": "Outlined white or dark CTA chosen by local contrast.",
+        "footer_mode": "THREE_LOGOS_WHITE_WITH_TOCA_TOP_OR_FOUR_LOGOS_IF_NO_TOP_SIGNATURE"
+      },
+      "typography": {
+        "headline_role": "Montserrat Semibold candidate for functional title; Bodoni optional only for experiential secondary copy.",
+        "support_role": "Montserrat Regular candidate.",
+        "time_role": "Montserrat Semibold candidate.",
+        "cta_role": "Montserrat Medium candidate.",
+        "headline_case": "FUNCTIONAL_UPPERCASE_ALLOWED"
+      },
+      "safe_regions": [
+        { "name": "top_signature", "bbox_norm": [0.7, 0.05, 0.96, 0.16] },
+        { "name": "orange_headline_panel", "bbox_norm": [0.08, 0.2, 0.92, 0.56] },
+        { "name": "lower_support_cta", "bbox_norm": [0.08, 0.56, 0.92, 0.78] }
+      ],
+      "protected_regions": ["hero_subject", "face", "product", "critical_light_source"],
+      "selection_rules": [
+        "Usar para horário, chamada funcional e informação de Sunset.",
+        "Usar quando o laranja precisa de um painel de contraste azul/cinza para separar a mensagem da foto."
+      ],
+      "negative_constraints": [
+        "Não usar azul/cinza como filtro global.",
+        "Não aplicar a mesma paleta funcional em fotos que pedem hero editorial."
+      ],
+      "quality_gate": "FUNCTIONAL_MESSAGE_IS_DOMINANT_WITH_LOCAL_CONTRAST_ONLY"
+    }
+  ]
+}

@@ -10,6 +10,11 @@ import {
   type VenueAsset,
   type VenueReference,
 } from '../contracts/creative-truth.js';
+import {
+  getSunsetStoryTemplate,
+  type SunsetStoryTemplateDescriptor,
+  type SunsetTemplateId,
+} from './sunset-story-template-engine.js';
 import { ExecutionError } from '../core/errors.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../providers/google-sheets/creative-truth-registry.js';
 import { assertCreativeStandard, resolveCreativeMode } from './creative-truth.js';
@@ -22,6 +27,7 @@ export interface CreativeTruthResolutionRequest {
   readonly venueAssetId?: string;
   readonly requiredBrands: readonly string[];
   readonly brandVariant?: string;
+  readonly templateId?: SunsetTemplateId;
 }
 
 export interface CreativeTruthResolution {
@@ -32,6 +38,7 @@ export interface CreativeTruthResolution {
   readonly brandAssets: readonly BrandAsset[];
   readonly generativeException?: GenerativeExceptionApproval;
   readonly references: readonly VenueReference[];
+  readonly template?: SunsetStoryTemplateDescriptor;
 }
 
 export class CreativeTruthResolver {
@@ -46,6 +53,7 @@ export class CreativeTruthResolver {
       throw new ExecutionError('POLICY_DENIED', 'FAILED_STANDARD_NOT_RESOLVED', false);
     }
 
+    const template = resolveSunsetTemplate(request, standard);
     const creativeMode = resolveCreativeMode(request.requestedMode);
     const brandAssets = await this.resolveBrands(
       request.requiredBrands,
@@ -102,6 +110,7 @@ export class CreativeTruthResolver {
         brandAssets,
         generativeException,
         references: verified,
+        ...(template ? { template } : {}),
       };
     }
 
@@ -133,6 +142,7 @@ export class CreativeTruthResolver {
       venueAsset,
       brandAssets,
       references: [],
+      ...(template ? { template } : {}),
     };
   }
 
@@ -163,6 +173,21 @@ export class CreativeTruthResolver {
         (asset.status === 'VENUE_VERIFIED_MARKETING_READY' || asset.status === 'ACTIVE_APPROVED') &&
         Boolean(asset.masterAssetId && asset.masterDriveFileId && asset.masterSha256),
     );
+  }
+}
+
+function resolveSunsetTemplate(
+  request: CreativeTruthResolutionRequest,
+  standard: CreativeStandard,
+): SunsetStoryTemplateDescriptor | undefined {
+  if (request.operation !== 'SUNSET' || standard.format !== 'STORIES') return undefined;
+  if (!request.templateId) {
+    throw new ExecutionError('QUALITY_GATE_FAILED', 'FAILED_TEMPLATE_NOT_RESOLVED', false);
+  }
+  try {
+    return getSunsetStoryTemplate(request.templateId);
+  } catch {
+    throw new ExecutionError('QUALITY_GATE_FAILED', 'FAILED_TEMPLATE_NOT_RESOLVED', false);
   }
 }
 

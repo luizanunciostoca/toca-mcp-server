@@ -124,7 +124,7 @@ export function requireGatePassed(result: CreativeTruthGateResult): void {
   const errorCode =
     result.gate === 'VENUE_FIDELITY'
       ? 'FIDELITY_GATE_FAILED'
-      : result.gate === 'QUALITY'
+      : result.gate === 'QUALITY' || result.gate === 'TEMPLATE'
         ? 'QUALITY_GATE_FAILED'
         : 'POLICY_DENIED';
   throw new ExecutionError(errorCode, first, false);
