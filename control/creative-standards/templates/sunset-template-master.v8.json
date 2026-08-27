@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "1.0.0",
+  "templateId": "SUNSET_TEMPLATE_MASTER_V8",
+  "status": "APPROVED_VISUAL_CONTRACT",
+  "runtimeEligible": false,
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "aspectRatio": "9:16",
+    "colorSpace": "sRGB",
+    "exportFormat": "PNG"
+  },
+  "reference": {
+    "fileName": "SUNSET_TEMPLATE_MASTER_V8_REFERENCE.jpeg",
+    "sourceWidth": 864,
+    "sourceHeight": 1536,
+    "sha256": "766429270261ae7d99c7f9081c12a6ab6ca7565b76193c5ab43fe223eea95ed8",
+    "driveFileId": "1IiayW0SlsoxDqW9iQs7YwPQfCorraBqD",
+    "manualDriveFileId": "1UohaVZnzvzbQAa-50wZf_CG6U0jngmo6eMp5zKSNXKI"
+  },
+  "background": {
+    "mode": "FULL_BLEED_PHOTO",
+    "fit": "COVER",
+    "distort": false,
+    "subjectConflictPolicy": "REPOSITION_OR_CROP_PHOTO_NEVER_MOVE_LAYOUT",
+    "localDarkeningAllowed": true,
+    "globalColorCastRequired": false
+  },
+  "layers": [
+    "BACKGROUND_PHOTO",
+    "OPTIONAL_LOCAL_DARKENING",
+    "CTA",
+    "HEADLINE",
+    "SUBHEADLINE",
+    "SUPPORT_STRIPS",
+    "FOOTER_BRANDS"
+  ],
+  "editorOnly": {
+    "dashedDiagonalX": true,
+    "repeatedGuidanceText": "INSIRA A IMAGEM DE FUNDO",
+    "centerImageIcon": true,
+    "instructionTitle": "INSIRA A IMAGEM DE FUNDO",
+    "instructionCopy": "Substitua este fundo pela imagem desejada para o seu pôr do sol.",
+    "removeBeforeExport": true,
+    "placeholderRepresentsImageBox": false
+  },
+  "cta": {
+    "text": "Garanta seu ingresso",
+    "region": {
+      "x": 327,
+      "y": 329,
+      "w": 441,
+      "h": 57
+    },
+    "background": "TRANSPARENT",
+    "borderColor": "#FFFFFF",
+    "textColor": "#FFFFFF",
+    "alignment": "CENTER"
+  },
+  "headline": {
+    "lines": [
+      {
+        "text": "PÔR DO SOL",
+        "region": {
+          "x": 179,
+          "y": 430,
+          "w": 722,
+          "h": 112
+        }
+      },
+      {
+        "text": "na Toca",
+        "region": {
+          "x": 341,
+          "y": 536,
+          "w": 410,
+          "h": 106
+        }
+      }
+    ],
+    "fontRole": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
+    "color": "#FFFFFF",
+    "alignment": "CENTER"
+  },
+  "supportStrips": [
+    {
+      "text": "Vem curtir um",
+      "region": {
+        "x": 89,
+        "y": 802,
+        "w": 350,
+        "h": 49
+      },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    },
+    {
+      "text": "dia inesquecível",
+      "region": {
+        "x": 89,
+        "y": 855,
+        "w": 401,
+        "h": 50
+      },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    },
+    {
+      "text": "na Toca!",
+      "region": {
+        "x": 89,
+        "y": 911,
+        "w": 222,
+        "h": 49
+      },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    }
+  ],
+  "footer": {
+    "region": {
+      "x": 170,
+      "y": 1690,
+      "w": 744,
+      "h": 128
+    },
+    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
+    "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
+    "allowAiBrandReconstruction": false,
+    "colorMode": "WHITE"
+  },
+  "protectedRegions": [
+    {
+      "id": "CTA",
+      "x": 327,
+      "y": 329,
+      "w": 441,
+      "h": 57
+    },
+    {
+      "id": "HEADLINE",
+      "x": 179,
+      "y": 430,
+      "w": 722,
+      "h": 212
+    },
+    {
+      "id": "SUPPORT_COPY",
+      "x": 89,
+      "y": 802,
+      "w": 401,
+      "h": 158
+    },
+    {
+      "id": "FOOTER",
+      "x": 170,
+      "y": 1690,
+      "w": 744,
+      "h": 128
+    }
+  ],
+  "invariants": [
+    "FIXED_CTA",
+    "FIXED_TWO_LINE_HEADLINE",
+    "FIXED_THREE_SUPPORT_STRIPS_COPY_AND_POSITIONS",
+    "FIXED_FOOTER_ORDER",
+    "FIXED_TYPOGRAPHY_ROLES",
+    "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
+    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT"
+  ],
+  "qualityGate": [
+    "CANVAS_1080X1920",
+    "ASPECT_RATIO_9_16",
+    "BACKGROUND_FULL_BLEED",
+    "PHOTO_NOT_DISTORTED",
+    "CTA_MATCH_CONTRACT",
+    "HEADLINE_MATCH_CONTRACT",
+    "THREE_SUPPORT_STRIPS_MATCH_CONTRACT",
+    "OFFICIAL_BRAND_ASSETS",
+    "FOOTER_ORDER_MATCHES",
+    "EDITOR_GUIDANCE_REMOVED",
+    "SUFFICIENT_CONTRAST",
+    "NO_AI_RECONSTRUCTED_LOGOS",
+    "NO_CROSS_TEMPLATE_MIXING",
+    "NO_TECHNICAL_GUIDANCE_IN_EXPORT"
+  ],
+  "runtimeBoundary": {
+    "preparePublishAuthorized": false,
+    "providerMutationAuthorized": false,
+    "requirementsBeforeRuntimeEligible": [
+      "PIN_EXACT_FONTS",
+      "PIN_EXACT_BRAND_ASSETS",
+      "IMPLEMENT_RENDERER_TEMPLATE",
+      "PASS_DETERMINISTIC_VISUAL_REGRESSION"
+    ]
+  }
+}

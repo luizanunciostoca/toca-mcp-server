@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "1.0.0",
+  "templateId": "SUNSET_TEMPLATE_MASTER_V5",
+  "status": "APPROVED_VISUAL_CONTRACT",
+  "runtimeEligible": false,
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "aspectRatio": "9:16"
+  },
+  "reference": {
+    "fileName": "SUNSET_TEMPLATE_MASTER_V5_REFERENCE.png",
+    "sourceWidth": 941,
+    "sourceHeight": 1672,
+    "sha256": "4addb6828fdc37e1a90468c938102f2c576053cdd3a5e6d789a12e71c34a766a",
+    "driveFileId": "1qDQBcJYllOMin2nqdfA70MNz7e9K3LmV",
+    "manualDriveFileId": "11U_zPmQIEApQQYEzOJjrAp-q82rYLG9SeELyYXaRK4M"
+  },
+  "background": {
+    "mode": "FULL_BLEED_PHOTO",
+    "fit": "COVER",
+    "distort": false,
+    "subjectConflictPolicy": "REPOSITION_OR_CROP_PHOTO_NEVER_MOVE_LAYOUT",
+    "localDarkeningAllowed": true,
+    "globalColorCastRequired": false
+  },
+  "layers": [
+    "BACKGROUND_PHOTO",
+    "OPTIONAL_LOCAL_DARKENING",
+    "SUPPORT_STRIPS",
+    "CTA",
+    "HEADLINE",
+    "FOOTER_BRANDS"
+  ],
+  "editorOnly": {
+    "placeholder": {
+      "text": "adicionar imagem aqui",
+      "region": { "x": 390, "y": 665, "w": 295, "h": 277 }
+    },
+    "removeBeforeExport": true
+  },
+  "supportStrips": [
+    {
+      "text": "A Toca tem o",
+      "region": { "x": 87, "y": 322, "w": 337, "h": 48 },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    },
+    {
+      "text": "melhor pôr do sol",
+      "region": { "x": 87, "y": 379, "w": 442, "h": 49 },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    },
+    {
+      "text": "que você verá!",
+      "region": { "x": 87, "y": 436, "w": 375, "h": 49 },
+      "background": "#FFFFFF",
+      "textColor": "#111111",
+      "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
+    }
+  ],
+  "cta": {
+    "text": "Garanta seu ingresso",
+    "region": { "x": 312, "y": 1194, "w": 457, "h": 67 },
+    "background": "TRANSPARENT",
+    "borderColor": "#FFFFFF",
+    "textColor": "#FFFFFF",
+    "alignment": "CENTER"
+  },
+  "headline": {
+    "lines": [
+      {
+        "text": "PÔR DO SOL",
+        "region": { "x": 164, "y": 1280, "w": 762, "h": 119 }
+      },
+      {
+        "text": "na Toca",
+        "region": { "x": 328, "y": 1415, "w": 430, "h": 99 }
+      }
+    ],
+    "fontRole": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
+    "color": "#FFFFFF",
+    "alignment": "CENTER"
+  },
+  "footer": {
+    "region": { "x": 191, "y": 1705, "w": 708, "h": 119 },
+    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
+    "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
+    "allowAiBrandReconstruction": false,
+    "colorMode": "WHITE"
+  },
+  "invariants": [
+    "FIXED_SUPPORT_COPY_AND_POSITIONS",
+    "FIXED_CTA",
+    "FIXED_HEADLINE_AND_ALIGNMENT",
+    "FIXED_FOOTER_ORDER",
+    "FIXED_TYPOGRAPHY_ROLES",
+    "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
+    "NO_EDITOR_PLACEHOLDER_IN_FINAL_EXPORT"
+  ],
+  "qualityGate": [
+    "CANVAS_1080X1920",
+    "ASPECT_RATIO_9_16",
+    "BACKGROUND_FULL_BLEED",
+    "PHOTO_NOT_DISTORTED",
+    "SUPPORT_STRIPS_MATCH_CONTRACT",
+    "CTA_MATCH_CONTRACT",
+    "HEADLINE_MATCH_CONTRACT",
+    "OFFICIAL_BRAND_ASSETS",
+    "FOOTER_ORDER_MATCHES",
+    "PLACEHOLDER_REMOVED",
+    "SUFFICIENT_CONTRAST",
+    "NO_AI_RECONSTRUCTED_LOGOS",
+    "NO_CROSS_TEMPLATE_MIXING",
+    "NO_TECHNICAL_GUIDANCE_IN_EXPORT"
+  ],
+  "runtimeBoundary": {
+    "preparePublishAuthorized": false,
+    "providerMutationAuthorized": false,
+    "requirementsBeforeRuntimeEligible": [
+      "PIN_EXACT_FONTS",
+      "PIN_EXACT_BRAND_ASSETS",
+      "IMPLEMENT_RENDERER_TEMPLATE",
+      "PASS_DETERMINISTIC_VISUAL_REGRESSION"
+    ]
+  }
+}

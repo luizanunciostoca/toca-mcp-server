@@ -1,0 +1,244 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "SUNSET_TEMPLATE_MASTER_V2",
+  "templateVersion": "1.0",
+  "status": "APPROVED_VISUAL_CONTRACT",
+  "runtimeIntegrationStatus": "PENDING_TEMPLATE_LIBRARY_INTEGRATION",
+  "runtimeEligible": false,
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "STORIES"
+  },
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "manualDocumentId": "1eAPaQywMVWkNOSZbBtzCUy5dkO_mzZJaIafrIV1_67U",
+    "referenceImageId": "1UMBo_aSOojs95VOFw1kKH_p_cysih7LM",
+    "referenceImageName": "SUNSET_TEMPLATE_MASTER_V2_REFERENCE.png",
+    "referenceImageSha256": "da4d13a4e71388eb0f0edf8f90023c5b9d352d13c2a0d5d4e5c116e11c5a4d48",
+    "referenceDimensions": {
+      "width": 941,
+      "height": 1672
+    }
+  },
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "aspectRatio": "9:16",
+    "colorSpace": "sRGB",
+    "exportFormat": "PNG"
+  },
+  "background": {
+    "type": "FULL_BLEED_PHOTO",
+    "fit": "COVER",
+    "distortionAllowed": false,
+    "repositionAllowed": true,
+    "layoutMovesForPhoto": false,
+    "referenceBlackSurfaceIsEditorOnly": true,
+    "removeEditorPlaceholderBeforeExport": true,
+    "removeEditorGuidesBeforeExport": true
+  },
+  "layerOrder": [
+    "BACKGROUND_PHOTO",
+    "LOCAL_CONTRAST_TREATMENT",
+    "TIME_BOX",
+    "DISPLAY_LINE_1",
+    "DISPLAY_LINE_2",
+    "EMBEDDED_TOCA_SYMBOL",
+    "BRAND_FOOTER"
+  ],
+  "protectedLayoutRegions": [
+    { "id": "TIME", "x": 489, "y": 240, "width": 523, "height": 96 },
+    { "id": "DISPLAY_LINE_1", "x": 76, "y": 388, "width": 953, "height": 178 },
+    { "id": "DISPLAY_LINE_2", "x": 62, "y": 598, "width": 982, "height": 425 },
+    { "id": "EMBEDDED_TOCA_SYMBOL", "x": 523, "y": 752, "width": 155, "height": 152 },
+    { "id": "BRAND_FOOTER", "x": 180, "y": 1660, "width": 670, "height": 150 }
+  ],
+  "elements": {
+    "time": {
+      "kind": "TIME_BOX",
+      "text": "16:30H ÀS 22H",
+      "box": { "x": 489, "y": 240, "width": 523, "height": 96 },
+      "fill": "TRANSPARENT",
+      "stroke": "#FFFFFF",
+      "strokeWidthPx": { "min": 1, "max": 2 },
+      "textColor": "#FFFFFF",
+      "alignment": "CENTER",
+      "fontRole": "CLEAN_GEOMETRIC_SANS_TIME"
+    },
+    "displayLine1": {
+      "kind": "DISPLAY_HEADLINE",
+      "text": "PÔR DO",
+      "region": { "x": 76, "y": 388, "width": 953, "height": 178 },
+      "textColor": "#FFFFFF",
+      "alignment": "CENTER",
+      "lineCount": 1,
+      "case": "UPPER",
+      "fontRole": "HEAVY_GEOMETRIC_GROTESK",
+      "fontWeight": "EXTRABOLD_OR_BLACK",
+      "runtimeFallbackCandidate": "MONTSERRAT_BLACK",
+      "fontAssetPinRequiredBeforeRuntimeEligible": true
+    },
+    "displayLine2": {
+      "kind": "DISPLAY_HEADLINE_MONUMENTAL",
+      "text": "SOL",
+      "region": { "x": 62, "y": 598, "width": 982, "height": 425 },
+      "textColor": "#FFFFFF",
+      "alignment": "CENTER",
+      "lineCount": 1,
+      "case": "UPPER",
+      "fontRole": "HEAVY_GEOMETRIC_GROTESK",
+      "fontWeight": "EXTRABOLD_OR_BLACK",
+      "mustRemainMonumental": true,
+      "sameFamilyAsDisplayLine1": true
+    },
+    "embeddedTocaSymbol": {
+      "kind": "OFFICIAL_BRAND_SYMBOL_EMBEDDED_IN_GLYPH_COUNTER",
+      "hostGlyph": "O",
+      "hostWord": "SOL",
+      "region": { "x": 523, "y": 752, "width": 155, "height": 152 },
+      "preferredColor": "#FFFFFF",
+      "officialAssetOnly": true,
+      "aiReconstructionAllowed": false,
+      "opticalCenteringRequired": true
+    },
+    "brandFooter": {
+      "kind": "THREE_LOGO_FOOTER",
+      "region": { "x": 180, "y": 1660, "width": 670, "height": 150 },
+      "preferredColor": "#FFFFFF",
+      "officialAssetsOnly": true,
+      "aiReconstructionAllowed": false,
+      "order": ["CORONA", "RED_BULL", "MORRO_DIGITAL"],
+      "approximateBoxes": {
+        "CORONA": { "x": 204, "y": 1680, "width": 191, "height": 113 },
+        "RED_BULL": { "x": 477, "y": 1695, "width": 161, "height": 94 },
+        "MORRO_DIGITAL": { "x": 692, "y": 1680, "width": 149, "height": 98 }
+      },
+      "tocaFooterLogoAllowed": false,
+      "reasonNoTocaFooterLogo": "TOCA_SYMBOL_IS_EMBEDDED_IN_SOL_O"
+    },
+    "cta": {
+      "present": false,
+      "mustRemainAbsent": true
+    },
+    "supportCopy": {
+      "present": false,
+      "mustRemainAbsent": true
+    }
+  },
+  "photography": {
+    "preferredSubjectPlacement": "CENTER_TO_LOWER_FRAME",
+    "allowSecondarySubjectBehindTypography": true,
+    "criticalFaceOrProductMayBeFullyCovered": false,
+    "cropConflictResolution": "REPOSITION_PHOTO_NOT_TEMPLATE"
+  },
+  "contrast": {
+    "globalFilterPreferred": false,
+    "preserveNaturalPhoto": true,
+    "localizedBlackOverlayPercent": {
+      "timeAndHeadline": { "min": 10, "max": 35 },
+      "brandFooter": { "min": 15, "max": 40 }
+    },
+    "broadFeatherRequired": true,
+    "visibleRectangularDarkPatchesAllowed": false
+  },
+  "layoutInvariants": [
+    "CANVAS_1080X1920",
+    "ASPECT_9_16",
+    "TIME_FIXED",
+    "DISPLAY_TWO_LINE_STRUCTURE_FIXED",
+    "DISPLAY_LINE_1_TEXT_FIXED",
+    "DISPLAY_LINE_2_TEXT_FIXED",
+    "SOL_MONUMENTAL_SCALE_FIXED",
+    "TOCA_SYMBOL_EMBEDDED_IN_SOL_O",
+    "NO_CTA",
+    "NO_SUPPORT_COPY",
+    "THREE_LOGO_FOOTER_ONLY",
+    "FOOTER_ORDER_FIXED",
+    "WHITE_GRAPHIC_ELEMENTS",
+    "BACKGROUND_FULL_BLEED"
+  ],
+  "photoAdaptation": {
+    "strategy": "ADAPT_PHOTO_TO_TEMPLATE",
+    "steps": [
+      "SELECT_APPROVED_REAL_PHOTO",
+      "CROP_TO_9_16",
+      "REPOSITION_PHOTO_WITHIN_CROP",
+      "CHECK_CRITICAL_SUBJECT_AGAINST_DISPLAY_REGIONS",
+      "APPLY_LOCALIZED_CONTRAST_IF_NEEDED",
+      "RENDER_FIXED_TIME_BOX",
+      "RENDER_FIXED_POR_DO",
+      "RENDER_FIXED_SOL",
+      "INSERT_OFFICIAL_TOCA_SYMBOL_IN_SOL_O",
+      "INSERT_OFFICIAL_FOOTER_LOGOS",
+      "QUALITY_GATE",
+      "HUMAN_APPROVAL"
+    ]
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "requiredPasses": [
+      "OUTPUT_1080X1920",
+      "ASPECT_RATIO_9_16",
+      "BACKGROUND_FULL_BLEED",
+      "BACKGROUND_NOT_DISTORTED",
+      "POR_DO_WHITE_AND_LEGIBLE",
+      "SOL_WHITE_AND_LEGIBLE",
+      "SOL_MONUMENTAL_SCALE_PRESERVED",
+      "TIME_TEXT_EXACT",
+      "TIME_BOX_POSITION_PRESERVED",
+      "OFFICIAL_TOCA_SYMBOL_IN_SOL_O",
+      "NO_AI_RECREATED_SYMBOL_OR_LOGO",
+      "FOOTER_ONLY_CORONA_REDBULL_MORRO",
+      "FOOTER_ORDER_CORRECT",
+      "NO_CTA",
+      "NO_SUPPORT_COPY",
+      "NO_EDITOR_PLACEHOLDER",
+      "NO_TECHNICAL_TEXT_IN_FINAL",
+      "ESSENTIAL_SUBJECT_RECOGNIZABLE",
+      "ASSET_LINEAGE_COMPLETE"
+    ]
+  },
+  "productionMethod": {
+    "mode": "DETERMINISTIC_COMPOSITOR",
+    "fullImageGenerationPerStoryAllowed": false,
+    "pipeline": [
+      "REAL_PHOTO",
+      "CROP_ENGINE",
+      "FIXED_RENDERER",
+      "TIME_BOX",
+      "DISPLAY_TYPE",
+      "OFFICIAL_EMBEDDED_TOCA_SYMBOL",
+      "OFFICIAL_FOOTER_LOGOS",
+      "LOCAL_CONTRAST",
+      "FINAL_PNG"
+    ],
+    "aiMayAssist": [
+      "SOURCE_PHOTO_SELECTION",
+      "CROP_ANALYSIS",
+      "PROTECTED_SUBJECT_DETECTION",
+      "CONTRAST_ASSESSMENT"
+    ],
+    "deterministicRequired": [
+      "TEXT_RENDERING",
+      "SYMBOL_INSERTION",
+      "LOGO_INSERTION",
+      "ELEMENT_COORDINATES",
+      "TYPOGRAPHY_AFTER_FONT_PIN"
+    ]
+  },
+  "publicationBoundary": {
+    "visualApprovalAuthorizesPublish": false,
+    "requiresExistingBrandGate": true,
+    "requiresExistingQualityGate": true,
+    "requiresPolicy": true,
+    "requiresApproval": true,
+    "requiresImmutableApprovedDescriptorOrHash": true,
+    "publishExactApprovedAssetOnly": true
+  },
+  "libraryCompatibility": {
+    "coexistsWith": ["SUNSET_TEMPLATE_MASTER_V1"],
+    "crossTemplateComponentMixingAllowed": false,
+    "mixedCompositionRequiresNewApprovedContract": true
+  }
+}
