@@ -66,6 +66,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_VERSION: 8.24.3
 
+      - name: Install verified Gitleaks CLI for exact candidate ancestry
+        run: |
+          set -euo pipefail
+          VERSION=8.24.3
+          ARCHIVE="gitleaks_${VERSION}_linux_x64.tar.gz"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/${ARCHIVE}"
+          curl --fail --silent --show-error --location "$URL" --output "/tmp/${ARCHIVE}"
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  /tmp/${ARCHIVE}" | sha256sum --check --strict
+          tar --extract --gzip --file "/tmp/${ARCHIVE}" --directory /tmp gitleaks
+          sudo install --mode 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version | grep -F "$VERSION"
+
       - name: Scan complete candidate ancestry for secrets
         if: always()
         run: >-
