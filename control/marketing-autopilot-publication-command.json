@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "commandId": "prepare-MKT-20260827-SUNSET-FEED-1500-SHARENOW-1249",
-  "action": "PREPARE",
-  "issuedAt": "2026-08-27T12:49:00-03:00",
+  "commandId": "publish-MKT-20260827-SUNSET-FEED-1500-SHARENOW-1255",
+  "action": "PUBLISH",
+  "issuedAt": "2026-08-27T12:55:54-03:00",
   "contentItemId": "MKT-20260827-SUNSET-FEED-1500",
   "scheduledAt": "2026-08-27T13:15:00-03:00",
   "timezone": "America/Bahia",
@@ -17,8 +17,8 @@
   "correlationId": "CORR-MKT-20260827-SUNSET-FEED-1500-SHARENOW-1249",
   "idempotencyKey": "MKT-20260827-SUNSET-FEED-1500-SHARENOW-V2",
   "approvalMode": "EXPLICIT_APPROVAL",
-  "approvalStatus": "PENDING_REVIEW",
-  "approvedRequestSha256": "",
+  "approvalStatus": "APPROVED",
+  "approvedRequestSha256": "e70df82975a4c64940436fcd0268ea4340459cc30ff4559fe490b30d164d140b",
   "schedulingPolicy": "SHARE_NOW",
   "publicationIntent": "SHARE_NOW"
 }
