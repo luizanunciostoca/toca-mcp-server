@@ -155,6 +155,27 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).not.toContain('WEBHOOK_TAG=staging-webhook-${GITHUB_SHA::7}');
   });
 
+  it('uses replay-safe exact-candidate revision names within the Cloud Run limit', () => {
+    const mcpService = 'toca-mcp-next-staging';
+    const webhookService = 'toca-webhook-next-staging';
+    const runIdSuffix = '3038062235';
+    const runAttempt = '999';
+    const mcpSuffix = `mcp-9f144b08-${runIdSuffix}-${runAttempt}`;
+    const webhookSuffix = `webhook-9f144b08-${runIdSuffix}-${runAttempt}`;
+
+    expect(workflow).toContain('RUN_ID_SUFFIX="${GITHUB_RUN_ID: -10}"');
+    expect(workflow).toContain('[[ "$RUN_ID_SUFFIX" =~ ^[0-9]{1,10}$ ]]');
+    expect(workflow).toContain('[[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]{1,3}$ ]]');
+    expect(workflow).toContain(
+      'MCP_REVISION_SUFFIX=mcp-${GITHUB_SHA::8}-${RUN_ID_SUFFIX}-${GITHUB_RUN_ATTEMPT}',
+    );
+    expect(workflow).toContain(
+      'WEBHOOK_REVISION_SUFFIX=webhook-${GITHUB_SHA::8}-${RUN_ID_SUFFIX}-${GITHUB_RUN_ATTEMPT}',
+    );
+    expect(mcpService.length + 1 + mcpSuffix.length).toBeLessThanOrEqual(63);
+    expect(webhookService.length + 1 + webhookSuffix.length).toBeLessThanOrEqual(63);
+  });
+
   it('waits boundedly for tagged revision propagation and validates the exact revisions', () => {
     expect(workflow).toContain('for attempt in $(seq 1 24); do');
     expect(workflow).toContain('select(.tag == $tag)');
