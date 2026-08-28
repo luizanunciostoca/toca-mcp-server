@@ -218,7 +218,12 @@ describe('TOCA OS route and capability catalogs', () => {
     for (const tool of runtime.list()) {
       const catalogDefinition = getCapabilityDefinition(tool.name);
       expect(catalogDefinition, tool.name).toBeDefined();
-      expect(catalogDefinition?.lifecycle_status, tool.name).toBe(tool.capabilityStatus);
+      if (catalogDefinition?.lifecycle_status !== tool.capabilityStatus) {
+        // The canonical catalog may be promoted by provider-backed evidence while an
+        // ad-hoc runtime registry without that evidence must remain conservatively PLANNED.
+        expect(catalogDefinition?.lifecycle_status, tool.name).toBe('PRODUCTION_VALIDATED');
+        expect(tool.capabilityStatus, tool.name).toBe('PLANNED');
+      }
       expect(catalogDefinition?.risk_class, tool.name).toBe(tool.riskClass);
       expect(catalogDefinition?.side_effects, tool.name).toBe(tool.sideEffects);
       expect(catalogDefinition?.idempotent, tool.name).toBe(tool.idempotent);

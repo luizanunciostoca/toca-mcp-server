@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
 const script = readFileSync('scripts/marketing-publish-now.sh', 'utf8');
+const brandGate = readFileSync('scripts/check-publish-now-brand-determinism.mjs', 'utf8');
+const rightsGate = readFileSync('scripts/check-publish-now-rights-clearance.mjs', 'utf8');
 
 describe('Marketing Publish Now hardening contract', () => {
   it('uses the WIF access token directly for Docker and retries both pushes', () => {
@@ -16,6 +18,33 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(script).toContain('.creativeTruthBinding.outputSha256 == .expectedAssetSha256');
     expect(script).toContain('.manifest.request.publicationAssetSha256 == $sourceSha');
     expect(script).toContain('.manifest.request.creativeTruthBinding.outputSha256 == $sourceSha');
+  });
+
+  it('fails closed before cloud authentication when deterministic brand truth is absent', () => {
+    const brandStep = workflow.indexOf('Verify deterministic brand binding');
+    const authStep = workflow.indexOf('Authenticate to Google Cloud and Drive');
+
+    expect(brandStep).toBeGreaterThan(-1);
+    expect(authStep).toBeGreaterThan(brandStep);
+    expect(workflow).toContain('node scripts/check-publish-now-brand-determinism.mjs');
+    expect(brandGate).toContain('BRAND_DETERMINISM_REQUIRED');
+    expect(brandGate).toContain('BRAND_DETERMINISM_NOT_VERIFIED');
+    expect(brandGate).toContain('BRAND_DETERMINISM_TYPOGRAPHY_REQUIRED');
+    expect(brandGate).toContain('BRAND_DETERMINISM_ASSET_BINDING_MISMATCH');
+  });
+
+  it('fails closed before cloud authentication when rights clearance is absent or stale', () => {
+    const rightsStep = workflow.indexOf('Verify rights clearance gate');
+    const authStep = workflow.indexOf('Authenticate to Google Cloud and Drive');
+
+    expect(rightsStep).toBeGreaterThan(-1);
+    expect(authStep).toBeGreaterThan(rightsStep);
+    expect(workflow).toContain('node scripts/check-publish-now-rights-clearance.mjs');
+    expect(rightsGate).toContain('RIGHTS_CLEARANCE_REQUIRED');
+    expect(rightsGate).toContain('RIGHTS_CLEARANCE_NOT_CLEARED');
+    expect(rightsGate).toContain('RIGHTS_CLEARANCE_ASSET_BINDING_MISMATCH');
+    expect(rightsGate).toContain('RIGHTS_CLEARANCE_EXPIRED');
+    expect(rightsGate).toContain("clearance.scope === 'INSTAGRAM_ORGANIC_PUBLICATION'");
   });
 
   it('always performs provider readback after a side-effect attempt, even when execute fails', () => {

@@ -50,6 +50,14 @@ jobs:
           jq -e '.schemaVersion == 1 and (.action | IN("NOOP", "PUBLISH_NOW"))' "$COMMAND" >/dev/null
           echo "action=$(jq -r .action "$COMMAND")" >> "$GITHUB_OUTPUT"
 
+      - name: Verify deterministic brand binding
+        if: steps.command.outputs.action == 'PUBLISH_NOW'
+        run: node scripts/check-publish-now-brand-determinism.mjs
+
+      - name: Verify rights clearance gate
+        if: steps.command.outputs.action == 'PUBLISH_NOW'
+        run: node scripts/check-publish-now-rights-clearance.mjs
+
       - name: Authenticate to Google Cloud and Drive
         if: steps.command.outputs.action == 'PUBLISH_NOW'
         id: auth

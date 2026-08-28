@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "commandId": "publish-now-MKT-20260827-SUNSET-FEED-1500-1426",
-  "action": "PUBLISH_NOW",
+  "action": "NOOP",
   "issuedAt": "2026-08-27T14:26:06-03:00",
   "timezone": "America/Bahia",
   "operation": "SUNSET",
@@ -28,5 +28,13 @@
   },
   "approvalMode": "EXPLICIT_APPROVAL",
   "approvalStatus": "APPROVED",
-  "publicationIntent": "SHARE_NOW"
+  "publicationIntent": "SHARE_NOW",
+  "consumed": {
+    "workflowRunId": 33098660561,
+    "publicationId": "18620842246053649",
+    "permalink": "https://www.instagram.com/p/DcjVHsVkgbL/",
+    "requestSha256": "6ea846df8005dad15afc96ccd933cdb981086d72e1d592c5f3af3a76f05aabb7",
+    "artifactId": 9657560375,
+    "status": "PUBLISHED_VERIFIED"
+  }
 }
