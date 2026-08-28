@@ -42,7 +42,7 @@ jobs:
             process.exit(1);
           }
           """
-          new_guard = """const registry = readFileSync('src/registry.ts', 'utf8');
+          new_guard = r"""const registry = readFileSync('src/registry.ts', 'utf8');
           if (registry.includes('instagram.comments.reply')) {
             console.error('Unpromoted external write capabilities must not be advertised');
             process.exit(1);
@@ -52,7 +52,7 @@ jobs:
             'instagram.messaging.messages.read',
           ]);
           const advertisedInstagramMessagingNames = [
-            ...registry.matchAll(/name: '(instagram\\.messaging\\.[^']+)'/g),
+            ...registry.matchAll(/name: '(instagram\.messaging\.[^']+)'/g),
           ].map((match) => match[1]);
           for (const name of advertisedInstagramMessagingNames) {
             if (!allowedInstagramMessagingReadNames.has(name)) {
@@ -61,8 +61,7 @@ jobs:
             }
             const marker = "name: '" + name + "'";
             const start = registry.indexOf(marker);
-            const end = registry.indexOf('\n  },', start);
-            const definition = registry.slice(start, end === -1 ? registry.length : end);
+            const definition = registry.slice(start, start + 800);
             if (
               !definition.includes("riskClass: 'READ'") ||
               !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
