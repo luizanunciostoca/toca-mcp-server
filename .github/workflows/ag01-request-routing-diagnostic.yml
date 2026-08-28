@@ -1,0 +1,52 @@
+name: AG-01 Request Routing Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-request-routing-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  CANDIDATE_REVISION: toca-ag01-orchestrator-vtx-d2c85284-2
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Capture service, IAM, revision and request logs
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/service.json
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/iam.json
+          gcloud run revisions describe "$CANDIDATE_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/revision.json
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="'$SERVICE'" AND timestamp>="2026-08-28T19:20:00Z"' --project "$PROJECT_ID" --limit=300 --order=desc --format=json > evidence/revision-logs.json
+          jq '{annotations:.metadata.annotations,labels:.metadata.labels,status:.status,traffic:.status.traffic}' evidence/service.json > evidence/service-summary.json
+          jq '{bindings:.bindings}' evidence/iam.json > evidence/iam-summary.json
+          jq '[.[] | {timestamp,severity,httpRequest,logName,resource,labels,textPayload,jsonPayload}]' evidence/revision-logs.json > evidence/request-summary.json
+          echo '=== SERVICE SUMMARY ==='
+          cat evidence/service-summary.json
+          echo '=== IAM SUMMARY ==='
+          cat evidence/iam-summary.json
+          echo '=== HTTP REQUEST ENTRIES ==='
+          jq '[.[] | select(.httpRequest != null) | {timestamp,status:.httpRequest.status,requestUrl:.httpRequest.requestUrl,requestMethod:.httpRequest.requestMethod,userAgent:.httpRequest.userAgent,remoteIp:.httpRequest.remoteIp,latency:.httpRequest.latency}]' evidence/request-summary.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-request-routing-diagnostic-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
