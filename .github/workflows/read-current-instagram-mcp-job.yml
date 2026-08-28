@@ -42,13 +42,6 @@ jobs:
           rows=json.load(open('/tmp/logs.json'))
           print(json.dumps({'validation':'cloud-log-entry-count','count':len(rows)}))
           emitted=set()
-          patterns=[
-            r'META_HTTP_\d+(?:\|META_CODE_\d+)?(?:\|META_SUBCODE_\d+)?(?:\|META_TYPE_[A-Za-z0-9_.-]+)?',
-            r'META_GRAPH_READ_FAILED:[A-Za-z0-9_:.-]+',
-            r'INSTAGRAM_[A-Z0-9_:.-]+',
-            r'MCP_TIMEOUT:[A-Za-z0-9_/.-]+',
-            r'TOCA_[A-Z0-9_:.-]+',
-          ]
           for row in rows:
             texts=[]
             if isinstance(row.get('textPayload'),str): texts.append(row['textPayload'])
@@ -56,31 +49,31 @@ jobs:
             if isinstance(jp,dict): texts.append(json.dumps(jp,separators=(',',':')))
             for text in texts:
               if 'instagram.messaging.read.provider_error' in text:
-                try:
-                  obj=json.loads(text)
-                except Exception:
-                  obj=None
-                if isinstance(obj,dict):
-                  allowed={'event','operation','httpStatus','providerCode','providerSubcode','providerType'}
-                  safe={k:v for k,v in obj.items() if k in allowed}
-                  key=json.dumps(safe,sort_keys=True)
-                  if key not in emitted:
-                    emitted.add(key); print(json.dumps({'validation':'provider-telemetry',**safe},separators=(',',':')))
+                def capture_string(field):
+                  match=re.search(r'["\\]'+re.escape(field)+r'["\\]\s*:\s*["\\]([^"\\]+)',text)
+                  return match.group(1) if match else None
+                def capture_int(field):
+                  match=re.search(r'["\\]'+re.escape(field)+r'["\\]\s*:\s*(null|-?\d+)',text)
+                  if not match or match.group(1)=='null': return None
+                  return int(match.group(1))
+                safe={
+                  'validation':'provider-telemetry',
+                  'event':'instagram.messaging.read.provider_error',
+                  'operation':capture_string('operation'),
+                  'httpStatus':capture_int('httpStatus'),
+                  'providerCode':capture_int('providerCode'),
+                  'providerSubcode':capture_int('providerSubcode'),
+                  'providerType':capture_string('providerType'),
+                }
+                print(json.dumps(safe,separators=(',',':')))
               if '"validation"' in text:
                 for m in re.finditer(r'\{[^\n]*"validation"[^\n]*\}',text):
                   raw=m.group(0)
-                  try:
-                    obj=json.loads(raw)
-                  except Exception:
-                    continue
+                  try: obj=json.loads(raw)
+                  except Exception: continue
                   allowed={'validation','server','version','protocolVersion','tocaExecutePresent','capabilitySearchPresent','toolCount','executableCapabilities','status','executionIdPresent','conversationsReturned','nextAfterPresent','errorCode','serverStderrCodes'}
                   safe={k:v for k,v in obj.items() if k in allowed}
                   key=json.dumps(safe,sort_keys=True)
                   if key not in emitted:
                     emitted.add(key); print(json.dumps(safe,separators=(',',':')))
-              for pattern in patterns:
-                for code in re.findall(pattern,text):
-                  key='CODE:'+code
-                  if key not in emitted:
-                    emitted.add(key); print(json.dumps({'validation':'sanitized-server-code','code':code},separators=(',',':')))
           PY
