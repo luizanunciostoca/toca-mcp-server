@@ -1,0 +1,115 @@
+name: P2.1 Google Ads Provider READ Verification v2
+
+on:
+  push:
+    branches:
+      - ops/p2-1-google-ads-provider-20260828
+    paths:
+      - '.github/workflows/p2-1-google-ads-provider-read-v2.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
+      GCP_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE || 'toca-mcp-production' }}
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET }}
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET }}
+      GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_CLIENT_SECRET_VERSION }}
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET }}
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION }}
+      GOOGLE_ADS_CUSTOMER_ID: ${{ vars.GOOGLE_ADS_CUSTOMER_ID }}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ vars.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+      GOOGLE_ADS_ALLOWED_CURRENCY: ${{ vars.GOOGLE_ADS_ALLOWED_CURRENCY }}
+      GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS: ${{ vars.GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS }}
+      GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS: ${{ vars.GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS }}
+      GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS: ${{ vars.GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS }}
+      GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS: ${{ vars.GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Quality
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+      - name: Preflight external bindings only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          required=(GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION GCP_GOOGLE_ADS_CLIENT_ID_SECRET GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET_VERSION GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION GOOGLE_ADS_ALLOWED_CURRENCY GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS)
+          missing=(); for n in "${required[@]}"; do [ -n "${!n:-}" ] || missing+=("$n"); done
+          jq -n --arg sha "$GITHUB_SHA" --arg missing "$(IFS=,; echo "${missing[*]:-}")" --argjson count "${#missing[@]}" '{schemaVersion:"toca.p2.1.external-bindings.v2",sourceSha:$sha,missing:$missing,missingCount:$count,secretValuesExposed:false}' > evidence/preflight.json
+          if [ "${#missing[@]}" -gt 0 ]; then echo "P2_1_EXTERNAL_BINDINGS_MISSING=$(IFS=,; echo "${missing[*]}")" >&2; exit 1; fi
+      - name: Authenticate GCP
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Validate named secret versions without reading values
+        shell: bash
+        run: |
+          set -euo pipefail
+          check(){ state="$(gcloud secrets versions describe "$3" --secret "$2" --project "$GCP_PROJECT_ID" --format='value(state)')"; [ "$state" = ENABLED ] || { echo "$1 secret is not enabled" >&2; exit 1; }; }
+          check developer "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET" "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION"
+          check client_id "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET" "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION"
+          check client_secret "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET" "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET_VERSION"
+          check refresh "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET" "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION"
+      - name: Verify public production stays OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          S="$(gcloud run services describe "$GCP_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          P="$(printf '%s' "$S"|jq -r '[.spec.template.spec.containers[0].env[]?|select(.name=="GOOGLE_ADS_PHASE")|.value][0]//"OFF"')"
+          V="$(printf '%s' "$S"|jq -r '[.spec.template.spec.containers[0].env[]?|select(.name=="GOOGLE_ADS_PROVIDER_VERIFIED")|.value][0]//"false"')"
+          [ "$P" = OFF ] && [ "$V" != true ]
+      - name: Build and run read-only provider proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:p2-1-google-ads-v2-${GITHUB_SHA}"
+          JOB="toca-p2-1-google-ads-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build -t "$IMAGE" . && docker push "$IMAGE"
+          ENVV="^~^SOURCE_SHA=$GITHUB_SHA~GOOGLE_ADS_VERIFICATION_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}~RUNTIME_SERVICE_ACCOUNT=$GCP_RUNTIME_SERVICE_ACCOUNT~GOOGLE_ADS_CUSTOMER_ID=$GOOGLE_ADS_CUSTOMER_ID~GOOGLE_ADS_LOGIN_CUSTOMER_ID=$GOOGLE_ADS_LOGIN_CUSTOMER_ID~GOOGLE_ADS_ALLOWED_CURRENCY=$GOOGLE_ADS_ALLOWED_CURRENCY~GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS=$GOOGLE_ADS_MAX_DAILY_BUDGET_MICROS~GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS=$GOOGLE_ADS_CURRENCY_MINOR_UNIT_MICROS~GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS=$GOOGLE_ADS_ALLOWED_LOCATION_CRITERION_IDS~GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS=$GOOGLE_ADS_ALLOWED_LANGUAGE_CRITERION_IDS~GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN~GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_ID~GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET~GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN"
+          SECV="^~^TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN=$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET:$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_VERSION~TOCA_SECRET_GOOGLE_ADS_CLIENT_ID=$GCP_GOOGLE_ADS_CLIENT_ID_SECRET:$GCP_GOOGLE_ADS_CLIENT_ID_SECRET_VERSION~TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET=$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET:$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET_VERSION~TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN=$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET:$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET_VERSION"
+          gcloud run jobs deploy "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command node --args dist/src/google-ads-provider-read-smoke.js --set-env-vars "$ENVV" --set-secrets "$SECV" --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          sleep 3
+          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$JOB AND textPayload:\"GOOGLE_ADS_PROVIDER_READ_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=50 --format='value(textPayload)' | grep 'GOOGLE_ADS_PROVIDER_READ_RESULT=' | head -n1 || true)"
+          test -n "$LINE"; JSON="${LINE#GOOGLE_ADS_PROVIDER_READ_RESULT=}"
+          printf '%s' "$JSON" | jq -e '.credentials.developerTokenAccepted==true and .credentials.oauthRefreshAccepted==true and .accountVerification.verified==true and .prepare.status=="VALIDATED_PAUSED_ONLY" and .targetingValidation.valid==true and .targetingValidation.sideEffects==false and .mutation.createPausedExecuted==false and .mutation.activateExecuted==false and .mutation.spendGeneratedForVerification==false' >/dev/null
+          printf '%s\n' "$JSON" | jq . > evidence/provider-read.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p2-1-google-ads-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          retention-days: 90
