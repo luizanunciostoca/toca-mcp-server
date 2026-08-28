@@ -15,36 +15,29 @@ failUnless(
   clearance.scope === 'INSTAGRAM_ORGANIC_PUBLICATION',
   'RIGHTS_CLEARANCE_SCOPE_INVALID',
 );
-failUnless(
-  typeof clearance.evidenceRef === 'string' &&
-    clearance.evidenceRef.trim().length > 0,
-  'RIGHTS_CLEARANCE_EVIDENCE_REQUIRED',
-);
-failUnless(
-  typeof clearance.authority === 'string' && clearance.authority.trim().length > 0,
-  'RIGHTS_CLEARANCE_AUTHORITY_REQUIRED',
-);
-failUnless(
-  typeof clearance.clearedAt === 'string' &&
-    Number.isFinite(Date.parse(clearance.clearedAt)),
-  'RIGHTS_CLEARANCE_TIMESTAMP_INVALID',
-);
-failUnless(
+
+const hasEvidenceRef =
+  typeof clearance.evidenceRef === 'string' && clearance.evidenceRef.trim().length > 0;
+failUnless(hasEvidenceRef, 'RIGHTS_CLEARANCE_EVIDENCE_REQUIRED');
+
+const hasAuthority =
+  typeof clearance.authority === 'string' && clearance.authority.trim().length > 0;
+failUnless(hasAuthority, 'RIGHTS_CLEARANCE_AUTHORITY_REQUIRED');
+
+const hasValidClearanceTimestamp =
+  typeof clearance.clearedAt === 'string' && Number.isFinite(Date.parse(clearance.clearedAt));
+failUnless(hasValidClearanceTimestamp, 'RIGHTS_CLEARANCE_TIMESTAMP_INVALID');
+
+const hasExactAssetBinding =
   typeof clearance.assetSha256 === 'string' &&
-    clearance.assetSha256 === command.expectedAssetSha256,
-  'RIGHTS_CLEARANCE_ASSET_BINDING_MISMATCH',
-);
+  clearance.assetSha256 === command.expectedAssetSha256;
+failUnless(hasExactAssetBinding, 'RIGHTS_CLEARANCE_ASSET_BINDING_MISMATCH');
 
 if (clearance.expiresAt !== undefined) {
-  failUnless(
-    typeof clearance.expiresAt === 'string' &&
-      Number.isFinite(Date.parse(clearance.expiresAt)),
-    'RIGHTS_CLEARANCE_EXPIRY_INVALID',
-  );
-  failUnless(
-    Date.parse(clearance.expiresAt) > Date.now(),
-    'RIGHTS_CLEARANCE_EXPIRED',
-  );
+  const hasValidExpiry =
+    typeof clearance.expiresAt === 'string' && Number.isFinite(Date.parse(clearance.expiresAt));
+  failUnless(hasValidExpiry, 'RIGHTS_CLEARANCE_EXPIRY_INVALID');
+  failUnless(Date.parse(clearance.expiresAt) > Date.now(), 'RIGHTS_CLEARANCE_EXPIRED');
 }
 
 console.log(
