@@ -74,6 +74,7 @@ jobs:
           gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
           BASE_URL="$(jq -r '.status.url' /tmp/service.json)"
           TAG_URL="https://${TAG}---$(echo "$BASE_URL" | sed -E 's#https://##')"
+          echo "AUDIENCE=$BASE_URL" >> "$GITHUB_ENV"
           echo "TAG_URL=$TAG_URL" >> "$GITHUB_ENV"
           echo "REVISION=${SERVICE}-${SUFFIX}" >> "$GITHUB_ENV"
       - name: Mint probe token
@@ -83,7 +84,7 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
           token_format: id_token
-          id_token_audience: ${{ env.TAG_URL }}
+          id_token_audience: ${{ env.AUDIENCE }}
           create_credentials_file: false
           export_environment_variables: false
       - name: Probe readiness and capture structured error
