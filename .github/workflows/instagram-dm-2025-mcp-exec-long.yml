@@ -71,6 +71,34 @@ jobs:
               lines.append(line[10:] if line.startswith('          ') else line)
           client = '\n'.join(lines) + '\n'
           client = client.replace('}, 20000);', '}, 90000);')
+          old_handler = """createInterface({ input: child.stderr }).on('line', (line) => {
+            const sanitized = safe(line);
+            if (sanitized) stderr.push(sanitized);
+            if (stderr.length > 20) stderr.shift();
+          });"""
+          new_handler = """createInterface({ input: child.stderr }).on('line', (line) => {
+            try {
+              const event = JSON.parse(line) as Record<string, unknown>;
+              if (event.event === 'instagram.messaging.read.provider_error') {
+                console.log(JSON.stringify({
+                  validation: 'provider-telemetry',
+                  operation: typeof event.operation === 'string' ? event.operation : null,
+                  httpStatus: typeof event.httpStatus === 'number' ? event.httpStatus : null,
+                  providerCode: typeof event.providerCode === 'number' ? event.providerCode : null,
+                  providerSubcode: typeof event.providerSubcode === 'number' ? event.providerSubcode : null,
+                  providerType: typeof event.providerType === 'string' ? event.providerType : null,
+                }));
+              }
+            } catch {
+              // Non-JSON server stderr remains redacted below.
+            }
+            const sanitized = safe(line);
+            if (sanitized) stderr.push(sanitized);
+            if (stderr.length > 20) stderr.shift();
+          });"""
+          if old_handler not in client:
+              raise SystemExit('MCP_STDERR_TELEMETRY_HANDLER_NOT_FOUND')
+          client = client.replace(old_handler, new_handler, 1)
           Path('src/instagram-dm-2025-mcp-exec.ts').write_text(client)
           PY
           pnpm install --frozen-lockfile
@@ -121,7 +149,7 @@ jobs:
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet || STATUS=$?
 
           for attempt in 1 2 3 4 5 6; do
-            LINES="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=30m --limit=200 --order=asc --format='value(textPayload)' | grep -E '"validation"|instagram.messaging.read.provider_error' || true)"
+            LINES="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=30m --limit=200 --order=asc --format='value(textPayload)' | grep -E '"validation"|provider-telemetry' || true)"
             if [ -n "$LINES" ]; then
               printf '%s\n' "$LINES"
               break
