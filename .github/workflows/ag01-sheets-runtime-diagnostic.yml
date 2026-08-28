@@ -52,11 +52,17 @@ jobs:
           gcloud run jobs deploy "$JOB" --project "$PROJECT_ID" --region "$REGION" \
             --image "$IMAGE" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --command node --args /app/dist/ag01-sheets-readiness-smoke.js \
+            --command node --args /app/dist/src/ag01-sheets-readiness-smoke.js \
             --set-env-vars "AG01_TOCA_OS_ROUTING_SPREADSHEET_ID=$ROUTING_SPREADSHEET_ID,AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID=$CANONICAL_RESOURCES_SPREADSHEET_ID" \
             --max-retries 0 --task-timeout 120s --quiet
-          EXECUTION="$(gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          set +e
+          EXECUTION_OUTPUT="$(gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)' 2>&1)"
+          EXECUTION_RC=$?
+          set -e
+          printf '%s\n' "$EXECUTION_OUTPUT"
+          EXECUTION="$(printf '%s\n' "$EXECUTION_OUTPUT" | grep -Eo "${JOB}-[a-z0-9]+" | tail -n 1 || true)"
           echo "EXECUTION=$EXECUTION" >> "$GITHUB_ENV"
+          echo "EXECUTION_RC=$EXECUTION_RC" >> "$GITHUB_ENV"
       - name: Capture sanitized runtime evidence
         if: always()
         run: |
@@ -80,6 +86,7 @@ jobs:
             exit 1
           fi
           grep -q '^AG01_SHEETS_DIAG_COMPLETE' ag01-sheets-runtime-diagnostic/readback.log
+          [[ "${EXECUTION_RC:-1}" == "0" ]]
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
