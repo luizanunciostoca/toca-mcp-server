@@ -6,14 +6,7 @@
   "provider": "Google Ads API",
   "publicPhase": "OFF",
   "providerVerified": false,
-  "allowedLifecycle": [
-    "OFF",
-    "READ_ONLY",
-    "PREPARE",
-    "CREATE_PAUSED",
-    "READBACK",
-    "MANAGE"
-  ],
+  "allowedLifecycle": ["OFF", "READ_ONLY", "PREPARE", "CREATE_PAUSED", "READBACK", "MANAGE"],
   "verified": {
     "qualityRunId": "33205910481",
     "testFilesPassed": 217,
