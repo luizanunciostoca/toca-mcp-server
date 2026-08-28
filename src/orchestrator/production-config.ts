@@ -80,7 +80,10 @@ export function loadAg01ProductionConfig(
     requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
   }
   const vertexProjectId =
-    value.AG01_VERTEX_PROJECT_ID ?? env.GOOGLE_CLOUD_PROJECT?.trim() ?? env.GCP_PROJECT_ID?.trim() ?? '';
+    value.AG01_VERTEX_PROJECT_ID ??
+    env.GOOGLE_CLOUD_PROJECT?.trim() ??
+    env.GCP_PROJECT_ID?.trim() ??
+    '';
   if (value.AG01_MODEL_PROVIDER === 'vertex' && !vertexProjectId) {
     throw new Error('AG01_VERTEX_PROJECT_ID_REQUIRED');
   }

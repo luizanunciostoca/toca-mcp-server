@@ -4,7 +4,8 @@ import { getRouteDefinition } from './governance/route-catalog.js';
 import { VertexGeminiDecisionAdapter } from './orchestrator/vertex-gemini-decision-adapter.js';
 import type { TocaOsRegistrySnapshot } from './orchestrator/toca-os-registry.js';
 
-const projectId = process.env.AG01_VERTEX_PROJECT_ID?.trim() || process.env.GOOGLE_CLOUD_PROJECT?.trim();
+const projectId =
+  process.env.AG01_VERTEX_PROJECT_ID?.trim() || process.env.GOOGLE_CLOUD_PROJECT?.trim();
 const location = process.env.AG01_VERTEX_LOCATION?.trim() || 'global';
 const model = process.env.AG01_VERTEX_MODEL?.trim() || 'gemini-2.5-flash';
 const evidencePath = process.env.P2_2_EVIDENCE_PATH?.trim() || '/tmp/p2-2-ag01-vertex.json';
@@ -87,7 +88,8 @@ const result = await adapter.decide({
 });
 
 if (result.decision.routeId !== 'R17') throw new Error('P2_2_VERTEX_ROUTE_READBACK_MISMATCH');
-if (result.decision.agent !== route.primaryAgent) throw new Error('P2_2_VERTEX_AGENT_READBACK_MISMATCH');
+if (result.decision.agent !== route.primaryAgent)
+  throw new Error('P2_2_VERTEX_AGENT_READBACK_MISMATCH');
 if (result.decision.steps.length !== 0 || result.decision.proposedCapability !== null) {
   throw new Error('P2_2_VERTEX_UNEXPECTED_CAPABILITY_PROPOSAL');
 }

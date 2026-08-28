@@ -1,10 +1,7 @@
 import { resolveCapabilityDefinition } from '../governance/capability-resolution.js';
 import { getRouteDefinition } from '../governance/route-catalog.js';
 import { ROUTE_IDS, type RouteId } from '../governance/types.js';
-import {
-  AG01_DECISION_JSON_SCHEMA,
-  parseAg01StructuredDecision,
-} from './structured-decision.js';
+import { AG01_DECISION_JSON_SCHEMA, parseAg01StructuredDecision } from './structured-decision.js';
 import type {
   Ag01DecisionModelAdapter,
   Ag01ModelDecisionInput,
@@ -120,7 +117,10 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
         }
 
         const body = (await response.json()) as VertexGenerateContentResponse;
-        if (typeof body.promptFeedback?.blockReason === 'string' && body.promptFeedback.blockReason) {
+        if (
+          typeof body.promptFeedback?.blockReason === 'string' &&
+          body.promptFeedback.blockReason
+        ) {
           throw new Error(`AG01_MODEL_REFUSAL:${body.promptFeedback.blockReason}`);
         }
         const candidate = body.candidates?.[0];
@@ -283,9 +283,10 @@ function toVertexSchema(value: unknown): unknown {
     if (key === 'additionalProperties') continue;
     if (key === 'type') {
       if (Array.isArray(child)) {
-        const nonNull = child.find((item) => item !== 'null');
+        const childArray = child as unknown[];
+        const nonNull = childArray.find((item) => item !== 'null');
         if (typeof nonNull === 'string') result.type = nonNull.toUpperCase();
-        if (child.includes('null')) result.nullable = true;
+        if (childArray.includes('null')) result.nullable = true;
       } else if (typeof child === 'string') {
         result.type = child.toUpperCase();
       }

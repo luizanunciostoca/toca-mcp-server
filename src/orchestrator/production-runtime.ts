@@ -9,7 +9,10 @@ import { DurableFollowupCoordinator } from './durable-followup.js';
 import { GoogleOAuthRefreshSecretResolver } from './google-oauth-secret-resolver.js';
 import { PostgresConversationStore } from './postgres-conversation-store.js';
 import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
-import { OpenAiResponsesDecisionAdapter, type Ag01DecisionModelAdapter } from './openai-responses-adapter.js';
+import {
+  OpenAiResponsesDecisionAdapter,
+  type Ag01DecisionModelAdapter,
+} from './openai-responses-adapter.js';
 import {
   Ag01DecisionContext,
   ModelBackedIntentRouteResolver,
