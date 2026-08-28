@@ -68,12 +68,7 @@
   "brandSystem": {
     "heroBrandAssetId": "BRAND-THE-PARTY-WHITE-V1",
     "heroBrandRequired": true,
-    "institutionalFooterOrder": [
-      "TOCA_DO_MORCEGO",
-      "CORONA",
-      "RED_BULL",
-      "MORRO_DIGITAL"
-    ],
+    "institutionalFooterOrder": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "footerRequiredWhenApplicable": true,
     "officialBrandAssetsOnly": true
   },
