@@ -1,0 +1,24 @@
+name: Production Deploy Guard
+
+on:
+  push:
+    branches:
+      - fix/book-12-production-deploy-guard-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-toca-managed-instagram-daemon-production
+  cancel-in-progress: true
+
+jobs:
+  block-unapproved-auto-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record production deployment guard
+        run: |
+          echo 'PRODUCTION_AUTO_DEPLOY=BLOCKED'
+          echo 'This guard cancels an unapproved production deployment sharing this concurrency group.'
