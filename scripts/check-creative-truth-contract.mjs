@@ -91,16 +91,13 @@ const expectedThePartyPalette = {
   neonPurple: '#8A2BE2',
   red: '#FF2D20',
 };
-const expectedThePartyFooter = [
-  'TOCA_DO_MORCEGO',
-  'CORONA',
-  'RED_BULL',
-  'MORRO_DIGITAL',
-];
+const expectedThePartyFooter = ['TOCA_DO_MORCEGO', 'CORONA', 'RED_BULL', 'MORRO_DIGITAL'];
 
 for (const path of thePartyPaths) {
   const standard = JSON.parse(readFileSync(path, 'utf8'));
-  if (standard.sourceOfTruth?.venueReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1') {
+  if (
+    standard.sourceOfTruth?.venueReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1'
+  ) {
     console.error(`The Party standard must resolve the operation-scoped reference set: ${path}`);
     process.exit(1);
   }
