@@ -1,0 +1,186 @@
+name: Instagram DM 2025 FAQ Export
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-faq-extract-20260828
+    paths:
+      - '.github/smoke/instagram-dm-2025-faq-export.mjs'
+      - '.github/workflows/instagram-dm-2025-faq-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: instagram-dm-2025-faq-export
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  encrypted-read-only-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Generate one-time export encryption key
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPORT_KEY_HEX="$(openssl rand -hex 32)"
+          echo "::add-mask::$EXPORT_KEY_HEX"
+          echo "EXPORT_KEY_HEX=$EXPORT_KEY_HEX" >> "$GITHUB_ENV"
+
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build isolated read-only extractor image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/instagram-dm-export
+          cp .github/smoke/instagram-dm-2025-faq-export.mjs /tmp/instagram-dm-export/export.mjs
+          cat > /tmp/instagram-dm-export/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY export.mjs ./export.mjs
+          USER node
+          CMD ["node", "export.mjs"]
+          DOCKER
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/instagram-dm-faq-export:${GITHUB_SHA}"
+          docker build -t "$IMAGE" /tmp/instagram-dm-export
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated read-only Cloud Run Job
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-instagram-dm-faq-${GITHUB_RUN_ID}"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,EXPORT_KEY_HEX=$EXPORT_KEY_HEX" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --max-retries 0 \
+            --task-timeout 1200s \
+            --quiet
+
+      - name: Execute isolated read-only export
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+          EXECUTION="$(gcloud run jobs executions list \
+            --job "$JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --limit 1 \
+            --sort-by='~metadata.creationTimestamp' \
+            --format='value(metadata.name)')"
+          test -n "$EXECUTION"
+          echo "EXECUTION=$EXECUTION" >> "$GITHUB_ENV"
+
+      - name: Read encrypted chunks and coverage only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 3
+          BASE_FILTER="resource.type=cloud_run_job AND resource.labels.job_name=$JOB_NAME AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION"
+          gcloud logging read "$BASE_FILTER AND jsonPayload.validation=\"instagram-dm-2025-export-coverage\"" \
+            --project "$PROJECT_ID" \
+            --limit 1 \
+            --freshness 30m \
+            --order=desc \
+            --format='json(jsonPayload)' > /tmp/coverage.json
+          test "$(jq 'length' /tmp/coverage.json)" -eq 1
+          jq -e '.[0].jsonPayload.coverage.exportedInboundTextMessages2025 >= 0' /tmp/coverage.json >/dev/null
+          jq '.[0].jsonPayload.coverage' /tmp/coverage.json
+
+          gcloud logging read "$BASE_FILTER AND jsonPayload.validation=\"instagram-dm-2025-export-chunk\"" \
+            --project "$PROJECT_ID" \
+            --limit 1000 \
+            --freshness 30m \
+            --order=asc \
+            --format='json(jsonPayload)' > /tmp/chunks.json
+          test "$(jq 'length' /tmp/chunks.json)" -gt 0
+
+      - name: Reconstruct and decrypt private payload locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/private-instagram-dm-export
+          node <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const rows = JSON.parse(fs.readFileSync('/tmp/chunks.json', 'utf8'))
+            .map((row) => row.jsonPayload)
+            .filter((row) => row && row.validation === 'instagram-dm-2025-export-chunk')
+            .sort((a, b) => Number(a.chunkIndex) - Number(b.chunkIndex));
+          if (!rows.length) throw new Error('NO_ENCRYPTED_DM_EXPORT_CHUNKS');
+          const total = Number(rows[0].totalChunks);
+          if (rows.length !== total) throw new Error(`DM_EXPORT_CHUNK_MISMATCH:${rows.length}:${total}`);
+          const iv = Buffer.from(rows[0].iv, 'base64');
+          const tag = Buffer.from(rows[0].tag, 'base64');
+          const ciphertext = Buffer.from(rows.map((row) => row.chunk).join(''), 'base64');
+          const key = Buffer.from(process.env.EXPORT_KEY_HEX, 'hex');
+          const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+          decipher.setAuthTag(tag);
+          const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+          const parsed = JSON.parse(plaintext.toString('utf8'));
+          if (parsed?.source !== 'instagram-direct-meta-conversations-api' || !Array.isArray(parsed.messages)) {
+            throw new Error('DM_EXPORT_PAYLOAD_INVALID');
+          }
+          fs.writeFileSync('/tmp/private-instagram-dm-export/dm-2025.json', JSON.stringify(parsed));
+          fs.writeFileSync('/tmp/private-instagram-dm-export/coverage.json', JSON.stringify(parsed.coverage, null, 2));
+          console.log(JSON.stringify({
+            validation: 'instagram-dm-2025-private-payload-decrypted',
+            messages: parsed.messages.length,
+            completeHistoricalCoverageClaimAllowed: parsed.coverage.completeHistoricalCoverageClaimAllowed,
+          }));
+          NODE
+
+      - name: Upload private one-day artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-dm-2025-private-${{ github.run_id }}
+          path: /tmp/private-instagram-dm-export
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Cleanup isolated Cloud Run Job
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${JOB_NAME:-}" ]; then
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --quiet >/dev/null 2>&1 || true
+          fi
