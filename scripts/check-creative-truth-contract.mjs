@@ -17,6 +17,7 @@ const required = [
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
   'src/providers/google-sheets/creative-truth-registry.ts',
+  'src/providers/google-sheets/the-party-content-orchestration.ts',
   'src/providers/local/local-creative-composer.ts',
   'src/providers/local/local-video-composer.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
@@ -78,13 +79,95 @@ for (const path of [
   }
 }
 
-for (const path of [
+const thePartyPaths = [
   'control/creative-standards/the-party-hybrid-networks-standard.v1.json',
   'control/creative-standards/the-party-hybrid-minimalist-standard.v1.json',
-]) {
+];
+const expectedThePartyPalette = {
+  black: '#0D0D0D',
+  white: '#FFFFFF',
+  gold: '#FFC629',
+  amber: '#FFA900',
+  neonPurple: '#8A2BE2',
+  red: '#FF2D20',
+};
+const expectedThePartyFooter = [
+  'TOCA_DO_MORCEGO',
+  'CORONA',
+  'RED_BULL',
+  'MORRO_DIGITAL',
+];
+
+for (const path of thePartyPaths) {
   const standard = JSON.parse(readFileSync(path, 'utf8'));
   if (standard.sourceOfTruth?.venueReferenceSetId !== 'TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1') {
     console.error(`The Party standard must resolve the operation-scoped reference set: ${path}`);
+    process.exit(1);
+  }
+  if (
+    standard.standardVersion !== '2.0' ||
+    standard.sourceOfTruth?.canonicalDriveId !==
+      '1CnsYiSYvNXvma4giDSiYbIhuYhmh0_BBse2UoOLB4BI' ||
+    standard.sourceOfTruth?.brandSystemDriveId !==
+      '1X_ppNT3-BckHea9HmzjhI1xULI1CFfhk3wmi4ALH7Ag' ||
+    standard.sourceOfTruth?.approvedReferencesFolderId !==
+      '1RyxWk6kaJcnKRb88NY9evN2BfLBnRLNm' ||
+    standard.sourceOfTruth?.quickGuideDriveId !== '1Ko5ZOoLkX4nQ41HUBE5IvQfEQE0FExPb' ||
+    JSON.stringify(standard.designTokens?.palette) !== JSON.stringify(expectedThePartyPalette) ||
+    standard.designTokens?.typography?.display !== 'Bebas Neue Condensed Bold' ||
+    standard.designTokens?.typography?.expressive !== 'Brush Script' ||
+    standard.designTokens?.typography?.support !== 'Montserrat Regular / Medium / Bold' ||
+    standard.brandSystem?.heroBrandAssetId !== 'BRAND-THE-PARTY-WHITE-V1' ||
+    standard.brandSystem?.heroBrandRequired !== true ||
+    JSON.stringify(standard.brandSystem?.institutionalFooterOrder) !==
+      JSON.stringify(expectedThePartyFooter) ||
+    standard.brandSystem?.officialBrandAssetsOnly !== true ||
+    standard.qualityGate?.requiresVisualRegressionAgainstV2References !== true ||
+    standard.qualityGate?.requiresFooterOrderValidation !== true ||
+    standard.qualityGate?.requiresTypographyAndPaletteValidation !== true
+  ) {
+    console.error(`The Party visual standard is not synchronized to canonical v2.0: ${path}`);
+    process.exit(1);
+  }
+}
+
+const thePartyNetworks = JSON.parse(
+  readFileSync('control/creative-standards/the-party-hybrid-networks-standard.v1.json', 'utf8'),
+);
+if (
+  thePartyNetworks.environmentSystem?.required !== true ||
+  thePartyNetworks.environmentSystem?.inferenceForbidden !== true ||
+  !thePartyNetworks.environmentSystem?.allowed?.includes('INTERNATIONAL') ||
+  !thePartyNetworks.environmentSystem?.allowed?.includes('NATIONAL')
+) {
+  console.error('The Party Hybrid Networks v2.0 must remain fail-closed on environment selection');
+  process.exit(1);
+}
+
+const thePartyMinimalist = JSON.parse(
+  readFileSync('control/creative-standards/the-party-hybrid-minimalist-standard.v1.json', 'utf8'),
+);
+if (
+  thePartyMinimalist.composition?.peopleFirstPreferred !== true ||
+  thePartyMinimalist.composition?.lowerGraphicDensity !== true ||
+  thePartyMinimalist.composition?.generousNegativeSpace !== true
+) {
+  console.error('The Party Hybrid Minimalist v2.0 must preserve people-first premium composition');
+  process.exit(1);
+}
+
+const thePartyContentOrchestration = readFileSync(
+  'src/providers/google-sheets/the-party-content-orchestration.ts',
+  'utf8',
+);
+for (const marker of [
+  "THE_PARTY_VISUAL_STANDARD_VERSION = '2.0'",
+  'THE_PARTY_CONTENT_STANDARD_VERSION_MISMATCH',
+  'THE_PARTY_CONTENT_STANDARD_INTENT_MISMATCH',
+  'THE_PARTY_ENVIRONMENT_REQUIRED',
+]) {
+  if (!thePartyContentOrchestration.includes(marker)) {
+    console.error(`The Party content orchestration missing v2.0 runtime contract: ${marker}`);
     process.exit(1);
   }
 }
