@@ -131,8 +131,10 @@ jobs:
           else
             : > p2-2-evidence/job.log
           fi
-          grep -F '"schemaVersion":"toca.p2.2.ag01-vertex-provider.v1"' p2-2-evidence/job.log \
-            | tail -n 1 > p2-2-evidence/provider-readback.json || true
+          grep -F 'P2_2_PROVIDER_READBACK ' p2-2-evidence/job.log \
+            | tail -n 1 \
+            | sed 's/^P2_2_PROVIDER_READBACK //' \
+            > p2-2-evidence/provider-readback.json || true
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo 'Cloud Run runtime-identity smoke failed.' >&2
             cat p2-2-evidence/execution-stderr.log >&2 || true
