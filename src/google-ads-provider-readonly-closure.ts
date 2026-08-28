@@ -31,7 +31,8 @@ const discoveryApi = new GoogleAdsRestApiClient(
 
 const discovery = await discoveryApi.listAccessibleCustomers();
 const accessibleCustomers = normalizeAccessibleCustomers(discovery);
-if (accessibleCustomers.length === 0) throw new Error('GOOGLE_ADS_READONLY_NO_ACCESSIBLE_CUSTOMERS');
+if (accessibleCustomers.length === 0)
+  throw new Error('GOOGLE_ADS_READONLY_NO_ACCESSIBLE_CUSTOMERS');
 
 const loginCustomerId = configuredLoginCustomerId
   ? normalizeCustomerId(configuredLoginCustomerId)
