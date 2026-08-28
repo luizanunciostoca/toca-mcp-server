@@ -18,21 +18,21 @@ function createClient(handler: (read: RecordedRead) => unknown): {
   return {
     reads,
     client: {
-      async get(path, query = {}) {
+      get(path, query = {}) {
         const read = { path, query } satisfies RecordedRead;
         reads.push(read);
-        return handler(read);
+        return Promise.resolve(handler(read));
       },
-      async getWithAccessToken(path, query, token) {
+      getWithAccessToken(path, query, token) {
         const read = { path, query, token } satisfies RecordedRead;
         reads.push(read);
-        return handler(read);
+        return Promise.resolve(handler(read));
       },
     },
   };
 }
 
-function bindingResponses(read: RecordedRead): unknown | undefined {
+function bindingResponses(read: RecordedRead): unknown {
   if (read.path === 'IG_1') {
     return { id: 'IG_1', username: 'tocadomorcego' };
   }
