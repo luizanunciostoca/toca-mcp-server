@@ -1,0 +1,107 @@
+name: P2.1 Google Ads Read-Only Closure
+
+on:
+  push:
+    branches:
+      - ops/p2-1-google-ads-provider-20260828
+    paths:
+      - '.github/workflows/p2-1-google-ads-readonly-closure.yml'
+      - 'src/google-ads-provider-readonly-closure.ts'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_ARTIFACT_REPOSITORY: toca-mcp
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+      GCP_MCP_SERVICE: toca-mcp-production
+      GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET: toca-google-ads-developer-token
+      GCP_GOOGLE_ADS_CLIENT_ID_SECRET: toca-google-ads-client-id
+      GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET: toca-google-ads-client-secret
+      GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET: toca-google-ads-refresh-token
+      GOOGLE_ADS_CUSTOMER_ID: '5844308491'
+      GOOGLE_ADS_ALLOWED_CURRENCY: BRL
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Exact-head Quality Gate
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+      - name: Authenticate GCP
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Prove secret objects exist without reading values
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          for sid in "$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET" "$GCP_GOOGLE_ADS_CLIENT_ID_SECRET" "$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET" "$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET"; do
+            gcloud secrets versions describe latest --secret "$sid" --project "$GCP_PROJECT_ID" --format='value(state)' | grep -qx ENABLED
+          done
+          jq -n --arg sha "$GITHUB_SHA" --arg customer "$GOOGLE_ADS_CUSTOMER_ID" '{schemaVersion:"toca.p2.1.readonly.preflight.v1",sourceSha:$sha,customerId:$customer,secretsExist:true,secretValuesExposed:false,providerMutationAuthorized:false}' > evidence/preflight.json
+      - name: Verify public Google Ads production stays OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          S="$(gcloud run services describe "$GCP_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          P="$(printf '%s' "$S" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PHASE") | .value][0] // "OFF"')"
+          V="$(printf '%s' "$S" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="GOOGLE_ADS_PROVIDER_VERIFIED") | .value][0] // "false"')"
+          [ "$P" = OFF ]
+          [ "$V" != true ]
+      - name: Build immutable read-only probe image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:p2-1-readonly-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Execute real Google Ads read-only provider proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-p2-1-readonly-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ENVV="^~^SOURCE_SHA=$GITHUB_SHA~GOOGLE_ADS_VERIFICATION_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}~RUNTIME_SERVICE_ACCOUNT=$GCP_RUNTIME_SERVICE_ACCOUNT~GOOGLE_ADS_CUSTOMER_ID=$GOOGLE_ADS_CUSTOMER_ID~GOOGLE_ADS_ALLOWED_CURRENCY=$GOOGLE_ADS_ALLOWED_CURRENCY~GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN~GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_ID~GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET~GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN"
+          SECV="^~^TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN=$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_CLIENT_ID=$GCP_GOOGLE_ADS_CLIENT_ID_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET=$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN=$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET:latest"
+          gcloud run jobs deploy "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command node --args dist/src/google-ads-provider-readonly-closure.js --set-env-vars "$ENVV" --set-secrets "$SECV" --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          sleep 3
+          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$JOB AND textPayload:\"GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=50 --format='value(textPayload)' | grep 'GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=' | head -n1 || true)"
+          test -n "$LINE"
+          JSON="${LINE#GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=}"
+          printf '%s' "$JSON" | jq -e '.credentials.developerTokenAccepted==true and .credentials.oauthRefreshAccepted==true and .accountVerification.verified==true and .externalSideEffectExecuted==false and .mutation.createPausedExecuted==false and .mutation.activateExecuted==false and .mutation.spendGeneratedForVerification==false and .route=="R28"' >/dev/null
+          printf '%s\n' "$JSON" | jq . > evidence/provider-readonly.json
+          echo "P2_1_GOOGLE_ADS_PROVIDER_VERIFIED_READ_ONLY"
+      - name: Upload immutable evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p2-1-google-ads-readonly-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          retention-days: 90
