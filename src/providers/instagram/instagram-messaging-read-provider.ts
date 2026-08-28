@@ -195,7 +195,8 @@ export class InstagramMessagingReadProvider {
     const matches = pages.data.data.filter(
       (page) => page.instagram_business_account?.id === this.instagramBusinessAccountId,
     );
-    if (matches.length !== 1) throw new Error(`INSTAGRAM_MESSAGING_PAGE_MATCH_COUNT:${matches.length}`);
+    if (matches.length !== 1)
+      throw new Error(`INSTAGRAM_MESSAGING_PAGE_MATCH_COUNT:${matches.length}`);
 
     const page = matches[0];
     if (!page.tasks.includes('MESSAGING')) throw new Error('INSTAGRAM_PAGE_MESSAGING_TASK_MISSING');

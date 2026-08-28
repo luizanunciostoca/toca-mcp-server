@@ -87,16 +87,10 @@ describe('InstagramMessagingReadProvider', () => {
     const result = await provider.listConversations({ limit: 50, after: 'CURSOR_1' });
 
     expect(result).toEqual({
-      conversations: [
-        { conversationId: 'CONV_1', updatedTime: '2025-05-01T12:00:00+0000' },
-      ],
+      conversations: [{ conversationId: 'CONV_1', updatedTime: '2025-05-01T12:00:00+0000' }],
       nextAfter: 'CURSOR_2',
     });
-    expect(reads.map((read) => read.path)).toEqual([
-      'IG_1',
-      'me/accounts',
-      'PAGE_1/conversations',
-    ]);
+    expect(reads.map((read) => read.path)).toEqual(['IG_1', 'me/accounts', 'PAGE_1/conversations']);
     expect(JSON.stringify(result)).not.toContain('SHOULD_NOT_LEAK');
   });
 
