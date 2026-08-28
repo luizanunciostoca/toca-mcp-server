@@ -33,7 +33,7 @@ jobs:
           gcloud logging read \
             "resource.type=cloud_run_job AND resource.labels.job_name=${SOURCE_JOB_NAME}" \
             --project "$GCP_PROJECT_ID" \
-            --freshness=30m \
+            --freshness=60m \
             --limit=300 \
             --order=asc \
             --format=json > /tmp/logs.json
@@ -68,4 +68,14 @@ jobs:
                   key=json.dumps(safe,sort_keys=True)
                   if key not in emitted:
                     emitted.add(key); print(json.dumps(safe,separators=(',',':')))
+          PY
+      - name: List relevant secret names only
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAMES="$(gcloud secrets list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/dev/null | grep -Ei 'instagram|meta.*token|token.*meta' || true)"
+          python3 - "$NAMES" <<'PY'
+          import json, sys
+          names=[line.strip() for line in sys.argv[1].splitlines() if line.strip()]
+          print(json.dumps({'validation':'instagram-auth-secret-names','names':names},separators=(',',':')))
           PY
