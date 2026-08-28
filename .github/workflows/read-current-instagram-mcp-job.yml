@@ -15,7 +15,7 @@ env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  SOURCE_JOB_NAME: toca-instagram-dm-mcp-long-33217538142-1
+  SOURCE_JOB_NAME: toca-instagram-dm-mcp-long-33217993691-1
 
 jobs:
   inspect:
@@ -55,6 +55,17 @@ jobs:
             jp=row.get('jsonPayload')
             if isinstance(jp,dict): texts.append(json.dumps(jp,separators=(',',':')))
             for text in texts:
+              if 'instagram.messaging.read.provider_error' in text:
+                try:
+                  obj=json.loads(text)
+                except Exception:
+                  obj=None
+                if isinstance(obj,dict):
+                  allowed={'event','operation','httpStatus','providerCode','providerSubcode','providerType'}
+                  safe={k:v for k,v in obj.items() if k in allowed}
+                  key=json.dumps(safe,sort_keys=True)
+                  if key not in emitted:
+                    emitted.add(key); print(json.dumps({'validation':'provider-telemetry',**safe},separators=(',',':')))
               if '"validation"' in text:
                 for m in re.finditer(r'\{[^\n]*"validation"[^\n]*\}',text):
                   raw=m.group(0)
