@@ -90,7 +90,7 @@ export interface ThePartyContentOrchestrationRecord {
   readonly environmentSource?: ThePartyEnvironmentSource;
   readonly editionEnvironmentStatus: ThePartyEnvironmentDecisionStatus;
   readonly standardId: ThePartyVisualStandardId;
-  readonly standardVersion: typeof THE_PARTY_VISUAL_STANDARD_VERSION;
+  readonly standardVersion: string;
   readonly visualStandardStatus: ThePartyVisualStandardStatus;
   readonly persistedVisualStandardStatus: ThePartyVisualStandardStatus;
   readonly heroBrandAssetId: typeof THE_PARTY_HERO_BRAND_ASSET_ID;
@@ -110,7 +110,7 @@ interface ParsedContentRecord {
   readonly intent: ThePartyCreativeIntent;
   readonly environment?: ThePartyEnvironment;
   readonly standardId: ThePartyVisualStandardId;
-  readonly standardVersion: typeof THE_PARTY_VISUAL_STANDARD_VERSION;
+  readonly standardVersion: string;
   readonly visualStandardStatus: ThePartyVisualStandardStatus;
   readonly heroBrandAssetId: typeof THE_PARTY_HERO_BRAND_ASSET_ID;
   readonly venueAssetId?: string;
