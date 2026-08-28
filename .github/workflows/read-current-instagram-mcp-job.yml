@@ -1,0 +1,75 @@
+name: Read Current Instagram MCP Job
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-mcp-exec-20260828
+    paths:
+      - '.github/workflows/read-current-instagram-mcp-job.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_JOB_NAME: toca-instagram-dm-mcp-long-33217538142-1
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Print sanitized MCP evidence and error codes
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${SOURCE_JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=30m \
+            --limit=300 \
+            --order=asc \
+            --format=json > /tmp/logs.json
+          python3 <<'PY'
+          import json, re
+          rows=json.load(open('/tmp/logs.json'))
+          print(json.dumps({'validation':'cloud-log-entry-count','count':len(rows)}))
+          emitted=set()
+          patterns=[
+            r'META_HTTP_\d+(?:\|META_CODE_\d+)?(?:\|META_SUBCODE_\d+)?(?:\|META_TYPE_[A-Za-z0-9_.-]+)?',
+            r'META_GRAPH_READ_FAILED:[A-Za-z0-9_:.-]+',
+            r'INSTAGRAM_[A-Z0-9_:.-]+',
+            r'MCP_TIMEOUT:[A-Za-z0-9_/.-]+',
+            r'TOCA_[A-Z0-9_:.-]+',
+          ]
+          for row in rows:
+            texts=[]
+            if isinstance(row.get('textPayload'),str): texts.append(row['textPayload'])
+            jp=row.get('jsonPayload')
+            if isinstance(jp,dict): texts.append(json.dumps(jp,separators=(',',':')))
+            for text in texts:
+              if '"validation"' in text:
+                for m in re.finditer(r'\{[^\n]*"validation"[^\n]*\}',text):
+                  raw=m.group(0)
+                  try:
+                    obj=json.loads(raw)
+                  except Exception:
+                    continue
+                  allowed={'validation','server','version','protocolVersion','tocaExecutePresent','capabilitySearchPresent','toolCount','executableCapabilities','status','executionIdPresent','conversationsReturned','nextAfterPresent','errorCode','serverStderrCodes'}
+                  safe={k:v for k,v in obj.items() if k in allowed}
+                  key=json.dumps(safe,sort_keys=True)
+                  if key not in emitted:
+                    emitted.add(key); print(json.dumps(safe,separators=(',',':')))
+              for pattern in patterns:
+                for code in re.findall(pattern,text):
+                  key='CODE:'+code
+                  if key not in emitted:
+                    emitted.add(key); print(json.dumps({'validation':'sanitized-server-code','code':code},separators=(',',':')))
+          PY
