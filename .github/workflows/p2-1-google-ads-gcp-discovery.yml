@@ -1,0 +1,50 @@
+name: P2.1 Google Ads GCP Discovery
+
+on:
+  push:
+    branches:
+      - ops/p2-1-google-ads-provider-20260828
+    paths:
+      - '.github/workflows/p2-1-google-ads-gcp-discovery.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_ID: toca-mcp-production
+      REGION: southamerica-east1
+      SERVICE: toca-mcp-production
+      WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Discover bindings without secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud secrets list --project "$PROJECT_ID" --format=json \
+            | jq '[.[] | {name:(.name|split("/")|last),labels:(.labels//{}),createTime:(.createTime//null)} | select((.name|ascii_downcase|contains("google")) or (.name|ascii_downcase|contains("ads")))]' \
+            > evidence/google-ads-secret-candidates.json
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json \
+            | jq '{service:.metadata.name,serviceAccount:(.spec.template.spec.serviceAccountName//null),env:[.spec.template.spec.containers[0].env[]? | select((.name|contains("GOOGLE_ADS")) or (.name|contains("GCP_GOOGLE_ADS"))) | {name:.name,value:(if has("value") then .value else null end),secretRef:(.valueFrom.secretKeyRef.secret//null)}]}' \
+            > evidence/service-google-ads-env.json
+          gcloud iam service-accounts describe "$RUNTIME_SA" --project "$PROJECT_ID" --format=json \
+            | jq '{email:.email,disabled:(.disabled//false)}' > evidence/runtime-sa.json
+          jq -n --arg project "$PROJECT_ID" --arg region "$REGION" --arg service "$SERVICE" '{schemaVersion:"toca.p2.1.google-ads-discovery.v1",project:$project,region:$region,service:$service,secretValuesRead:false,providerMutationExecuted:false}' > evidence/manifest.json
+          echo 'P2_1_DISCOVERY_COMPLETE'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p2-1-google-ads-gcp-discovery-${{ github.run_id }}
+          path: evidence
+          retention-days: 90
