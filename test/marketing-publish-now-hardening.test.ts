@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
@@ -18,6 +19,21 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(script).toContain('.creativeTruthBinding.outputSha256 == .expectedAssetSha256');
     expect(script).toContain('.manifest.request.publicationAssetSha256 == $sourceSha');
     expect(script).toContain('.manifest.request.creativeTruthBinding.outputSha256 == $sourceSha');
+  });
+
+  it('executes the compatibility wrapper patch-only preflight without provider access', () => {
+    const result = spawnSync('bash', ['scripts/marketing-publish-now-fixed.sh'], {
+      cwd: process.cwd(),
+      env: { ...process.env, PUBLISH_NOW_PATCH_ONLY: 'true' },
+      encoding: 'utf8',
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stderr).toContain('P1_WRAPPER_PHASE=START');
+    expect(result.stderr).toContain('P1_WRAPPER_PHASE=PATCH_GENERATED');
+    expect(result.stderr).toContain('P1_COMPAT_PATCH=PASS');
+    expect(result.stderr).toContain('P1_WRAPPER_PHASE=PATCH_ONLY_COMPLETE');
+    expect(result.stderr).not.toContain('P1_PHASE=AUTHENTICATE_DOCKER');
   });
 
   it('fails closed before cloud authentication when deterministic brand truth is absent', () => {
