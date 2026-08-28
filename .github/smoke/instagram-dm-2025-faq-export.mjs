@@ -14,9 +14,7 @@ const MAX_CONVERSATION_PAGES = 500;
 const CONVERSATION_PAGE_LIMIT = 100;
 const MESSAGE_DETAIL_LIMIT = 20;
 
-function asObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
+function asObject(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function asArray(value) { return Array.isArray(value) ? value : []; }
 function asString(value) { return typeof value === 'string' && value.length > 0 ? value : null; }
 function timestamp(value) {
@@ -43,6 +41,24 @@ async function graphGet(path, token, query = {}) {
   return body;
 }
 
+async function readGrantedPermissions() {
+  const body = asObject(await graphGet('me/permissions', userToken));
+  const granted = [];
+  const declined = [];
+  for (const candidate of asArray(body.data)) {
+    const item = asObject(candidate);
+    const permission = asString(item.permission);
+    const status = asString(item.status);
+    if (!permission) continue;
+    if (status === 'granted') granted.push(permission);
+    else declined.push(`${permission}:${status ?? 'unknown'}`);
+  }
+  granted.sort();
+  declined.sort();
+  console.log(JSON.stringify({ validation: 'meta-token-permissions', granted, declined }));
+  return { granted, declined };
+}
+
 async function resolveInstagramProfile() {
   const body = asObject(await graphGet(accountId, userToken, { fields: 'id,username' }));
   const id = asString(body.id);
@@ -52,9 +68,7 @@ async function resolveInstagramProfile() {
 }
 
 async function resolvePage() {
-  const body = asObject(await graphGet('me/accounts', userToken, {
-    fields: 'id,access_token,tasks,instagram_business_account', limit: 100,
-  }));
+  const body = asObject(await graphGet('me/accounts', userToken, { fields: 'id,access_token,tasks,instagram_business_account', limit: 100 }));
   const matches = asArray(body.data).filter((candidate) => {
     const page = asObject(candidate);
     return asObject(page.instagram_business_account).id === accountId;
@@ -80,9 +94,7 @@ async function selectInstagramConversationRoute(pageId, pageToken) {
   const failures = [];
   for (const candidate of candidates) {
     try {
-      const body = asObject(await graphGet(candidate.path, candidate.token, {
-        ...candidate.query, fields: 'id,updated_time', limit: Math.min(5, CONVERSATION_PAGE_LIMIT),
-      }));
+      const body = asObject(await graphGet(candidate.path, candidate.token, { ...candidate.query, fields: 'id,updated_time', limit: 5 }));
       if (!Array.isArray(body.data)) throw new Error('META_GRAPH_READ_FAILED:INVALID_DATA');
       return { ...candidate, probeCount: body.data.length };
     } catch (error) {
@@ -99,12 +111,7 @@ async function listAllConversations(route) {
   do {
     pages += 1;
     if (pages > MAX_CONVERSATION_PAGES) throw new Error('INSTAGRAM_CONVERSATION_PAGE_GUARD_EXCEEDED');
-    const body = asObject(await graphGet(route.path, route.token, {
-      ...route.query,
-      fields: 'id,updated_time',
-      limit: CONVERSATION_PAGE_LIMIT,
-      ...(after ? { after } : {}),
-    }));
+    const body = asObject(await graphGet(route.path, route.token, { ...route.query, fields: 'id,updated_time', limit: CONVERSATION_PAGE_LIMIT, ...(after ? { after } : {}) }));
     conversations.push(...asArray(body.data));
     after = asString(asObject(asObject(body.paging).cursors).after);
   } while (after);
@@ -115,10 +122,7 @@ async function readConversation(conversationId, token) {
   const fields = `messages.limit(${MESSAGE_DETAIL_LIMIT}){id,created_time,from,to,message,is_unsupported}`;
   const body = asObject(await graphGet(conversationId, token, { fields }));
   const messages = asObject(body.messages);
-  return {
-    data: asArray(messages.data),
-    hasMore: Boolean(asString(asObject(messages.paging).next) || asString(asObject(asObject(messages.paging).cursors).after)),
-  };
+  return { data: asArray(messages.data), hasMore: Boolean(asString(asObject(messages.paging).next) || asString(asObject(asObject(messages.paging).cursors).after)) };
 }
 
 function participantUsernames(message) {
@@ -141,6 +145,7 @@ function directionFor(message, pageId, accountUsername) {
 }
 function inPeriod(timeMs) { return timeMs !== null && timeMs >= PERIOD_START && timeMs < PERIOD_END; }
 
+await readGrantedPermissions();
 const instagramProfile = await resolveInstagramProfile();
 const { pageId, pageToken } = await resolvePage();
 const route = await selectInstagramConversationRoute(pageId, pageToken);
@@ -170,16 +175,13 @@ for (const candidate of conversations) {
   const updated = timestamp(conversation.updated_time);
   if (!conversationId) continue;
   if (updated !== null && updated < PERIOD_START) { conversationsSkippedBefore2025 += 1; continue; }
-
   conversationsInspected += 1;
   let read;
   try { read = await readConversation(conversationId, route.token); }
   catch { conversationReadErrors += 1; continue; }
-
   if (read.data.length === 0) { conversationsWithNoReadableMessages += 1; continue; }
   const instagramMessages = read.data.filter((message) => isInstagramMessage(asObject(message)));
   if (instagramMessages.length === 0) { conversationsRejectedAsNonInstagram += 1; continue; }
-
   instagramConversationsObserved += 1;
   instagramMessagesObserved += instagramMessages.length;
   const inspectedTimes = [];
@@ -201,38 +203,20 @@ for (const candidate of conversations) {
     if (!text) { messagesWithoutText2025 += 1; continue; }
     exportedMessages.push({ createdTime: new Date(createdMs).toISOString(), text });
   }
-
   if (read.hasMore) {
     conversationsWithMoreThan20Messages += 1;
     const earliestConversationInspected = inspectedTimes.length > 0 ? Math.min(...inspectedTimes) : null;
-    if (earliestConversationInspected === null || (earliestConversationInspected > PERIOD_START && (updated === null || updated >= PERIOD_START))) {
-      conversationsPotentiallyMissing2025DueMetaLimit += 1;
-    }
+    if (earliestConversationInspected === null || (earliestConversationInspected > PERIOD_START && (updated === null || updated >= PERIOD_START))) conversationsPotentiallyMissing2025DueMetaLimit += 1;
   }
 }
 
 const sourcePlatformValidated = route.label.includes('platform') && (instagramConversationsObserved > 0 || conversations.length === 0);
 const coverage = {
-  period: { start: '2025-01-01T00:00:00.000Z', endExclusive: '2026-01-01T00:00:00.000Z' },
-  selectedRoute: route.label,
-  routeProbeCount: route.probeCount,
-  conversationPages,
-  conversationsReturned: conversations.length,
-  conversationsSkippedBefore2025,
-  conversationsInspected,
-  conversationsWithNoReadableMessages,
-  conversationsRejectedAsNonInstagram,
-  instagramConversationsObserved,
-  instagramMessagesObserved,
-  sourcePlatformValidated,
-  conversationsWithMoreThan20Messages,
-  conversationsPotentiallyMissing2025DueMetaLimit,
-  conversationReadErrors,
-  inspectedMessageRecords,
-  inbound2025Messages,
-  outbound2025Messages,
-  unknownDirection2025Messages,
-  messagesWithoutText2025,
+  period: { start: '2025-01-01T00:00:00.000Z', endExclusive: '2026-01-01T00:00:00.000Z' }, selectedRoute: route.label, routeProbeCount: route.probeCount,
+  conversationPages, conversationsReturned: conversations.length, conversationsSkippedBefore2025, conversationsInspected,
+  conversationsWithNoReadableMessages, conversationsRejectedAsNonInstagram, instagramConversationsObserved, instagramMessagesObserved,
+  sourcePlatformValidated, conversationsWithMoreThan20Messages, conversationsPotentiallyMissing2025DueMetaLimit, conversationReadErrors,
+  inspectedMessageRecords, inbound2025Messages, outbound2025Messages, unknownDirection2025Messages, messagesWithoutText2025,
   exportedInboundTextMessages2025: exportedMessages.length,
   earliestInspectedMessageTime: earliestInspected === null ? null : new Date(earliestInspected).toISOString(),
   latestInspectedMessageTime: latestInspected === null ? null : new Date(latestInspected).toISOString(),
@@ -240,7 +224,7 @@ const coverage = {
   completeHistoricalCoverageClaimAllowed: sourcePlatformValidated && conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
 };
 
-const payload = { schemaVersion: 3, source: 'instagram-direct-meta-conversations-api', generatedAt: new Date().toISOString(), coverage, messages: exportedMessages };
+const payload = { schemaVersion: 4, source: 'instagram-direct-meta-conversations-api', generatedAt: new Date().toISOString(), coverage, messages: exportedMessages };
 const key = Buffer.from(exportKeyHex, 'hex');
 const iv = crypto.randomBytes(12);
 const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
