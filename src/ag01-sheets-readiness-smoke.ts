@@ -14,8 +14,7 @@ interface GoogleErrorPayload {
 }
 
 const routingSpreadsheetId = process.env.AG01_TOCA_OS_ROUTING_SPREADSHEET_ID?.trim();
-const canonicalSpreadsheetId =
-  process.env.AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID?.trim();
+const canonicalSpreadsheetId = process.env.AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID?.trim();
 if (!routingSpreadsheetId || !canonicalSpreadsheetId) {
   throw new Error('AG01_SHEETS_DIAG_SPREADSHEET_IDS_REQUIRED');
 }
