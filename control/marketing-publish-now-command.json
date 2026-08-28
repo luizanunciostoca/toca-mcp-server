@@ -1,40 +1,47 @@
 {
   "schemaVersion": 1,
-  "commandId": "publish-now-MKT-20260827-SUNSET-FEED-1500-1426",
-  "action": "NOOP",
-  "issuedAt": "2026-08-27T14:26:06-03:00",
+  "commandId": "publish-now-MKT-20260828-SUNSET-FEED-0900-1154",
+  "action": "PUBLISH_NOW",
+  "issuedAt": "2026-08-28T11:54:14-03:00",
   "timezone": "America/Bahia",
   "operation": "SUNSET",
   "channel": "INSTAGRAM",
   "format": "FEED_IMAGE",
-  "contentItemId": "MKT-20260827-SUNSET-FEED-1500",
-  "assetId": "CR-MKT-20260827-SUNSET-FEED-1500-PHOTO-V2",
-  "driveFileId": "1xKQ6PlhLnaX6GLruk7tySG3dNF05cWHO",
+  "contentItemId": "MKT-20260828-SUNSET-FEED-0900",
+  "assetId": "CR-MKT-20260828-SUNSET-FEED-0900-PUBLISH-JPEG-V1",
+  "driveFileId": "1BbGHwJXHJYS4anKH9hyneJcyK1uiqA11",
   "contentType": "image/jpeg",
-  "expectedAssetSha256": "28446c6a4cb8b3d2d1fc1bebce101f356dcd8870836e462ef27687a1789dfffa",
+  "expectedAssetSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5",
   "instagramAccountId": "17841402033495654",
-  "caption": "Conforto, vista e hospitalidade se encontram para fazer do fim de tarde uma experiência completa.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
-  "correlationId": "CORR-MKT-20260827-SUNSET-FEED-1500-SHARENOW-1426",
-  "idempotencyKey": "MKT-20260827-SUNSET-FEED-1500-SHARENOW-V4",
+  "caption": "Sexta começa melhor quando o céu encontra o mar. Na Toca, o pôr do sol abre espaço para o que a noite ainda vai contar.\n\nViva o Sunset na Toca do Morcego.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
+  "correlationId": "CORR-MKT-20260828-SUNSET-FEED-0900-SHARENOW-1154",
+  "idempotencyKey": "MKT-20260828-SUNSET-FEED-0900-SHARENOW-V1",
+  "targetCodeSha": "b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a",
   "creativeTruthBinding": {
     "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
     "standardId": "SUNSET_FEED_PHOTO_V1",
-    "creativeId": "CR-MKT-20260827-SUNSET-FEED-1500-PHOTO-V2",
-    "outputSha256": "28446c6a4cb8b3d2d1fc1bebce101f356dcd8870836e462ef27687a1789dfffa",
+    "creativeId": "CR-MKT-20260828-SUNSET-FEED-0900-PUBLISH-JPEG-V1",
+    "outputSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5",
     "brandIntegrityStatus": "PASSED",
     "venueFidelityStatus": "PASSED",
     "qualityGateStatus": "PASSED",
     "exactAssetBinding": true
   },
+  "brandDeterminism": {
+    "status": "VERIFIED",
+    "standardRef": "2026-08-26_FEED_INSTAGRAM_7DIAS_V02#SUNSET_PHOTO_REAL_NO_TEXT",
+    "typographyRef": "NOT_APPLICABLE_NO_TEXT_ON_IMAGE",
+    "assetSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5"
+  },
+  "rightsClearance": {
+    "status": "CLEARED",
+    "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+    "evidenceRef": "TOCA_OS_ASSET_BINDINGS_30D:17VZJ1lMfuxv3D4DaPRRJf_GV-u5xBL6RHfViAoryBZE:ASSET_BINDINGS_23A14!A27:J27",
+    "authority": "CANONICAL_MEDIA_CATALOG_BINDING_AND_USER_EXPLICIT_PUBLICATION_AUTHORIZATION_2026-08-28",
+    "clearedAt": "2026-08-28T11:54:14-03:00",
+    "assetSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5"
+  },
   "approvalMode": "EXPLICIT_APPROVAL",
   "approvalStatus": "APPROVED",
-  "publicationIntent": "SHARE_NOW",
-  "consumed": {
-    "workflowRunId": 33098660561,
-    "publicationId": "18620842246053649",
-    "permalink": "https://www.instagram.com/p/DcjVHsVkgbL/",
-    "requestSha256": "6ea846df8005dad15afc96ccd933cdb981086d72e1d592c5f3af3a76f05aabb7",
-    "artifactId": 9657560375,
-    "status": "PUBLISHED_VERIFIED"
-  }
+  "publicationIntent": "SHARE_NOW"
 }
