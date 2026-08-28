@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "standardId": "THE_PARTY_HYBRID_MINIMALIST_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "2.0",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
@@ -11,11 +11,71 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "canonicalDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
+    "canonicalDriveId": "1CnsYiSYvNXvma4giDSiYbIhuYhmh0_BBse2UoOLB4BI",
+    "brandSystemDriveId": "1X_ppNT3-BckHea9HmzjhI1xULI1CFfhk3wmi4ALH7Ag",
+    "approvedReferencesFolderId": "1RyxWk6kaJcnKRb88NY9evN2BfLBnRLNm",
+    "quickGuideDriveId": "1Ko5ZOoLkX4nQ41HUBE5IvQfEQE0FExPb",
     "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1",
     "legacyVenueReferenceSetExecution": "DENY"
   },
   "visualFamily": "HYBRID_MINIMALIST",
+  "designTokens": {
+    "palette": {
+      "black": "#0D0D0D",
+      "white": "#FFFFFF",
+      "gold": "#FFC629",
+      "amber": "#FFA900",
+      "neonPurple": "#8A2BE2",
+      "red": "#FF2D20"
+    },
+    "typography": {
+      "display": "Bebas Neue Condensed Bold",
+      "expressive": "Brush Script",
+      "support": "Montserrat Regular / Medium / Bold"
+    }
+  },
+  "layoutFamilies": [
+    "NIGHT_EDITORIAL_PEOPLE_FIRST",
+    "ELEGANT_CTA_INGRESSOS",
+    "PEOPLE_FIRST_TWO_TRACKS",
+    "MANIFESTO_PREMIUM",
+    "HIGHLIGHT_COVER",
+    "LANDING_PAGE_HERO",
+    "INSTITUTIONAL_NIGHT"
+  ],
+  "pillars": [
+    "PEOPLE_AND_EXPERIENCE",
+    "REAL_TOCA_PHOTOGRAPHY",
+    "PREMIUM_ENVIRONMENT",
+    "TWO_TRACKS",
+    "DJS",
+    "LIVE_BANDS",
+    "DRINKS_AND_SPECIAL_BAR"
+  ],
+  "brandSystem": {
+    "heroBrandAssetId": "BRAND-THE-PARTY-WHITE-V1",
+    "heroBrandRequired": true,
+    "institutionalFooterOrder": [
+      "TOCA_DO_MORCEGO",
+      "CORONA",
+      "RED_BULL",
+      "MORRO_DIGITAL"
+    ],
+    "footerRequiredWhenApplicable": true,
+    "officialBrandAssetsOnly": true
+  },
+  "composition": {
+    "realNightlifePhotography": true,
+    "peopleFirstPreferred": true,
+    "lowerGraphicDensity": true,
+    "generousNegativeSpace": true,
+    "singlePrimaryMessage": true,
+    "singlePrimaryCta": true,
+    "safeAreasRequired": true,
+    "blackWhiteGoldBase": true,
+    "purpleOrRedOnlyAsRealLightOrControlledAccent": true,
+    "genericNightclubTemplateLookForbidden": true
+  },
   "rules": {
     "realVenueAssetRequired": true,
     "deterministicBrandInsertion": true,
@@ -29,6 +89,9 @@
   },
   "qualityGate": {
     "failClosed": true,
-    "requiresParentPolicyGates": true
+    "requiresParentPolicyGates": true,
+    "requiresVisualRegressionAgainstV2References": true,
+    "requiresFooterOrderValidation": true,
+    "requiresTypographyAndPaletteValidation": true
   }
 }
