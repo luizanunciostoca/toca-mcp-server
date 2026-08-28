@@ -1,0 +1,50 @@
+name: AG-01 Runtime Sheets Token IAM
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-runtime-sheets-token-iam.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Grant minimum self token minting authority
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" \
+            --member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
+            --role roles/iam.serviceAccountTokenCreator \
+            --quiet
+          gcloud iam service-accounts get-iam-policy "$RUNTIME_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > policy.json
+          jq -e --arg member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" '
+            .bindings[]? | select(.role=="roles/iam.serviceAccountTokenCreator") | .members[]? == $member
+          ' policy.json >/dev/null
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-runtime-sheets-token-iam-${{ github.run_id }}
+          path: policy.json
+          retention-days: 90
