@@ -40,6 +40,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Read and classify publish-now command
         id: command
@@ -49,6 +50,10 @@ jobs:
           COMMAND=control/marketing-publish-now-command.json
           jq -e '.schemaVersion == 1 and (.action | IN("NOOP", "PUBLISH_NOW"))' "$COMMAND" >/dev/null
           echo "action=$(jq -r .action "$COMMAND")" >> "$GITHUB_OUTPUT"
+          if [ "$(jq -r .action "$COMMAND")" = "PUBLISH_NOW" ]; then
+            jq -e '.targetCodeSha | test("^[a-f0-9]{40}$")' "$COMMAND" >/dev/null
+            echo "target_code_sha=$(jq -r .targetCodeSha "$COMMAND")" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify deterministic brand binding
         if: steps.command.outputs.action == 'PUBLISH_NOW'
@@ -71,12 +76,30 @@ jobs:
       - if: steps.command.outputs.action == 'PUBLISH_NOW'
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Bind execution tree to audited code snapshot
+        if: steps.command.outputs.action == 'PUBLISH_NOW'
+        shell: bash
+        env:
+          TARGET_CODE_SHA: ${{ steps.command.outputs.target_code_sha }}
+        run: |
+          set -euo pipefail
+          cp control/marketing-publish-now-command.json /tmp/marketing-publish-now-command.json
+          git cat-file -e "${TARGET_CODE_SHA}^{commit}"
+          git checkout --detach "$TARGET_CODE_SHA"
+          test "$(git rev-parse HEAD)" = "$TARGET_CODE_SHA"
+          cp /tmp/marketing-publish-now-command.json control/marketing-publish-now-command.json
+          echo "AUDITED_CODE_SHA=$TARGET_CODE_SHA" >> "$GITHUB_ENV"
+
       - name: Execute hardened publish-now lane
         if: steps.command.outputs.action == 'PUBLISH_NOW'
         shell: bash
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-        run: bash scripts/marketing-publish-now.sh
+          GITHUB_SHA: ${{ env.AUDITED_CODE_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash scripts/marketing-publish-now.sh
 
       - name: Upload immutable publication and reconciliation evidence
         if: always() && steps.command.outputs.action == 'PUBLISH_NOW'
