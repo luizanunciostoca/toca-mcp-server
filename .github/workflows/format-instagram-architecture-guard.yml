@@ -1,0 +1,47 @@
+name: Format Instagram Architecture Guard
+
+on:
+  push:
+    branches:
+      - feat/instagram-messaging-readonly-20260828
+    paths:
+      - '.github/workflows/format-instagram-architecture-guard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/instagram-messaging-readonly-20260828
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format and validate architecture guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write scripts/architecture-check.mjs
+          pnpm exec prettier --check scripts/architecture-check.mjs
+          node --check scripts/architecture-check.mjs
+          node scripts/architecture-check.mjs
+          git diff --check
+      - name: Commit formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/architecture-check.mjs
+          git commit -m 'style(architecture): format Instagram messaging guard'
+          git push origin HEAD:feat/instagram-messaging-readonly-20260828
