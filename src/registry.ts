@@ -84,6 +84,26 @@ const instagramReadTools: readonly ToolDefinition[] = [
     sideEffects: false,
     idempotent: true,
   },
+  {
+    name: 'instagram.messaging.conversations.read',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'READ',
+    requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
+  {
+    name: 'instagram.messaging.messages.read',
+    version: '1.0.0',
+    provider: 'Meta/Instagram',
+    riskClass: 'READ',
+    requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata'],
+    capabilityStatus: 'IMPLEMENTED',
+    sideEffects: false,
+    idempotent: true,
+  },
 ];
 
 const metaAdsReadTools: readonly ToolDefinition[] = [

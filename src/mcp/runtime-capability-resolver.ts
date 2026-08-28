@@ -12,6 +12,7 @@ import type {
   GoogleAdsPaidMediaProvider,
 } from '../providers/google-ads/google-ads-paid-media.js';
 import type { InstagramHistoryProvider } from '../providers/instagram/instagram-history-provider.js';
+import type { InstagramMessagingReadProvider } from '../providers/instagram/instagram-messaging-read-provider.js';
 import type { MetaAdsControlledGraphProvider } from '../providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import {
   requestSha256,
@@ -139,6 +140,14 @@ const accountInsightsSchema = z.object({
   until: z.string().min(1).optional(),
   metricType: z.enum(['time_series', 'total_value']).optional(),
 });
+const instagramConversationListSchema = z.object({
+  limit: z.number().int().min(1).max(100).default(50),
+  after: z.string().min(1).optional(),
+});
+const instagramMessageListSchema = z.object({
+  conversationId: z.string().min(1),
+  limit: z.number().int().min(1).max(20).default(20),
+});
 const adAccountSchema = z.object({
   adAccountId: z.string().min(1),
   currency: z.string().min(3).max(8),
@@ -242,6 +251,7 @@ export interface RuntimeCapabilityServices {
   readonly googleAdsTargetAccount?: string;
   readonly googleAdsCurrency?: string;
   readonly instagramHistory?: InstagramHistoryProvider;
+  readonly instagramMessagingRead?: InstagramMessagingReadProvider;
   readonly instagramPublication?: InstagramCorePublicationRuntime;
   readonly metaAdsRead?: MetaAdsReadProvider;
   readonly metaAdsDemand?: MetaAdsDemandIntelligenceService;
@@ -533,6 +543,18 @@ function resolveBinding(
       return services.instagramHistory
         ? binding(accountInsightsSchema, (input) =>
             services.instagramHistory!.getAccountInsights(input),
+          )
+        : undefined;
+    case 'instagram.messaging.conversations.read':
+      return services.instagramMessagingRead
+        ? binding(instagramConversationListSchema, (input) =>
+            services.instagramMessagingRead!.listConversations(input),
+          )
+        : undefined;
+    case 'instagram.messaging.messages.read':
+      return services.instagramMessagingRead
+        ? binding(instagramMessageListSchema, (input) =>
+            services.instagramMessagingRead!.listMessages(input),
           )
         : undefined;
     case 'meta_ads.accounts.list':

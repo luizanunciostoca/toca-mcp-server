@@ -31,6 +31,7 @@ import { GoogleAdsAccountVerifier } from './providers/google-ads/google-ads-acco
 import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
 import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
+import { InstagramMessagingReadProvider } from './providers/instagram/instagram-messaging-read-provider.js';
 import { InstagramPublicationExecutor } from './providers/instagram/instagram-publication-executor.js';
 import { MetaInstagramPublicationTransport } from './providers/instagram/meta-instagram-publication-transport.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
@@ -185,6 +186,13 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
     config.META_ACCESS_TOKEN_ENV_KEY
       ? new InstagramHistoryProvider(createMetaClient(), config.INSTAGRAM_BUSINESS_ACCOUNT_ID)
+      : undefined;
+
+  const instagramMessagingRead =
+    config.INSTAGRAM_READ_ENABLED &&
+    config.INSTAGRAM_BUSINESS_ACCOUNT_ID &&
+    config.META_ACCESS_TOKEN_ENV_KEY
+      ? new InstagramMessagingReadProvider(createMetaClient(), config.INSTAGRAM_BUSINESS_ACCOUNT_ID)
       : undefined;
 
   let instagramPublication: InstagramCorePublicationRuntime | undefined;
@@ -400,6 +408,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       : undefined;
   const standardRuntimeResolver = createRuntimeCapabilityResolver({
     ...(instagramHistory ? { instagramHistory } : {}),
+    ...(instagramMessagingRead ? { instagramMessagingRead } : {}),
     ...(instagramPublication ? { instagramPublication } : {}),
     ...(metaAdsRead ? { metaAdsRead } : {}),
     ...(metaAdsDemand ? { metaAdsDemand } : {}),
@@ -524,6 +533,11 @@ function runtimeServiceIdentity(
     organizationId: scope.organizationId,
     roles: directPublicationEnabled ? ['OPERATOR', 'EXTERNAL_WRITER'] : ['OPERATOR'],
     allowedCapabilityIds: [
+      ...(config.INSTAGRAM_READ_ENABLED &&
+      config.META_ACCESS_TOKEN_ENV_KEY &&
+      config.INSTAGRAM_BUSINESS_ACCOUNT_ID
+        ? ['instagram.messaging.conversations.read', 'instagram.messaging.messages.read']
+        : []),
       'instagram.toca_schedule.create',
       'instagram.toca_schedule.reschedule',
       'instagram.toca_schedule.cancel',
