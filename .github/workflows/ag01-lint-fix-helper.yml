@@ -1,0 +1,46 @@
+name: AG-01 Lint Fix Helper
+
+on:
+  push:
+    branches: [ops/ag01-vertex-permanent-binding-20260828]
+    paths: ['.github/workflows/ag01-lint-fix-helper.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Remove unnecessary regex escape and normalize
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/orchestrator/http-server.ts')
+          s = p.read_text()
+          old = r"[A-Za-z0-9._~+\/-]+"
+          new = r"[A-Za-z0-9._~+/-]+"
+          if old not in s:
+              raise SystemExit('Expected AG-01 bearer redaction regex not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write src/orchestrator/http-server.ts
+          pnpm exec eslint src/orchestrator/http-server.ts
+      - name: Commit lint remediation
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/orchestrator/http-server.ts
+          git commit -m 'fix(ag01): satisfy HTTP boundary lint gate'
+          git push origin HEAD:ops/ag01-vertex-permanent-binding-20260828
