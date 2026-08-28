@@ -8,16 +8,69 @@ This document separates recovery **targets** from measured evidence. A target is
 
 ## Canonical objectives
 
-| Critical surface | Durable source of truth | RPO target | RTO / reconciliation target | Resume gate | Current evidence |
-| --- | --- | ---: | ---: | --- | --- |
-| PostgreSQL canonical durable state | Cloud SQL + PITR + backups | `<=15m` | `<=60m` | isolated restore, migrations, integrity, readiness | **PROVEN in isolated staging**: measured RPO `46s`, RTO `737s` |
-| Workflow, timers, scheduler, Outbox and DLQ | PostgreSQL canonical tables | inherits DB `<=15m` | `<=60m` after DB recovery | no duplicate side effect; due work reconciled before resume | **PROVEN in isolated staging** as part of DR surface |
-| Audit Ledger / EventRecord | PostgreSQL canonical tables | inherits DB `<=15m` | `<=60m` | ledger integrity and head consistency | **PROVEN in isolated staging**; head mismatch count `0` |
-| Approval, Privacy/LGPD, CRM, Conversation/Message, AG-01 durable state | PostgreSQL canonical tables | inherits DB `<=15m` | `<=60m` | schema/readability + domain integrity | **PROVEN in isolated staging** as part of DR surface |
-| Cloud Run MCP/Core and webhook runtime | immutable image digest + deployment configuration | `0` data loss for source/artifact | `<=60m` to reconstruct after durable state is healthy | exact digest/revision, intended identity, authenticated `/readyz` | **STAGING VERIFIED**; 30/30 authenticated readiness samples returned HTTP 200 |
-| Secret/config references | Secret Manager references + deployment config; never raw secret backup | `0` repository-side loss of references | `<=60m` to resolve/rebind, subject to provider/admin availability | identity authorized; secret reference resolves; no plaintext export | contract implemented; environment evidence required per recovery |
-| Provider external state after an ambiguous write | provider is authoritative for external resource state; local ledger preserves correlation/idempotency | not expressed as backup RPO | provider readback before retry; target `<=60m` for operational reconciliation | `WRITE` remains disabled until authoritative readback | **PROVEN for Instagram image Fast Lane**; other providers remain provider-gated |
-| Provider credentials/bindings | provider account + Secret Manager binding | N/A | `<=60m` target after infra recovery, subject to provider availability | safe READ/readback succeeds before provider enablement | pending per provider unless separately evidenced |
+### PostgreSQL canonical durable state
+
+- Source of truth: Cloud SQL + PITR + backups.
+- RPO target: `<=15m`.
+- RTO target: `<=60m`.
+- Resume gate: isolated restore, migrations, integrity and readiness.
+- Current evidence: **PROVEN in isolated staging** with measured RPO `46s` and RTO `737s`.
+
+### Workflow, timers, scheduler, Outbox and DLQ
+
+- Source of truth: canonical PostgreSQL tables.
+- RPO target: inherits database `<=15m`.
+- RTO target: `<=60m` after database recovery.
+- Resume gate: no duplicate side effect; due work reconciled before resume.
+- Current evidence: **PROVEN in isolated staging** as part of the DR surface.
+
+### Audit Ledger / EventRecord
+
+- Source of truth: canonical PostgreSQL tables.
+- RPO target: inherits database `<=15m`.
+- RTO target: `<=60m`.
+- Resume gate: ledger integrity and head consistency.
+- Current evidence: **PROVEN in isolated staging** with head mismatch count `0`.
+
+### Approval, Privacy/LGPD, CRM, Conversation/Message and AG-01 durable state
+
+- Source of truth: canonical PostgreSQL tables.
+- RPO target: inherits database `<=15m`.
+- RTO target: `<=60m`.
+- Resume gate: schema readability and domain integrity.
+- Current evidence: **PROVEN in isolated staging** as part of the DR surface.
+
+### Cloud Run MCP/Core and webhook runtime
+
+- Source of truth: immutable image digest + deployment configuration.
+- RPO target: `0` data loss for source/artifact.
+- RTO target: `<=60m` to reconstruct after durable state is healthy.
+- Resume gate: exact digest/revision, intended identity and authenticated `/readyz`.
+- Current evidence: **STAGING VERIFIED**; 30/30 authenticated readiness samples returned HTTP 200.
+
+### Secret/config references
+
+- Source of truth: Secret Manager references + deployment configuration; never raw secret backup.
+- RPO target: `0` repository-side loss of references.
+- RTO target: `<=60m` to resolve/rebind, subject to provider/admin availability.
+- Resume gate: intended identity is authorized, secret reference resolves and plaintext is never exported.
+- Current evidence: contract implemented; environment evidence is required per recovery.
+
+### Provider external state after an ambiguous write
+
+- Source of truth: the provider is authoritative for external resource state; the local ledger preserves correlation and idempotency identity.
+- RPO target: not expressed as backup RPO.
+- Reconciliation target: provider readback before retry, operational target `<=60m`.
+- Resume gate: `WRITE` remains disabled until authoritative readback.
+- Current evidence: **PROVEN for Instagram image Fast Lane**; other providers remain provider-gated.
+
+### Provider credentials/bindings
+
+- Source of truth: provider account + Secret Manager binding.
+- RPO target: N/A.
+- Recovery target: `<=60m` after infrastructure recovery, subject to provider availability.
+- Resume gate: safe READ/readback succeeds before provider enablement.
+- Current evidence: pending per provider unless separately evidenced.
 
 ## Evidence rules
 
