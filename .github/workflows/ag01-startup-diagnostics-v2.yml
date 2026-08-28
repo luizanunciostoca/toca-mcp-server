@@ -1,0 +1,55 @@
+name: AG-01 Startup Diagnostics v2
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-startup-diagnostics-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  REVISION: toca-ag01-orchestrator-vtx-3b15e35e-2
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Capture structured startup diagnostics
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-startup-diagnostics-v2
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND resource.labels.revision_name=${REVISION}" \
+            --project "$PROJECT_ID" --limit 300 --freshness 4h --format=json \
+            > ag01-startup-diagnostics-v2/logs.json
+          gcloud run revisions describe "$REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json \
+            > ag01-startup-diagnostics-v2/revision.json || true
+          jq -r '.[] | [(.timestamp // ""), (.severity // ""), ((.textPayload // "")|tostring), ((.jsonPayload // {})|tojson), ((.protoPayload // {})|tojson)] | @tsv' \
+            ag01-startup-diagnostics-v2/logs.json > ag01-startup-diagnostics-v2/signals.tsv
+          grep -Ei 'AG01|TOCA_OS|registry|sheet|token|iamcredentials|permission|403|404|429|not_ready|error|failed' \
+            ag01-startup-diagnostics-v2/signals.tsv | tail -n 200 | tee ag01-startup-diagnostics-v2/relevant.log || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-startup-diagnostics-v2-${{ github.run_id }}
+          path: ag01-startup-diagnostics-v2
+          retention-days: 30
+          if-no-files-found: error
