@@ -98,6 +98,8 @@ describe('TOCA MCP execution-layer boundary', () => {
       'instagram.insights.account',
       'instagram.insights.media',
       'instagram.media.list',
+      'instagram.messaging.conversations.read',
+      'instagram.messaging.messages.read',
       'system.capabilities',
       'system.health',
     ]);

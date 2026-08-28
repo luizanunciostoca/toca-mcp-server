@@ -807,6 +807,7 @@ export const TECHNICAL_EXTENSION_CAPABILITY_IDS: Readonly<
     'google_business.profile.drift.detect',
   ],
   R08: ['meta_ads.accounts.list', 'meta_ads.campaign.prepare_paused'],
+  R09: ['instagram.messaging.conversations.read', 'instagram.messaging.messages.read'],
   R17: ['system.capabilities', 'system.health'],
   R18: ['instagram.media.list', 'instagram.insights.media', 'instagram.insights.account'],
   R19: [
