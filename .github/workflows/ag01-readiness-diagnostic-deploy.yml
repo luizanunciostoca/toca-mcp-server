@@ -1,0 +1,109 @@
+name: AG-01 Readiness Diagnostic Deploy
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-readiness-diagnostic-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-ag01-orchestrator
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-db
+  DATABASE_SECRET: toca-database-url
+  ROUTING_SPREADSHEET_ID: 1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU
+  CANONICAL_RESOURCES_SPREADSHEET_ID: 1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY
+
+jobs:
+  diagnose-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Read canonical DB binding
+        run: |
+          set -euo pipefail
+          gcloud run services describe toca-mcp-production --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/mcp.json
+          DB_VERSION="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name=="DATABASE_URL") | .valueFrom.secretKeyRef.key] | first // "latest"' /tmp/mcp.json)"
+          echo "DB_VERSION=$DB_VERSION" >> "$GITHUB_ENV"
+      - name: Build immutable diagnostic image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01:readiness-diagnostic-${GITHUB_SHA}"
+          docker build --file Dockerfile.orchestrator --tag "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy zero-traffic diagnostic revision using health-only startup
+        run: |
+          set -euo pipefail
+          SUFFIX="diag-${GITHUB_SHA::8}"
+          TAG="diag-${GITHUB_SHA::8}"
+          ENV_VARS="NODE_ENV=production,AG01_MODEL_PROVIDER=vertex,AG01_VERTEX_PROJECT_ID=$PROJECT_ID,AG01_VERTEX_LOCATION=global,AG01_VERTEX_MODEL=gemini-2.5-flash,AG01_TOCA_OS_ROUTING_SPREADSHEET_ID=$ROUTING_SPREADSHEET_ID,AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID=$CANONICAL_RESOURCES_SPREADSHEET_ID,AG01_GOOGLE_AUTH_MODE=gcp_metadata,AG01_AUTHORIZATION_ROLES=READER,AG01_ALLOWED_ROUTE_IDS=,AG01_ALLOWED_CAPABILITY_IDS=,AG01_ALLOWED_TARGET_ACCOUNTS=,TOCA_DEFAULT_TENANT_ID=toca,TOCA_DEFAULT_WORKSPACE_ID=toca,TOCA_DEFAULT_ORGANIZATION_ID=toca,TOCA_RELEASE_SHA=$GITHUB_SHA"
+          gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
+            --image "$IMAGE" --revision-suffix "$SUFFIX" --no-traffic --tag "$TAG" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" \
+            --update-secrets "DATABASE_URL=$DATABASE_SECRET:$DB_VERSION" \
+            --update-env-vars "$ENV_VARS" \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=24,timeoutSeconds=5,periodSeconds=5' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=15' \
+            --min-instances 0 --max-instances 1 --memory 1Gi --cpu 1 --cpu-throttling \
+            --ingress all --no-allow-unauthenticated --quiet
+          gcloud run services add-iam-policy-binding "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
+            --member "serviceAccount:$DEPLOY_SERVICE_ACCOUNT" --role roles/run.invoker --quiet
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
+          BASE_URL="$(jq -r '.status.url' /tmp/service.json)"
+          TAG_URL="https://${TAG}---$(echo "$BASE_URL" | sed -E 's#https://##')"
+          echo "TAG_URL=$TAG_URL" >> "$GITHUB_ENV"
+          echo "REVISION=${SERVICE}-${SUFFIX}" >> "$GITHUB_ENV"
+      - name: Mint probe token
+        id: probe
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.TAG_URL }}
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Probe readiness and capture structured error
+        env:
+          ID_TOKEN: ${{ steps.probe.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-readiness-diagnostic
+          curl --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$TAG_URL/healthz" > ag01-readiness-diagnostic/healthz.json || true
+          curl --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$TAG_URL/readyz" > ag01-readiness-diagnostic/readyz.json || true
+          sleep 2
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE} AND resource.labels.revision_name=${REVISION}" \
+            --project "$PROJECT_ID" --limit 200 --freshness 1h --format=json > ag01-readiness-diagnostic/logs.json
+          jq -r '.[] | select(.jsonPayload.event=="ag01.readiness.failed") | .jsonPayload' ag01-readiness-diagnostic/logs.json \
+            | tee ag01-readiness-diagnostic/readiness-errors.jsonl
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ag01-readiness-diagnostic-${{ github.run_id }}
+          path: ag01-readiness-diagnostic
+          retention-days: 30
+          if-no-files-found: warn
