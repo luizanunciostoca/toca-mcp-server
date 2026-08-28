@@ -20,6 +20,7 @@ export const THE_PARTY_CONTENT_ORCHESTRATION_CONTRACT_ID =
   'THE_PARTY_CONTENT_ORCHESTRATION_V1' as const;
 export const THE_PARTY_HERO_BRAND = 'THE_PARTY' as const;
 export const THE_PARTY_HERO_BRAND_ASSET_ID = 'BRAND-THE-PARTY-WHITE-V1' as const;
+export const THE_PARTY_VISUAL_STANDARD_VERSION = '2.0' as const;
 
 const CONTENT_ITEMS_RANGE = 'CONTENT_ITEMS!A1:BX2000';
 const EDITIONS_RANGE = 'EDITIONS!A1:P2000';
@@ -89,7 +90,7 @@ export interface ThePartyContentOrchestrationRecord {
   readonly environmentSource?: ThePartyEnvironmentSource;
   readonly editionEnvironmentStatus: ThePartyEnvironmentDecisionStatus;
   readonly standardId: ThePartyVisualStandardId;
-  readonly standardVersion: '1.0';
+  readonly standardVersion: typeof THE_PARTY_VISUAL_STANDARD_VERSION;
   readonly visualStandardStatus: ThePartyVisualStandardStatus;
   readonly persistedVisualStandardStatus: ThePartyVisualStandardStatus;
   readonly heroBrandAssetId: typeof THE_PARTY_HERO_BRAND_ASSET_ID;
@@ -109,7 +110,7 @@ interface ParsedContentRecord {
   readonly intent: ThePartyCreativeIntent;
   readonly environment?: ThePartyEnvironment;
   readonly standardId: ThePartyVisualStandardId;
-  readonly standardVersion: '1.0';
+  readonly standardVersion: typeof THE_PARTY_VISUAL_STANDARD_VERSION;
   readonly visualStandardStatus: ThePartyVisualStandardStatus;
   readonly heroBrandAssetId: typeof THE_PARTY_HERO_BRAND_ASSET_ID;
   readonly venueAssetId?: string;
@@ -262,7 +263,9 @@ function parseAndValidateRecord(
   }
 
   const standardVersion = value('creative_standard_version');
-  if (standardVersion !== '1.0') deny('THE_PARTY_CONTENT_STANDARD_VERSION_MISMATCH');
+  if (standardVersion !== THE_PARTY_VISUAL_STANDARD_VERSION) {
+    deny('THE_PARTY_CONTENT_STANDARD_VERSION_MISMATCH');
+  }
 
   const visualStandardStatus = parseVisualStandardStatus(value('visual_standard_status'));
   if (standardId === THE_PARTY_HYBRID_NETWORKS_STANDARD_ID) {
@@ -321,7 +324,7 @@ function parseAndValidateRecord(
     intent,
     ...(environment ? { environment } : {}),
     standardId,
-    standardVersion: '1.0',
+    standardVersion: THE_PARTY_VISUAL_STANDARD_VERSION,
     visualStandardStatus,
     heroBrandAssetId: THE_PARTY_HERO_BRAND_ASSET_ID,
     ...(value('venue_asset_id') ? { venueAssetId: value('venue_asset_id') } : {}),
