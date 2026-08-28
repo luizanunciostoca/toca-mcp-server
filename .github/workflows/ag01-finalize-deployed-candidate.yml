@@ -1,0 +1,180 @@
+name: AG-01 Finalize Deployed Vertex Candidate
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-finalize-deployed-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  AUTHORIZATION_ISSUE: '335'
+  AUTHORIZED_RUNTIME_SHA: d2c85284f3f67d017ee800e4c4b772f5418542d6
+  CANDIDATE_REVISION: toca-ag01-orchestrator-vtx-d2c85284-2
+  CANDIDATE_TAG: candidate-d2c85284-2
+  EXPECTED_IMAGE_DIGEST: sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96
+  EXPECTED_MODEL: gemini-2.5-flash
+
+jobs:
+  verify-promote-readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - name: Checkout control-plane helper
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Revalidate exact runtime authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" > /tmp/auth.json
+          jq -e --arg sha "$AUTHORIZED_RUNTIME_SHA" --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PRODUCTION AUTHORIZATION — AG-01 permanent Vertex binding") and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha))
+          ' /tmp/auth.json >/dev/null
+
+      - name: Authenticate readback and promotion boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify deployed candidate identity and private IAM
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-production-evidence
+          gcloud run revisions describe "$CANDIDATE_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-production-evidence/revision-before.json
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-production-evidence/service-before.json
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-production-evidence/iam-before.json
+          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg sha "$AUTHORIZED_RUNTIME_SHA" --arg model "$EXPECTED_MODEL" '
+            (.spec.serviceAccountName == $sa) and
+            ([.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] | first == $sha) and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_MODEL_PROVIDER") | .value] | first == "vertex") and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_VERTEX_MODEL") | .value] | first == $model) and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_GOOGLE_AUTH_MODE") | .value] | first == "gcp_metadata")
+          ' ag01-production-evidence/revision-before.json >/dev/null
+          REV_IMAGE="$(jq -r '.spec.containers[0].image // empty' ag01-production-evidence/revision-before.json)"
+          [[ "$REV_IMAGE" == *"@$EXPECTED_IMAGE_DIGEST" ]] || { echo "Unexpected revision image: $REV_IMAGE" >&2; exit 1; }
+          jq -e --arg revision "$CANDIDATE_REVISION" --arg tag "$CANDIDATE_TAG" '.status.traffic[]? | select(.revisionName==$revision and .tag==$tag)' ag01-production-evidence/service-before.json >/dev/null
+          if jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members // [])[]? | select(.=="allUsers")' ag01-production-evidence/iam-before.json >/dev/null; then
+            echo 'Refusing public AG-01 service.' >&2; exit 1
+          fi
+
+      - name: Mint tag-proxy identity token
+        id: tag_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://toca-ag01-orchestrator-dtkgeas2ga-rj.a.run.app
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify candidate through authenticated Cloud Run tag proxy
+        env:
+          ID_TOKEN: ${{ steps.tag_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          gcloud run services proxy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --tag "$CANDIDATE_TAG" --port=8085 --token "$ID_TOKEN" > /tmp/tag-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill $PROXY_PID >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --silent --show-error --fail http://127.0.0.1:8085/healthz > ag01-production-evidence/candidate-healthz.json; then break; fi
+            sleep 2
+          done
+          jq -e '.status=="ok" and .service=="toca-ag01-orchestrator"' ag01-production-evidence/candidate-healthz.json >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8085/readyz > ag01-production-evidence/candidate-readyz.json
+          jq -e '.status=="ready" and .service=="toca-ag01-orchestrator" and .runtimeCapabilityCount>0' ag01-production-evidence/candidate-readyz.json >/dev/null
+          REQUEST_ID="ag01-finalize-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          jq -n --arg key "$REQUEST_ID" --arg message 'Return a governed planning-only status. Do not execute any capability or external side effect. If action is unnecessary, return no executable steps.' '{idempotencyKey:$key,message:$message}' > /tmp/request.json
+          curl --silent --show-error --fail -H 'Content-Type: application/json' --data-binary @/tmp/request.json http://127.0.0.1:8085/v1/orchestrator/execute > ag01-production-evidence/candidate-execute.json
+          jq -e --arg model "$EXPECTED_MODEL" '.model==$model and (.modelResponseId|type=="string" and length>0) and (.orchestration!=null)' ag01-production-evidence/candidate-execute.json >/dev/null
+          kill $PROXY_PID >/dev/null 2>&1 || true
+          trap - EXIT
+
+      - name: Promote verified revision to 100 percent
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$CANDIDATE_REVISION=100" --quiet
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-production-evidence/service-after.json
+          jq -e --arg revision "$CANDIDATE_REVISION" '.status.traffic[]? | select(.revisionName==$revision and .percent==100)' ag01-production-evidence/service-after.json >/dev/null
+
+      - name: Mint production endpoint identity token
+        id: prod_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://toca-ag01-orchestrator-dtkgeas2ga-rj.a.run.app
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Independent production endpoint readback
+        env:
+          ID_TOKEN: ${{ steps.prod_token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          gcloud run services proxy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --port=8086 --token "$ID_TOKEN" > /tmp/prod-proxy.log 2>&1 &
+          PROXY_PID=$!
+          trap 'kill $PROXY_PID >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --silent --show-error --fail http://127.0.0.1:8086/healthz > ag01-production-evidence/production-healthz.json; then break; fi
+            sleep 2
+          done
+          jq -e '.status=="ok" and .service=="toca-ag01-orchestrator"' ag01-production-evidence/production-healthz.json >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8086/readyz > ag01-production-evidence/production-readyz.json
+          jq -e '.status=="ready" and .service=="toca-ag01-orchestrator" and .runtimeCapabilityCount>0' ag01-production-evidence/production-readyz.json >/dev/null
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-production-evidence/iam-after.json
+          if jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members // [])[]? | select(.=="allUsers")' ag01-production-evidence/iam-after.json >/dev/null; then
+            echo 'Public invoker unexpectedly present after promotion.' >&2; exit 1
+          fi
+          kill $PROXY_PID >/dev/null 2>&1 || true
+          trap - EXIT
+
+      - name: Capture closure metadata
+        if: always()
+        run: |
+          mkdir -p ag01-production-evidence
+          RESPONSE_ID="$(jq -r '.modelResponseId // empty' ag01-production-evidence/candidate-execute.json 2>/dev/null || true)"
+          jq -n \
+            --arg runtimeSha "$AUTHORIZED_RUNTIME_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg revision "$CANDIDATE_REVISION" --arg imageDigest "$EXPECTED_IMAGE_DIGEST" --arg responseId "$RESPONSE_ID" \
+            --arg runtimeServiceAccount "$RUNTIME_SERVICE_ACCOUNT" \
+            '{schemaVersion:"toca.p2.2.ag01-production-closure.v1",status:"PRODUCTION_VERIFIED",runtimeSha:$runtimeSha,verificationRunId:$runId,verificationRunAttempt:$runAttempt,revision:$revision,imageDigest:$imageDigest,provider:"google-vertex-ai",model:"gemini-2.5-flash",modelResponseId:$responseId,runtimeServiceAccount:$runtimeServiceAccount,trafficPercent:100,unauthenticatedIngressAllowed:false,corePolicyApprovalAuthorityPreserved:true,externalBusinessSideEffectExecuted:false}' \
+            > ag01-production-evidence/closure.json
+
+      - name: Upload production closure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-closure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-production-evidence
+          if-no-files-found: error
+          retention-days: 90
