@@ -1,7 +1,21 @@
-# P0.8 Exact-Head Quality Gate Request
+# P0.8 Exact-Head Quality Gate Evidence
 
-Canonical snapshot under test: `b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a`.
+Canonical snapshot validated: `b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a`.
 
-The branch workflow `.github/workflows/p0-8-exact-head-quality-gate.yml` must checkout that exact SHA, verify `git rev-parse HEAD`, and execute formatting, architecture/governance, lint, typecheck, tests, build, and dependency audit.
+GitHub Actions run: `33145521785`
+Result: `success`
+Completed: `2026-08-28T05:42:45Z`
 
-This file exists only to create an auditable push event for the dedicated validation branch. It does not alter the canonical snapshot under test.
+The dedicated workflow checked out the exact canonical SHA and verified `git rev-parse HEAD` before executing the gates.
+
+Validated successfully:
+- dependency installation with frozen lockfile;
+- format check;
+- architecture and governance checks;
+- lint;
+- typecheck;
+- tests;
+- build;
+- dependency audit at `high` severity threshold.
+
+This branch exists only to hold reproducible Quality Gate evidence. The canonical snapshot itself was not modified by the validation run.
