@@ -49,6 +49,7 @@ const required = [
   'src/providers/instagram/instagram-contracts.ts',
   'src/providers/instagram/instagram-engagement-contracts.ts',
   'src/providers/instagram/instagram-engagement-provider.ts',
+  'src/providers/instagram/instagram-messaging-read-provider.ts',
   'src/providers/instagram/instagram-publication-readiness-preflight.ts',
   'src/providers/instagram/instagram-publication-readiness-runtime.ts',
   'src/providers/meta-ads/budget-guardrail.ts',
@@ -239,9 +240,37 @@ if (
   process.exit(1);
 }
 const registry = readFileSync('src/registry.ts', 'utf8');
-if (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {
+if (registry.includes('instagram.comments.reply')) {
   console.error('Unpromoted external write capabilities must not be advertised');
   process.exit(1);
+}
+const allowedInstagramMessagingReadNames = new Set([
+  'instagram.messaging.conversations.read',
+  'instagram.messaging.messages.read',
+]);
+const advertisedInstagramMessagingNames = [
+  ...registry.matchAll(/name: '(instagram\.messaging\.[^']+)'/g),
+].map((match) => match[1]);
+for (const name of advertisedInstagramMessagingNames) {
+  if (!allowedInstagramMessagingReadNames.has(name)) {
+    console.error('Unpromoted Instagram messaging capability must not be advertised: ' + name);
+    process.exit(1);
+  }
+  const marker = "name: '" + name + "'";
+  const start = registry.indexOf(marker);
+  const definition = registry.slice(start, start + 800);
+  if (
+    !definition.includes("riskClass: 'READ'") ||
+    !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
+    !definition.includes('sideEffects: false') ||
+    !definition.includes('idempotent: true') ||
+    !definition.includes(
+      "requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata']",
+    )
+  ) {
+    console.error('Instagram messaging read capability violates the read-only boundary: ' + name);
+    process.exit(1);
+  }
 }
 const allowedMetaAdsReadNames = new Set([
   'meta_ads.accounts.list',
