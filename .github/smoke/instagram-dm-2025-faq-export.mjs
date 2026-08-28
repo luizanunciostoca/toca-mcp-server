@@ -5,12 +5,8 @@ const accountId = process.env.INSTAGRAM_ACCOUNT_ID?.trim();
 const userToken = process.env.META_ACCESS_TOKEN?.trim();
 const exportKeyHex = process.env.EXPORT_KEY_HEX?.trim();
 
-if (!accountId || !userToken || !exportKeyHex) {
-  throw new Error('INSTAGRAM_DM_EXPORT_CONFIGURATION_MISSING');
-}
-if (!/^[a-f0-9]{64}$/i.test(exportKeyHex)) {
-  throw new Error('INSTAGRAM_DM_EXPORT_KEY_INVALID');
-}
+if (!accountId || !userToken || !exportKeyHex) throw new Error('INSTAGRAM_DM_EXPORT_CONFIGURATION_MISSING');
+if (!/^[a-f0-9]{64}$/i.test(exportKeyHex)) throw new Error('INSTAGRAM_DM_EXPORT_KEY_INVALID');
 
 const PERIOD_START = Date.parse('2025-01-01T00:00:00Z');
 const PERIOD_END = Date.parse('2026-01-01T00:00:00Z');
@@ -21,15 +17,8 @@ const MESSAGE_DETAIL_LIMIT = 20;
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function asString(value) {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
+function asArray(value) { return Array.isArray(value) ? value : []; }
+function asString(value) { return typeof value === 'string' && value.length > 0 ? value : null; }
 function timestamp(value) {
   const text = asString(value);
   if (!text) return null;
@@ -40,13 +29,9 @@ function timestamp(value) {
 async function graphGet(path, token, query = {}) {
   const url = new URL(`${GRAPH_BASE}/${String(path).replace(/^\//, '')}`);
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && String(value).length > 0) {
-      url.searchParams.set(key, String(value));
-    }
+    if (value !== undefined && value !== null && String(value).length > 0) url.searchParams.set(key, String(value));
   }
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  });
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = asObject(asObject(body).error);
@@ -67,16 +52,12 @@ async function resolveInstagramProfile() {
 }
 
 async function resolvePage() {
-  const body = asObject(
-    await graphGet('me/accounts', userToken, {
-      fields: 'id,access_token,tasks,instagram_business_account',
-      limit: 100,
-    }),
-  );
+  const body = asObject(await graphGet('me/accounts', userToken, {
+    fields: 'id,access_token,tasks,instagram_business_account', limit: 100,
+  }));
   const matches = asArray(body.data).filter((candidate) => {
     const page = asObject(candidate);
-    const linked = asObject(page.instagram_business_account);
-    return linked.id === accountId;
+    return asObject(page.instagram_business_account).id === accountId;
   });
   if (matches.length !== 1) throw new Error(`INSTAGRAM_PAGE_MATCH_COUNT:${matches.length}`);
   const page = asObject(matches[0]);
@@ -88,29 +69,51 @@ async function resolvePage() {
   return { pageId, pageToken };
 }
 
-async function listAllConversations(pageId, pageToken) {
+async function selectInstagramConversationRoute(pageId, pageToken) {
+  const candidates = [
+    { label: 'page-platform-uppercase', path: `${pageId}/conversations`, token: pageToken, query: { platform: 'INSTAGRAM' } },
+    { label: 'page-platform-lowercase', path: `${pageId}/conversations`, token: pageToken, query: { platform: 'instagram' } },
+    { label: 'ig-account-platform-lowercase-page-token', path: `${accountId}/conversations`, token: pageToken, query: { platform: 'instagram' } },
+    { label: 'ig-account-platform-uppercase-page-token', path: `${accountId}/conversations`, token: pageToken, query: { platform: 'INSTAGRAM' } },
+    { label: 'ig-account-platform-lowercase-user-token', path: `${accountId}/conversations`, token: userToken, query: { platform: 'instagram' } },
+  ];
+  const failures = [];
+  for (const candidate of candidates) {
+    try {
+      const body = asObject(await graphGet(candidate.path, candidate.token, {
+        ...candidate.query, fields: 'id,updated_time', limit: Math.min(5, CONVERSATION_PAGE_LIMIT),
+      }));
+      if (!Array.isArray(body.data)) throw new Error('META_GRAPH_READ_FAILED:INVALID_DATA');
+      return { ...candidate, probeCount: body.data.length };
+    } catch (error) {
+      failures.push(`${candidate.label}:${error instanceof Error ? error.message : 'UNKNOWN'}`);
+    }
+  }
+  throw new Error(`INSTAGRAM_CONVERSATION_ROUTE_UNAVAILABLE:${failures.join(';')}`);
+}
+
+async function listAllConversations(route) {
   const conversations = [];
   let after = null;
   let pages = 0;
   do {
     pages += 1;
     if (pages > MAX_CONVERSATION_PAGES) throw new Error('INSTAGRAM_CONVERSATION_PAGE_GUARD_EXCEEDED');
-    const body = asObject(
-      await graphGet(`${pageId}/conversations`, pageToken, {
-        fields: 'id,updated_time',
-        limit: CONVERSATION_PAGE_LIMIT,
-        ...(after ? { after } : {}),
-      }),
-    );
+    const body = asObject(await graphGet(route.path, route.token, {
+      ...route.query,
+      fields: 'id,updated_time',
+      limit: CONVERSATION_PAGE_LIMIT,
+      ...(after ? { after } : {}),
+    }));
     conversations.push(...asArray(body.data));
     after = asString(asObject(asObject(body.paging).cursors).after);
   } while (after);
   return { conversations, pages };
 }
 
-async function readConversation(conversationId, pageToken) {
+async function readConversation(conversationId, token) {
   const fields = `messages.limit(${MESSAGE_DETAIL_LIMIT}){id,created_time,from,to,message,is_unsupported}`;
-  const body = asObject(await graphGet(conversationId, pageToken, { fields }));
+  const body = asObject(await graphGet(conversationId, token, { fields }));
   const messages = asObject(body.messages);
   return {
     data: asArray(messages.data),
@@ -119,19 +122,14 @@ async function readConversation(conversationId, pageToken) {
 }
 
 function participantUsernames(message) {
-  const from = asObject(message.from);
-  const fromUsername = asString(from.username);
-  const toUsernames = asArray(asObject(message.to).data)
-    .map((recipient) => asString(asObject(recipient).username))
-    .filter(Boolean);
+  const fromUsername = asString(asObject(message.from).username);
+  const toUsernames = asArray(asObject(message.to).data).map((r) => asString(asObject(r).username)).filter(Boolean);
   return { fromUsername, toUsernames };
 }
-
 function isInstagramMessage(message) {
   const { fromUsername, toUsernames } = participantUsernames(message);
   return Boolean(fromUsername || toUsernames.length > 0);
 }
-
 function directionFor(message, pageId, accountUsername) {
   const from = asObject(message.from);
   const fromId = asString(from.id);
@@ -141,14 +139,12 @@ function directionFor(message, pageId, accountUsername) {
   if (fromUsername && fromUsername !== accountUsername) return 'INBOUND';
   return 'UNKNOWN';
 }
-
-function inPeriod(timeMs) {
-  return timeMs !== null && timeMs >= PERIOD_START && timeMs < PERIOD_END;
-}
+function inPeriod(timeMs) { return timeMs !== null && timeMs >= PERIOD_START && timeMs < PERIOD_END; }
 
 const instagramProfile = await resolveInstagramProfile();
 const { pageId, pageToken } = await resolvePage();
-const { conversations, pages: conversationPages } = await listAllConversations(pageId, pageToken);
+const route = await selectInstagramConversationRoute(pageId, pageToken);
+const { conversations, pages: conversationPages } = await listAllConversations(route);
 
 const exportedMessages = [];
 let conversationsSkippedBefore2025 = 0;
@@ -173,35 +169,20 @@ for (const candidate of conversations) {
   const conversationId = asString(conversation.id);
   const updated = timestamp(conversation.updated_time);
   if (!conversationId) continue;
-  if (updated !== null && updated < PERIOD_START) {
-    conversationsSkippedBefore2025 += 1;
-    continue;
-  }
+  if (updated !== null && updated < PERIOD_START) { conversationsSkippedBefore2025 += 1; continue; }
 
   conversationsInspected += 1;
   let read;
-  try {
-    read = await readConversation(conversationId, pageToken);
-  } catch {
-    conversationReadErrors += 1;
-    continue;
-  }
+  try { read = await readConversation(conversationId, route.token); }
+  catch { conversationReadErrors += 1; continue; }
 
-  if (read.data.length === 0) {
-    conversationsWithNoReadableMessages += 1;
-    continue;
-  }
-
+  if (read.data.length === 0) { conversationsWithNoReadableMessages += 1; continue; }
   const instagramMessages = read.data.filter((message) => isInstagramMessage(asObject(message)));
-  if (instagramMessages.length === 0) {
-    conversationsRejectedAsNonInstagram += 1;
-    continue;
-  }
+  if (instagramMessages.length === 0) { conversationsRejectedAsNonInstagram += 1; continue; }
 
   instagramConversationsObserved += 1;
   instagramMessagesObserved += instagramMessages.length;
   const inspectedTimes = [];
-
   for (const candidateMessage of instagramMessages) {
     const message = asObject(candidateMessage);
     inspectedMessageRecords += 1;
@@ -212,44 +193,29 @@ for (const candidate of conversations) {
       latestInspected = latestInspected === null ? createdMs : Math.max(latestInspected, createdMs);
     }
     if (!inPeriod(createdMs)) continue;
-
     const direction = directionFor(message, pageId, instagramProfile.username);
-    if (direction === 'OUTBOUND') {
-      outbound2025Messages += 1;
-      continue;
-    }
-    if (direction === 'UNKNOWN') {
-      unknownDirection2025Messages += 1;
-      continue;
-    }
-
+    if (direction === 'OUTBOUND') { outbound2025Messages += 1; continue; }
+    if (direction === 'UNKNOWN') { unknownDirection2025Messages += 1; continue; }
     inbound2025Messages += 1;
     const text = asString(message.message);
-    if (!text) {
-      messagesWithoutText2025 += 1;
-      continue;
-    }
-    exportedMessages.push({
-      createdTime: new Date(createdMs).toISOString(),
-      text,
-    });
+    if (!text) { messagesWithoutText2025 += 1; continue; }
+    exportedMessages.push({ createdTime: new Date(createdMs).toISOString(), text });
   }
 
   if (read.hasMore) {
     conversationsWithMoreThan20Messages += 1;
     const earliestConversationInspected = inspectedTimes.length > 0 ? Math.min(...inspectedTimes) : null;
-    if (
-      earliestConversationInspected === null ||
-      (earliestConversationInspected > PERIOD_START && (updated === null || updated >= PERIOD_START))
-    ) {
+    if (earliestConversationInspected === null || (earliestConversationInspected > PERIOD_START && (updated === null || updated >= PERIOD_START))) {
       conversationsPotentiallyMissing2025DueMetaLimit += 1;
     }
   }
 }
 
-const sourcePlatformValidated = instagramConversationsObserved > 0 || instagramMessagesObserved > 0;
+const sourcePlatformValidated = route.label.includes('platform') && (instagramConversationsObserved > 0 || conversations.length === 0);
 const coverage = {
   period: { start: '2025-01-01T00:00:00.000Z', endExclusive: '2026-01-01T00:00:00.000Z' },
+  selectedRoute: route.label,
+  routeProbeCount: route.probeCount,
   conversationPages,
   conversationsReturned: conversations.length,
   conversationsSkippedBefore2025,
@@ -271,18 +237,10 @@ const coverage = {
   earliestInspectedMessageTime: earliestInspected === null ? null : new Date(earliestInspected).toISOString(),
   latestInspectedMessageTime: latestInspected === null ? null : new Date(latestInspected).toISOString(),
   metaMessageDetailLimitPerConversation: MESSAGE_DETAIL_LIMIT,
-  completeHistoricalCoverageClaimAllowed:
-    sourcePlatformValidated && conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
+  completeHistoricalCoverageClaimAllowed: sourcePlatformValidated && conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
 };
 
-const payload = {
-  schemaVersion: 2,
-  source: 'instagram-direct-meta-conversations-api',
-  generatedAt: new Date().toISOString(),
-  coverage,
-  messages: exportedMessages,
-};
-
+const payload = { schemaVersion: 3, source: 'instagram-direct-meta-conversations-api', generatedAt: new Date().toISOString(), coverage, messages: exportedMessages };
 const key = Buffer.from(exportKeyHex, 'hex');
 const iv = crypto.randomBytes(12);
 const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -290,22 +248,7 @@ const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
 const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
 const tag = cipher.getAuthTag();
 const encoded = ciphertext.toString('base64');
-const chunkSize = 100_000;
 const chunks = [];
-for (let offset = 0; offset < encoded.length; offset += chunkSize) {
-  chunks.push(encoded.slice(offset, offset + chunkSize));
-}
-
+for (let offset = 0; offset < encoded.length; offset += 100_000) chunks.push(encoded.slice(offset, offset + 100_000));
 console.log(JSON.stringify({ validation: 'instagram-dm-2025-export-coverage', coverage }));
-chunks.forEach((chunk, chunkIndex) => {
-  console.log(
-    JSON.stringify({
-      validation: 'instagram-dm-2025-export-chunk',
-      chunkIndex,
-      totalChunks: chunks.length,
-      iv: iv.toString('base64'),
-      tag: tag.toString('base64'),
-      chunk,
-    }),
-  );
-});
+chunks.forEach((chunk, chunkIndex) => console.log(JSON.stringify({ validation: 'instagram-dm-2025-export-chunk', chunkIndex, totalChunks: chunks.length, iv: iv.toString('base64'), tag: tag.toString('base64'), chunk })));
