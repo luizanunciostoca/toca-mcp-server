@@ -259,7 +259,7 @@ for (const name of advertisedInstagramMessagingNames) {
   const marker = "name: '" + name + "'";
   const start = registry.indexOf(marker);
   const end = registry.indexOf('\n  },', start);
-const definition = registry.slice(start, end === -1 ? registry.length : end);
+  const definition = registry.slice(start, end === -1 ? registry.length : end);
   if (
     !definition.includes("riskClass: 'READ'") ||
     !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
