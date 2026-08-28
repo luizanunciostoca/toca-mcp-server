@@ -1,17 +1,16 @@
 name: Deploy TOCA Managed Instagram Daemon GCP
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'migrations/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml'
   workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: 'Type DEPLOY_PRODUCTION to authorize this production deployment'
+        required: true
+        type: string
+      authorization_ref:
+        description: 'Required approval/change reference for this production deployment'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -40,6 +39,7 @@ env:
 
 jobs:
   quality-build-image:
+    if: ${{ inputs.confirm_production == 'DEPLOY_PRODUCTION' && inputs.authorization_ref != '' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
