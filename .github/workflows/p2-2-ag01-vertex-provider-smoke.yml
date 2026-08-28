@@ -109,20 +109,32 @@ jobs:
             --format='value(metadata.name)' 2>p2-2-evidence/execution-stderr.log)"
           EXIT_CODE=$?
           set -e
+          if [ -z "$EXECUTION" ]; then
+            EXECUTION="$(grep -oE 'toca-ag01-vertex-p2-2-smoke-[a-z0-9]+' p2-2-evidence/execution-stderr.log | tail -n 1 || true)"
+          fi
           echo "$EXECUTION" > p2-2-evidence/execution-name.txt
           echo "$EXIT_CODE" > p2-2-evidence/execution-exit-code.txt
-          sleep 4
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=$SMOKE_JOB AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION" \
-            --project "$PROJECT_ID" \
-            --freshness 20m \
-            --limit 200 \
-            --order asc \
-            --format='value(textPayload)' > p2-2-evidence/job.log || true
+          if [ -n "$EXECUTION" ]; then
+            gcloud run jobs executions describe "$EXECUTION" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --format=json > p2-2-evidence/execution-describe.json || true
+            sleep 6
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$SMOKE_JOB\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION\"" \
+              --project "$PROJECT_ID" \
+              --freshness 20m \
+              --limit 200 \
+              --order asc \
+              --format='value(textPayload)' > p2-2-evidence/job.log || true
+          else
+            : > p2-2-evidence/job.log
+          fi
           grep -F '"schemaVersion":"toca.p2.2.ag01-vertex-provider.v1"' p2-2-evidence/job.log \
             | tail -n 1 > p2-2-evidence/provider-readback.json || true
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo 'Cloud Run runtime-identity smoke failed.' >&2
+            cat p2-2-evidence/execution-stderr.log >&2 || true
             cat p2-2-evidence/job.log >&2 || true
             exit "$EXIT_CODE"
           fi
