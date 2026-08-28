@@ -8,6 +8,7 @@ const projectId = process.env.AG01_VERTEX_PROJECT_ID?.trim() || process.env.GOOG
 const location = process.env.AG01_VERTEX_LOCATION?.trim() || 'global';
 const model = process.env.AG01_VERTEX_MODEL?.trim() || 'gemini-2.5-flash';
 const evidencePath = process.env.P2_2_EVIDENCE_PATH?.trim() || '/tmp/p2-2-ag01-vertex.json';
+const injectedToken = process.env.GCP_ACCESS_TOKEN?.trim();
 
 if (!projectId) throw new Error('AG01_VERTEX_PROJECT_ID_REQUIRED');
 
@@ -70,6 +71,9 @@ const adapter = new VertexGeminiDecisionAdapter({
   timeoutMs: 30_000,
   maxRetries: 1,
   maxOutputTokens: 2048,
+  ...(injectedToken
+    ? { accessTokenProvider: { getAccessToken: () => Promise.resolve(injectedToken) } }
+    : {}),
 });
 
 await adapter.readiness();
@@ -102,6 +106,7 @@ const evidence = {
   capabilityProposed: false,
   coreCapabilityExecuted: false,
   externalSideEffectExecuted: false,
+  authMode: injectedToken ? 'wif-access-token' : 'metadata-service',
   evidence: result.evidence,
   verifiedAt: new Date().toISOString(),
 };
