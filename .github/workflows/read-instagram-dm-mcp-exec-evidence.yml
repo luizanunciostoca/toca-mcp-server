@@ -1,0 +1,75 @@
+name: Read Instagram DM MCP Execution Evidence
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-mcp-exec-20260828
+    paths:
+      - '.github/workflows/read-instagram-dm-mcp-exec-evidence.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_JOB_NAME: toca-instagram-dm-mcp-33217237094-1
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read sanitized validation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${SOURCE_JOB_NAME}" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=2h \
+              --limit=200 \
+              --order=asc \
+              --format=json > /tmp/logs.json
+
+            python3 <<'PY'
+          import json, re
+          rows = json.load(open('/tmp/logs.json'))
+          found = []
+          for row in rows:
+              candidates = []
+              if isinstance(row.get('textPayload'), str):
+                  candidates.append(row['textPayload'])
+              jp = row.get('jsonPayload')
+              if isinstance(jp, dict):
+                  candidates.append(json.dumps(jp, separators=(',', ':')))
+              for text in candidates:
+                  if '"validation"' not in text and 'validation' not in text:
+                      continue
+                  for match in re.finditer(r'\{[^\n]*"validation"[^\n]*\}', text):
+                      raw = match.group(0)
+                      try:
+                          obj = json.loads(raw)
+                      except Exception:
+                          continue
+                      allowed = {'validation','server','version','protocolVersion','tocaExecutePresent','capabilitySearchPresent','toolCount','executableCapabilities','status','executionIdPresent','conversationsReturned','nextAfterPresent','errorCode','serverStderrCodes'}
+                      found.append({k:v for k,v in obj.items() if k in allowed})
+          for item in found:
+              print(json.dumps(item, separators=(',', ':')))
+          open('/tmp/found-count','w').write(str(len(found)))
+          PY
+            COUNT="$(cat /tmp/found-count)"
+            if [ "$COUNT" -gt 0 ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'NO_VALIDATION_EVIDENCE_FOUND'
+          exit 1
