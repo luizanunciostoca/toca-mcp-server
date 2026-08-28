@@ -12,18 +12,23 @@ No provider write is authorized by this closeout. Existing provider evidence is 
 
 ## P-01 — Capability total `771 x 796`
 
-**Status: CLOSED AS RECONCILIATION RULE.**
+**Status: CLOSED AS LAYERED COUNT SEMANTICS.**
 
-Canonical machine-actionable enumeration is `771` capabilities. The `796` figure is a published-document/static-snapshot count and must not be presented as current enumerable runtime truth.
+The two figures are real, but they describe different catalog layers and must not be compared as if they were the same denominator:
 
-Rules:
+- `771` = Drive machine-actionable **structural catalog** count in `CATALOGO_MACHINE_ACTIONABLE_DE_ROTAS_E_CAPABILITIES_2025-01-02_v1.0`, `SUMMARY`;
+- `796` = repository **expanded code catalog** count materialized by `src/governance/capability-catalog.ts` contract `v1.1.0` and enforced by `test/governance-catalog.test.ts`;
+- the repository catalog is composed from route capability IDs plus technical extensions, video-content technical extensions and transversal capability IDs;
+- the live MCP runtime registry is intentionally narrower than the `796` code catalog and remains feature/evidence gated;
+- therefore `796 - 771 = 25` must **not** be interpreted as 25 missing, invalid or editorial capabilities without an ID-level cross-layer diff.
 
-- `771` = canonical enumerable source/runtime catalog count for this snapshot;
-- `796` = legacy/editorial published figure;
-- the delta `25` must be treated as unbound/editorial entries until each item has a canonical capability ID and enumerable binding;
-- future status pages must resolve live catalog/source before displaying a capability total.
+Reconciliation rule: every status page, report or dashboard that displays a capability count must name the layer (`DRIVE_STRUCTURAL_CATALOG`, `REPO_EXPANDED_CATALOG`, or `RUNTIME_REGISTRY`) and must never present one layer's count as the current truth of another.
 
-Source of truth: Drive `CATALOGO_MACHINE_ACTIONABLE_DE_ROTAS_E_CAPABILITIES_2025-01-02_v1.0`, `SUMMARY` sheet.
+Sources of truth:
+
+- Drive structural layer: `CATALOGO_MACHINE_ACTIONABLE_DE_ROTAS_E_CAPABILITIES_2025-01-02_v1.0` / `SUMMARY`;
+- repository expanded layer: `src/governance/capability-catalog.ts` + `test/governance-catalog.test.ts`;
+- executable runtime layer: `src/registry.ts` plus active feature flags and provider-backed evidence.
 
 ## P-02 — Fast Lane x capability evidence
 
@@ -174,10 +179,10 @@ These are not missing Technology architecture after this change; they are explic
 
 Livro 12 P2 closeout is accepted when:
 
-- machine-actionable catalog reports `771` as canonical enumerable total and `796` is marked legacy/editorial;
+- Drive reports `771` explicitly as the structural catalog count, while repository contract `v1.1.0` reports `796` explicitly as the expanded code-catalog count; no source labels either figure as the other's runtime truth;
 - R28 is `META_ADS_CONTROLLED_LIFECYCLE` in Drive and code;
 - the provider-evidence manifest validates with `instagram.publish.image` only;
 - Fast Lane consumed command is `NOOP`;
 - brand and rights checks execute before cloud authentication for future `PUBLISH_NOW` commands;
-- Quality Gate passes on the PR;
+- Quality Gate, Autonomy Safety and Security Supply Chain pass on the PR;
 - no additional provider write is executed solely to manufacture evidence.
