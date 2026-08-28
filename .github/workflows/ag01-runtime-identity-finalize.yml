@@ -1,0 +1,206 @@
+name: AG-01 Runtime Identity Finalize
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-runtime-identity-finalize.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  PROBE_JOB: toca-ag01-runtime-identity-probe
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  AUTHORIZATION_ISSUE: '335'
+  AUTHORIZED_RUNTIME_SHA: d2c85284f3f67d017ee800e4c4b772f5418542d6
+  CANDIDATE_REVISION: toca-ag01-orchestrator-vtx-d2c85284-2
+  CANDIDATE_TAG: candidate-d2c85284-2
+  IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/ag01@sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96
+  EXPECTED_MODEL: gemini-2.5-flash
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Revalidate exact runtime authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" > /tmp/auth.json
+          jq -e --arg sha "$AUTHORIZED_RUNTIME_SHA" --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and (.user.login == $owner) and
+            (.title == "PRODUCTION AUTHORIZATION — AG-01 permanent Vertex binding") and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha))
+          ' /tmp/auth.json >/dev/null
+
+      - name: Authenticate control plane
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Verify immutable candidate and private IAM
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud run revisions describe "$CANDIDATE_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/revision-before.json
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/service-before.json
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/iam-before.json
+          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg sha "$AUTHORIZED_RUNTIME_SHA" --arg model "$EXPECTED_MODEL" '
+            (.spec.serviceAccountName==$sa) and
+            ([.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value] | first == $sha) and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_MODEL_PROVIDER") | .value] | first == "vertex") and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_VERTEX_MODEL") | .value] | first == $model) and
+            ([.spec.containers[0].env[]? | select(.name=="AG01_GOOGLE_AUTH_MODE") | .value] | first == "gcp_metadata")
+          ' evidence/revision-before.json >/dev/null
+          jq -e --arg revision "$CANDIDATE_REVISION" --arg tag "$CANDIDATE_TAG" '.status.traffic[]? | select(.revisionName==$revision and .tag==$tag)' evidence/service-before.json >/dev/null
+          if jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members // [])[]? | select(.=="allUsers")' evidence/iam-before.json >/dev/null; then
+            echo 'Refusing public service.' >&2; exit 1
+          fi
+          BASE_URL="$(jq -r '.status.url' evidence/service-before.json)"
+          TAG_URL="$(jq -r --arg tag "$CANDIDATE_TAG" '.status.traffic[] | select(.tag==$tag) | .url' evidence/service-before.json)"
+          echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+          echo "TAG_URL=$TAG_URL" >> "$GITHUB_ENV"
+
+      - name: Build runtime-identity probe payload
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.mjs <<'JS'
+          const audience = process.env.BASE_URL;
+          const target = process.env.PROBE_MODE === 'tag' ? process.env.TAG_URL : audience;
+          const metadataUrl = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=' + encodeURIComponent(audience) + '&format=full';
+          const tokenResponse = await fetch(metadataUrl, { headers: { 'Metadata-Flavor': 'Google' } });
+          if (!tokenResponse.ok) throw new Error(`METADATA_ID_TOKEN_${tokenResponse.status}`);
+          const token = (await tokenResponse.text()).trim();
+          async function request(path, init = {}) {
+            const response = await fetch(target + path, {
+              ...init,
+              headers: { ...(init.headers || {}), authorization: `Bearer ${token}` },
+            });
+            const text = await response.text();
+            let body;
+            try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 300) }; }
+            return { status: response.status, body };
+          }
+          const health = await request('/healthz');
+          if (health.status !== 200 || health.body?.status !== 'ok' || health.body?.service !== 'toca-ag01-orchestrator') {
+            throw new Error(`HEALTH_PROBE_FAILED:${JSON.stringify(health)}`);
+          }
+          const ready = await request('/readyz');
+          if (ready.status !== 200 || ready.body?.status !== 'ready' || ready.body?.service !== 'toca-ag01-orchestrator' || !(ready.body?.runtimeCapabilityCount > 0)) {
+            throw new Error(`READY_PROBE_FAILED:${JSON.stringify(ready)}`);
+          }
+          const execute = await request('/v1/orchestrator/execute', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              idempotencyKey: process.env.PROBE_ID,
+              message: 'Return only a governed planning status. Do not propose or execute any capability, external write, financial action, or destructive action. No action is required.',
+            }),
+          });
+          const modelOk = execute.body?.model === process.env.EXPECTED_MODEL && typeof execute.body?.modelResponseId === 'string' && execute.body.modelResponseId.length > 0 && execute.body?.orchestration;
+          if (!modelOk) throw new Error(`MODEL_PROBE_FAILED:${JSON.stringify({status:execute.status,body:execute.body})}`);
+          console.log('AG01_RUNTIME_IDENTITY_PROBE ' + JSON.stringify({
+            status: 'PROVIDER_AND_PRIVATE_SERVICE_VERIFIED',
+            mode: process.env.PROBE_MODE,
+            target,
+            model: execute.body.model,
+            modelResponseId: execute.body.modelResponseId,
+            orchestrationStatus: execute.body.orchestration.status,
+            routeId: execute.body.orchestration.routeId,
+            runtimeCapabilityCount: ready.body.runtimeCapabilityCount,
+            externalBusinessSideEffectExecuted: false,
+          }));
+          JS
+          PROBE_SCRIPT_B64="$(base64 -w0 /tmp/probe.mjs)"
+          echo "PROBE_SCRIPT_B64=$PROBE_SCRIPT_B64" >> "$GITHUB_ENV"
+
+      - name: Deploy private in-project runtime identity probe job
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" \
+            --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command /bin/sh \
+            --args '-c,echo "$PROBE_SCRIPT_B64" | base64 -d > /tmp/probe.mjs && node /tmp/probe.mjs' \
+            --set-env-vars "PROBE_SCRIPT_B64=$PROBE_SCRIPT_B64,BASE_URL=$BASE_URL,TAG_URL=$TAG_URL,PROBE_MODE=tag,PROBE_ID=tag-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT},EXPECTED_MODEL=$EXPECTED_MODEL" \
+            --max-retries 0 --task-timeout 5m --quiet
+
+      - name: Execute authenticated candidate tag probe from runtime identity
+        run: |
+          set -euo pipefail
+          EXECUTION="$(gcloud run jobs execute "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          echo "$EXECUTION" > evidence/tag-execution.txt
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'$PROBE_JOB'" AND textPayload:"AG01_RUNTIME_IDENTITY_PROBE"' \
+            --project "$PROJECT_ID" --freshness=10m --limit=20 --format=json > /tmp/tag-logs.json
+          jq -r '.[].textPayload // empty' /tmp/tag-logs.json | grep 'AG01_RUNTIME_IDENTITY_PROBE ' | head -n1 | sed 's/^.*AG01_RUNTIME_IDENTITY_PROBE //' > evidence/tag-probe.json
+          jq -e '.status=="PROVIDER_AND_PRIVATE_SERVICE_VERIFIED" and .mode=="tag" and .model=="gemini-2.5-flash" and (.modelResponseId|length>0) and .externalBusinessSideEffectExecuted==false' evidence/tag-probe.json >/dev/null
+
+      - name: Promote verified candidate revision to 100 percent
+        run: |
+          set -euo pipefail
+          PREVIOUS_100="$(jq -r '.status.traffic[]? | select(.percent==100) | .revisionName' evidence/service-before.json | head -n1)"
+          echo "$PREVIOUS_100" > evidence/previous-100-revision.txt
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$CANDIDATE_REVISION=100" --quiet
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/service-promoted.json
+          jq -e --arg revision "$CANDIDATE_REVISION" '.status.traffic[]? | select(.revisionName==$revision and .percent==100)' evidence/service-promoted.json >/dev/null
+
+      - name: Execute independent production-base readback from runtime identity
+        run: |
+          set -euo pipefail
+          gcloud run jobs update "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" \
+            --update-env-vars "PROBE_MODE=base,PROBE_ID=base-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --quiet
+          rollback() {
+            PREVIOUS_100="$(cat evidence/previous-100-revision.txt)"
+            if [[ -n "$PREVIOUS_100" ]]; then
+              gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PREVIOUS_100=100" --quiet || true
+            fi
+          }
+          trap rollback ERR
+          EXECUTION="$(gcloud run jobs execute "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          echo "$EXECUTION" > evidence/base-execution.txt
+          sleep 3
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'$PROBE_JOB'" AND textPayload:"AG01_RUNTIME_IDENTITY_PROBE"' \
+            --project "$PROJECT_ID" --freshness=10m --limit=50 --format=json > /tmp/base-logs.json
+          jq -r '.[].textPayload // empty' /tmp/base-logs.json | grep 'AG01_RUNTIME_IDENTITY_PROBE ' | sed 's/^.*AG01_RUNTIME_IDENTITY_PROBE //' | jq -s '[.[] | select(.mode=="base")][0]' > evidence/base-probe.json
+          jq -e '.status=="PROVIDER_AND_PRIVATE_SERVICE_VERIFIED" and .mode=="base" and .model=="gemini-2.5-flash" and (.modelResponseId|length>0) and .externalBusinessSideEffectExecuted==false' evidence/base-probe.json >/dev/null
+          trap - ERR
+
+      - name: Final production control-plane readback
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/service-final.json
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/iam-final.json
+          jq -e --arg revision "$CANDIDATE_REVISION" '.status.traffic[]? | select(.revisionName==$revision and .percent==100)' evidence/service-final.json >/dev/null
+          if jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members // [])[]? | select(.=="allUsers")' evidence/iam-final.json >/dev/null; then
+            echo 'Public invoker detected after promotion.' >&2; exit 1
+          fi
+          RESPONSE_ID="$(jq -r '.modelResponseId' evidence/base-probe.json)"
+          jq -n --arg sha "$AUTHORIZED_RUNTIME_SHA" --arg revision "$CANDIDATE_REVISION" --arg image "$IMAGE" --arg responseId "$RESPONSE_ID" --arg runId "$GITHUB_RUN_ID" --arg sa "$RUNTIME_SERVICE_ACCOUNT" '{schemaVersion:"toca.p2.2.ag01-production-closure.v2",status:"PRODUCTION_VERIFIED",runtimeSha:$sha,revision:$revision,image:$image,verificationRunId:$runId,provider:"google-vertex-ai",model:"gemini-2.5-flash",modelResponseId:$responseId,runtimeServiceAccount:$sa,trafficPercent:100,privateInvocationVerifiedFromRuntimeIdentity:true,unauthenticatedIngressAllowed:false,corePolicyApprovalAuthorityPreserved:true,externalBusinessSideEffectExecuted:false}' > evidence/closure.json
+
+      - name: Upload immutable closure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-production-runtime-identity-closure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 90
