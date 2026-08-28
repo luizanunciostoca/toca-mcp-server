@@ -30,6 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Canonical count was updated separately after the first diagnostic run.
           python3 <<'PY'
           from pathlib import Path
 
