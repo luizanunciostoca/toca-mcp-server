@@ -50,7 +50,9 @@ export class GoogleOAuthRefreshSecretResolver implements SecretResolver {
     this.#tokenEndpoint = options.tokenEndpoint ?? 'https://oauth2.googleapis.com/token';
     this.#metadataTokenEndpoint = options.metadataTokenEndpoint ?? DEFAULT_METADATA_TOKEN_URL;
     this.#metadataEmailEndpoint = options.metadataEmailEndpoint ?? DEFAULT_METADATA_EMAIL_URL;
-    this.#iamCredentialsBaseUrl = (options.iamCredentialsBaseUrl ?? DEFAULT_IAM_CREDENTIALS_BASE_URL).replace(/\/$/, '');
+    this.#iamCredentialsBaseUrl = (
+      options.iamCredentialsBaseUrl ?? DEFAULT_IAM_CREDENTIALS_BASE_URL
+    ).replace(/\/$/, '');
     this.#timeoutMs = options.timeoutMs ?? 10_000;
   }
 
@@ -109,7 +111,10 @@ export class GoogleOAuthRefreshSecretResolver implements SecretResolver {
         throw new Error(`AG01_GCP_METADATA_EMAIL_FAILED:${emailResponse.status}`);
       }
       const metadataPayload = (await metadataTokenResponse.json()) as TokenResponse;
-      if (typeof metadataPayload.access_token !== 'string' || !metadataPayload.access_token.trim()) {
+      if (
+        typeof metadataPayload.access_token !== 'string' ||
+        !metadataPayload.access_token.trim()
+      ) {
         throw new Error('AG01_GCP_METADATA_ACCESS_TOKEN_MISSING');
       }
       const serviceAccountEmail = (await emailResponse.text()).trim();
@@ -135,7 +140,8 @@ export class GoogleOAuthRefreshSecretResolver implements SecretResolver {
         throw new Error('AG01_GCP_SHEETS_ACCESS_TOKEN_MISSING');
       }
       const expiresAtMs =
-        typeof scopedPayload.expireTime === 'string' && Number.isFinite(Date.parse(scopedPayload.expireTime))
+        typeof scopedPayload.expireTime === 'string' &&
+        Number.isFinite(Date.parse(scopedPayload.expireTime))
           ? Date.parse(scopedPayload.expireTime)
           : this.#now().getTime() + 3_600_000;
       this.#cache = { token: scopedPayload.accessToken, expiresAtMs };
