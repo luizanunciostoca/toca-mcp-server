@@ -21,4 +21,5 @@ jobs:
       - name: Record production deployment guard
         run: |
           echo 'PRODUCTION_AUTO_DEPLOY=BLOCKED'
+          echo 'reason=explicit-production-authorization-not-present'
           echo 'This guard cancels an unapproved production deployment sharing this concurrency group.'
