@@ -1,0 +1,39 @@
+name: AG-01 VPC Service Controls Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-vpc-service-controls-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Inspect Cloud Run HttpIngress policy logs
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud logging read 'resource.type="audited_resource" AND resource.labels.method="run.googleapis.com/HttpIngress" AND timestamp>="2026-08-28T19:20:00Z"' --project "$PROJECT_ID" --limit=100 --order=desc --format=json > evidence/http-ingress-policy.json
+          jq '[.[] | {timestamp,severity,protoPayload,resource,logName}]' evidence/http-ingress-policy.json > evidence/summary.json
+          cat evidence/summary.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-vpc-sc-diagnostic-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
