@@ -1,10 +1,7 @@
 name: P1.3 Meta Ads Readback
 
 on:
-  push:
-    branches: [ops/p1-3-meta-ads-preflight-fix-20260828]
-    paths:
-      - '.github/workflows/p1-3-meta-ads-readback.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
