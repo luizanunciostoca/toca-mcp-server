@@ -91,12 +91,15 @@ jobs:
       - name: Execute isolated read-only export
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          set +e
           gcloud run jobs execute "$JOB_NAME" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --wait \
             --quiet
+          RC=$?
+          set -e
           EXECUTION="$(gcloud run jobs executions list \
             --job "$JOB_NAME" \
             --project "$PROJECT_ID" \
@@ -106,6 +109,34 @@ jobs:
             --format='value(metadata.name)')"
           test -n "$EXECUTION"
           echo "EXECUTION=$EXECUTION" >> "$GITHUB_ENV"
+          echo "EXECUTION_RC=$RC" >> "$GITHUB_ENV"
+          echo "Cloud Run execution completed with rc=$RC"
+
+      - name: Read sanitized failure diagnostics
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${EXECUTION:-}" ] || [ "${EXECUTION_RC:-1}" = "0" ]; then
+            exit 0
+          fi
+          sleep 3
+          BASE_FILTER="resource.type=cloud_run_job AND resource.labels.job_name=$JOB_NAME AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION"
+          echo 'Sanitized Cloud Run failure diagnostics:'
+          gcloud logging read "$BASE_FILTER AND severity>=ERROR" \
+            --project "$PROJECT_ID" \
+            --limit 50 \
+            --freshness 30m \
+            --order=asc \
+            --format='value(textPayload)' \
+            | sed -E 's/(access[_-]?token|authorization|bearer|secret)[=: ]+[^ ]+/\1=[REDACTED]/Ig' \
+            | tail -n 80 || true
+
+      - name: Require successful provider read
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${EXECUTION_RC:-1}" = "0"
 
       - name: Read encrypted chunks and coverage only
         shell: bash
