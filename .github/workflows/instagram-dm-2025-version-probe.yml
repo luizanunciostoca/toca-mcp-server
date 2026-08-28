@@ -1,0 +1,87 @@
+name: Instagram DM 2025 Version Probe
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-version-probe-20260828
+    paths:
+      - '.github/workflows/instagram-dm-2025-version-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server:instagram-dm-mcp-long-5f143b8008a92bc9fe38771ef2d017fb266aea7f
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api_version: v22.0
+            label: v22
+          - api_version: v23.0
+            label: v23
+          - api_version: v24.0
+            label: v24
+    steps:
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Execute governed read through TOCA MCP on ${{ matrix.api_version }}
+        shell: bash
+        env:
+          API_VERSION: ${{ matrix.api_version }}
+          VERSION_LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-ig-dm-${VERSION_LABEL}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/instagram-dm-2025-mcp-exec.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=true~INSTAGRAM_READ_ENABLED=true~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~META_ACCESS_TOKEN_ENV_KEY=META_ACCESS_TOKEN~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=$API_VERSION~META_ENABLED=false~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~GOOGLE_ADS_PHASE=OFF~TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=false~TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+          STATUS=0
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet || STATUS=$?
+
+          for attempt in 1 2 3 4 5 6; do
+            LINES="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=30m --limit=200 --order=asc --format='value(textPayload)' | grep -E '\"validation\"|provider-telemetry' || true)"
+            if [ -n "$LINES" ]; then
+              echo "GRAPH_API_VERSION=$API_VERSION"
+              printf '%s\n' "$LINES"
+              break
+            fi
+            sleep 10
+          done
+          exit "$STATUS"
