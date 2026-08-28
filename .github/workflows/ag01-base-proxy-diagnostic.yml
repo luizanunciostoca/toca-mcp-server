@@ -1,0 +1,54 @@
+name: AG-01 Base Proxy Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-base-proxy-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe base service through gcloud proxy
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud run services proxy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --port=8087 > /tmp/proxy.log 2>&1 &
+          PID=$!
+          trap 'kill $PID >/dev/null 2>&1 || true' EXIT
+          code=000
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --show-error -o evidence/body.json -w '%{http_code}' http://127.0.0.1:8087/healthz || true)"
+            echo "attempt=$attempt code=$code"
+            [[ "$code" == "200" ]] && break
+            sleep 2
+          done
+          printf '%s\n' "$code" > evidence/code.txt
+          cp /tmp/proxy.log evidence/proxy.log || true
+          cat evidence/body.json || true
+          [[ "$code" == "200" ]]
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ag01-base-proxy-diagnostic-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
