@@ -1,0 +1,89 @@
+name: AG-01 Sheets Runtime Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - 'src/ag01-sheets-readiness-smoke.ts'
+      - '.github/workflows/ag01-sheets-runtime-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  JOB: toca-ag01-sheets-runtime-diag
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  ROUTING_SPREADSHEET_ID: 1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU
+  CANONICAL_RESOURCES_SPREADSHEET_ID: 1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Build immutable diagnostic image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01:sheets-runtime-diag-${GITHUB_SHA}"
+          docker build --file Dockerfile.orchestrator --tag "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Execute diagnostic as production runtime identity
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB" --project "$PROJECT_ID" --region "$REGION" \
+            --image "$IMAGE" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node --args /app/dist/ag01-sheets-readiness-smoke.js \
+            --set-env-vars "AG01_TOCA_OS_ROUTING_SPREADSHEET_ID=$ROUTING_SPREADSHEET_ID,AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID=$CANONICAL_RESOURCES_SPREADSHEET_ID" \
+            --max-retries 0 --task-timeout 120s --quiet
+          EXECUTION="$(gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          echo "EXECUTION=$EXECUTION" >> "$GITHUB_ENV"
+      - name: Capture sanitized runtime evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-sheets-runtime-diagnostic
+          if [[ -n "${EXECUTION:-}" ]]; then
+            gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=$JOB AND labels.\"run.googleapis.com/execution_name\"=$EXECUTION" \
+              --project "$PROJECT_ID" --limit 200 --freshness 1h --format=json \
+              > ag01-sheets-runtime-diagnostic/logs.json || true
+          else
+            gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=$JOB" \
+              --project "$PROJECT_ID" --limit 200 --freshness 1h --format=json \
+              > ag01-sheets-runtime-diagnostic/logs.json || true
+          fi
+          jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' ag01-sheets-runtime-diagnostic/logs.json \
+            | grep -E '^AG01_SHEETS_DIAG_' \
+            | tee ag01-sheets-runtime-diagnostic/readback.log || true
+          if grep -q '^AG01_SHEETS_DIAG_FAILED' ag01-sheets-runtime-diagnostic/readback.log; then
+            exit 1
+          fi
+          grep -q '^AG01_SHEETS_DIAG_COMPLETE' ag01-sheets-runtime-diagnostic/readback.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ag01-sheets-runtime-diagnostic-${{ github.run_id }}
+          path: ag01-sheets-runtime-diagnostic
+          retention-days: 30
+          if-no-files-found: warn
