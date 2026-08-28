@@ -199,6 +199,7 @@ export class InstagramMessagingReadProvider {
       throw new Error(`INSTAGRAM_MESSAGING_PAGE_MATCH_COUNT:${matches.length}`);
 
     const page = matches[0];
+    if (!page) throw new Error('INSTAGRAM_MESSAGING_PAGE_MATCH_MISSING');
     if (!page.tasks.includes('MESSAGING')) throw new Error('INSTAGRAM_PAGE_MESSAGING_TASK_MISSING');
     return {
       pageId: page.id,
