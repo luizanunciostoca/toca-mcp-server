@@ -60,6 +60,14 @@ export class MetaApiClient {
     return this.requestForm('GET', path, query);
   }
 
+  async getWithAccessToken(
+    path: string,
+    query: Readonly<Record<string, string>>,
+    accessToken: string,
+  ): Promise<unknown> {
+    return this.requestFormWithAccessToken('GET', path, query, accessToken);
+  }
+
   async post(path: string, body: Readonly<Record<string, string>>): Promise<unknown> {
     return this.requestForm('POST', path, body);
   }
@@ -103,10 +111,21 @@ export class MetaApiClient {
     values: Readonly<Record<string, string>>,
   ): Promise<unknown> {
     const token = await this.secrets.resolve(this.accessToken);
+    return this.requestFormWithAccessToken(method, path, values, token);
+  }
+
+  private async requestFormWithAccessToken(
+    method: 'GET' | 'POST',
+    path: string,
+    values: Readonly<Record<string, string>>,
+    accessToken: string,
+  ): Promise<unknown> {
+    if (accessToken.length === 0) throw new Error('META_ACCESS_TOKEN_EMPTY');
+
     const url = this.buildUrl(path);
     const headers: Record<string, string> = {
       Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken}`,
     };
     let body: string | undefined;
 
