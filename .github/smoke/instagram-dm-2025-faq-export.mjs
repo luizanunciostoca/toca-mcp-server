@@ -145,10 +145,16 @@ function directionFor(message, pageId, accountUsername) {
 }
 function inPeriod(timeMs) { return timeMs !== null && timeMs >= PERIOD_START && timeMs < PERIOD_END; }
 
-await readGrantedPermissions();
+const permissions = await readGrantedPermissions();
 const instagramProfile = await resolveInstagramProfile();
 const { pageId, pageToken } = await resolvePage();
-const route = await selectInstagramConversationRoute(pageId, pageToken);
+let route;
+try {
+  route = await selectInstagramConversationRoute(pageId, pageToken);
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'UNKNOWN';
+  throw new Error(`${message}|GRANTED_PERMISSIONS:${permissions.granted.join(',') || 'NONE'}|DECLINED_PERMISSIONS:${permissions.declined.join(',') || 'NONE'}`);
+}
 const { conversations, pages: conversationPages } = await listAllConversations(route);
 
 const exportedMessages = [];
@@ -224,7 +230,7 @@ const coverage = {
   completeHistoricalCoverageClaimAllowed: sourcePlatformValidated && conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
 };
 
-const payload = { schemaVersion: 4, source: 'instagram-direct-meta-conversations-api', generatedAt: new Date().toISOString(), coverage, messages: exportedMessages };
+const payload = { schemaVersion: 5, source: 'instagram-direct-meta-conversations-api', generatedAt: new Date().toISOString(), coverage, messages: exportedMessages };
 const key = Buffer.from(exportKeyHex, 'hex');
 const iv = crypto.randomBytes(12);
 const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
