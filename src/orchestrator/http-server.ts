@@ -234,7 +234,7 @@ function normalizeHttpError(error: unknown): { readonly status: number; readonly
 function safeOperationalErrorDetail(error: unknown): string {
   const message = error instanceof Error ? error.message : 'AG01_RUNTIME_ERROR';
   return message
-    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/access[_-]?token[=:]\s*[^\s,;]+/gi, 'access_token=[REDACTED]')
     .slice(0, 500);
 }
