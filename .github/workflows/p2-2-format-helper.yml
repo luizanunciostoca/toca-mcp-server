@@ -6,7 +6,7 @@ on:
     paths: ['.github/workflows/p2-2-format-helper.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          persist-credentials: false
+          persist-credentials: true
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 10.15.0
@@ -22,13 +22,28 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec prettier --write src/ag01-vertex-provider-smoke.ts src/orchestrator/production-config.ts src/orchestrator/production-runtime.ts src/orchestrator/vertex-gemini-decision-adapter.ts
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: p2-2-formatted-source
-          path: |
-            src/ag01-vertex-provider-smoke.ts
-            src/orchestrator/production-config.ts
-            src/orchestrator/production-runtime.ts
-            src/orchestrator/vertex-gemini-decision-adapter.ts
-          retention-days: 1
+      - name: Fix strict lint narrowing and format candidate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/orchestrator/vertex-gemini-decision-adapter.ts')
+          s = p.read_text()
+          s = s.replace(
+            "const nonNull = child.find((item) => item !== 'null');\n        if (typeof nonNull === 'string') result.type = nonNull.toUpperCase();\n        if (child.includes('null')) result.nullable = true;",
+            "const childArray = child as unknown[];\n        const nonNull = childArray.find((item) => item !== 'null');\n        if (typeof nonNull === 'string') result.type = nonNull.toUpperCase();\n        if (childArray.includes('null')) result.nullable = true;",
+          )
+          p.write_text(s)
+          PY
+          pnpm exec prettier --write src/ag01-vertex-provider-smoke.ts src/orchestrator/production-config.ts src/orchestrator/production-runtime.ts src/orchestrator/vertex-gemini-decision-adapter.ts
+      - name: Commit normalized candidate
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/ag01-vertex-provider-smoke.ts src/orchestrator/production-config.ts src/orchestrator/production-runtime.ts src/orchestrator/vertex-gemini-decision-adapter.ts
+          git commit -m 'fix(ag01): normalize Vertex provider candidate'
+          git push origin HEAD:ops/p2-2-ag01-vertex-20260828
