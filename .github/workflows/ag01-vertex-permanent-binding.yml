@@ -1,0 +1,266 @@
+name: AG-01 Permanent Vertex Binding
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-vertex-permanent-binding.yml'
+      - 'src/orchestrator/**'
+      - 'Dockerfile.orchestrator'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-ag01-orchestrator
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-db
+  DATABASE_SECRET: toca-database-url
+  AUTHORIZATION_ISSUE: '335'
+  AG01_MODEL_PROVIDER: vertex
+  AG01_VERTEX_PROJECT_ID: toca-mcp-production
+  AG01_VERTEX_LOCATION: global
+  AG01_VERTEX_MODEL: gemini-2.5-flash
+  ROUTING_SPREADSHEET_ID: 1vnSliJe2duw278DPPdiTylXUooOdzYtVa0nXD24LEtU
+  CANONICAL_RESOURCES_SPREADSHEET_ID: 1Pc1tyx0dd9GvJBM_8mewh21tfXayfaOhajbmX-uACsY
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Require exact production authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          AUTH_API="https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}"
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "$AUTH_API" > /tmp/ag01-production-authorization.json
+          jq -e --arg sha "$GITHUB_SHA" --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PRODUCTION AUTHORIZATION — AG-01 permanent Vertex binding") and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha))
+          ' /tmp/ag01-production-authorization.json >/dev/null || {
+            echo "Exact-SHA production authorization is not ACTIVE for $GITHUB_SHA" >&2
+            exit 1
+          }
+
+      - name: Verify architectural authority boundary
+        run: |
+          set -euo pipefail
+          grep -Fq 'ExistingCoreCapabilityGateway' src/orchestrator/production-runtime.ts
+          grep -Fq 'bindApprovalStoreToScope' src/orchestrator/production-runtime.ts
+          grep -Fq "config.modelProvider === 'vertex'" src/orchestrator/production-runtime.ts
+          grep -Fq 'AG01_FAIL_CLOSED' src/orchestrator/production-runtime.ts
+          grep -Fq "url.pathname === '/v1/orchestrator/execute'" src/orchestrator/http-server.ts
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Quality gate
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate deploy boundary to GCP
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve AG-01 Google OAuth secret bindings fail-closed
+        env:
+          CONFIG_CLIENT_ID_SECRET: ${{ vars.GCP_AG01_GOOGLE_OAUTH_CLIENT_ID_SECRET }}
+          CONFIG_CLIENT_SECRET_SECRET: ${{ vars.GCP_AG01_GOOGLE_OAUTH_CLIENT_SECRET_SECRET }}
+          CONFIG_REFRESH_TOKEN_SECRET: ${{ vars.GCP_AG01_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET }}
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-binding-evidence
+          secret_exists() {
+            gcloud secrets describe "$1" --project "$PROJECT_ID" --format='value(name)' >/dev/null 2>&1
+          }
+          resolve_secret() {
+            local configured="$1"; shift
+            if [[ -n "$configured" ]] && secret_exists "$configured"; then
+              printf '%s' "$configured"; return 0
+            fi
+            local candidate
+            for candidate in "$@"; do
+              if secret_exists "$candidate"; then printf '%s' "$candidate"; return 0; fi
+            done
+            return 1
+          }
+          secret_exists "$DATABASE_SECRET" || { echo "Missing required database secret: $DATABASE_SECRET" >&2; exit 1; }
+          CLIENT_ID_SECRET="$(resolve_secret "$CONFIG_CLIENT_ID_SECRET" toca-google-oauth-client-id google-oauth-client-id toca-google-client-id || true)"
+          CLIENT_SECRET_SECRET="$(resolve_secret "$CONFIG_CLIENT_SECRET_SECRET" toca-google-oauth-client-secret google-oauth-client-secret toca-google-client-secret || true)"
+          REFRESH_TOKEN_SECRET="$(resolve_secret "$CONFIG_REFRESH_TOKEN_SECRET" toca-google-oauth-refresh-token google-oauth-refresh-token toca-google-refresh-token || true)"
+          if [[ -z "$CLIENT_ID_SECRET" || -z "$CLIENT_SECRET_SECRET" || -z "$REFRESH_TOKEN_SECRET" ]]; then
+            jq -n \
+              --arg clientIdFound "${CLIENT_ID_SECRET:+true}" \
+              --arg clientSecretFound "${CLIENT_SECRET_SECRET:+true}" \
+              --arg refreshTokenFound "${REFRESH_TOKEN_SECRET:+true}" \
+              '{schemaVersion:"toca.ag01.permanent-binding-preflight.v1",status:"BLOCKED_GOOGLE_OAUTH_SECRET_BINDING",clientIdSecretFound:($clientIdFound=="true"),clientSecretSecretFound:($clientSecretFound=="true"),refreshTokenSecretFound:($refreshTokenFound=="true"),secretPayloadRead:false}' \
+              > ag01-binding-evidence/preflight.json
+            echo 'AG-01 permanent binding requires Google OAuth client-id/client-secret/refresh-token Secret Manager bindings for TOCA_OS registry access.' >&2
+            exit 1
+          fi
+          echo "CLIENT_ID_SECRET=$CLIENT_ID_SECRET" >> "$GITHUB_ENV"
+          echo "CLIENT_SECRET_SECRET=$CLIENT_SECRET_SECRET" >> "$GITHUB_ENV"
+          echo "REFRESH_TOKEN_SECRET=$REFRESH_TOKEN_SECRET" >> "$GITHUB_ENV"
+          jq -n \
+            --arg clientIdSecret "$CLIENT_ID_SECRET" \
+            --arg clientSecretSecret "$CLIENT_SECRET_SECRET" \
+            --arg refreshTokenSecret "$REFRESH_TOKEN_SECRET" \
+            '{schemaVersion:"toca.ag01.permanent-binding-preflight.v1",status:"READY",clientIdSecret:$clientIdSecret,clientSecretSecret:$clientSecretSecret,refreshTokenSecret:$refreshTokenSecret,secretPayloadRead:false}' \
+            > ag01-binding-evidence/preflight.json
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable orchestrator image
+        run: |
+          set -euo pipefail
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01:permanent-${GITHUB_SHA}"
+          docker build --file Dockerfile.orchestrator --tag "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy permanent private candidate with Vertex primary
+        run: |
+          set -euo pipefail
+          REV_SUFFIX="vtx-${GITHUB_SHA::8}"
+          TAG="candidate-${GITHUB_SHA::8}"
+          ENV_VARS="NODE_ENV=production,AG01_MODEL_PROVIDER=$AG01_MODEL_PROVIDER,AG01_VERTEX_PROJECT_ID=$AG01_VERTEX_PROJECT_ID,AG01_VERTEX_LOCATION=$AG01_VERTEX_LOCATION,AG01_VERTEX_MODEL=$AG01_VERTEX_MODEL,AG01_TOCA_OS_ROUTING_SPREADSHEET_ID=$ROUTING_SPREADSHEET_ID,AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID=$CANONICAL_RESOURCES_SPREADSHEET_ID,AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY=GOOGLE_OAUTH_CLIENT_ID,AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY=GOOGLE_OAUTH_CLIENT_SECRET,AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY=GOOGLE_OAUTH_REFRESH_TOKEN,AG01_AUTHORIZATION_ROLES=READER,AG01_ALLOWED_ROUTE_IDS=,AG01_ALLOWED_CAPABILITY_IDS=,AG01_ALLOWED_TARGET_ACCOUNTS=,TOCA_DEFAULT_TENANT_ID=toca,TOCA_DEFAULT_WORKSPACE_ID=toca,TOCA_DEFAULT_ORGANIZATION_ID=toca,TOCA_RELEASE_SHA=$GITHUB_SHA"
+          SECRETS="DATABASE_URL=$DATABASE_SECRET:latest,GOOGLE_OAUTH_CLIENT_ID=$CLIENT_ID_SECRET:latest,GOOGLE_OAUTH_CLIENT_SECRET=$CLIENT_SECRET_SECRET:latest,GOOGLE_OAUTH_REFRESH_TOKEN=$REFRESH_TOKEN_SECRET:latest"
+          if gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" >/dev/null 2>&1; then
+            TRAFFIC_ARGS=(--no-traffic --tag "$TAG")
+          else
+            TRAFFIC_ARGS=(--tag "$TAG")
+          fi
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --image "$IMAGE" \
+            --revision-suffix "$REV_SUFFIX" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "${PROJECT_ID}:${REGION}:${CLOUD_SQL_INSTANCE}" \
+            --update-secrets "$SECRETS" \
+            --update-env-vars "$ENV_VARS" \
+            --startup-probe 'httpGet.path=/readyz,httpGet.port=8080,failureThreshold=18,timeoutSeconds=5,periodSeconds=5' \
+            --liveness-probe 'httpGet.path=/healthz,httpGet.port=8080,failureThreshold=3,timeoutSeconds=3,periodSeconds=15' \
+            --min-instances 0 --max-instances 2 \
+            --memory 1Gi --cpu 1 --cpu-throttling \
+            --ingress all --no-allow-unauthenticated \
+            "${TRAFFIC_ARGS[@]}" \
+            --quiet
+          gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-binding-evidence/service-iam.json
+          if jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members // [])[]? | select(.=="allUsers")' ag01-binding-evidence/service-iam.json >/dev/null; then
+            echo 'Refusing unauthenticated AG-01 service exposure.' >&2
+            exit 1
+          fi
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-binding-evidence/service-candidate.json
+          CANDIDATE_URL="$(jq -r --arg tag "$TAG" '[.status.traffic[]? | select(.tag==$tag) | .url] | first // empty' ag01-binding-evidence/service-candidate.json)"
+          AUDIENCE="$(jq -r '.status.url // empty' ag01-binding-evidence/service-candidate.json)"
+          CANDIDATE_REVISION="$(jq -r --arg tag "$TAG" '[.status.traffic[]? | select(.tag==$tag) | .revisionName] | first // empty' ag01-binding-evidence/service-candidate.json)"
+          test -n "$CANDIDATE_URL" && test -n "$AUDIENCE" && test -n "$CANDIDATE_REVISION"
+          echo "CANDIDATE_URL=$CANDIDATE_URL" >> "$GITHUB_ENV"
+          echo "AUDIENCE=$AUDIENCE" >> "$GITHUB_ENV"
+          echo "CANDIDATE_REVISION=$CANDIDATE_REVISION" >> "$GITHUB_ENV"
+
+      - name: Mint private candidate probe token
+        id: probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.AUDIENCE }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify health readiness and governed no-side-effect execute
+        env:
+          ID_TOKEN: ${{ steps.probe_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/healthz" > ag01-binding-evidence/healthz.json
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$CANDIDATE_URL/readyz" > ag01-binding-evidence/readyz.json
+          jq -e '.status == "ok" and .service == "toca-ag01-orchestrator"' ag01-binding-evidence/healthz.json >/dev/null
+          jq -e '.status == "ready" and .runtimeCapabilityCount > 0' ag01-binding-evidence/readyz.json >/dev/null
+          REQUEST_ID="permanent-binding-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          jq -n --arg key "$REQUEST_ID" --arg message 'Return a governed planning-only status for the TOCA OS. Do not execute any capability or external side effect. Confirm the model/provider and the authority boundary.' '{idempotencyKey:$key,message:$message}' > /tmp/ag01-request.json
+          HTTP_CODE="$(curl --silent --show-error -o ag01-binding-evidence/execute.json -w '%{http_code}' \
+            -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/ag01-request.json "$CANDIDATE_URL/v1/orchestrator/execute")"
+          case "$HTTP_CODE" in 200|409|422) ;; *) echo "Unexpected AG-01 HTTP status $HTTP_CODE" >&2; cat ag01-binding-evidence/execute.json >&2; exit 1 ;; esac
+          jq -e '.model == "gemini-2.5-flash"' ag01-binding-evidence/execute.json >/dev/null
+          jq -e '.modelResponseId != null' ag01-binding-evidence/execute.json >/dev/null
+          jq -e '.orchestration != null' ag01-binding-evidence/execute.json >/dev/null
+
+      - name: Promote verified candidate to permanent service traffic
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$SERVICE" \
+            --project "$PROJECT_ID" --region "$REGION" \
+            --to-revisions "$CANDIDATE_REVISION=100" --quiet
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-binding-evidence/service-final.json
+          FINAL_READY="$(jq -r '.status.latestReadyRevisionName // empty' ag01-binding-evidence/service-final.json)"
+          [[ "$FINAL_READY" == "$CANDIDATE_REVISION" ]] || { echo "Final ready revision mismatch: $FINAL_READY != $CANDIDATE_REVISION" >&2; exit 1; }
+
+      - name: Capture immutable permanent-binding evidence
+        if: always()
+        run: |
+          mkdir -p ag01-binding-evidence
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg service "$SERVICE" \
+            --arg runtimeServiceAccount "$RUNTIME_SERVICE_ACCOUNT" \
+            --arg provider 'google-vertex-ai' \
+            --arg model "$AG01_VERTEX_MODEL" \
+            --arg authIssue "$AUTHORIZATION_ISSUE" \
+            '{schemaVersion:"toca.ag01.permanent-binding-evidence.v1",sourceSha:$sourceSha,runId:$runId,runAttempt:$runAttempt,service:$service,runtimeServiceAccount:$runtimeServiceAccount,provider:$provider,model:$model,productionAuthorizationIssue:($authIssue|tonumber),externalApiKeyRequired:false,unauthenticatedIngressAllowed:false,corePolicyApprovalAuthorityPreserved:true}' \
+            > ag01-binding-evidence/run-metadata.json
+
+      - name: Upload immutable evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-vertex-permanent-binding-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-binding-evidence
+          if-no-files-found: error
+          retention-days: 90
