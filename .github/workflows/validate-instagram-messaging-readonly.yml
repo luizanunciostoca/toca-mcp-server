@@ -1,0 +1,33 @@
+name: Validate Instagram Messaging Read-Only
+
+on:
+  push:
+    branches:
+      - feat/instagram-messaging-readonly-20260828
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Formatting
+        run: pnpm exec prettier --check src/providers/meta/meta-api-client.ts src/providers/instagram/instagram-messaging-read-provider.ts src/registry.ts src/mcp/runtime-capability-resolver.ts src/server.ts test/instagram-messaging-read-provider.test.ts
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Messaging tests
+        run: pnpm vitest run test/instagram-messaging-read-provider.test.ts test/instagram-engagement-provider.test.ts
+      - name: Build
+        run: pnpm build
