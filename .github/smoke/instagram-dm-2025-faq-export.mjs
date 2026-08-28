@@ -51,7 +51,9 @@ async function graphGet(path, token, query = {}) {
   if (!response.ok) {
     const error = asObject(asObject(body).error);
     const code = typeof error.code === 'number' ? error.code : response.status;
-    throw new Error(`META_GRAPH_READ_FAILED:${code}`);
+    const subcode = typeof error.error_subcode === 'number' ? error.error_subcode : 0;
+    const type = asString(error.type)?.replace(/[^A-Za-z0-9_-]/g, '') ?? 'UNKNOWN';
+    throw new Error(`META_GRAPH_READ_FAILED:${code}:${subcode}:${type}`);
   }
   return body;
 }
@@ -87,7 +89,6 @@ async function listAllConversations(pageId, pageToken) {
     if (pages > MAX_CONVERSATION_PAGES) throw new Error('INSTAGRAM_CONVERSATION_PAGE_GUARD_EXCEEDED');
     const body = asObject(
       await graphGet(`${pageId}/conversations`, pageToken, {
-        platform: 'instagram',
         fields: 'id,updated_time',
         limit: CONVERSATION_PAGE_LIMIT,
         ...(after ? { after } : {}),
@@ -109,6 +110,14 @@ async function readConversation(conversationId, pageToken) {
   };
 }
 
+function touchesInstagramAccount(message) {
+  const fromId = asString(asObject(message.from).id);
+  const toIds = asArray(asObject(message.to).data)
+    .map((recipient) => asString(asObject(recipient).id))
+    .filter(Boolean);
+  return fromId === accountId || toIds.includes(accountId);
+}
+
 function directionFor(message, pageId) {
   const fromId = asString(asObject(message.from).id);
   if (!fromId) return 'UNKNOWN';
@@ -126,6 +135,7 @@ const { conversations, pages: conversationPages } = await listAllConversations(p
 const exportedMessages = [];
 let conversationsSkippedBefore2025 = 0;
 let conversationsInspected = 0;
+let conversationsRejectedAsNonInstagram = 0;
 let conversationsWithMoreThan20Messages = 0;
 let conversationsPotentiallyMissing2025DueMetaLimit = 0;
 let conversationReadErrors = 0;
@@ -156,8 +166,14 @@ for (const candidate of conversations) {
     continue;
   }
 
+  const instagramMessages = read.data.filter((message) => touchesInstagramAccount(asObject(message)));
+  if (read.data.length > 0 && instagramMessages.length === 0) {
+    conversationsRejectedAsNonInstagram += 1;
+    continue;
+  }
+
   const inspectedTimes = [];
-  for (const candidateMessage of read.data) {
+  for (const candidateMessage of instagramMessages) {
     const message = asObject(candidateMessage);
     inspectedMessageRecords += 1;
     const createdMs = timestamp(message.created_time);
@@ -190,7 +206,7 @@ for (const candidate of conversations) {
     });
   }
 
-  if (read.hasMore) {
+  if (read.hasMore && instagramMessages.length > 0) {
     conversationsWithMoreThan20Messages += 1;
     const earliestConversationInspected = inspectedTimes.length > 0 ? Math.min(...inspectedTimes) : null;
     if (
@@ -208,6 +224,7 @@ const coverage = {
   conversationsReturned: conversations.length,
   conversationsSkippedBefore2025,
   conversationsInspected,
+  conversationsRejectedAsNonInstagram,
   conversationsWithMoreThan20Messages,
   conversationsPotentiallyMissing2025DueMetaLimit,
   conversationReadErrors,
