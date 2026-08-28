@@ -36,8 +36,7 @@ const timestamp = typeof clearedAt === 'string' && Date.parse(clearedAt);
 fail(Number.isFinite(timestamp), BAD_TIMESTAMP);
 
 const assetSha = clearance.assetSha256;
-const assetOk =
-  typeof assetSha === 'string' && assetSha === command.expectedAssetSha256;
+const assetOk = typeof assetSha === 'string' && assetSha === command.expectedAssetSha256;
 fail(assetOk, BAD_ASSET);
 
 if (clearance.expiresAt !== undefined) {
