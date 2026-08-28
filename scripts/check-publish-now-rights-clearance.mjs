@@ -16,7 +16,8 @@ failUnless(
   'RIGHTS_CLEARANCE_SCOPE_INVALID',
 );
 failUnless(
-  typeof clearance.evidenceRef === 'string' && clearance.evidenceRef.trim().length > 0,
+  typeof clearance.evidenceRef === 'string' &&
+    clearance.evidenceRef.trim().length > 0,
   'RIGHTS_CLEARANCE_EVIDENCE_REQUIRED',
 );
 failUnless(
@@ -24,7 +25,8 @@ failUnless(
   'RIGHTS_CLEARANCE_AUTHORITY_REQUIRED',
 );
 failUnless(
-  typeof clearance.clearedAt === 'string' && Number.isFinite(Date.parse(clearance.clearedAt)),
+  typeof clearance.clearedAt === 'string' &&
+    Number.isFinite(Date.parse(clearance.clearedAt)),
   'RIGHTS_CLEARANCE_TIMESTAMP_INVALID',
 );
 failUnless(
@@ -35,10 +37,14 @@ failUnless(
 
 if (clearance.expiresAt !== undefined) {
   failUnless(
-    typeof clearance.expiresAt === 'string' && Number.isFinite(Date.parse(clearance.expiresAt)),
+    typeof clearance.expiresAt === 'string' &&
+      Number.isFinite(Date.parse(clearance.expiresAt)),
     'RIGHTS_CLEARANCE_EXPIRY_INVALID',
   );
-  failUnless(Date.parse(clearance.expiresAt) > Date.now(), 'RIGHTS_CLEARANCE_EXPIRED');
+  failUnless(
+    Date.parse(clearance.expiresAt) > Date.now(),
+    'RIGHTS_CLEARANCE_EXPIRED',
+  );
 }
 
 console.log(
