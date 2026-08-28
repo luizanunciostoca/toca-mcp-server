@@ -179,6 +179,7 @@ jobs:
         run: |
           set -euo pipefail
           URL="$CANDIDATE_URL"
+          # Tagged Cloud Run routes may need a short bounded propagation window after deploy.
           probe_get() {
             local path="$1" out="$2"
             for attempt in $(seq 1 12); do
