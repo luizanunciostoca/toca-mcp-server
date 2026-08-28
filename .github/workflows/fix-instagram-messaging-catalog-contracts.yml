@@ -1,0 +1,64 @@
+name: Fix Instagram Messaging Catalog Contracts
+
+on:
+  push:
+    branches:
+      - feat/instagram-messaging-readonly-20260828
+    paths:
+      - '.github/workflows/fix-instagram-messaging-catalog-contracts.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/instagram-messaging-readonly-20260828
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Align canonical R09 and runtime test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          ids = Path('src/governance/capability-ids.ts')
+          text = ids.read_text()
+          old = "  R08: ['meta_ads.accounts.list', 'meta_ads.campaign.prepare_paused'],\n  R17: ['system.capabilities', 'system.health'],"
+          new = "  R08: ['meta_ads.accounts.list', 'meta_ads.campaign.prepare_paused'],\n  R09: [\n    'instagram.messaging.conversations.read',\n    'instagram.messaging.messages.read',\n  ],\n  R17: ['system.capabilities', 'system.health'],"
+          if old not in text:
+              raise SystemExit('R09_CATALOG_PATCH_TARGET_NOT_FOUND')
+          ids.write_text(text.replace(old, new, 1))
+
+          test = Path('test/media-ranking-runtime.test.ts')
+          text = test.read_text()
+          old = "      'instagram.media.list',\n      'system.capabilities',"
+          new = "      'instagram.media.list',\n      'instagram.messaging.conversations.read',\n      'instagram.messaging.messages.read',\n      'system.capabilities',"
+          if old not in text:
+              raise SystemExit('RUNTIME_EXPECTATION_PATCH_TARGET_NOT_FOUND')
+          test.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write src/governance/capability-ids.ts test/media-ranking-runtime.test.ts
+          pnpm exec vitest run test/governance-catalog.test.ts test/media-ranking-runtime.test.ts test/instagram-messaging-read-provider.test.ts
+          pnpm architecture:check
+          git diff --check
+      - name: Commit contract alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/governance/capability-ids.ts test/media-ranking-runtime.test.ts
+          git commit -m 'fix(instagram): align messaging reads with canonical R09 catalog'
+          git push origin HEAD:feat/instagram-messaging-readonly-20260828
