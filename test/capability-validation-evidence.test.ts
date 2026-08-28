@@ -27,13 +27,19 @@ const valid = () => ({
 });
 
 describe('provider capability validation evidence', () => {
-  it('loads the canonical manifest without inventing provider validations', () => {
+  it('loads the canonical provider-backed validation without inflating other capabilities', () => {
     const manifest = loadCapabilityValidationEvidenceManifest({
-      exactHeadSha: 'b'.repeat(40),
-      now: '2026-08-26T22:00:00Z',
+      exactHeadSha: 'b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a',
+      now: '2026-08-28T04:00:00Z',
     });
     expect(manifest.manifestId).toBe('TOCA_CAPABILITY_VALIDATION_EVIDENCE_V1');
-    expect(manifest.validations).toEqual([]);
+    expect(manifest.validations).toHaveLength(1);
+    expect(manifest.validations[0]).toMatchObject({
+      capabilityId: 'instagram.publish.image',
+      provider: 'Meta/Instagram',
+      status: 'PRODUCTION_VALIDATED',
+      externalResourceId: '18620842246053649',
+    });
   });
 
   it('accepts an exact-head production package with write, readback, idempotency and reconciliation proof', () => {
