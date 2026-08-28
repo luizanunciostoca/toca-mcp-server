@@ -58,6 +58,14 @@ async function graphGet(path, token, query = {}) {
   return body;
 }
 
+async function resolveInstagramProfile() {
+  const body = asObject(await graphGet(accountId, userToken, { fields: 'id,username' }));
+  const id = asString(body.id);
+  const username = asString(body.username);
+  if (id !== accountId || !username) throw new Error('INSTAGRAM_PROFILE_ROUTE_INCOMPLETE');
+  return { id, username };
+}
+
 async function resolvePage() {
   const body = asObject(
     await graphGet('me/accounts', userToken, {
@@ -110,32 +118,45 @@ async function readConversation(conversationId, pageToken) {
   };
 }
 
-function touchesInstagramAccount(message) {
-  const fromId = asString(asObject(message.from).id);
-  const toIds = asArray(asObject(message.to).data)
-    .map((recipient) => asString(asObject(recipient).id))
+function participantUsernames(message) {
+  const from = asObject(message.from);
+  const fromUsername = asString(from.username);
+  const toUsernames = asArray(asObject(message.to).data)
+    .map((recipient) => asString(asObject(recipient).username))
     .filter(Boolean);
-  return fromId === accountId || toIds.includes(accountId);
+  return { fromUsername, toUsernames };
 }
 
-function directionFor(message, pageId) {
-  const fromId = asString(asObject(message.from).id);
-  if (!fromId) return 'UNKNOWN';
-  if (fromId === accountId || fromId === pageId) return 'OUTBOUND';
-  return 'INBOUND';
+function isInstagramMessage(message) {
+  const { fromUsername, toUsernames } = participantUsernames(message);
+  return Boolean(fromUsername || toUsernames.length > 0);
+}
+
+function directionFor(message, pageId, accountUsername) {
+  const from = asObject(message.from);
+  const fromId = asString(from.id);
+  const { fromUsername, toUsernames } = participantUsernames(message);
+  if (fromUsername === accountUsername || fromId === accountId || fromId === pageId) return 'OUTBOUND';
+  if (toUsernames.includes(accountUsername)) return 'INBOUND';
+  if (fromUsername && fromUsername !== accountUsername) return 'INBOUND';
+  return 'UNKNOWN';
 }
 
 function inPeriod(timeMs) {
   return timeMs !== null && timeMs >= PERIOD_START && timeMs < PERIOD_END;
 }
 
+const instagramProfile = await resolveInstagramProfile();
 const { pageId, pageToken } = await resolvePage();
 const { conversations, pages: conversationPages } = await listAllConversations(pageId, pageToken);
 
 const exportedMessages = [];
 let conversationsSkippedBefore2025 = 0;
 let conversationsInspected = 0;
+let conversationsWithNoReadableMessages = 0;
 let conversationsRejectedAsNonInstagram = 0;
+let instagramConversationsObserved = 0;
+let instagramMessagesObserved = 0;
 let conversationsWithMoreThan20Messages = 0;
 let conversationsPotentiallyMissing2025DueMetaLimit = 0;
 let conversationReadErrors = 0;
@@ -166,13 +187,21 @@ for (const candidate of conversations) {
     continue;
   }
 
-  const instagramMessages = read.data.filter((message) => touchesInstagramAccount(asObject(message)));
-  if (read.data.length > 0 && instagramMessages.length === 0) {
+  if (read.data.length === 0) {
+    conversationsWithNoReadableMessages += 1;
+    continue;
+  }
+
+  const instagramMessages = read.data.filter((message) => isInstagramMessage(asObject(message)));
+  if (instagramMessages.length === 0) {
     conversationsRejectedAsNonInstagram += 1;
     continue;
   }
 
+  instagramConversationsObserved += 1;
+  instagramMessagesObserved += instagramMessages.length;
   const inspectedTimes = [];
+
   for (const candidateMessage of instagramMessages) {
     const message = asObject(candidateMessage);
     inspectedMessageRecords += 1;
@@ -184,7 +213,7 @@ for (const candidate of conversations) {
     }
     if (!inPeriod(createdMs)) continue;
 
-    const direction = directionFor(message, pageId);
+    const direction = directionFor(message, pageId, instagramProfile.username);
     if (direction === 'OUTBOUND') {
       outbound2025Messages += 1;
       continue;
@@ -206,7 +235,7 @@ for (const candidate of conversations) {
     });
   }
 
-  if (read.hasMore && instagramMessages.length > 0) {
+  if (read.hasMore) {
     conversationsWithMoreThan20Messages += 1;
     const earliestConversationInspected = inspectedTimes.length > 0 ? Math.min(...inspectedTimes) : null;
     if (
@@ -218,13 +247,18 @@ for (const candidate of conversations) {
   }
 }
 
+const sourcePlatformValidated = instagramConversationsObserved > 0 || instagramMessagesObserved > 0;
 const coverage = {
   period: { start: '2025-01-01T00:00:00.000Z', endExclusive: '2026-01-01T00:00:00.000Z' },
   conversationPages,
   conversationsReturned: conversations.length,
   conversationsSkippedBefore2025,
   conversationsInspected,
+  conversationsWithNoReadableMessages,
   conversationsRejectedAsNonInstagram,
+  instagramConversationsObserved,
+  instagramMessagesObserved,
+  sourcePlatformValidated,
   conversationsWithMoreThan20Messages,
   conversationsPotentiallyMissing2025DueMetaLimit,
   conversationReadErrors,
@@ -238,11 +272,11 @@ const coverage = {
   latestInspectedMessageTime: latestInspected === null ? null : new Date(latestInspected).toISOString(),
   metaMessageDetailLimitPerConversation: MESSAGE_DETAIL_LIMIT,
   completeHistoricalCoverageClaimAllowed:
-    conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
+    sourcePlatformValidated && conversationReadErrors === 0 && conversationsPotentiallyMissing2025DueMetaLimit === 0,
 };
 
 const payload = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   source: 'instagram-direct-meta-conversations-api',
   generatedAt: new Date().toISOString(),
   coverage,
