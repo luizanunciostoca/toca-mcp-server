@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { MetaApiError } from '../meta/meta-api-client.js';
 
 export interface InstagramMessagingMetaClient {
   get(path: string, query?: Readonly<Record<string, string>>): Promise<unknown>;
@@ -117,8 +118,8 @@ export class InstagramMessagingReadProvider {
     input: InstagramConversationListInput,
   ): Promise<InstagramConversationListResult> {
     const binding = await this.pageBinding();
-    const parsed = conversationsResponseSchema.safeParse(
-      await this.client.getWithAccessToken(
+    const response = await observedMetaRead('conversations.list', () =>
+      this.client.getWithAccessToken(
         `${binding.pageId}/conversations`,
         {
           platform: 'instagram',
@@ -129,6 +130,7 @@ export class InstagramMessagingReadProvider {
         binding.pageAccessToken,
       ),
     );
+    const parsed = conversationsResponseSchema.safeParse(response);
     if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_CONVERSATIONS_RESPONSE_INVALID');
 
     return {
@@ -146,13 +148,14 @@ export class InstagramMessagingReadProvider {
     const binding = await this.pageBinding();
     const boundedLimit = Math.min(input.limit, 20);
     const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;
-    const parsed = messagesResponseSchema.safeParse(
-      await this.client.getWithAccessToken(
+    const response = await observedMetaRead('messages.list', () =>
+      this.client.getWithAccessToken(
         input.conversationId,
         { fields },
         binding.pageAccessToken,
       ),
     );
+    const parsed = messagesResponseSchema.safeParse(response);
     if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGES_RESPONSE_INVALID');
 
     const providerHasMore = Boolean(
@@ -177,19 +180,21 @@ export class InstagramMessagingReadProvider {
   }
 
   private async resolvePageBinding(): Promise<PageBinding> {
-    const profile = profileSchema.safeParse(
-      await this.client.get(this.instagramBusinessAccountId, { fields: 'id,username' }),
+    const profileResponse = await observedMetaRead('profile.read', () =>
+      this.client.get(this.instagramBusinessAccountId, { fields: 'id,username' }),
     );
+    const profile = profileSchema.safeParse(profileResponse);
     if (!profile.success || profile.data.id !== this.instagramBusinessAccountId) {
       throw new Error('INSTAGRAM_MESSAGING_PROFILE_RESPONSE_INVALID');
     }
 
-    const pages = pagesResponseSchema.safeParse(
-      await this.client.get('me/accounts', {
+    const pagesResponse = await observedMetaRead('pages.read', () =>
+      this.client.get('me/accounts', {
         fields: 'id,access_token,tasks,instagram_business_account',
         limit: '100',
       }),
     );
+    const pages = pagesResponseSchema.safeParse(pagesResponse);
     if (!pages.success) throw new Error('INSTAGRAM_MESSAGING_PAGES_RESPONSE_INVALID');
 
     const matches = pages.data.data.filter(
@@ -206,6 +211,27 @@ export class InstagramMessagingReadProvider {
       pageAccessToken: page.access_token,
       instagramUsername: profile.data.username,
     };
+  }
+}
+
+async function observedMetaRead<T>(operation: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof MetaApiError) {
+      console.error(
+        JSON.stringify({
+          severity: 'WARNING',
+          event: 'instagram.messaging.read.provider_error',
+          operation,
+          httpStatus: error.status,
+          providerCode: error.providerCode ?? null,
+          providerSubcode: error.providerSubcode ?? null,
+          providerType: error.type ?? null,
+        }),
+      );
+    }
+    throw error;
   }
 }
 
