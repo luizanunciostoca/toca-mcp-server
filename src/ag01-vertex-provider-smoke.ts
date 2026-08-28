@@ -113,4 +113,4 @@ const evidence = {
   verifiedAt: new Date().toISOString(),
 };
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
-console.log(JSON.stringify(evidence));
+console.log(`P2_2_PROVIDER_READBACK ${JSON.stringify(evidence)}`);
