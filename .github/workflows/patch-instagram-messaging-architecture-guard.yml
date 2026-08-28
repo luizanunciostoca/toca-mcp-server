@@ -18,26 +18,76 @@ jobs:
         with:
           ref: feat/instagram-messaging-readonly-20260828
           fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Patch architecture guard for governed read-only messaging
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = 'scripts/architecture-check.mjs';
-          let source = fs.readFileSync(path, 'utf8');
-          const oldGuard = `const registry = readFileSync('src/registry.ts', 'utf8');\nif (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {\n  console.error('Unpromoted external write capabilities must not be advertised');\n  process.exit(1);\n}\n`;
-          const newGuard = `const registry = readFileSync('src/registry.ts', 'utf8');\nif (registry.includes('instagram.comments.reply')) {\n  console.error('Unpromoted external write capabilities must not be advertised');\n  process.exit(1);\n}\nconst allowedInstagramMessagingReadNames = new Set([\n  'instagram.messaging.conversations.read',\n  'instagram.messaging.messages.read',\n]);\nconst advertisedInstagramMessagingNames = [\n  ...registry.matchAll(/name: '(instagram\\.messaging\\.[^']+)'/g),\n].map((match) => match[1]);\nfor (const name of advertisedInstagramMessagingNames) {\n  if (!allowedInstagramMessagingReadNames.has(name)) {\n    console.error(\\`Unpromoted Instagram messaging capability must not be advertised: \\${name}\\`);\n    process.exit(1);\n  }\n  const marker = \\`name: '\\${name}'\\`;\n  const start = registry.indexOf(marker);\n  const end = registry.indexOf('\\n  },', start);\n  const definition = registry.slice(start, end === -1 ? registry.length : end);\n  if (\n    !definition.includes(\"riskClass: 'READ'\") ||\n    !definition.includes(\"capabilityStatus: 'IMPLEMENTED'\") ||\n    !definition.includes('sideEffects: false') ||\n    !definition.includes('idempotent: true') ||\n    !definition.includes(\n      \"requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata']\",\n    )\n  ) {\n    console.error(\\`Instagram messaging read capability violates the read-only boundary: \\${name}\\`);\n    process.exit(1);\n  }\n}\n`;
-          if (!source.includes(oldGuard)) throw new Error('ARCHITECTURE_INSTAGRAM_MESSAGING_GUARD_NOT_FOUND');
-          source = source.replace(oldGuard, newGuard);
-          const requiredNeedle = "  'src/providers/instagram/instagram-engagement-provider.ts',\n";
-          const requiredAddition = "  'src/providers/instagram/instagram-engagement-provider.ts',\n  'src/providers/instagram/instagram-messaging-read-provider.ts',\n";
-          if (!source.includes("'src/providers/instagram/instagram-messaging-read-provider.ts'")) {
-            if (!source.includes(requiredNeedle)) throw new Error('ARCHITECTURE_REQUIRED_LIST_ANCHOR_NOT_FOUND');
-            source = source.replace(requiredNeedle, requiredAddition);
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/architecture-check.mjs')
+          source = path.read_text()
+          old_guard = """const registry = readFileSync('src/registry.ts', 'utf8');
+          if (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {
+            console.error('Unpromoted external write capabilities must not be advertised');
+            process.exit(1);
           }
-          fs.writeFileSync(path, source);
-          NODE
+          """
+          new_guard = """const registry = readFileSync('src/registry.ts', 'utf8');
+          if (registry.includes('instagram.comments.reply')) {
+            console.error('Unpromoted external write capabilities must not be advertised');
+            process.exit(1);
+          }
+          const allowedInstagramMessagingReadNames = new Set([
+            'instagram.messaging.conversations.read',
+            'instagram.messaging.messages.read',
+          ]);
+          const advertisedInstagramMessagingNames = [
+            ...registry.matchAll(/name: '(instagram\\.messaging\\.[^']+)'/g),
+          ].map((match) => match[1]);
+          for (const name of advertisedInstagramMessagingNames) {
+            if (!allowedInstagramMessagingReadNames.has(name)) {
+              console.error('Unpromoted Instagram messaging capability must not be advertised: ' + name);
+              process.exit(1);
+            }
+            const marker = "name: '" + name + "'";
+            const start = registry.indexOf(marker);
+            const end = registry.indexOf('\n  },', start);
+            const definition = registry.slice(start, end === -1 ? registry.length : end);
+            if (
+              !definition.includes("riskClass: 'READ'") ||
+              !definition.includes("capabilityStatus: 'IMPLEMENTED'") ||
+              !definition.includes('sideEffects: false') ||
+              !definition.includes('idempotent: true') ||
+              !definition.includes(
+                "requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata']",
+              )
+            ) {
+              console.error('Instagram messaging read capability violates the read-only boundary: ' + name);
+              process.exit(1);
+            }
+          }
+          """
+          if old_guard not in source:
+              raise SystemExit('ARCHITECTURE_INSTAGRAM_MESSAGING_GUARD_NOT_FOUND')
+          source = source.replace(old_guard, new_guard)
+          required_needle = "  'src/providers/instagram/instagram-engagement-provider.ts',\n"
+          required_addition = required_needle + "  'src/providers/instagram/instagram-messaging-read-provider.ts',\n"
+          if "'src/providers/instagram/instagram-messaging-read-provider.ts'" not in source:
+              if required_needle not in source:
+                  raise SystemExit('ARCHITECTURE_REQUIRED_LIST_ANCHOR_NOT_FOUND')
+              source = source.replace(required_needle, required_addition, 1)
+          path.write_text(source)
+          PY
           pnpm exec prettier --write scripts/architecture-check.mjs
           git diff --check
       - name: Verify architecture gate locally
