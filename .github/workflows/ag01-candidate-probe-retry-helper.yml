@@ -1,0 +1,39 @@
+name: AG-01 Candidate Probe Retry Helper
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-candidate-probe-retry-helper.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: true
+      - name: Add bounded propagation retries to tagged candidate probe
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/ag01-vertex-permanent-binding-v2.yml')
+          s = p.read_text()
+          old = '''          URL="$CANDIDATE_URL"\n          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$URL/healthz" > ag01-binding-evidence/healthz.json\n          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$URL/readyz" > ag01-binding-evidence/readyz.json\n'''
+          new = '''          URL="$CANDIDATE_URL"\n          probe_get() {\n            local path="$1" out="$2"\n            for attempt in $(seq 1 12); do\n              code="$(curl --silent --show-error -o "$out" -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL$path" || true)"\n              if [[ "$code" == "200" ]]; then return 0; fi\n              echo "candidate probe $path attempt=$attempt status=$code" >&2\n              sleep 5\n            done\n            echo "candidate probe $path did not become ready" >&2\n            cat "$out" >&2 || true\n            return 1\n          }\n          probe_get /healthz ag01-binding-evidence/healthz.json\n          probe_get /readyz ag01-binding-evidence/readyz.json\n'''
+          if old not in s:
+            raise SystemExit('target probe block not found')
+          p.write_text(s.replace(old, new))
+          PY
+      - name: Commit retry remediation
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/ag01-vertex-permanent-binding-v2.yml
+          git commit -m 'fix(ag01): tolerate tagged route propagation before probe'
+          git push origin HEAD:ops/ag01-vertex-permanent-binding-20260828
