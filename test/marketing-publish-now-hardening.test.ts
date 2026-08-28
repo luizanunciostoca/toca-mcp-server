@@ -38,7 +38,9 @@ describe('Marketing Publish Now hardening contract', () => {
 
   it('uses the runtime audited SHA without overriding the GitHub runner SHA', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"');
-    expect(workflow).toContain('GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh');
+    expect(workflow).toContain(
+      'GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh',
+    );
     expect(workflow).not.toContain('GITHUB_SHA: ${{ env.AUDITED_CODE_SHA }}');
   });
 
