@@ -1,0 +1,53 @@
+name: Patch Instagram Messaging Architecture Guard
+
+on:
+  push:
+    branches:
+      - feat/instagram-messaging-readonly-20260828
+    paths:
+      - '.github/workflows/patch-instagram-messaging-architecture-guard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/instagram-messaging-readonly-20260828
+          fetch-depth: 0
+      - name: Patch architecture guard for governed read-only messaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'scripts/architecture-check.mjs';
+          let source = fs.readFileSync(path, 'utf8');
+          const oldGuard = `const registry = readFileSync('src/registry.ts', 'utf8');\nif (registry.includes('instagram.comments.reply') || registry.includes('instagram.messaging.')) {\n  console.error('Unpromoted external write capabilities must not be advertised');\n  process.exit(1);\n}\n`;
+          const newGuard = `const registry = readFileSync('src/registry.ts', 'utf8');\nif (registry.includes('instagram.comments.reply')) {\n  console.error('Unpromoted external write capabilities must not be advertised');\n  process.exit(1);\n}\nconst allowedInstagramMessagingReadNames = new Set([\n  'instagram.messaging.conversations.read',\n  'instagram.messaging.messages.read',\n]);\nconst advertisedInstagramMessagingNames = [\n  ...registry.matchAll(/name: '(instagram\\.messaging\\.[^']+)'/g),\n].map((match) => match[1]);\nfor (const name of advertisedInstagramMessagingNames) {\n  if (!allowedInstagramMessagingReadNames.has(name)) {\n    console.error(\\`Unpromoted Instagram messaging capability must not be advertised: \\${name}\\`);\n    process.exit(1);\n  }\n  const marker = \\`name: '\\${name}'\\`;\n  const start = registry.indexOf(marker);\n  const end = registry.indexOf('\\n  },', start);\n  const definition = registry.slice(start, end === -1 ? registry.length : end);\n  if (\n    !definition.includes(\"riskClass: 'READ'\") ||\n    !definition.includes(\"capabilityStatus: 'IMPLEMENTED'\") ||\n    !definition.includes('sideEffects: false') ||\n    !definition.includes('idempotent: true') ||\n    !definition.includes(\n      \"requiredScopes: ['instagram_basic', 'instagram_manage_messages', 'pages_manage_metadata']\",\n    )\n  ) {\n    console.error(\\`Instagram messaging read capability violates the read-only boundary: \\${name}\\`);\n    process.exit(1);\n  }\n}\n`;
+          if (!source.includes(oldGuard)) throw new Error('ARCHITECTURE_INSTAGRAM_MESSAGING_GUARD_NOT_FOUND');
+          source = source.replace(oldGuard, newGuard);
+          const requiredNeedle = "  'src/providers/instagram/instagram-engagement-provider.ts',\n";
+          const requiredAddition = "  'src/providers/instagram/instagram-engagement-provider.ts',\n  'src/providers/instagram/instagram-messaging-read-provider.ts',\n";
+          if (!source.includes("'src/providers/instagram/instagram-messaging-read-provider.ts'")) {
+            if (!source.includes(requiredNeedle)) throw new Error('ARCHITECTURE_REQUIRED_LIST_ANCHOR_NOT_FOUND');
+            source = source.replace(requiredNeedle, requiredAddition);
+          }
+          fs.writeFileSync(path, source);
+          NODE
+          pnpm exec prettier --write scripts/architecture-check.mjs
+          git diff --check
+      - name: Verify architecture gate locally
+        run: pnpm architecture:check
+      - name: Commit architecture contract update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/architecture-check.mjs
+          git commit -m 'fix(architecture): allow governed Instagram messaging reads'
+          git push origin HEAD:feat/instagram-messaging-readonly-20260828
