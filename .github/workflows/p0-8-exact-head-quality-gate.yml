@@ -1,0 +1,67 @@
+name: P0.8 Exact-Head Quality Gate
+
+on:
+  push:
+    branches:
+      - ops/p0-8-exact-head-quality-gate-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout canonical snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a
+          persist-credentials: false
+
+      - name: Verify exact canonical SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          EXPECTED="b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a"
+          echo "expected=$EXPECTED"
+          echo "actual=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Architecture and governance checks
+        run: pnpm architecture:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level=high
