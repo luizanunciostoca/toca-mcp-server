@@ -9,9 +9,13 @@ const schema = z.object({
   DATABASE_URL: z.string().trim().min(1),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   AG01_HOST: z.string().trim().min(1).optional(),
+  AG01_MODEL_PROVIDER: z.enum(['openai', 'vertex']).default('openai'),
   AG01_OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  AG01_OPENAI_API_KEY_ENV_KEY: z.string().trim().min(1),
-  AG01_OPENAI_MODEL: z.string().trim().min(1),
+  AG01_OPENAI_API_KEY_ENV_KEY: z.string().trim().min(1).optional(),
+  AG01_OPENAI_MODEL: z.string().trim().min(1).optional(),
+  AG01_VERTEX_PROJECT_ID: z.string().trim().min(1).optional(),
+  AG01_VERTEX_LOCATION: z.string().trim().min(1).default('global'),
+  AG01_VERTEX_MODEL: z.string().trim().min(1).default('gemini-2.5-flash'),
   AG01_OPENAI_TIMEOUT_MS: positiveInteger(20_000),
   AG01_OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   AG01_OPENAI_MAX_OUTPUT_TOKENS: positiveInteger(4096),
@@ -38,9 +42,13 @@ export interface Ag01ProductionConfig {
   readonly databaseUrl: string;
   readonly host: string;
   readonly port: number;
+  readonly modelProvider: 'openai' | 'vertex';
   readonly openAiBaseUrl: string;
   readonly openAiApiKeyEnvKey: string;
   readonly openAiModel: string;
+  readonly vertexProjectId: string;
+  readonly vertexLocation: string;
+  readonly vertexModel: string;
   readonly openAiTimeoutMs: number;
   readonly openAiMaxRetries: number;
   readonly openAiMaxOutputTokens: number;
@@ -66,7 +74,16 @@ export function loadAg01ProductionConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Ag01ProductionConfig {
   const value = schema.parse(env);
-  requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
+  if (value.AG01_MODEL_PROVIDER === 'openai') {
+    if (!value.AG01_OPENAI_API_KEY_ENV_KEY) throw new Error('AG01_OPENAI_API_KEY_ENV_KEY_REQUIRED');
+    if (!value.AG01_OPENAI_MODEL) throw new Error('AG01_OPENAI_MODEL_REQUIRED');
+    requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
+  }
+  const vertexProjectId =
+    value.AG01_VERTEX_PROJECT_ID ?? env.GOOGLE_CLOUD_PROJECT?.trim() ?? env.GCP_PROJECT_ID?.trim() ?? '';
+  if (value.AG01_MODEL_PROVIDER === 'vertex' && !vertexProjectId) {
+    throw new Error('AG01_VERTEX_PROJECT_ID_REQUIRED');
+  }
   requireReferencedSecret(
     env,
     value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
@@ -94,9 +111,13 @@ export function loadAg01ProductionConfig(
     databaseUrl: value.DATABASE_URL,
     host: value.AG01_HOST ?? (value.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'),
     port: value.PORT,
+    modelProvider: value.AG01_MODEL_PROVIDER,
     openAiBaseUrl: value.AG01_OPENAI_BASE_URL.replace(/\/$/, ''),
-    openAiApiKeyEnvKey: value.AG01_OPENAI_API_KEY_ENV_KEY,
-    openAiModel: value.AG01_OPENAI_MODEL,
+    openAiApiKeyEnvKey: value.AG01_OPENAI_API_KEY_ENV_KEY ?? '',
+    openAiModel: value.AG01_OPENAI_MODEL ?? '',
+    vertexProjectId,
+    vertexLocation: value.AG01_VERTEX_LOCATION,
+    vertexModel: value.AG01_VERTEX_MODEL,
     openAiTimeoutMs: value.AG01_OPENAI_TIMEOUT_MS,
     openAiMaxRetries: value.AG01_OPENAI_MAX_RETRIES,
     openAiMaxOutputTokens: value.AG01_OPENAI_MAX_OUTPUT_TOKENS,
