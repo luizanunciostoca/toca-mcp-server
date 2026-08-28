@@ -1,0 +1,55 @@
+name: P2.1 Google Ads Binding Probe
+
+on:
+  push:
+    branches:
+      - ops/p2-1-google-ads-provider-20260828
+    paths:
+      - '.github/workflows/p2-1-google-ads-binding-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_ID: toca-mcp-production
+      REGION: southamerica-east1
+      SERVICE: toca-mcp-production
+      WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      DEPLOY_SA: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      RUNTIME_SA: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Probe known surfaces
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
+          jq '{service:.metadata.name,serviceAccount:(.spec.template.spec.serviceAccountName//null),googleAdsEnv:[.spec.template.spec.containers[0].env[]? | select(.name|contains("GOOGLE_ADS")) | {name:.name,value:(.value//null),secret:(.valueFrom.secretKeyRef.secret//null)}]}' /tmp/service.json > evidence/service.json
+          : > evidence/candidates.ndjson
+          for sid in toca-google-ads-developer-token toca-google-ads-client-id toca-google-ads-client-secret toca-google-ads-refresh-token google-ads-developer-token google-ads-client-id google-ads-client-secret google-ads-refresh-token; do
+            if out="$(gcloud secrets describe "$sid" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
+              printf '%s' "$out" | jq --arg sid "$sid" '{secretId:$sid,exists:true,name:.name,labels:(.labels//{})}' >> evidence/candidates.ndjson
+            else
+              jq -n --arg sid "$sid" '{secretId:$sid,exists:false}' >> evidence/candidates.ndjson
+            fi
+          done
+          jq -s '.' evidence/candidates.ndjson > evidence/candidates.json
+          rm evidence/candidates.ndjson
+          jq -n --arg project "$PROJECT_ID" '{schemaVersion:"toca.p2.1.google-ads-binding-probe.v1",project:$project,secretValuesRead:false,providerMutationExecuted:false}' > evidence/manifest.json
+          cat evidence/service.json
+          cat evidence/candidates.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p2-1-google-ads-binding-probe-${{ github.run_id }}
+          path: evidence
+          retention-days: 90
