@@ -27,7 +27,7 @@ const pageSchema = z.object({
   id: z.string().min(1),
   access_token: z.string().min(1),
   tasks: z.array(z.string()).default([]),
-  instagram_business_account: linkedInstagramSchema,
+  instagram_business_account: linkedInstagramSchema.optional(),
 });
 const pagesResponseSchema = z.object({ data: z.array(pageSchema) });
 const profileSchema = z.object({
@@ -193,7 +193,7 @@ export class InstagramMessagingReadProvider {
     if (!pages.success) throw new Error('INSTAGRAM_MESSAGING_PAGES_RESPONSE_INVALID');
 
     const matches = pages.data.data.filter(
-      (page) => page.instagram_business_account.id === this.instagramBusinessAccountId,
+      (page) => page.instagram_business_account?.id === this.instagramBusinessAccountId,
     );
     if (matches.length !== 1) throw new Error(`INSTAGRAM_MESSAGING_PAGE_MATCH_COUNT:${matches.length}`);
 
