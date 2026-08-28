@@ -1,0 +1,62 @@
+name: AG-01 Production Binding Discovery
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-production-binding-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  MCP_SERVICE: toca-mcp-production
+  AG01_SERVICE: toca-ag01-orchestrator
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate read-only GCP boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Discover existing production secret references without reading payloads
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-discovery-evidence
+          gcloud run services describe "$MCP_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/mcp.json
+          jq '{schemaVersion:"toca.ag01.binding-discovery.v1",service:(.metadata.name // null),serviceAccount:(.spec.template.spec.serviceAccountName // .spec.template.spec.serviceAccount // null),secretRefs:[.spec.template.spec.containers[0].env[]? | select(.valueFrom.secretKeyRef != null) | {envName:.name,secretName:.valueFrom.secretKeyRef.name,version:(.valueFrom.secretKeyRef.key // null)}],plainEnvNames:[.spec.template.spec.containers[0].env[]? | select(.value != null) | .name]}' /tmp/mcp.json > ag01-discovery-evidence/mcp-runtime-bindings.json
+          if gcloud run services describe "$AG01_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/ag01.json 2>/dev/null; then
+            jq '{schemaVersion:"toca.ag01.existing-service.v1",exists:true,service:(.metadata.name // null),serviceAccount:(.spec.template.spec.serviceAccountName // .spec.template.spec.serviceAccount // null),secretRefs:[.spec.template.spec.containers[0].env[]? | select(.valueFrom.secretKeyRef != null) | {envName:.name,secretName:.valueFrom.secretKeyRef.name,version:(.valueFrom.secretKeyRef.key // null)}],plainEnvNames:[.spec.template.spec.containers[0].env[]? | select(.value != null) | .name]}' /tmp/ag01.json > ag01-discovery-evidence/ag01-existing-service.json
+          else
+            jq -n '{schemaVersion:"toca.ag01.existing-service.v1",exists:false}' > ag01-discovery-evidence/ag01-existing-service.json
+          fi
+          jq -n --arg sourceSha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" '{schemaVersion:"toca.ag01.binding-discovery-run.v1",sourceSha:$sourceSha,runId:$runId,providerMutationExecuted:false,secretPayloadRead:false}' > ag01-discovery-evidence/run-metadata.json
+
+      - name: Upload discovery evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-binding-discovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-discovery-evidence
+          if-no-files-found: error
+          retention-days: 30
