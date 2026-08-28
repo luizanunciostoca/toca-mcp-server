@@ -1,0 +1,59 @@
+name: AG-01 Existing Diagnostic Probe
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-existing-diagnostic-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  TAG_URL: https://diag-b6ec3906---toca-ag01-orchestrator-dtkgeas2ga-rj.a.run.app
+  AUDIENCE: https://toca-ag01-orchestrator-dtkgeas2ga-rj.a.run.app
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Mint private probe token
+        id: probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.AUDIENCE }}
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Probe existing zero-traffic revision
+        env:
+          ID_TOKEN: ${{ steps.probe_auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-existing-probe
+          code=$(curl --silent --show-error -o ag01-existing-probe/readyz.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$TAG_URL/readyz")
+          echo "$code" > ag01-existing-probe/readyz-status.txt
+          cat ag01-existing-probe/readyz.json
+          [[ "$code" == "200" ]]
+          jq -e '.status == "ready" and .runtimeCapabilityCount > 0' ag01-existing-probe/readyz.json >/dev/null
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ag01-existing-probe-${{ github.run_id }}
+          path: ag01-existing-probe
+          retention-days: 30
+          if-no-files-found: warn
