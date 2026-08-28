@@ -71,7 +71,11 @@ describe('InstagramMessagingReadProvider', () => {
         });
         return {
           data: [
-            { id: 'CONV_1', updated_time: '2025-05-01T12:00:00+0000', participants: 'SHOULD_NOT_LEAK' },
+            {
+              id: 'CONV_1',
+              updated_time: '2025-05-01T12:00:00+0000',
+              participants: 'SHOULD_NOT_LEAK',
+            },
           ],
           paging: { cursors: { after: 'CURSOR_2' } },
         };
@@ -80,13 +84,20 @@ describe('InstagramMessagingReadProvider', () => {
     });
     const provider = new InstagramMessagingReadProvider(client, 'IG_1');
 
-    await expect(provider.listConversations({ limit: 50, after: 'CURSOR_1' })).resolves.toEqual({
-      conversations: [{ conversationId: 'CONV_1', updatedTime: '2025-05-01T12:00:00+0000' }],
+    const result = await provider.listConversations({ limit: 50, after: 'CURSOR_1' });
+
+    expect(result).toEqual({
+      conversations: [
+        { conversationId: 'CONV_1', updatedTime: '2025-05-01T12:00:00+0000' },
+      ],
       nextAfter: 'CURSOR_2',
     });
-
-    expect(reads.map((read) => read.path)).toEqual(['IG_1', 'me/accounts', 'PAGE_1/conversations']);
-    expect(JSON.stringify(await provider.listConversations({ limit: 1 }))).not.toContain('SHOULD_NOT_LEAK');
+    expect(reads.map((read) => read.path)).toEqual([
+      'IG_1',
+      'me/accounts',
+      'PAGE_1/conversations',
+    ]);
+    expect(JSON.stringify(result)).not.toContain('SHOULD_NOT_LEAK');
   });
 
   it('bounds message detail to 20, classifies direction and strips participant identity', async () => {
@@ -112,7 +123,9 @@ describe('InstagramMessagingReadProvider', () => {
                 id: 'MID_OUT',
                 created_time: '2025-05-01T12:01:00+0000',
                 from: { id: 'IG_1', username: 'tocadomorcego' },
-                to: { data: [{ id: 'FOLLOWER_PRIVATE_ID', username: 'follower_private_username' }] },
+                to: {
+                  data: [{ id: 'FOLLOWER_PRIVATE_ID', username: 'follower_private_username' }],
+                },
                 message: 'Abrimos às 16:30.',
               },
             ],
