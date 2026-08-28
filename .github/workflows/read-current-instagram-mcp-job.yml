@@ -15,7 +15,7 @@ env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  SOURCE_JOB_NAME: toca-instagram-dm-mcp-long-33217993691-1
+  SOURCE_JOB_NAME: toca-instagram-dm-mcp-long-33218314043-1
 
 jobs:
   inspect:
@@ -48,30 +48,22 @@ jobs:
             jp=row.get('jsonPayload')
             if isinstance(jp,dict): texts.append(json.dumps(jp,separators=(',',':')))
             for text in texts:
-              if 'instagram.messaging.read.provider_error' in text:
-                def capture_string(field):
-                  match=re.search(r'["\\]'+re.escape(field)+r'["\\]\s*:\s*["\\]([^"\\]+)',text)
-                  return match.group(1) if match else None
-                def capture_int(field):
-                  match=re.search(r'["\\]'+re.escape(field)+r'["\\]\s*:\s*(null|-?\d+)',text)
-                  if not match or match.group(1)=='null': return None
-                  return int(match.group(1))
-                safe={
-                  'validation':'provider-telemetry',
-                  'event':'instagram.messaging.read.provider_error',
-                  'operation':capture_string('operation'),
-                  'httpStatus':capture_int('httpStatus'),
-                  'providerCode':capture_int('providerCode'),
-                  'providerSubcode':capture_int('providerSubcode'),
-                  'providerType':capture_string('providerType'),
-                }
-                print(json.dumps(safe,separators=(',',':')))
+              if '"validation":"provider-telemetry"' in text or 'instagram.messaging.read.provider_error' in text:
+                for m in re.finditer(r'\{[^\n]*(?:"validation":"provider-telemetry"|"event":"instagram\.messaging\.read\.provider_error")[^\n]*\}', text):
+                  raw=m.group(0)
+                  try: obj=json.loads(raw)
+                  except Exception: continue
+                  allowed={'validation','event','operation','httpStatus','providerCode','providerSubcode','providerType'}
+                  safe={k:v for k,v in obj.items() if k in allowed}
+                  key=json.dumps(safe,sort_keys=True)
+                  if key not in emitted:
+                    emitted.add(key); print(json.dumps(safe,separators=(',',':')))
               if '"validation"' in text:
                 for m in re.finditer(r'\{[^\n]*"validation"[^\n]*\}',text):
                   raw=m.group(0)
                   try: obj=json.loads(raw)
                   except Exception: continue
-                  allowed={'validation','server','version','protocolVersion','tocaExecutePresent','capabilitySearchPresent','toolCount','executableCapabilities','status','executionIdPresent','conversationsReturned','nextAfterPresent','errorCode','serverStderrCodes'}
+                  allowed={'validation','server','version','protocolVersion','tocaExecutePresent','capabilitySearchPresent','toolCount','executableCapabilities','status','executionIdPresent','conversationsReturned','nextAfterPresent','errorCode','serverStderrCodes','operation','httpStatus','providerCode','providerSubcode','providerType'}
                   safe={k:v for k,v in obj.items() if k in allowed}
                   key=json.dumps(safe,sort_keys=True)
                   if key not in emitted:
