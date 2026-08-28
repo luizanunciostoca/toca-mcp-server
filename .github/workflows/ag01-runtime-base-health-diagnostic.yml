@@ -1,0 +1,67 @@
+name: AG-01 Runtime Base Health Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-runtime-base-health-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  JOB: toca-ag01-runtime-base-health-probe
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/ag01@sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Deploy and execute base health probe from runtime identity
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          BASE_URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          cat > /tmp/probe.mjs <<'JS'
+          const audience = process.env.BASE_URL;
+          const metadata = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=' + encodeURIComponent(audience) + '&format=full';
+          const tokenResp = await fetch(metadata, {headers:{'Metadata-Flavor':'Google'}});
+          if (!tokenResp.ok) throw new Error(`TOKEN_${tokenResp.status}`);
+          const token = (await tokenResp.text()).trim();
+          for (const path of ['/healthz','/readyz']) {
+            const r = await fetch(audience + path, {headers:{authorization:`Bearer ${token}`}});
+            const text = await r.text();
+            console.log('AG01_BASE_HEALTH ' + JSON.stringify({path,status:r.status,body:text.slice(0,500)}));
+            if (r.status !== 200) throw new Error(`BASE_${path}_${r.status}`);
+          }
+          console.log('AG01_BASE_HEALTH_OK');
+          JS
+          B64="$(base64 -w0 /tmp/probe.mjs)"
+          gcloud run jobs deploy "$JOB" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" --command /bin/sh \
+            --args '-c,echo "$SCRIPT_B64" | base64 -d > /tmp/probe.mjs && node /tmp/probe.mjs' \
+            --set-env-vars "SCRIPT_B64=$B64,BASE_URL=$BASE_URL" --max-retries 0 --task-timeout 3m --quiet
+          EXEC="$(gcloud run jobs execute "$JOB" --project "$PROJECT_ID" --region "$REGION" --wait --format='value(metadata.name)')"
+          echo "$EXEC" > evidence/execution.txt
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'$JOB'"' --project "$PROJECT_ID" --freshness=10m --limit=50 --format=json > evidence/logs.json
+          jq -r '.[].textPayload // empty' evidence/logs.json | grep 'AG01_BASE_HEALTH' > evidence/probe.txt
+          grep -q 'AG01_BASE_HEALTH_OK' evidence/probe.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ag01-runtime-base-health-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
