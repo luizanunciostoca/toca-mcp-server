@@ -32,7 +32,9 @@ export async function validateMetaAdsAdWriteReadiness(
     const adSetId = scalarString(adSet?.id);
     if (!adSetId) break;
 
-    const selectedIndex = remaining.findIndex((candidate) => scalarString(candidate.id) === adSetId);
+    const selectedIndex = remaining.findIndex(
+      (candidate) => scalarString(candidate.id) === adSetId,
+    );
     if (selectedIndex >= 0) remaining.splice(selectedIndex, 1);
 
     try {
@@ -51,7 +53,10 @@ export async function validateMetaAdsAdWriteReadiness(
 
       return { validated: true, adSetId, creativeId: input.creativeId };
     } catch (error) {
-      if (error instanceof Error && error.message === 'META_ADS_SMOKE_VALIDATE_ONLY_UNEXPECTED_ID') {
+      if (
+        error instanceof Error &&
+        error.message === 'META_ADS_SMOKE_VALIDATE_ONLY_UNEXPECTED_ID'
+      ) {
         throw error;
       }
       lastProviderError = error;
