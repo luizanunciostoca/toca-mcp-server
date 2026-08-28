@@ -1,0 +1,42 @@
+name: AG-01 Runtime Base Log Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-runtime-base-log-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  JOB: toca-ag01-runtime-base-health-probe
+  EXECUTION: toca-ag01-runtime-base-health-probe-xrqqm
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Capture execution and logs
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          gcloud run jobs executions describe "$EXECUTION" --project "$PROJECT_ID" --region "$REGION" --format=json > evidence/execution.json
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'$JOB'"' --project "$PROJECT_ID" --freshness=30m --limit=100 --format=json > evidence/logs.json
+          jq -r '.[].textPayload // empty' evidence/logs.json | tail -n 60 || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-runtime-base-log-diagnostic-${{ github.run_id }}
+          path: evidence
+          retention-days: 30
