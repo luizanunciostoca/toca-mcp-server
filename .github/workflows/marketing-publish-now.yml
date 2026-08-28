@@ -95,11 +95,10 @@ jobs:
         shell: bash
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          GITHUB_SHA: ${{ env.AUDITED_CODE_SHA }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          bash scripts/marketing-publish-now-fixed.sh
+          test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"
+          GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh
 
       - name: Upload immutable publication and reconciliation evidence
         if: always() && steps.command.outputs.action == 'PUBLISH_NOW'
