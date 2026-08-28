@@ -56,6 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
+          pnpm exec prettier --write \
+            src/ag01-vertex-provider-smoke.ts \
+            src/orchestrator/production-config.ts \
+            src/orchestrator/production-runtime.ts \
+            src/orchestrator/vertex-gemini-decision-adapter.ts
           pnpm quality
 
       - name: Authenticate to Google Cloud with WIF
