@@ -16,7 +16,7 @@ env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
   SERVICE: toca-ag01-orchestrator
-  REVISION: toca-ag01-orchestrator-vtx-3b15e35e-2
+  REVISION: toca-ag01-orchestrator-diag-b6ec3906
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
 
