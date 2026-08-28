@@ -1,0 +1,33 @@
+name: P2.1 Format Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/p2-1-google-ads-provider-20260828
+    paths:
+      - '.github/workflows/p2-1-format-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Show canonical Prettier diff
+        run: |
+          set -euo pipefail
+          pnpm prettier --write control/p2-1-google-ads-provider-gate.v1.json src/google-ads-provider-readonly-closure.ts
+          git diff -- control/p2-1-google-ads-provider-gate.v1.json src/google-ads-provider-readonly-closure.ts
