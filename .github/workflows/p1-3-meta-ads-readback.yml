@@ -2,6 +2,10 @@ name: P1.3 Meta Ads Readback
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ops/p1-3-meta-ads-preflight-fix-20260828]
+    paths:
+      - '.github/workflows/p1-3-meta-ads-readback.yml'
 
 permissions:
   contents: read
@@ -11,7 +15,7 @@ env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
   GCP_ARTIFACT_REPOSITORY: toca-mcp
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/globalIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
@@ -86,33 +90,59 @@ jobs:
             --quiet
 
       - name: Execute readback and capture evidence
+        id: readback
         shell: bash
         run: |
-          set -euo pipefail
+          set -u -o pipefail
+          set +e
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-          RESULT_JSON=''
-          for attempt in $(seq 1 12); do
-            LINE="$(gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_SMOKE_READBACK_RESULT=\"" \
-              --project "$GCP_PROJECT_ID" --freshness=15m --limit=50 --order=desc \
-              --format='value(textPayload)' | grep 'META_ADS_SMOKE_READBACK_RESULT=' | head -n1 || true)"
-            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#META_ADS_SMOKE_READBACK_RESULT=}"; break; fi
-            sleep 5
-          done
-          test -n "$RESULT_JSON"
-          printf '%s\n' "$RESULT_JSON" | jq -e '
-            .mode == "READBACK" and
-            .providerMutationExecuted == false and
-            .smokeId == "prepare-33149821139-1" and
-            .approvedRequestSha256 == "eb7aec363f249583f3a03ba7acb5a0487eda57255a52905b9138cf6009fe1260"
-          ' >/dev/null
-          printf '%s\n' "$RESULT_JSON" | jq '.' > p1-3-meta-ads-readback.json
+          EXEC_STATUS=$?
+          set -e
+
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc \
+            --format='value(textPayload)' > p1-3-meta-ads-readback-job.log || true
+
+          RESULT_LINE="$(grep 'META_ADS_SMOKE_READBACK_RESULT=' p1-3-meta-ads-readback-job.log | tail -n1 || true)"
+          FAILURE_LINE="$(grep 'META_ADS_SMOKE_READBACK_FAILURE=' p1-3-meta-ads-readback-job.log | tail -n1 || true)"
+
+          if [ -n "$RESULT_LINE" ]; then
+            RESULT_JSON="${RESULT_LINE#*META_ADS_SMOKE_READBACK_RESULT=}"
+            printf '%s\n' "$RESULT_JSON" | jq -e '
+              .mode == "READBACK" and
+              .providerMutationExecuted == false and
+              .smokeId == "prepare-33149821139-1" and
+              .approvedRequestSha256 == "eb7aec363f249583f3a03ba7acb5a0487eda57255a52905b9138cf6009fe1260"
+            ' >/dev/null
+            printf '%s\n' "$RESULT_JSON" | jq '.' > p1-3-meta-ads-readback.json
+          fi
+
+          if [ -n "$FAILURE_LINE" ]; then
+            FAILURE_JSON="${FAILURE_LINE#*META_ADS_SMOKE_READBACK_FAILURE=}"
+            printf '%s\n' "$FAILURE_JSON" | jq '.' > p1-3-meta-ads-readback-failure.json || true
+          fi
+
+          printf '{"executionExitCode":%s,"resultCaptured":%s,"failureCaptured":%s}\n' \
+            "$EXEC_STATUS" \
+            "$([ -n "$RESULT_LINE" ] && echo true || echo false)" \
+            "$([ -n "$FAILURE_LINE" ] && echo true || echo false)" \
+            > p1-3-meta-ads-readback-execution.json
+
+          if [ "$EXEC_STATUS" -ne 0 ] || [ -z "$RESULT_LINE" ]; then
+            exit 1
+          fi
 
       - name: Upload readback evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: p1-3-meta-ads-readback-${{ github.run_id }}-${{ github.run_attempt }}
-          path: p1-3-meta-ads-readback.json
+          path: |
+            p1-3-meta-ads-readback.json
+            p1-3-meta-ads-readback-failure.json
+            p1-3-meta-ads-readback-execution.json
+            p1-3-meta-ads-readback-job.log
           if-no-files-found: error
 
       - name: Reassert public MCP Meta Ads writes remain disabled
