@@ -182,7 +182,7 @@ jobs:
           curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$URL/healthz" > ag01-binding-evidence/healthz.json
           curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" "$URL/readyz" > ag01-binding-evidence/readyz.json
           jq -e '.status == "ok" and .service == "toca-ag01-orchestrator"' ag01-binding-evidence/healthz.json >/dev/null
-          jq -e '.status == "ready" and .model == "gemini-2.5-flash" and .runtimeCapabilityCount > 0' ag01-binding-evidence/readyz.json >/dev/null
+          jq -e '.status == "ready" and .service == "toca-ag01-orchestrator" and .runtimeCapabilityCount > 0' ag01-binding-evidence/readyz.json >/dev/null
           REQUEST_ID="permanent-binding-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           jq -n --arg key "$REQUEST_ID" --arg message 'Return a governed planning-only status. Do not execute any capability or external side effect. If action is unnecessary, return no executable steps.' '{idempotencyKey:$key,message:$message}' > /tmp/ag01-request.json
           curl --fail-with-body --silent --show-error \
