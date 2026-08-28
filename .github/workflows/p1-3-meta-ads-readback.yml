@@ -15,7 +15,7 @@ env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
   GCP_ARTIFACT_REPOSITORY: toca-mcp
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/globalIdentityPools/github/providers/github-toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
