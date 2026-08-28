@@ -36,6 +36,14 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(result.stderr).not.toContain('P1_PHASE=AUTHENTICATE_DOCKER');
   });
 
+  it('uses the runtime audited SHA without overriding the GitHub runner SHA', () => {
+    expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"');
+    expect(workflow).toContain(
+      'GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh',
+    );
+    expect(workflow).not.toContain('GITHUB_SHA: ${{ env.AUDITED_CODE_SHA }}');
+  });
+
   it('fails closed before cloud authentication when deterministic brand truth is absent', () => {
     const brandStep = workflow.indexOf('Verify deterministic brand binding');
     const authStep = workflow.indexOf('Authenticate to Google Cloud and Drive');
