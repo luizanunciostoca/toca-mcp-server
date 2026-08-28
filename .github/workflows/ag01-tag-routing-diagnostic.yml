@@ -1,0 +1,60 @@
+name: AG-01 Tag Routing Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/ag01-vertex-permanent-binding-20260828
+    paths:
+      - '.github/workflows/ag01-tag-routing-diagnostic.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  TAG: candidate-d2c85284-2
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        id: auth
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://toca-ag01-orchestrator-dtkgeas2ga-rj.a.run.app
+          create_credentials_file: true
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Capture routing endpoints and HTTP codes
+        env:
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-tag-diagnostic
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > ag01-tag-diagnostic/service.json
+          BASE="$(jq -r '.status.url' ag01-tag-diagnostic/service.json)"
+          STATUS_TAG_URL="$(jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | .url' ag01-tag-diagnostic/service.json)"
+          DETERMINISTIC="https://${TAG}---${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+          for spec in "base=$BASE" "status_tag=$STATUS_TAG_URL" "deterministic_tag=$DETERMINISTIC"; do
+            name="${spec%%=*}"; url="${spec#*=}"
+            code="$(curl --silent --show-error -o "ag01-tag-diagnostic/${name}.body" -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$url/healthz" || true)"
+            printf '%s\n' "$code" > "ag01-tag-diagnostic/${name}.code"
+          done
+          jq -n --arg base "$BASE" --arg statusTag "$STATUS_TAG_URL" --arg deterministic "$DETERMINISTIC" \
+            --arg baseCode "$(cat ag01-tag-diagnostic/base.code)" --arg statusTagCode "$(cat ag01-tag-diagnostic/status_tag.code)" --arg deterministicCode "$(cat ag01-tag-diagnostic/deterministic_tag.code)" \
+            '{baseUrl:$base,statusTagUrl:$statusTag,deterministicTagUrl:$deterministic,baseCode:$baseCode,statusTagCode:$statusTagCode,deterministicTagCode:$deterministicCode}' > ag01-tag-diagnostic/result.json
+          cat ag01-tag-diagnostic/result.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ag01-tag-routing-diagnostic-${{ github.run_id }}
+          path: ag01-tag-diagnostic
+          retention-days: 30
