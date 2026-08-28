@@ -25,7 +25,7 @@ export async function validateMetaAdsAdWriteReadiness(
   );
   const adSets = Array.isArray(response.data) ? response.data.map(asRecord) : [];
   const remaining = [...adSets];
-  let lastProviderError: unknown;
+  let lastProviderError: Error | undefined;
 
   while (remaining.length > 0) {
     const adSet = selectMetaAdsValidationAdSet(remaining);
@@ -59,11 +59,11 @@ export async function validateMetaAdsAdWriteReadiness(
       ) {
         throw error;
       }
-      lastProviderError = error;
+      lastProviderError = error instanceof Error ? error : new Error(String(error));
     }
   }
 
-  if (lastProviderError !== undefined) throw lastProviderError;
+  if (lastProviderError) throw lastProviderError;
   throw new Error('META_ADS_SMOKE_VALIDATE_ONLY_ADSET_NOT_FOUND');
 }
 
