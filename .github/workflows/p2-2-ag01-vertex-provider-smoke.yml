@@ -5,6 +5,7 @@ on:
     branches:
       - ops/p2-2-ag01-vertex-20260828
     paths:
+      - 'Dockerfile.orchestrator'
       - 'src/orchestrator/vertex-gemini-decision-adapter.ts'
       - 'src/orchestrator/production-config.ts'
       - 'src/orchestrator/production-runtime.ts'
