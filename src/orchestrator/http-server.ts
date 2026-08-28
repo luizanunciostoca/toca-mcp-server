@@ -66,7 +66,11 @@ async function routeRequest(
         runtimeCapabilityCount: runtime.runtimeCapabilityIds.length,
       });
     } catch (error) {
-      log('ag01.readiness.failed', { errorCode: normalizeHttpError(error).code });
+      const normalized = normalizeHttpError(error);
+      log('ag01.readiness.failed', {
+        errorCode: normalized.code,
+        errorDetail: safeOperationalErrorDetail(error),
+      });
       writeJson(response, 503, {
         status: 'not_ready',
         service: runtime.serviceName,
@@ -225,6 +229,14 @@ function normalizeHttpError(error: unknown): { readonly status: number; readonly
   }
   if (code === 'AG01_HUMAN_ESCALATION') return { status: 409, code };
   return { status: 500, code };
+}
+
+function safeOperationalErrorDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'AG01_RUNTIME_ERROR';
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/access[_-]?token[=:]\s*[^\s,;]+/gi, 'access_token=[REDACTED]')
+    .slice(0, 500);
 }
 
 function log(event: string, fields: Readonly<Record<string, unknown>>): void {
