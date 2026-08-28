@@ -21,3 +21,5 @@ Validated successfully:
 This branch exists only to hold reproducible Quality Gate evidence. The canonical snapshot itself was not modified by the validation run.
 
 Evidence run URL: https://github.com/luizanunciostoca/toca-mcp-server/actions/runs/33145521785
+
+Closure: P0.8 CLOSED.
