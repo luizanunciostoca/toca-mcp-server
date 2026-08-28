@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "toca.p2.1.google-ads-provider-gate.v1",
+  "item": "P2.1",
+  "routeId": "R28",
+  "status": "CI_VERIFIED_BLOCKED_EXTERNAL_CREDENTIAL_AND_ACCOUNT_BINDING",
+  "provider": "Google Ads API",
+  "publicPhase": "OFF",
+  "providerVerified": false,
+  "allowedLifecycle": [
+    "OFF",
+    "READ_ONLY",
+    "PREPARE",
+    "CREATE_PAUSED",
+    "READBACK",
+    "MANAGE"
+  ],
+  "verified": {
+    "qualityRunId": "33205910481",
+    "testFilesPassed": 217,
+    "testsPassed": 1047,
+    "gcpBindingProbeRunId": "33206214007",
+    "runtimeService": "toca-mcp-production",
+    "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+    "secretValuesRead": false,
+    "providerMutationExecuted": false,
+    "spendGenerated": false
+  },
+  "externalInputsRequired": [
+    "googleAdsDeveloperTokenSecretBinding",
+    "oauthClientIdSecretBinding",
+    "oauthClientSecretSecretBinding",
+    "oauthRefreshTokenSecretBinding",
+    "customerId",
+    "optionalLoginCustomerId",
+    "allowedCurrency",
+    "maxDailyBudgetMicros",
+    "currencyMinorUnitMicros",
+    "allowedLocationCriterionIds"
+  ],
+  "closureRule": "Do not promote to PROVIDER_VERIFIED until a real Google Ads API readback succeeds under runtime identity. CREATE_PAUSED and MANAGE remain separate approval gates.",
+  "noR33": true
+}
