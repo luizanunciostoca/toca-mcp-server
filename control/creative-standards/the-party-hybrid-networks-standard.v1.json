@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "standardId": "THE_PARTY_HYBRID_NETWORKS_V1",
-  "standardVersion": "1.0",
+  "standardVersion": "2.0",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "scope": {
@@ -11,11 +11,82 @@
   },
   "sourceOfTruth": {
     "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
-    "canonicalDriveId": "1QQRReW6dLwAh0BrJUiVpbXHGsbV-5ze81MOYkSx7WIU",
+    "canonicalDriveId": "1CnsYiSYvNXvma4giDSiYbIhuYhmh0_BBse2UoOLB4BI",
+    "brandSystemDriveId": "1X_ppNT3-BckHea9HmzjhI1xULI1CFfhk3wmi4ALH7Ag",
+    "approvedReferencesFolderId": "1RyxWk6kaJcnKRb88NY9evN2BfLBnRLNm",
+    "quickGuideDriveId": "1Ko5ZOoLkX4nQ41HUBE5IvQfEQE0FExPb",
     "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_THE_PARTY_V1",
     "legacyVenueReferenceSetExecution": "DENY"
   },
   "visualFamily": "HYBRID_NETWORKS",
+  "designTokens": {
+    "palette": {
+      "black": "#0D0D0D",
+      "white": "#FFFFFF",
+      "gold": "#FFC629",
+      "amber": "#FFA900",
+      "neonPurple": "#8A2BE2",
+      "red": "#FF2D20"
+    },
+    "typography": {
+      "display": "Bebas Neue Condensed Bold",
+      "expressive": "Brush Script",
+      "support": "Montserrat Regular / Medium / Bold"
+    }
+  },
+  "environmentSystem": {
+    "required": true,
+    "allowed": ["INTERNATIONAL", "NATIONAL"],
+    "INTERNATIONAL": {
+      "dominantEnergy": ["#8A2BE2", "#0D0D0D", "#FFFFFF"],
+      "rule": "Purple/violet must come from real venue light or a controlled graphic accent; preserve real skin tones, materials and venue truth."
+    },
+    "NATIONAL": {
+      "dominantEnergy": ["#FFC629", "#FFA900", "#FF2D20", "#0D0D0D"],
+      "rule": "Gold/amber/orange/warm red may dominate while preserving premium contrast, real venue light and readable hierarchy."
+    },
+    "inferenceForbidden": true
+  },
+  "layoutFamilies": [
+    "TWO_TRACKS_DUAL_EXPERIENCE",
+    "OPERATIONAL_HOURS_ATTRIBUTES",
+    "DRINKS_BAR_SPECIAL_CTA",
+    "SUNSET_CONTINUITY_IMMERSIVE",
+    "DJ_TWO_TRACKS_HIGH_IMPACT",
+    "LINEUP_HIGH_IMPACT",
+    "SOCIAL_PROMOTION_HIGH_ENERGY"
+  ],
+  "pillars": [
+    "TWO_TRACKS",
+    "DJS",
+    "LIVE_BANDS",
+    "PREMIUM_ENVIRONMENT",
+    "PEOPLE_AND_EXPERIENCE",
+    "REAL_TOCA_PHOTOGRAPHY",
+    "DRINKS_AND_SPECIAL_BAR"
+  ],
+  "brandSystem": {
+    "heroBrandAssetId": "BRAND-THE-PARTY-WHITE-V1",
+    "heroBrandRequired": true,
+    "institutionalFooterOrder": [
+      "TOCA_DO_MORCEGO",
+      "CORONA",
+      "RED_BULL",
+      "MORRO_DIGITAL"
+    ],
+    "footerRequiredWhenApplicable": true,
+    "officialBrandAssetsOnly": true
+  },
+  "composition": {
+    "realNightlifePhotography": true,
+    "strongHierarchy": true,
+    "singlePrimaryMessage": true,
+    "singlePrimaryCta": true,
+    "safeAreasRequired": true,
+    "neonAndPointLightAllowed": true,
+    "offerBoxesGoldOrAmberPreferred": true,
+    "genericNightclubTemplateLookForbidden": true
+  },
   "rules": {
     "realVenueAssetRequired": true,
     "deterministicBrandInsertion": true,
@@ -29,6 +100,9 @@
   },
   "qualityGate": {
     "failClosed": true,
-    "requiresParentPolicyGates": true
+    "requiresParentPolicyGates": true,
+    "requiresVisualRegressionAgainstV2References": true,
+    "requiresFooterOrderValidation": true,
+    "requiresTypographyAndPaletteValidation": true
   }
 }
