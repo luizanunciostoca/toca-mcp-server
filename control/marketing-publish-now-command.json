@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "commandId": "publish-now-MKT-20260828-SUNSET-FEED-0900-1206-v2",
+  "commandId": "publish-now-MKT-20260828-SUNSET-FEED-0900-1233-v3",
   "action": "PUBLISH_NOW",
-  "issuedAt": "2026-08-28T12:06:06-03:00",
+  "issuedAt": "2026-08-28T12:33:06-03:00",
   "timezone": "America/Bahia",
   "operation": "SUNSET",
   "channel": "INSTAGRAM",
@@ -14,9 +14,9 @@
   "expectedAssetSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5",
   "instagramAccountId": "17841402033495654",
   "caption": "Sexta começa melhor quando o céu encontra o mar. Na Toca, o pôr do sol abre espaço para o que a noite ainda vai contar.\n\nViva o Sunset na Toca do Morcego.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
-  "correlationId": "CORR-MKT-20260828-SUNSET-FEED-0900-SHARENOW-1206-V2",
-  "idempotencyKey": "MKT-20260828-SUNSET-FEED-0900-SHARENOW-V2",
-  "targetCodeSha": "8ac64709671387ddff1a1f01fc8cda6a168fa16b",
+  "correlationId": "CORR-MKT-20260828-SUNSET-FEED-0900-SHARENOW-1233-V3",
+  "idempotencyKey": "MKT-20260828-SUNSET-FEED-0900-SHARENOW-V3",
+  "targetCodeSha": "23a522ef91bc1830aac25c01b347b66629555dfe",
   "creativeTruthBinding": {
     "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
     "standardId": "SUNSET_FEED_PHOTO_V1",
@@ -38,7 +38,7 @@
     "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
     "evidenceRef": "TOCA_OS_ASSET_BINDINGS_30D:17VZJ1lMfuxv3D4DaPRRJf_GV-u5xBL6RHfViAoryBZE:ASSET_BINDINGS_23A14!A27:J27",
     "authority": "CANONICAL_MEDIA_CATALOG_BINDING_AND_USER_EXPLICIT_PUBLICATION_AUTHORIZATION_2026-08-28",
-    "clearedAt": "2026-08-28T12:06:06-03:00",
+    "clearedAt": "2026-08-28T12:33:06-03:00",
     "assetSha256": "284fe3ea85a5519f18d79fe7c9e511e75491a6c32bc6e7a6dc18ebc9bf53c4f5"
   },
   "approvalMode": "EXPLICIT_APPROVAL",
