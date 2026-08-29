@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       authorization_ref:
-        description: 'Same-repository PRODUCTION AUTHORIZATION issue URL bound to the exact main SHA'
+        description: 'Same-repository PRODUCTION AUTHORIZATION issue URL bound to the exact controller SHA'
         required: true
         type: string
 
@@ -23,7 +23,6 @@ concurrency:
 env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
-  GCP_ARTIFACT_REPOSITORY: toca-mcp
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
@@ -42,22 +41,25 @@ env:
   TOCA_ORGANIZATION_ID: toca
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
+  RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f
+  RUNTIME_IMAGE_DIGEST: sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
 
 jobs:
   shadow-rollout:
     if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_shadow == 'DEPLOY_ENGAGEMENT_SHADOW' && inputs.authorization_ref != '' }}
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout exact main SHA
+      - name: Checkout exact controller SHA
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Verify exact production authorization before any provider access
+      - name: Verify exact DRS-safe shadow authorization
         env:
           AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
         shell: bash
@@ -81,14 +83,16 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H 'User-Agent: toca-instagram-engagement-shadow' \
+            -H 'User-Agent: toca-instagram-engagement-shadow-drs' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}" \
             > /tmp/production-authorization.json
 
           jq -e \
             --arg expectedUrl "$AUTHORIZATION_REF" \
             --arg sha "$GITHUB_SHA" \
-            --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --arg runtimeSha "$RUNTIME_SOURCE_SHA" \
+            --arg digest "$RUNTIME_IMAGE_DIGEST" '
               (.html_url == $expectedUrl) and
               (.state == "open") and
               (has("pull_request") | not) and
@@ -96,17 +100,23 @@ jobs:
               (.title | startswith("PRODUCTION AUTHORIZATION")) and
               ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha)) and
               ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
-              ((.body // "") | contains("INSTAGRAM_ENGAGEMENT_SHADOW=AUTHORIZED"))
+              ((.body // "") | contains("INSTAGRAM_ENGAGEMENT_SHADOW=AUTHORIZED")) and
+              ((.body // "") | contains("INSTAGRAM_ENGAGEMENT_DRS_CONTINUATION=AUTHORIZED")) and
+              ((.body // "") | contains("RUNTIME_SOURCE_SHA=" + $runtimeSha)) and
+              ((.body // "") | contains("RUNTIME_IMAGE_DIGEST=" + $digest)) and
+              ((.body // "") | contains("EXTERNAL_REPLY_WRITES_AUTHORIZED=false"))
             ' /tmp/production-authorization.json >/dev/null || {
-              echo 'Production authorization is not active for this exact SHA and engagement shadow scope' >&2
+              echo 'Production authorization is not active for this exact DRS-safe shadow controller and runtime image' >&2
               exit 1
             }
 
           mkdir -p engagement-evidence
           jq -n \
-            --arg sha "$GITHUB_SHA" \
+            --arg controllerSha "$GITHUB_SHA" \
+            --arg runtimeSha "$RUNTIME_SOURCE_SHA" \
+            --arg digest "$RUNTIME_IMAGE_DIGEST" \
             --arg ref "$AUTHORIZATION_REF" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-authorization.v1",sourceSha:$sha,authorizationRef:$ref,shadowAuthorized:true,externalReplyWritesAuthorized:false}' \
+            '{schemaVersion:"toca.instagram-engagement.shadow-drs-authorization.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,authorizationRef:$ref,shadowAuthorized:true,externalReplyWritesAuthorized:false}' \
             > engagement-evidence/authorization.json
 
       - name: Setup pnpm
@@ -121,6 +131,7 @@ jobs:
           cache: pnpm
 
       - name: Run exact-head Quality Gate
+        shell: bash
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
@@ -135,7 +146,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Validate production boundary and capture rollback revisions
+      - name: Verify immutable runtime and capture rollback prestate
         shell: bash
         run: |
           set -euo pipefail
@@ -145,6 +156,14 @@ jobs:
           test "$INSTAGRAM_ACCOUNT_ID" = '17841402033495654'
           test "$INSTAGRAM_PAGE_ID" = '306103746115875'
           test "$CANONICAL_FAQ_SPREADSHEET_ID" = '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU'
+          test "$RUNTIME_SOURCE_SHA" = 'd23039fa360b1e1674964a59bd003ca76227e48f'
+          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30'
+
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$DESCRIBED_DIGEST" == "$RUNTIME_IMAGE_DIGEST" ]] || {
+            echo 'Runtime image digest mismatch' >&2
+            exit 1
+          }
 
           current_revision() {
             local service="$1"
@@ -163,69 +182,84 @@ jobs:
 
           DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           DAEMON_SA="$(printf '%s' "$DAEMON_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
-          [[ "$DAEMON_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Unexpected daemon runtime identity' >&2; exit 1; }
+          [[ "$DAEMON_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || {
+            echo 'Unexpected daemon runtime identity' >&2
+            exit 1
+          }
 
           PREVIOUS_DAEMON_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
-          test -n "$PREVIOUS_DAEMON_REVISION" || { echo 'Daemon rollback revision missing' >&2; exit 1; }
+          test -n "$PREVIOUS_DAEMON_REVISION" || {
+            echo 'Daemon rollback revision missing' >&2
+            exit 1
+          }
           echo "PREVIOUS_DAEMON_REVISION=$PREVIOUS_DAEMON_REVISION" >> "$GITHUB_ENV"
+
+          DAEMON_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
+          PUBLICATION_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false"')"
+          [[ "$DAEMON_WRITES" == false ]] || {
+            echo 'Daemon engagement writes must be false before shadow rollout' >&2
+            exit 1
+          }
+          [[ "$PUBLICATION_WRITES" == false ]] || {
+            echo 'Daemon publication writes must remain false' >&2
+            exit 1
+          }
 
           WEBHOOK_SERVICE_EXISTED=false
           PREVIOUS_WEBHOOK_REVISION=''
+          PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED=true
+          PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED=false
           PREVIOUS_WEBHOOK_PUBLIC=false
-          PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED=false
-          WEBHOOK_JSON='{}'
+
           if gcloud run services describe "$WEBHOOK_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
             > /tmp/instagram-engagement-webhook-prestate.json 2>/dev/null; then
             WEBHOOK_SERVICE_EXISTED=true
             WEBHOOK_JSON="$(cat /tmp/instagram-engagement-webhook-prestate.json)"
             WEBHOOK_SA="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
-            [[ "$WEBHOOK_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Unexpected webhook runtime identity' >&2; exit 1; }
+            [[ "$WEBHOOK_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || {
+              echo 'Unexpected webhook runtime identity' >&2
+              exit 1
+            }
+
             PREVIOUS_WEBHOOK_REVISION="$(current_revision "$WEBHOOK_SERVICE_NAME")"
-            test -n "$PREVIOUS_WEBHOOK_REVISION" || { echo 'Existing webhook rollback revision missing' >&2; exit 1; }
+            test -n "$PREVIOUS_WEBHOOK_REVISION" || {
+              echo 'Existing webhook serving revision is not uniquely identifiable' >&2
+              exit 1
+            }
+
             PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
+            PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
+
             if gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
               | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
               PREVIOUS_WEBHOOK_PUBLIC=true
+              echo 'Legacy allUsers invoker binding is not allowed for the DRS-safe rollout' >&2
+              exit 1
             fi
+
             WEBHOOK_WRITES="$(printf '%s' "$WEBHOOK_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
-            [[ "$WEBHOOK_WRITES" == false ]] || { echo 'Existing webhook engagement writes must be false before shadow rollout' >&2; exit 1; }
+            [[ "$WEBHOOK_WRITES" == false ]] || {
+              echo 'Existing webhook engagement writes must be false before shadow rollout' >&2
+              exit 1
+            }
           fi
+
           echo "PREVIOUS_WEBHOOK_REVISION=$PREVIOUS_WEBHOOK_REVISION" >> "$GITHUB_ENV"
           echo "PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED" >> "$GITHUB_ENV"
-          echo "PREVIOUS_WEBHOOK_PUBLIC=$PREVIOUS_WEBHOOK_PUBLIC" >> "$GITHUB_ENV"
           echo "PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED=$PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED" >> "$GITHUB_ENV"
-
-          DAEMON_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
-          PUBLICATION_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false"')"
-          [[ "$DAEMON_WRITES" == false ]] || { echo 'Engagement writes must be false before shadow rollout' >&2; exit 1; }
-          [[ "$PUBLICATION_WRITES" == false ]] || { echo 'Daemon publication writes must remain false' >&2; exit 1; }
+          echo "PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED=$PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_PUBLIC=$PREVIOUS_WEBHOOK_PUBLIC" >> "$GITHUB_ENV"
 
           jq -n \
             --arg daemon "$PREVIOUS_DAEMON_REVISION" \
             --arg webhook "$PREVIOUS_WEBHOOK_REVISION" \
             --arg serviceExisted "$WEBHOOK_SERVICE_EXISTED" \
-            --arg public "$PREVIOUS_WEBHOOK_PUBLIC" \
             --arg defaultUrlDisabled "$PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-rollback.v1",daemonRevision:$daemon,webhookRevision:(if ($webhook|length)>0 then $webhook else "ABSENT" end),webhookServiceExisted:($serviceExisted=="true"),webhookPublic:($public=="true"),webhookDefaultUrlDisabled:($defaultUrlDisabled=="true")}' \
+            --arg invokerIamDisabled "$PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-drs-prestate.v1",daemonRevision:$daemon,webhookRevision:(if ($webhook|length)>0 then $webhook else "ABSENT" end),webhookServiceExisted:($serviceExisted=="true"),webhookDefaultUrlDisabled:($defaultUrlDisabled=="true"),webhookInvokerIamDisabled:($invokerIamDisabled=="true"),legacyAllUsersInvoker:false,writesEnabled:false}' \
             > engagement-evidence/rollback-targets.json
-
-      - name: Build and push immutable shadow image
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
-          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          DIGEST="$(gcloud artifacts docker images describe "$IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
-          [[ "$DIGEST" == sha256:* ]] || { echo 'Immutable image digest missing' >&2; exit 1; }
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
-          jq -n --arg image "$IMAGE" --arg digest "$DIGEST" --arg sha "$GITHUB_SHA" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-image.v1",sourceSha:$sha,image:$image,digest:$digest}' \
-            > engagement-evidence/image.json
 
       - name: Apply migrations and synchronize canonical knowledge mirror
         shell: bash
@@ -234,7 +268,7 @@ jobs:
           run_job() {
             local job="$1" command_path="$2" env_vars="$3"
             if ! gcloud run jobs deploy "$job" \
-              --image "$IMAGE" \
+              --image "$RUNTIME_IMAGE" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
               --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
@@ -269,11 +303,13 @@ jobs:
         run: |
           set -euo pipefail
           JOB="toca-ig-eng-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
           trap cleanup EXIT
 
           gcloud run jobs deploy "$JOB" \
-            --image "$IMAGE" \
+            --image "$RUNTIME_IMAGE" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
@@ -299,28 +335,30 @@ jobs:
             .identitiesPrinted == false and
             .secretsPrinted == false
           ' >/dev/null
-          printf '%s' "$READINESS" | jq -c '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status,writesEnabled,knowledgeSource:.knowledgeAuthMode,databaseSchemaVerified,migrationVerified,knowledgeSnapshotVerified,scopeConfigured,secretsPrinted}' > engagement-evidence/readiness.json
+          printf '%s' "$READINESS" | jq -c '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status,writesEnabled,knowledgeSource:.knowledgeAuthMode,databaseSchemaVerified,migrationVerified,knowledgeSnapshotVerified,scopeConfigured,secretsPrinted}' \
+            > engagement-evidence/readiness.json
+
           cleanup
           trap - EXIT
 
-      - name: Deploy engagement shadow runtime and webhook persistence
+      - name: Deploy shadow runtime and expose webhook with DRS-safe invoker mode
         shell: bash
         run: |
           set -euo pipefail
           gcloud run services update "$DAEMON_SERVICE_NAME" \
-            --image "$IMAGE" \
+            --image "$RUNTIME_IMAGE" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
-            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --command node --args dist/src/toca-managed-instagram-daemon.js \
-            --quiet
+            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --command node --args dist/src/toca-managed-instagram-daemon.js --quiet
 
           WEBHOOK_ENV="^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID"
+
           if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" == true ]]; then
             gcloud run services update "$WEBHOOK_SERVICE_NAME" \
-              --image "$IMAGE" \
+              --image "$RUNTIME_IMAGE" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
               --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
               --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
@@ -330,7 +368,7 @@ jobs:
               --quiet
           else
             gcloud run deploy "$WEBHOOK_SERVICE_NAME" \
-              --image "$IMAGE" \
+              --image "$RUNTIME_IMAGE" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
               --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
               --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
@@ -341,14 +379,17 @@ jobs:
               --quiet
           fi
 
+          # First enable the default URL while the invoker IAM check is still enforced.
           gcloud run services update "$WEBHOOK_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --default-url --quiet
-          gcloud run services add-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --member=allUsers --role=roles/run.invoker --quiet
 
-      - name: Verify deployed fail-closed configuration
+          # Then expose the callback through Cloud Run's DRS-safe invoker mode.
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --default-url --no-invoker-iam-check --quiet
+
+      - name: Verify DRS-safe public callback and fail-closed writes
         id: deployed
         shell: bash
         run: |
@@ -372,17 +413,29 @@ jobs:
             ([$c.env[]? | select(.name == "MCP_ENABLED") | .value] | last == "false") and
             ([$c.env[]? | select(.name == "META_WEBHOOK_ENABLED") | .value] | last == "true") and
             ([$c.env[]? | select(.name == "META_WEBHOOK_PERSISTENCE_ENABLED") | .value] | last == "true") and
-            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last == "false")
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last == "false") and
+            ((.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") != "true") and
+            ((.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false") == "true")
           ' >/dev/null
 
-          gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" \
+          if gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
-            | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null
+            | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
+            echo 'DRS-safe public callback must not depend on a legacy allUsers invoker binding' >&2
+            exit 1
+          fi
 
           WEBHOOK_URL="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.url // empty')"
-          test -n "$WEBHOOK_URL" || { echo 'Webhook URL missing' >&2; exit 1; }
+          test -n "$WEBHOOK_URL" || {
+            echo 'Webhook URL missing' >&2
+            exit 1
+          }
           echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
-          jq -n --arg webhookUrl "$WEBHOOK_URL" '{schemaVersion:"toca.instagram-engagement.shadow-deploy.v1",daemonRuntimeEnabled:true,engagementWritesEnabled:false,webhookPersistenceEnabled:true,webhookPublicForMeta:true,webhookUrl:$webhookUrl}' > engagement-evidence/deploy.json
+
+          jq -n \
+            --arg webhookUrl "$WEBHOOK_URL" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-drs-deploy.v1",daemonRuntimeEnabled:true,engagementWritesEnabled:false,webhookPersistenceEnabled:true,webhookPublicForMeta:true,publicViaInvokerIamCheckDisabled:true,legacyAllUsersInvoker:false,webhookUrl:$webhookUrl}' \
+            > engagement-evidence/deploy.json
 
       - name: Prove COMMENT and DIRECT end-to-end with synthetic signed webhooks
         env:
@@ -391,11 +444,13 @@ jobs:
         run: |
           set -euo pipefail
           JOB="toca-ig-eng-shadow-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
           trap cleanup EXIT
 
           gcloud run jobs deploy "$JOB" \
-            --image "$IMAGE" \
+            --image "$RUNTIME_IMAGE" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
@@ -418,6 +473,7 @@ jobs:
             .writesEnabled == false
           ' >/dev/null
           printf '%s\n' "$PROOF" > engagement-evidence/shadow-proof.json
+
           cleanup
           trap - EXIT
 
@@ -428,11 +484,13 @@ jobs:
         run: |
           set -euo pipefail
           JOB="toca-ig-eng-subscribe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
           trap cleanup EXIT
 
           gcloud run jobs deploy "$JOB" \
-            --image "$IMAGE" \
+            --image "$RUNTIME_IMAGE" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --set-secrets "META_APP_SECRET=$META_APP_SECRET_ID:latest,META_ACCESS_TOKEN=$META_TOKEN_SECRET_ID:latest" \
@@ -452,55 +510,90 @@ jobs:
             .secretsPrinted == false
           ' >/dev/null
           printf '%s\n' "$SUBSCRIPTION" > engagement-evidence/meta-subscriptions.json
+
           cleanup
           trap - EXIT
 
-      - name: Write final shadow evidence
+      - name: Write final DRS-safe shadow evidence
         shell: bash
         run: |
           set -euo pipefail
           jq -n \
-            --arg sha "$GITHUB_SHA" \
-            --arg image "$IMAGE" \
-            --arg digest "$IMAGE_DIGEST" \
+            --arg controllerSha "$GITHUB_SHA" \
+            --arg runtimeSha "$RUNTIME_SOURCE_SHA" \
+            --arg digest "$RUNTIME_IMAGE_DIGEST" \
             --arg account "$INSTAGRAM_ACCOUNT_ID" \
             --arg page "$INSTAGRAM_PAGE_ID" \
             --arg sheet "$CANONICAL_FAQ_SPREADSHEET_ID" \
-            '{schemaVersion:"toca.instagram-engagement.production-shadow.v1",sourceSha:$sha,image:$image,imageDigest:$digest,instagramAccountId:$account,pageId:$page,canonicalKnowledgeSpreadsheetId:$sheet,channels:["COMMENT","DIRECT"],runtimeConnected:true,webhookPersistenceConnected:true,metaSubscriptionsProviderReadback:true,syntheticShadowProof:"PASS",externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
+            '{schemaVersion:"toca.instagram-engagement.production-shadow-drs.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,instagramAccountId:$account,pageId:$page,canonicalKnowledgeSpreadsheetId:$sheet,channels:["COMMENT","DIRECT"],runtimeConnected:true,webhookPersistenceConnected:true,webhookPublicViaInvokerIamCheckDisabled:true,legacyAllUsersInvoker:false,metaSubscriptionsProviderReadback:true,syntheticShadowProof:"PASS",externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
             > engagement-evidence/closeout.json
           cat engagement-evidence/closeout.json >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Roll back serving revisions on rollout failure
+      - name: Roll back serving revisions and webhook exposure on rollout failure
         if: failure()
         shell: bash
         run: |
           set +e
+
           if [[ -n "${PREVIOUS_DAEMON_REVISION:-}" ]]; then
-            gcloud run services update-traffic "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions="${PREVIOUS_DAEMON_REVISION}=100" --quiet
-          fi
-          if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
-            gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions="${PREVIOUS_WEBHOOK_REVISION}=100" --quiet
+            gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --to-revisions="${PREVIOUS_DAEMON_REVISION}=100" --quiet
           fi
 
-          if gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+          if gcloud run services describe "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --format='value(metadata.name)' >/dev/null 2>&1; then
             if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]]; then
-              gcloud run services update "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
-              gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+              # Preserve the service non-destructively, but restore the absent prestate as closed exposure.
+              gcloud run services update "$WEBHOOK_SERVICE_NAME" \
                 --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-                --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+                --no-default-url --quiet
+              gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                --no-default-url --invoker-iam-check --quiet
+              gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
               echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+              echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=DRS_CLOSED' >> "$GITHUB_STEP_SUMMARY"
             else
-              if [[ "${PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED:-false}" == true ]]; then
-                gcloud run services update "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
-              fi
-              if [[ "${PREVIOUS_WEBHOOK_PUBLIC:-false}" != true ]]; then
-                gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+              if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
+                gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME" \
                   --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-                  --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+                  --to-revisions="${PREVIOUS_WEBHOOK_REVISION}=100" --quiet
               fi
-              echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=PREVIOUS_EXPOSURE_RESTORED' >> "$GITHUB_STEP_SUMMARY"
+
+              if [[ "${PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED:-false}" == true ]]; then
+                gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --no-default-url --quiet
+              else
+                gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --default-url --quiet
+              fi
+
+              if [[ "${PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED:-false}" == true ]]; then
+                gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --no-invoker-iam-check --quiet
+              else
+                gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --invoker-iam-check --quiet
+              fi
+
+              gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+
+              if [[ "${PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED:-false}" == true && "${PREVIOUS_WEBHOOK_INVOKER_IAM_DISABLED:-false}" != true ]]; then
+                echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=DRS_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=PREVIOUS_EXPOSURE_RESTORED' >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
           fi
+
           echo 'ROLLBACK_ATTEMPTED=true' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized engagement shadow evidence
