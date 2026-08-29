@@ -1,0 +1,150 @@
+name: Instagram Engagement Shadow Proof Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-proof-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33257384156'
+  SOURCE_PROOF_JOB: toca-ig-eng-corrected-proof-33257384156-1
+
+jobs:
+  read-only-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram shadow proof diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and read-only boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram shadow proof diagnostic AUTO"))
+          ' >/dev/null
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_SHADOW_PROOF_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_PROOF_JOB=$SOURCE_PROOF_JOB"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Authenticate read-only diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Extract sanitized SHADOW_PROOF failure token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$SOURCE_RUN_ID" = '33257384156'
+          test "$SOURCE_PROOF_JOB" = 'toca-ig-eng-corrected-proof-33257384156-1'
+
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_PROOF_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json)"
+          ENTRY_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq 'length')"
+          test "$ENTRY_COUNT" -gt 0
+
+          TOKENS="$(printf '%s' "$LOG_ENTRIES" \
+            | jq -r '.. | strings' \
+            | grep -oE 'SHADOW_PROOF_((COMMENT|DIRECT)_[A-Z_]+(:[A-Z0-9_-]+)?|REQUIRES_WRITES_DISABLED)' \
+            | sort -u || true)"
+          test -n "$TOKENS"
+
+          mkdir -p engagement-evidence
+          printf '%s\n' "$TOKENS" \
+            | jq -Rsc --arg sourceRunId "$SOURCE_RUN_ID" --arg sourceProofJob "$SOURCE_PROOF_JOB" --argjson entryCount "$ENTRY_COUNT" '
+                split("\n")
+                | map(select(length > 0))
+                | {
+                    schemaVersion: "toca.instagram-engagement.shadow-proof-diagnostic.v1",
+                    sourceRunId: $sourceRunId,
+                    sourceProofJob: $sourceProofJob,
+                    logEntriesScanned: $entryCount,
+                    shadowProofTokens: ., 
+                    readOnlyDiagnostic: true,
+                    serviceMutationsAuthorized: false,
+                    databaseMutationsAuthorized: false,
+                    providerWritesAuthorized: false,
+                    externalReplyWritesAuthorized: false
+                  }
+              ' > engagement-evidence/shadow-proof-diagnostic.json
+
+          TOKEN_SUMMARY="$(printf '%s' "$TOKENS" | paste -sd ', ' -)"
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "SHADOW_PROOF_DIAGNOSTIC_STATUS=PASS
+SOURCE_RUN_ID=${SOURCE_RUN_ID}
+SOURCE_PROOF_JOB=${SOURCE_PROOF_JOB}
+SHADOW_PROOF_TOKENS=${TOKEN_SUMMARY}
+READ_ONLY_DIAGNOSTIC=true
+SERVICE_MUTATIONS_AUTHORIZED=false
+DATABASE_MUTATIONS_AUTHORIZED=false
+PROVIDER_WRITES_AUTHORIZED=false
+EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+
+      - name: Upload sanitized diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-proof-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
