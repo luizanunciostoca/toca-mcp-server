@@ -1,0 +1,267 @@
+name: Instagram DM 2025 Detail Probe
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-version-probe-20260828
+    paths:
+      - '.github/workflows/instagram-dm-2025-detail-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Materialize governed targeted detail lookup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          ids = Path('src/governance/capability-ids.ts')
+          text = ids.read_text()
+          required = ["'instagram.messaging.conversations.read'", "'instagram.messaging.messages.read'"]
+          if not all(item in text for item in required):
+              anchor = "  R09: [\n"
+              if anchor not in text: raise SystemExit('R09_CATALOG_ANCHOR_NOT_FOUND')
+              text = text.replace(anchor, anchor + "    'instagram.messaging.conversations.read',\n    'instagram.messaging.messages.read',\n", 1)
+              ids.write_text(text)
+
+          provider = Path('src/providers/instagram/instagram-messaging-read-provider.ts')
+          text = provider.read_text()
+
+          old = """export interface InstagramConversationListInput {
+            readonly limit: number;
+            readonly after?: string | undefined;
+          }"""
+          new = """export interface InstagramConversationListInput {
+            readonly limit: number;
+            readonly after?: string | undefined;
+            readonly userId?: string | undefined;
+          }"""
+          if old not in text: raise SystemExit('CONVERSATION_INPUT_TARGET_NOT_FOUND')
+          text = text.replace(old, new, 1)
+          marker = "          ...(input.after ? { after: input.after } : {}),\n"
+          if marker not in text: raise SystemExit('USER_ID_QUERY_TARGET_NOT_FOUND')
+          text = text.replace(marker, marker + "          ...(input.userId ? { user_id: input.userId } : {}),\n", 1)
+
+          old = """export interface InstagramMessageListInput {
+            readonly conversationId: string;
+            readonly limit: number;
+          }"""
+          new = """export interface InstagramMessageListInput {
+            readonly conversationId?: string | undefined;
+            readonly limit?: number | undefined;
+            readonly metadataOnly?: boolean | undefined;
+            readonly messageId?: string | undefined;
+            readonly detailOnly?: boolean | undefined;
+          }"""
+          if old not in text: raise SystemExit('MESSAGE_INPUT_TARGET_NOT_FOUND')
+          text = text.replace(old, new, 1)
+
+          old = """  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
+            const binding = await this.pageBinding();
+            const boundedLimit = Math.min(input.limit, 20);
+            const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;
+            const response = await observedMetaRead('messages.list', () =>
+              this.client.getWithAccessToken(
+                input.conversationId,
+                { fields },
+                binding.pageAccessToken,
+              ),
+            );
+            const parsed = messagesResponseSchema.safeParse(response);
+            if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGES_RESPONSE_INVALID');
+
+            const providerHasMore = Boolean(
+              parsed.data.messages.paging?.next || parsed.data.messages.paging?.cursors?.after,
+            );
+            return {
+              messages: parsed.data.messages.data.map((message) => ({
+                messageId: message.id,
+                ...(message.created_time ? { createdTime: message.created_time } : {}),
+                direction: directionFor(message, binding, this.instagramBusinessAccountId),
+                ...(message.message ? { text: message.message } : {}),
+                unsupported: message.is_unsupported ?? false,
+              })),
+              providerHasMore,
+              providerMessageDetailLimit: 20,
+            };
+          }"""
+          new = """  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
+            const binding = await this.pageBinding();
+            if (input.detailOnly && input.messageId) {
+              const response = await observedMetaRead('messages.detail', () =>
+                this.client.getWithAccessToken(
+                  input.messageId!,
+                  { fields: 'id,created_time,from,to,message,is_unsupported' },
+                  binding.pageAccessToken,
+                ),
+              );
+              const parsed = messageSchema.safeParse(response);
+              if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGE_DETAIL_RESPONSE_INVALID');
+              const message = parsed.data;
+              return {
+                messages: [{
+                  messageId: message.id,
+                  ...(message.created_time ? { createdTime: message.created_time } : {}),
+                  direction: directionFor(message, binding, this.instagramBusinessAccountId),
+                  ...(message.message ? { text: message.message } : {}),
+                  unsupported: message.is_unsupported ?? false,
+                }],
+                providerHasMore: false,
+                providerMessageDetailLimit: 20,
+              };
+            }
+            if (!input.conversationId) throw new Error('INSTAGRAM_MESSAGING_CONVERSATION_ID_REQUIRED');
+            const boundedLimit = Math.min(input.limit ?? 20, input.metadataOnly ? 100 : 20);
+            const fields = input.metadataOnly
+              ? `messages.limit(${boundedLimit}){id,created_time}`
+              : `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;
+            const response = await observedMetaRead('messages.list', () =>
+              this.client.getWithAccessToken(
+                input.conversationId!,
+                { fields },
+                binding.pageAccessToken,
+              ),
+            );
+            const parsed = messagesResponseSchema.safeParse(response);
+            if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGES_RESPONSE_INVALID');
+
+            const providerHasMore = Boolean(
+              parsed.data.messages.paging?.next || parsed.data.messages.paging?.cursors?.after,
+            );
+            return {
+              messages: parsed.data.messages.data.map((message) => ({
+                messageId: message.id,
+                ...(message.created_time ? { createdTime: message.created_time } : {}),
+                direction: directionFor(message, binding, this.instagramBusinessAccountId),
+                ...(message.message ? { text: message.message } : {}),
+                unsupported: message.is_unsupported ?? false,
+              })),
+              providerHasMore,
+              providerMessageDetailLimit: 20,
+            };
+          }"""
+          if old not in text: raise SystemExit('LIST_MESSAGES_TARGET_NOT_FOUND')
+          provider.write_text(text.replace(old, new, 1))
+
+          resolver = Path('src/mcp/runtime-capability-resolver.ts')
+          text = resolver.read_text()
+          old = """const instagramConversationListSchema = z.object({
+            limit: z.number().int().min(1).max(100).default(50),
+            after: z.string().min(1).optional(),
+          });"""
+          new = """const instagramConversationListSchema = z.object({
+            limit: z.number().int().min(1).max(100).default(50),
+            after: z.string().min(1).optional(),
+            userId: z.string().min(1).optional(),
+          });"""
+          if old not in text: raise SystemExit('CONVERSATION_SCHEMA_TARGET_NOT_FOUND')
+          text = text.replace(old, new, 1)
+          old = """const instagramMessageListSchema = z.object({
+            conversationId: z.string().min(1),
+            limit: z.number().int().min(1).max(20).default(20),
+          });"""
+          new = """const instagramMessageListSchema = z.object({
+            conversationId: z.string().min(1).optional(),
+            limit: z.number().int().min(1).max(100).optional(),
+            metadataOnly: z.boolean().optional(),
+            messageId: z.string().min(1).optional(),
+            detailOnly: z.boolean().optional(),
+          }).superRefine((input, ctx) => {
+            if (input.detailOnly && !input.messageId) ctx.addIssue({ code: 'custom', message: 'messageId required for detailOnly' });
+            if (!input.detailOnly && !input.conversationId) ctx.addIssue({ code: 'custom', message: 'conversationId required' });
+          });"""
+          if old not in text: raise SystemExit('MESSAGE_SCHEMA_TARGET_NOT_FOUND')
+          resolver.write_text(text.replace(old, new, 1))
+
+          server = Path('src/server.ts')
+          text = server.read_text()
+          old = "  const cloudRunService = env.K_SERVICE?.trim();"
+          if old in text:
+              server.write_text(text.replace(old, "  const cloudRunService = env.K_SERVICE?.trim() || env.CLOUD_RUN_JOB?.trim();", 1))
+          PY
+          pnpm install --frozen-lockfile
+          pnpm exec prettier --write src/governance/capability-ids.ts src/providers/instagram/instagram-messaging-read-provider.ts src/mcp/runtime-capability-resolver.ts src/server.ts src/ops/instagram-dm-2025-detail-probe.ts
+          pnpm typecheck
+          pnpm build
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Build ephemeral read-only image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:ig-2025-detail-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Execute aggregate 2025 detail lookup through TOCA MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-ig-2025-detail-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node --args dist/src/ops/instagram-dm-2025-detail-probe.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=true~INSTAGRAM_READ_ENABLED=true~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~META_ACCESS_TOKEN_ENV_KEY=META_ACCESS_TOKEN~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_ENABLED=false~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~GOOGLE_ADS_PHASE=OFF~TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=false~TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED=false" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 --max-retries 0 --task-timeout 600s --quiet
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          sleep 15
+          gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" --freshness=30m --limit=500 --order=asc --format=json > /tmp/logs.json
+          python3 <<'PY'
+          import json, sys
+          for row in json.load(open('/tmp/logs.json')):
+              vals=[]
+              if isinstance(row.get('textPayload'),str): vals.append(row['textPayload'])
+              if isinstance(row.get('jsonPayload'),dict): vals.append(json.dumps(row['jsonPayload'],separators=(',',':')))
+              for text in vals:
+                  try: obj=json.loads(text)
+                  except Exception: continue
+                  if isinstance(obj,dict) and obj.get('validation')=='instagram-dm-2025-detail-probe':
+                      print(json.dumps(obj,separators=(',',':')))
+                      sys.exit(0)
+          print('DETAIL_PROBE_EVIDENCE_NOT_FOUND',file=sys.stderr)
+          sys.exit(1)
+          PY
