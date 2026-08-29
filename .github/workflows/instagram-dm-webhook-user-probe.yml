@@ -1,6 +1,7 @@
 name: Instagram DM Webhook User Probe
 
 # Operational READ_ONLY diagnostic. No Instagram writes.
+# Diagnostic generation 3: preserve the sanitized inner MCP failure category.
 on:
   push:
     branches:
