@@ -1,5 +1,6 @@
 name: Instagram DM Webhook User Probe
 
+# Operational READ_ONLY diagnostic. No Instagram writes.
 on:
   push:
     branches:
