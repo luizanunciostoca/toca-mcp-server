@@ -9,7 +9,10 @@ import {
 } from './instagram-engagement/events.js';
 import { GoogleSheetsInstagramEngagementKnowledgeSource } from './instagram-engagement/knowledge.js';
 import { InstagramEngagementProcessor } from './instagram-engagement/processor.js';
-import { claimInstagramEngagementEvents } from './instagram-engagement/typed-outbox.js';
+import {
+  claimInstagramEngagementEvents,
+  recoverStaleInstagramEngagementClaims,
+} from './instagram-engagement/typed-outbox.js';
 import { PostgresCrmCoreStore } from './persistence/postgres-crm-core-store.js';
 import { PostgresEventRecordStore } from './persistence/postgres-event-record-store.js';
 import { createPostgresPool } from './persistence/postgres.js';
@@ -36,6 +39,7 @@ const workerId = `${process.env.K_REVISION?.trim() || hostname()}:instagram-enga
 const batchSize = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_BATCH_SIZE, 10, 1, 50);
 const pollMs = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_POLL_MS, 1_000, 250, 60_000);
 const staleMs = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_STALE_CLAIM_MS, 300_000, 60_000, 3_600_000);
+const eventTypes = [INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE, INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE] as const;
 
 const sheetsSecrets = new EnvSecretResolver(process.env, 'env');
 const sheetsClient = new GoogleSheetsRestClient(sheetsSecrets, {
@@ -100,11 +104,17 @@ console.log(
 
 while (!stopping) {
   const now = new Date();
-  await recoverStaleEngagementClaims(now);
+  await recoverStaleInstagramEngagementClaims({
+    pool,
+    eventTypes,
+    staleBefore: new Date(now.getTime() - staleMs).toISOString(),
+    now: now.toISOString(),
+    limit: batchSize,
+  });
   const claimed = await claimInstagramEngagementEvents({
     pool,
     workerId,
-    eventTypes: [INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE, INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE],
+    eventTypes,
     now: now.toISOString(),
     limit: batchSize,
   });
@@ -118,7 +128,10 @@ while (!stopping) {
     if (stopping) break;
     try {
       await processor.process(event);
-      console.log('Instagram engagement event processed', JSON.stringify({ eventId: event.eventId, eventType: event.eventType }));
+      console.log(
+        'Instagram engagement event processed',
+        JSON.stringify({ eventId: event.eventId, eventType: event.eventType }),
+      );
     } catch (error) {
       const code = safeErrorCode(error);
       const nextAttemptAt = new Date(Date.now() + retryDelayMs(event.attemptNumber)).toISOString();
@@ -130,7 +143,10 @@ while (!stopping) {
         now: new Date().toISOString(),
         nextAttemptAt,
       });
-      console.error('Instagram engagement event failed', JSON.stringify({ eventId: event.eventId, eventType: event.eventType, errorCode: code }));
+      console.error(
+        'Instagram engagement event failed',
+        JSON.stringify({ eventId: event.eventId, eventType: event.eventType, errorCode: code }),
+      );
     }
   }
 }
@@ -149,30 +165,6 @@ function createLiveProvider(): InstagramGraphEngagementProvider {
   return new InstagramGraphEngagementProvider(client);
 }
 
-async function recoverStaleEngagementClaims(now: Date): Promise<void> {
-  const staleBefore = new Date(now.getTime() - staleMs).toISOString();
-  const result = await pool.query<{ event_id: string }>(
-    `select event_id from event_outbox
-     where status = 'CLAIMED'
-       and claimed_at <= $1::timestamptz
-       and event_type = any($2::text[])
-     order by claimed_at asc
-     limit $3`,
-    [staleBefore, [INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE, INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE], batchSize],
-  );
-  for (const row of result.rows) {
-    const record = await outbox.get(row.event_id);
-    if (!record?.claimExecutionId) continue;
-    await outbox.recoverStaleClaims({
-      staleBefore,
-      now: now.toISOString(),
-      limit: 1,
-      evidence: ['instagram:engagement:stale-claim-recovery'],
-      nextAttemptAt: now.toISOString(),
-    });
-  }
-}
-
 function retryDelayMs(attempt: number): number {
   return Math.min(1_000 * 2 ** Math.max(0, attempt - 1), 60_000);
 }
@@ -186,14 +178,18 @@ function requiredEnv(key: string): string {
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   if (!value?.trim()) return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error('INSTAGRAM_ENGAGEMENT_RUNTIME_INTEGER_INVALID');
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_RUNTIME_INTEGER_INVALID');
+  }
   return parsed;
 }
 
 function safeErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const candidate = raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';
-  return /^[A-Z0-9_]+$/.test(candidate) ? candidate.slice(0, 120) : 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';
+  return /^[A-Z0-9_]+$/.test(candidate)
+    ? candidate.slice(0, 120)
+    : 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';
 }
 
 function isTrue(value: string | undefined): boolean {
