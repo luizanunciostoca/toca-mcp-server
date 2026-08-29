@@ -7,6 +7,7 @@ import {
   INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE,
   INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
 } from './instagram-engagement/events.js';
+import { createInstagramEngagementGoogleSheetsAuth } from './instagram-engagement/google-sheets-auth.js';
 import { GoogleSheetsInstagramEngagementKnowledgeSource } from './instagram-engagement/knowledge.js';
 import { InstagramEngagementProcessor } from './instagram-engagement/processor.js';
 import {
@@ -32,7 +33,6 @@ const tenantId = requiredEnv('INSTAGRAM_ENGAGEMENT_TENANT_ID');
 const workspaceId = process.env.INSTAGRAM_ENGAGEMENT_WORKSPACE_ID?.trim() || tenantId;
 const organizationId = process.env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() || tenantId;
 const spreadsheetId = requiredEnv('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
-const sheetsTokenKey = requiredEnv('INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_TOKEN_ENV_KEY');
 const pageId = requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
 const instagramUserId =
   config.INSTAGRAM_BUSINESS_ACCOUNT_ID ?? requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
@@ -50,9 +50,9 @@ const eventTypes = [
   INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
 ] as const;
 
-const sheetsSecrets = new EnvSecretResolver(process.env, 'env');
-const sheetsClient = new GoogleSheetsRestClient(sheetsSecrets, {
-  tokenReference: { provider: 'env', key: sheetsTokenKey },
+const sheetsAuth = createInstagramEngagementGoogleSheetsAuth();
+const sheetsClient = new GoogleSheetsRestClient(sheetsAuth.resolver, {
+  tokenReference: sheetsAuth.tokenReference,
 });
 const knowledge = new GoogleSheetsInstagramEngagementKnowledgeSource({
   client: sheetsClient,
@@ -115,6 +115,7 @@ console.log(
     writesEnabled: config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED,
     batchSize,
     knowledgeConfigured: true,
+    knowledgeAuthMode: sheetsAuth.mode,
     scopeConfigured: Boolean(tenantId && workspaceId && organizationId),
   }),
 );
