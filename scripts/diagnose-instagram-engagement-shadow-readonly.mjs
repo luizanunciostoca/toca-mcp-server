@@ -150,7 +150,9 @@ try {
 } catch (error) {
   try {
     await client.query('rollback');
-  } catch {}
+  } catch (rollbackError) {
+    void rollbackError;
+  }
   throw error;
 } finally {
   await client.end();
