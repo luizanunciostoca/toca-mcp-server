@@ -1,0 +1,163 @@
+name: Instagram Engagement Shadow Retained Log Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-retained-log-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33274932765'
+  SOURCE_EXECUTION: toca-ig-eng-corrected-proof-33274932765-1-4d7pc
+
+jobs:
+  retained-log-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram retained shadow log diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and read-only boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_SHADOW_RETAINED_LOG_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do grep -Fxq "$required" <<< "$BODY"; done
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Authenticate read-only diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read retained execution logs without execution resource
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p engagement-evidence
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.execution_name=\"${SOURCE_EXECUTION}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json \
+            > /tmp/retained-logs.json
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/retained-logs.json', 'utf8'));
+          function collectStrings(value, output = []) {
+            if (typeof value === 'string') output.push(value);
+            else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, output));
+            else if (value && typeof value === 'object') Object.values(value).forEach((item) => collectStrings(item, output));
+            return output;
+          }
+          function redact(value) {
+            return String(value)
+              .replaceAll('Que horas começa o Sunset?', '<SYNTHETIC_MESSAGE>')
+              .replace(/https?:\/\/[^\s]+/giu, '<URL>')
+              .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+              .replace(/sha256:[a-f0-9]{32,}/giu, '<DIGEST>')
+              .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu, '<UUID>')
+              .replace(/shadow-proof-[A-Z0-9_-]+/giu, '<SYNTHETIC_ID>')
+              .replace(/\b\d{10,}\b/gu, '<ID>')
+              .replace(/\b[A-Z0-9_-]{24,}\b/giu, '<TOKEN>')
+              .replace(/\s+/gu, ' ')
+              .trim()
+              .slice(0, 360);
+          }
+          const strings = collectStrings(entries);
+          const markers = [...new Set(strings
+            .filter((v) => /SHADOW_PROOF_|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|FAILED|ERROR|ENOENT|EACCES|POSTGRES|DATABASE/iu.test(v))
+            .map(redact)
+            .filter(Boolean))].slice(0, 40);
+          const payloadSummaries = (Array.isArray(entries) ? entries : []).map((entry) => ({
+            severity: String(entry?.severity ?? 'DEFAULT'),
+            log: String(entry?.logName ?? '').replaceAll('%2F', '/').split('/logs/').at(-1) ?? 'unknown',
+            payloadType: entry?.textPayload !== undefined ? 'textPayload' : entry?.jsonPayload !== undefined ? 'jsonPayload' : entry?.protoPayload !== undefined ? 'protoPayload' : 'unknown',
+            safeSignature: redact(
+              typeof entry?.textPayload === 'string' ? entry.textPayload :
+              typeof entry?.jsonPayload?.message === 'string' ? entry.jsonPayload.message :
+              typeof entry?.protoPayload?.status?.message === 'string' ? entry.protoPayload.status.message : ''
+            ),
+          })).filter((item) => item.safeSignature || item.severity === 'ERROR');
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.shadow-retained-log-diagnostic.v1',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceExecution: process.env.SOURCE_EXECUTION,
+            entries: Array.isArray(entries) ? entries.length : 0,
+            safeMarkers: markers,
+            payloadSummaries: payloadSummaries.slice(0, 40),
+            rawPayloadPrinted: false,
+            readOnlyDiagnostic: true,
+            externalReplyWritesAuthorized: false,
+          };
+          fs.writeFileSync('engagement-evidence/retained-log-diagnostic.json', `${JSON.stringify(evidence, null, 2)}\n`);
+          NODE
+
+          ENTRY_COUNT="$(jq -r '.entries' engagement-evidence/retained-log-diagnostic.json)"
+          SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/retained-log-diagnostic.json)"
+          PAYLOAD_SUMMARIES="$(jq -c '.payloadSummaries' engagement-evidence/retained-log-diagnostic.json)"
+          printf -v BODY '%s\n' \
+            'RETAINED_SHADOW_LOG_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
+            "ENTRY_COUNT=${ENTRY_COUNT}" \
+            "SAFE_MARKERS=${SAFE_MARKERS}" \
+            "PAYLOAD_SUMMARIES=${PAYLOAD_SUMMARIES}" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_AUTHORIZED=false' \
+            'DATABASE_MUTATIONS_AUTHORIZED=false' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+
+      - name: Upload sanitized retained-log evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-retained-log-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
