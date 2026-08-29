@@ -5,10 +5,7 @@ const workflow = readFileSync(
   '.github/workflows/instagram-engagement-shadow-readonly-trace.yml',
   'utf8',
 );
-const script = readFileSync(
-  'scripts/diagnose-instagram-engagement-shadow-readonly.mjs',
-  'utf8',
-);
+const script = readFileSync('scripts/diagnose-instagram-engagement-shadow-readonly.mjs', 'utf8');
 
 const workflowGuards = [
   'PRODUCTION DIAGNOSTIC AUTHORIZATION',
