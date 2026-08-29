@@ -31,6 +31,27 @@ describe('Instagram engagement exact candidate shadow recovery', () => {
     expect(workflow).not.toContain('services add-iam-policy-binding');
   });
 
+  it('enables webhook inbound outbox composition without enabling external writes', () => {
+    const required = [
+      '@INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true',
+      '@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID',
+      '@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID',
+      '@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID',
+      'select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value',
+      'select(.name == "INSTAGRAM_ENGAGEMENT_TENANT_ID") | .value',
+      'select(.name == "INSTAGRAM_ENGAGEMENT_WORKSPACE_ID") | .value',
+      'select(.name == "INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID") | .value',
+      'webhookInboundOutboxEnabled:true',
+    ];
+
+    for (const token of required) {
+      expect(workflow).toContain(token);
+    }
+
+    expect(workflow).toContain('@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
+    expect(workflow).not.toContain('@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
+  });
+
   it('routes and verifies exactly one webhook candidate before exposure', () => {
     const required = [
       'WEBHOOK_CANDIDATE_REVISION=',
