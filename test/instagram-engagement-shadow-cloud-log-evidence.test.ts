@@ -48,7 +48,8 @@ describe('Instagram engagement Cloud Run shadow evidence extraction', () => {
     ]);
 
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout).validation).toBe('instagram-engagement-shadow-e2e');
+    const payload = JSON.parse(result.stdout) as { validation?: unknown };
+    expect(payload.validation).toBe('instagram-engagement-shadow-e2e');
   });
 
   it('extracts structured logger message JSON without accepting unrelated payloads', () => {
