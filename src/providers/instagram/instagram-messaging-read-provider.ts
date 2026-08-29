@@ -66,6 +66,7 @@ const messagesResponseSchema = z.object({
 export interface InstagramConversationListInput {
   readonly limit: number;
   readonly after?: string | undefined;
+  readonly userId?: string | undefined;
 }
 
 export interface InstagramConversationListItem {
@@ -81,6 +82,7 @@ export interface InstagramConversationListResult {
 export interface InstagramMessageListInput {
   readonly conversationId: string;
   readonly limit: number;
+  readonly after?: string | undefined;
 }
 
 export type InstagramMessageDirection = 'INBOUND' | 'OUTBOUND' | 'UNKNOWN';
@@ -97,6 +99,7 @@ export interface InstagramMessageListResult {
   readonly messages: readonly InstagramMessageReadItem[];
   readonly providerHasMore: boolean;
   readonly providerMessageDetailLimit: 20;
+  readonly nextAfter?: string | undefined;
 }
 
 interface PageBinding {
@@ -125,6 +128,7 @@ export class InstagramMessagingReadProvider {
           fields: 'id,updated_time',
           limit: String(input.limit),
           ...(input.after ? { after: input.after } : {}),
+          ...(input.userId ? { user_id: input.userId } : {}),
         },
         binding.pageAccessToken,
       ),
@@ -145,7 +149,8 @@ export class InstagramMessagingReadProvider {
   async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
     const binding = await this.pageBinding();
     const boundedLimit = Math.min(input.limit, 20);
-    const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;
+    const afterClause = input.after ? `.after(${safeFieldCursor(input.after)})` : '';
+    const fields = `messages.limit(${boundedLimit})${afterClause}{id,created_time,from,to,message,is_unsupported}`;
     const parsed = messagesResponseSchema.safeParse(
       await this.client.getWithAccessToken(
         input.conversationId,
@@ -155,9 +160,8 @@ export class InstagramMessagingReadProvider {
     );
     if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGES_RESPONSE_INVALID');
 
-    const providerHasMore = Boolean(
-      parsed.data.messages.paging?.next || parsed.data.messages.paging?.cursors?.after,
-    );
+    const nextAfter = parsed.data.messages.paging?.cursors?.after;
+    const providerHasMore = Boolean(parsed.data.messages.paging?.next || nextAfter);
     return {
       messages: parsed.data.messages.data.map((message) => ({
         messageId: message.id,
@@ -168,6 +172,7 @@ export class InstagramMessagingReadProvider {
       })),
       providerHasMore,
       providerMessageDetailLimit: 20,
+      ...(nextAfter ? { nextAfter } : {}),
     };
   }
 
@@ -207,6 +212,12 @@ export class InstagramMessagingReadProvider {
       instagramUsername: profile.data.username,
     };
   }
+}
+
+function safeFieldCursor(value: string): string {
+  const cursor = value.trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error('INSTAGRAM_MESSAGING_CURSOR_UNSAFE');
+  return cursor;
 }
 
 function directionFor(
