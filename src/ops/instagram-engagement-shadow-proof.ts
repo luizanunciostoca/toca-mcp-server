@@ -1,12 +1,33 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { parseMetaWebhookEvents } from '../providers/meta/meta-webhook.js';
+import {
+  buildSafeShadowProofFailureEvidence,
+  type ShadowProofChannel,
+  type ShadowProofStage,
+} from './instagram-engagement-shadow-proof-failure.js';
 
+let activeStage: ShadowProofStage = 'BOOTSTRAP';
+let activeChannel: ShadowProofChannel = null;
+let failureEmitted = false;
+
+function terminateWithSafeFailure(reason: unknown): void {
+  if (failureEmitted) return;
+  failureEmitted = true;
+  const evidence = buildSafeShadowProofFailureEvidence(reason, activeStage, activeChannel);
+  process.stderr.write(`${JSON.stringify(evidence)}\n`, () => process.exit(1));
+}
+
+process.on('uncaughtException', terminateWithSafeFailure);
+process.on('unhandledRejection', terminateWithSafeFailure);
+
+activeStage = 'ENVIRONMENT';
 const databaseUrl = requiredEnv('DATABASE_URL');
 const webhookUrl = requiredEnv('INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL').replace(/\/$/, '');
 const appSecret = requiredEnv('META_APP_SECRET');
 const instagramAccountId = requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 
+activeStage = 'WRITE_GUARD';
 if (isTrue(process.env.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED)) {
   throw new Error('SHADOW_PROOF_REQUIRES_WRITES_DISABLED');
 }
@@ -14,13 +35,17 @@ if (isTrue(process.env.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED)) {
 const proofId = randomUUID();
 const started = Date.now();
 const client = new pg.Client({ connectionString: databaseUrl });
+activeStage = 'DATABASE_CONNECT';
 await client.connect();
+let proofFailed = false;
 try {
   const results = [];
   for (const channel of ['COMMENT', 'DIRECT'] as const) {
     results.push(await runChannelProof(channel));
   }
 
+  activeChannel = null;
+  activeStage = 'COMPLETE';
   console.log(
     JSON.stringify({
       validation: 'instagram-engagement-shadow-e2e',
@@ -38,11 +63,15 @@ try {
       elapsedSeconds: Math.ceil((Date.now() - started) / 1000),
     }),
   );
+} catch (error) {
+  proofFailed = true;
+  throw error;
 } finally {
+  if (!proofFailed) activeStage = 'CLEANUP';
   await client.end();
 }
 
-type ShadowChannel = 'COMMENT' | 'DIRECT';
+type ShadowChannel = Exclude<ShadowProofChannel, null>;
 
 interface ShadowEvidence {
   readonly status: string;
@@ -63,6 +92,8 @@ interface ShadowChannelResult {
 }
 
 async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelResult> {
+  activeChannel = channel;
+  activeStage = 'EVENT_NORMALIZATION';
   const rawBody = buildSyntheticWebhook(channel);
   const normalized = parseMetaWebhookEvents(rawBody);
   if (normalized.length !== 1 || !normalized[0]) {
@@ -74,6 +105,7 @@ async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelRes
   const eventId = normalized[0].eventId;
   const signature = createHmac('sha256', appSecret).update(rawBody).digest('hex');
 
+  activeStage = 'WEBHOOK_REQUEST';
   const response = await fetch(`${webhookUrl}/webhooks/meta`, {
     method: 'POST',
     headers: {
@@ -84,9 +116,12 @@ async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelRes
   });
   if (!response.ok) throw new Error(`SHADOW_PROOF_${channel}_WEBHOOK_FAILED:${response.status}`);
 
+  activeStage = 'ACTION_WAIT';
   const evidence = await waitForEvidence(eventId, channel);
+  activeStage = 'DECISION_ASSERT';
   assertExpectedShadowDecision(evidence, channel);
 
+  activeStage = 'INBOUND_READBACK';
   const inbound = await client.query<{ status: string }>(
     `select status from event_outbox
       where event_type = 'instagram.engagement.inbound.v1'
@@ -101,6 +136,7 @@ async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelRes
     );
   }
 
+  activeStage = 'REPLY_READBACK';
   const replies = await client.query<{ count: string }>(
     `select count(*)::text as count from event_outbox
       where event_type = 'instagram.engagement.reply.v1'
