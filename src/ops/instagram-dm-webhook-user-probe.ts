@@ -21,6 +21,7 @@ const child = spawn(process.execPath, ['dist/src/index.js'], {
 let nextId = 1;
 const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 const providerErrors = new Map<string, number>();
+const executionFailures = new Map<string, number>();
 
 createInterface({ input: child.stdout }).on('line', (line) => {
   const trimmed = line.trim();
@@ -82,17 +83,50 @@ function notify(method: string, params: JsonObject): void {
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
 }
 
+function safeErrorCategory(value: unknown): string {
+  const text = String(value ?? '').toUpperCase();
+  const known = [
+    'CAPABILITY_NOT_FOUND',
+    'CAPABILITY_NOT_EXECUTABLE',
+    'RUNTIME_BINDING_NOT_FOUND',
+    'RUNTIME_BINDING_UNAVAILABLE',
+    'POLICY_DENIED',
+    'IDENTITY_REQUIRED',
+    'TENANT_ID_REQUIRED',
+    'WORKSPACE_ID_REQUIRED',
+    'ORGANIZATION_ID_REQUIRED',
+    'APPROVAL_REQUIRED',
+    'INVALID_ARGUMENT',
+    'VALIDATION',
+    'MCP_RPC_ERROR',
+    'MCP_TOOL_ERROR',
+    'MCP_TIMEOUT',
+    'META_HTTP_400',
+    'META_SUBCODE_2534084',
+  ];
+  for (const token of known) if (text.includes(token)) return token;
+  const token = text.match(/[A-Z][A-Z0-9_]{3,}/)?.[0];
+  return token ?? 'UNKNOWN';
+}
+
+function recordFailure(error: unknown): void {
+  const category = safeErrorCategory(error instanceof Error ? error.message : error);
+  executionFailures.set(category, (executionFailures.get(category) ?? 0) + 1);
+}
+
 function structured(result: unknown): JsonObject {
   const value = result as {
     isError?: boolean;
     structuredContent?: JsonObject;
     content?: Array<{ type?: string; text?: string }>;
   };
-  if (value?.isError) throw new Error('MCP_TOOL_ERROR');
+  const text = value?.content?.find((item) => item.type === 'text')?.text;
+  if (value?.isError) {
+    throw new Error(`MCP_TOOL_ERROR:${safeErrorCategory(text ?? 'MCP_TOOL_ERROR')}`);
+  }
   if (value?.structuredContent && typeof value.structuredContent === 'object') {
     return value.structuredContent;
   }
-  const text = value?.content?.find((item) => item.type === 'text')?.text;
   if (text) {
     const parsed = JSON.parse(text) as unknown;
     if (parsed && typeof parsed === 'object') return parsed as JsonObject;
@@ -178,12 +212,12 @@ async function main(): Promise<void> {
               if (scalar(message.text).trim()) inboundMessagesWithText2025 += 1;
             }
           }
-        } catch {
-          // Aggregate only. Do not emit conversation IDs or message content.
+        } catch (error) {
+          recordFailure(error);
         }
       }
-    } catch {
-      // Aggregate only. Do not emit sender IDs or raw provider messages.
+    } catch (error) {
+      recordFailure(error);
     }
   }
 
@@ -202,6 +236,7 @@ async function main(): Promise<void> {
       inboundMessages2025,
       inboundMessagesWithText2025,
       conversationsWithProviderHasMore,
+      executionFailures: [...executionFailures.entries()].map(([category, count]) => ({ category, count })),
       providerErrors: [...providerErrors.entries()].map(([key, count]) => ({ ...JSON.parse(key), count })),
       identitiesPrinted: false,
       messageTextPrinted: false,
@@ -225,7 +260,7 @@ function scalar(value: unknown): string {
 
 main()
   .catch((error) => {
-    const code = error instanceof Error ? error.message.replace(/[^A-Z0-9:_-]/gi, '_').slice(0, 160) : 'UNKNOWN';
+    const code = safeErrorCategory(error instanceof Error ? error.message : error);
     console.log(
       JSON.stringify({
         validation: 'instagram-dm-webhook-user-probe',
