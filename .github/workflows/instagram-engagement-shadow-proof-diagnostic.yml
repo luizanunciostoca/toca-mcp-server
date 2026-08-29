@@ -120,7 +120,7 @@ jobs:
                     sourceRunId: $sourceRunId,
                     sourceProofJob: $sourceProofJob,
                     logEntriesScanned: $entryCount,
-                    shadowProofTokens: ., 
+                    shadowProofTokens: .,
                     readOnlyDiagnostic: true,
                     serviceMutationsAuthorized: false,
                     databaseMutationsAuthorized: false,
@@ -130,16 +130,18 @@ jobs:
               ' > engagement-evidence/shadow-proof-diagnostic.json
 
           TOKEN_SUMMARY="$(printf '%s' "$TOKENS" | paste -sd ', ' -)"
+          printf -v DIAGNOSTIC_BODY '%s\n' \
+            'SHADOW_PROOF_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_PROOF_JOB=${SOURCE_PROOF_JOB}" \
+            "SHADOW_PROOF_TOKENS=${TOKEN_SUMMARY}" \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_AUTHORIZED=false' \
+            'DATABASE_MUTATIONS_AUTHORIZED=false' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
           gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "SHADOW_PROOF_DIAGNOSTIC_STATUS=PASS
-SOURCE_RUN_ID=${SOURCE_RUN_ID}
-SOURCE_PROOF_JOB=${SOURCE_PROOF_JOB}
-SHADOW_PROOF_TOKENS=${TOKEN_SUMMARY}
-READ_ONLY_DIAGNOSTIC=true
-SERVICE_MUTATIONS_AUTHORIZED=false
-DATABASE_MUTATIONS_AUTHORIZED=false
-PROVIDER_WRITES_AUTHORIZED=false
-EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+            --body "$DIAGNOSTIC_BODY"
 
       - name: Upload sanitized diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
