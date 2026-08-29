@@ -6,7 +6,7 @@ on:
       - ops/instagram-dm-2025-version-probe-20260828
     paths:
       - '.github/workflows/instagram-history-store-inventory.yml'
-      - '.github/smoke/instagram-history-store-inventory.mjs'
+      - 'src/ops/instagram-history-store-inventory.ts'
 
 permissions:
   contents: read
@@ -67,17 +67,13 @@ jobs:
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --command node \
-            --args .github/smoke/instagram-history-store-inventory.mjs \
+            --args dist/src/ops/instagram-history-store-inventory.js \
             --tasks 1 --max-retries 0 --task-timeout 180s --quiet
 
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-          for attempt in 1 2 3 4 5 6; do
-            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=30m --limit=100 --order=asc --format='value(textPayload)' | grep 'instagram-history-store-inventory' || true)"
-            if [ -n "$LINE" ]; then
-              printf '%s\n' "$LINE"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'SANITIZED_INVENTORY_LOG_NOT_FOUND' >&2
-          exit 1
+          sleep 20
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=30m --limit=200 --order=asc --format='value(textPayload)' \
+            | grep 'instagram-history-store-inventory'
