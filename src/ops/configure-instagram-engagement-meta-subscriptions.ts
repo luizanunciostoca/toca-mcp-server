@@ -82,8 +82,14 @@ async function assertAssetSubscription(
   const response = await fetch(url);
   if (!response.ok) throw new Error(`META_SUBSCRIPTION_READBACK_FAILED:${response.status}`);
   const json = (await response.json()) as { data?: readonly { id?: unknown }[] };
-  const present = (json.data ?? []).some((item) => String(item.id ?? '') === expectedAppId);
+  const present = (json.data ?? []).some((item) => safeScalarString(item.id) === expectedAppId);
   if (!present) throw new Error('META_SUBSCRIPTION_READBACK_APP_MISSING');
+}
+
+function safeScalarString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return '';
 }
 
 function requiredEnv(key: string): string {
