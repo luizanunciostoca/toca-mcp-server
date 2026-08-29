@@ -1,0 +1,346 @@
+name: Instagram Engagement Shadow Database Diagnostics
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-db-diagnostics
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f
+  RUNTIME_IMAGE_DIGEST: sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
+
+jobs:
+  diagnose-db:
+    if: >-
+      github.event.issue.pull_request == null &&
+      github.event.comment.user.login == 'luizanunciostoca' &&
+      github.event.comment.body == 'RUN_ENGAGEMENT_SHADOW_DB_DIAGNOSTICS'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact default-branch controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact owner authorization and target run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p db-diagnostics-evidence
+
+          ISSUE_JSON="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          MAIN_JSON="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main")"
+
+          MAIN_SHA="$(printf '%s' "$MAIN_JSON" | jq -r '.commit.sha')"
+          ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          AUTH_SHA="$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^AUTHORIZED_CONTROLLER_SHA=//p' | head -n1)"
+          TARGET_RUN_ID="$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^TARGET_SHADOW_RUN_ID=//p' | head -n1)"
+
+          printf '%s' "$ISSUE_JSON" | jq -e '
+            .state == "open" and
+            .user.login == "luizanunciostoca" and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram shadow DB diagnostics"))
+          ' >/dev/null
+          grep -Fx 'READ_ONLY_DATABASE_DIAGNOSTICS=AUTHORIZED' <<<"$ISSUE_BODY" >/dev/null
+          grep -Fx 'EXTERNAL_REPLY_WRITES_AUTHORIZED=false' <<<"$ISSUE_BODY" >/dev/null
+          grep -Fx 'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false' <<<"$ISSUE_BODY" >/dev/null
+          grep -Fx "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA" <<<"$ISSUE_BODY" >/dev/null
+          grep -Fx "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" <<<"$ISSUE_BODY" >/dev/null
+          [[ "$AUTH_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$AUTH_SHA" == "$GITHUB_SHA" ]]
+          [[ "$AUTH_SHA" == "$MAIN_SHA" ]]
+
+          TARGET_RUN_JSON="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}")"
+          printf '%s' "$TARGET_RUN_JSON" | jq -e '
+            .name == "Instagram Engagement Shadow Unique Candidate Recovery" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            .conclusion == "failure"
+          ' >/dev/null
+
+          TARGET_STARTED_AT="$(printf '%s' "$TARGET_RUN_JSON" | jq -r '.run_started_at')"
+          TARGET_UPDATED_AT="$(printf '%s' "$TARGET_RUN_JSON" | jq -r '.updated_at')"
+          WINDOW_START="$(node -e 'console.log(new Date(Date.parse(process.argv[1]) - 5*60*1000).toISOString())' "$TARGET_STARTED_AT")"
+          WINDOW_END="$(node -e 'console.log(new Date(Date.parse(process.argv[1]) + 5*60*1000).toISOString())' "$TARGET_UPDATED_AT")"
+
+          {
+            echo "AUTHORIZATION_ISSUE=$ISSUE_NUMBER"
+            echo "TARGET_RUN_ID=$TARGET_RUN_ID"
+            echo "WINDOW_START=$WINDOW_START"
+            echo "WINDOW_END=$WINDOW_END"
+          } >> "$GITHUB_ENV"
+
+          jq -n \
+            --arg issue "$ISSUE_NUMBER" \
+            --arg controller "$AUTH_SHA" \
+            --arg targetRunId "$TARGET_RUN_ID" \
+            --arg start "$WINDOW_START" \
+            --arg end "$WINDOW_END" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-db-diagnostics-authorization.v1",authorizationIssue:($issue|tonumber),controllerSha:$controller,targetRunId:$targetRunId,windowStart:$start,windowEnd:$end,readOnly:true,databaseWritesAuthorized:false,externalReplyWritesAuthorized:false}' \
+            > db-diagnostics-evidence/authorization.json
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Execute SELECT-only database readback in ephemeral job
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-eng-dbdiag-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          cat > /tmp/db-diagnostics.cjs <<'NODE'
+          const crypto = require('node:crypto');
+          const pg = require('pg');
+
+          const sha = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+          const iso = (value) => value instanceof Date ? value.toISOString() : (value ? new Date(value).toISOString() : null);
+          const text = (value) => value == null ? null : String(value);
+
+          (async () => {
+            const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+            const client = await pool.connect();
+            try {
+              await client.query('begin read only');
+              const identity = await client.query('select current_database() as database_name, current_user as database_user');
+              const meta = await client.query(
+                `select event_id, occurred_at
+                   from meta_webhook_events
+                  where channel = 'COMMENT'
+                    and sender_scoped_id like 'shadow-proof-comment-sender-%'
+                    and occurred_at >= $1::timestamptz
+                    and occurred_at <= $2::timestamptz
+                  order by occurred_at desc
+                  limit 20`,
+                [process.env.TARGET_WINDOW_START, process.env.TARGET_WINDOW_END],
+              );
+
+              const events = [];
+              for (const row of meta.rows) {
+                const inboundEventId = `instagram-engagement-inbound:${row.event_id}`;
+                const outbox = await client.query(
+                  `select event_id, event_type, status, available_at, attempts, max_attempts,
+                          claimed_by, claim_execution_id, claimed_at, delivered_at,
+                          last_error_code, tenant_id, workspace_id, organization_id
+                     from event_outbox
+                    where event_id = $1
+                    limit 1`,
+                  [inboundEventId],
+                );
+                const attempts = await client.query(
+                  `select status, worker_id, attempt_number, error_code, claimed_at, completed_at
+                     from event_outbox_delivery_attempts
+                    where event_id = $1
+                    order by attempt_number asc`,
+                  [inboundEventId],
+                );
+                const action = await client.query(
+                  `select status, intent, risk, autonomy, faq_id, provider_reply_id, created_at, updated_at
+                     from instagram_engagement_actions
+                    where event_id = $1
+                    limit 1`,
+                  [row.event_id],
+                );
+                const audit = await client.query(
+                  `select count(*)::int as count
+                     from audit_events
+                    where correlation_id = $1
+                      and tool_name = 'instagram.engagement.webhook.receive'
+                      and decision = 'ACCEPTED'`,
+                  [row.event_id],
+                );
+
+                const o = outbox.rows[0] || null;
+                const a = action.rows[0] || null;
+                events.push({
+                  eventIdSha256: sha(row.event_id),
+                  occurredAt: iso(row.occurred_at),
+                  auditAcceptedCount: Number(audit.rows[0]?.count || 0),
+                  inbound: o ? {
+                    exists: true,
+                    eventType: text(o.event_type),
+                    status: text(o.status),
+                    availableAt: iso(o.available_at),
+                    attempts: Number(o.attempts || 0),
+                    maxAttempts: Number(o.max_attempts || 0),
+                    claimedBy: text(o.claimed_by),
+                    hasClaimExecutionId: Boolean(o.claim_execution_id),
+                    claimedAt: iso(o.claimed_at),
+                    deliveredAt: iso(o.delivered_at),
+                    lastErrorCode: text(o.last_error_code),
+                    tenantMatches: o.tenant_id === 'toca',
+                    workspaceMatches: o.workspace_id === 'toca',
+                    organizationMatches: o.organization_id === 'toca',
+                  } : { exists: false },
+                  deliveryAttempts: attempts.rows.map((d) => ({
+                    status: text(d.status),
+                    workerId: text(d.worker_id),
+                    attemptNumber: Number(d.attempt_number || 0),
+                    errorCode: text(d.error_code),
+                    claimedAt: iso(d.claimed_at),
+                    completedAt: iso(d.completed_at),
+                  })),
+                  action: a ? {
+                    exists: true,
+                    status: text(a.status),
+                    intent: text(a.intent),
+                    risk: text(a.risk),
+                    autonomy: text(a.autonomy),
+                    faqId: text(a.faq_id),
+                    providerReplyObserved: Boolean(a.provider_reply_id),
+                    createdAt: iso(a.created_at),
+                    updatedAt: iso(a.updated_at),
+                  } : { exists: false },
+                });
+              }
+
+              const first = events[0] || null;
+              let inference = 'TARGET_META_EVENT_NOT_FOUND_CURRENT_DB';
+              if (first) {
+                if (!first.inbound.exists) inference = 'META_COMMITTED_WITHOUT_INBOUND_OUTBOX';
+                else if (first.inbound.status === 'PENDING' && first.inbound.attempts === 0) inference = 'INBOUND_PENDING_UNCLAIMED';
+                else if (first.inbound.status === 'CLAIMED') inference = 'INBOUND_CLAIMED_STUCK_OR_ACTIVE';
+                else if (first.inbound.status === 'FAILED_RETRYABLE' || first.inbound.status === 'DEAD_LETTER') inference = 'INBOUND_DELIVERY_FAILED';
+                else if (first.inbound.status === 'DELIVERED' && !first.action.exists) inference = 'INBOUND_DELIVERED_ACTION_MISSING';
+                else if (first.inbound.status === 'DELIVERED' && first.action.exists) inference = 'INBOUND_AND_ACTION_PRESENT';
+                else inference = 'INBOUND_PRESENT_OTHER_STATE';
+              }
+
+              const result = {
+                schemaVersion: 'toca.instagram-engagement.shadow-db-diagnostics.v1',
+                targetRunId: process.env.TARGET_RUN_ID,
+                readOnlyTransaction: true,
+                databaseWritesAuthorized: false,
+                externalReplyWritesAuthorized: false,
+                instagramEngagementWritesEnabled: false,
+                secretsPrinted: false,
+                messageTextPrinted: false,
+                senderIdentityPrinted: false,
+                databaseFingerprint: sha(identity.rows[0]?.database_name || 'unknown'),
+                databaseUserFingerprint: sha(identity.rows[0]?.database_user || 'unknown'),
+                matchingSyntheticCommentEvents: events.length,
+                events,
+                inference,
+              };
+              console.log(`INSTAGRAM_ENGAGEMENT_DB_DIAGNOSTICS ${JSON.stringify(result)}`);
+              await client.query('rollback');
+            } finally {
+              client.release();
+              await pool.end();
+            }
+          })().catch((error) => {
+            console.error(`INSTAGRAM_ENGAGEMENT_DB_DIAGNOSTICS_ERROR ${String(error?.message || error).slice(0, 240)}`);
+            process.exit(1);
+          });
+          NODE
+
+          DIAG_SCRIPT_B64="$(base64 -w0 /tmp/db-diagnostics.cjs)"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^@^TARGET_RUN_ID=$TARGET_RUN_ID@TARGET_WINDOW_START=$WINDOW_START@TARGET_WINDOW_END=$WINDOW_END@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@EXTERNAL_REPLY_WRITES_AUTHORIZED=false@DIAG_SCRIPT_B64=$DIAG_SCRIPT_B64" \
+            --command node \
+            --args "^@^-e@eval(Buffer.from(process.env.DIAG_SCRIPT_B64,'base64').toString('utf8'))" \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=30m --limit=200 --order=asc --format=json)"
+          printf '%s' "$LOG_ENTRIES" | node - <<'NODE' > db-diagnostics-evidence/database-diagnostics.json
+          let input = '';
+          process.stdin.setEncoding('utf8');
+          process.stdin.on('data', (chunk) => { input += chunk; });
+          process.stdin.on('end', () => {
+            const entries = JSON.parse(input || '[]');
+            const strings = (value, out = []) => {
+              if (typeof value === 'string') out.push(value);
+              else if (Array.isArray(value)) for (const item of value) strings(item, out);
+              else if (value && typeof value === 'object') for (const item of Object.values(value)) strings(item, out);
+              return out;
+            };
+            for (const entry of entries) {
+              for (const value of strings(entry)) {
+                const marker = 'INSTAGRAM_ENGAGEMENT_DB_DIAGNOSTICS ';
+                const index = value.indexOf(marker);
+                if (index < 0) continue;
+                const candidate = value.slice(index + marker.length).trim();
+                try {
+                  const parsed = JSON.parse(candidate);
+                  process.stdout.write(JSON.stringify(parsed, null, 2) + '\n');
+                  return;
+                } catch {}
+              }
+            }
+            throw new Error('SANITIZED_DATABASE_DIAGNOSTICS_NOT_FOUND');
+          });
+          NODE
+
+          jq -e '
+            .readOnlyTransaction == true and
+            .databaseWritesAuthorized == false and
+            .externalReplyWritesAuthorized == false and
+            .instagramEngagementWritesEnabled == false and
+            .secretsPrinted == false and
+            .messageTextPrinted == false and
+            .senderIdentityPrinted == false
+          ' db-diagnostics-evidence/database-diagnostics.json >/dev/null
+
+          cat db-diagnostics-evidence/database-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
+          rm -f /tmp/db-diagnostics.cjs
+          cleanup
+          trap - EXIT
+
+      - name: Upload sanitized database diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-db-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: db-diagnostics-evidence/
+          if-no-files-found: warn
+          retention-days: 90
