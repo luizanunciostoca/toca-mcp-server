@@ -80,7 +80,7 @@ async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelRes
       'content-type': 'application/json',
       'x-hub-signature-256': `sha256=${signature}`,
     },
-    body: rawBody,
+    body: rawBody.toString('utf8'),
   });
   if (!response.ok) throw new Error(`SHADOW_PROOF_${channel}_WEBHOOK_FAILED:${response.status}`);
 
