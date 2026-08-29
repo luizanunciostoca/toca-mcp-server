@@ -99,7 +99,8 @@ export function resolveKnowledgeRows(
   let bestScore = 0;
 
   for (const row of rows) {
-    if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent)) continue;
+    if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
+      continue;
     const score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
     if (score > bestScore) {
       best = row;
@@ -139,7 +140,13 @@ export function parseKnowledgeRows(
     if (!faqId || !canonical || !intent) continue;
 
     const prompts = [canonical, ...splitVariants(variants)].map(normalizeText).filter(Boolean);
-    const factsVerified = isVerifiedKnowledgeConfiguration(status, autonomy, answer, source, intent);
+    const factsVerified = isVerifiedKnowledgeConfiguration(
+      status,
+      autonomy,
+      answer,
+      source,
+      intent,
+    );
     rows.push({
       faqId,
       intent,

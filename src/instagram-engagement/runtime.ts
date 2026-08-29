@@ -78,7 +78,12 @@ export function createInstagramEngagementBatchRuntime(
   ] as const;
 
   const outbox = new PostgresTransactionalOutbox(options.pool);
-  const knowledgeRuntime = createKnowledgeSource(options.pool, spreadsheetId, env, options.fetchImpl);
+  const knowledgeRuntime = createKnowledgeSource(
+    options.pool,
+    spreadsheetId,
+    env,
+    options.fetchImpl,
+  );
 
   const crm = new PostgresCrmCoreStore(options.pool, { outbox });
   const events = new PostgresEventRecordStore(options.pool, { outbox });

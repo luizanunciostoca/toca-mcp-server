@@ -68,7 +68,8 @@ try {
     [[ENGAGEMENT_MIGRATION, KNOWLEDGE_MIGRATION]],
   );
   const applied = new Set(migrations.rows.map((row) => row.version));
-  if (!applied.has(ENGAGEMENT_MIGRATION)) throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');
+  if (!applied.has(ENGAGEMENT_MIGRATION))
+    throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');
 
   let knowledgeMode: 'postgres' | 'google-sheets:env' | 'google-sheets:gcp-iam';
   if (knowledgeSource === 'postgres') {

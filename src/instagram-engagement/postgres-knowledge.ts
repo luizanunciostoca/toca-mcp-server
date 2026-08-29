@@ -21,9 +21,7 @@ interface KnowledgeDbRow {
   readonly status: string;
 }
 
-export class PostgresInstagramEngagementKnowledgeSource
-  implements InstagramEngagementKnowledgeSource
-{
+export class PostgresInstagramEngagementKnowledgeSource implements InstagramEngagementKnowledgeSource {
   constructor(
     private readonly pool: pg.Pool,
     private readonly sourceSpreadsheetId?: string,

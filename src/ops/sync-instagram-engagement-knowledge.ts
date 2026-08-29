@@ -26,7 +26,8 @@ try {
   const migration = await client.query<{ present: boolean }>(
     `select exists(select 1 from schema_migrations where version = '036_instagram_engagement_knowledge.sql') as present`,
   );
-  if (!migration.rows[0]?.present) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_MIGRATION_NOT_APPLIED');
+  if (!migration.rows[0]?.present)
+    throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_MIGRATION_NOT_APPLIED');
 
   await client.query(
     `update instagram_engagement_knowledge
@@ -86,7 +87,8 @@ try {
   if (Number(verified.rows[0]?.count ?? 0) !== INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.length) {
     throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SYNC_COUNT_MISMATCH');
   }
-  if (verified.rows[0]?.hashes !== 1) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SYNC_HASH_MISMATCH');
+  if (verified.rows[0]?.hashes !== 1)
+    throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SYNC_HASH_MISMATCH');
   await client.query('commit');
 
   console.log(

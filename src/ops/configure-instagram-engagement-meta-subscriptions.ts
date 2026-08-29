@@ -6,10 +6,9 @@ const appSecret = requiredEnv('META_APP_SECRET');
 const pageAccessToken = requiredEnv('META_ACCESS_TOKEN');
 const pageId = requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
 const instagramAccountId = requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
-const graphBaseUrl = (process.env.META_GRAPH_BASE_URL?.trim() || 'https://graph.facebook.com').replace(
-  /\/$/,
-  '',
-);
+const graphBaseUrl = (
+  process.env.META_GRAPH_BASE_URL?.trim() || 'https://graph.facebook.com'
+).replace(/\/$/, '');
 const apiVersion = process.env.META_GRAPH_API_VERSION?.trim() || 'v24.0';
 const verifyToken = deriveMetaWebhookVerifyToken(appSecret);
 const appAccessToken = `${appId}|${appSecret}`;
