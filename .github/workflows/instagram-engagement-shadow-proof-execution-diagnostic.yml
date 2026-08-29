@@ -20,7 +20,6 @@ env:
   GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   SOURCE_RUN_ID: '33274932765'
   SOURCE_PROOF_JOB: toca-ig-eng-corrected-proof-33274932765-1
-  SOURCE_EXECUTION: toca-ig-eng-corrected-proof-33274932765-1-4d7pc
 
 jobs:
   read-only-execution-diagnostic:
@@ -56,7 +55,6 @@ jobs:
             "INSTAGRAM_ENGAGEMENT_SHADOW_EXECUTION_DIAGNOSTIC=AUTHORIZED"
             "SOURCE_RUN_ID=$SOURCE_RUN_ID"
             "SOURCE_PROOF_JOB=$SOURCE_PROOF_JOB"
-            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
             "READ_ONLY_DIAGNOSTIC=true"
             "SERVICE_MUTATIONS_AUTHORIZED=false"
             "DATABASE_MUTATIONS_AUTHORIZED=false"
@@ -77,7 +75,30 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Describe failed execution and inspect execution-scoped logs
+      - name: Discover actual proof execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs executions list \
+            --job "$SOURCE_PROOF_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json > /tmp/executions.json
+
+          EXECUTION_COUNT="$(jq 'length' /tmp/executions.json)"
+          test "$EXECUTION_COUNT" -ge 1
+
+          SOURCE_EXECUTION="$(jq -r 'sort_by(.metadata.creationTimestamp // .createTime // "") | reverse | .[0].metadata.name // .[0].name // empty' /tmp/executions.json)"
+          test -n "$SOURCE_EXECUTION"
+          case "$SOURCE_EXECUTION" in
+            ${SOURCE_PROOF_JOB}-*) ;;
+            *) echo 'Discovered execution does not belong to exact proof job' >&2; exit 1 ;;
+          esac
+
+          echo "SOURCE_EXECUTION=$SOURCE_EXECUTION" >> "$GITHUB_ENV"
+          echo "DISCOVERED_EXECUTION_COUNT=$EXECUTION_COUNT" >> "$GITHUB_ENV"
+
+      - name: Describe discovered failed execution and inspect execution-scoped logs
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -123,13 +144,14 @@ jobs:
             message: redact(condition?.message ?? 'NONE'),
           }));
           const logStrings = collectStrings(entries);
-          const safeMarkers = [...new Set(logStrings.filter((value) => /SHADOW_PROOF_|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|DEADLINE|FAILED/iu.test(value)).map(redact))].slice(0, 20);
+          const safeMarkers = [...new Set(logStrings.filter((value) => /SHADOW_PROOF_|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|DEADLINE|FAILED|ERROR/iu.test(value)).map(redact))].slice(0, 30);
           const logNames = [...new Set((Array.isArray(entries) ? entries : []).map((entry) => String(entry?.logName ?? '').replaceAll('%2F', '/').split('/logs/').at(-1) ?? 'unknown'))].sort();
           const evidence = {
-            schemaVersion: 'toca.instagram-engagement.shadow-proof-execution-diagnostic.v1',
+            schemaVersion: 'toca.instagram-engagement.shadow-proof-execution-diagnostic.v2',
             sourceRunId: process.env.SOURCE_RUN_ID,
             sourceProofJob: process.env.SOURCE_PROOF_JOB,
             sourceExecution: process.env.SOURCE_EXECUTION,
+            discoveredExecutionCount: Number(process.env.DISCOVERED_EXECUTION_COUNT ?? '0'),
             completionTimePresent: Boolean(execution?.status?.completionTime),
             failedCount: execution?.status?.failedCount ?? null,
             succeededCount: execution?.status?.succeededCount ?? null,
@@ -157,6 +179,7 @@ jobs:
             'SHADOW_EXECUTION_DIAGNOSTIC_STATUS=PASS' \
             "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
             "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
+            "DISCOVERED_EXECUTION_COUNT=${DISCOVERED_EXECUTION_COUNT}" \
             "FAILED_COUNT=${FAILED_COUNT}" \
             "SUCCEEDED_COUNT=${SUCCEEDED_COUNT}" \
             "EXECUTION_SCOPED_LOG_ENTRIES=${LOG_COUNT}" \
