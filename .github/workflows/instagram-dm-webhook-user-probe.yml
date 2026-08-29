@@ -1,7 +1,7 @@
 name: Instagram DM Webhook User Probe
 
 # Operational READ_ONLY diagnostic. No Instagram writes.
-# Diagnostic generation 3: preserve the sanitized inner MCP failure category.
+# Diagnostic generation 4: materialize the R09 messaging catalog before toca.execute.
 on:
   push:
     branches:
@@ -41,12 +41,30 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Materialize optional user_id read lookup
+      - name: Materialize R09 and optional user_id read lookup
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
+
+          ids = Path('src/governance/capability-ids.ts')
+          text = ids.read_text()
+          required = [
+              "'instagram.messaging.conversations.read'",
+              "'instagram.messaging.messages.read'",
+          ]
+          if not all(item in text for item in required):
+              anchor = "  R09: [\n"
+              if anchor not in text:
+                  raise SystemExit('R09_CATALOG_ANCHOR_NOT_FOUND')
+              injection = (
+                  "  R09: [\n"
+                  "    'instagram.messaging.conversations.read',\n"
+                  "    'instagram.messaging.messages.read',\n"
+              )
+              text = text.replace(anchor, injection, 1)
+              ids.write_text(text)
 
           provider = Path('src/providers/instagram/instagram-messaging-read-provider.ts')
           text = provider.read_text()
@@ -90,7 +108,7 @@ jobs:
               server.write_text(text.replace(old, "  const cloudRunService = env.K_SERVICE?.trim() || env.CLOUD_RUN_JOB?.trim();", 1))
           PY
           pnpm install --frozen-lockfile
-          pnpm exec prettier --write src/providers/instagram/instagram-messaging-read-provider.ts src/mcp/runtime-capability-resolver.ts src/server.ts src/ops/instagram-dm-webhook-user-probe.ts
+          pnpm exec prettier --write src/governance/capability-ids.ts src/providers/instagram/instagram-messaging-read-provider.ts src/mcp/runtime-capability-resolver.ts src/server.ts src/ops/instagram-dm-webhook-user-probe.ts
           pnpm typecheck
           pnpm build
 
