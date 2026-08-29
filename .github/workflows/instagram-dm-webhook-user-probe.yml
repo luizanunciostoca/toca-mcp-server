@@ -1,7 +1,7 @@
 name: Instagram DM Webhook User Probe
 
 # Operational READ_ONLY diagnostic. No Instagram writes.
-# Diagnostic generation 4: materialize the R09 messaging catalog before toca.execute.
+# Diagnostic generation 5: probe all persisted DIRECT sender ids through governed toca.execute.
 on:
   push:
     branches:
