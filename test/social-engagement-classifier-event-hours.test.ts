@@ -27,7 +27,9 @@ describe('social engagement event schedule classification', () => {
       eventInterest: 'SUNSET',
       productEvent: 'SUNSET',
     });
-    expect(resolveKnowledgeRows('Que horas começa o Sunset?', classification.intent, [FAQ_001])).toMatchObject({
+    expect(
+      resolveKnowledgeRows('Que horas começa o Sunset?', classification.intent, [FAQ_001]),
+    ).toMatchObject({
       faqId: 'FAQ-001',
       intent: 'LOCATION_HOURS',
       factsVerified: true,
@@ -52,7 +54,9 @@ describe('social engagement event schedule classification', () => {
   });
 
   it('preserves commercial precedence over schedule/event signals', () => {
-    expect(classifySocialEngagement('Quanto custa o ingresso da The Party e que horas começa?')).toMatchObject({
+    expect(
+      classifySocialEngagement('Quanto custa o ingresso da The Party e que horas começa?'),
+    ).toMatchObject({
       intent: 'COMMERCIAL_LEAD',
       eventInterest: 'THE_PARTY',
       commercialIntent: 'HIGH',
