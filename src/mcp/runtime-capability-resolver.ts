@@ -143,10 +143,12 @@ const accountInsightsSchema = z.object({
 const instagramConversationListSchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
   after: z.string().min(1).optional(),
+  userId: z.string().min(1).optional(),
 });
 const instagramMessageListSchema = z.object({
   conversationId: z.string().min(1),
   limit: z.number().int().min(1).max(20).default(20),
+  after: z.string().min(1).optional(),
 });
 const adAccountSchema = z.object({
   adAccountId: z.string().min(1),
