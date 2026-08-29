@@ -68,7 +68,7 @@ describe('Instagram engagement shadow read-only trace', () => {
     expect(workflow).toContain('actions: read');
     expect(workflow).toContain('issues: read');
     expect(workflow).toContain('GH_TOKEN: ${{ github.token }}');
-    expect(workflow).toContain('jq \' .issue\' "$GITHUB_EVENT_PATH"'.replace("' .issue'", "'.issue'"));
+    expect(workflow).toContain('jq \\.issue\\ "$GITHUB_EVENT_PATH"');
     expect(workflow).toContain('-H "Authorization: Bearer $GH_TOKEN"');
     expect(workflow).toContain('mkdir -p engagement-evidence');
     expect(workflow).toContain('toca.instagram-engagement.shadow-readonly-trace-attempt.v1');
