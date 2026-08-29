@@ -17,6 +17,7 @@ const REQUIRED_FAQ_HEADERS = [
   'resposta_oficial',
   'fonte_resposta_toca_os',
   'status',
+  'validade_operacional',
 ] as const;
 
 const REQUIRED_TABLES = [
@@ -40,6 +41,9 @@ const workspaceId = process.env.INSTAGRAM_ENGAGEMENT_WORKSPACE_ID?.trim() || ten
 const organizationId = process.env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() || tenantId;
 requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
 const spreadsheetId = requiredEnv('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
+if (spreadsheetId !== INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID) {
+  throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH');
+}
 const knowledgeSource =
   process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE?.trim().toLowerCase() || 'google-sheets';
 const instagramUserId =
@@ -76,9 +80,6 @@ try {
     if (!applied.has(KNOWLEDGE_MIGRATION)) {
       throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_MIGRATION_NOT_APPLIED');
     }
-    if (spreadsheetId !== INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID) {
-      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH');
-    }
     const snapshot = await pool.query<{ count: string; hashes: number; approved: string }>(
       `select count(*)::text as count,
               count(distinct source_snapshot_sha256)::int as hashes,
@@ -103,16 +104,9 @@ try {
     });
     const values = await sheetsClient.readRange(
       spreadsheetId,
-      process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A1:T2',
+      process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A1:T20',
     );
-    const header = (values[0] ?? [])
-      .map(safeCell)
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
-    const missingHeaders = REQUIRED_FAQ_HEADERS.filter((required) => !header.includes(required));
-    if (missingHeaders.length > 0) {
-      throw new Error(`INSTAGRAM_ENGAGEMENT_FAQ_SCHEMA_INVALID:${missingHeaders.join(',')}`);
-    }
+    validateCanonicalSheetSnapshot(values);
     knowledgeMode = `google-sheets:${sheetsAuth.mode}`;
   } else {
     throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE_INVALID');
@@ -143,6 +137,7 @@ try {
       migrationVerified: true,
       knowledgeReadable: true,
       knowledgeSchemaVerified: true,
+      knowledgeSnapshotVerified: true,
       knowledgeAuthMode: knowledgeMode,
       scopeConfigured: Boolean(tenantId && workspaceId && organizationId),
       identitiesPrinted: false,
@@ -151,6 +146,77 @@ try {
   );
 } finally {
   await pool.end();
+}
+
+function validateCanonicalSheetSnapshot(values: readonly (readonly unknown[])[]): void {
+  const header = (values[0] ?? []).map((value) => safeCell(value).trim().toLowerCase());
+  const missingHeaders = REQUIRED_FAQ_HEADERS.filter((required) => !header.includes(required));
+  if (missingHeaders.length > 0) {
+    throw new Error(`INSTAGRAM_ENGAGEMENT_FAQ_SCHEMA_INVALID:${missingHeaders.join(',')}`);
+  }
+
+  const index = new Map(header.map((name, position) => [name, position] as const));
+  const faqIdIndex = requiredColumn(index, 'faq_id');
+  const body = values
+    .slice(1)
+    .filter((row) => safeCell(row[faqIdIndex]).trim().length > 0);
+
+  if (body.length !== INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.length) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SNAPSHOT_COUNT_INVALID');
+  }
+
+  const expectedById = new Map(
+    INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.map((row) => [row.faqId, row] as const),
+  );
+  const seen = new Set<string>();
+
+  for (const row of body) {
+    const faqId = sheetCell(row, index, 'faq_id');
+    if (seen.has(faqId)) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_DUPLICATE_FAQ_ID');
+    seen.add(faqId);
+
+    const expected = expectedById.get(faqId);
+    if (!expected) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_UNEXPECTED_FAQ_ID');
+
+    if (sheetCell(row, index, 'pergunta_canonica') !== expected.canonicalQuestion) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_QUESTION_MISMATCH');
+    }
+    if (sheetCell(row, index, 'intent').toUpperCase() !== expected.intent) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_INTENT_MISMATCH');
+    }
+    if (sheetCell(row, index, 'autonomy_default').toUpperCase() !== expected.autonomy) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_AUTONOMY_MISMATCH');
+    }
+    if (sheetCell(row, index, 'resposta_oficial') !== expected.answer) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_ANSWER_MISMATCH');
+    }
+    if (sheetCell(row, index, 'fonte_resposta_toca_os') !== expected.source) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE_MISMATCH');
+    }
+    if (sheetCell(row, index, 'status').toUpperCase() !== expected.status) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_STATUS_MISMATCH');
+    }
+    if (
+      sheetCell(row, index, 'validade_operacional').toUpperCase() !== expected.operationalValidity
+    ) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_VALIDITY_MISMATCH');
+    }
+  }
+
+  if (seen.size !== expectedById.size) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_FAQ_SET_MISMATCH');
+  }
+}
+
+function requiredColumn(index: ReadonlyMap<string, number>, key: string): number {
+  const position = index.get(key);
+  if (position === undefined) throw new Error(`INSTAGRAM_ENGAGEMENT_FAQ_SCHEMA_INVALID:${key}`);
+  return position;
+}
+
+function sheetCell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
+  const position = requiredColumn(index, key);
+  return safeCell(row[position]).trim();
 }
 
 function requiredEnv(key: string): string {
