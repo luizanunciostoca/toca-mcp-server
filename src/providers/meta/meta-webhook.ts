@@ -119,6 +119,10 @@ function normalizeChange(
   const commentLike = Boolean(commentId) || field.includes('comment') || field.includes('mention');
 
   if (!commentLike) return undefined;
+  // Provider echoes/self-authored comments must never enter the inbound automation path.
+  // This mirrors the proven n8n reference guard (account id != sender id) while keeping
+  // the TOCA implementation deterministic and provider-native.
+  if (senderId === accountId) return undefined;
 
   return {
     eventId: deterministicEventId(accountId, 'COMMENT', commentId, occurredAt, raw),
@@ -154,6 +158,13 @@ function normalizeDirectValue(
   const recipientId = nestedString(value, 'recipient', 'id');
   const text = stringValue(message.text);
   const occurredAt = normalizeTimestamp(value.timestamp);
+  const isEcho = message.is_echo === true;
+
+  // Do not process our own outbound message echo as a new inbound DIRECT. Otherwise a
+  // successful automated reply can be re-consumed and create a response loop.
+  if (isEcho || senderId === accountId) return undefined;
+  // When Meta supplies a recipient id, only accept events actually addressed to this account.
+  if (recipientId && recipientId !== accountId) return undefined;
 
   return {
     eventId: deterministicEventId(accountId, 'DIRECT', messageId, occurredAt, raw),

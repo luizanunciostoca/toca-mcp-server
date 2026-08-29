@@ -38,7 +38,7 @@ describe('parseMetaWebhookEvents', () => {
     });
   });
 
-  it('normalizes Instagram messages delivered through changes', () => {
+  it('normalizes Instagram messages delivered through changes when addressed to the connected account', () => {
     const events = parseMetaWebhookEvents(
       Buffer.from(
         JSON.stringify({
@@ -51,7 +51,7 @@ describe('parseMetaWebhookEvents', () => {
                   field: 'messages',
                   value: {
                     sender: { id: '12334' },
-                    recipient: { id: '23245' },
+                    recipient: { id: '17841402033495654' },
                     timestamp: '1527459824',
                     message: {
                       mid: 'random_mid',

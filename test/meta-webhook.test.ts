@@ -175,6 +175,33 @@ describe('Meta webhook boundary', () => {
     });
   });
 
+  it('drops comments authored by the connected Instagram account to prevent reply loops', () => {
+    const events = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              changes: [
+                {
+                  field: 'comments',
+                  value: {
+                    id: 'comment-self-1',
+                    from: { id: '17841402033495654' },
+                    text: 'Resposta publicada pela própria conta',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(events).toEqual([]);
+  });
+
   it('normalizes direct messages without authorizing a reply', () => {
     const events = parseMetaWebhookEvents(
       Buffer.from(
@@ -206,5 +233,55 @@ describe('Meta webhook boundary', () => {
       text: 'Oi',
       rawType: 'messaging',
     });
+  });
+
+  it('drops outbound DIRECT echoes and self-sent messages before automation', () => {
+    const echoEvents = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              messaging: [
+                {
+                  sender: { id: '17841402033495654' },
+                  recipient: { id: 'recipient-1' },
+                  timestamp: 1_700_000_002_000,
+                  message: { mid: 'message-echo-1', text: 'Resposta automática', is_echo: true },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(echoEvents).toEqual([]);
+  });
+
+  it('drops DIRECT events addressed to another account when recipient id is available', () => {
+    const events = parseMetaWebhookEvents(
+      Buffer.from(
+        JSON.stringify({
+          object: 'instagram',
+          entry: [
+            {
+              id: '17841402033495654',
+              messaging: [
+                {
+                  sender: { id: 'sender-3' },
+                  recipient: { id: 'different-account' },
+                  timestamp: 1_700_000_003_000,
+                  message: { mid: 'message-2', text: 'Não é para esta conta' },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(events).toEqual([]);
   });
 });
