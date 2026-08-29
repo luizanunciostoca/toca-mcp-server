@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
+import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
+import {
+  createInstagramEngagementInboundEnvelope,
+  type InstagramEngagementScope,
+} from '../instagram-engagement/events.js';
 import type { InstagramWebhookEvent } from '../providers/instagram/instagram-engagement-contracts.js';
 
 export interface MetaWebhookPersistResult {
@@ -7,8 +12,20 @@ export interface MetaWebhookPersistResult {
   readonly duplicates: readonly InstagramWebhookEvent[];
 }
 
+export interface PostgresMetaWebhookEventStoreOptions {
+  readonly outbox?: TransactionalOutboxWriter;
+  readonly engagementScope?: InstagramEngagementScope;
+}
+
 export class PostgresMetaWebhookEventStore {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly options: PostgresMetaWebhookEventStoreOptions = {},
+  ) {
+    if (Boolean(options.outbox) !== Boolean(options.engagementScope)) {
+      throw new Error('META_WEBHOOK_ENGAGEMENT_OUTBOX_SCOPE_REQUIRED');
+    }
+  }
 
   async persist(events: readonly InstagramWebhookEvent[]): Promise<MetaWebhookPersistResult> {
     if (events.length === 0) return { accepted: [], duplicates: [] };
@@ -60,6 +77,14 @@ export class PostgresMetaWebhookEventStore {
               JSON.stringify({ provider: 'meta', deduplicated: false }),
             ],
           );
+
+          if (this.options.outbox && this.options.engagementScope) {
+            await this.options.outbox.enqueue(
+              client,
+              createInstagramEngagementInboundEnvelope(event, this.options.engagementScope),
+              { maxAttempts: 5 },
+            );
+          }
         } else {
           duplicates.push(event);
         }
