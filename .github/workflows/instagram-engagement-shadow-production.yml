@@ -162,18 +162,40 @@ jobs:
           }
 
           DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           DAEMON_SA="$(printf '%s' "$DAEMON_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
-          WEBHOOK_SA="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
           [[ "$DAEMON_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Unexpected daemon runtime identity' >&2; exit 1; }
-          [[ "$WEBHOOK_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Unexpected webhook runtime identity' >&2; exit 1; }
 
           PREVIOUS_DAEMON_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
-          PREVIOUS_WEBHOOK_REVISION="$(current_revision "$WEBHOOK_SERVICE_NAME")"
           test -n "$PREVIOUS_DAEMON_REVISION" || { echo 'Daemon rollback revision missing' >&2; exit 1; }
-          test -n "$PREVIOUS_WEBHOOK_REVISION" || { echo 'Webhook rollback revision missing' >&2; exit 1; }
           echo "PREVIOUS_DAEMON_REVISION=$PREVIOUS_DAEMON_REVISION" >> "$GITHUB_ENV"
+
+          WEBHOOK_SERVICE_EXISTED=false
+          PREVIOUS_WEBHOOK_REVISION=''
+          PREVIOUS_WEBHOOK_PUBLIC=false
+          PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED=false
+          WEBHOOK_JSON='{}'
+          if gcloud run services describe "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/instagram-engagement-webhook-prestate.json 2>/dev/null; then
+            WEBHOOK_SERVICE_EXISTED=true
+            WEBHOOK_JSON="$(cat /tmp/instagram-engagement-webhook-prestate.json)"
+            WEBHOOK_SA="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.spec.template.spec.serviceAccountName // empty')"
+            [[ "$WEBHOOK_SA" == "$GCP_RUNTIME_SERVICE_ACCOUNT" ]] || { echo 'Unexpected webhook runtime identity' >&2; exit 1; }
+            PREVIOUS_WEBHOOK_REVISION="$(current_revision "$WEBHOOK_SERVICE_NAME")"
+            test -n "$PREVIOUS_WEBHOOK_REVISION" || { echo 'Existing webhook rollback revision missing' >&2; exit 1; }
+            PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
+            if gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
+              PREVIOUS_WEBHOOK_PUBLIC=true
+            fi
+            WEBHOOK_WRITES="$(printf '%s' "$WEBHOOK_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
+            [[ "$WEBHOOK_WRITES" == false ]] || { echo 'Existing webhook engagement writes must be false before shadow rollout' >&2; exit 1; }
+          fi
           echo "PREVIOUS_WEBHOOK_REVISION=$PREVIOUS_WEBHOOK_REVISION" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_PUBLIC=$PREVIOUS_WEBHOOK_PUBLIC" >> "$GITHUB_ENV"
+          echo "PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED=$PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED" >> "$GITHUB_ENV"
 
           DAEMON_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
           PUBLICATION_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false"')"
@@ -183,7 +205,10 @@ jobs:
           jq -n \
             --arg daemon "$PREVIOUS_DAEMON_REVISION" \
             --arg webhook "$PREVIOUS_WEBHOOK_REVISION" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-rollback.v1",daemonRevision:$daemon,webhookRevision:$webhook}' \
+            --arg serviceExisted "$WEBHOOK_SERVICE_EXISTED" \
+            --arg public "$PREVIOUS_WEBHOOK_PUBLIC" \
+            --arg defaultUrlDisabled "$PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-rollback.v1",daemonRevision:$daemon,webhookRevision:(if ($webhook|length)>0 then $webhook else "ABSENT" end),webhookServiceExisted:($serviceExisted=="true"),webhookPublic:($public=="true"),webhookDefaultUrlDisabled:($defaultUrlDisabled=="true")}' \
             > engagement-evidence/rollback-targets.json
 
       - name: Build and push immutable shadow image
@@ -279,16 +304,33 @@ jobs:
             --command node --args dist/src/toca-managed-instagram-daemon.js \
             --quiet
 
-          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
-            --image "$IMAGE" \
-            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
-            --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
-            --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest" \
-            --update-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
-            --command node --args dist/src/http-instagram-engagement.js \
-            --quiet
+          WEBHOOK_ENV="^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID"
+          if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" == true ]]; then
+            gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+              --image "$IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+              --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest" \
+              --update-env-vars "$WEBHOOK_ENV" \
+              --command node --args dist/src/http-instagram-engagement.js \
+              --quiet
+          else
+            gcloud run deploy "$WEBHOOK_SERVICE_NAME" \
+              --image "$IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+              --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest" \
+              --update-env-vars "$WEBHOOK_ENV" \
+              --command node --args dist/src/http-instagram-engagement.js \
+              --no-allow-unauthenticated \
+              --quiet
+          fi
 
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --default-url --quiet
           gcloud run services add-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --member=allUsers --role=roles/run.invoker --quiet
@@ -427,6 +469,26 @@ jobs:
           fi
           if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
             gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions="${PREVIOUS_WEBHOOK_REVISION}=100" --quiet
+          fi
+
+          if gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
+            if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]]; then
+              gcloud run services update "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+              gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+                --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+              echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+            else
+              if [[ "${PREVIOUS_WEBHOOK_DEFAULT_URL_DISABLED:-false}" == true ]]; then
+                gcloud run services update "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
+              fi
+              if [[ "${PREVIOUS_WEBHOOK_PUBLIC:-false}" != true ]]; then
+                gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+                  --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+                  --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 || true
+              fi
+              echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=PREVIOUS_EXPOSURE_RESTORED' >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           echo 'ROLLBACK_ATTEMPTED=true' >> "$GITHUB_STEP_SUMMARY"
 
