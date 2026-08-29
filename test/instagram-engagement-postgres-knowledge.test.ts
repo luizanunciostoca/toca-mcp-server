@@ -2,15 +2,20 @@ import type pg from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { PostgresInstagramEngagementKnowledgeSource } from '../src/instagram-engagement/postgres-knowledge.js';
 
-function createPool(rows: readonly Record<string, unknown>[]): pg.Pool {
+function createPool(rows: readonly Record<string, unknown>[]): {
+  readonly pool: pg.Pool;
+  readonly query: ReturnType<typeof vi.fn>;
+} {
+  const query = vi.fn().mockResolvedValue({ rows });
   return {
-    query: vi.fn().mockResolvedValue({ rows }),
-  } as unknown as pg.Pool;
+    pool: { query } as unknown as pg.Pool,
+    query,
+  };
 }
 
 describe('PostgresInstagramEngagementKnowledgeSource', () => {
   it('resolves an approved low-risk auto-reply row', async () => {
-    const pool = createPool([
+    const { pool, query } = createPool([
       {
         faq_id: 'FAQ-001',
         canonical_question: 'Que horas começa o Sunset?',
@@ -28,13 +33,13 @@ describe('PostgresInstagramEngagementKnowledgeSource', () => {
 
     expect(match?.faqId).toBe('FAQ-001');
     expect(match?.factsVerified).toBe(true);
-    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('source_spreadsheet_id = $1'), [
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('source_spreadsheet_id = $1'), [
       'sheet-1',
     ]);
   });
 
   it('never returns a commercial SUGGEST_ONLY row as verified knowledge', async () => {
-    const pool = createPool([
+    const { pool } = createPool([
       {
         faq_id: 'FAQ-010',
         canonical_question: 'Quero fazer uma reserva ou evento privado, como faço?',
@@ -52,7 +57,7 @@ describe('PostgresInstagramEngagementKnowledgeSource', () => {
   });
 
   it('fails closed for human-review intents even if a row is misconfigured as auto reply', async () => {
-    const pool = createPool([
+    const { pool } = createPool([
       {
         faq_id: 'FAQ-HIGH',
         canonical_question: 'Quero reembolso',
