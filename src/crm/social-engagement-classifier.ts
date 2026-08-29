@@ -16,20 +16,61 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     sunset && theParty ? 'BOTH' : sunset ? 'SUNSET' : theParty ? 'THE_PARTY' : 'NONE';
   const productEvent = eventInterest === 'NONE' ? 'UNSPECIFIED' : eventInterest;
 
-  const refund = hasAny(normalized, ['reembolso', 'estorno', 'refund', 'devolucao']);
-  const legal = hasAny(normalized, ['advogado', 'processo', 'legal action', 'lawsuit']);
+  const refund = hasAny(normalized, [
+    'reembolso',
+    'estorno',
+    'refund',
+    'devolucao',
+    'cobranca',
+    'cobrado duas vezes',
+    'cobranca duplicada',
+    'chargeback',
+  ]);
+  const harassmentOrThreat = hasAny(normalized, [
+    'ameaca',
+    'ameacando',
+    'assedio',
+    'assediado',
+    'assediada',
+    'harassment',
+    'threat',
+    'threatening',
+  ]);
+  const legal = hasAny(normalized, [
+    'advogado',
+    'processo',
+    'justica',
+    'boletim de ocorrencia',
+    'legal action',
+    'lawsuit',
+  ]);
   const safety = hasAny(normalized, [
     'acidente',
     'agressao',
-    'ameaca',
-    'assedio',
     'seguranca',
+    'machucado',
+    'machucada',
+    'emergencia',
     'emergency',
     'assault',
-    'threat',
-    'harassment',
   ]);
-  const press = hasAny(normalized, ['imprensa', 'jornalista', 'press inquiry', 'media request']);
+  const press = hasAny(normalized, [
+    'imprensa',
+    'jornalista',
+    'reportagem',
+    'press inquiry',
+    'media request',
+  ]);
+  const publicFigure = hasAny(normalized, [
+    'vip',
+    'influencer',
+    'celebridade',
+    'famoso',
+    'famosa',
+    'artista conhecido',
+    'public figure',
+    'celebrity',
+  ]);
   const complaint = hasAny(normalized, [
     'reclamacao',
     'reclamar',
@@ -47,9 +88,24 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'que horas',
     'onde fica',
     'localizacao',
+    'como chegar',
     'hours',
     'what time',
     'where is',
+    'how to get',
+  ]);
+  const operationalFaq = hasAny(normalized, [
+    'idade minima',
+    'menor de idade',
+    'dress code',
+    'traje',
+    'acessibilidade',
+    'cadeirante',
+    'estacionamento',
+    'forma de pagamento',
+    'aceita cartao',
+    'pode entrar com',
+    'documento para entrar',
   ]);
 
   const commercialSignals = [ticket, reservation, price].filter(Boolean).length;
@@ -75,29 +131,41 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
             ? 'LOW'
             : 'NONE';
 
-  const intent = refund
-    ? 'REFUND'
-    : legal
-      ? 'LEGAL'
-      : safety
-        ? 'SAFETY_INCIDENT'
-        : press
-          ? 'PRESS'
-          : complaint
-            ? 'COMPLAINT'
-            : commercialIntent === 'HIGH' || reservation || price
-              ? 'COMMERCIAL_LEAD'
-              : ticket
-                ? 'TICKET_INFO'
-                : eventInterest !== 'NONE'
-                  ? 'EVENT_INFO'
-                  : locationHours
-                    ? 'LOCATION_HOURS'
-                    : 'GENERAL_SOCIAL';
+  const knownLowOrCommercial =
+    ticket || reservation || price || locationHours || operationalFaq || eventInterest !== 'NONE';
+  const materialUnknown = !knownLowOrCommercial && isMaterialQuestion(normalized);
+
+  const intent = harassmentOrThreat
+    ? 'HARASSMENT_OR_THREAT'
+    : refund
+      ? 'REFUND'
+      : legal
+        ? 'LEGAL'
+        : safety
+          ? 'SAFETY_INCIDENT'
+          : press
+            ? 'PRESS'
+            : publicFigure
+              ? 'PUBLIC_FIGURE'
+              : complaint
+                ? 'COMPLAINT'
+                : commercialIntent === 'HIGH' || reservation || price
+                  ? 'COMMERCIAL_LEAD'
+                  : ticket
+                    ? 'TICKET_INFO'
+                    : eventInterest !== 'NONE'
+                      ? 'EVENT_INFO'
+                      : locationHours
+                        ? 'LOCATION_HOURS'
+                        : operationalFaq
+                          ? 'FAQ_OPERATIONAL'
+                          : materialUnknown
+                            ? 'UNKNOWN'
+                            : 'GENERAL_SOCIAL';
 
   const topic: SocialTopic = refund
     ? 'REFUND'
-    : legal
+    : legal || harassmentOrThreat
       ? 'LEGAL'
       : safety
         ? 'SAFETY'
@@ -113,7 +181,7 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                   ? 'TICKETS'
                   : eventInterest !== 'NONE'
                     ? 'EVENT_INFO'
-                    : locationHours
+                    : locationHours || operationalFaq
                       ? 'LOCATION_HOURS'
                       : 'GENERAL';
 
@@ -122,7 +190,7 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     commercialIntent,
     eventInterest,
     sentiment: classifySentiment(normalized),
-    urgency: classifyUrgency(normalized, safety, refund),
+    urgency: classifyUrgency(normalized, safety || harassmentOrThreat, refund),
     topic,
     language: classifyLanguage(normalized),
     productEvent,
@@ -141,11 +209,45 @@ function hasAny(value: string, candidates: readonly string[]): boolean {
   return candidates.some((candidate) => value.includes(candidate));
 }
 
+function isMaterialQuestion(value: string): boolean {
+  if (!value.trim()) return true;
+  return (
+    value.includes('?') ||
+    hasAny(` ${value} `, [
+      ' como ',
+      ' quando ',
+      ' onde ',
+      ' qual ',
+      ' quais ',
+      ' quanto ',
+      ' quem ',
+      ' posso ',
+      ' pode ',
+      ' tem ',
+      ' existe ',
+      ' how ',
+      ' when ',
+      ' where ',
+      ' what ',
+      ' who ',
+      ' can ',
+      ' do you ',
+      ' hay ',
+      ' donde ',
+      ' cuando ',
+      ' cuanto ',
+    ])
+  );
+}
+
 function containsSensitiveData(value: string): boolean {
   const email = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
   const phone = /(?:\+?\d[\s().-]*){10,15}/;
   const paymentCardLike = /\b(?:\d[ -]*?){13,19}\b/;
-  return email.test(value) || phone.test(value) || paymentCardLike.test(value);
+  const cpfLike = /\b\d{3}[.-]?\d{3}[.-]?\d{3}-?\d{2}\b/;
+  return (
+    email.test(value) || phone.test(value) || paymentCardLike.test(value) || cpfLike.test(value)
+  );
 }
 
 function classifySentiment(value: string): SocialSentiment {
