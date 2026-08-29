@@ -39,7 +39,9 @@ describe('GcpGoogleWorkspaceTokenResolver', () => {
     const [, iamInit] = fetchImpl.mock.calls[1] ?? [];
     expect(iamInit?.method).toBe('POST');
     expect(iamInit?.headers).toMatchObject({ Authorization: 'Bearer metadata-token' });
-    expect(JSON.parse(String(iamInit?.body))).toEqual({
+    const iamBody = iamInit?.body;
+    if (typeof iamBody !== 'string') throw new Error('EXPECTED_STRING_IAM_REQUEST_BODY');
+    expect(JSON.parse(iamBody)).toEqual({
       scope: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
       lifetime: '3600s',
     });
