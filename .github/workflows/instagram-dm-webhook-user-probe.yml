@@ -1,7 +1,7 @@
 name: Instagram DM Webhook User Probe
 
 # Operational READ_ONLY diagnostic. No Instagram writes.
-# Diagnostic generation 5: probe all persisted DIRECT sender ids through governed toca.execute.
+# Diagnostic generation 6: use the permanent PR #341 bounded user_id + message cursor implementation.
 on:
   push:
     branches:
@@ -24,15 +24,36 @@ env:
   DATABASE_SECRET_ID: toca-database-url
   TOKEN_SECRET_ID: toca-meta-oauth-token
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  MESSAGING_BRANCH: feat/instagram-messaging-readonly-20260828
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Checkout operational probe source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Compose permanent messaging candidate with operational probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/ops/instagram-dm-webhook-user-probe.ts /tmp/instagram-dm-webhook-user-probe.ts
+          git fetch origin "$MESSAGING_BRANCH"
+          git checkout --detach "origin/$MESSAGING_BRANCH"
+          mkdir -p src/ops
+          cp /tmp/instagram-dm-webhook-user-probe.ts src/ops/instagram-dm-webhook-user-probe.ts
+
+          python3 <<'PY'
+          from pathlib import Path
+          server = Path('src/server.ts')
+          text = server.read_text()
+          old = "  const cloudRunService = env.K_SERVICE?.trim();"
+          if old in text:
+              server.write_text(text.replace(old, "  const cloudRunService = env.K_SERVICE?.trim() || env.CLOUD_RUN_JOB?.trim();", 1))
+          PY
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.15.0
@@ -40,75 +61,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-
-      - name: Materialize R09 and optional user_id read lookup
-        shell: bash
+      - name: Validate composed read-only candidate
         run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          ids = Path('src/governance/capability-ids.ts')
-          text = ids.read_text()
-          required = [
-              "'instagram.messaging.conversations.read'",
-              "'instagram.messaging.messages.read'",
-          ]
-          if not all(item in text for item in required):
-              anchor = "  R09: [\n"
-              if anchor not in text:
-                  raise SystemExit('R09_CATALOG_ANCHOR_NOT_FOUND')
-              injection = (
-                  "  R09: [\n"
-                  "    'instagram.messaging.conversations.read',\n"
-                  "    'instagram.messaging.messages.read',\n"
-              )
-              text = text.replace(anchor, injection, 1)
-              ids.write_text(text)
-
-          provider = Path('src/providers/instagram/instagram-messaging-read-provider.ts')
-          text = provider.read_text()
-          interface_old = """export interface InstagramConversationListInput {
-            readonly limit: number;
-            readonly after?: string | undefined;
-          }"""
-          interface_new = """export interface InstagramConversationListInput {
-            readonly limit: number;
-            readonly after?: string | undefined;
-            readonly userId?: string | undefined;
-          }"""
-          if interface_old not in text:
-              raise SystemExit('PROVIDER_INPUT_PATCH_TARGET_NOT_FOUND')
-          text = text.replace(interface_old, interface_new, 1)
-          after_line = "          ...(input.after ? { after: input.after } : {}),\n"
-          if after_line not in text:
-              raise SystemExit('PROVIDER_QUERY_PATCH_TARGET_NOT_FOUND')
-          text = text.replace(after_line, after_line + "          ...(input.userId ? { user_id: input.userId } : {}),\n", 1)
-          provider.write_text(text)
-
-          resolver = Path('src/mcp/runtime-capability-resolver.ts')
-          text = resolver.read_text()
-          schema_old = """const instagramConversationListSchema = z.object({
-            limit: z.number().int().min(1).max(100).default(50),
-            after: z.string().min(1).optional(),
-          });"""
-          schema_new = """const instagramConversationListSchema = z.object({
-            limit: z.number().int().min(1).max(100).default(50),
-            after: z.string().min(1).optional(),
-            userId: z.string().min(1).optional(),
-          });"""
-          if schema_old not in text:
-              raise SystemExit('RESOLVER_SCHEMA_PATCH_TARGET_NOT_FOUND')
-          resolver.write_text(text.replace(schema_old, schema_new, 1))
-
-          server = Path('src/server.ts')
-          text = server.read_text()
-          old = "  const cloudRunService = env.K_SERVICE?.trim();"
-          if old in text:
-              server.write_text(text.replace(old, "  const cloudRunService = env.K_SERVICE?.trim() || env.CLOUD_RUN_JOB?.trim();", 1))
-          PY
           pnpm install --frozen-lockfile
-          pnpm exec prettier --write src/governance/capability-ids.ts src/providers/instagram/instagram-messaging-read-provider.ts src/mcp/runtime-capability-resolver.ts src/server.ts src/ops/instagram-dm-webhook-user-probe.ts
+          pnpm exec prettier --check src/providers/instagram/instagram-messaging-read-provider.ts src/mcp/runtime-capability-resolver.ts
+          pnpm exec prettier --write src/server.ts src/ops/instagram-dm-webhook-user-probe.ts
           pnpm typecheck
           pnpm build
 
@@ -124,16 +81,18 @@ jobs:
         run: |
           set -euo pipefail
           gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
-          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:ig-dm-webhook-${GITHUB_SHA}"
+          MESSAGING_SHA="$(git rev-parse HEAD)"
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:ig-dm-bounded-${MESSAGING_SHA}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "MESSAGING_SHA=$MESSAGING_SHA" >> "$GITHUB_ENV"
 
-      - name: Execute webhook sender probe through TOCA MCP
+      - name: Execute paginated bounded probe through TOCA MCP
         shell: bash
         run: |
           set -euo pipefail
-          JOB_NAME="toca-ig-dm-webhook-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          JOB_NAME="toca-ig-dm-bounded-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
             gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
           }
@@ -170,14 +129,15 @@ jobs:
                       obj=json.loads(text)
                       if isinstance(obj,dict): candidates.append(obj)
                   except Exception:
-                      for m in re.finditer(r'\{[^\n]*"validation":"instagram-dm-webhook-user-probe"[^\n]*\}', text):
+                      for m in re.finditer(r'\{[^\n]*"validation":"instagram-dm-webhook-user-probe-v2"[^\n]*\}', text):
                           try: candidates.append(json.loads(m.group(0)))
                           except Exception: pass
                   for obj in candidates:
-                      if obj.get('validation')=='instagram-dm-webhook-user-probe':
+                      if obj.get('validation')=='instagram-dm-webhook-user-probe-v2':
+                          obj['messagingCandidateSha']='REDACTED_IN_JOB_LOG' if not obj.get('messagingCandidateSha') else obj['messagingCandidateSha']
                           print(json.dumps(obj,separators=(',',':')))
                           sys.exit(0)
-          print('WEBHOOK_USER_PROBE_EVIDENCE_NOT_FOUND', file=sys.stderr)
+          print('WEBHOOK_USER_PROBE_V2_EVIDENCE_NOT_FOUND', file=sys.stderr)
           sys.exit(1)
           PY
           exit "$STATUS"
