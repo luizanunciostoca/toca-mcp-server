@@ -145,8 +145,8 @@ async function webhookSenderIds(): Promise<string[]> {
     const result = await client.query<{ sender_scoped_id: string }>(`
       SELECT DISTINCT sender_scoped_id
       FROM meta_webhook_events
-      WHERE NULLIF(BTRIM(sender_scoped_id), '') IS NOT NULL
-        AND NULLIF(BTRIM(provider_message_id), '') IS NOT NULL
+      WHERE channel = 'DIRECT'
+        AND NULLIF(BTRIM(sender_scoped_id), '') IS NOT NULL
       LIMIT 50
     `);
     await client.query('ROLLBACK');
@@ -223,6 +223,7 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify({
       validation: 'instagram-dm-webhook-user-probe',
+      senderSource: 'meta_webhook_events:DIRECT',
       mcpServer: initialized.serverInfo?.name ?? null,
       protocolVersion: initialized.protocolVersion ?? null,
       webhookSenderIdsAvailable: senderIds.length,
