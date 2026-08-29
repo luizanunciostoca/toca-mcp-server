@@ -1,0 +1,181 @@
+name: Instagram Engagement Shadow Runtime Build
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: instagram-engagement-shadow-runtime-build
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  build-only:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram engagement shadow runtime build AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact authorized runtime source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and exact main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram engagement shadow runtime build AUTO"))
+          ' >/dev/null
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_SHADOW_RUNTIME_BUILD=AUTHORIZED"
+            "AUTO_BUILD_AUTHORIZED=true"
+            "RUNTIME_BUILD_ONLY=true"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "SERVICE_DEPLOY_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Run exact-head Quality Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate build-only publisher to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker authentication
+        shell: bash
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable shadow runtime only
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_ARTIFACT_REPOSITORY" = 'toca-mcp'
+
+          IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
+          docker build --pull -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+
+          DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(image_summary.digest)')"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo 'Published runtime digest is invalid' >&2
+            exit 1
+          }
+
+          IMMUTABLE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$DIGEST"
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$IMMUTABLE_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$DIGEST"
+
+          echo "runtime_source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$IMMUTABLE_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized immutable-runtime evidence to authorization issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_SOURCE_SHA: ${{ steps.image.outputs.runtime_source_sha }}
+          RUNTIME_IMAGE_DIGEST: ${{ steps.image.outputs.runtime_image_digest }}
+          RUNTIME_IMAGE: ${{ steps.image.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$RUNTIME_IMAGE" == *"@${RUNTIME_IMAGE_DIGEST}" ]]
+
+          COMMENT="$(cat <<EOF
+SHADOW_RUNTIME_BUILD_STATUS=PASS
+RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA
+RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST
+RUNTIME_IMAGE=$RUNTIME_IMAGE
+BUILD_ONLY=true
+DATABASE_MUTATIONS=false
+SERVICE_DEPLOY=false
+EXTERNAL_REPLY_WRITES=false
+EOF
+)"
+
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
+
+          {
+            echo 'SHADOW_RUNTIME_BUILD_STATUS=PASS'
+            echo "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA"
+            echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST"
+            echo 'BUILD_ONLY=true'
+            echo 'DATABASE_MUTATIONS=false'
+            echo 'SERVICE_DEPLOY=false'
+            echo 'EXTERNAL_REPLY_WRITES=false'
+          } >> "$GITHUB_STEP_SUMMARY"
