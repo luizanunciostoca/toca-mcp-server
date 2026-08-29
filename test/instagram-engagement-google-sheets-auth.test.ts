@@ -31,7 +31,7 @@ describe('Instagram engagement Google Sheets auth', () => {
     expect(() =>
       createInstagramEngagementGoogleSheetsAuth({
         INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE: 'public',
-      } as NodeJS.ProcessEnv),
+      }),
     ).toThrow('INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE_INVALID');
   });
 });
