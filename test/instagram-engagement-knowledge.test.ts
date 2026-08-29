@@ -80,8 +80,8 @@ describe('Instagram engagement knowledge', () => {
 
   it('returns only a high-confidence verified match for the expected intent', async () => {
     const client = {
-      async readRange() {
-        return [
+      readRange() {
+        return Promise.resolve([
           header,
           [
             'FAQ-001',
@@ -104,7 +104,7 @@ describe('Instagram engagement knowledge', () => {
             'VALIDADO',
             '',
           ],
-        ];
+        ]);
       },
     };
     const source = new GoogleSheetsInstagramEngagementKnowledgeSource({
