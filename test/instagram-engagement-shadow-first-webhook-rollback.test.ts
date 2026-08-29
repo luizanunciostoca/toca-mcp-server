@@ -9,16 +9,12 @@ const workflow = readFileSync(
 describe('Instagram engagement production shadow first-webhook contract', () => {
   it('accepts an absent webhook prestate without weakening daemon rollback', () => {
     expect(workflow).toContain('WEBHOOK_SERVICE_EXISTED=false');
-    expect(workflow).toContain(
-      'PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED',
-    );
+    expect(workflow).toContain('PREVIOUS_WEBHOOK_SERVICE_EXISTED=$WEBHOOK_SERVICE_EXISTED');
     expect(workflow).toContain(
       'webhookRevision:(if ($webhook|length)>0 then $webhook else "ABSENT" end)',
     );
-    expect(workflow).toContain("test -n \"$PREVIOUS_DAEMON_REVISION\"");
-    expect(workflow).not.toContain(
-      "test -n \"$PREVIOUS_WEBHOOK_REVISION\" || { echo 'Webhook rollback revision missing'",
-    );
+    expect(workflow).toContain('Daemon rollback revision missing');
+    expect(workflow).not.toContain('Webhook rollback revision missing');
   });
 
   it('bootstraps a first webhook privately before enabling the Meta callback surface', () => {
@@ -29,16 +25,12 @@ describe('Instagram engagement production shadow first-webhook contract', () => 
   });
 
   it('restores an absent first-webhook state as closed external exposure', () => {
-    expect(workflow).toContain(
-      'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED',
-    );
+    expect(workflow).toContain('WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED');
     expect(workflow).toContain('--no-default-url --quiet');
     expect(workflow).toContain(
       'gcloud run services remove-iam-policy-binding "$WEBHOOK_SERVICE_NAME"',
     );
-    expect(workflow).not.toContain(
-      'gcloud run services delete "$WEBHOOK_SERVICE_NAME"',
-    );
+    expect(workflow).not.toContain('gcloud run services delete "$WEBHOOK_SERVICE_NAME"');
   });
 
   it('keeps engagement reply writes disabled throughout shadow bootstrap', () => {
