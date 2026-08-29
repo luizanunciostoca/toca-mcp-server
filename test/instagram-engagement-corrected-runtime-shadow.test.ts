@@ -10,7 +10,7 @@ const workflow = fs.readFileSync(workflowPath, 'utf8');
 
 describe('Instagram corrected runtime production shadow workflow', () => {
   it('is owner-only, exact-main bound and pinned to the accepted immutable runtime', () => {
-    expect(workflow).toContain("github.event.issue.user.login == github.repository_owner");
+    expect(workflow).toContain('github.event.issue.user.login == github.repository_owner');
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
     expect(workflow).toContain('CURRENT_MAIN_SHA');
     expect(workflow).toContain('test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"');
