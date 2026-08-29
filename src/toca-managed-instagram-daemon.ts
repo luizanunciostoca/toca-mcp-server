@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
 import { RuntimeTelemetry } from './core/observability.js';
 import { JsonConsoleLogger } from './core/structured-logger.js';
+import { createInstagramEngagementBatchRuntime } from './instagram-engagement/runtime.js';
 import { runFoundationDailyControl } from './operations/foundation-daily-control.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { PostgresScheduler } from './scheduler/postgres-scheduler.js';
@@ -35,11 +36,21 @@ if (!config.DATABASE_URL) {
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
 const logger = new JsonConsoleLogger();
 const telemetry = new RuntimeTelemetry(logger);
+const engagementRuntime = isTrue(process.env.INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED)
+  ? createInstagramEngagementBatchRuntime({
+      config,
+      pool,
+      workerId: `${process.env.K_REVISION?.trim() || 'managed-daemon'}:instagram-engagement`,
+    })
+  : undefined;
 let running = false;
 let stopping = false;
 let lastRunStartedAt: string | null = null;
 let lastRunFinishedAt: string | null = null;
 let lastClaimed = 0;
+let lastEngagementClaimed = 0;
+let lastEngagementSucceeded = 0;
+let lastEngagementFailed = 0;
 let lastError: string | null = null;
 let lastDailyControlDay: string | null = null;
 
@@ -127,6 +138,9 @@ async function verifySchedulerPersistence(): Promise<void> {
 
 type TickResult = {
   claimed: number;
+  engagementClaimed: number;
+  engagementSucceeded: number;
+  engagementFailed: number;
   error: string | null;
   skipped: boolean;
 };
@@ -147,7 +161,14 @@ async function runDailyControlWithoutBlockingWorker(): Promise<void> {
 async function tick(): Promise<TickResult> {
   if (running || stopping) {
     telemetry.increment('daemon.tick.skipped');
-    return { claimed: 0, error: null, skipped: true };
+    return {
+      claimed: 0,
+      engagementClaimed: 0,
+      engagementSucceeded: 0,
+      engagementFailed: 0,
+      error: null,
+      skipped: true,
+    };
   }
 
   running = true;
@@ -162,17 +183,49 @@ async function tick(): Promise<TickResult> {
       telemetry,
       logger,
     });
+    if (engagementRuntime) {
+      const engagement = await engagementRuntime.runBatch();
+      lastEngagementClaimed = engagement.claimed;
+      lastEngagementSucceeded = engagement.succeeded;
+      lastEngagementFailed = engagement.failed;
+      telemetry.record('daemon.engagement.claimed_events', engagement.claimed);
+      telemetry.record('daemon.engagement.succeeded_events', engagement.succeeded);
+      telemetry.record('daemon.engagement.failed_events', engagement.failed);
+    } else {
+      lastEngagementClaimed = 0;
+      lastEngagementSucceeded = 0;
+      lastEngagementFailed = 0;
+    }
     await runDailyControlWithoutBlockingWorker();
     lastError = null;
     telemetry.increment('daemon.tick.succeeded');
     telemetry.record('daemon.tick.claimed_jobs', lastClaimed);
-    logger.info('toca.managed.instagram.daemon.tick.completed', { claimed: lastClaimed });
-    return { claimed: lastClaimed, error: null, skipped: false };
+    logger.info('toca.managed.instagram.daemon.tick.completed', {
+      claimed: lastClaimed,
+      engagementClaimed: lastEngagementClaimed,
+      engagementSucceeded: lastEngagementSucceeded,
+      engagementFailed: lastEngagementFailed,
+    });
+    return {
+      claimed: lastClaimed,
+      engagementClaimed: lastEngagementClaimed,
+      engagementSucceeded: lastEngagementSucceeded,
+      engagementFailed: lastEngagementFailed,
+      error: null,
+      skipped: false,
+    };
   } catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
     telemetry.increment('daemon.tick.failed');
     logger.error('toca.managed.instagram.daemon.tick.failed', { error: lastError });
-    return { claimed: 0, error: lastError, skipped: false };
+    return {
+      claimed: 0,
+      engagementClaimed: lastEngagementClaimed,
+      engagementSucceeded: lastEngagementSucceeded,
+      engagementFailed: lastEngagementFailed,
+      error: lastError,
+      skipped: false,
+    };
   } finally {
     telemetry.record('daemon.tick.duration_ms', Date.now() - started);
     lastRunFinishedAt = new Date().toISOString();
@@ -200,9 +253,15 @@ const server = createServer((request, response) => {
         schedulingTransport: 'protected-mcp',
         triggerMode: 'cloud-scheduler-http',
         running,
+        engagementRuntimeEnabled: Boolean(engagementRuntime),
+        engagementWritesEnabled: engagementRuntime?.writesEnabled ?? false,
+        engagementKnowledgeAuthMode: engagementRuntime?.knowledgeAuthMode ?? null,
         lastRunStartedAt,
         lastRunFinishedAt,
         lastClaimed,
+        lastEngagementClaimed,
+        lastEngagementSucceeded,
+        lastEngagementFailed,
         lastError,
         lastDailyControlDay,
         telemetry: telemetry.snapshot(),
@@ -244,6 +303,8 @@ server.listen(port, '0.0.0.0', () => {
   logger.info('toca.managed.instagram.daemon.started', {
     port,
     triggerMode: 'cloud-scheduler-http',
+    engagementRuntimeEnabled: Boolean(engagementRuntime),
+    engagementWritesEnabled: engagementRuntime?.writesEnabled ?? false,
   });
 });
 
@@ -263,4 +324,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     void shutdown(signal).finally(() => process.exit(0));
   });
+}
+
+function isTrue(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true';
 }
