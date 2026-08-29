@@ -2,11 +2,18 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync(
-  '.github/workflows/instagram-engagement-shadow-drs-continuation.yml',
+  '.github/workflows/instagram-engagement-shadow-production.yml',
   'utf8',
 );
 
-describe('Instagram engagement production shadow DRS continuation', () => {
+describe('Instagram engagement production shadow DRS-safe primary workflow', () => {
+  it('keeps the familiar production shadow dispatch surface', () => {
+    expect(workflow).toContain('name: Instagram Engagement Production Shadow');
+    expect(workflow).toContain('confirm_shadow:');
+    expect(workflow).toContain('DEPLOY_ENGAGEMENT_SHADOW');
+    expect(workflow).not.toContain('confirm_continuation:');
+  });
+
   it('uses the exact previously validated immutable runtime image', () => {
     expect(workflow).toContain('RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f');
     expect(workflow).toContain(
