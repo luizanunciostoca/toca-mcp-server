@@ -1,0 +1,89 @@
+name: Instagram Engagement Shadow Inspect Ephemeral
+
+on:
+  push:
+    branches: [feat/instagram-engagement-shadow-production-20260828]
+    paths:
+      - '.github/workflows/instagram-engagement-shadow-inspect-ephemeral.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  WEBHOOK_SERVICE: toca-webhook-next-production
+  DAEMON_SERVICE: toca-managed-instagram-daemon
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read sanitized production prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          service_summary() {
+            local name="$1"
+            if ! json="$(gcloud run services describe "$name" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null)"; then
+              jq -n --arg name "$name" '{name:$name,exists:false}'
+              return
+            fi
+            printf '%s' "$json" | jq --arg name "$name" '{
+              name:$name,
+              exists:true,
+              url:(.status.url // null),
+              latestReadyRevision:(.status.latestReadyRevisionName // null),
+              ingress:(.metadata.annotations["run.googleapis.com/ingress"] // null),
+              minScale:(.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // null),
+              maxScale:(.spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] // null),
+              serviceAccount:(.spec.template.spec.serviceAccountName // null),
+              command:(.spec.template.spec.containers[0].command // []),
+              args:(.spec.template.spec.containers[0].args // []),
+              selectedEnv:([.spec.template.spec.containers[0].env[]? | select(.name | IN(
+                "TOCA_SERVICE_ROLE","META_WEBHOOK_ENABLED","META_WEBHOOK_PERSISTENCE_ENABLED",
+                "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED","INSTAGRAM_ENGAGEMENT_WRITES_ENABLED",
+                "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED","TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED"
+              )) | {name, value:(.value // "<secret-ref>")}]),
+              secretEnvNames:([.spec.template.spec.containers[0].env[]? | select(has("valueFrom")) | .name] | sort)
+            }'
+          }
+
+          webhook="$(service_summary "$WEBHOOK_SERVICE")"
+          daemon="$(service_summary "$DAEMON_SERVICE")"
+          enabled_services="$(gcloud services list --project "$GCP_PROJECT_ID" --enabled --format='value(config.name)' | sort)"
+          iam="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json)"
+          token_creator=false
+          if printf '%s' "$iam" | jq -e --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" '
+            any(.bindings[]?; .role == "roles/iam.serviceAccountTokenCreator" and any(.members[]?; . == $member))
+          ' >/dev/null; then token_creator=true; fi
+
+          iamcredentials=false
+          sheets=false
+          grep -qx 'iamcredentials.googleapis.com' <<<"$enabled_services" && iamcredentials=true
+          grep -qx 'sheets.googleapis.com' <<<"$enabled_services" && sheets=true
+
+          jq -n \
+            --argjson webhook "$webhook" \
+            --argjson daemon "$daemon" \
+            --argjson tokenCreator "$token_creator" \
+            --argjson iamcredentials "$iamcredentials" \
+            --argjson sheets "$sheets" \
+            '{validation:"instagram-engagement-shadow-inspect",webhook:$webhook,daemon:$daemon,googleApis:{iamcredentials:$iamcredentials,sheets:$sheets},runtimeSelfTokenCreator:$tokenCreator,secretsPrinted:false,userDataPrinted:false}'
