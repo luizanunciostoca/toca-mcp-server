@@ -214,7 +214,11 @@ function requiredColumn(index: ReadonlyMap<string, number>, key: string): number
   return position;
 }
 
-function sheetCell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
+function sheetCell(
+  row: readonly unknown[],
+  index: ReadonlyMap<string, number>,
+  key: string,
+): string {
   const position = requiredColumn(index, key);
   return safeCell(row[position]).trim();
 }
