@@ -34,9 +34,9 @@ env:
   TOCA_ORGANIZATION_ID: toca
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
-  RUNTIME_SOURCE_SHA: 22ca9a0160ad3b08d0e133342256376a8e98cb17
-  RUNTIME_IMAGE_DIGEST: sha256:50479566a83448090e9fd8f14c471ca6a79ba3c239eb386e8354379b5c872de6
-  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:50479566a83448090e9fd8f14c471ca6a79ba3c239eb386e8354379b5c872de6
+  RUNTIME_SOURCE_SHA: 334b54a6a4d730e5c949eda71647595c95030a9f
+  RUNTIME_IMAGE_DIGEST: sha256:8bc7052b2794f5dc837f33006030590414b7e2883b6789909e373dba73242907
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:8bc7052b2794f5dc837f33006030590414b7e2883b6789909e373dba73242907
 
 jobs:
   corrected-runtime-shadow:
@@ -134,8 +134,8 @@ jobs:
           set -euo pipefail
           test "$GCP_PROJECT_ID" = 'toca-mcp-production'
           test "$GCP_REGION" = 'southamerica-east1'
-          test "$RUNTIME_SOURCE_SHA" = '22ca9a0160ad3b08d0e133342256376a8e98cb17'
-          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:50479566a83448090e9fd8f14c471ca6a79ba3c239eb386e8354379b5c872de6'
+          test "$RUNTIME_SOURCE_SHA" = '334b54a6a4d730e5c949eda71647595c95030a9f'
+          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:8bc7052b2794f5dc837f33006030590414b7e2883b6789909e373dba73242907'
 
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$RUNTIME_IMAGE_DIGEST"
