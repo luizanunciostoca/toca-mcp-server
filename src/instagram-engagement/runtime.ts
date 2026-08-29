@@ -15,7 +15,11 @@ import {
   INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
 } from './events.js';
 import { createInstagramEngagementGoogleSheetsAuth } from './google-sheets-auth.js';
-import { GoogleSheetsInstagramEngagementKnowledgeSource } from './knowledge.js';
+import {
+  GoogleSheetsInstagramEngagementKnowledgeSource,
+  type InstagramEngagementKnowledgeSource,
+} from './knowledge.js';
+import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
 import { InstagramEngagementProcessor } from './processor.js';
 import {
   claimInstagramEngagementEvents,
@@ -23,6 +27,7 @@ import {
 } from './typed-outbox.js';
 
 type Config = ReturnType<typeof loadConfig>;
+type KnowledgeRuntimeMode = 'google-sheets:env' | 'google-sheets:gcp-iam' | 'postgres';
 
 export interface InstagramEngagementBatchRuntimeOptions {
   readonly config: Config;
@@ -40,7 +45,7 @@ export interface InstagramEngagementBatchResult {
 
 export interface InstagramEngagementBatchRuntime {
   readonly writesEnabled: boolean;
-  readonly knowledgeAuthMode: 'env' | 'gcp-iam';
+  readonly knowledgeAuthMode: KnowledgeRuntimeMode;
   runBatch(now?: Date): Promise<InstagramEngagementBatchResult>;
 }
 
@@ -73,16 +78,12 @@ export function createInstagramEngagementBatchRuntime(
   ] as const;
 
   const outbox = new PostgresTransactionalOutbox(options.pool);
-  const sheetsAuth = createInstagramEngagementGoogleSheetsAuth(env, options.fetchImpl ?? fetch);
-  const sheetsClient = new GoogleSheetsRestClient(sheetsAuth.resolver, {
-    tokenReference: sheetsAuth.tokenReference,
-  });
-  const knowledge = new GoogleSheetsInstagramEngagementKnowledgeSource({
-    client: sheetsClient,
+  const knowledgeRuntime = createKnowledgeSource(
+    options.pool,
     spreadsheetId,
-    range: env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A:T',
-    cacheMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
-  });
+    env,
+    options.fetchImpl,
+  );
 
   const crm = new PostgresCrmCoreStore(options.pool, { outbox });
   const events = new PostgresEventRecordStore(options.pool, { outbox });
@@ -100,7 +101,7 @@ export function createInstagramEngagementBatchRuntime(
     : disabledProvider();
   const processor = new InstagramEngagementProcessor({
     pool: options.pool,
-    knowledge,
+    knowledge: knowledgeRuntime.source,
     leadEngine,
     provider,
     pageId,
@@ -110,7 +111,7 @@ export function createInstagramEngagementBatchRuntime(
 
   return {
     writesEnabled: config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED,
-    knowledgeAuthMode: sheetsAuth.mode,
+    knowledgeAuthMode: knowledgeRuntime.mode,
     async runBatch(now = new Date()) {
       await recoverStaleInstagramEngagementClaims({
         pool: options.pool,
@@ -155,6 +156,36 @@ export function createInstagramEngagementBatchRuntime(
       }
       return { claimed: claimed.length, succeeded, failed };
     },
+  };
+}
+
+function createKnowledgeSource(
+  pool: pg.Pool,
+  spreadsheetId: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl?: typeof fetch,
+): { readonly source: InstagramEngagementKnowledgeSource; readonly mode: KnowledgeRuntimeMode } {
+  const kind = env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE?.trim().toLowerCase() || 'google-sheets';
+  if (kind === 'postgres') {
+    return {
+      source: new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId),
+      mode: 'postgres',
+    };
+  }
+  if (kind !== 'google-sheets') throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE_INVALID');
+
+  const sheetsAuth = createInstagramEngagementGoogleSheetsAuth(env, fetchImpl ?? fetch);
+  const sheetsClient = new GoogleSheetsRestClient(sheetsAuth.resolver, {
+    tokenReference: sheetsAuth.tokenReference,
+  });
+  return {
+    source: new GoogleSheetsInstagramEngagementKnowledgeSource({
+      client: sheetsClient,
+      spreadsheetId,
+      range: env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A:T',
+      cacheMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
+    }),
+    mode: `google-sheets:${sheetsAuth.mode}`,
   };
 }
 
