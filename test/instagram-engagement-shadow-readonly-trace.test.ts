@@ -26,7 +26,9 @@ describe('Instagram engagement shadow read-only trace', () => {
         'legacyAllUsersInvoker:false',
       ];
       for (const token of required) expect(workflow).toContain(token);
-      expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
+      expect(workflow).not.toContain(
+        'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      );
       expect(workflow).not.toContain('--no-invoker-iam-check');
       expect(workflow).not.toContain('update-traffic');
     },
