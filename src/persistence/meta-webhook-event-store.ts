@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
+import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
 import type { TransactionalOutboxWriter } from '../events/transactional-outbox.js';
 import {
   createInstagramEngagementInboundEnvelope,
@@ -18,11 +19,14 @@ export interface PostgresMetaWebhookEventStoreOptions {
 }
 
 export class PostgresMetaWebhookEventStore {
+  private readonly options: PostgresMetaWebhookEventStoreOptions;
+
   constructor(
     private readonly pool: pg.Pool,
-    private readonly options: PostgresMetaWebhookEventStoreOptions = {},
+    options?: PostgresMetaWebhookEventStoreOptions,
   ) {
-    if (Boolean(options.outbox) !== Boolean(options.engagementScope)) {
+    this.options = options ?? defaultOptions(pool, process.env);
+    if (Boolean(this.options.outbox) !== Boolean(this.options.engagementScope)) {
       throw new Error('META_WEBHOOK_ENGAGEMENT_OUTBOX_SCOPE_REQUIRED');
     }
   }
@@ -83,7 +87,11 @@ export class PostgresMetaWebhookEventStore {
           if (this.options.outbox && this.options.engagementScope) {
             await this.options.outbox.enqueue(
               client,
-              createInstagramEngagementInboundEnvelope(normalizedEvent, this.options.engagementScope, occurredAt),
+              createInstagramEngagementInboundEnvelope(
+                normalizedEvent,
+                this.options.engagementScope,
+                occurredAt,
+              ),
               { maxAttempts: 5 },
             );
           }
@@ -100,4 +108,28 @@ export class PostgresMetaWebhookEventStore {
       client.release();
     }
   }
+}
+
+function defaultOptions(
+  pool: pg.Pool,
+  env: NodeJS.ProcessEnv,
+): PostgresMetaWebhookEventStoreOptions {
+  if (!isTrue(env.INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED)) return {};
+  const tenantId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_TENANT_ID');
+  const workspaceId = env.INSTAGRAM_ENGAGEMENT_WORKSPACE_ID?.trim() || tenantId;
+  const organizationId = env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() || tenantId;
+  return {
+    outbox: new PostgresTransactionalOutbox(pool),
+    engagementScope: { tenantId, workspaceId, organizationId },
+  };
+}
+
+function requiredEnv(env: NodeJS.ProcessEnv, key: string): string {
+  const value = env[key]?.trim();
+  if (!value) throw new Error(`${key}_REQUIRED`);
+  return value;
+}
+
+function isTrue(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true';
 }
