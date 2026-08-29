@@ -19,7 +19,9 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
+  issues: read
   id-token: write
 
 concurrency:
@@ -62,19 +64,41 @@ jobs:
         env:
           DISPATCH_AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
           DISPATCH_TARGET_FAILED_RUN: ${{ inputs.target_failed_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
+          mkdir -p engagement-evidence
+          jq -n \
+            --arg controllerSha "$GITHUB_SHA" \
+            --arg eventName "$GITHUB_EVENT_NAME" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-readonly-trace-attempt.v1",controllerSha:$controllerSha,eventName:$eventName,databaseMutationsAuthorized:false,externalReplyWritesAuthorized:false}' \
+            > engagement-evidence/trace-attempt.json
+
           if [[ "$GITHUB_EVENT_NAME" == 'issues' ]]; then
-            AUTHORIZATION_REF="$(jq -r '.issue.html_url // empty' "$GITHUB_EVENT_PATH")"
-            AUTH_BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+            jq '.issue' "$GITHUB_EVENT_PATH" > /tmp/diagnostic-authorization.json
+            AUTHORIZATION_REF="$(jq -r '.html_url // empty' /tmp/diagnostic-authorization.json)"
+            AUTH_BODY="$(jq -r '.body // ""' /tmp/diagnostic-authorization.json)"
             TARGET_FAILED_RUN="$(printf '%s\n' "$AUTH_BODY" | sed -n 's/^TARGET_FAILED_RUN=\([0-9][0-9]*\)$/\1/p' | head -n1)"
           else
             test "${{ inputs.confirm_trace }}" = 'TRACE_ENGAGEMENT_SHADOW_READONLY'
             AUTHORIZATION_REF="$DISPATCH_AUTHORIZATION_REF"
             TARGET_FAILED_RUN="$DISPATCH_TARGET_FAILED_RUN"
+
+            AUTH_PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
+            [[ "$AUTHORIZATION_REF" == "${AUTH_PREFIX}"* ]]
+            AUTH_ISSUE="${AUTHORIZATION_REF#${AUTH_PREFIX}}"
+            [[ "$AUTH_ISSUE" =~ ^[0-9]+$ ]]
+
+            curl --fail-with-body --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              -H 'User-Agent: toca-instagram-shadow-readonly-trace' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}" \
+              > /tmp/diagnostic-authorization.json
           fi
 
           AUTH_PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
@@ -82,13 +106,6 @@ jobs:
           AUTH_ISSUE="${AUTHORIZATION_REF#${AUTH_PREFIX}}"
           [[ "$AUTH_ISSUE" =~ ^[0-9]+$ ]]
           [[ "$TARGET_FAILED_RUN" =~ ^[0-9]+$ ]]
-
-          curl --fail-with-body --silent --show-error \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H 'User-Agent: toca-instagram-shadow-readonly-trace' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}" \
-            > /tmp/diagnostic-authorization.json
 
           jq -e \
             --arg expectedUrl "$AUTHORIZATION_REF" \
@@ -116,6 +133,7 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             -H 'User-Agent: toca-instagram-shadow-readonly-trace' \
+            -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_FAILED_RUN}" \
             > /tmp/target-run.json
 
@@ -142,7 +160,6 @@ jobs:
           echo "TRACE_ENDED_AT=$TRACE_ENDED_AT" >> "$GITHUB_ENV"
           echo "TARGET_FAILED_CONTROLLER_SHA=$TARGET_FAILED_CONTROLLER_SHA" >> "$GITHUB_ENV"
 
-          mkdir -p engagement-evidence
           jq -n \
             --arg controllerSha "$GITHUB_SHA" \
             --arg targetRun "$TARGET_FAILED_RUN" \
@@ -150,7 +167,7 @@ jobs:
             --arg startedAt "$TRACE_STARTED_AT" \
             --arg endedAt "$TRACE_ENDED_AT" \
             --arg authorizationRef "$AUTHORIZATION_REF" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-readonly-trace-authorization.v2",controllerSha:$controllerSha,targetFailedRun:$targetRun,targetFailedControllerSha:$targetControllerSha,traceWindow:{startedAt:$startedAt,endedAt:$endedAt},authorizationRef:$authorizationRef,cloudRunEphemeralJobAuthorized:true,artifactRegistryDiagnosticImageAuthorized:true,databaseMutationsAuthorized:false,externalReplyWritesAuthorized:false}' \
+            '{schemaVersion:"toca.instagram-engagement.shadow-readonly-trace-authorization.v3",controllerSha:$controllerSha,targetFailedRun:$targetRun,targetFailedControllerSha:$targetControllerSha,traceWindow:{startedAt:$startedAt,endedAt:$endedAt},authorizationRef:$authorizationRef,cloudRunEphemeralJobAuthorized:true,artifactRegistryDiagnosticImageAuthorized:true,databaseMutationsAuthorized:false,externalReplyWritesAuthorized:false}' \
             > engagement-evidence/trace-authorization.json
 
       - name: Authenticate production deployer for governed diagnostic control plane
