@@ -8,9 +8,7 @@ const workflow = readFileSync(
 
 describe('Instagram engagement production shadow DRS continuation', () => {
   it('uses the exact previously validated immutable runtime image', () => {
-    expect(workflow).toContain(
-      'RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f',
-    );
+    expect(workflow).toContain('RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f');
     expect(workflow).toContain(
       'RUNTIME_IMAGE_DIGEST: sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30',
     );
