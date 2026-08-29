@@ -69,11 +69,13 @@ jobs:
           webhook="$(service_summary "$WEBHOOK_SERVICE")"
           daemon="$(service_summary "$DAEMON_SERVICE")"
           enabled_services="$(gcloud services list --project "$GCP_PROJECT_ID" --enabled --format='value(config.name)' | sort)"
-          iam="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json)"
-          token_creator=false
-          if printf '%s' "$iam" | jq -e --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" '
-            any(.bindings[]?; .role == "roles/iam.serviceAccountTokenCreator" and any(.members[]?; . == $member))
-          ' >/dev/null; then token_creator=true; fi
+          token_creator='unverified'
+          if iam="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+            token_creator=false
+            if printf '%s' "$iam" | jq -e --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" '
+              any(.bindings[]?; .role == "roles/iam.serviceAccountTokenCreator" and any(.members[]?; . == $member))
+            ' >/dev/null; then token_creator=true; fi
+          fi
 
           iamcredentials=false
           sheets=false
@@ -83,7 +85,7 @@ jobs:
           jq -n \
             --argjson webhook "$webhook" \
             --argjson daemon "$daemon" \
-            --argjson tokenCreator "$token_creator" \
+            --arg tokenCreator "$token_creator" \
             --argjson iamcredentials "$iamcredentials" \
             --argjson sheets "$sheets" \
             '{validation:"instagram-engagement-shadow-inspect",webhook:$webhook,daemon:$daemon,googleApis:{iamcredentials:$iamcredentials,sheets:$sheets},runtimeSelfTokenCreator:$tokenCreator,secretsPrinted:false,userDataPrinted:false}'
