@@ -24,6 +24,8 @@ Apply the repository migrations before starting the worker. The engagement-speci
 
 `035_instagram_engagement_e2e.sql`
 
+When PostgreSQL is used as the runtime knowledge source, migration `036_instagram_engagement_knowledge.sql` is also required.
+
 The readiness preflight requires these tables:
 
 - `meta_webhook_events`
@@ -72,9 +74,13 @@ The preflight verifies:
 - runtime configuration is complete;
 - required PostgreSQL tables exist;
 - migration 035 is recorded in `schema_migrations`;
+- the configured spreadsheet ID is exactly the active canonical TOCA OS FAQ source;
 - the FAQ sheet is readable;
 - mandatory FAQ headers exist;
+- the canonical sheet contains exactly the expected ten FAQ IDs, with matching question, intent, autonomy, official answer, TOCA OS source, approval status, and operational validity;
 - when writes are enabled, Meta is explicitly verified and a read-only Graph API identity request succeeds.
+
+A header-only, superseded, incomplete, duplicated, or content-divergent FAQ sheet fails readiness closed.
 
 The preflight prints only a sanitized PASS record and never prints account IDs, sheet IDs, tokens, user identities, or message text.
 
@@ -102,7 +108,13 @@ Set:
 - `INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true`
 - `INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false`
 
-Keep Meta webhook persistence enabled on the canonical HTTP service. Confirm new events progress through classification/CRM and that no reply event can perform an external write.
+Keep Meta webhook persistence enabled on the canonical HTTP service. Then run:
+
+```bash
+pnpm start:instagram-engagement-shadow-proof
+```
+
+The shadow proof refuses to run if `INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true`. It submits signed synthetic COMMENT and DIRECT webhook events, requires both inbound events to reach `DELIVERED`, requires `FAQ-001` to resolve as a suggestion, and proves that zero reply outbox events and zero provider reply IDs were created.
 
 ### Stage C — controlled write readiness
 
