@@ -5,7 +5,10 @@ const workflow = readFileSync(
   '.github/workflows/instagram-engagement-shadow-readonly-trace.yml',
   'utf8',
 );
-const script = readFileSync('scripts/diagnose-instagram-engagement-shadow-readonly.mjs', 'utf8');
+const script = readFileSync(
+  'scripts/diagnose-instagram-engagement-shadow-readonly.mjs',
+  'utf8',
+);
 
 describe('Instagram engagement shadow read-only trace', () => {
   it('requires exact owner authorization and keeps production fail-closed', () => {
@@ -28,11 +31,15 @@ describe('Instagram engagement shadow read-only trace', () => {
 
   it('uses a pinned Cloud SQL proxy and a read-only transaction', () => {
     expect(workflow).toContain("PROXY_VERSION='2.24.1'");
-    expect(workflow).toContain("PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'");
+    expect(workflow).toContain(
+      "PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'",
+    );
     expect(workflow).toContain('diagnose-instagram-engagement-shadow-readonly.mjs');
-    expect(script).toContain("begin transaction read only");
+    expect(script).toContain('begin transaction read only');
     expect(script).toContain("await client.query('rollback')");
-    expect(script).not.toMatch(/\b(insert|update|delete|alter|drop|truncate)\s+(into|table|from|event_outbox|instagram_engagement_actions)/i);
+    expect(script).not.toMatch(
+      /\b(insert|update|delete|alter|drop|truncate)\s+(into|table|from|event_outbox|instagram_engagement_actions)/i,
+    );
   });
 
   it('traces webhook, inbound outbox, attempts and action without raw content', () => {
