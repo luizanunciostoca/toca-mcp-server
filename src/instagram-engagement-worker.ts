@@ -172,6 +172,8 @@ await pool.end();
 console.log('Instagram engagement worker stopped');
 
 function createLiveProvider(): InstagramGraphEngagementProvider {
+  if (!config.META_ENABLED) throw new Error('META_ENABLED_REQUIRED');
+  if (!isTrue(process.env.META_PROVIDER_VERIFIED)) throw new Error('META_PROVIDER_NOT_VERIFIED');
   if (!config.META_ACCESS_TOKEN_ENV_KEY) throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');
   const secrets = new EnvSecretResolver(process.env, 'env');
   const client = new MetaApiClient(
