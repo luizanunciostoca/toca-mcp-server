@@ -1,0 +1,180 @@
+name: Instagram Engagement Shadow Proof Execution Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-proof-execution-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33274932765'
+  SOURCE_PROOF_JOB: toca-ig-eng-corrected-proof-33274932765-1
+  SOURCE_EXECUTION: toca-ig-eng-corrected-proof-33274932765-1-4d7pc
+
+jobs:
+  read-only-execution-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram shadow execution diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and read-only boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_SHADOW_EXECUTION_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_PROOF_JOB=$SOURCE_PROOF_JOB"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY"
+          done
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Authenticate read-only diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Describe failed execution and inspect execution-scoped logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p engagement-evidence
+          gcloud run jobs executions describe "$SOURCE_EXECUTION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > /tmp/execution.json
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.execution_name=\"${SOURCE_EXECUTION}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json \
+            > /tmp/execution-logs.json
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const execution = JSON.parse(fs.readFileSync('/tmp/execution.json', 'utf8'));
+          const entries = JSON.parse(fs.readFileSync('/tmp/execution-logs.json', 'utf8'));
+          function collectStrings(value, output = []) {
+            if (typeof value === 'string') output.push(value);
+            else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, output));
+            else if (value && typeof value === 'object') Object.values(value).forEach((item) => collectStrings(item, output));
+            return output;
+          }
+          function redact(value) {
+            return String(value)
+              .replaceAll('Que horas começa o Sunset?', '<SYNTHETIC_MESSAGE>')
+              .replace(/https?:\/\/[^\s]+/giu, '<URL>')
+              .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+              .replace(/sha256:[a-f0-9]{32,}/giu, '<DIGEST>')
+              .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu, '<UUID>')
+              .replace(/shadow-proof-[A-Z0-9_-]+/giu, '<SYNTHETIC_ID>')
+              .replace(/\b\d{10,}\b/gu, '<ID>')
+              .replace(/\b[A-Z0-9_-]{24,}\b/giu, '<TOKEN>')
+              .replace(/\s+/gu, ' ')
+              .trim()
+              .slice(0, 300);
+          }
+          const conditions = Array.isArray(execution?.status?.conditions) ? execution.status.conditions : [];
+          const conditionSummary = conditions.map((condition) => ({
+            type: String(condition?.type ?? 'UNKNOWN').slice(0, 64),
+            state: String(condition?.state ?? condition?.status ?? 'UNKNOWN').slice(0, 32),
+            reason: redact(condition?.reason ?? 'NONE'),
+            message: redact(condition?.message ?? 'NONE'),
+          }));
+          const logStrings = collectStrings(entries);
+          const safeMarkers = [...new Set(logStrings.filter((value) => /SHADOW_PROOF_|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|DEADLINE|FAILED/iu.test(value)).map(redact))].slice(0, 20);
+          const logNames = [...new Set((Array.isArray(entries) ? entries : []).map((entry) => String(entry?.logName ?? '').replaceAll('%2F', '/').split('/logs/').at(-1) ?? 'unknown'))].sort();
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.shadow-proof-execution-diagnostic.v1',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceProofJob: process.env.SOURCE_PROOF_JOB,
+            sourceExecution: process.env.SOURCE_EXECUTION,
+            completionTimePresent: Boolean(execution?.status?.completionTime),
+            failedCount: execution?.status?.failedCount ?? null,
+            succeededCount: execution?.status?.succeededCount ?? null,
+            conditionSummary,
+            executionScopedLogEntries: Array.isArray(entries) ? entries.length : 0,
+            logNames,
+            safeMarkers,
+            rawErrorPayloadPrinted: false,
+            readOnlyDiagnostic: true,
+            serviceMutationsAuthorized: false,
+            databaseMutationsAuthorized: false,
+            providerWritesAuthorized: false,
+            externalReplyWritesAuthorized: false,
+          };
+          fs.writeFileSync('engagement-evidence/execution-diagnostic.json', `${JSON.stringify(evidence, null, 2)}\n`);
+          NODE
+
+          CONDITION_SUMMARY="$(jq -c '.conditionSummary' engagement-evidence/execution-diagnostic.json)"
+          SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/execution-diagnostic.json)"
+          LOG_NAMES="$(jq -r '.logNames | join(",")' engagement-evidence/execution-diagnostic.json)"
+          LOG_COUNT="$(jq -r '.executionScopedLogEntries' engagement-evidence/execution-diagnostic.json)"
+          FAILED_COUNT="$(jq -r '.failedCount // "UNKNOWN"' engagement-evidence/execution-diagnostic.json)"
+          SUCCEEDED_COUNT="$(jq -r '.succeededCount // "UNKNOWN"' engagement-evidence/execution-diagnostic.json)"
+          printf -v BODY '%s\n' \
+            'SHADOW_EXECUTION_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
+            "FAILED_COUNT=${FAILED_COUNT}" \
+            "SUCCEEDED_COUNT=${SUCCEEDED_COUNT}" \
+            "EXECUTION_SCOPED_LOG_ENTRIES=${LOG_COUNT}" \
+            "LOG_NAMES=${LOG_NAMES}" \
+            "CONDITION_SUMMARY=${CONDITION_SUMMARY}" \
+            "SAFE_MARKERS=${SAFE_MARKERS}" \
+            'RAW_ERROR_PAYLOAD_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_AUTHORIZED=false' \
+            'DATABASE_MUTATIONS_AUTHORIZED=false' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+
+      - name: Upload sanitized execution diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-proof-execution-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
