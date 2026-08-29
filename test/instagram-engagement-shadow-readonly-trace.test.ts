@@ -71,7 +71,9 @@ describe('Instagram engagement shadow read-only trace', () => {
     expect(workflow).toContain("jq '.issue' \"$GITHUB_EVENT_PATH\"");
     expect(workflow).toContain('-H "Authorization: Bearer $GH_TOKEN"');
     expect(workflow).toContain('mkdir -p engagement-evidence');
-    expect(workflow).toContain('toca.instagram-engagement.shadow-readonly-trace-attempt.v1');
+    expect(workflow).toContain(
+      'toca.instagram-engagement.shadow-readonly-trace-attempt.v1',
+    );
   });
 
   it('injects the database secret only into a runtime-SA ephemeral job', () => {
@@ -81,7 +83,9 @@ describe('Instagram engagement shadow read-only trace', () => {
     expect(workflow).toContain('gcloud run jobs deploy "$JOB_NAME"');
     expect(workflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(workflow).toContain('--set-cloudsql-instances "$CLOUD_SQL_INSTANCE"');
-    expect(workflow).toContain('--set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest"');
+    expect(workflow).toContain(
+      '--set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest"',
+    );
     expect(workflow).toContain('gcloud run jobs delete "$JOB_NAME"');
   });
 
