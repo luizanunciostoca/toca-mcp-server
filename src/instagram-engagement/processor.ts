@@ -5,7 +5,10 @@ import {
   type SocialEngagementLeadEngine,
 } from '../crm/social-engagement-lead-engine.js';
 import { MetaApiError } from '../providers/meta/meta-api-client.js';
-import type { InstagramEngagementProvider, InstagramWebhookEvent } from '../providers/instagram/instagram-engagement-contracts.js';
+import type {
+  InstagramEngagementProvider,
+  InstagramWebhookEvent,
+} from '../providers/instagram/instagram-engagement-contracts.js';
 import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
 import {
   INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE,
@@ -16,7 +19,10 @@ import {
   type InstagramEngagementReplyPayload,
 } from './events.js';
 import type { InstagramEngagementKnowledgeSource } from './knowledge.js';
-import { PostgresInstagramEngagementActionStore, type InstagramEngagementActionStatus } from './postgres-action-store.js';
+import {
+  PostgresInstagramEngagementActionStore,
+  type InstagramEngagementActionStatus,
+} from './postgres-action-store.js';
 import type { ClaimedInstagramEngagementEvent } from './typed-outbox.js';
 
 export interface InstagramEngagementProcessorOptions {
@@ -105,7 +111,11 @@ export class InstagramEngagementProcessor {
       pageId: this.options.pageId,
       instagramUserId: this.options.instagramUserId,
     });
-    const status = resolveActionStatus(leadResult.humanRequired, leadResult.replyDisposition, reply);
+    const status = resolveActionStatus(
+      leadResult.humanRequired,
+      leadResult.replyDisposition,
+      reply,
+    );
     await this.actions.createIfAbsent({
       eventId: payload.eventId,
       tenantId: claimed.tenantId,
@@ -189,7 +199,11 @@ export class InstagramEngagementProcessor {
         eventId: claimed.eventId,
         executionId: claimed.executionId,
         errorCode: code,
-        evidence: [ambiguous ? 'instagram:engagement:provider-outcome-ambiguous' : 'instagram:engagement:provider-failed'],
+        evidence: [
+          ambiguous
+            ? 'instagram:engagement:provider-outcome-ambiguous'
+            : 'instagram:engagement:provider-failed',
+        ],
         now: this.now().toISOString(),
       });
     }
@@ -203,7 +217,8 @@ function buildReplyPayload(input: {
   readonly pageId: string;
   readonly instagramUserId: string;
 }): InstagramEngagementReplyPayload | undefined {
-  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified) return undefined;
+  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified)
+    return undefined;
   if (input.event.channel === 'COMMENT') {
     if (!input.event.commentId) return undefined;
     return {
@@ -243,7 +258,10 @@ async function executeProviderReply(
 ): Promise<string> {
   if (payload.channel === 'COMMENT') {
     if (!payload.commentId) throw new Error('INSTAGRAM_ENGAGEMENT_COMMENT_ID_REQUIRED');
-    const result = await provider.replyToComment({ commentId: payload.commentId, message: payload.message });
+    const result = await provider.replyToComment({
+      commentId: payload.commentId,
+      message: payload.message,
+    });
     return result.commentId;
   }
   if (!payload.pageId || !payload.instagramUserId || !payload.recipientScopedId) {
@@ -266,6 +284,7 @@ function isAmbiguousProviderFailure(error: unknown): boolean {
 
 function safeErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const first = raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
+  const first =
+    raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
   return /^[A-Z0-9_]+$/.test(first) ? first.slice(0, 120) : 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
 }

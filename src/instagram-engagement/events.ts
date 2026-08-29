@@ -38,11 +38,15 @@ const replyPayloadSchema = z.object({
 export type InstagramEngagementInboundPayload = z.infer<typeof inboundPayloadSchema>;
 export type InstagramEngagementReplyPayload = z.infer<typeof replyPayloadSchema>;
 
-export function parseInstagramEngagementInboundPayload(value: unknown): InstagramEngagementInboundPayload {
+export function parseInstagramEngagementInboundPayload(
+  value: unknown,
+): InstagramEngagementInboundPayload {
   return inboundPayloadSchema.parse(value);
 }
 
-export function parseInstagramEngagementReplyPayload(value: unknown): InstagramEngagementReplyPayload {
+export function parseInstagramEngagementReplyPayload(
+  value: unknown,
+): InstagramEngagementReplyPayload {
   return replyPayloadSchema.parse(value);
 }
 

@@ -51,7 +51,9 @@ describe('Instagram engagement risk policy', () => {
   });
 
   it('keeps commercial pricing intent in suggest-only handoff', () => {
-    const classification = classifySocialEngagement('Quanto custa e como faço para comprar ingresso?');
+    const classification = classifySocialEngagement(
+      'Quanto custa e como faço para comprar ingresso?',
+    );
     expect(classification.intent).toBe('COMMERCIAL_LEAD');
     const decision = evaluateEngagementPolicy({
       channel: 'DIRECT',

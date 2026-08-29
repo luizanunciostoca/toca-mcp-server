@@ -113,7 +113,8 @@ export async function recoverStaleInstagramEngagementClaims(input: {
   readonly limit: number;
 }): Promise<readonly string[]> {
   validateCommon(input.eventTypes, input.now, input.limit);
-  if (!Number.isFinite(Date.parse(input.staleBefore))) throw new Error('INSTAGRAM_ENGAGEMENT_STALE_BEFORE_INVALID');
+  if (!Number.isFinite(Date.parse(input.staleBefore)))
+    throw new Error('INSTAGRAM_ENGAGEMENT_STALE_BEFORE_INVALID');
   const client = await input.pool.connect();
   try {
     await client.query('begin');
@@ -131,7 +132,8 @@ export async function recoverStaleInstagramEngagementClaims(input: {
     );
     const recovered: string[] = [];
     for (const row of stale.rows) {
-      if (!row.claim_execution_id) throw new Error('INSTAGRAM_ENGAGEMENT_STALE_EXECUTION_ID_MISSING');
+      if (!row.claim_execution_id)
+        throw new Error('INSTAGRAM_ENGAGEMENT_STALE_EXECUTION_ID_MISSING');
       const terminal = row.attempts >= row.max_attempts;
       const status = terminal ? 'DEAD_LETTER' : 'FAILED_RETRYABLE';
       const attempt = await client.query<AttemptRow>(
@@ -140,8 +142,11 @@ export async function recoverStaleInstagramEngagementClaims(input: {
         [row.claim_execution_id, row.event_id],
       );
       const attemptRow = attempt.rows[0];
-      if (!attemptRow || attemptRow.status !== 'CLAIMED') throw new Error('INSTAGRAM_ENGAGEMENT_STALE_ATTEMPT_INVALID');
-      const evidence = mergeEvidence(attemptRow.evidence, ['instagram:engagement:stale-claim-recovery']);
+      if (!attemptRow || attemptRow.status !== 'CLAIMED')
+        throw new Error('INSTAGRAM_ENGAGEMENT_STALE_ATTEMPT_INVALID');
+      const evidence = mergeEvidence(attemptRow.evidence, [
+        'instagram:engagement:stale-claim-recovery',
+      ]);
       await client.query(
         `update event_outbox_delivery_attempts set
            status = $2, completed_at = $3::timestamptz,
@@ -172,12 +177,16 @@ export async function recoverStaleInstagramEngagementClaims(input: {
 }
 
 function validateCommon(eventTypes: readonly string[], now: string, limit: number): void {
-  if (eventTypes.length === 0 || eventTypes.some((value) => !value.trim())) throw new Error('INSTAGRAM_ENGAGEMENT_EVENT_TYPES_REQUIRED');
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INSTAGRAM_ENGAGEMENT_CLAIM_LIMIT_INVALID');
+  if (eventTypes.length === 0 || eventTypes.some((value) => !value.trim()))
+    throw new Error('INSTAGRAM_ENGAGEMENT_EVENT_TYPES_REQUIRED');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error('INSTAGRAM_ENGAGEMENT_CLAIM_LIMIT_INVALID');
   if (!Number.isFinite(Date.parse(now))) throw new Error('INSTAGRAM_ENGAGEMENT_NOW_INVALID');
 }
 
 function mergeEvidence(value: unknown, extra: readonly string[]): readonly string[] {
-  const current = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const current = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
   return [...new Set([...current, ...extra].map((item) => item.trim()).filter(Boolean))].sort();
 }

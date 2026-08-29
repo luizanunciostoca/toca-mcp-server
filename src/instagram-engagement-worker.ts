@@ -34,12 +34,21 @@ const organizationId = process.env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() 
 const spreadsheetId = requiredEnv('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
 const sheetsTokenKey = requiredEnv('INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_TOKEN_ENV_KEY');
 const pageId = requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
-const instagramUserId = config.INSTAGRAM_BUSINESS_ACCOUNT_ID ?? requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
+const instagramUserId =
+  config.INSTAGRAM_BUSINESS_ACCOUNT_ID ?? requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 const workerId = `${process.env.K_REVISION?.trim() || hostname()}:instagram-engagement`;
 const batchSize = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_BATCH_SIZE, 10, 1, 50);
 const pollMs = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_POLL_MS, 1_000, 250, 60_000);
-const staleMs = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_STALE_CLAIM_MS, 300_000, 60_000, 3_600_000);
-const eventTypes = [INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE, INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE] as const;
+const staleMs = boundedInteger(
+  process.env.INSTAGRAM_ENGAGEMENT_STALE_CLAIM_MS,
+  300_000,
+  60_000,
+  3_600_000,
+);
+const eventTypes = [
+  INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE,
+  INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
+] as const;
 
 const sheetsSecrets = new EnvSecretResolver(process.env, 'env');
 const sheetsClient = new GoogleSheetsRestClient(sheetsSecrets, {
@@ -49,7 +58,12 @@ const knowledge = new GoogleSheetsInstagramEngagementKnowledgeSource({
   client: sheetsClient,
   spreadsheetId,
   range: process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A:T',
-  cacheMs: boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
+  cacheMs: boundedInteger(
+    process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS,
+    60_000,
+    0,
+    3_600_000,
+  ),
 });
 
 const crm = new PostgresCrmCoreStore(pool, { outbox });
@@ -69,7 +83,10 @@ const provider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
       async replyToComment(): Promise<{ readonly commentId: string }> {
         throw new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED');
       },
-      async sendDirectReply(): Promise<{ readonly recipientId: string; readonly messageId: string }> {
+      async sendDirectReply(): Promise<{
+        readonly recipientId: string;
+        readonly messageId: string;
+      }> {
         throw new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED');
       },
     };
@@ -175,7 +192,12 @@ function requiredEnv(key: string): string {
   return value;
 }
 
-function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
+function boundedInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
   if (!value?.trim()) return fallback;
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
@@ -186,7 +208,8 @@ function boundedInteger(value: string | undefined, fallback: number, minimum: nu
 
 function safeErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const candidate = raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';
+  const candidate =
+    raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';
   return /^[A-Z0-9_]+$/.test(candidate)
     ? candidate.slice(0, 120)
     : 'INSTAGRAM_ENGAGEMENT_PROCESSING_FAILED';

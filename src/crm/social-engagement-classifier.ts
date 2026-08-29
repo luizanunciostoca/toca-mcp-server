@@ -245,7 +245,9 @@ function containsSensitiveData(value: string): boolean {
   const phone = /(?:\+?\d[\s().-]*){10,15}/;
   const paymentCardLike = /\b(?:\d[ -]*?){13,19}\b/;
   const cpfLike = /\b\d{3}[.-]?\d{3}[.-]?\d{3}-?\d{2}\b/;
-  return email.test(value) || phone.test(value) || paymentCardLike.test(value) || cpfLike.test(value);
+  return (
+    email.test(value) || phone.test(value) || paymentCardLike.test(value) || cpfLike.test(value)
+  );
 }
 
 function classifySentiment(value: string): SocialSentiment {

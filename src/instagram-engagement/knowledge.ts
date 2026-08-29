@@ -14,7 +14,10 @@ export interface InstagramEngagementKnowledgeMatch {
 }
 
 export interface InstagramEngagementKnowledgeSource {
-  resolve(text: string, expectedIntent: EngagementIntent): Promise<InstagramEngagementKnowledgeMatch | null>;
+  resolve(
+    text: string,
+    expectedIntent: EngagementIntent,
+  ): Promise<InstagramEngagementKnowledgeMatch | null>;
 }
 
 export interface GoogleSheetsInstagramEngagementKnowledgeOptions {
@@ -30,7 +33,14 @@ interface KnowledgeRow extends InstagramEngagementKnowledgeMatch {
 }
 
 const DEFAULT_RANGE = 'FAQ_IA!A:T';
-const VERIFIED_STATUSES = new Set(['ACTIVE', 'ATIVO', 'VERIFIED', 'VALIDADO', 'APPROVED', 'APROVADO']);
+const VERIFIED_STATUSES = new Set([
+  'ACTIVE',
+  'ATIVO',
+  'VERIFIED',
+  'VALIDADO',
+  'APPROVED',
+  'APROVADO',
+]);
 const HUMAN_INTENTS = new Set<EngagementIntent>([
   'COMPLAINT',
   'REFUND',
@@ -49,7 +59,8 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
   private cache: { readonly expiresAt: number; readonly rows: readonly KnowledgeRow[] } | undefined;
 
   constructor(private readonly options: GoogleSheetsInstagramEngagementKnowledgeOptions) {
-    if (!options.spreadsheetId.trim()) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID_REQUIRED');
+    if (!options.spreadsheetId.trim())
+      throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID_REQUIRED');
     this.range = options.range?.trim() || DEFAULT_RANGE;
     this.cacheMs = options.cacheMs ?? 60_000;
     if (!Number.isInteger(this.cacheMs) || this.cacheMs < 0 || this.cacheMs > 3_600_000) {
@@ -58,7 +69,10 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
     this.now = options.now ?? Date.now;
   }
 
-  async resolve(text: string, expectedIntent: EngagementIntent): Promise<InstagramEngagementKnowledgeMatch | null> {
+  async resolve(
+    text: string,
+    expectedIntent: EngagementIntent,
+  ): Promise<InstagramEngagementKnowledgeMatch | null> {
     const normalized = normalizeText(text);
     if (!normalized) return null;
     const rows = await this.rows();
@@ -66,7 +80,8 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
     let bestScore = 0;
 
     for (const row of rows) {
-      if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent)) continue;
+      if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
+        continue;
       const score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
       if (score > bestScore) {
         best = row;
@@ -95,10 +110,16 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
   }
 }
 
-export function parseKnowledgeRows(values: readonly (readonly unknown[])[]): readonly KnowledgeRow[] {
+export function parseKnowledgeRows(
+  values: readonly (readonly unknown[])[],
+): readonly KnowledgeRow[] {
   const [headerRaw, ...body] = values;
   if (!headerRaw) return [];
-  const headers = headerRaw.map((value) => String(value ?? '').trim().toLowerCase());
+  const headers = headerRaw.map((value) =>
+    String(value ?? '')
+      .trim()
+      .toLowerCase(),
+  );
   const index = new Map(headers.map((header, position) => [header, position] as const));
   const rows: KnowledgeRow[] = [];
 
@@ -151,7 +172,9 @@ function parseIntent(value: string): EngagementIntent | undefined {
     'HARASSMENT_OR_THREAT',
     'UNKNOWN',
   ];
-  return allowed.includes(candidate as EngagementIntent) ? (candidate as EngagementIntent) : undefined;
+  return allowed.includes(candidate as EngagementIntent)
+    ? (candidate as EngagementIntent)
+    : undefined;
 }
 
 function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
@@ -161,7 +184,10 @@ function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: 
 }
 
 function splitVariants(value: string): readonly string[] {
-  return value.split(/[\n|;]/g).map((item) => item.trim()).filter(Boolean);
+  return value
+    .split(/[\n|;]/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeText(value: string): string {
@@ -177,7 +203,8 @@ function normalizeText(value: string): string {
 function similarity(left: string, right: string): number {
   if (!left || !right) return 0;
   if (left === right) return 1;
-  if (left.length >= 12 && right.length >= 12 && (left.includes(right) || right.includes(left))) return 0.92;
+  if (left.length >= 12 && right.length >= 12 && (left.includes(right) || right.includes(left)))
+    return 0.92;
   const leftTokens = new Set(left.split(' ').filter((token) => token.length > 1));
   const rightTokens = new Set(right.split(' ').filter((token) => token.length > 1));
   if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
