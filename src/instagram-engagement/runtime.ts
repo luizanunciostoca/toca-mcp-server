@@ -53,7 +53,7 @@ export function createInstagramEngagementBatchRuntime(
     throw new Error('INSTAGRAM_ENGAGEMENT_RUNTIME_DISABLED');
   }
 
-  const tenantId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_TENANT_ID');
+  requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_TENANT_ID');
   const spreadsheetId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
   const pageId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_PAGE_ID');
   const instagramUserId =
