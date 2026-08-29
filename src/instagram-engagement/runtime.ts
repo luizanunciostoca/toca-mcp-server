@@ -54,8 +54,6 @@ export function createInstagramEngagementBatchRuntime(
   }
 
   const tenantId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_TENANT_ID');
-  const workspaceId = env.INSTAGRAM_ENGAGEMENT_WORKSPACE_ID?.trim() || tenantId;
-  const organizationId = env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() || tenantId;
   const spreadsheetId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
   const pageId = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_PAGE_ID');
   const instagramUserId =
