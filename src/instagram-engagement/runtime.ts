@@ -7,6 +7,7 @@ import { PostgresTransactionalOutbox } from '../events/postgres-transactional-ou
 import { PostgresCrmCoreStore } from '../persistence/postgres-crm-core-store.js';
 import { PostgresEventRecordStore } from '../persistence/postgres-event-record-store.js';
 import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
+import type { InstagramEngagementProvider } from '../providers/instagram/instagram-engagement-contracts.js';
 import { InstagramGraphEngagementProvider } from '../providers/instagram/instagram-engagement-provider.js';
 import { MetaApiClient } from '../providers/meta/meta-api-client.js';
 import {
@@ -96,7 +97,7 @@ export function createInstagramEngagementBatchRuntime(
     },
   });
 
-  const provider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
+  const provider: InstagramEngagementProvider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
     ? createLiveProvider(config, env)
     : disabledProvider();
   const processor = new InstagramEngagementProcessor({
@@ -175,7 +176,7 @@ function createLiveProvider(
   return new InstagramGraphEngagementProvider(client);
 }
 
-function disabledProvider(): InstagramGraphEngagementProvider {
+function disabledProvider(): InstagramEngagementProvider {
   return {
     replyToComment(): Promise<{ readonly commentId: string }> {
       return Promise.reject(new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED'));
@@ -183,7 +184,7 @@ function disabledProvider(): InstagramGraphEngagementProvider {
     sendDirectReply(): Promise<{ readonly recipientId: string; readonly messageId: string }> {
       return Promise.reject(new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED'));
     },
-  } as InstagramGraphEngagementProvider;
+  };
 }
 
 function retryDelayMs(attempt: number): number {
