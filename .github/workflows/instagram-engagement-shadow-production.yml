@@ -208,8 +208,7 @@ jobs:
           set -euo pipefail
           run_job() {
             local job="$1" command_path="$2" env_vars="$3"
-            trap 'gcloud run jobs delete "'$1'" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' RETURN
-            gcloud run jobs deploy "$job" \
+            if ! gcloud run jobs deploy "$job" \
               --image "$IMAGE" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
@@ -219,10 +218,15 @@ jobs:
               --set-env-vars "$env_vars" \
               --command node \
               --args "$command_path" \
-              --tasks 1 --max-retries 0 --task-timeout 300s --quiet
-            gcloud run jobs execute "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+              --tasks 1 --max-retries 0 --task-timeout 300s --quiet; then
+              gcloud run jobs delete "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              return 1
+            fi
+            if ! gcloud run jobs execute "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet; then
+              gcloud run jobs delete "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+              return 1
+            fi
             gcloud run jobs delete "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
-            trap - RETURN
           }
 
           MIGRATE_JOB="toca-ig-eng-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -273,7 +277,7 @@ jobs:
             --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --command node --args dist/src/toca-managed-instagram-daemon.js \
-            --no-allow-unauthenticated --quiet
+            --quiet
 
           gcloud run services update "$WEBHOOK_SERVICE_NAME" \
             --image "$IMAGE" \
@@ -281,9 +285,13 @@ jobs:
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest" \
-            --update-env-vars "NODE_ENV=production,MCP_ENABLED=false,TOCA_SERVICE_ROLE=webhook,TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID,TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,META_ENABLED=true,META_PROVIDER_VERIFIED=true,META_WEBHOOK_ENABLED=true,META_WEBHOOK_PERSISTENCE_ENABLED=true,META_APP_ID=$META_APP_ID,META_APP_SECRET_PROVIDER=env,META_APP_SECRET_KEY=META_APP_SECRET,META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth,META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token,META_REDIRECT_URI=$META_REDIRECT_URI,META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES,META_GRAPH_BASE_URL=https://graph.facebook.com,META_GRAPH_API_VERSION=v24.0,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --update-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --command node --args dist/src/http-instagram-engagement.js \
-            --allow-unauthenticated --quiet
+            --quiet
+
+          gcloud run services add-iam-policy-binding "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --member=allUsers --role=roles/run.invoker --quiet
 
       - name: Verify deployed fail-closed configuration
         id: deployed
@@ -312,10 +320,14 @@ jobs:
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last == "false")
           ' >/dev/null
 
+          gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null
+
           WEBHOOK_URL="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.url // empty')"
           test -n "$WEBHOOK_URL" || { echo 'Webhook URL missing' >&2; exit 1; }
           echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
-          jq -n --arg webhookUrl "$WEBHOOK_URL" '{schemaVersion:"toca.instagram-engagement.shadow-deploy.v1",daemonRuntimeEnabled:true,engagementWritesEnabled:false,webhookPersistenceEnabled:true,webhookUrl:$webhookUrl}' > engagement-evidence/deploy.json
+          jq -n --arg webhookUrl "$WEBHOOK_URL" '{schemaVersion:"toca.instagram-engagement.shadow-deploy.v1",daemonRuntimeEnabled:true,engagementWritesEnabled:false,webhookPersistenceEnabled:true,webhookPublicForMeta:true,webhookUrl:$webhookUrl}' > engagement-evidence/deploy.json
 
       - name: Prove COMMENT and DIRECT end-to-end with synthetic signed webhooks
         env:
