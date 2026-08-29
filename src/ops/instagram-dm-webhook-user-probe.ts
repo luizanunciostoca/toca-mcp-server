@@ -99,7 +99,6 @@ function safeErrorCategory(value: unknown): string {
     'INVALID_ARGUMENT',
     'VALIDATION',
     'MCP_RPC_ERROR',
-    'MCP_TOOL_ERROR',
     'MCP_TIMEOUT',
     'META_HTTP_400',
     'META_SUBCODE_2534084',
@@ -122,7 +121,7 @@ function structured(result: unknown): JsonObject {
   };
   const text = value?.content?.find((item) => item.type === 'text')?.text;
   if (value?.isError) {
-    throw new Error(`MCP_TOOL_ERROR:${safeErrorCategory(text ?? 'MCP_TOOL_ERROR')}`);
+    throw new Error(safeErrorCategory(text ?? 'MCP_TOOL_ERROR'));
   }
   if (value?.structuredContent && typeof value.structuredContent === 'object') {
     return value.structuredContent;
