@@ -28,7 +28,7 @@ export interface GoogleSheetsInstagramEngagementKnowledgeOptions {
   readonly now?: () => number;
 }
 
-interface KnowledgeRow extends InstagramEngagementKnowledgeMatch {
+export interface InstagramEngagementKnowledgeRow extends InstagramEngagementKnowledgeMatch {
   readonly prompts: readonly string[];
 }
 
@@ -56,7 +56,9 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
   private readonly range: string;
   private readonly cacheMs: number;
   private readonly now: () => number;
-  private cache: { readonly expiresAt: number; readonly rows: readonly KnowledgeRow[] } | undefined;
+  private cache:
+    | { readonly expiresAt: number; readonly rows: readonly InstagramEngagementKnowledgeRow[] }
+    | undefined;
 
   constructor(private readonly options: GoogleSheetsInstagramEngagementKnowledgeOptions) {
     if (!options.spreadsheetId.trim())
@@ -73,34 +75,10 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
     text: string,
     expectedIntent: EngagementIntent,
   ): Promise<InstagramEngagementKnowledgeMatch | null> {
-    const normalized = normalizeText(text);
-    if (!normalized) return null;
-    const rows = await this.rows();
-    let best: KnowledgeRow | undefined;
-    let bestScore = 0;
-
-    for (const row of rows) {
-      if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
-        continue;
-      const score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
-      if (score > bestScore) {
-        best = row;
-        bestScore = score;
-      }
-    }
-
-    if (!best || bestScore < 0.78) return null;
-    return {
-      faqId: best.faqId,
-      intent: best.intent,
-      answer: best.answer,
-      source: best.source,
-      confidence: bestScore,
-      factsVerified: true,
-    };
+    return resolveKnowledgeRows(text, expectedIntent, await this.rows());
   }
 
-  private async rows(): Promise<readonly KnowledgeRow[]> {
+  private async rows(): Promise<readonly InstagramEngagementKnowledgeRow[]> {
     const now = this.now();
     if (this.cache && this.cache.expiresAt > now) return this.cache.rows;
     const values = await this.options.client.readRange(this.options.spreadsheetId, this.range);
@@ -110,14 +88,44 @@ export class GoogleSheetsInstagramEngagementKnowledgeSource implements Instagram
   }
 }
 
+export function resolveKnowledgeRows(
+  text: string,
+  expectedIntent: EngagementIntent,
+  rows: readonly InstagramEngagementKnowledgeRow[],
+): InstagramEngagementKnowledgeMatch | null {
+  const normalized = normalizeText(text);
+  if (!normalized) return null;
+  let best: InstagramEngagementKnowledgeRow | undefined;
+  let bestScore = 0;
+
+  for (const row of rows) {
+    if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent)) continue;
+    const score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
+    if (score > bestScore) {
+      best = row;
+      bestScore = score;
+    }
+  }
+
+  if (!best || bestScore < 0.78) return null;
+  return {
+    faqId: best.faqId,
+    intent: best.intent,
+    answer: best.answer,
+    source: best.source,
+    confidence: bestScore,
+    factsVerified: true,
+  };
+}
+
 export function parseKnowledgeRows(
   values: readonly (readonly unknown[])[],
-): readonly KnowledgeRow[] {
+): readonly InstagramEngagementKnowledgeRow[] {
   const [headerRaw, ...body] = values;
   if (!headerRaw) return [];
   const headers = headerRaw.map((value) => scalarText(value).toLowerCase());
   const index = new Map(headers.map((header, position) => [header, position] as const));
-  const rows: KnowledgeRow[] = [];
+  const rows: InstagramEngagementKnowledgeRow[] = [];
 
   for (const raw of body) {
     const faqId = cell(raw, index, 'faq_id');
@@ -127,16 +135,11 @@ export function parseKnowledgeRows(
     const source = cell(raw, index, 'fonte_resposta_toca_os');
     const status = cell(raw, index, 'status').toUpperCase();
     const autonomy = cell(raw, index, 'autonomy_default').toUpperCase();
-    const intent = parseIntent(cell(raw, index, 'intent'));
+    const intent = parseEngagementIntent(cell(raw, index, 'intent'));
     if (!faqId || !canonical || !intent) continue;
 
     const prompts = [canonical, ...splitVariants(variants)].map(normalizeText).filter(Boolean);
-    const factsVerified =
-      VERIFIED_STATUSES.has(status) &&
-      autonomy === 'AUTO_REPLY_ALLOWED' &&
-      answer.length > 0 &&
-      source.length > 0 &&
-      !HUMAN_INTENTS.has(intent);
+    const factsVerified = isVerifiedKnowledgeConfiguration(status, autonomy, answer, source, intent);
     rows.push({
       faqId,
       intent,
@@ -150,7 +153,7 @@ export function parseKnowledgeRows(
   return rows;
 }
 
-function parseIntent(value: string): EngagementIntent | undefined {
+export function parseEngagementIntent(value: string): EngagementIntent | undefined {
   const candidate = value.trim().toUpperCase();
   const allowed: readonly EngagementIntent[] = [
     'FAQ_OPERATIONAL',
@@ -171,6 +174,26 @@ function parseIntent(value: string): EngagementIntent | undefined {
   return allowed.includes(candidate as EngagementIntent)
     ? (candidate as EngagementIntent)
     : undefined;
+}
+
+export function isVerifiedKnowledgeConfiguration(
+  status: string,
+  autonomy: string,
+  answer: string,
+  source: string,
+  intent: EngagementIntent,
+): boolean {
+  return (
+    VERIFIED_STATUSES.has(status.trim().toUpperCase()) &&
+    autonomy.trim().toUpperCase() === 'AUTO_REPLY_ALLOWED' &&
+    answer.trim().length > 0 &&
+    source.trim().length > 0 &&
+    !HUMAN_INTENTS.has(intent)
+  );
+}
+
+export function normalizeKnowledgePrompt(value: string): string {
+  return normalizeText(value);
 }
 
 function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
