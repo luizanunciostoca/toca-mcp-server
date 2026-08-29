@@ -102,6 +102,7 @@ function safeErrorCategory(value: unknown): string {
     'MCP_TIMEOUT',
     'META_HTTP_400',
     'META_SUBCODE_2534084',
+    'INSTAGRAM_MESSAGING_CURSOR_UNSAFE',
   ];
   for (const token of known) if (text.includes(token)) return token;
   const token = text.match(/[A-Z][A-Z0-9_]{3,}/)?.[0];
@@ -147,6 +148,7 @@ async function webhookSenderIds(): Promise<string[]> {
       FROM meta_webhook_events
       WHERE channel = 'DIRECT'
         AND NULLIF(BTRIM(sender_scoped_id), '') IS NOT NULL
+      ORDER BY sender_scoped_id
       LIMIT 50
     `);
     await client.query('ROLLBACK');
@@ -156,24 +158,37 @@ async function webhookSenderIds(): Promise<string[]> {
   }
 }
 
+function updateRange(value: string, state: { oldest: string | null; newest: string | null }): void {
+  if (!value) return;
+  if (!state.oldest || value < state.oldest) state.oldest = value;
+  if (!state.newest || value > state.newest) state.newest = value;
+}
+
 async function main(): Promise<void> {
   const initialized = (await send('initialize', {
     protocolVersion: '2025-06-18',
     capabilities: {},
-    clientInfo: { name: 'toca-os-instagram-webhook-user-probe', version: '1.0.0' },
+    clientInfo: { name: 'toca-os-instagram-webhook-user-probe', version: '2.0.0' },
   })) as { serverInfo?: { name?: string }; protocolVersion?: string };
   notify('notifications/initialized', {});
 
   const senderIds = await webhookSenderIds();
+  const inboundByYear = new Map<string, number>();
+  const timestampRange = { oldest: null as string | null, newest: null as string | null };
   let probesAttempted = 0;
   let successfulConversationCalls = 0;
   let conversationsFound = 0;
   let messageReadsSucceeded = 0;
+  let messagePagesRead = 0;
   let messagesReturned = 0;
+  let duplicateMessagesAcrossPages = 0;
   let inboundMessages = 0;
   let inboundMessages2025 = 0;
   let inboundMessagesWithText2025 = 0;
-  let conversationsWithProviderHasMore = 0;
+  let conversationsFullyPaginated = 0;
+  let conversationsStoppedByPageLimit = 0;
+  let conversationsStoppedByCursorCycle = 0;
+  const MAX_PAGES_PER_CONVERSATION = 100;
 
   for (const userId of senderIds) {
     probesAttempted += 1;
@@ -191,29 +206,61 @@ async function main(): Promise<void> {
       for (const conversation of conversations) {
         const conversationId = scalar(conversation.conversationId);
         if (!conversationId) continue;
-        try {
-          const messagesExecution = await callTool('toca.execute', {
-            capabilityId: 'instagram.messaging.messages.read',
-            payload: { conversationId, limit: 20 },
-            correlationId: `instagram-dm-webhook-msg-${Date.now()}-${probesAttempted}`,
-          });
-          messageReadsSucceeded += 1;
-          const messagesResult = asRecord(messagesExecution.result);
-          const messages = arrayOfRecords(messagesResult.messages);
-          messagesReturned += messages.length;
-          if (messagesResult.providerHasMore === true) conversationsWithProviderHasMore += 1;
-          for (const message of messages) {
-            if (message.direction !== 'INBOUND') continue;
-            inboundMessages += 1;
-            const createdTime = scalar(message.createdTime);
-            if (createdTime && createdTime >= '2025-01-01' && createdTime < '2026-01-01') {
-              inboundMessages2025 += 1;
-              if (scalar(message.text).trim()) inboundMessagesWithText2025 += 1;
+        const seenCursors = new Set<string>();
+        const seenMessageIds = new Set<string>();
+        let after: string | undefined;
+        let fullyPaginated = false;
+
+        for (let page = 1; page <= MAX_PAGES_PER_CONVERSATION; page += 1) {
+          try {
+            const messagesExecution = await callTool('toca.execute', {
+              capabilityId: 'instagram.messaging.messages.read',
+              payload: { conversationId, limit: 20, ...(after ? { after } : {}) },
+              correlationId: `instagram-dm-webhook-msg-${Date.now()}-${probesAttempted}-${page}`,
+            });
+            messageReadsSucceeded += 1;
+            messagePagesRead += 1;
+            const messagesResult = asRecord(messagesExecution.result);
+            const messages = arrayOfRecords(messagesResult.messages);
+            messagesReturned += messages.length;
+
+            for (const message of messages) {
+              const messageId = scalar(message.messageId);
+              if (messageId) {
+                if (seenMessageIds.has(messageId)) duplicateMessagesAcrossPages += 1;
+                seenMessageIds.add(messageId);
+              }
+              const createdTime = scalar(message.createdTime);
+              updateRange(createdTime, timestampRange);
+              if (message.direction !== 'INBOUND') continue;
+              inboundMessages += 1;
+              const year = createdTime.slice(0, 4);
+              if (/^\d{4}$/.test(year)) inboundByYear.set(year, (inboundByYear.get(year) ?? 0) + 1);
+              if (createdTime && createdTime >= '2025-01-01' && createdTime < '2026-01-01') {
+                inboundMessages2025 += 1;
+                if (scalar(message.text).trim()) inboundMessagesWithText2025 += 1;
+              }
             }
+
+            const nextAfter = scalar(messagesResult.nextAfter);
+            if (!nextAfter) {
+              fullyPaginated = true;
+              break;
+            }
+            if (seenCursors.has(nextAfter)) {
+              conversationsStoppedByCursorCycle += 1;
+              break;
+            }
+            seenCursors.add(nextAfter);
+            after = nextAfter;
+          } catch (error) {
+            recordFailure(error);
+            break;
           }
-        } catch (error) {
-          recordFailure(error);
         }
+
+        if (fullyPaginated) conversationsFullyPaginated += 1;
+        else if (seenCursors.size >= MAX_PAGES_PER_CONVERSATION) conversationsStoppedByPageLimit += 1;
       }
     } catch (error) {
       recordFailure(error);
@@ -222,7 +269,7 @@ async function main(): Promise<void> {
 
   console.log(
     JSON.stringify({
-      validation: 'instagram-dm-webhook-user-probe',
+      validation: 'instagram-dm-webhook-user-probe-v2',
       senderSource: 'meta_webhook_events:DIRECT',
       mcpServer: initialized.serverInfo?.name ?? null,
       protocolVersion: initialized.protocolVersion ?? null,
@@ -231,11 +278,20 @@ async function main(): Promise<void> {
       successfulConversationCalls,
       conversationsFound,
       messageReadsSucceeded,
+      messagePagesRead,
       messagesReturned,
+      duplicateMessagesAcrossPages,
       inboundMessages,
       inboundMessages2025,
       inboundMessagesWithText2025,
-      conversationsWithProviderHasMore,
+      inboundByYear: [...inboundByYear.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([year, count]) => ({ year, count })),
+      oldestMessageTime: timestampRange.oldest,
+      newestMessageTime: timestampRange.newest,
+      conversationsFullyPaginated,
+      conversationsStoppedByPageLimit,
+      conversationsStoppedByCursorCycle,
       executionFailures: [...executionFailures.entries()].map(([category, count]) => ({ category, count })),
       providerErrors: [...providerErrors.entries()].map(([key, count]) => ({ ...JSON.parse(key), count })),
       identitiesPrinted: false,
@@ -263,7 +319,7 @@ main()
     const code = safeErrorCategory(error instanceof Error ? error.message : error);
     console.log(
       JSON.stringify({
-        validation: 'instagram-dm-webhook-user-probe',
+        validation: 'instagram-dm-webhook-user-probe-v2',
         status: 'FAILED',
         errorCode: code,
         identitiesPrinted: false,
