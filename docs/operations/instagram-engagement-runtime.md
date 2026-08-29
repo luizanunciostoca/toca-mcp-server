@@ -44,9 +44,10 @@ Required for processing:
 - `INSTAGRAM_ENGAGEMENT_PAGE_ID`
 - `INSTAGRAM_BUSINESS_ACCOUNT_ID`
 - `INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID`
-- `INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_TOKEN_ENV_KEY`
+- `INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE=gcp-iam` in production
+- `INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL`
 
-Recommended defaults are documented in `.env.example`.
+For local/test environments, `INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE=env` may be used with a short-lived token reference. Production must not depend on a manually maintained Google Sheets bearer token.
 
 External writes additionally require:
 
@@ -76,6 +77,15 @@ The preflight verifies:
 - when writes are enabled, Meta is explicitly verified and a read-only Graph API identity request succeeds.
 
 The preflight prints only a sanitized PASS record and never prints account IDs, sheet IDs, tokens, user identities, or message text.
+
+## Production shadow topology
+
+The canonical production shadow topology reuses existing TOCA OS surfaces rather than creating a parallel system:
+
+- `toca-webhook-next-production` receives `GET/POST /webhooks/meta`, validates Meta challenge/signature, persists inbound COMMENT/DIRECT events and enqueues them in PostgreSQL.
+- `toca-managed-instagram-daemon` remains the authenticated, scale-to-zero minute-trigger service. Its `/tick` processes both the existing publication batch and the bounded engagement batch when `INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true`.
+- In shadow mode, `INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false` on every runtime surface. Verified low-risk facts are classified/suggested only; no external COMMENT or DIRECT reply is sent.
+- The FAQ source is `TOCA_OS — BASE_CANONICA_ATENDIMENTO_INSTAGRAM_IA_v1.0`; the historical 2025 analysis sheet is superseded and is not a runtime source.
 
 ## Promotion sequence
 
@@ -117,7 +127,7 @@ Fast write stop:
 Full engagement stop:
 
 1. Set `INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false`.
-2. Set `INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=false` and stop the engagement worker.
+2. Set `INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=false` and stop engagement processing in the daemon.
 3. Keep webhook persistence enabled unless inbound capture itself must be stopped.
 
 Do not delete outbox or action rows during rollback. They are the audit/recovery record.
@@ -164,4 +174,4 @@ group by event_type;
 
 ## Historical 2025 Directs
 
-This runtime solves governed processing of newly captured events. It does not claim complete historical coverage of 2025 Instagram Directs. Historical completeness remains a separate ingestion problem because Meta may restrict global conversation listing and may omit old inactive Requests. The canonical FAQ dataset must not be marked historically complete until independent coverage evidence exists.
+Historical 2025 Direct recovery is explicitly out of scope for the current operational runtime. The runtime starts from newly captured webhook traffic and must not claim historical completeness. The superseded 2025 analysis artifact is not consulted for live replies.

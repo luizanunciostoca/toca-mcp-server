@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { EnvSecretResolver } from './core/secrets.js';
+import { createInstagramEngagementGoogleSheetsAuth } from './instagram-engagement/google-sheets-auth.js';
 import { createPostgresPool } from './persistence/postgres.js';
 import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
 import { MetaApiClient } from './providers/meta/meta-api-client.js';
@@ -34,7 +35,6 @@ const workspaceId = process.env.INSTAGRAM_ENGAGEMENT_WORKSPACE_ID?.trim() || ten
 const organizationId = process.env.INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID?.trim() || tenantId;
 requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
 const spreadsheetId = requiredEnv('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID');
-const sheetsTokenKey = requiredEnv('INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_TOKEN_ENV_KEY');
 const instagramUserId =
   config.INSTAGRAM_BUSINESS_ACCOUNT_ID ?? requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 
@@ -58,9 +58,9 @@ try {
   );
   if (!migration.rows[0]?.present) throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');
 
-  const sheetsSecrets = new EnvSecretResolver(process.env, 'env');
-  const sheetsClient = new GoogleSheetsRestClient(sheetsSecrets, {
-    tokenReference: { provider: 'env', key: sheetsTokenKey },
+  const sheetsAuth = createInstagramEngagementGoogleSheetsAuth();
+  const sheetsClient = new GoogleSheetsRestClient(sheetsAuth.resolver, {
+    tokenReference: sheetsAuth.tokenReference,
   });
   const values = await sheetsClient.readRange(
     spreadsheetId,
@@ -100,6 +100,7 @@ try {
       migrationVerified: true,
       knowledgeReadable: true,
       knowledgeSchemaVerified: true,
+      knowledgeAuthMode: sheetsAuth.mode,
       scopeConfigured: Boolean(tenantId && workspaceId && organizationId),
       identitiesPrinted: false,
       secretsPrinted: false,
