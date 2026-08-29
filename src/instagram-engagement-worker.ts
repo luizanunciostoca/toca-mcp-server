@@ -80,14 +80,14 @@ const leadEngine = new SocialEngagementLeadEngine({
 const provider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
   ? createLiveProvider()
   : {
-      async replyToComment(): Promise<{ readonly commentId: string }> {
-        throw new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED');
+      replyToComment(): Promise<{ readonly commentId: string }> {
+        return Promise.reject(new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED'));
       },
-      async sendDirectReply(): Promise<{
+      sendDirectReply(): Promise<{
         readonly recipientId: string;
         readonly messageId: string;
       }> {
-        throw new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED');
+        return Promise.reject(new Error('INSTAGRAM_ENGAGEMENT_WRITES_DISABLED'));
       },
     };
 
