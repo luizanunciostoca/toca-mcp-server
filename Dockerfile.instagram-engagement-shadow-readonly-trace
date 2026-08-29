@@ -1,0 +1,7 @@
+FROM southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
+
+USER root
+COPY --chown=node:node scripts/diagnose-instagram-engagement-shadow-readonly.mjs ./scripts/diagnose-instagram-engagement-shadow-readonly.mjs
+USER node
+
+ENTRYPOINT ["node", "scripts/diagnose-instagram-engagement-shadow-readonly.mjs"]
