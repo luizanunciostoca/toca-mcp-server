@@ -37,6 +37,8 @@ export class PostgresMetaWebhookEventStore {
     try {
       await client.query('begin');
       for (const event of events) {
+        const occurredAt = event.occurredAt ?? new Date().toISOString();
+        const normalizedEvent: InstagramWebhookEvent = { ...event, occurredAt };
         const textSha256 = event.text
           ? createHash('sha256').update(event.text, 'utf8').digest('hex')
           : null;
@@ -49,7 +51,7 @@ export class PostgresMetaWebhookEventStore {
           [
             event.eventId,
             event.channel,
-            event.occurredAt,
+            occurredAt,
             event.senderId ?? null,
             event.messageId ?? null,
             textSha256,
@@ -57,7 +59,7 @@ export class PostgresMetaWebhookEventStore {
         );
 
         if (result.rowCount === 1) {
-          accepted.push(event);
+          accepted.push(normalizedEvent);
           await client.query(
             `insert into audit_events
                (correlation_id, tool_name, risk_class, decision, normalized_payload, provider_result)
@@ -69,7 +71,7 @@ export class PostgresMetaWebhookEventStore {
               'ACCEPTED',
               JSON.stringify({
                 channel: event.channel,
-                occurredAt: event.occurredAt,
+                occurredAt,
                 hasSenderScopedId: Boolean(event.senderId),
                 hasProviderMessageId: Boolean(event.messageId),
                 hasTextHash: Boolean(textSha256),
@@ -81,12 +83,12 @@ export class PostgresMetaWebhookEventStore {
           if (this.options.outbox && this.options.engagementScope) {
             await this.options.outbox.enqueue(
               client,
-              createInstagramEngagementInboundEnvelope(event, this.options.engagementScope),
+              createInstagramEngagementInboundEnvelope(normalizedEvent, this.options.engagementScope, occurredAt),
               { maxAttempts: 5 },
             );
           }
         } else {
-          duplicates.push(event);
+          duplicates.push(normalizedEvent);
         }
       }
       await client.query('commit');
