@@ -11,7 +11,9 @@ describe('Instagram engagement shadow proof recovery', () => {
     expect(workflow).toContain('name: Instagram Engagement Shadow Proof Recovery');
     expect(workflow).toContain('confirm_recovery:');
     expect(workflow).toContain('RECOVER_ENGAGEMENT_SHADOW_PROOF');
-    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_SHADOW_PROOF_RECOVERY=AUTHORIZED');
+    expect(workflow).toContain(
+      'INSTAGRAM_ENGAGEMENT_SHADOW_PROOF_RECOVERY=AUTHORIZED',
+    );
     expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=');
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
@@ -32,19 +34,27 @@ describe('Instagram engagement shadow proof recovery', () => {
 
   it('validates the existing private scheduler target before pumping ticks', () => {
     expect(workflow).toContain('SCHEDULER_JOB_NAME: toca-managed-instagram-tick');
-    expect(workflow).toContain('gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME"');
+    expect(workflow).toContain(
+      'gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME"',
+    );
     expect(workflow).toContain('--arg uri "${DAEMON_URL}/tick"');
     expect(workflow).toContain('.httpTarget.httpMethod == "POST"');
-    expect(workflow).toContain('.httpTarget.oidcToken.serviceAccountEmail == $sa');
+    expect(workflow).toContain(
+      '.httpTarget.oidcToken.serviceAccountEmail == $sa',
+    );
     expect(workflow).toContain('.httpTarget.oidcToken.audience == $audience');
   });
 
   it('pumps the authenticated scheduler while the synthetic proof waits for COMMENT and DIRECT', () => {
     expect(workflow).toContain('tick_pump()');
-    expect(workflow).toContain('gcloud scheduler jobs run "$SCHEDULER_JOB_NAME"');
+    expect(workflow).toContain(
+      'gcloud scheduler jobs run "$SCHEDULER_JOB_NAME"',
+    );
     expect(workflow).toContain('tick_pump &');
     expect(workflow).toContain('instagram-engagement-shadow-e2e');
-    expect(workflow).toContain('.channelsVerified | sort == ["COMMENT","DIRECT"]');
+    expect(workflow).toContain(
+      '.channelsVerified | sort == ["COMMENT","DIRECT"]',
+    );
     expect(workflow).toContain('.externalReplyObserved == false');
     expect(workflow).toContain('.replyOutboxEvents == 0');
   });
