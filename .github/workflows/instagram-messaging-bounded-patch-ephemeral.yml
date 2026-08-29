@@ -1,0 +1,70 @@
+name: Instagram Messaging Bounded Patch Ephemeral
+
+on:
+  push:
+    branches: [feat/instagram-messaging-readonly-20260828]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/instagram-messaging-readonly-20260828
+      - name: Patch runtime schemas
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/mcp/runtime-capability-resolver.ts')
+          s = p.read_text()
+          old = """const instagramConversationListSchema = z.object({
+            limit: z.number().int().min(1).max(100).default(50),
+            after: z.string().min(1).optional(),
+          });
+          const instagramMessageListSchema = z.object({
+            conversationId: z.string().min(1),
+            limit: z.number().int().min(1).max(20).default(20),
+          });"""
+          new = """const instagramConversationListSchema = z.object({
+            limit: z.number().int().min(1).max(100).default(50),
+            after: z.string().min(1).optional(),
+            userId: z.string().min(1).optional(),
+          });
+          const instagramMessageListSchema = z.object({
+            conversationId: z.string().min(1),
+            limit: z.number().int().min(1).max(20).default(20),
+            after: z.string().min(1).optional(),
+          });"""
+          if old not in s:
+              raise SystemExit('EXPECTED_RUNTIME_SCHEMA_BLOCK_NOT_FOUND')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format changed files
+        run: pnpm exec prettier --write src/mcp/runtime-capability-resolver.ts src/providers/instagram/instagram-messaging-read-provider.ts test/instagram-messaging-read-provider.test.ts
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/mcp/runtime-capability-resolver.ts src/providers/instagram/instagram-messaging-read-provider.ts test/instagram-messaging-read-provider.test.ts
+          git commit -m "feat(instagram): materialize bounded Direct pagination"
+          git push origin HEAD:feat/instagram-messaging-readonly-20260828
