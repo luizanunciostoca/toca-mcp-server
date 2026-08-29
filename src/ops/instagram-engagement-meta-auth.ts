@@ -1,7 +1,4 @@
-export type MetaFetch = (
-  input: string | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+export type MetaFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export interface ResolveMetaPageAccessTokenOptions {
   readonly rootToken: string;
@@ -29,16 +26,13 @@ export async function resolveMetaPageAccessToken(
     };
     const match = (json.data ?? []).find(
       (item) =>
-        safeScalarString(item.id) === options.expectedPageId &&
-        safeScalarString(item.access_token),
+        safeScalarString(item.id) === options.expectedPageId && safeScalarString(item.access_token),
     );
     const resolved = safeScalarString(match?.access_token);
     if (resolved) return resolved;
   }
 
-  const pageUrl = new URL(
-    `${graphBaseUrl}/${options.apiVersion}/${options.expectedPageId}`,
-  );
+  const pageUrl = new URL(`${graphBaseUrl}/${options.apiVersion}/${options.expectedPageId}`);
   pageUrl.searchParams.set('fields', 'id');
   pageUrl.searchParams.set('access_token', options.rootToken);
   const pageResponse = await fetchImpl(pageUrl);
