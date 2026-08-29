@@ -283,10 +283,23 @@ jobs:
             --tasks 1 --max-retries 0 --task-timeout 180s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
-          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format='value(textPayload)' || true)"
-          printf '%s\n' "$LOGS" | grep -F '"validation":"instagram-engagement-readiness"' | grep -F '"status":"PASS"' >/dev/null
-          printf '%s\n' "$LOGS" | grep -F '"writesEnabled":false' >/dev/null
-          jq -n '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status:"PASS",writesEnabled:false,knowledgeSource:"postgres"}' > engagement-evidence/readiness.json
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          READINESS="$(printf '%s' "$LOG_ENTRIES" | node scripts/extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-readiness)"
+          printf '%s' "$READINESS" | jq -e '
+            .status == "PASS" and
+            .writesEnabled == false and
+            .providerReadVerified == false and
+            .databaseSchemaVerified == true and
+            .migrationVerified == true and
+            .knowledgeReadable == true and
+            .knowledgeSchemaVerified == true and
+            .knowledgeSnapshotVerified == true and
+            .knowledgeAuthMode == "postgres" and
+            .scopeConfigured == true and
+            .identitiesPrinted == false and
+            .secretsPrinted == false
+          ' >/dev/null
+          printf '%s' "$READINESS" | jq -c '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status,writesEnabled,knowledgeSource:.knowledgeAuthMode,databaseSchemaVerified,migrationVerified,knowledgeSnapshotVerified,scopeConfigured,secretsPrinted}' > engagement-evidence/readiness.json
           cleanup
           trap - EXIT
 
@@ -392,9 +405,8 @@ jobs:
             --tasks 1 --max-retries 0 --task-timeout 240s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
-          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format='value(textPayload)' || true)"
-          PROOF="$(printf '%s\n' "$LOGS" | grep -F '"validation":"instagram-engagement-shadow-e2e"' | tail -n1)"
-          test -n "$PROOF" || { echo 'Shadow proof evidence missing' >&2; exit 1; }
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          PROOF="$(printf '%s' "$LOG_ENTRIES" | node scripts/extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-shadow-e2e)"
           printf '%s' "$PROOF" | jq -e '
             .status == "PASS" and
             (.channelsVerified | sort == ["COMMENT","DIRECT"]) and
@@ -429,9 +441,8 @@ jobs:
             --tasks 1 --max-retries 0 --task-timeout 180s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
-          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format='value(textPayload)' || true)"
-          SUBSCRIPTION="$(printf '%s\n' "$LOGS" | grep -F '"validation":"instagram-engagement-meta-subscriptions"' | tail -n1)"
-          test -n "$SUBSCRIPTION" || { echo 'Meta subscription readback evidence missing' >&2; exit 1; }
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          SUBSCRIPTION="$(printf '%s' "$LOG_ENTRIES" | node scripts/extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-meta-subscriptions)"
           printf '%s' "$SUBSCRIPTION" | jq -e '
             .status == "PASS" and
             .appSubscriptionConfigured == true and
