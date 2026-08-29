@@ -28,18 +28,21 @@ describe('Instagram corrected runtime production shadow workflow', () => {
     expect(workflow).not.toContain('INSTAGRAM_PUBLICATION_WRITES_ENABLED=true');
   });
 
-  it('requires exact daemon/webhook candidates and proves both channels without reply side effects', () => {
-    expect(workflow).toContain('DAEMON_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true');
-    expect(workflow).toContain('WEBHOOK_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true');
-    expect(workflow).toContain('--to-revisions="${DAEMON_CANDIDATE_REVISION}=100"');
-    expect(workflow).toContain('--to-revisions="${WEBHOOK_CANDIDATE_REVISION}=100"');
-    expect(workflow).toContain('dist/src/ops/instagram-engagement-shadow-proof.js');
-    expect(workflow).toContain('(.channelsVerified | sort == ["COMMENT","DIRECT"])');
-    expect(workflow).toContain('.inboundDelivered == true');
-    expect(workflow).toContain('.faqResolved == true');
-    expect(workflow).toContain('.externalReplyObserved == false');
-    expect(workflow).toContain('.replyOutboxEvents == 0');
-  });
+  it(
+    'requires exact daemon/webhook candidates and proves both channels without reply side effects',
+    () => {
+      expect(workflow).toContain('DAEMON_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true');
+      expect(workflow).toContain('WEBHOOK_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true');
+      expect(workflow).toContain('--to-revisions="${DAEMON_CANDIDATE_REVISION}=100"');
+      expect(workflow).toContain('--to-revisions="${WEBHOOK_CANDIDATE_REVISION}=100"');
+      expect(workflow).toContain('dist/src/ops/instagram-engagement-shadow-proof.js');
+      expect(workflow).toContain('(.channelsVerified | sort == ["COMMENT","DIRECT"])');
+      expect(workflow).toContain('.inboundDelivered == true');
+      expect(workflow).toContain('.faqResolved == true');
+      expect(workflow).toContain('.externalReplyObserved == false');
+      expect(workflow).toContain('.replyOutboxEvents == 0');
+    },
+  );
 
   it('preserves DRS-safe callback rules and automatic rollback', () => {
     expect(workflow).toContain('--no-invoker-iam-check');
