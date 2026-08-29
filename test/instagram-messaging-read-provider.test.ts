@@ -94,7 +94,35 @@ describe('InstagramMessagingReadProvider', () => {
     expect(JSON.stringify(result)).not.toContain('SHOULD_NOT_LEAK');
   });
 
-  it('bounds message detail to 20, classifies direction and strips participant identity', async () => {
+  it('finds a conversation by bounded user_id without returning the private identity', async () => {
+    const { client } = createClient((read) => {
+      const binding = bindingResponses(read);
+      if (binding !== undefined) return binding;
+      if (read.path === 'PAGE_1/conversations') {
+        expect(read.token).toBe('PAGE_TOKEN');
+        expect(read.query).toEqual({
+          platform: 'instagram',
+          fields: 'id,updated_time',
+          limit: '1',
+          user_id: 'PRIVATE_SCOPED_ID',
+        });
+        return {
+          data: [{ id: 'CONV_BOUND', updated_time: '2026-08-28T12:00:00+0000' }],
+        };
+      }
+      throw new Error(`UNEXPECTED_READ:${read.path}`);
+    });
+    const provider = new InstagramMessagingReadProvider(client, 'IG_1');
+
+    const result = await provider.listConversations({ limit: 1, userId: 'PRIVATE_SCOPED_ID' });
+
+    expect(result).toEqual({
+      conversations: [{ conversationId: 'CONV_BOUND', updatedTime: '2026-08-28T12:00:00+0000' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_SCOPED_ID');
+  });
+
+  it('bounds message detail to 20, classifies direction, exposes only a cursor and strips identity', async () => {
     const { client } = createClient((read) => {
       const binding = bindingResponses(read);
       if (binding !== undefined) return binding;
@@ -123,7 +151,10 @@ describe('InstagramMessagingReadProvider', () => {
                 message: 'Abrimos às 16:30.',
               },
             ],
-            paging: { next: 'https://graph.facebook.com/next-page' },
+            paging: {
+              cursors: { after: 'SAFE_CURSOR_2' },
+              next: 'https://graph.facebook.com/next-page?access_token=SHOULD_NOT_LEAK',
+            },
           },
         };
       }
@@ -152,10 +183,39 @@ describe('InstagramMessagingReadProvider', () => {
       ],
       providerHasMore: true,
       providerMessageDetailLimit: 20,
+      nextAfter: 'SAFE_CURSOR_2',
     });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain('FOLLOWER_PRIVATE_ID');
     expect(serialized).not.toContain('follower_private_username');
+    expect(serialized).not.toContain('SHOULD_NOT_LEAK');
+  });
+
+  it('uses a safe message cursor in field expansion and rejects unsafe cursor syntax', async () => {
+    const { client } = createClient((read) => {
+      const binding = bindingResponses(read);
+      if (binding !== undefined) return binding;
+      if (read.path === 'CONV_1') {
+        expect(read.query.fields).toBe(
+          'messages.limit(20).after(SAFE_CURSOR_2){id,created_time,from,to,message,is_unsupported}',
+        );
+        return { messages: { data: [], paging: {} } };
+      }
+      throw new Error(`UNEXPECTED_READ:${read.path}`);
+    });
+    const provider = new InstagramMessagingReadProvider(client, 'IG_1');
+
+    await expect(
+      provider.listMessages({ conversationId: 'CONV_1', limit: 20, after: 'SAFE_CURSOR_2' }),
+    ).resolves.toEqual({
+      messages: [],
+      providerHasMore: false,
+      providerMessageDetailLimit: 20,
+    });
+
+    await expect(
+      provider.listMessages({ conversationId: 'CONV_1', limit: 20, after: 'unsafe(cursor)' }),
+    ).rejects.toThrow('INSTAGRAM_MESSAGING_CURSOR_UNSAFE');
   });
 
   it('fails closed when the linked Page does not carry the MESSAGING task', async () => {
