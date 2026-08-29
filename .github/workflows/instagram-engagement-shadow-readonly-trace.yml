@@ -1,0 +1,263 @@
+name: Instagram Engagement Shadow Readonly Trace
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      confirm_trace:
+        description: 'Type TRACE_ENGAGEMENT_SHADOW_READONLY to authorize read-only tracing'
+        required: true
+        type: string
+      authorization_ref:
+        description: 'Same-repository PRODUCTION DIAGNOSTIC AUTHORIZATION issue URL bound to exact controller SHA'
+        required: true
+        type: string
+      target_failed_run:
+        description: 'Failed Instagram Engagement Shadow Unique Candidate Recovery run id'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-production-shadow-readonly-trace
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+
+jobs:
+  trace:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (
+        (github.event_name == 'issues' && github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION DIAGNOSTIC AUTHORIZATION — Instagram shadow readonly trace')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.confirm_trace == 'TRACE_ENGAGEMENT_SHADOW_READONLY' && inputs.authorization_ref != '' && inputs.target_failed_run != '')
+      )
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact diagnostic controller SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify owner authorization and target failed run
+        shell: bash
+        env:
+          DISPATCH_AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
+          DISPATCH_TARGET_FAILED_RUN: ${{ inputs.target_failed_run }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          if [[ "$GITHUB_EVENT_NAME" == 'issues' ]]; then
+            AUTHORIZATION_REF="$(jq -r '.issue.html_url // empty' "$GITHUB_EVENT_PATH")"
+            AUTH_BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+            TARGET_FAILED_RUN="$(printf '%s\n' "$AUTH_BODY" | sed -n 's/^TARGET_FAILED_RUN=\([0-9][0-9]*\)$/\1/p' | head -n1)"
+          else
+            test "${{ inputs.confirm_trace }}" = 'TRACE_ENGAGEMENT_SHADOW_READONLY'
+            AUTHORIZATION_REF="$DISPATCH_AUTHORIZATION_REF"
+            TARGET_FAILED_RUN="$DISPATCH_TARGET_FAILED_RUN"
+          fi
+
+          AUTH_PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
+          [[ "$AUTHORIZATION_REF" == "${AUTH_PREFIX}"* ]]
+          AUTH_ISSUE="${AUTHORIZATION_REF#${AUTH_PREFIX}}"
+          [[ "$AUTH_ISSUE" =~ ^[0-9]+$ ]]
+          [[ "$TARGET_FAILED_RUN" =~ ^[0-9]+$ ]]
+
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'User-Agent: toca-instagram-shadow-readonly-trace' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTH_ISSUE}" \
+            > /tmp/diagnostic-authorization.json
+
+          jq -e \
+            --arg expectedUrl "$AUTHORIZATION_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --arg targetRun "$TARGET_FAILED_RUN" '
+              (.html_url == $expectedUrl) and
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION DIAGNOSTIC AUTHORIZATION — Instagram shadow readonly trace")) and
+              ((.body // "") | contains("AUTHORIZED_DIAGNOSTIC_SHA=" + $sha)) and
+              ((.body // "") | contains("INSTAGRAM_ENGAGEMENT_SHADOW_READONLY_TRACE=AUTHORIZED")) and
+              ((.body // "") | contains("TARGET_FAILED_RUN=" + $targetRun)) and
+              ((.body // "") | contains("DATABASE_MUTATIONS_AUTHORIZED=false")) and
+              ((.body // "") | contains("EXTERNAL_REPLY_WRITES_AUTHORIZED=false"))
+            ' /tmp/diagnostic-authorization.json >/dev/null || {
+              echo 'Read-only diagnostic authorization mismatch' >&2
+              exit 1
+            }
+
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'User-Agent: toca-instagram-shadow-readonly-trace' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_FAILED_RUN}" \
+            > /tmp/target-run.json
+
+          jq -e '
+            (.name == "Instagram Engagement Shadow Unique Candidate Recovery") and
+            (.event == "workflow_dispatch") and
+            (.conclusion == "failure") and
+            (.head_branch == "main")
+          ' /tmp/target-run.json >/dev/null || {
+            echo 'Target run is not the expected failed unique-candidate recovery' >&2
+            exit 1
+          }
+
+          TRACE_STARTED_AT="$(jq -r '.run_started_at // .created_at // empty' /tmp/target-run.json)"
+          TRACE_ENDED_AT="$(jq -r '.updated_at // empty' /tmp/target-run.json)"
+          TARGET_FAILED_CONTROLLER_SHA="$(jq -r '.head_sha // empty' /tmp/target-run.json)"
+          test -n "$TRACE_STARTED_AT"
+          test -n "$TRACE_ENDED_AT"
+          [[ "$TARGET_FAILED_CONTROLLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          echo "AUTHORIZATION_REF=$AUTHORIZATION_REF" >> "$GITHUB_ENV"
+          echo "TARGET_FAILED_RUN=$TARGET_FAILED_RUN" >> "$GITHUB_ENV"
+          echo "TRACE_STARTED_AT=$TRACE_STARTED_AT" >> "$GITHUB_ENV"
+          echo "TRACE_ENDED_AT=$TRACE_ENDED_AT" >> "$GITHUB_ENV"
+          echo "TARGET_FAILED_CONTROLLER_SHA=$TARGET_FAILED_CONTROLLER_SHA" >> "$GITHUB_ENV"
+
+          mkdir -p engagement-evidence
+          jq -n \
+            --arg controllerSha "$GITHUB_SHA" \
+            --arg targetRun "$TARGET_FAILED_RUN" \
+            --arg targetControllerSha "$TARGET_FAILED_CONTROLLER_SHA" \
+            --arg startedAt "$TRACE_STARTED_AT" \
+            --arg endedAt "$TRACE_ENDED_AT" \
+            --arg authorizationRef "$AUTHORIZATION_REF" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-readonly-trace-authorization.v1",controllerSha:$controllerSha,targetFailedRun:$targetRun,targetFailedControllerSha:$targetControllerSha,traceWindow:{startedAt:$startedAt,endedAt:$endedAt},authorizationRef:$authorizationRef,databaseMutationsAuthorized:false,externalReplyWritesAuthorized:false}' \
+            > engagement-evidence/trace-authorization.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+
+      - name: Authenticate production deployer for read-only inspection
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify production remains fail-closed before database trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+
+          printf '%s' "$DAEMON_JSON" | jq -e '.spec.template.spec.containers[0] as $c | ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"' >/dev/null
+          printf '%s' "$WEBHOOK_JSON" | jq -e '
+            ((.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true") and
+            ((.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false") != "true")
+          ' >/dev/null
+          if gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
+            echo 'Fail-closed diagnostic boundary requires no allUsers invoker' >&2
+            exit 1
+          fi
+
+          jq -n '{callbackClosed:true,legacyAllUsersInvoker:false,engagementWritesEnabled:false,databaseMutationPerformed:false}' \
+            > engagement-evidence/trace-prestate.json
+
+      - name: Start verified Cloud SQL Auth Proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROXY_VERSION='2.24.1'
+          PROXY_SHA256='fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb'
+          curl --fail --silent --show-error --location "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64" --output /tmp/cloud-sql-proxy
+          echo "${PROXY_SHA256}  /tmp/cloud-sql-proxy" | sha256sum --check --strict
+          chmod 0755 /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 5432 "$CLOUD_SQL_INSTANCE" >/tmp/cloud-sql-proxy.log 2>&1 &
+          PROXY_PID=$!
+          echo "CLOUD_SQL_PROXY_PID=$PROXY_PID" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 30); do
+            if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then exit 0; fi
+            kill -0 "$PROXY_PID" 2>/dev/null || { cat /tmp/cloud-sql-proxy.log >&2; exit 1; }
+            sleep 1
+          done
+          cat /tmp/cloud-sql-proxy.log >&2
+          exit 1
+
+      - name: Trace synthetic COMMENT state through PostgreSQL read-only transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_DATABASE_URL="$(gcloud secrets versions access latest --secret "$DATABASE_SECRET_ID" --project "$GCP_PROJECT_ID")"
+          export DATABASE_URL="$(RAW_DATABASE_URL="$RAW_DATABASE_URL" node --input-type=module -e '
+            const url = new URL(process.env.RAW_DATABASE_URL);
+            url.hostname = "127.0.0.1";
+            url.port = "5432";
+            for (const key of ["host","port","ssl","sslmode","sslcert","sslkey","sslrootcert","sslaccept"]) url.searchParams.delete(key);
+            process.stdout.write(url.toString());
+          ')"
+          unset RAW_DATABASE_URL
+          export DATABASE_SSL=false
+
+          node scripts/diagnose-instagram-engagement-shadow-readonly.mjs > engagement-evidence/readonly-trace.json
+
+          unset DATABASE_URL DATABASE_SSL
+          jq -e '
+            (.databaseMutationPerformed == false) and
+            (.externalReplyWritesAuthorized == false) and
+            (.rawSenderPrinted == false) and
+            (.rawMessagePrinted == false) and
+            (.secretsPrinted == false)
+          ' engagement-evidence/readonly-trace.json >/dev/null
+          cat engagement-evidence/readonly-trace.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop Cloud SQL Auth Proxy
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${CLOUD_SQL_PROXY_PID:-}" ]]; then
+            kill "$CLOUD_SQL_PROXY_PID" >/dev/null 2>&1 || true
+            wait "$CLOUD_SQL_PROXY_PID" >/dev/null 2>&1 || true
+          fi
+
+      - name: Upload sanitized read-only trace evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-readonly-trace-${{ github.run_id }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
