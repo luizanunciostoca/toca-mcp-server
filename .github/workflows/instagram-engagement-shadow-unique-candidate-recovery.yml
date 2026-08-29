@@ -96,6 +96,7 @@ jobs:
               ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha)) and
               ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
               ((.body // "") | contains("INSTAGRAM_ENGAGEMENT_SHADOW_UNIQUE_CANDIDATE_RECOVERY=AUTHORIZED")) and
+              ((.body // "") | contains("DAEMON_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true")) and
               ((.body // "") | contains("RUNTIME_SOURCE_SHA=" + $runtimeSha)) and
               ((.body // "") | contains("RUNTIME_IMAGE_DIGEST=" + $digest)) and
               ((.body // "") | contains("EXTERNAL_REPLY_WRITES_AUTHORIZED=false"))
@@ -106,7 +107,7 @@ jobs:
 
           mkdir -p engagement-evidence
           jq -n --arg controllerSha "$GITHUB_SHA" --arg runtimeSha "$RUNTIME_SOURCE_SHA" --arg digest "$RUNTIME_IMAGE_DIGEST" --arg ref "$AUTHORIZATION_REF" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-authorization.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,authorizationRef:$ref,externalReplyWritesAuthorized:false}' \
+            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-authorization.v2",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,authorizationRef:$ref,daemonCandidateTrafficRoutingAuthorized:true,externalReplyWritesAuthorized:false}' \
             > engagement-evidence/authorization.json
 
       - name: Setup pnpm
@@ -158,12 +159,15 @@ jobs:
           WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           PREVIOUS_DAEMON_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
           PREVIOUS_WEBHOOK_REVISION="$(current_revision "$WEBHOOK_SERVICE_NAME")"
+          BEFORE_DAEMON_LATEST_READY="$(printf '%s' "$DAEMON_JSON" | jq -r '.status.latestReadyRevisionName // empty')"
           BEFORE_LATEST_READY="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.latestReadyRevisionName // empty')"
           test -n "$PREVIOUS_DAEMON_REVISION"
           test -n "$PREVIOUS_WEBHOOK_REVISION"
+          test -n "$BEFORE_DAEMON_LATEST_READY"
           test -n "$BEFORE_LATEST_READY"
           echo "PREVIOUS_DAEMON_REVISION=$PREVIOUS_DAEMON_REVISION" >> "$GITHUB_ENV"
           echo "PREVIOUS_WEBHOOK_REVISION=$PREVIOUS_WEBHOOK_REVISION" >> "$GITHUB_ENV"
+          echo "BEFORE_DAEMON_LATEST_READY=$BEFORE_DAEMON_LATEST_READY" >> "$GITHUB_ENV"
           echo "BEFORE_LATEST_READY=$BEFORE_LATEST_READY" >> "$GITHUB_ENV"
 
           printf '%s' "$DAEMON_JSON" | jq -e '.spec.template.spec.containers[0] as $c | ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false" == "false") and ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false" == "false")' >/dev/null
@@ -185,8 +189,8 @@ jobs:
           ' >/dev/null || { echo 'Scheduler target/OIDC boundary mismatch' >&2; exit 1; }
           echo "DAEMON_URL=$DAEMON_URL" >> "$GITHUB_ENV"
 
-          jq -n --arg daemon "$PREVIOUS_DAEMON_REVISION" --arg webhook "$PREVIOUS_WEBHOOK_REVISION" --arg latest "$BEFORE_LATEST_READY" --arg scheduler "$SCHEDULER_JOB_NAME" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-prestate.v1",daemonRevision:$daemon,webhookTrafficRevision:$webhook,webhookLatestReadyBefore:$latest,callbackClosed:true,scheduler:$scheduler,schedulerTargetVerified:true,schedulerOidcVerified:true,writesEnabled:false}' \
+          jq -n --arg daemon "$PREVIOUS_DAEMON_REVISION" --arg daemonLatest "$BEFORE_DAEMON_LATEST_READY" --arg webhook "$PREVIOUS_WEBHOOK_REVISION" --arg latest "$BEFORE_LATEST_READY" --arg scheduler "$SCHEDULER_JOB_NAME" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-prestate.v2",daemonRevision:$daemon,daemonLatestReadyBefore:$daemonLatest,webhookTrafficRevision:$webhook,webhookLatestReadyBefore:$latest,callbackClosed:true,scheduler:$scheduler,schedulerTargetVerified:true,schedulerOidcVerified:true,writesEnabled:false}' \
             > engagement-evidence/prestate.json
 
       - name: Re-run fail-closed readiness
@@ -210,24 +214,99 @@ jobs:
           cleanup
           trap - EXIT
 
-      - name: Create and validate deterministic unique candidate while callback remains closed
+      - name: Create and validate deterministic unique candidates while callback remains closed
         id: candidate
         shell: bash
         run: |
           set -euo pipefail
 
+          RUN_TAIL="${GITHUB_RUN_ID: -7}"
+          DAEMON_REVISION_SUFFIX="d${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
+          REVISION_SUFFIX="u${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
+          EXPECTED_DAEMON_CANDIDATE_REVISION="${DAEMON_SERVICE_NAME}-${DAEMON_REVISION_SUFFIX}"
+          EXPECTED_WEBHOOK_CANDIDATE_REVISION="${WEBHOOK_SERVICE_NAME}-${REVISION_SUFFIX}"
+          [[ "$EXPECTED_DAEMON_CANDIDATE_REVISION" != "$PREVIOUS_DAEMON_REVISION" ]]
+          [[ "$EXPECTED_DAEMON_CANDIDATE_REVISION" != "$BEFORE_DAEMON_LATEST_READY" ]]
+          [[ "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" != "$PREVIOUS_WEBHOOK_REVISION" ]]
+          [[ "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" != "$BEFORE_LATEST_READY" ]]
+
+          DAEMON_ENV="^@^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@INSTAGRAM_ENGAGEMENT_SHADOW_RUN_ID=$GITHUB_RUN_ID"
           gcloud run services update "$DAEMON_SERVICE_NAME" \
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --revision-suffix="$DAEMON_REVISION_SUFFIX" \
+            --update-env-vars "$DAEMON_ENV" \
             --command node --args dist/src/toca-managed-instagram-daemon.js --quiet
 
-          RUN_TAIL="${GITHUB_RUN_ID: -7}"
-          REVISION_SUFFIX="u${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
-          EXPECTED_WEBHOOK_CANDIDATE_REVISION="${WEBHOOK_SERVICE_NAME}-${REVISION_SUFFIX}"
-          [[ "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" != "$PREVIOUS_WEBHOOK_REVISION" ]]
-          [[ "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" != "$BEFORE_LATEST_READY" ]]
+          DAEMON_REVISION_JSON="$(gcloud run revisions describe "$EXPECTED_DAEMON_CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_REVISION_JSON" | jq \
+            --arg expected "$EXPECTED_DAEMON_CANDIDATE_REVISION" \
+            --arg digest "$RUNTIME_IMAGE_DIGEST" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg tenant "$TOCA_TENANT_ID" \
+            --arg workspace "$TOCA_WORKSPACE_ID" \
+            --arg organization "$TOCA_ORGANIZATION_ID" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg databaseSecret "$DATABASE_SECRET_ID" \
+            --arg cloudSql "$CLOUD_SQL_INSTANCE" '
+            .spec.containers[0] as $c |
+            def envValue($name): ([($c.env // [])[] | select(.name == $name) | .value] | last // null);
+            {
+              schemaVersion:"toca.instagram-engagement.shadow-daemon-candidate-contract.v1",
+              revisionName:(.metadata.name // ""),
+              expectedRevisionName:$expected,
+              serviceAccountMatches:(.spec.serviceAccountName == $sa),
+              imageDigestMatches:($c.image | contains($digest)),
+              commandMatches:($c.command == ["node"]),
+              argsMatches:($c.args == ["dist/src/toca-managed-instagram-daemon.js"]),
+              runtimeEnabled:envValue("INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED"),
+              writesEnabled:envValue("INSTAGRAM_ENGAGEMENT_WRITES_ENABLED"),
+              tenantMatches:(envValue("INSTAGRAM_ENGAGEMENT_TENANT_ID") == $tenant),
+              workspaceMatches:(envValue("INSTAGRAM_ENGAGEMENT_WORKSPACE_ID") == $workspace),
+              organizationMatches:(envValue("INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID") == $organization),
+              shadowRunMatches:(envValue("INSTAGRAM_ENGAGEMENT_SHADOW_RUN_ID") == $runId),
+              knowledgeSourceMatches:(envValue("INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE") == "postgres"),
+              databaseSecretBound:([($c.env // [])[] | select(.name == "DATABASE_URL") | tostring] | any(contains($databaseSecret))),
+              cloudSqlBound:([.. | strings] | any(contains($cloudSql)))
+            }
+          ' > engagement-evidence/daemon-candidate-contract.json
+
+          jq -e '
+            (.revisionName == .expectedRevisionName) and
+            (.serviceAccountMatches == true) and
+            (.imageDigestMatches == true) and
+            (.commandMatches == true) and
+            (.argsMatches == true) and
+            (.runtimeEnabled == "true") and
+            (.writesEnabled == "false") and
+            (.tenantMatches == true) and
+            (.workspaceMatches == true) and
+            (.organizationMatches == true) and
+            (.shadowRunMatches == true) and
+            (.knowledgeSourceMatches == true) and
+            (.databaseSecretBound == true) and
+            (.cloudSqlBound == true)
+          ' engagement-evidence/daemon-candidate-contract.json >/dev/null || {
+            cat engagement-evidence/daemon-candidate-contract.json >&2
+            echo 'Daemon unique candidate revision contract mismatch' >&2
+            exit 1
+          }
+
+          gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --to-revisions="${EXPECTED_DAEMON_CANDIDATE_REVISION}=100" --quiet
+
+          DAEMON_ROUTED_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_ROUTED_JSON" | jq -e --arg revision "$EXPECTED_DAEMON_CANDIDATE_REVISION" '
+            ([.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | length == 1) and
+            ([.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | first == $revision)
+          ' >/dev/null || { echo 'Daemon unique candidate must own exactly 100% traffic before proof' >&2; exit 1; }
+
+          echo "DAEMON_CANDIDATE_REVISION=$EXPECTED_DAEMON_CANDIDATE_REVISION" >> "$GITHUB_ENV"
+          jq -n --arg revision "$EXPECTED_DAEMON_CANDIDATE_REVISION" --arg previous "$PREVIOUS_DAEMON_REVISION" --arg beforeLatest "$BEFORE_DAEMON_LATEST_READY" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-daemon-candidate-routing.v1",daemonCandidateRevision:$revision,previousTrafficRevision:$previous,latestReadyBefore:$beforeLatest,candidateRevisionUnique:true,candidateRevisionVerified:true,candidateTrafficPercent:100,writesEnabled:false}' \
+            > engagement-evidence/daemon-candidate-routing.json
 
           WEBHOOK_ENV="^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@INSTAGRAM_ENGAGEMENT_SHADOW_RUN_ID=$GITHUB_RUN_ID@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID"
           gcloud run services update "$WEBHOOK_SERVICE_NAME" \
@@ -309,8 +388,8 @@ jobs:
 
           echo "WEBHOOK_CANDIDATE_REVISION=$EXPECTED_WEBHOOK_CANDIDATE_REVISION" >> "$GITHUB_ENV"
           echo "candidate_revision=$EXPECTED_WEBHOOK_CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
-          jq -n --arg revision "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" --arg previous "$PREVIOUS_WEBHOOK_REVISION" --arg beforeLatest "$BEFORE_LATEST_READY" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-routing.v1",candidateRevision:$revision,previousTrafficRevision:$previous,latestReadyBefore:$beforeLatest,candidateRevisionUnique:true,candidateRevisionVerified:true,candidateTrafficPercent:100,callbackClosedDuringRouting:true,webhookInboundOutboxEnabled:true,writesEnabled:false}' \
+          jq -n --arg revision "$EXPECTED_WEBHOOK_CANDIDATE_REVISION" --arg previous "$PREVIOUS_WEBHOOK_REVISION" --arg beforeLatest "$BEFORE_LATEST_READY" --arg daemonRevision "$EXPECTED_DAEMON_CANDIDATE_REVISION" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-routing.v2",candidateRevision:$revision,previousTrafficRevision:$previous,latestReadyBefore:$beforeLatest,candidateRevisionUnique:true,candidateRevisionVerified:true,candidateTrafficPercent:100,daemonCandidateRevision:$daemonRevision,daemonCandidateTrafficPercent:100,callbackClosedDuringRouting:true,webhookInboundOutboxEnabled:true,writesEnabled:false}' \
             > engagement-evidence/candidate-routing.json
 
       - name: Expose DRS-safe callback only after exact unique candidate owns 100 percent traffic
@@ -335,11 +414,11 @@ jobs:
           WEBHOOK_URL="$(printf '%s' "$WEBHOOK_JSON" | jq -r '.status.url // empty')"
           test -n "$WEBHOOK_URL"
           echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
-          jq -n --arg webhookUrl "$WEBHOOK_URL" --arg revision "$WEBHOOK_CANDIDATE_REVISION" \
-            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-deploy.v1",webhookUrl:$webhookUrl,candidateRevision:$revision,candidateRevisionUnique:true,candidateTrafficPercent:100,webhookInboundOutboxEnabled:true,callbackDrsSafe:true,legacyAllUsersInvoker:false,engagementWritesEnabled:false}' \
+          jq -n --arg webhookUrl "$WEBHOOK_URL" --arg revision "$WEBHOOK_CANDIDATE_REVISION" --arg daemonRevision "$DAEMON_CANDIDATE_REVISION" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-deploy.v2",webhookUrl:$webhookUrl,candidateRevision:$revision,candidateRevisionUnique:true,candidateTrafficPercent:100,daemonCandidateRevision:$daemonRevision,daemonCandidateTrafficPercent:100,webhookInboundOutboxEnabled:true,callbackDrsSafe:true,legacyAllUsersInvoker:false,engagementWritesEnabled:false}' \
             > engagement-evidence/deploy.json
 
-      - name: Prove COMMENT and DIRECT against exact unique candidate with authenticated ticks
+      - name: Prove COMMENT and DIRECT against exact unique candidates with authenticated ticks
         env:
           WEBHOOK_URL: ${{ steps.deployed.outputs.webhook_url }}
         shell: bash
@@ -355,6 +434,11 @@ jobs:
 
           ROUTED_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           printf '%s' "$ROUTED_JSON" | jq -e --arg revision "$WEBHOOK_CANDIDATE_REVISION" '([.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | first == $revision)' >/dev/null
+          DAEMON_ROUTED_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_ROUTED_JSON" | jq -e --arg revision "$DAEMON_CANDIDATE_REVISION" '([.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | first == $revision)' >/dev/null || {
+            echo 'Exact daemon candidate must still own 100% traffic immediately before proof' >&2
+            exit 1
+          }
 
           gcloud run jobs deploy "$JOB" \
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
@@ -384,10 +468,10 @@ jobs:
           LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=300 --order=asc --format=json || true)"
           if [[ "$PROOF_RC" -ne 0 ]]; then
             printf '%s\n' "$LOG_ENTRIES" | jq '[.[] | {timestamp,severity,textPayload,jsonPayload,labels}]' > engagement-evidence/proof-job-sanitized-logs.json || true
-            jq -n --argjson exitCode "$PROOF_RC" --arg revision "$WEBHOOK_CANDIDATE_REVISION" \
-              '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-proof-failure.v1",proofJobExitCode:$exitCode,candidateRevision:$revision,candidateRevisionUnique:true,candidateTrafficPercent:100,webhookInboundOutboxEnabled:true,tickPumpUsed:true,schedulerTargetVerified:true,writesEnabled:false}' \
+            jq -n --argjson exitCode "$PROOF_RC" --arg revision "$WEBHOOK_CANDIDATE_REVISION" --arg daemonRevision "$DAEMON_CANDIDATE_REVISION" \
+              '{schemaVersion:"toca.instagram-engagement.shadow-unique-candidate-proof-failure.v2",proofJobExitCode:$exitCode,candidateRevision:$revision,candidateRevisionUnique:true,candidateTrafficPercent:100,daemonCandidateRevision:$daemonRevision,daemonCandidateTrafficPercent:100,webhookInboundOutboxEnabled:true,tickPumpUsed:true,schedulerTargetVerified:true,writesEnabled:false}' \
               > engagement-evidence/proof-failure.json
-            echo 'Synthetic proof job failed against exact unique candidate after authenticated tick pump' >&2
+            echo 'Synthetic proof job failed against exact unique candidates after authenticated tick pump' >&2
             exit "$PROOF_RC"
           fi
 
@@ -424,8 +508,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg controllerSha "$GITHUB_SHA" --arg runtimeSha "$RUNTIME_SOURCE_SHA" --arg digest "$RUNTIME_IMAGE_DIGEST" --arg revision "$WEBHOOK_CANDIDATE_REVISION" \
-            '{schemaVersion:"toca.instagram-engagement.production-shadow-unique-candidate-recovery.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,webhookCandidateRevision:$revision,candidateRevisionUnique:true,webhookCandidateTrafficPercent:100,webhookInboundOutboxEnabled:true,channels:["COMMENT","DIRECT"],schedulerTargetVerified:true,schedulerOidcVerified:true,syntheticShadowProof:"PASS",metaSubscriptionsProviderReadback:true,externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
+          jq -n --arg controllerSha "$GITHUB_SHA" --arg runtimeSha "$RUNTIME_SOURCE_SHA" --arg digest "$RUNTIME_IMAGE_DIGEST" --arg revision "$WEBHOOK_CANDIDATE_REVISION" --arg daemonRevision "$DAEMON_CANDIDATE_REVISION" \
+            '{schemaVersion:"toca.instagram-engagement.production-shadow-unique-candidate-recovery.v2",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,webhookCandidateRevision:$revision,candidateRevisionUnique:true,webhookCandidateTrafficPercent:100,daemonCandidateRevision:$daemonRevision,daemonCandidateRevisionUnique:true,daemonCandidateTrafficPercent:100,webhookInboundOutboxEnabled:true,channels:["COMMENT","DIRECT"],schedulerTargetVerified:true,schedulerOidcVerified:true,syntheticShadowProof:"PASS",metaSubscriptionsProviderReadback:true,externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
             > engagement-evidence/closeout.json
           cat engagement-evidence/closeout.json >> "$GITHUB_STEP_SUMMARY"
 
