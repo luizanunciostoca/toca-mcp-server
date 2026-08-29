@@ -1,0 +1,53 @@
+name: Instagram DM 2025 Version Evidence
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-version-probe-20260828
+    paths:
+      - '.github/workflows/instagram-dm-2025-version-evidence.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read sanitized provider evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          for item in \
+            'v22:toca-ig-dm-v22-33222147822-1' \
+            'v23:toca-ig-dm-v23-33222147822-1' \
+            'v24:toca-ig-dm-v24-33222147822-1'; do
+            LABEL="${item%%:*}"
+            JOB_NAME="${item#*:}"
+            echo "=== $LABEL ==="
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=2h \
+              --limit=300 \
+              --order=asc \
+              --format='value(textPayload)' \
+              | grep -E '\"validation\"|provider-telemetry' \
+              | sed -E 's/(access[_-]?token|token|secret|authorization)[^,}]*/REDACTED/Ig' \
+              || true
+          done
