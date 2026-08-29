@@ -103,7 +103,14 @@ postgresDescribe('Instagram engagement PostgreSQL E2E', () => {
            'CLAIMED', $5::timestamptz, 1, 5, 'other-worker', $6,
            $5::timestamptz, null, null, 1
          )`,
-        [genericEventId, scope.tenantId, scope.workspaceId, scope.organizationId, firstClaimAt, genericExecutionId],
+        [
+          genericEventId,
+          scope.tenantId,
+          scope.workspaceId,
+          scope.organizationId,
+          firstClaimAt,
+          genericExecutionId,
+        ],
       );
       await pool.query(
         `insert into event_outbox_delivery_attempts (
@@ -152,10 +159,10 @@ postgresDescribe('Instagram engagement PostgreSQL E2E', () => {
       );
       expect(delivered.rows[0]).toEqual({ status: 'DELIVERED', attempts: 2 });
     } finally {
-      await pool.query(
-        `delete from event_outbox_delivery_attempts where event_id in ($1, $2)`,
-        [inboundOutboxId, genericEventId],
-      );
+      await pool.query(`delete from event_outbox_delivery_attempts where event_id in ($1, $2)`, [
+        inboundOutboxId,
+        genericEventId,
+      ]);
       await pool.query(`delete from event_consumer_receipts where event_id in ($1, $2)`, [
         inboundOutboxId,
         genericEventId,
