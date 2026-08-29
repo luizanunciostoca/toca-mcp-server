@@ -89,10 +89,21 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'onde fica',
     'localizacao',
     'como chegar',
+    'quando',
+    'abre',
+    'fecha',
+    'comeca',
+    'termina',
+    'funciona todos os dias',
     'hours',
     'what time',
     'where is',
     'how to get',
+    'when',
+    'opens',
+    'closes',
+    'starts',
+    'ends',
   ]);
   const operationalFaq = hasAny(normalized, [
     'idade minima',
@@ -153,10 +164,10 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                   ? 'COMMERCIAL_LEAD'
                   : ticket
                     ? 'TICKET_INFO'
-                    : eventInterest !== 'NONE'
-                      ? 'EVENT_INFO'
-                      : locationHours
-                        ? 'LOCATION_HOURS'
+                    : locationHours
+                      ? 'LOCATION_HOURS'
+                      : eventInterest !== 'NONE'
+                        ? 'EVENT_INFO'
                         : operationalFaq
                           ? 'FAQ_OPERATIONAL'
                           : materialUnknown
@@ -179,11 +190,13 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                 ? 'PRICE'
                 : ticket
                   ? 'TICKETS'
-                  : eventInterest !== 'NONE'
-                    ? 'EVENT_INFO'
-                    : locationHours || operationalFaq
-                      ? 'LOCATION_HOURS'
-                      : 'GENERAL';
+                  : locationHours
+                    ? 'LOCATION_HOURS'
+                    : eventInterest !== 'NONE'
+                      ? 'EVENT_INFO'
+                      : operationalFaq
+                        ? 'LOCATION_HOURS'
+                        : 'GENERAL';
 
   return {
     intent,
