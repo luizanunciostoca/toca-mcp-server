@@ -89,7 +89,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Extract sanitized SHADOW_PROOF failure token
+      - name: Classify sanitized shadow proof failure
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -102,25 +102,77 @@ jobs:
           LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_PROOF_JOB}\"" \
             --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json)"
           ENTRY_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq 'length')"
+          STDERR_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq '[.[] | select((.logName // "") | endswith("/stderr"))] | length')"
+          ERROR_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq '[.[] | select((.severity // "") == "ERROR")] | length')"
           test "$ENTRY_COUNT" -gt 0
 
-          TOKENS="$(printf '%s' "$LOG_ENTRIES" \
-            | jq -r '.. | strings' \
-            | grep -oE 'SHADOW_PROOF_((COMMENT|DIRECT)_[A-Z_]+(:[A-Z0-9_-]+)?|REQUIRES_WRITES_DISABLED)' \
-            | sort -u || true)"
-          test -n "$TOKENS"
+          ALL_STRINGS="$(printf '%s' "$LOG_ENTRIES" | jq -r '.. | strings')"
+          findings=()
+          add_if_present() {
+            local needle="$1"
+            local label="$2"
+            if grep -Fqi -- "$needle" <<< "$ALL_STRINGS"; then
+              findings+=("$label")
+            fi
+          }
 
+          for channel in COMMENT DIRECT; do
+            for marker in \
+              EVENT_NORMALIZATION_FAILED \
+              CHANNEL_NORMALIZATION_FAILED \
+              WEBHOOK_FAILED \
+              ACTION_NOT_OBSERVED \
+              UNEXPECTED_STATUS \
+              UNEXPECTED_INTENT \
+              UNEXPECTED_AUTONOMY \
+              FAQ_NOT_RESOLVED \
+              EXTERNAL_REPLY_DETECTED \
+              INBOUND_NOT_DELIVERED \
+              REPLY_EVENT_CREATED_WHILE_WRITES_DISABLED; do
+              add_if_present "SHADOW_PROOF_${channel}_${marker}" "SHADOW_PROOF_${channel}_${marker}"
+            done
+          done
+
+          add_if_present 'SHADOW_PROOF_REQUIRES_WRITES_DISABLED' 'SHADOW_PROOF_REQUIRES_WRITES_DISABLED'
+          add_if_present 'DATABASE_URL_REQUIRED' 'ENV_DATABASE_URL_REQUIRED'
+          add_if_present 'INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL_REQUIRED' 'ENV_SHADOW_WEBHOOK_URL_REQUIRED'
+          add_if_present 'META_APP_SECRET_REQUIRED' 'ENV_META_APP_SECRET_REQUIRED'
+          add_if_present 'INSTAGRAM_BUSINESS_ACCOUNT_ID_REQUIRED' 'ENV_INSTAGRAM_ACCOUNT_ID_REQUIRED'
+          add_if_present 'fetch failed' 'RUNTIME_FETCH_FAILED'
+          add_if_present 'ECONNREFUSED' 'RUNTIME_ECONNREFUSED'
+          add_if_present 'ECONNRESET' 'RUNTIME_ECONNRESET'
+          add_if_present 'ENOTFOUND' 'RUNTIME_ENOTFOUND'
+          add_if_present 'ETIMEDOUT' 'RUNTIME_ETIMEDOUT'
+          add_if_present 'UND_ERR_CONNECT_TIMEOUT' 'RUNTIME_CONNECT_TIMEOUT'
+          add_if_present 'MODULE_NOT_FOUND' 'RUNTIME_MODULE_NOT_FOUND'
+          add_if_present 'Cannot find module' 'RUNTIME_CANNOT_FIND_MODULE'
+          add_if_present 'password authentication failed' 'DATABASE_AUTHENTICATION_FAILED'
+          add_if_present 'no pg_hba.conf' 'DATABASE_PG_HBA_REJECTED'
+          add_if_present 'permission denied' 'RUNTIME_PERMISSION_DENIED'
+
+          if [[ "${#findings[@]}" -eq 0 ]]; then
+            findings=('NO_KNOWN_FAILURE_MARKER')
+          fi
+
+          FINDINGS="$(printf '%s\n' "${findings[@]}" | sort -u)"
           mkdir -p engagement-evidence
-          printf '%s\n' "$TOKENS" \
-            | jq -Rsc --arg sourceRunId "$SOURCE_RUN_ID" --arg sourceProofJob "$SOURCE_PROOF_JOB" --argjson entryCount "$ENTRY_COUNT" '
+          printf '%s\n' "$FINDINGS" \
+            | jq -Rsc \
+              --arg sourceRunId "$SOURCE_RUN_ID" \
+              --arg sourceProofJob "$SOURCE_PROOF_JOB" \
+              --argjson entryCount "$ENTRY_COUNT" \
+              --argjson stderrCount "$STDERR_COUNT" \
+              --argjson errorCount "$ERROR_COUNT" '
                 split("\n")
                 | map(select(length > 0))
                 | {
-                    schemaVersion: "toca.instagram-engagement.shadow-proof-diagnostic.v1",
+                    schemaVersion: "toca.instagram-engagement.shadow-proof-diagnostic.v2",
                     sourceRunId: $sourceRunId,
                     sourceProofJob: $sourceProofJob,
                     logEntriesScanned: $entryCount,
-                    shadowProofTokens: .,
+                    stderrEntries: $stderrCount,
+                    errorSeverityEntries: $errorCount,
+                    failureClassifications: .,
                     readOnlyDiagnostic: true,
                     serviceMutationsAuthorized: false,
                     databaseMutationsAuthorized: false,
@@ -129,12 +181,15 @@ jobs:
                   }
               ' > engagement-evidence/shadow-proof-diagnostic.json
 
-          TOKEN_SUMMARY="$(printf '%s' "$TOKENS" | paste -sd ', ' -)"
+          FINDING_SUMMARY="$(printf '%s' "$FINDINGS" | paste -sd ', ' -)"
           printf -v DIAGNOSTIC_BODY '%s\n' \
             'SHADOW_PROOF_DIAGNOSTIC_STATUS=PASS' \
             "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
             "SOURCE_PROOF_JOB=${SOURCE_PROOF_JOB}" \
-            "SHADOW_PROOF_TOKENS=${TOKEN_SUMMARY}" \
+            "FAILURE_CLASSIFICATIONS=${FINDING_SUMMARY}" \
+            "LOG_ENTRIES_SCANNED=${ENTRY_COUNT}" \
+            "STDERR_ENTRIES=${STDERR_COUNT}" \
+            "ERROR_SEVERITY_ENTRIES=${ERROR_COUNT}" \
             'READ_ONLY_DIAGNOSTIC=true' \
             'SERVICE_MUTATIONS_AUTHORIZED=false' \
             'DATABASE_MUTATIONS_AUTHORIZED=false' \
