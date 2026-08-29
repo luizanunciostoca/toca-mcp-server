@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/p2-1-google-ads-readonly-closure.yml'
       - 'src/google-ads-provider-readonly-closure.ts'
+      - 'src/google-ads-provider-auth-diagnostic.ts'
 
 permissions:
   contents: read
@@ -111,6 +112,16 @@ jobs:
           fi
 
           if [ "$EXEC_RC" -ne 0 ]; then
+            DIAG_JOB="${JOB}-diag"
+            gcloud run jobs deploy "$DIAG_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command node --args dist/src/google-ads-provider-auth-diagnostic.js --set-secrets "$SECV" --max-retries 0 --task-timeout 90s --quiet
+            set +e
+            gcloud run jobs execute "$DIAG_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null 2>&1
+            set -e
+            sleep 2
+            DIAG_LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$DIAG_JOB AND textPayload:\"GOOGLE_ADS_AUTH_DIAGNOSTIC=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=20 --format='value(textPayload)' | grep 'GOOGLE_ADS_AUTH_DIAGNOSTIC=' | head -n1 || true)"
+            if [ -n "$DIAG_LINE" ]; then
+              printf '%s\n' "${DIAG_LINE#GOOGLE_ADS_AUTH_DIAGNOSTIC=}" | jq . > evidence/auth-diagnostic.json
+            fi
             echo "P2_1_GOOGLE_ADS_PROVIDER_PROOF_FAILED_FAIL_CLOSED"
             exit "$EXEC_RC"
           fi
