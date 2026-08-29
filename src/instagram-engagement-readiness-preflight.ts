@@ -157,9 +157,7 @@ function validateCanonicalSheetSnapshot(values: readonly (readonly unknown[])[])
 
   const index = new Map(header.map((name, position) => [name, position] as const));
   const faqIdIndex = requiredColumn(index, 'faq_id');
-  const body = values
-    .slice(1)
-    .filter((row) => safeCell(row[faqIdIndex]).trim().length > 0);
+  const body = values.slice(1).filter((row) => safeCell(row[faqIdIndex]).trim().length > 0);
 
   if (body.length !== INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.length) {
     throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SNAPSHOT_COUNT_INVALID');
