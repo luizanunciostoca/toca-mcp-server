@@ -1,0 +1,54 @@
+name: Instagram Engagement Format Ephemeral
+
+on:
+  push:
+    branches:
+      - feat/instagram-engagement-shadow-production-20260828
+    paths:
+      - '.github/workflows/instagram-engagement-format-ephemeral.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format engagement files
+        run: |
+          pnpm exec prettier --write \
+            docs/operations/instagram-engagement-runtime.md \
+            src/instagram-engagement/runtime.ts \
+            src/ops/instagram-engagement-shadow-proof.ts \
+            src/providers/gcp/google-workspace-token-resolver.ts \
+            test/google-workspace-token-resolver.test.ts \
+            test/instagram-engagement-google-sheets-auth.test.ts
+      - name: Commit formatting only
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'No formatting changes required'
+            exit 0
+          fi
+          git add \
+            docs/operations/instagram-engagement-runtime.md \
+            src/instagram-engagement/runtime.ts \
+            src/ops/instagram-engagement-shadow-proof.ts \
+            src/providers/gcp/google-workspace-token-resolver.ts \
+            test/google-workspace-token-resolver.test.ts \
+            test/instagram-engagement-google-sheets-auth.test.ts
+          git commit -m 'style(instagram): apply prettier to shadow runtime'
+          git push origin HEAD:feat/instagram-engagement-shadow-production-20260828
