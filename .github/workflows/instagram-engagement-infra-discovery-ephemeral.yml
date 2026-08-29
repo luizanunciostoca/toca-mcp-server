@@ -1,0 +1,51 @@
+name: Instagram Engagement Infra Discovery Ephemeral
+
+on:
+  push:
+    branches:
+      - ops/instagram-engagement-shadow-deploy-20260829
+    paths:
+      - '.github/workflows/instagram-engagement-infra-discovery-ephemeral.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+      GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read sanitized privileged prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_names="$(gcloud secrets list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/dev/null | grep -E 'meta|webhook|verify' || true)"
+          policy_read=false
+          token_creator=false
+          if iam="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json 2>/dev/null)"; then
+            policy_read=true
+            if printf '%s' "$iam" | jq -e --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" 'any(.bindings[]?; .role == "roles/iam.serviceAccountTokenCreator" and any(.members[]?; . == $member))' >/dev/null; then
+              token_creator=true
+            fi
+          fi
+          jq -n \
+            --arg secretNames "$secret_names" \
+            --argjson policyRead "$policy_read" \
+            --argjson tokenCreator "$token_creator" \
+            '{validation:"instagram-engagement-infra-discovery",matchingSecretNames:($secretNames|split("\n")|map(select(length>0))),runtimeIamPolicyReadable:$policyRead,runtimeSelfTokenCreator:$tokenCreator,secretValuesPrinted:false}'
