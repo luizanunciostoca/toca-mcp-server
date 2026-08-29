@@ -57,7 +57,6 @@ jobs:
 
           provider = Path('src/providers/instagram/instagram-messaging-read-provider.ts')
           text = provider.read_text()
-
           old = """export interface InstagramConversationListInput {
             readonly limit: number;
             readonly after?: string | undefined;
@@ -87,36 +86,9 @@ jobs:
           if old not in text: raise SystemExit('MESSAGE_INPUT_TARGET_NOT_FOUND')
           text = text.replace(old, new, 1)
 
-          old = """  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
-            const binding = await this.pageBinding();
-            const boundedLimit = Math.min(input.limit, 20);
-            const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;
-            const response = await observedMetaRead('messages.list', () =>
-              this.client.getWithAccessToken(
-                input.conversationId,
-                { fields },
-                binding.pageAccessToken,
-              ),
-            );
-            const parsed = messagesResponseSchema.safeParse(response);
-            if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGES_RESPONSE_INVALID');
-
-            const providerHasMore = Boolean(
-              parsed.data.messages.paging?.next || parsed.data.messages.paging?.cursors?.after,
-            );
-            return {
-              messages: parsed.data.messages.data.map((message) => ({
-                messageId: message.id,
-                ...(message.created_time ? { createdTime: message.created_time } : {}),
-                direction: directionFor(message, binding, this.instagramBusinessAccountId),
-                ...(message.message ? { text: message.message } : {}),
-                unsupported: message.is_unsupported ?? false,
-              })),
-              providerHasMore,
-              providerMessageDetailLimit: 20,
-            };
-          }"""
-          new = """  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
+          method_start = text.index("  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {")
+          method_end = text.index("\n  private pageBinding(): Promise<PageBinding>", method_start)
+          method = """  async listMessages(input: InstagramMessageListInput): Promise<InstagramMessageListResult> {
             const binding = await this.pageBinding();
             if (input.detailOnly && input.messageId) {
               const response = await observedMetaRead('messages.detail', () =>
@@ -127,21 +99,25 @@ jobs:
                 ),
               );
               const parsed = messageSchema.safeParse(response);
-              if (!parsed.success) throw new Error('INSTAGRAM_MESSAGING_MESSAGE_DETAIL_RESPONSE_INVALID');
+              if (!parsed.success)
+                throw new Error('INSTAGRAM_MESSAGING_MESSAGE_DETAIL_RESPONSE_INVALID');
               const message = parsed.data;
               return {
-                messages: [{
-                  messageId: message.id,
-                  ...(message.created_time ? { createdTime: message.created_time } : {}),
-                  direction: directionFor(message, binding, this.instagramBusinessAccountId),
-                  ...(message.message ? { text: message.message } : {}),
-                  unsupported: message.is_unsupported ?? false,
-                }],
+                messages: [
+                  {
+                    messageId: message.id,
+                    ...(message.created_time ? { createdTime: message.created_time } : {}),
+                    direction: directionFor(message, binding, this.instagramBusinessAccountId),
+                    ...(message.message ? { text: message.message } : {}),
+                    unsupported: message.is_unsupported ?? false,
+                  },
+                ],
                 providerHasMore: false,
                 providerMessageDetailLimit: 20,
               };
             }
-            if (!input.conversationId) throw new Error('INSTAGRAM_MESSAGING_CONVERSATION_ID_REQUIRED');
+            if (!input.conversationId)
+              throw new Error('INSTAGRAM_MESSAGING_CONVERSATION_ID_REQUIRED');
             const boundedLimit = Math.min(input.limit ?? 20, input.metadataOnly ? 100 : 20);
             const fields = input.metadataOnly
               ? `messages.limit(${boundedLimit}){id,created_time}`
@@ -170,9 +146,10 @@ jobs:
               providerHasMore,
               providerMessageDetailLimit: 20,
             };
-          }"""
-          if old not in text: raise SystemExit('LIST_MESSAGES_TARGET_NOT_FOUND')
-          provider.write_text(text.replace(old, new, 1))
+          }
+"""
+          text = text[:method_start] + method + text[method_end:]
+          provider.write_text(text)
 
           resolver = Path('src/mcp/runtime-capability-resolver.ts')
           text = resolver.read_text()
@@ -191,16 +168,20 @@ jobs:
             conversationId: z.string().min(1),
             limit: z.number().int().min(1).max(20).default(20),
           });"""
-          new = """const instagramMessageListSchema = z.object({
-            conversationId: z.string().min(1).optional(),
-            limit: z.number().int().min(1).max(100).optional(),
-            metadataOnly: z.boolean().optional(),
-            messageId: z.string().min(1).optional(),
-            detailOnly: z.boolean().optional(),
-          }).superRefine((input, ctx) => {
-            if (input.detailOnly && !input.messageId) ctx.addIssue({ code: 'custom', message: 'messageId required for detailOnly' });
-            if (!input.detailOnly && !input.conversationId) ctx.addIssue({ code: 'custom', message: 'conversationId required' });
-          });"""
+          new = """const instagramMessageListSchema = z
+            .object({
+              conversationId: z.string().min(1).optional(),
+              limit: z.number().int().min(1).max(100).optional(),
+              metadataOnly: z.boolean().optional(),
+              messageId: z.string().min(1).optional(),
+              detailOnly: z.boolean().optional(),
+            })
+            .superRefine((input, ctx) => {
+              if (input.detailOnly && !input.messageId)
+                ctx.addIssue({ code: 'custom', message: 'messageId required for detailOnly' });
+              if (!input.detailOnly && !input.conversationId)
+                ctx.addIssue({ code: 'custom', message: 'conversationId required' });
+            });"""
           if old not in text: raise SystemExit('MESSAGE_SCHEMA_TARGET_NOT_FOUND')
           resolver.write_text(text.replace(old, new, 1))
 
