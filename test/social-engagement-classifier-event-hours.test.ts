@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { classifySocialEngagement } from '../src/crm/social-engagement-classifier.js';
-import { resolveKnowledgeRows } from '../src/instagram-engagement/knowledge.js';
+import {
+  normalizeKnowledgePrompt,
+  resolveKnowledgeRows,
+} from '../src/instagram-engagement/knowledge.js';
 
 const FAQ_001 = {
   faqId: 'FAQ-001',
@@ -10,11 +13,11 @@ const FAQ_001 = {
   confidence: 0,
   factsVerified: true,
   prompts: [
-    'que horas começa o sunset',
-    'qual o horario do sunset',
-    'sunset começa quando',
-    'o sunset funciona todos os dias',
-  ],
+    'Que horas começa o Sunset?',
+    'Qual o horário do Sunset?',
+    'Sunset começa quando?',
+    'O Sunset funciona todos os dias?',
+  ].map(normalizeKnowledgePrompt),
 };
 
 describe('social engagement event schedule classification', () => {
