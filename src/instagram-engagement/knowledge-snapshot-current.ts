@@ -1,7 +1,7 @@
 import type { EngagementIntent } from '../policy/engagement-policy.js';
 
 export const INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID =
-  '1529TovmZFt1oBkCQ_K7kjRdjGuRidkfgPEJuzY4YvuA';
+  '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU';
 
 export interface InstagramEngagementKnowledgeSnapshotRow {
   readonly faqId: string;
