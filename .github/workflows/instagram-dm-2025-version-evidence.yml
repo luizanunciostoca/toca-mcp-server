@@ -37,17 +37,49 @@ jobs:
             'v22:toca-ig-dm-v22-33222147822-1' \
             'v23:toca-ig-dm-v23-33222147822-1' \
             'v24:toca-ig-dm-v24-33222147822-1'; do
-            LABEL="${item%%:*}"
+            export LABEL="${item%%:*}"
             JOB_NAME="${item#*:}"
-            echo "=== $LABEL ==="
             gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" \
               --project "$GCP_PROJECT_ID" \
               --freshness=2h \
               --limit=300 \
               --order=asc \
-              --format='value(textPayload)' \
-              | grep -E '\"validation\"|provider-telemetry' \
-              | sed -E 's/(access[_-]?token|token|secret|authorization)[^,}]*/REDACTED/Ig' \
-              || true
+              --format=json > "/tmp/${LABEL}.json"
+            python3 <<'PY'
+          import json, os, re
+          label = os.environ['LABEL']
+          rows = json.load(open(f'/tmp/{label}.json'))
+          found = []
+          for row in rows:
+              candidates = []
+              if isinstance(row.get('textPayload'), str):
+                  candidates.append(row['textPayload'])
+              jp = row.get('jsonPayload')
+              if isinstance(jp, dict):
+                  candidates.append(json.dumps(jp, separators=(',', ':')))
+              for text in candidates:
+                  if 'provider-telemetry' not in text and 'validation' not in text and 'instagram.messaging.read.provider_error' not in text:
+                      continue
+                  objects = []
+                  try:
+                      objects.append(json.loads(text))
+                  except Exception:
+                      for match in re.finditer(r'\{[^\n]*\}', text):
+                          try:
+                              objects.append(json.loads(match.group(0)))
+                          except Exception:
+                              pass
+                  for obj in objects:
+                      if not isinstance(obj, dict):
+                          continue
+                      allowed = {
+                          'validation','event','operation','httpStatus','providerCode','providerSubcode','providerType',
+                          'status','errorCode','conversationsReturned','nextAfterPresent','serverStderrCodes'
+                      }
+                      sanitized = {k: obj[k] for k in allowed if k in obj}
+                      if sanitized:
+                          found.append(sanitized)
+          print(json.dumps({'graphApiVersion': label, 'evidence': found}, separators=(',', ':')))
+          PY
           done
