@@ -12,6 +12,7 @@ describe('Instagram engagement unique candidate shadow recovery', () => {
       'name: Instagram Engagement Shadow Unique Candidate Recovery',
       'RECOVER_ENGAGEMENT_SHADOW_UNIQUE_CANDIDATE',
       'INSTAGRAM_ENGAGEMENT_SHADOW_UNIQUE_CANDIDATE_RECOVERY=AUTHORIZED',
+      'DAEMON_CANDIDATE_TRAFFIC_ROUTING_AUTHORIZED=true',
       'AUTHORIZED_CANDIDATE_SHA=',
       'EXTERNAL_REPLY_WRITES_AUTHORIZED=false',
       'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false',
@@ -38,6 +39,26 @@ describe('Instagram engagement unique candidate shadow recovery', () => {
       'gcloud run revisions describe "$EXPECTED_WEBHOOK_CANDIDATE_REVISION"',
       'Do not trust latestReadyRevisionName to identify the candidate',
       'candidateRevisionUnique:true',
+    ];
+
+    for (const token of required) expect(workflow).toContain(token);
+  });
+
+  it('creates, validates and routes an exact daemon candidate before proof', () => {
+    const required = [
+      'BEFORE_DAEMON_LATEST_READY=',
+      'DAEMON_REVISION_SUFFIX="d${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"',
+      'EXPECTED_DAEMON_CANDIDATE_REVISION="${DAEMON_SERVICE_NAME}-${DAEMON_REVISION_SUFFIX}"',
+      '--revision-suffix="$DAEMON_REVISION_SUFFIX"',
+      'gcloud run revisions describe "$EXPECTED_DAEMON_CANDIDATE_REVISION"',
+      'daemon-candidate-contract.json',
+      'databaseSecretBound',
+      'cloudSqlBound',
+      '--to-revisions="${EXPECTED_DAEMON_CANDIDATE_REVISION}=100"',
+      'daemon-candidate-routing.json',
+      'DAEMON_CANDIDATE_REVISION=$EXPECTED_DAEMON_CANDIDATE_REVISION',
+      'Exact daemon candidate must still own 100% traffic immediately before proof',
+      'daemonCandidateTrafficPercent:100',
     ];
 
     for (const token of required) expect(workflow).toContain(token);
@@ -79,6 +100,7 @@ describe('Instagram engagement unique candidate shadow recovery', () => {
       '.instagramSubscriptionConfigured == true',
       '.pageAccessTokenResolved == true',
       'if: failure()',
+      '--to-revisions="${PREVIOUS_DAEMON_REVISION}=100"',
     ];
 
     for (const token of required) expect(workflow).toContain(token);
