@@ -89,7 +89,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Classify sanitized shadow proof failure
+      - name: Classify and redact shadow proof failure
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -99,97 +99,149 @@ jobs:
           test "$SOURCE_RUN_ID" = '33257384156'
           test "$SOURCE_PROOF_JOB" = 'toca-ig-eng-corrected-proof-33257384156-1'
 
-          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_PROOF_JOB}\"" \
-            --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json)"
-          ENTRY_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq 'length')"
-          STDERR_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq '[.[] | select((.logName // "") | endswith("/stderr"))] | length')"
-          ERROR_COUNT="$(printf '%s' "$LOG_ENTRIES" | jq '[.[] | select((.severity // "") == "ERROR")] | length')"
-          test "$ENTRY_COUNT" -gt 0
+          mkdir -p engagement-evidence
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_PROOF_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=1d --limit=500 --order=asc --format=json \
+            > /tmp/shadow-proof-logs.json
 
-          ALL_STRINGS="$(printf '%s' "$LOG_ENTRIES" | jq -r '.. | strings')"
-          findings=()
-          add_if_present() {
-            local needle="$1"
-            local label="$2"
-            if grep -Fqi -- "$needle" <<< "$ALL_STRINGS"; then
-              findings+=("$label")
-            fi
+          node <<'NODE'
+          import fs from 'node:fs';
+
+          const entries = JSON.parse(fs.readFileSync('/tmp/shadow-proof-logs.json', 'utf8'));
+          if (!Array.isArray(entries) || entries.length === 0) {
+            throw new Error('DIAGNOSTIC_LOGS_NOT_FOUND');
           }
 
-          for channel in COMMENT DIRECT; do
-            for marker in \
-              EVENT_NORMALIZATION_FAILED \
-              CHANNEL_NORMALIZATION_FAILED \
-              WEBHOOK_FAILED \
-              ACTION_NOT_OBSERVED \
-              UNEXPECTED_STATUS \
-              UNEXPECTED_INTENT \
-              UNEXPECTED_AUTONOMY \
-              FAQ_NOT_RESOLVED \
-              EXTERNAL_REPLY_DETECTED \
-              INBOUND_NOT_DELIVERED \
-              REPLY_EVENT_CREATED_WHILE_WRITES_DISABLED; do
-              add_if_present "SHADOW_PROOF_${channel}_${marker}" "SHADOW_PROOF_${channel}_${marker}"
-            done
-          done
+          const errorEntries = entries.filter((entry) => entry?.severity === 'ERROR');
+          const logClasses = [
+            ...new Set(
+              errorEntries.map((entry) => {
+                const logName = String(entry?.logName ?? 'unknown').replaceAll('%2F', '/');
+                return logName.includes('/logs/') ? logName.split('/logs/').at(-1) : 'unknown';
+              }),
+            ),
+          ].sort();
 
-          add_if_present 'SHADOW_PROOF_REQUIRES_WRITES_DISABLED' 'SHADOW_PROOF_REQUIRES_WRITES_DISABLED'
-          add_if_present 'DATABASE_URL_REQUIRED' 'ENV_DATABASE_URL_REQUIRED'
-          add_if_present 'INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL_REQUIRED' 'ENV_SHADOW_WEBHOOK_URL_REQUIRED'
-          add_if_present 'META_APP_SECRET_REQUIRED' 'ENV_META_APP_SECRET_REQUIRED'
-          add_if_present 'INSTAGRAM_BUSINESS_ACCOUNT_ID_REQUIRED' 'ENV_INSTAGRAM_ACCOUNT_ID_REQUIRED'
-          add_if_present 'fetch failed' 'RUNTIME_FETCH_FAILED'
-          add_if_present 'ECONNREFUSED' 'RUNTIME_ECONNREFUSED'
-          add_if_present 'ECONNRESET' 'RUNTIME_ECONNRESET'
-          add_if_present 'ENOTFOUND' 'RUNTIME_ENOTFOUND'
-          add_if_present 'ETIMEDOUT' 'RUNTIME_ETIMEDOUT'
-          add_if_present 'UND_ERR_CONNECT_TIMEOUT' 'RUNTIME_CONNECT_TIMEOUT'
-          add_if_present 'MODULE_NOT_FOUND' 'RUNTIME_MODULE_NOT_FOUND'
-          add_if_present 'Cannot find module' 'RUNTIME_CANNOT_FIND_MODULE'
-          add_if_present 'password authentication failed' 'DATABASE_AUTHENTICATION_FAILED'
-          add_if_present 'no pg_hba.conf' 'DATABASE_PG_HBA_REJECTED'
-          add_if_present 'permission denied' 'RUNTIME_PERMISSION_DENIED'
+          const payloadTypes = [
+            ...new Set(
+              errorEntries.map((entry) =>
+                entry?.textPayload !== undefined
+                  ? 'textPayload'
+                  : entry?.jsonPayload !== undefined
+                    ? 'jsonPayload'
+                    : entry?.protoPayload !== undefined
+                      ? 'protoPayload'
+                      : 'unknown',
+              ),
+            ),
+          ].sort();
 
-          if [[ "${#findings[@]}" -eq 0 ]]; then
-            findings=('NO_KNOWN_FAILURE_MARKER')
-          fi
+          function collectStrings(value, output = []) {
+            if (typeof value === 'string') output.push(value);
+            else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, output));
+            else if (value && typeof value === 'object') {
+              Object.values(value).forEach((item) => collectStrings(item, output));
+            }
+            return output;
+          }
 
-          FINDINGS="$(printf '%s\n' "${findings[@]}" | sort -u)"
-          mkdir -p engagement-evidence
-          printf '%s\n' "$FINDINGS" \
-            | jq -Rsc \
-              --arg sourceRunId "$SOURCE_RUN_ID" \
-              --arg sourceProofJob "$SOURCE_PROOF_JOB" \
-              --argjson entryCount "$ENTRY_COUNT" \
-              --argjson stderrCount "$STDERR_COUNT" \
-              --argjson errorCount "$ERROR_COUNT" '
-                split("\n")
-                | map(select(length > 0))
-                | {
-                    schemaVersion: "toca.instagram-engagement.shadow-proof-diagnostic.v2",
-                    sourceRunId: $sourceRunId,
-                    sourceProofJob: $sourceProofJob,
-                    logEntriesScanned: $entryCount,
-                    stderrEntries: $stderrCount,
-                    errorSeverityEntries: $errorCount,
-                    failureClassifications: .,
-                    readOnlyDiagnostic: true,
-                    serviceMutationsAuthorized: false,
-                    databaseMutationsAuthorized: false,
-                    providerWritesAuthorized: false,
-                    externalReplyWritesAuthorized: false
-                  }
-              ' > engagement-evidence/shadow-proof-diagnostic.json
+          function preferredMessage(entry) {
+            if (typeof entry?.textPayload === 'string') return entry.textPayload;
+            if (typeof entry?.jsonPayload?.message === 'string') return entry.jsonPayload.message;
+            if (typeof entry?.protoPayload?.status?.message === 'string') {
+              return entry.protoPayload.status.message;
+            }
+            return collectStrings(entry)
+              .filter((value) => value.length > 0)
+              .sort((left, right) => right.length - left.length)[0] ?? '';
+          }
 
-          FINDING_SUMMARY="$(printf '%s' "$FINDINGS" | paste -sd ', ' -)"
+          function redact(value) {
+            return String(value)
+              .replaceAll('Que horas começa o Sunset?', '<SYNTHETIC_MESSAGE>')
+              .replace(/https?:\/\/[^\s]+/giu, '<URL>')
+              .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+              .replace(/sha256:[a-f0-9]{32,}/giu, '<DIGEST>')
+              .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu, '<UUID>')
+              .replace(/shadow-proof-[A-Z0-9_-]+/giu, '<SYNTHETIC_ID>')
+              .replace(/"[^"\n]{1,500}"/gu, '<STR>')
+              .replace(/'[^'\n]{1,500}'/gu, '<STR>')
+              .replace(/\b\d{10,}\b/gu, '<ID>')
+              .replace(/\b[A-Z0-9_-]{24,}\b/giu, '<TOKEN>')
+              .replace(/\s+/gu, ' ')
+              .trim()
+              .slice(0, 240);
+          }
+
+          const allStrings = collectStrings(entries).join('\n');
+          const knownMarkers = [];
+          for (const channel of ['COMMENT', 'DIRECT']) {
+            for (const marker of [
+              'EVENT_NORMALIZATION_FAILED',
+              'CHANNEL_NORMALIZATION_FAILED',
+              'WEBHOOK_FAILED',
+              'ACTION_NOT_OBSERVED',
+              'UNEXPECTED_STATUS',
+              'UNEXPECTED_INTENT',
+              'UNEXPECTED_AUTONOMY',
+              'FAQ_NOT_RESOLVED',
+              'EXTERNAL_REPLY_DETECTED',
+              'INBOUND_NOT_DELIVERED',
+              'REPLY_EVENT_CREATED_WHILE_WRITES_DISABLED',
+            ]) {
+              const token = `SHADOW_PROOF_${channel}_${marker}`;
+              if (allStrings.includes(token)) knownMarkers.push(token);
+            }
+          }
+          if (allStrings.includes('SHADOW_PROOF_REQUIRES_WRITES_DISABLED')) {
+            knownMarkers.push('SHADOW_PROOF_REQUIRES_WRITES_DISABLED');
+          }
+
+          const signatures = [
+            ...new Set(errorEntries.map((entry) => redact(preferredMessage(entry))).filter(Boolean)),
+          ];
+
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.shadow-proof-diagnostic.v3',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceProofJob: process.env.SOURCE_PROOF_JOB,
+            logEntriesScanned: entries.length,
+            errorSeverityEntries: errorEntries.length,
+            errorLogClasses: logClasses,
+            errorPayloadTypes: payloadTypes,
+            knownFailureMarkers: [...new Set(knownMarkers)].sort(),
+            safeErrorSignatures: signatures,
+            rawErrorPayloadPrinted: false,
+            readOnlyDiagnostic: true,
+            serviceMutationsAuthorized: false,
+            databaseMutationsAuthorized: false,
+            providerWritesAuthorized: false,
+            externalReplyWritesAuthorized: false,
+          };
+          fs.writeFileSync(
+            'engagement-evidence/shadow-proof-diagnostic.json',
+            `${JSON.stringify(evidence, null, 2)}\n`,
+          );
+          NODE
+
+          LOG_ENTRIES_SCANNED="$(jq -r '.logEntriesScanned' engagement-evidence/shadow-proof-diagnostic.json)"
+          ERROR_SEVERITY_ENTRIES="$(jq -r '.errorSeverityEntries' engagement-evidence/shadow-proof-diagnostic.json)"
+          ERROR_LOG_CLASSES="$(jq -r '.errorLogClasses | join(",")' engagement-evidence/shadow-proof-diagnostic.json)"
+          ERROR_PAYLOAD_TYPES="$(jq -r '.errorPayloadTypes | join(",")' engagement-evidence/shadow-proof-diagnostic.json)"
+          KNOWN_FAILURE_MARKERS="$(jq -r '.knownFailureMarkers | if length == 0 then "NONE" else join(",") end' engagement-evidence/shadow-proof-diagnostic.json)"
+          SAFE_ERROR_SIGNATURE="$(jq -r '.safeErrorSignatures | if length == 0 then "NONE" else join(" | ") end' engagement-evidence/shadow-proof-diagnostic.json)"
+
           printf -v DIAGNOSTIC_BODY '%s\n' \
             'SHADOW_PROOF_DIAGNOSTIC_STATUS=PASS' \
             "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
             "SOURCE_PROOF_JOB=${SOURCE_PROOF_JOB}" \
-            "FAILURE_CLASSIFICATIONS=${FINDING_SUMMARY}" \
-            "LOG_ENTRIES_SCANNED=${ENTRY_COUNT}" \
-            "STDERR_ENTRIES=${STDERR_COUNT}" \
-            "ERROR_SEVERITY_ENTRIES=${ERROR_COUNT}" \
+            "LOG_ENTRIES_SCANNED=${LOG_ENTRIES_SCANNED}" \
+            "ERROR_SEVERITY_ENTRIES=${ERROR_SEVERITY_ENTRIES}" \
+            "ERROR_LOG_CLASSES=${ERROR_LOG_CLASSES}" \
+            "ERROR_PAYLOAD_TYPES=${ERROR_PAYLOAD_TYPES}" \
+            "KNOWN_FAILURE_MARKERS=${KNOWN_FAILURE_MARKERS}" \
+            "SAFE_ERROR_SIGNATURE=${SAFE_ERROR_SIGNATURE}" \
+            'RAW_ERROR_PAYLOAD_PRINTED=false' \
             'READ_ONLY_DIAGNOSTIC=true' \
             'SERVICE_MUTATIONS_AUTHORIZED=false' \
             'DATABASE_MUTATIONS_AUTHORIZED=false' \
