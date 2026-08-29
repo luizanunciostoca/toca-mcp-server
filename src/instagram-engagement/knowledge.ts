@@ -115,11 +115,7 @@ export function parseKnowledgeRows(
 ): readonly KnowledgeRow[] {
   const [headerRaw, ...body] = values;
   if (!headerRaw) return [];
-  const headers = headerRaw.map((value) =>
-    String(value ?? '')
-      .trim()
-      .toLowerCase(),
-  );
+  const headers = headerRaw.map((value) => scalarText(value).toLowerCase());
   const index = new Map(headers.map((header, position) => [header, position] as const));
   const rows: KnowledgeRow[] = [];
 
@@ -180,7 +176,15 @@ function parseIntent(value: string): EngagementIntent | undefined {
 function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
   const position = index.get(key);
   if (position === undefined) return '';
-  return String(row[position] ?? '').trim();
+  return scalarText(row[position]);
+}
+
+function scalarText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value).trim();
+  }
+  return '';
 }
 
 function splitVariants(value: string): readonly string[] {
