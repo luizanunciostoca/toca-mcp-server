@@ -153,17 +153,15 @@ jobs:
           [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$RUNTIME_IMAGE" == *"@${RUNTIME_IMAGE_DIGEST}" ]]
 
-          COMMENT="$(cat <<EOF
-SHADOW_RUNTIME_BUILD_STATUS=PASS
-RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA
-RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST
-RUNTIME_IMAGE=$RUNTIME_IMAGE
-BUILD_ONLY=true
-DATABASE_MUTATIONS=false
-SERVICE_DEPLOY=false
-EXTERNAL_REPLY_WRITES=false
-EOF
-)"
+          printf -v COMMENT '%s\n' \
+            'SHADOW_RUNTIME_BUILD_STATUS=PASS' \
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" \
+            "RUNTIME_IMAGE=$RUNTIME_IMAGE" \
+            'BUILD_ONLY=true' \
+            'DATABASE_MUTATIONS=false' \
+            'SERVICE_DEPLOY=false' \
+            'EXTERNAL_REPLY_WRITES=false'
 
           gh api \
             --method POST \
