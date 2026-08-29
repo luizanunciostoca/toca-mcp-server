@@ -238,11 +238,17 @@ jobs:
             --quiet
 
           JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          printf '%s' "$JOB_JSON" | jq -e --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" --arg instance "$CLOUD_SQL_INSTANCE" '
-            (.spec.template.template.spec.serviceAccountName == $runtime) and
-            ((.metadata.annotations["run.googleapis.com/cloudsql-instances"] // .spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"] // "") | contains($instance)) and
-            (.spec.template.template.spec.template.spec.containers[0].env // .spec.template.template.spec.containers[0].env // [] | any(.name == "DATABASE_URL" and (.valueSource.secretKeyRef.secret == "toca-database-url" or .valueFrom.secretKeyRef.name == "toca-database-url")))
-          ' >/dev/null || true
+          printf '%s' "$JOB_JSON" | jq -e \
+            --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg instance "$CLOUD_SQL_INSTANCE" \
+            --arg secret "$DATABASE_SECRET_ID" '
+              ([.. | objects | .serviceAccountName? // empty] | any(. == $runtime)) and
+              ([.. | strings] | any(contains($instance))) and
+              ([.. | objects | select(.name? == "DATABASE_URL") | tostring] | any(contains($secret)))
+            ' >/dev/null || {
+              echo 'Ephemeral diagnostic job configuration mismatch' >&2
+              exit 1
+            }
 
           set +e
           gcloud run jobs execute "$JOB_NAME" \
