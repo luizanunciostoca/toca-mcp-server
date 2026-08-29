@@ -20,7 +20,7 @@ const inboundPayloadSchema = z.object({
   messageId: z.string().min(1).optional(),
   mediaId: z.string().min(1).optional(),
   text: z.string().max(20_000).optional(),
-  occurredAt: z.string().min(1).optional(),
+  occurredAt: z.string().min(1),
   rawType: z.string().min(1),
 });
 
@@ -49,8 +49,9 @@ export function parseInstagramEngagementReplyPayload(value: unknown): InstagramE
 export function createInstagramEngagementInboundEnvelope(
   event: InstagramWebhookEvent,
   scope: InstagramEngagementScope,
+  fallbackOccurredAt = new Date().toISOString(),
 ): DomainEventEnvelope {
-  const occurredAt = event.occurredAt ?? new Date().toISOString();
+  const occurredAt = event.occurredAt ?? fallbackOccurredAt;
   return {
     eventId: `instagram-engagement-inbound:${event.eventId}`,
     eventKey: `instagram-engagement-inbound:${event.eventId}`,
@@ -74,7 +75,7 @@ export function createInstagramEngagementInboundEnvelope(
       ...(event.messageId ? { messageId: event.messageId } : {}),
       ...(event.mediaId ? { mediaId: event.mediaId } : {}),
       ...(event.text ? { text: event.text } : {}),
-      ...(event.occurredAt ? { occurredAt: event.occurredAt } : {}),
+      occurredAt,
       rawType: event.rawType,
     } satisfies InstagramEngagementInboundPayload,
     evidence: ['meta:webhook:signature-verified', 'meta:webhook:persisted'],
