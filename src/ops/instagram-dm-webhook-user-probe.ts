@@ -121,9 +121,7 @@ function structured(result: unknown): JsonObject {
     content?: Array<{ type?: string; text?: string }>;
   };
   const text = value?.content?.find((item) => item.type === 'text')?.text;
-  if (value?.isError) {
-    throw new Error(safeErrorCategory(text ?? 'MCP_TOOL_ERROR'));
-  }
+  if (value?.isError) throw new Error(safeErrorCategory(text ?? 'MCP_TOOL_ERROR'));
   if (value?.structuredContent && typeof value.structuredContent === 'object') {
     return value.structuredContent;
   }
@@ -138,7 +136,7 @@ async function callTool(name: string, args: JsonObject): Promise<JsonObject> {
   return structured(await send('tools/call', { name, arguments: args }));
 }
 
-async function webhookSenderIds(): Promise<string[]> {
+async function persistedSenderIds(): Promise<string[]> {
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();
   try {
@@ -146,10 +144,9 @@ async function webhookSenderIds(): Promise<string[]> {
     const result = await client.query<{ sender_scoped_id: string }>(`
       SELECT DISTINCT sender_scoped_id
       FROM meta_webhook_events
-      WHERE channel = 'DIRECT'
-        AND NULLIF(BTRIM(sender_scoped_id), '') IS NOT NULL
+      WHERE NULLIF(BTRIM(sender_scoped_id), '') IS NOT NULL
       ORDER BY sender_scoped_id
-      LIMIT 50
+      LIMIT 100
     `);
     await client.query('ROLLBACK');
     return result.rows.map((row) => row.sender_scoped_id).filter(Boolean);
@@ -168,11 +165,11 @@ async function main(): Promise<void> {
   const initialized = (await send('initialize', {
     protocolVersion: '2025-06-18',
     capabilities: {},
-    clientInfo: { name: 'toca-os-instagram-webhook-user-probe', version: '2.0.0' },
+    clientInfo: { name: 'toca-os-instagram-webhook-user-probe', version: '3.0.0' },
   })) as { serverInfo?: { name?: string }; protocolVersion?: string };
   notify('notifications/initialized', {});
 
-  const senderIds = await webhookSenderIds();
+  const senderIds = await persistedSenderIds();
   const inboundByYear = new Map<string, number>();
   const timestampRange = { oldest: null as string | null, newest: null as string | null };
   let probesAttempted = 0;
@@ -186,9 +183,13 @@ async function main(): Promise<void> {
   let inboundMessages2025 = 0;
   let inboundMessagesWithText2025 = 0;
   let conversationsFullyPaginated = 0;
+  let conversationsCoveredThrough2025 = 0;
+  let conversationsNeedingOlderPageButBlocked = 0;
   let conversationsStoppedByPageLimit = 0;
   let conversationsStoppedByCursorCycle = 0;
   const MAX_PAGES_PER_CONVERSATION = 100;
+  const START_2025 = '2025-01-01';
+  const START_2026 = '2026-01-01';
 
   for (const userId of senderIds) {
     probesAttempted += 1;
@@ -210,6 +211,8 @@ async function main(): Promise<void> {
         const seenMessageIds = new Set<string>();
         let after: string | undefined;
         let fullyPaginated = false;
+        let coveredThrough2025 = false;
+        let pageFailed = false;
 
         for (let page = 1; page <= MAX_PAGES_PER_CONVERSATION; page += 1) {
           try {
@@ -223,6 +226,7 @@ async function main(): Promise<void> {
             const messagesResult = asRecord(messagesExecution.result);
             const messages = arrayOfRecords(messagesResult.messages);
             messagesReturned += messages.length;
+            let oldestOnPage: string | null = null;
 
             for (const message of messages) {
               const messageId = scalar(message.messageId);
@@ -232,19 +236,28 @@ async function main(): Promise<void> {
               }
               const createdTime = scalar(message.createdTime);
               updateRange(createdTime, timestampRange);
+              if (createdTime && (!oldestOnPage || createdTime < oldestOnPage)) oldestOnPage = createdTime;
               if (message.direction !== 'INBOUND') continue;
               inboundMessages += 1;
               const year = createdTime.slice(0, 4);
               if (/^\d{4}$/.test(year)) inboundByYear.set(year, (inboundByYear.get(year) ?? 0) + 1);
-              if (createdTime && createdTime >= '2025-01-01' && createdTime < '2026-01-01') {
+              if (createdTime >= START_2025 && createdTime < START_2026) {
                 inboundMessages2025 += 1;
                 if (scalar(message.text).trim()) inboundMessagesWithText2025 += 1;
               }
             }
 
+            // Meta returns conversation messages newest-first. Once this page reaches
+            // a date before 2025, any later page is older and cannot contain 2025.
+            if (oldestOnPage && oldestOnPage < START_2025) {
+              coveredThrough2025 = true;
+              break;
+            }
+
             const nextAfter = scalar(messagesResult.nextAfter);
             if (!nextAfter) {
               fullyPaginated = true;
+              coveredThrough2025 = true;
               break;
             }
             if (seenCursors.has(nextAfter)) {
@@ -255,12 +268,17 @@ async function main(): Promise<void> {
             after = nextAfter;
           } catch (error) {
             recordFailure(error);
+            pageFailed = true;
             break;
           }
         }
 
         if (fullyPaginated) conversationsFullyPaginated += 1;
-        else if (seenCursors.size >= MAX_PAGES_PER_CONVERSATION) conversationsStoppedByPageLimit += 1;
+        if (coveredThrough2025) conversationsCoveredThrough2025 += 1;
+        if (pageFailed && !coveredThrough2025) conversationsNeedingOlderPageButBlocked += 1;
+        if (!fullyPaginated && !coveredThrough2025 && seenCursors.size >= MAX_PAGES_PER_CONVERSATION) {
+          conversationsStoppedByPageLimit += 1;
+        }
       }
     } catch (error) {
       recordFailure(error);
@@ -269,11 +287,11 @@ async function main(): Promise<void> {
 
   console.log(
     JSON.stringify({
-      validation: 'instagram-dm-webhook-user-probe-v2',
-      senderSource: 'meta_webhook_events:DIRECT',
+      validation: 'instagram-dm-webhook-user-probe-v3',
+      senderSource: 'meta_webhook_events:all_channels',
       mcpServer: initialized.serverInfo?.name ?? null,
       protocolVersion: initialized.protocolVersion ?? null,
-      webhookSenderIdsAvailable: senderIds.length,
+      persistedSenderIdsAvailable: senderIds.length,
       probesAttempted,
       successfulConversationCalls,
       conversationsFound,
@@ -290,6 +308,8 @@ async function main(): Promise<void> {
       oldestMessageTime: timestampRange.oldest,
       newestMessageTime: timestampRange.newest,
       conversationsFullyPaginated,
+      conversationsCoveredThrough2025,
+      conversationsNeedingOlderPageButBlocked,
       conversationsStoppedByPageLimit,
       conversationsStoppedByCursorCycle,
       executionFailures: [...executionFailures.entries()].map(([category, count]) => ({ category, count })),
@@ -319,7 +339,7 @@ main()
     const code = safeErrorCategory(error instanceof Error ? error.message : error);
     console.log(
       JSON.stringify({
-        validation: 'instagram-dm-webhook-user-probe-v2',
+        validation: 'instagram-dm-webhook-user-probe-v3',
         status: 'FAILED',
         errorCode: code,
         identitiesPrinted: false,
