@@ -28,14 +28,19 @@ describe('TOCA managed Instagram daemon engagement isolation', () => {
   });
 
   it('returns observed component counters on a failed tick instead of erasing claim evidence', () => {
-    const catchBlock = daemonSource.slice(
-      daemonSource.indexOf('} catch (error) {\n    lastError ='),
-      daemonSource.indexOf('} finally {\n    telemetry.record'),
+    const failedTickStart = daemonSource.indexOf("telemetry.increment('daemon.tick.failed')");
+    const failedTickEnd = daemonSource.indexOf(
+      "telemetry.record('daemon.tick.duration_ms'",
+      failedTickStart,
     );
 
-    expect(catchBlock).toContain('claimed: lastClaimed');
-    expect(catchBlock).toContain('engagementClaimed: lastEngagementClaimed');
-    expect(catchBlock).toContain('engagementSucceeded: lastEngagementSucceeded');
-    expect(catchBlock).toContain('engagementFailed: lastEngagementFailed');
+    expect(failedTickStart).toBeGreaterThan(-1);
+    expect(failedTickEnd).toBeGreaterThan(failedTickStart);
+
+    const failedTick = daemonSource.slice(failedTickStart, failedTickEnd);
+    expect(failedTick).toContain('claimed: lastClaimed');
+    expect(failedTick).toContain('engagementClaimed: lastEngagementClaimed');
+    expect(failedTick).toContain('engagementSucceeded: lastEngagementSucceeded');
+    expect(failedTick).toContain('engagementFailed: lastEngagementFailed');
   });
 });
