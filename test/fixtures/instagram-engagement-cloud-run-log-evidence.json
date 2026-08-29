@@ -1,0 +1,17 @@
+[
+  {
+    "jsonPayload": {
+      "validation": "instagram-engagement-readiness",
+      "status": "PASS",
+      "writesEnabled": false
+    }
+  },
+  {
+    "textPayload": "{\"validation\":\"instagram-engagement-shadow-e2e\",\"status\":\"PASS\",\"writesEnabled\":false}"
+  },
+  {
+    "jsonPayload": {
+      "message": "{\"validation\":\"instagram-engagement-meta-subscriptions\",\"status\":\"PASS\",\"secretsPrinted\":false}"
+    }
+  }
+]
