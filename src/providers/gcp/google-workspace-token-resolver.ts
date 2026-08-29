@@ -41,16 +41,21 @@ export class GcpGoogleWorkspaceTokenResolver implements SecretResolver {
     if (!email) throw new Error('GOOGLE_WORKSPACE_SERVICE_ACCOUNT_EMAIL_REQUIRED');
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.metadataTokenUrl = options.metadataTokenUrl ?? DEFAULT_METADATA_TOKEN_URL;
-    this.iamCredentialsBaseUrl = (options.iamCredentialsBaseUrl ?? DEFAULT_IAM_CREDENTIALS_BASE_URL).replace(
-      /\/$/,
-      '',
-    );
-    this.scopes = options.scopes?.length ? [...new Set(options.scopes)] : [GOOGLE_SHEETS_READONLY_SCOPE];
+    this.iamCredentialsBaseUrl = (
+      options.iamCredentialsBaseUrl ?? DEFAULT_IAM_CREDENTIALS_BASE_URL
+    ).replace(/\/$/, '');
+    this.scopes = options.scopes?.length
+      ? [...new Set(options.scopes)]
+      : [GOOGLE_SHEETS_READONLY_SCOPE];
     if (this.scopes.some((scope) => !scope.trim())) {
       throw new Error('GOOGLE_WORKSPACE_SCOPE_INVALID');
     }
     this.refreshSkewMs = options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
-    if (!Number.isInteger(this.refreshSkewMs) || this.refreshSkewMs < 0 || this.refreshSkewMs > 30 * 60 * 1000) {
+    if (
+      !Number.isInteger(this.refreshSkewMs) ||
+      this.refreshSkewMs < 0 ||
+      this.refreshSkewMs > 30 * 60 * 1000
+    ) {
       throw new Error('GOOGLE_WORKSPACE_REFRESH_SKEW_INVALID');
     }
     this.now = options.now ?? Date.now;

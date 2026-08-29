@@ -62,7 +62,12 @@ export function createInstagramEngagementBatchRuntime(
   const workerId =
     options.workerId ?? `${env.K_REVISION?.trim() || hostname()}:instagram-engagement`;
   const batchSize = boundedInteger(env.INSTAGRAM_ENGAGEMENT_BATCH_SIZE, 10, 1, 50);
-  const staleMs = boundedInteger(env.INSTAGRAM_ENGAGEMENT_STALE_CLAIM_MS, 300_000, 60_000, 3_600_000);
+  const staleMs = boundedInteger(
+    env.INSTAGRAM_ENGAGEMENT_STALE_CLAIM_MS,
+    300_000,
+    60_000,
+    3_600_000,
+  );
   const eventTypes = [
     INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE,
     INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
@@ -132,7 +137,9 @@ export function createInstagramEngagementBatchRuntime(
         } catch (error) {
           failed += 1;
           const code = safeErrorCode(error);
-          const nextAttemptAt = new Date(Date.now() + retryDelayMs(event.attemptNumber)).toISOString();
+          const nextAttemptAt = new Date(
+            Date.now() + retryDelayMs(event.attemptNumber),
+          ).toISOString();
           await outbox.markFailed({
             eventId: event.eventId,
             executionId: event.executionId,
@@ -152,7 +159,10 @@ export function createInstagramEngagementBatchRuntime(
   };
 }
 
-function createLiveProvider(config: Config, env: NodeJS.ProcessEnv): InstagramGraphEngagementProvider {
+function createLiveProvider(
+  config: Config,
+  env: NodeJS.ProcessEnv,
+): InstagramGraphEngagementProvider {
   if (!config.META_ENABLED) throw new Error('META_ENABLED_REQUIRED');
   if (!isTrue(env.META_PROVIDER_VERIFIED)) throw new Error('META_PROVIDER_NOT_VERIFIED');
   if (!config.META_ACCESS_TOKEN_ENV_KEY) throw new Error('META_ACCESS_TOKEN_ENV_KEY_REQUIRED');

@@ -31,7 +31,8 @@ const rawBody = Buffer.from(
   }),
 );
 const normalized = parseMetaWebhookEvents(rawBody);
-if (normalized.length !== 1 || !normalized[0]) throw new Error('SHADOW_PROOF_EVENT_NORMALIZATION_FAILED');
+if (normalized.length !== 1 || !normalized[0])
+  throw new Error('SHADOW_PROOF_EVENT_NORMALIZATION_FAILED');
 const eventId = normalized[0].eventId;
 const signature = createHmac('sha256', appSecret).update(rawBody).digest('hex');
 

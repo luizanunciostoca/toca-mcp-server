@@ -29,7 +29,10 @@ describe('GcpGoogleWorkspaceTokenResolver', () => {
     });
 
     await expect(
-      resolver.resolve({ provider: GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER, key: 'sheets-readonly' }),
+      resolver.resolve({
+        provider: GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
+        key: 'sheets-readonly',
+      }),
     ).resolves.toBe('sheets-token');
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -90,7 +93,10 @@ describe('GcpGoogleWorkspaceTokenResolver', () => {
       'GOOGLE_WORKSPACE_TOKEN_PROVIDER_MISMATCH',
     );
     await expect(
-      resolver.resolve({ provider: GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER, key: 'sheets-readonly' }),
+      resolver.resolve({
+        provider: GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
+        key: 'sheets-readonly',
+      }),
     ).rejects.toThrow('GOOGLE_WORKSPACE_SCOPED_TOKEN_FAILED:403');
   });
 });

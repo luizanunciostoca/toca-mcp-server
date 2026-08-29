@@ -19,8 +19,7 @@ describe('Instagram engagement Google Sheets auth', () => {
   it('uses GCP IAM scoped tokens without requiring a static Sheets token', () => {
     const env = {
       INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE: 'gcp-iam',
-      INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL:
-        'runtime@example.iam.gserviceaccount.com',
+      INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL: 'runtime@example.iam.gserviceaccount.com',
     } as NodeJS.ProcessEnv;
     const auth = createInstagramEngagementGoogleSheetsAuth(env);
 
