@@ -176,27 +176,57 @@ async function tick(): Promise<TickResult> {
   const started = Date.now();
   telemetry.increment('daemon.tick.started');
   try {
-    lastClaimed = await runTocaManagedInstagramWorkerBatch({
-      config,
-      pool,
-      tenantId,
-      telemetry,
-      logger,
-    });
+    let engagementError: string | null = null;
+    let publicationError: string | null = null;
+
+    lastEngagementClaimed = 0;
+    lastEngagementSucceeded = 0;
+    lastEngagementFailed = 0;
     if (engagementRuntime) {
-      const engagement = await engagementRuntime.runBatch();
-      lastEngagementClaimed = engagement.claimed;
-      lastEngagementSucceeded = engagement.succeeded;
-      lastEngagementFailed = engagement.failed;
-      telemetry.record('daemon.engagement.claimed_events', engagement.claimed);
-      telemetry.record('daemon.engagement.succeeded_events', engagement.succeeded);
-      telemetry.record('daemon.engagement.failed_events', engagement.failed);
-    } else {
-      lastEngagementClaimed = 0;
-      lastEngagementSucceeded = 0;
-      lastEngagementFailed = 0;
+      try {
+        const engagement = await engagementRuntime.runBatch();
+        lastEngagementClaimed = engagement.claimed;
+        lastEngagementSucceeded = engagement.succeeded;
+        lastEngagementFailed = engagement.failed;
+        telemetry.record('daemon.engagement.claimed_events', engagement.claimed);
+        telemetry.record('daemon.engagement.succeeded_events', engagement.succeeded);
+        telemetry.record('daemon.engagement.failed_events', engagement.failed);
+      } catch (error) {
+        engagementError = error instanceof Error ? error.message : String(error);
+        telemetry.increment('daemon.engagement.tick_failed');
+        logger.error('toca.managed.instagram.daemon.engagement.tick_failed', {
+          error: engagementError,
+        });
+      }
     }
+
+    lastClaimed = 0;
+    try {
+      lastClaimed = await runTocaManagedInstagramWorkerBatch({
+        config,
+        pool,
+        tenantId,
+        telemetry,
+        logger,
+      });
+    } catch (error) {
+      publicationError = error instanceof Error ? error.message : String(error);
+      telemetry.increment('daemon.publication.tick_failed');
+      logger.error('toca.managed.instagram.daemon.publication.tick_failed', {
+        error: publicationError,
+      });
+    }
+
     await runDailyControlWithoutBlockingWorker();
+
+    const componentErrors = [
+      engagementError ? `engagement:${engagementError}` : null,
+      publicationError ? `publication:${publicationError}` : null,
+    ].filter((value): value is string => value !== null);
+    if (componentErrors.length > 0) {
+      throw new Error(componentErrors.join('|'));
+    }
+
     lastError = null;
     telemetry.increment('daemon.tick.succeeded');
     telemetry.record('daemon.tick.claimed_jobs', lastClaimed);
@@ -219,7 +249,7 @@ async function tick(): Promise<TickResult> {
     telemetry.increment('daemon.tick.failed');
     logger.error('toca.managed.instagram.daemon.tick.failed', { error: lastError });
     return {
-      claimed: 0,
+      claimed: lastClaimed,
       engagementClaimed: lastEngagementClaimed,
       engagementSucceeded: lastEngagementSucceeded,
       engagementFailed: lastEngagementFailed,
