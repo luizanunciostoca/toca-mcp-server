@@ -37,6 +37,7 @@ const HUMAN_REQUIRED = new Set<EngagementIntent>([
   'PRESS',
   'PUBLIC_FIGURE',
   'HARASSMENT_OR_THREAT',
+  'UNKNOWN',
 ]);
 
 const AUTO_ELIGIBLE = new Set<EngagementIntent>([
