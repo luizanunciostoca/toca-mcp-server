@@ -83,12 +83,8 @@ jobs:
           }"""
           if old not in text: raise SystemExit('MESSAGE_INPUT_TARGET_NOT_FOUND')
           text = text.replace(old, new, 1)
-          old = """    const boundedLimit = Math.min(input.limit, 20);
-            const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;"""
-          new = """    const boundedLimit = Math.min(input.limit, input.metadataOnly ? 100 : 20);
-            const fields = input.metadataOnly
-              ? `messages.limit(${boundedLimit}){id,created_time}`
-              : `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;"""
+          old = "    const boundedLimit = Math.min(input.limit, 20);\n    const fields = `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;"
+          new = "    const boundedLimit = Math.min(input.limit, input.metadataOnly ? 100 : 20);\n    const fields = input.metadataOnly\n      ? `messages.limit(${boundedLimit}){id,created_time}`\n      : `messages.limit(${boundedLimit}){id,created_time,from,to,message,is_unsupported}`;"
           if old not in text: raise SystemExit('MESSAGE_FIELDS_TARGET_NOT_FOUND')
           provider.write_text(text.replace(old, new, 1))
 
