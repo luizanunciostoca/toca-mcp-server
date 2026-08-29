@@ -1,0 +1,325 @@
+name: Instagram Engagement Shadow Pipeline Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/instagram-engagement-shadow-pipeline-diagnostics.yml'
+      - 'test/instagram-engagement-shadow-pipeline-diagnostics.test.ts'
+  workflow_run:
+    workflows: ['Instagram Engagement Shadow Unique Candidate Recovery']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      target_run_id:
+        description: 'Unique Candidate Recovery workflow run id to diagnose'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-pipeline-diagnostics
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  BOOTSTRAP_TARGET_RUN_ID: '33249642466'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout diagnostics controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve exact recovery run and bounded log window
+        env:
+          DISPATCH_TARGET_RUN_ID: ${{ inputs.target_run_id || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            workflow_run)
+              TARGET_RUN_ID="$(jq -r '.workflow_run.id' "$GITHUB_EVENT_PATH")"
+              ;;
+            workflow_dispatch)
+              TARGET_RUN_ID="$DISPATCH_TARGET_RUN_ID"
+              ;;
+            push)
+              TARGET_RUN_ID="$BOOTSTRAP_TARGET_RUN_ID"
+              ;;
+            *)
+              echo 'Unsupported diagnostics trigger' >&2
+              exit 1
+              ;;
+          esac
+          [[ "$TARGET_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'target run id must be numeric' >&2; exit 1; }
+
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'User-Agent: toca-instagram-shadow-pipeline-diagnostics' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}" \
+            > /tmp/target-run.json
+
+          jq -e '
+            .name == "Instagram Engagement Shadow Unique Candidate Recovery" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            (.run_attempt | type == "number") and
+            (.run_started_at | type == "string") and
+            (.updated_at | type == "string")
+          ' /tmp/target-run.json >/dev/null || {
+            echo 'Target is not a valid unique-candidate recovery run' >&2
+            exit 1
+          }
+
+          TARGET_RUN_ATTEMPT="$(jq -r '.run_attempt' /tmp/target-run.json)"
+          TARGET_HEAD_SHA="$(jq -r '.head_sha' /tmp/target-run.json)"
+          TARGET_STARTED_AT="$(jq -r '.run_started_at' /tmp/target-run.json)"
+          TARGET_UPDATED_AT="$(jq -r '.updated_at' /tmp/target-run.json)"
+          RUN_TAIL="${TARGET_RUN_ID: -7}"
+          EXPECTED_CANDIDATE_REVISION="${WEBHOOK_SERVICE_NAME}-u${RUN_TAIL}a${TARGET_RUN_ATTEMPT}"
+
+          WINDOW_START="$(node -e 'console.log(new Date(Date.parse(process.argv[1]) - 5*60*1000).toISOString())' "$TARGET_STARTED_AT")"
+          WINDOW_END="$(node -e 'console.log(new Date(Date.parse(process.argv[1]) + 5*60*1000).toISOString())' "$TARGET_UPDATED_AT")"
+
+          {
+            echo "TARGET_RUN_ID=$TARGET_RUN_ID"
+            echo "TARGET_RUN_ATTEMPT=$TARGET_RUN_ATTEMPT"
+            echo "TARGET_HEAD_SHA=$TARGET_HEAD_SHA"
+            echo "EXPECTED_CANDIDATE_REVISION=$EXPECTED_CANDIDATE_REVISION"
+            echo "WINDOW_START=$WINDOW_START"
+            echo "WINDOW_END=$WINDOW_END"
+          } >> "$GITHUB_ENV"
+
+          mkdir -p diagnostics-evidence
+          jq -n \
+            --arg runId "$TARGET_RUN_ID" \
+            --arg attempt "$TARGET_RUN_ATTEMPT" \
+            --arg headSha "$TARGET_HEAD_SHA" \
+            --arg revision "$EXPECTED_CANDIDATE_REVISION" \
+            --arg start "$WINDOW_START" \
+            --arg end "$WINDOW_END" \
+            '{schemaVersion:"toca.instagram-engagement.shadow-pipeline-diagnostics-target.v1",targetRunId:$runId,targetRunAttempt:($attempt|tonumber),targetHeadSha:$headSha,expectedCandidateRevision:$revision,windowStart:$start,windowEnd:$end,readOnly:true,externalReplyWritesAuthorized:false}' \
+            > diagnostics-evidence/target.json
+
+      - name: Authenticate read-only diagnostics session to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read and sanitize webhook and daemon pipeline signals
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WEBHOOK_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${WEBHOOK_SERVICE_NAME}\" AND resource.labels.revision_name=\"${EXPECTED_CANDIDATE_REVISION}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
+          DAEMON_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE_NAME}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
+          SCHEDULER_FILTER="resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${SCHEDULER_JOB_NAME}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
+
+          gcloud logging read "$WEBHOOK_FILTER" --project "$GCP_PROJECT_ID" --limit=1000 --order=asc --format=json > /tmp/webhook-logs.json || printf '[]\n' > /tmp/webhook-logs.json
+          gcloud logging read "$DAEMON_FILTER" --project "$GCP_PROJECT_ID" --limit=2000 --order=asc --format=json > /tmp/daemon-logs.json || printf '[]\n' > /tmp/daemon-logs.json
+          gcloud logging read "$SCHEDULER_FILTER" --project "$GCP_PROJECT_ID" --limit=1000 --order=asc --format=json > /tmp/scheduler-logs.json || printf '[]\n' > /tmp/scheduler-logs.json
+
+          cat > /tmp/sanitize-shadow-pipeline.mjs <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const [webhookPath, daemonPath, schedulerPath, outputPath, targetRunId, candidateRevision] = process.argv.slice(2);
+          const webhook = JSON.parse(readFileSync(webhookPath, 'utf8') || '[]');
+          const daemon = JSON.parse(readFileSync(daemonPath, 'utf8') || '[]');
+          const scheduler = JSON.parse(readFileSync(schedulerPath, 'utf8') || '[]');
+
+          const strings = (value, out = []) => {
+            if (typeof value === 'string') out.push(value);
+            else if (Array.isArray(value)) for (const item of value) strings(item, out);
+            else if (value && typeof value === 'object') for (const item of Object.values(value)) strings(item, out);
+            return out;
+          };
+          const findValue = (value, key) => {
+            if (!value || typeof value !== 'object') return undefined;
+            if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
+            for (const item of Object.values(value)) {
+              const found = findValue(item, key);
+              if (found !== undefined) return found;
+            }
+            return undefined;
+          };
+          const numberValue = (value, key) => {
+            const found = findValue(value, key);
+            return typeof found === 'number' && Number.isFinite(found) ? found : 0;
+          };
+          const httpStatus = (entry) => {
+            const status = entry?.httpRequest?.status;
+            if (typeof status === 'number') return status;
+            const nested = findValue(entry, 'status');
+            return typeof nested === 'number' ? nested : 0;
+          };
+          const requestUrl = (entry) => String(entry?.httpRequest?.requestUrl ?? findValue(entry, 'requestUrl') ?? '');
+          const requestMethod = (entry) => String(entry?.httpRequest?.requestMethod ?? findValue(entry, 'requestMethod') ?? '');
+          const safeCode = (value) => {
+            const text = String(value ?? '');
+            const candidates = text.match(/\b[A-Z][A-Z0-9_]{3,119}\b/g) ?? [];
+            return candidates.find((item) => item.includes('INSTAGRAM') || item.includes('OUTBOX') || item.includes('KNOWLEDGE') || item.includes('CRM') || item.includes('ENGAGEMENT')) ?? null;
+          };
+
+          let webhookRequest2xxCount = 0;
+          let webhookRequestNon2xxCount = 0;
+          let webhookAcceptedLogCount = 0;
+          let webhookAcceptedEventCount = 0;
+          let webhookDuplicateEventCount = 0;
+          const webhookChannels = new Set();
+
+          for (const entry of webhook) {
+            const status = httpStatus(entry);
+            const url = requestUrl(entry);
+            const method = requestMethod(entry);
+            if (method === 'POST' && url.includes('/webhooks/meta')) {
+              if (status >= 200 && status < 300) webhookRequest2xxCount += 1;
+              else if (status) webhookRequestNon2xxCount += 1;
+            }
+            const allStrings = strings(entry);
+            const marker = allStrings.find((text) => text.includes('Meta webhook events accepted'));
+            if (!marker) continue;
+            webhookAcceptedLogCount += 1;
+            const structuredCount = findValue(entry, 'count');
+            const structuredDuplicate = findValue(entry, 'duplicateCount');
+            if (typeof structuredCount === 'number') webhookAcceptedEventCount += structuredCount;
+            if (typeof structuredDuplicate === 'number') webhookDuplicateEventCount += structuredDuplicate;
+            const structuredChannels = findValue(entry, 'channels');
+            if (Array.isArray(structuredChannels)) for (const channel of structuredChannels) if (typeof channel === 'string') webhookChannels.add(channel);
+            const brace = marker.indexOf('{');
+            if (brace >= 0) {
+              try {
+                const parsed = JSON.parse(marker.slice(brace));
+                if (typeof parsed.count === 'number' && typeof structuredCount !== 'number') webhookAcceptedEventCount += parsed.count;
+                if (typeof parsed.duplicateCount === 'number' && typeof structuredDuplicate !== 'number') webhookDuplicateEventCount += parsed.duplicateCount;
+                if (Array.isArray(parsed.channels)) for (const channel of parsed.channels) if (typeof channel === 'string') webhookChannels.add(channel);
+              } catch {}
+            }
+          }
+
+          let daemonTickHttp2xxCount = 0;
+          let daemonTickHttpNon2xxCount = 0;
+          let daemonTickCompletedCount = 0;
+          let daemonTickFailedCount = 0;
+          let engagementClaimedTotal = 0;
+          let engagementSucceededTotal = 0;
+          let engagementFailedTotal = 0;
+          let maxEngagementClaimed = 0;
+          const processingErrorCodes = new Set();
+
+          for (const entry of daemon) {
+            const status = httpStatus(entry);
+            const url = requestUrl(entry);
+            const method = requestMethod(entry);
+            if (method === 'POST' && url.includes('/tick')) {
+              if (status >= 200 && status < 300) daemonTickHttp2xxCount += 1;
+              else if (status) daemonTickHttpNon2xxCount += 1;
+            }
+            const joined = strings(entry).join(' ');
+            if (joined.includes('toca.managed.instagram.daemon.tick.completed')) {
+              daemonTickCompletedCount += 1;
+              const claimed = numberValue(entry, 'engagementClaimed');
+              const succeeded = numberValue(entry, 'engagementSucceeded');
+              const failed = numberValue(entry, 'engagementFailed');
+              engagementClaimedTotal += claimed;
+              engagementSucceededTotal += succeeded;
+              engagementFailedTotal += failed;
+              maxEngagementClaimed = Math.max(maxEngagementClaimed, claimed);
+            }
+            if (joined.includes('toca.managed.instagram.daemon.tick.failed')) daemonTickFailedCount += 1;
+            if (joined.includes('Instagram engagement event failed')) {
+              const structured = findValue(entry, 'errorCode');
+              const code = safeCode(structured) ?? safeCode(joined);
+              if (code) processingErrorCodes.add(code);
+            }
+          }
+
+          let schedulerLogCount = scheduler.length;
+          let schedulerHttpSuccessCount = 0;
+          let schedulerHttpFailureCount = 0;
+          for (const entry of scheduler) {
+            const status = httpStatus(entry);
+            if (status >= 200 && status < 300) schedulerHttpSuccessCount += 1;
+            else if (status >= 400) schedulerHttpFailureCount += 1;
+          }
+
+          let inference = 'INSUFFICIENT_SIGNAL';
+          if (webhookRequest2xxCount === 0 && webhookAcceptedLogCount === 0) inference = 'WEBHOOK_NOT_OBSERVED';
+          else if (webhookAcceptedLogCount > 0 && webhookAcceptedEventCount === 0 && webhookDuplicateEventCount > 0) inference = 'WEBHOOK_DUPLICATE_ONLY';
+          else if (daemonTickHttp2xxCount === 0 && daemonTickCompletedCount === 0) inference = 'DAEMON_TICK_NOT_OBSERVED';
+          else if (engagementFailedTotal > 0 || processingErrorCodes.size > 0) inference = 'ENGAGEMENT_PROCESSOR_FAILED';
+          else if (webhookAcceptedEventCount > 0 && maxEngagementClaimed === 0) inference = 'INBOUND_NOT_CLAIMED_BY_DAEMON';
+          else if (engagementSucceededTotal > 0) inference = 'ENGAGEMENT_PROCESSOR_SUCCEEDED_ACTION_MISSING_OR_PROOF_MISMATCH';
+
+          const result = {
+            schemaVersion: 'toca.instagram-engagement.shadow-pipeline-diagnostics.v1',
+            targetRunId,
+            candidateRevision,
+            readOnly: true,
+            secretsPrinted: false,
+            messageTextPrinted: false,
+            externalReplyWritesAuthorized: false,
+            webhook: {
+              request2xxCount: webhookRequest2xxCount,
+              requestNon2xxCount: webhookRequestNon2xxCount,
+              acceptedLogCount: webhookAcceptedLogCount,
+              acceptedEventCount: webhookAcceptedEventCount,
+              duplicateEventCount: webhookDuplicateEventCount,
+              channels: [...webhookChannels].sort(),
+            },
+            daemon: {
+              tickHttp2xxCount: daemonTickHttp2xxCount,
+              tickHttpNon2xxCount: daemonTickHttpNon2xxCount,
+              tickCompletedCount: daemonTickCompletedCount,
+              tickFailedCount: daemonTickFailedCount,
+              engagementClaimedTotal,
+              engagementSucceededTotal,
+              engagementFailedTotal,
+              maxEngagementClaimed,
+              processingErrorCodes: [...processingErrorCodes].sort(),
+            },
+            scheduler: { logCount: schedulerLogCount, httpSuccessCount: schedulerHttpSuccessCount, httpFailureCount: schedulerHttpFailureCount },
+            inference,
+          };
+          writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n');
+          NODE
+
+          node /tmp/sanitize-shadow-pipeline.mjs \
+            /tmp/webhook-logs.json /tmp/daemon-logs.json /tmp/scheduler-logs.json \
+            diagnostics-evidence/pipeline-diagnostics.json "$TARGET_RUN_ID" "$EXPECTED_CANDIDATE_REVISION"
+
+          jq -e '.readOnly == true and .secretsPrinted == false and .messageTextPrinted == false and .externalReplyWritesAuthorized == false' diagnostics-evidence/pipeline-diagnostics.json >/dev/null
+          cat diagnostics-evidence/pipeline-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
+
+          rm -f /tmp/webhook-logs.json /tmp/daemon-logs.json /tmp/scheduler-logs.json /tmp/sanitize-shadow-pipeline.mjs
+
+      - name: Upload sanitized pipeline diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-shadow-pipeline-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostics-evidence/
+          if-no-files-found: warn
+          retention-days: 90
