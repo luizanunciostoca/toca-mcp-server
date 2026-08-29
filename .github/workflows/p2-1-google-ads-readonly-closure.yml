@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          jq -n --arg sha "$GITHUB_SHA" --arg customer "$GOOGLE_ADS_CUSTOMER_ID" '{schemaVersion:"toca.p2.1.readonly.preflight.v2",sourceSha:$sha,customerId:$customer,secretValuesReadByDeployer:false,secretBindingVerifiedByRuntimeExecution:true,providerMutationAuthorized:false}' > evidence/preflight.json
+          jq -n --arg sha "$GITHUB_SHA" --arg customer "$GOOGLE_ADS_CUSTOMER_ID" '{schemaVersion:"toca.p2.1.readonly.preflight.v3",sourceSha:$sha,customerId:$customer,secretValuesReadByDeployer:false,runtimeSecretBindingConfigured:true,runtimeSecretBindingVerified:false,providerMutationAuthorized:false}' > evidence/preflight.json
       - name: Verify public Google Ads production stays OFF
         shell: bash
         run: |
@@ -87,13 +87,37 @@ jobs:
           ENVV="^~^SOURCE_SHA=$GITHUB_SHA~GOOGLE_ADS_VERIFICATION_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}~RUNTIME_SERVICE_ACCOUNT=$GCP_RUNTIME_SERVICE_ACCOUNT~GOOGLE_ADS_CUSTOMER_ID=$GOOGLE_ADS_CUSTOMER_ID~GOOGLE_ADS_ALLOWED_CURRENCY=$GOOGLE_ADS_ALLOWED_CURRENCY~GOOGLE_ADS_DEVELOPER_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN~GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_ID~GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET~GOOGLE_ADS_OAUTH_REFRESH_TOKEN_ENV_KEY=TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN"
           SECV="^~^TOCA_SECRET_GOOGLE_ADS_DEVELOPER_TOKEN=$GCP_GOOGLE_ADS_DEVELOPER_TOKEN_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_CLIENT_ID=$GCP_GOOGLE_ADS_CLIENT_ID_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_CLIENT_SECRET=$GCP_GOOGLE_ADS_CLIENT_SECRET_SECRET:latest~TOCA_SECRET_GOOGLE_ADS_REFRESH_TOKEN=$GCP_GOOGLE_ADS_REFRESH_TOKEN_SECRET:latest"
           gcloud run jobs deploy "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --image "$IMAGE" --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --command node --args dist/src/google-ads-provider-readonly-closure.js --set-env-vars "$ENVV" --set-secrets "$SECV" --max-retries 0 --task-timeout 180s --quiet
-          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet 2>&1 | tee evidence/execute-output.txt
+          EXEC_RC=${PIPESTATUS[0]}
+          set -e
           sleep 3
-          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$JOB AND textPayload:\"GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=50 --format='value(textPayload)' | grep 'GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=' | head -n1 || true)"
+
+          EXECUTION="$(gcloud run jobs executions list --job "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --limit=1 --sort-by='~metadata.creationTimestamp' --format='value(metadata.name)' | head -n1)"
+          test -n "$EXECUTION"
+          gcloud run jobs executions describe "$EXECUTION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            | jq '{metadata:{name:.metadata.name,creationTimestamp:.metadata.creationTimestamp},status:{conditions:.status.conditions,failedCount:.status.failedCount,succeededCount:.status.succeededCount,completionTime:.status.completionTime}}' \
+            > evidence/execution.json
+
+          gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$JOB" --project "$GCP_PROJECT_ID" --freshness=20m --limit=100 --order=asc --format=json \
+            | jq '[.[] | {timestamp,severity,textPayload,jsonPayload:(if .jsonPayload then {message:(.jsonPayload.message // null),event:(.jsonPayload.event // null),error:(.jsonPayload.error // null)} else null end)}]' \
+            > evidence/runtime-logs.json
+
+          LINE="$(jq -r '.[].textPayload // empty' evidence/runtime-logs.json | grep 'GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=' | head -n1 || true)"
+          if [ -n "$LINE" ]; then
+            JSON="${LINE#GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=}"
+            printf '%s\n' "$JSON" | jq . > evidence/provider-readonly.json
+          fi
+
+          if [ "$EXEC_RC" -ne 0 ]; then
+            echo "P2_1_GOOGLE_ADS_PROVIDER_PROOF_FAILED_FAIL_CLOSED"
+            exit "$EXEC_RC"
+          fi
+
           test -n "$LINE"
-          JSON="${LINE#GOOGLE_ADS_PROVIDER_READONLY_CLOSURE=}"
           printf '%s' "$JSON" | jq -e '.credentials.developerTokenAccepted==true and .credentials.oauthRefreshAccepted==true and .accountVerification.verified==true and .externalSideEffectExecuted==false and .mutation.createPausedExecuted==false and .mutation.activateExecuted==false and .mutation.spendGeneratedForVerification==false and .route=="R28"' >/dev/null
-          printf '%s\n' "$JSON" | jq . > evidence/provider-readonly.json
+          jq '.runtimeSecretBindingVerified=true' evidence/preflight.json > evidence/preflight.tmp && mv evidence/preflight.tmp evidence/preflight.json
           echo "P2_1_GOOGLE_ADS_PROVIDER_VERIFIED_READ_ONLY"
       - name: Upload immutable evidence
         if: always()
