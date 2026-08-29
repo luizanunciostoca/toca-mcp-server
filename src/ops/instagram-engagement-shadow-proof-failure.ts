@@ -33,10 +33,8 @@ export function buildSafeShadowProofFailureEvidence(
   channel: ShadowProofChannel,
 ): SafeShadowProofFailureEvidence {
   const error = reason instanceof Error ? reason : undefined;
-  const message = error?.message ?? '';
-  const proofCode = message.match(
-    /^(SHADOW_PROOF_(?:(?:COMMENT|DIRECT)_[A-Z_]+|REQUIRES_WRITES_DISABLED)|[A-Z0-9_]+_REQUIRED)(?::|$)/u,
-  )?.[1];
+  const messageHead = (error?.message ?? '').split(':', 1)[0] ?? '';
+  const proofCode = isSafeProofCode(messageHead) ? messageHead : undefined;
   const directCode = safeRuntimeCode(readCode(error));
   const causeCode = safeRuntimeCode(readCode(error?.cause));
 
@@ -54,6 +52,12 @@ export function buildSafeShadowProofFailureEvidence(
   };
 }
 
+function isSafeProofCode(value: string): boolean {
+  if (value === 'SHADOW_PROOF_REQUIRES_WRITES_DISABLED') return true;
+  if (/^SHADOW_PROOF_(?:COMMENT|DIRECT)_[A-Z_]+$/u.test(value)) return true;
+  return /^[A-Z0-9_]+_REQUIRED$/u.test(value);
+}
+
 function readCode(value: unknown): unknown {
   if (!value || typeof value !== 'object' || !('code' in value)) return undefined;
   return value.code;
@@ -68,7 +72,6 @@ function safeRuntimeCode(value: unknown): string | undefined {
 function safeErrorName(value: string | undefined): string {
   if (!value) return 'UnknownError';
   const candidate = value.trim();
-  return /^(?:[A-Za-z][A-Za-z0-9]{0,31}Error|Error)$/u.test(candidate)
-    ? candidate
-    : 'UnknownError';
+  if (/^(?:[A-Za-z][A-Za-z0-9]{0,31}Error|Error)$/u.test(candidate)) return candidate;
+  return 'UnknownError';
 }
