@@ -1,0 +1,52 @@
+name: Instagram Engagement Sync Diagnostic Ephemeral
+
+on:
+  push:
+    branches:
+      - ops/instagram-engagement-sync-diagnostic-20260829
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      FAILED_JOB_NAME: instagram-engagement-knowledge-33231454327
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read sanitized failed sync logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${FAILED_JOB_NAME}\"" \
+            --project "$GCP_PROJECT_ID" \
+            --freshness=2h \
+            --limit=200 \
+            --order=asc \
+            --format=json > /tmp/logs.json
+          jq -r '
+            .[] |
+            [(.timestamp // ""), (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // "")] |
+            @tsv
+          ' /tmp/logs.json \
+            | sed -E 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED]#g; s#(Bearer )[A-Za-z0-9._~-]+#\1[REDACTED]#g' \
+            | grep -E 'instagram|engagement|knowledge|Error|ERROR|error|migration|relation|column|constraint|MODULE|Cannot|failed|FAILED|PASS|validation|status|exit|ENOENT|SQL|duplicate|invalid|INVALID' \
+            | tail -n 120 || true
+          echo 'SYNC_DIAGNOSTIC_READ_ONLY=PASS'
