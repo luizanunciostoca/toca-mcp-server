@@ -1,0 +1,67 @@
+name: Instagram History Store Evidence
+
+on:
+  push:
+    branches:
+      - ops/instagram-dm-2025-version-probe-20260828
+    paths:
+      - '.github/workflows/instagram-history-store-evidence.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_JOB_NAME: toca-ig-history-inventory-33222464230-1
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Read sanitized inventory result
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${SOURCE_JOB_NAME}" \
+            --project "$GCP_PROJECT_ID" --freshness=2h --limit=300 --order=asc --format=json > /tmp/logs.json
+          python3 <<'PY'
+          import json, re, sys
+          rows=json.load(open('/tmp/logs.json'))
+          for row in rows:
+              vals=[]
+              if isinstance(row.get('textPayload'),str): vals.append(row['textPayload'])
+              if isinstance(row.get('jsonPayload'),dict): vals.append(json.dumps(row['jsonPayload'],separators=(',',':')))
+              for text in vals:
+                  candidates=[]
+                  try:
+                      obj=json.loads(text)
+                      if isinstance(obj,dict): candidates.append(obj)
+                  except Exception:
+                      for m in re.finditer(r'\{[^\n]*"validation"[^\n]*\}',text):
+                          try: candidates.append(json.loads(m.group(0)))
+                          except Exception: pass
+                  for obj in candidates:
+                      if obj.get('validation')!='instagram-history-store-inventory': continue
+                      allowed={
+                        'validation':obj.get('validation'),
+                        'candidateTables':obj.get('candidateTables',[]),
+                        'matchingColumns':obj.get('matchingColumns',[]),
+                        'rowCounts':obj.get('rowCounts',[]),
+                        'contentRead':obj.get('contentRead'),
+                        'piiPrinted':obj.get('piiPrinted')
+                      }
+                      print(json.dumps(allowed,separators=(',',':')))
+                      sys.exit(0)
+          print('INVENTORY_EVIDENCE_NOT_FOUND',file=sys.stderr)
+          sys.exit(1)
+          PY
