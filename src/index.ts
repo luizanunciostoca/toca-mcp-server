@@ -1,4 +1,4 @@
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { createTocaServer } from './server.js';
+import { createArtistSafeTocaServer } from './artist-safe-server.js';
 
-serveStdio(() => createTocaServer());
+serveStdio(() => createArtistSafeTocaServer());

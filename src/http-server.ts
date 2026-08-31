@@ -15,7 +15,7 @@ import {
   parseWhatsAppWebhookEvents,
   type WhatsAppWebhookEvent,
 } from './providers/whatsapp/whatsapp-cloud-webhook.js';
-import { createTocaServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { createArtistSafeTocaServer, SERVER_NAME, SERVER_VERSION } from './artist-safe-server.js';
 
 const MAX_META_WEBHOOK_BODY_BYTES = 1024 * 1024;
 const COMPLIANCE_CONTACT_EMAIL = 'adm@tocadomorcego.com';
@@ -40,7 +40,7 @@ export interface TocaHttpServerOptions {
 }
 
 export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Server {
-  const mcp = createMcpHandler(() => createTocaServer());
+  const mcp = createMcpHandler(() => createArtistSafeTocaServer());
   const handleMcp = toNodeHandler(mcp, {
     onerror: (error) => {
       options.onError?.(error);
