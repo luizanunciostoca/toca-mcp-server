@@ -137,8 +137,10 @@ describe('TOCA-managed Instagram scheduler', () => {
 
   it('verifies every scheduled asset by SHA-256 and preserves carousel order', async () => {
     const assets = [imageAsset('CAR-1', '1'.repeat(64)), imageAsset('CAR-2', '2'.repeat(64))];
-    const verified = vi.fn(async (objectName: string) => `https://storage.example/${objectName}`);
-    const execute = vi.fn(async () => ({ completed: true, publication: {} }));
+    const verified = vi.fn((objectName: string) =>
+      Promise.resolve(`https://storage.example/${objectName}`),
+    );
+    const execute = vi.fn(() => Promise.resolve({ completed: true, publication: {} }));
     const handler = new TocaManagedInstagramPublicationJobHandler(
       { createVerifiedDeliveryUrl: verified },
       { execute } as unknown as InstagramPublicationExecutor,
@@ -172,9 +174,9 @@ describe('TOCA-managed Instagram scheduler', () => {
     const execute = vi.fn();
     const handler = new TocaManagedInstagramPublicationJobHandler(
       {
-        createVerifiedDeliveryUrl: vi.fn(async () => {
-          throw new Error('PUBLICATION_ASSET_SHA256_MISMATCH');
-        }),
+        createVerifiedDeliveryUrl: vi.fn(() =>
+          Promise.reject(new Error('PUBLICATION_ASSET_SHA256_MISMATCH')),
+        ),
       },
       { execute } as unknown as InstagramPublicationExecutor,
     );
