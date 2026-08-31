@@ -43,11 +43,7 @@ describe('Instagram engagement shadow proof failure evidence', () => {
       message: 'column created_at does not exist',
       detail: 'private schema detail',
     };
-    const evidence = buildSafeShadowProofFailureEvidence(
-      rejection,
-      'INBOUND_READBACK',
-      'COMMENT',
-    );
+    const evidence = buildSafeShadowProofFailureEvidence(rejection, 'INBOUND_READBACK', 'COMMENT');
 
     expect(evidence.errorCode).toBe('42703');
     expect(evidence.errorName).toBe('DatabaseError');
