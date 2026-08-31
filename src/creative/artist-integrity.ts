@@ -30,10 +30,7 @@ export function evaluateArtistIntegrity(input: {
   if (input.evidence.aiOperationUsed || input.asset.aiModificationAllowed !== false) {
     failures.add('FAILED_ARTIST_AI_MODIFICATION');
   }
-  if (
-    input.evidence.physicalGeometryChanged ||
-    input.asset.physicalModificationAllowed !== false
-  ) {
+  if (input.evidence.physicalGeometryChanged || input.asset.physicalModificationAllowed !== false) {
     failures.add('FAILED_ARTIST_GEOMETRY_MODIFICATION');
   }
   if (input.evidence.unapprovedRetouchDetected) {
