@@ -140,7 +140,10 @@ describe('TOCA-managed Instagram scheduler', () => {
     const verified = vi.fn((objectName: string) =>
       Promise.resolve(`https://storage.example/${objectName}`),
     );
-    const execute = vi.fn(() => Promise.resolve({ completed: true, publication: {} }));
+    const execute = vi.fn((request: unknown) => {
+      void request;
+      return Promise.resolve({ completed: true, publication: {} });
+    });
     const handler = new TocaManagedInstagramPublicationJobHandler(
       { createVerifiedDeliveryUrl: verified },
       { execute } as unknown as InstagramPublicationExecutor,
