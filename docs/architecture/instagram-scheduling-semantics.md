@@ -52,4 +52,5 @@ For a managed publication:
 - rescheduling replaces the immutable scheduled job atomically so cancellation of the old job and
   persistence of the replacement cannot be split across commits;
 - provider reconciliation/readback remains authoritative for deciding whether an uncertain or
-  completed execution actually resulted in a published Instagram resource.
+  completed execution actually resulted in a published Instagram resource;
+- integration into the protected `main` requires revalidation whenever the base branch advances.
