@@ -11,9 +11,12 @@ RUN pnpm prune --prod
 
 FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
 ENV NODE_ENV=production
+ENV REMBG_ARTIST_MODEL=u2net_human_seg
+ENV U2NET_HOME=/tmp/rembg-models
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends imagemagick \
-  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+RUN apt-get update && apt-get install -y --no-install-recommends imagemagick python3 python3-pip \
+  && python3 -m pip install --no-cache-dir --break-system-packages "rembg[cpu,cli]==2.0.81" \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /root/.cache/pip /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
