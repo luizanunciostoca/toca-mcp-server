@@ -17,12 +17,24 @@ export interface ScheduledJob<TPayload = unknown> {
   readonly lastError?: string;
 }
 
+export type NewScheduledJob<TPayload = unknown> = Omit<
+  ScheduledJob<TPayload>,
+  'status' | 'attempts' | 'tenantId'
+>;
+
 export interface Scheduler {
-  schedule<TPayload>(
-    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts' | 'tenantId'>,
-  ): Promise<ScheduledJob<TPayload>>;
+  schedule<TPayload>(job: NewScheduledJob<TPayload>): Promise<ScheduledJob<TPayload>>;
   get<TPayload = unknown>(id: string): Promise<ScheduledJob<TPayload> | undefined>;
   reschedule(id: string, runAt: string, timezone: string): Promise<ScheduledJob | undefined>;
+  /**
+   * Atomically cancel one still-mutable schedule and persist its immutable replacement.
+   * Implementations that back production rescheduling must provide this method so a
+   * replacement failure cannot leave the original canceled without a successor.
+   */
+  replace?<TPayload>(
+    id: string,
+    replacement: NewScheduledJob<TPayload>,
+  ): Promise<ScheduledJob<TPayload> | undefined>;
   cancel(id: string): Promise<ScheduledJob | undefined>;
   list(toolName?: string): Promise<readonly ScheduledJob[]>;
   claimDue(nowIso: string, limit: number, toolName?: string): Promise<readonly ScheduledJob[]>;
@@ -33,7 +45,11 @@ export interface Scheduler {
 
 export interface ReconciliationResult {
   readonly status:
-    'IN_SYNC' | 'LOCAL_STALE' | 'PROVIDER_UNAVAILABLE' | 'STATE_CONFLICT' | 'RESOURCE_MISSING';
+    | 'IN_SYNC'
+    | 'LOCAL_STALE'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'STATE_CONFLICT'
+    | 'RESOURCE_MISSING';
   readonly localState: string;
   readonly providerState?: string;
   readonly externalResourceId?: string;
