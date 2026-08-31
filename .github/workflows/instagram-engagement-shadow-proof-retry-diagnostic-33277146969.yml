@@ -1,0 +1,122 @@
+name: Instagram Engagement Shadow Proof Retry Diagnostic 33277146969
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-shadow-proof-retry-diagnostic-33277146969
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33277146969'
+  SOURCE_EXECUTION: toca-ig-eng-proof-retry-33277146969-1-wggjw
+
+jobs:
+  retained-log-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram proof retry retained log diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_SHADOW_PROOF_RETRY_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY"; done
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Read retained execution logs and publish sanitized diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p engagement-evidence
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.execution_name=\"${SOURCE_EXECUTION}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=7d --limit=1000 --order=asc --format=json > /tmp/retained-logs.json
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/retained-logs.json','utf8'));
+          const collect=(v,o=[])=>{if(typeof v==='string')o.push(v);else if(Array.isArray(v))v.forEach(x=>collect(x,o));else if(v&&typeof v==='object')Object.values(v).forEach(x=>collect(x,o));return o};
+          const redact=(v)=>String(v)
+            .replaceAll('Que horas começa o Sunset?','<SYNTHETIC_MESSAGE>')
+            .replace(/https?:\/\/[^\s]+/giu,'<URL>')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu,'<EMAIL>')
+            .replace(/sha256:[a-f0-9]{32,}/giu,'<DIGEST>')
+            .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu,'<UUID>')
+            .replace(/shadow-proof-[A-Z0-9_-]+/giu,'<SYNTHETIC_ID>')
+            .replace(/\b\d{10,}\b/gu,'<ID>')
+            .replace(/\s+/gu,' ').trim().slice(0,500);
+          const strings=collect(entries);
+          const markers=[...new Set(strings.filter(v=>/instagram-engagement-shadow-e2e-failure|SHADOW_PROOF_|ERR_|ERROR|FAILED|TIMEOUT|DEADLINE|ECONN|EACCES|ENOENT|POSTGRES|DATABASE|FETCH|WEBHOOK/iu.test(v)).map(redact).filter(Boolean))].slice(0,80);
+          const evidence={schemaVersion:'toca.instagram-engagement.shadow-proof-retry-retained-log-diagnostic.v1',sourceRunId:process.env.SOURCE_RUN_ID,sourceExecution:process.env.SOURCE_EXECUTION,entries:Array.isArray(entries)?entries.length:0,safeMarkers:markers,rawPayloadPrinted:false,readOnlyDiagnostic:true,writesEnabled:false};
+          fs.writeFileSync('engagement-evidence/retained-proof-retry-diagnostic.json',JSON.stringify(evidence,null,2)+'\n');
+          NODE
+
+          ENTRY_COUNT="$(jq -r '.entries' engagement-evidence/retained-proof-retry-diagnostic.json)"
+          SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/retained-proof-retry-diagnostic.json)"
+          printf -v BODY '%s\n' \
+            'RETAINED_PROOF_RETRY_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
+            "ENTRY_COUNT=${ENTRY_COUNT}" \
+            "SAFE_MARKERS=${SAFE_MARKERS}" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: instagram-engagement-shadow-proof-retry-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
