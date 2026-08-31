@@ -14,15 +14,9 @@ export const artistAssetSchema = z.object({
   conventionalTreatmentAllowed: z.boolean(),
   cropAllowed: z.boolean(),
   compositionAllowed: z.boolean(),
-  protectedElements: z.array(z.string().min(1)).default([
-    'FACE',
-    'HAIR',
-    'SKIN',
-    'BODY',
-    'HANDS',
-    'CLOTHING',
-    'ACCESSORIES',
-  ]),
+  protectedElements: z
+    .array(z.string().min(1))
+    .default(['FACE', 'HAIR', 'SKIN', 'BODY', 'HANDS', 'CLOTHING', 'ACCESSORIES']),
   status: z.enum(['ACTIVE_APPROVED', 'REVOKED']),
 });
 
