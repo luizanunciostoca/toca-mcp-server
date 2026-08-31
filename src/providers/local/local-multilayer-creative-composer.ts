@@ -38,11 +38,7 @@ export interface LocalMultiLayerComposeInput {
   readonly canvas: MultiLayerCanvas;
   readonly venueOpacityPercent?: number;
   readonly orangeTint?: string;
-  readonly fadeDirection?:
-    | 'LEFT_TO_RIGHT'
-    | 'RIGHT_TO_LEFT'
-    | 'TOP_TO_BOTTOM'
-    | 'BOTTOM_TO_TOP';
+  readonly fadeDirection?: 'LEFT_TO_RIGHT' | 'RIGHT_TO_LEFT' | 'TOP_TO_BOTTOM' | 'BOTTOM_TO_TOP';
   readonly artistTransforms?: readonly ArtistTransform[];
 }
 
@@ -108,10 +104,7 @@ export class LocalMultiLayerCreativeComposer {
         writeFile(venuePath, input.venue.bytes),
         writeFile(maskPath, input.artistProtectionMaskBytes),
       ]);
-      await this.runner(
-        this.binary,
-        buildArgs(input, artistPath, venuePath, maskPath, outputPath),
-      );
+      await this.runner(this.binary, buildArgs(input, artistPath, venuePath, maskPath, outputPath));
       const outputBytes = await readFile(outputPath);
       if (!isPng(outputBytes)) {
         throw new ExecutionError(
@@ -165,11 +158,7 @@ function buildArgs(
   const [width, height] = dimensionsFor(input.canvas);
   const opacity = Math.max(0, Math.min(100, input.venueOpacityPercent ?? 55));
   const orange = input.orangeTint ?? '#d96b16';
-  const gradientArgs = buildGradientArgs(
-    width,
-    height,
-    input.fadeDirection ?? 'RIGHT_TO_LEFT',
-  );
+  const gradientArgs = buildGradientArgs(width, height, input.fadeDirection ?? 'RIGHT_TO_LEFT');
 
   return [
     artistPath,
