@@ -27,7 +27,7 @@ function assetFor(sourceBytes: Uint8Array): ArtistAsset {
 describe('artist segmentation integrity', () => {
   it('fails before segmentation when source hash does not match approved artist asset', async () => {
     const provider = { segment: vi.fn() };
-    const service = new ArtistSegmentationService(provider as never);
+    const service = new ArtistSegmentationService(provider);
     const wrongAsset = assetFor(Uint8Array.from([9, 9, 9]));
 
     await expect(
@@ -41,9 +41,9 @@ describe('artist segmentation integrity', () => {
   });
 
   it('invokes local rembg with a human-segmentation model and alpha matting', async () => {
-    const runner = vi.fn(async () => {
+    const runner = vi.fn(() => {
       const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
-      throw error;
+      return Promise.reject(error);
     });
     const provider = new LocalRembgSegmentationProvider('rembg-test', 'u2net_human_seg', runner);
 
