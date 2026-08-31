@@ -2,6 +2,7 @@ import type pg from 'pg';
 import {
   SCHEDULER_STALE_RECOVERY_MARKER,
   SCHEDULER_STALE_RUNNING_AFTER_MS,
+  type NewScheduledJob,
   type ScheduledJob,
   type Scheduler,
 } from './scheduler-contracts.js';
@@ -65,9 +66,7 @@ export class PostgresScheduler implements Scheduler {
     this.tenantId = normalizedTenantId;
   }
 
-  async schedule<TPayload>(
-    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts' | 'tenantId'>,
-  ): Promise<ScheduledJob<TPayload>> {
+  async schedule<TPayload>(job: NewScheduledJob<TPayload>): Promise<ScheduledJob<TPayload>> {
     const result = await this.pool.query<Row>(
       `insert into scheduled_jobs
         (id, tenant_id, tool_name, payload, run_at, timezone, idempotency_key)
@@ -108,6 +107,86 @@ export class PostgresScheduler implements Scheduler {
       [id, runAt, timezone, this.tenantId],
     );
     return result.rows[0] ? mapRow(result.rows[0], this.tenantId) : this.get(id);
+  }
+
+  async replace<TPayload>(
+    id: string,
+    replacement: NewScheduledJob<TPayload>,
+  ): Promise<ScheduledJob<TPayload> | undefined> {
+    if (replacement.id === id) throw new Error('SCHEDULER_REPLACE_ID_CONFLICT');
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const currentResult = await client.query<Row>(
+        `select * from scheduled_jobs
+         where id = $1 and tenant_id = $2
+         for update`,
+        [id, this.tenantId],
+      );
+      const current = currentResult.rows[0];
+      if (!current) {
+        await client.query('rollback');
+        return undefined;
+      }
+      const mappedCurrent = mapRow<TPayload>(current, this.tenantId);
+      if (mappedCurrent.status !== 'SCHEDULED') {
+        await client.query('rollback');
+        return mappedCurrent;
+      }
+      if (replacement.idempotencyKey === mappedCurrent.idempotencyKey) {
+        throw new Error('SCHEDULER_REPLACE_DESCRIPTOR_UNCHANGED');
+      }
+
+      const duplicate = await client.query<{ id: string; tenant_id: string }>(
+        `select id, tenant_id from scheduled_jobs
+         where idempotency_key = $1
+         limit 1
+         for update`,
+        [replacement.idempotencyKey],
+      );
+      if (duplicate.rows[0]) {
+        if (duplicate.rows[0].tenant_id !== this.tenantId) {
+          throw new Error(`SCHEDULER_IDEMPOTENCY_TENANT_CONFLICT:${replacement.idempotencyKey}`);
+        }
+        throw new Error(`SCHEDULER_REPLACE_IDEMPOTENCY_CONFLICT:${replacement.idempotencyKey}`);
+      }
+
+      const canceled = await client.query<Row>(
+        `update scheduled_jobs
+         set status = 'CANCELED', updated_at = now()
+         where id = $1 and tenant_id = $2 and status = 'SCHEDULED'
+         returning *`,
+        [id, this.tenantId],
+      );
+      assertSingleTransition(canceled.rowCount, 'SCHEDULER_REPLACE_CANCEL_CONFLICT', id);
+
+      const inserted = await client.query<Row>(
+        `insert into scheduled_jobs
+          (id, tenant_id, tool_name, payload, run_at, timezone, idempotency_key)
+         values ($1, $2, $3, $4::jsonb, $5::timestamptz, $6, $7)
+         returning *`,
+        [
+          replacement.id,
+          this.tenantId,
+          replacement.toolName,
+          JSON.stringify(replacement.payload),
+          replacement.runAt,
+          replacement.timezone,
+          replacement.idempotencyKey,
+        ],
+      );
+      const row = inserted.rows[0];
+      if (!row) throw new Error('SCHEDULER_REPLACE_INSERT_FAILED');
+
+      await client.query('commit');
+      return mapRow<TPayload>(row, this.tenantId);
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async cancel(id: string): Promise<ScheduledJob | undefined> {

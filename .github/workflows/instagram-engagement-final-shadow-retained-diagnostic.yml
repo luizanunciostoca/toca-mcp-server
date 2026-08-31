@@ -1,0 +1,187 @@
+name: Instagram Engagement Final Shadow Retained Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-final-shadow-retained-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33417026840'
+  SOURCE_JOB: toca-ig-eng-final-proof-33417026840-1
+  SOURCE_EXECUTION: toca-ig-eng-final-proof-33417026840-1-zdl96
+
+jobs:
+  retained-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION DIAGNOSTIC AUTHORIZATION — Instagram final shadow retained diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact-SHA read-only authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required=(
+            "AUTHORIZED_DIAGNOSTIC_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_FINAL_SHADOW_RETAINED_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_JOB=$SOURCE_JOB"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY"; done
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          mkdir -p engagement-evidence
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read retained logs and emit bounded diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=24h --limit=1000 --order=asc --format=json > /tmp/final-shadow-logs.json
+
+          set +e
+          gcloud run jobs executions describe "$SOURCE_EXECUTION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/execution.json 2>/dev/null
+          EXECUTION_DESCRIBE_RC=$?
+          set -e
+          if [[ "$EXECUTION_DESCRIBE_RC" -ne 0 ]]; then printf '{}' > /tmp/execution.json; fi
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const logs=JSON.parse(fs.readFileSync('/tmp/final-shadow-logs.json','utf8'));
+          const execution=JSON.parse(fs.readFileSync('/tmp/execution.json','utf8'));
+          const entries=Array.isArray(logs)?logs:[];
+          const strings=[];
+          const walk=v=>{if(typeof v==='string')strings.push(v);else if(Array.isArray(v))v.forEach(walk);else if(v&&typeof v==='object')Object.values(v).forEach(walk)};
+          walk(entries); walk(execution);
+          const redact=v=>String(v)
+            .replaceAll('Que horas começa o Sunset?','<SYNTHETIC_MESSAGE>')
+            .replace(/https?:\/\/[^\s]+/giu,'<URL>')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu,'<EMAIL>')
+            .replace(/sha256:[a-f0-9]{32,}/giu,'<DIGEST>')
+            .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu,'<UUID>')
+            .replace(/shadow-proof-[A-Z0-9_-]+/giu,'<SYNTHETIC_ID>')
+            .replace(/\b\d{10,}\b/gu,'<ID>')
+            .replace(/\b[A-Z0-9_-]{24,}\b/giu,'<TOKEN>')
+            .replace(/\s+/gu,' ').trim().slice(0,420);
+          const appFailures=[];
+          for (const entry of entries) {
+            const candidate=entry?.jsonPayload;
+            if (!candidate || typeof candidate!=='object') continue;
+            const validation=String(candidate.validation??'');
+            if (validation!=='instagram-engagement-shadow-e2e-failure') continue;
+            const stage=String(candidate.stage??'UNKNOWN');
+            const channel=candidate.channel===null?null:String(candidate.channel??'UNKNOWN');
+            const errorCode=String(candidate.errorCode??'UNCLASSIFIED_RUNTIME_ERROR');
+            const errorName=String(candidate.errorName??'UnknownError');
+            if (!/^[A-Z_]+$/u.test(stage)) continue;
+            if (!(channel===null || /^(COMMENT|DIRECT|UNKNOWN)$/u.test(channel))) continue;
+            if (!/^[A-Z0-9_]{2,64}$/u.test(errorCode)) continue;
+            if (!/^[A-Za-z][A-Za-z0-9]{0,31}(?:Error)?$/u.test(errorName)) continue;
+            appFailures.push({stage,channel,errorCode,errorName,writesEnabled:false});
+          }
+          const safeMarkers=[...new Set(strings.filter(v=>/instagram-engagement-shadow-e2e-failure|SHADOW_PROOF_|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|DATABASE|POSTGRES|PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|FAILED|TIMEOUT|ERROR/iu.test(v)).map(redact).filter(Boolean))].slice(0,80);
+          const classify=()=>{
+            const corpus=safeMarkers.join(' ');
+            if (/ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND/iu.test(corpus)) return 'MODULE_LOAD';
+            if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/iu.test(corpus)) return 'NETWORK_OR_DEPENDENCY';
+            if (/PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN/iu.test(corpus)) return 'AUTHORIZATION_OR_IAM';
+            if (/DATABASE|POSTGRES/iu.test(corpus)) return 'DATABASE_OR_SECRET_BOOTSTRAP';
+            if (/SHADOW_PROOF_/iu.test(corpus)) return 'APPLICATION_PROOF_ASSERTION';
+            return 'UNCLASSIFIED_RUNTIME_FAILURE';
+          };
+          const evidence={
+            schemaVersion:'toca.instagram-engagement.final-shadow-retained-diagnostic.v1',
+            sourceRunId:process.env.SOURCE_RUN_ID,
+            sourceJob:process.env.SOURCE_JOB,
+            sourceExecution:process.env.SOURCE_EXECUTION,
+            entryCount:entries.length,
+            applicationFailures:[...new Map(appFailures.map(v=>[JSON.stringify(v),v])).values()].slice(0,20),
+            failureClass:classify(),
+            safeMarkers,
+            executionDescriptionAvailable:Object.keys(execution).length>0,
+            rawPayloadPrinted:false,
+            readOnlyDiagnostic:true,
+            serviceMutationsPerformed:false,
+            databaseMutationsPerformed:false,
+            providerWritesPerformed:false,
+            externalReplyWrites:false
+          };
+          fs.writeFileSync('engagement-evidence/final-shadow-retained-diagnostic.json',JSON.stringify(evidence,null,2)+'\n');
+          NODE
+
+          APP_FAILURES="$(jq -c '.applicationFailures' engagement-evidence/final-shadow-retained-diagnostic.json)"
+          FAILURE_CLASS="$(jq -r '.failureClass' engagement-evidence/final-shadow-retained-diagnostic.json)"
+          ENTRY_COUNT="$(jq -r '.entryCount' engagement-evidence/final-shadow-retained-diagnostic.json)"
+          SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/final-shadow-retained-diagnostic.json)"
+          EXEC_AVAILABLE="$(jq -r '.executionDescriptionAvailable' engagement-evidence/final-shadow-retained-diagnostic.json)"
+          printf -v COMMENT '%s\n' \
+            'FINAL_SHADOW_RETAINED_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID" \
+            "SOURCE_JOB=$SOURCE_JOB" \
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION" \
+            "ENTRY_COUNT=$ENTRY_COUNT" \
+            "APPLICATION_FAILURES=$APP_FAILURES" \
+            "FAILURE_CLASS=$FAILURE_CLASS" \
+            "EXECUTION_DESCRIPTION_AVAILABLE=$EXEC_AVAILABLE" \
+            "SAFE_MARKERS=$SAFE_MARKERS" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_PERFORMED=false' \
+            'DATABASE_MUTATIONS_PERFORMED=false' \
+            'PROVIDER_WRITES_PERFORMED=false' \
+            'EXTERNAL_REPLY_WRITES=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Upload sanitized diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-final-shadow-retained-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
