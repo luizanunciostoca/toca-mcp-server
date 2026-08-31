@@ -40,21 +40,24 @@ describe('artist segmentation integrity', () => {
     expect(provider.segment).not.toHaveBeenCalled();
   });
 
-  it('invokes local rembg with a human-segmentation model and alpha matting', async () => {
+  it('invokes the rembg Python API with a human-segmentation model and alpha matting', async () => {
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     const runner = (command: string, args: readonly string[]) => {
       calls.push({ command, args });
       const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
       return Promise.reject(error);
     };
-    const provider = new LocalRembgSegmentationProvider('rembg-test', 'u2net_human_seg', runner);
+    const provider = new LocalRembgSegmentationProvider('python-test', 'u2net_human_seg', runner);
 
     await expect(
       provider.segment({ sourceBytes: bytes, contentType: 'image/jpeg' }),
     ).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.command).toBe('rembg-test');
-    expect(calls[0]?.args.slice(0, 4)).toEqual(['i', '-m', 'u2net_human_seg', '-a']);
+    expect(calls[0]?.command).toBe('python-test');
+    expect(calls[0]?.args[0]).toBe('-c');
+    expect(calls[0]?.args[1]).toContain('from rembg import new_session, remove');
+    expect(calls[0]?.args[1]).toContain('alpha_matting=True');
+    expect(calls[0]?.args.at(-1)).toBe('u2net_human_seg');
   });
 });
