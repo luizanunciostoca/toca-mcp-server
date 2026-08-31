@@ -9,11 +9,13 @@ Separate an approved artist from the photographic background without generative 
 `toca.creative.artist_segment`
 
 Input:
+
 - approved `artistAsset` registry record;
 - original artist image as base64;
 - original image content type.
 
 Output:
+
 - transparent `artistCutoutBase64` PNG;
 - grayscale `protectionMaskBase64` PNG;
 - source, cutout and mask SHA-256 lineage;
