@@ -27,7 +27,10 @@ const artistCompositeInputSchema = z.object({
   maskForArtistSourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
   canvas: canvasSchema.default('1080x1350'),
   venueOpacityPercent: z.number().min(0).max(100).default(55),
-  orangeTint: z.string().regex(/^#[a-f0-9]{6}$/i).default('#d96b16'),
+  orangeTint: z
+    .string()
+    .regex(/^#[a-f0-9]{6}$/i)
+    .default('#d96b16'),
   fadeDirection: fadeDirectionSchema.default('RIGHT_TO_LEFT'),
 });
 
@@ -102,7 +105,11 @@ export function registerArtistCompositeSurface(
 
 function decodeBase64(value: string, code: string): Uint8Array {
   const normalized = value.trim();
-  if (!normalized || normalized.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+  if (
+    !normalized ||
+    normalized.length % 4 === 1 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)
+  ) {
     throw new Error(code);
   }
   const bytes = Buffer.from(normalized, 'base64');
