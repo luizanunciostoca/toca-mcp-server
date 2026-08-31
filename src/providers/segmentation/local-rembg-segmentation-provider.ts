@@ -6,39 +6,31 @@ import { promisify } from 'node:util';
 import { ExecutionError } from '../../core/errors.js';
 import type {
   ArtistSegmentationProvider,
-  ArtistSegmentationProviderInput,
-  ArtistSegmentationProviderResult,
+  ArtistSegmentationProviderInput as SegmentationInput,
+  ArtistSegmentationProviderResult as SegmentationResult,
 } from '../../creative/artist-segmentation.js';
 
 const execFileAsync = promisify(execFile);
+type Runner = (command: string, args: readonly string[]) => Promise<void>;
+type ContentType = SegmentationInput['contentType'];
 
 export class LocalRembgSegmentationProvider implements ArtistSegmentationProvider {
   constructor(
     private readonly binary = process.env.REMBG_BINARY?.trim() || 'rembg',
     private readonly model = process.env.REMBG_ARTIST_MODEL?.trim() || 'u2net_human_seg',
-    private readonly runner: (
-      command: string,
-      args: readonly string[],
-    ) => Promise<void> = defaultRunner,
+    private readonly runner: Runner = defaultRunner,
   ) {}
 
-  async segment(
-    input: ArtistSegmentationProviderInput,
-  ): Promise<ArtistSegmentationProviderResult> {
+  async segment(input: SegmentationInput): Promise<SegmentationResult> {
     const workspace = await mkdtemp(join(tmpdir(), 'toca-rembg-'));
     const sourcePath = join(workspace, `source${extensionFor(input.contentType)}`);
     const outputPath = join(workspace, 'provider-cutout.png');
 
     try {
       await writeFile(sourcePath, input.sourceBytes);
-      await this.runner(this.binary, [
-        'i',
-        '-m',
-        this.model,
-        '-a',
-        sourcePath,
-        outputPath,
-      ]);
+      const args = ['i', '-m', this.model, '-a', sourcePath, outputPath];
+      await this.runner(this.binary, args);
+
       const bytes = await readFile(outputPath);
       if (!isPng(bytes)) {
         throw new ExecutionError(
@@ -47,6 +39,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
           false,
         );
       }
+
       return {
         cutoutPngBytes: bytes,
         provider: `LOCAL_REMBG:${this.model}`,
@@ -54,6 +47,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
       };
     } catch (error) {
       if (error instanceof ExecutionError) throw error;
+
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code === 'ENOENT') {
         throw new ExecutionError(
@@ -62,9 +56,11 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
           false,
         );
       }
+
+      const detail = error instanceof Error ? error.message : String(error);
       throw new ExecutionError(
         'PROVIDER_UNAVAILABLE',
-        `REMBG_SEGMENTATION_FAILED:${error instanceof Error ? error.message : String(error)}`,
+        `REMBG_SEGMENTATION_FAILED:${detail}`,
         true,
       );
     } finally {
@@ -73,7 +69,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
   }
 }
 
-function extensionFor(contentType: ArtistSegmentationProviderInput['contentType']): string {
+function extensionFor(contentType: ContentType): string {
   if (contentType === 'image/png') return '.png';
   if (contentType === 'image/webp') return '.webp';
   return '.jpg';
