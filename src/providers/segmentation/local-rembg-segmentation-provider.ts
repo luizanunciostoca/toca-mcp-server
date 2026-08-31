@@ -16,10 +16,13 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
   constructor(
     private readonly binary = process.env.REMBG_BINARY?.trim() || 'rembg',
     private readonly model = process.env.REMBG_ARTIST_MODEL?.trim() || 'u2net_human_seg',
-    private readonly runner: (command: string, args: readonly string[]) => Promise<void> = defaultRunner,
+    private readonly runner: (command: string, args: readonly string[]) => Promise<void> =
+      defaultRunner,
   ) {}
 
-  async segment(input: ArtistSegmentationProviderInput): Promise<ArtistSegmentationProviderResult> {
+  async segment(
+    input: ArtistSegmentationProviderInput,
+  ): Promise<ArtistSegmentationProviderResult> {
     const workspace = await mkdtemp(join(tmpdir(), 'toca-rembg-'));
     const sourcePath = join(workspace, `source${extensionFor(input.contentType)}`);
     const outputPath = join(workspace, 'provider-cutout.png');
