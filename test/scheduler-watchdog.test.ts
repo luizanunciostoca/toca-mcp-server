@@ -36,6 +36,34 @@ describe('scheduler watchdog', () => {
     expect(result.dueBacklog).toBe(0);
   });
 
+  it('does not require provider reconciliation while there is no due or running work', () => {
+    const result = evaluateSchedulerWatchdog(
+      [job()],
+      {
+        lastPollAt: healthyState.lastPollAt,
+        lastClaimAt: healthyState.lastClaimAt,
+        deadLetterBacklog: 0,
+      },
+      { now },
+    );
+    expect(result.status).toBe('HEALTHY');
+    expect(result.reasonCodes).not.toContain('SCHEDULER_RECONCILIATION_STALE');
+  });
+
+  it('requires reconciliation freshness when due work exists', () => {
+    const result = evaluateSchedulerWatchdog(
+      [job({ runAt: '2026-08-26T21:59:00Z' })],
+      {
+        lastPollAt: healthyState.lastPollAt,
+        lastClaimAt: healthyState.lastClaimAt,
+        deadLetterBacklog: 0,
+      },
+      { now },
+    );
+    expect(result.status).toBe('DEGRADED');
+    expect(result.reasonCodes).toContain('SCHEDULER_RECONCILIATION_STALE');
+  });
+
   it('reports unhealthy when poll and claim signals go stale', () => {
     const result = evaluateSchedulerWatchdog(
       [job()],

@@ -1,12 +1,10 @@
-import type { ScheduledJob, Scheduler } from './scheduler-contracts.js';
+import type { NewScheduledJob, ScheduledJob, Scheduler } from './scheduler-contracts.js';
 
 export class InMemoryScheduler implements Scheduler {
   private readonly jobs = new Map<string, ScheduledJob>();
   private readonly idempotencyIndex = new Map<string, string>();
 
-  schedule<TPayload>(
-    job: Omit<ScheduledJob<TPayload>, 'status' | 'attempts'>,
-  ): Promise<ScheduledJob<TPayload>> {
+  schedule<TPayload>(job: NewScheduledJob<TPayload>): Promise<ScheduledJob<TPayload>> {
     const existingId = this.idempotencyIndex.get(job.idempotencyKey);
     if (existingId) {
       return Promise.resolve(this.jobs.get(existingId) as ScheduledJob<TPayload>);
@@ -28,6 +26,35 @@ export class InMemoryScheduler implements Scheduler {
     const rescheduled: ScheduledJob = { ...current, runAt, timezone };
     this.jobs.set(id, rescheduled);
     return Promise.resolve(rescheduled);
+  }
+
+  replace<TPayload>(
+    id: string,
+    replacement: NewScheduledJob<TPayload>,
+  ): Promise<ScheduledJob<TPayload> | undefined> {
+    const current = this.jobs.get(id);
+    if (!current || current.status !== 'SCHEDULED') {
+      return Promise.resolve(current as ScheduledJob<TPayload> | undefined);
+    }
+    if (replacement.id === id) throw new Error('SCHEDULER_REPLACE_ID_CONFLICT');
+    if (replacement.idempotencyKey === current.idempotencyKey) {
+      throw new Error('SCHEDULER_REPLACE_DESCRIPTOR_UNCHANGED');
+    }
+    const existingReplacementId = this.idempotencyIndex.get(replacement.idempotencyKey);
+    if (existingReplacementId) {
+      throw new Error(`SCHEDULER_REPLACE_IDEMPOTENCY_CONFLICT:${replacement.idempotencyKey}`);
+    }
+
+    const canceled: ScheduledJob = { ...current, status: 'CANCELED' };
+    const scheduled: ScheduledJob<TPayload> = {
+      ...replacement,
+      status: 'SCHEDULED',
+      attempts: 0,
+    };
+    this.jobs.set(id, canceled);
+    this.jobs.set(replacement.id, scheduled);
+    this.idempotencyIndex.set(replacement.idempotencyKey, replacement.id);
+    return Promise.resolve(scheduled);
   }
 
   cancel(id: string): Promise<ScheduledJob | undefined> {

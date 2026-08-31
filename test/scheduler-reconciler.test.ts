@@ -106,7 +106,6 @@ describe('scheduler reconciler', () => {
     const scheduler = new InMemoryScheduler();
     await scheduler.schedule({
       id: 'job-periodic',
-      tenantId: 'toca',
       toolName: 'internal.instagram.publication.toca-managed.execute',
       payload: {},
       runAt: '2026-08-26T22:30:00Z',

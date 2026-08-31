@@ -101,9 +101,11 @@ export function evaluateSchedulerWatchdog(
   if (!state.lastClaimAt || age(nowEpoch, state.lastClaimAt) > thresholds.maxClaimSilenceMs) {
     reasons.push('SCHEDULER_CLAIM_STALE');
   }
+  const reconciliationRequired = due.length + running.length > 0;
   if (
-    !state.lastReconciliationAt ||
-    age(nowEpoch, state.lastReconciliationAt) > thresholds.maxReconciliationSilenceMs
+    reconciliationRequired &&
+    (!state.lastReconciliationAt ||
+      age(nowEpoch, state.lastReconciliationAt) > thresholds.maxReconciliationSilenceMs)
   ) {
     reasons.push('SCHEDULER_RECONCILIATION_STALE');
   }
