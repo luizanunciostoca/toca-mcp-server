@@ -3,7 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { ArtistAsset, ArtistIntegrityEvidence } from '../../contracts/artist-integrity.js';
+import type {
+  ArtistAsset,
+  ArtistIntegrityEvidence,
+  ArtistTransform,
+} from '../../contracts/artist-integrity.js';
 import { ExecutionError } from '../../core/errors.js';
 import {
   evaluateArtistIntegrity,
@@ -39,12 +43,7 @@ export interface LocalMultiLayerComposeInput {
     | 'RIGHT_TO_LEFT'
     | 'TOP_TO_BOTTOM'
     | 'BOTTOM_TO_TOP';
-  readonly artistTransforms?: readonly (
-    | 'CROP'
-    | 'SCALE'
-    | 'POSITION'
-    | 'CONVENTIONAL_COLOR_CORRECTION'
-  )[];
+  readonly artistTransforms?: readonly ArtistTransform[];
 }
 
 export interface LocalMultiLayerComposeResult {
@@ -163,12 +162,12 @@ function buildArgs(
   maskPath: string,
   outputPath: string,
 ): string[] {
-  const [w, h] = input.canvas.split('x').map(Number);
+  const [width, height] = dimensionsFor(input.canvas);
   const opacity = Math.max(0, Math.min(100, input.venueOpacityPercent ?? 55));
   const orange = input.orangeTint ?? '#d96b16';
   const gradientArgs = buildGradientArgs(
-    w,
-    h,
+    width,
+    height,
     input.fadeDirection ?? 'RIGHT_TO_LEFT',
   );
 
@@ -180,11 +179,11 @@ function buildArgs(
     '-filter',
     'Lanczos',
     '-resize',
-    `${w}x${h}^`,
+    `${width}x${height}^`,
     '-gravity',
     'center',
     '-extent',
-    `${w}x${h}`,
+    `${width}x${height}`,
     '(',
     venuePath,
     '-auto-orient',
@@ -193,11 +192,11 @@ function buildArgs(
     '-filter',
     'Lanczos',
     '-resize',
-    `${w}x${h}^`,
+    `${width}x${height}^`,
     '-gravity',
     'center',
     '-extent',
-    `${w}x${h}`,
+    `${width}x${height}`,
     '(',
     '+clone',
     '-fill',
@@ -225,11 +224,11 @@ function buildArgs(
     '-filter',
     'Lanczos',
     '-resize',
-    `${w}x${h}^`,
+    `${width}x${height}^`,
     '-gravity',
     'center',
     '-extent',
-    `${w}x${h}`,
+    `${width}x${height}`,
     '-colorspace',
     'gray',
     '-negate',
@@ -244,6 +243,12 @@ function buildArgs(
     '-strip',
     outputPath,
   ];
+}
+
+function dimensionsFor(canvas: MultiLayerCanvas): readonly [number, number] {
+  if (canvas === '1080x1920') return [1080, 1920];
+  if (canvas === '1080x1080') return [1080, 1080];
+  return [1080, 1350];
 }
 
 function buildGradientArgs(
