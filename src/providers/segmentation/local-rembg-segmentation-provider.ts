@@ -22,7 +22,9 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
     ) => Promise<void> = defaultRunner,
   ) {}
 
-  async segment(input: ArtistSegmentationProviderInput): Promise<ArtistSegmentationProviderResult> {
+  async segment(
+    input: ArtistSegmentationProviderInput,
+  ): Promise<ArtistSegmentationProviderResult> {
     const workspace = await mkdtemp(join(tmpdir(), 'toca-rembg-'));
     const sourcePath = join(workspace, `source${extensionFor(input.contentType)}`);
     const outputPath = join(workspace, 'provider-cutout.png');
