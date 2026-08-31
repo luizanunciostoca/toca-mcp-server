@@ -139,7 +139,7 @@ async function runChannelProof(channel: ShadowChannel): Promise<ShadowChannelRes
     `select status from event_outbox
       where event_type = 'instagram.engagement.inbound.v1'
         and payload->>'eventId' = $1
-      order by created_at desc
+      order by occurred_at desc, event_id desc
       limit 1`,
     [eventId],
   );
