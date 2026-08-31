@@ -12,6 +12,10 @@ import {
   TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB,
   TocaManagedInstagramPublicationJobHandler,
 } from '../scheduler/toca-managed-instagram-scheduler.js';
+import type {
+  SchedulerWatchdog,
+  SchedulerWatchdogSnapshot,
+} from '../scheduler/scheduler-watchdog.js';
 import { TocaManagedInstagramApprovalAuditGate } from './toca-managed-instagram-approval-audit.js';
 import { runWorkerBatch } from './worker-runtime.js';
 import type { JobHandler } from './worker.js';
@@ -22,6 +26,8 @@ export interface TocaManagedInstagramWorkerRuntimeOptions {
   readonly tenantId: string;
   readonly telemetry?: Telemetry;
   readonly logger?: StructuredLogger;
+  readonly watchdog?: SchedulerWatchdog;
+  readonly onWatchdogSnapshot?: (snapshot: SchedulerWatchdogSnapshot) => void;
 }
 
 export function createTocaManagedInstagramRuntimeHandlers(
@@ -67,5 +73,7 @@ export async function runTocaManagedInstagramWorkerBatch(
     claimToolName: TOCA_MANAGED_INSTAGRAM_PUBLICATION_JOB,
     ...(options.telemetry ? { telemetry: options.telemetry } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.watchdog ? { watchdog: options.watchdog } : {}),
+    ...(options.onWatchdogSnapshot ? { onWatchdogSnapshot: options.onWatchdogSnapshot } : {}),
   });
 }
