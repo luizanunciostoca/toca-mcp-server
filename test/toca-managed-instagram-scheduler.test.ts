@@ -11,10 +11,7 @@ import {
 
 const TEST_NOW = new Date('2026-08-14T08:00:00-03:00');
 
-const imageAsset = (
-  suffix: string,
-  sha = 'a'.repeat(64),
-): TocaManagedInstagramAsset => ({
+const imageAsset = (suffix: string, sha = 'a'.repeat(64)): TocaManagedInstagramAsset => ({
   assetId: `MM-SUN-${suffix}`,
   objectName: `instagram/corr/MM-SUN-${suffix}-${sha.slice(0, 16)}.jpg`,
   sha256: sha,
@@ -110,9 +107,9 @@ describe('TOCA-managed Instagram scheduler', () => {
     const reel = payload({ mediaType: 'REEL', asset: videoAsset('0001-V1') });
     await expect(managed(scheduler).schedule(reel)).resolves.toMatchObject({ status: 'SCHEDULED' });
 
-    expect(() =>
-      payload({ mediaType: 'REEL', asset: imageAsset('0002-V1') }),
-    ).toThrow('REEL requires exactly one video/mp4 asset.');
+    expect(() => payload({ mediaType: 'REEL', asset: imageAsset('0002-V1') })).toThrow(
+      'REEL requires exactly one video/mp4 asset.',
+    );
   });
 
   it('supports a video Story and an ordered image carousel', async () => {
@@ -133,9 +130,9 @@ describe('TOCA-managed Instagram scheduler', () => {
   });
 
   it('rejects a carousel with fewer than two assets', () => {
-    expect(() =>
-      payload({ mediaType: 'CAROUSEL', assets: [imageAsset('CAR-1')] }),
-    ).toThrow('CAROUSEL requires between two and ten JPEG, PNG, or WebP assets.');
+    expect(() => payload({ mediaType: 'CAROUSEL', assets: [imageAsset('CAR-1')] })).toThrow(
+      'CAROUSEL requires between two and ten JPEG, PNG, or WebP assets.',
+    );
   });
 
   it('verifies every scheduled asset by SHA-256 and preserves carousel order', async () => {
