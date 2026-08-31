@@ -14,9 +14,20 @@ const execFileAsync = promisify(execFile);
 type Runner = (command: string, args: readonly string[]) => Promise<void>;
 type ContentType = SegmentationInput['contentType'];
 
+const REMBG_PYTHON_SCRIPT = [
+  'from pathlib import Path',
+  'import sys',
+  'from rembg import new_session, remove',
+  'source_path, output_path, model_name = sys.argv[1:4]',
+  'source = Path(source_path).read_bytes()',
+  'session = new_session(model_name)',
+  'output = remove(source, session=session, alpha_matting=True)',
+  'Path(output_path).write_bytes(output)',
+].join('; ');
+
 export class LocalRembgSegmentationProvider implements ArtistSegmentationProvider {
   constructor(
-    private readonly binary = process.env.REMBG_BINARY?.trim() || 'rembg',
+    private readonly pythonBinary = process.env.PYTHON_BINARY?.trim() || 'python3',
     private readonly model = process.env.REMBG_ARTIST_MODEL?.trim() || 'u2net_human_seg',
     private readonly runner: Runner = defaultRunner,
   ) {}
@@ -28,8 +39,8 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
 
     try {
       await writeFile(sourcePath, input.sourceBytes);
-      const args = ['i', '-m', this.model, '-a', sourcePath, outputPath];
-      await this.runner(this.binary, args);
+      const args = ['-c', REMBG_PYTHON_SCRIPT, sourcePath, outputPath, this.model];
+      await this.runner(this.pythonBinary, args);
 
       const bytes = await readFile(outputPath);
       if (!isPng(bytes)) {
@@ -48,7 +59,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
       if (code === 'ENOENT') {
         throw new ExecutionError(
           'CAPABILITY_UNAVAILABLE',
-          `REMBG_BINARY_UNAVAILABLE:${this.binary}`,
+          `PYTHON_BINARY_UNAVAILABLE:${this.pythonBinary}`,
           false,
         );
       }
