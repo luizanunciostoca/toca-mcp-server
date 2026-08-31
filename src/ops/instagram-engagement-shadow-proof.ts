@@ -10,65 +10,78 @@ import {
 let activeStage: ShadowProofStage = 'BOOTSTRAP';
 let activeChannel: ShadowProofChannel = null;
 let failureEmitted = false;
+let databaseUrl = '';
+let webhookUrl = '';
+let appSecret = '';
+let instagramAccountId = '';
+let proofId = '';
+let started = 0;
+let client: pg.Client;
 
 function terminateWithSafeFailure(reason: unknown): void {
   if (failureEmitted) return;
   failureEmitted = true;
   const evidence = buildSafeShadowProofFailureEvidence(reason, activeStage, activeChannel);
-  process.stderr.write(`${JSON.stringify(evidence)}\n`, () => process.exit(1));
+  console.error(JSON.stringify(evidence));
+  process.exitCode = 1;
 }
 
 process.on('uncaughtException', terminateWithSafeFailure);
 process.on('unhandledRejection', terminateWithSafeFailure);
 
-activeStage = 'ENVIRONMENT';
-const databaseUrl = requiredEnv('DATABASE_URL');
-const webhookUrl = requiredEnv('INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL').replace(/\/$/, '');
-const appSecret = requiredEnv('META_APP_SECRET');
-const instagramAccountId = requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
+void main().catch(terminateWithSafeFailure);
 
-activeStage = 'WRITE_GUARD';
-if (isTrue(process.env.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED)) {
-  throw new Error('SHADOW_PROOF_REQUIRES_WRITES_DISABLED');
-}
+async function main(): Promise<void> {
+  activeStage = 'ENVIRONMENT';
+  databaseUrl = requiredEnv('DATABASE_URL');
+  webhookUrl = requiredEnv('INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL').replace(/\/$/, '');
+  appSecret = requiredEnv('META_APP_SECRET');
+  instagramAccountId = requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 
-const proofId = randomUUID();
-const started = Date.now();
-const client = new pg.Client({ connectionString: databaseUrl });
-activeStage = 'DATABASE_CONNECT';
-await client.connect();
-let proofFailed = false;
-try {
-  const results = [];
-  for (const channel of ['COMMENT', 'DIRECT'] as const) {
-    results.push(await runChannelProof(channel));
+  activeStage = 'WRITE_GUARD';
+  if (isTrue(process.env.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED)) {
+    throw new Error('SHADOW_PROOF_REQUIRES_WRITES_DISABLED');
   }
 
-  activeChannel = null;
-  activeStage = 'COMPLETE';
-  console.log(
-    JSON.stringify({
-      validation: 'instagram-engagement-shadow-e2e',
-      status: 'PASS',
-      channelsVerified: results.map((result) => result.channel),
-      webhookAccepted: results.every((result) => result.webhookAccepted),
-      inboundDelivered: results.every((result) => result.inboundDelivered),
-      faqResolved: results.every((result) => result.faqResolved),
-      externalReplyObserved: results.some((result) => result.externalReplyObserved),
-      replyOutboxEvents: results.reduce((sum, result) => sum + result.replyOutboxEvents, 0),
-      writesEnabled: false,
-      syntheticEvents: results.length,
-      userIdentityPrinted: false,
-      messageTextPrinted: false,
-      elapsedSeconds: Math.ceil((Date.now() - started) / 1000),
-    }),
-  );
-} catch (error) {
-  proofFailed = true;
-  throw error;
-} finally {
-  if (!proofFailed) activeStage = 'CLEANUP';
-  await client.end();
+  proofId = randomUUID();
+  started = Date.now();
+  client = new pg.Client({ connectionString: databaseUrl });
+  activeStage = 'DATABASE_CONNECT';
+  await client.connect();
+
+  let proofFailed = false;
+  try {
+    const results = [];
+    for (const channel of ['COMMENT', 'DIRECT'] as const) {
+      results.push(await runChannelProof(channel));
+    }
+
+    activeChannel = null;
+    activeStage = 'COMPLETE';
+    console.log(
+      JSON.stringify({
+        validation: 'instagram-engagement-shadow-e2e',
+        status: 'PASS',
+        channelsVerified: results.map((result) => result.channel),
+        webhookAccepted: results.every((result) => result.webhookAccepted),
+        inboundDelivered: results.every((result) => result.inboundDelivered),
+        faqResolved: results.every((result) => result.faqResolved),
+        externalReplyObserved: results.some((result) => result.externalReplyObserved),
+        replyOutboxEvents: results.reduce((sum, result) => sum + result.replyOutboxEvents, 0),
+        writesEnabled: false,
+        syntheticEvents: results.length,
+        userIdentityPrinted: false,
+        messageTextPrinted: false,
+        elapsedSeconds: Math.ceil((Date.now() - started) / 1000),
+      }),
+    );
+  } catch (error) {
+    proofFailed = true;
+    throw error;
+  } finally {
+    if (!proofFailed) activeStage = 'CLEANUP';
+    await client.end();
+  }
 }
 
 type ShadowChannel = Exclude<ShadowProofChannel, null>;
