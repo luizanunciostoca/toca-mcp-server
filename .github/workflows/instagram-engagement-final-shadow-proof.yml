@@ -34,9 +34,9 @@ env:
   TOCA_ORGANIZATION_ID: toca
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
-  RUNTIME_SOURCE_SHA: d3c59af9cc6061c4099f8e3b768d760b930ddcfd
-  RUNTIME_IMAGE_DIGEST: sha256:bf39d8c00839d62e570479f141937d9c2c891523d459b7d9d9025425ed00c7de
-  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:bf39d8c00839d62e570479f141937d9c2c891523d459b7d9d9025425ed00c7de
+  RUNTIME_SOURCE_SHA: 9f8453612ee5ac3e4f614716096cd046fd6fceb4
+  RUNTIME_IMAGE_DIGEST: sha256:919259cfe2c34a8c5e349ca04db325369966a358339cbe6bb5ebf501c720a886
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:919259cfe2c34a8c5e349ca04db325369966a358339cbe6bb5ebf501c720a886
 
 jobs:
   final-shadow-proof:
