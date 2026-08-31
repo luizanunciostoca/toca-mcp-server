@@ -32,11 +32,11 @@ export function buildSafeShadowProofFailureEvidence(
   stage: ShadowProofStage,
   channel: ShadowProofChannel,
 ): SafeShadowProofFailureEvidence {
-  const error = reason instanceof Error ? reason : undefined;
-  const messageHead = (error?.message ?? '').split(':', 1)[0] ?? '';
+  const messageHead = readStringProperty(reason, 'message')?.split(':', 1)[0] ?? '';
   const proofCode = isSafeProofCode(messageHead) ? messageHead : undefined;
-  const directCode = safeRuntimeCode(readCode(error));
-  const causeCode = safeRuntimeCode(readCode(error?.cause));
+  const directCode = safeRuntimeCode(readCode(reason));
+  const causeCode = safeRuntimeCode(readCode(readProperty(reason, 'cause')));
+  const errorName = safeErrorName(readStringProperty(reason, 'name'));
 
   return {
     validation: 'instagram-engagement-shadow-e2e-failure',
@@ -44,7 +44,7 @@ export function buildSafeShadowProofFailureEvidence(
     stage,
     channel,
     errorCode: proofCode ?? directCode ?? causeCode ?? 'UNCLASSIFIED_RUNTIME_ERROR',
-    errorName: safeErrorName(error?.name),
+    errorName,
     writesEnabled: false,
     rawErrorMessagePrinted: false,
     userIdentityPrinted: false,
@@ -58,9 +58,18 @@ function isSafeProofCode(value: string): boolean {
   return /^[A-Z0-9_]+_REQUIRED$/u.test(value);
 }
 
+function readProperty(value: unknown, key: string): unknown {
+  if (!value || typeof value !== 'object' || !(key in value)) return undefined;
+  return value[key as keyof typeof value];
+}
+
+function readStringProperty(value: unknown, key: string): string | undefined {
+  const candidate = readProperty(value, key);
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
 function readCode(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || !('code' in value)) return undefined;
-  return value.code;
+  return readProperty(value, 'code');
 }
 
 function safeRuntimeCode(value: unknown): string | undefined {
