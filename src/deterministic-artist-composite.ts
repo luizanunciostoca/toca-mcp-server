@@ -90,9 +90,7 @@ function parseArgs(argv: readonly string[]): Args {
 
   const fadeDirection = (values.get('fade-direction') ?? 'RIGHT_TO_LEFT') as Fade;
   if (
-    !['LEFT_TO_RIGHT', 'RIGHT_TO_LEFT', 'TOP_TO_BOTTOM', 'BOTTOM_TO_TOP'].includes(
-      fadeDirection,
-    )
+    !['LEFT_TO_RIGHT', 'RIGHT_TO_LEFT', 'TOP_TO_BOTTOM', 'BOTTOM_TO_TOP'].includes(fadeDirection)
   ) {
     throw new Error(`FADE_UNSUPPORTED:${fadeDirection}`);
   }
