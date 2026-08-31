@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { ExecutionError } from '../core/errors.js';
 import type {
   ArtistAsset,
   ArtistIntegrityEvidence,
@@ -7,6 +6,7 @@ import type {
   ArtistIntegrityGateResult,
   ArtistTransform,
 } from '../contracts/artist-integrity.js';
+import { ExecutionError } from '../core/errors.js';
 
 export function sha256Artist(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -30,7 +30,10 @@ export function evaluateArtistIntegrity(input: {
   if (input.evidence.aiOperationUsed || input.asset.aiModificationAllowed !== false) {
     failures.add('FAILED_ARTIST_AI_MODIFICATION');
   }
-  if (input.evidence.physicalGeometryChanged || input.asset.physicalModificationAllowed !== false) {
+  if (
+    input.evidence.physicalGeometryChanged ||
+    input.asset.physicalModificationAllowed !== false
+  ) {
     failures.add('FAILED_ARTIST_GEOMETRY_MODIFICATION');
   }
   if (input.evidence.unapprovedRetouchDetected) {
@@ -54,12 +57,18 @@ export function evaluateArtistIntegrity(input: {
 
 export function requireArtistIntegrity(result: ArtistIntegrityGateResult): void {
   if (result.status === 'PASSED') return;
-  throw new ExecutionError('POLICY_DENIED', result.failureCodes[0] ?? 'FAILED_ARTIST_LINEAGE_MISSING', false);
+  throw new ExecutionError(
+    'POLICY_DENIED',
+    result.failureCodes[0] ?? 'FAILED_ARTIST_LINEAGE_MISSING',
+    false,
+  );
 }
 
 function isTransformAllowed(asset: ArtistAsset, transform: ArtistTransform): boolean {
   if (transform === 'CROP') return asset.cropAllowed;
   if (transform === 'SCALE' || transform === 'POSITION') return asset.compositionAllowed;
-  if (transform === 'CONVENTIONAL_COLOR_CORRECTION') return asset.conventionalTreatmentAllowed;
+  if (transform === 'CONVENTIONAL_COLOR_CORRECTION') {
+    return asset.conventionalTreatmentAllowed;
+  }
   return false;
 }
