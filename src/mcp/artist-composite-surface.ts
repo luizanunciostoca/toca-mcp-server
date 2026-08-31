@@ -105,11 +105,7 @@ export function registerArtistCompositeSurface(
 
 function decodeBase64(value: string, code: string): Uint8Array {
   const normalized = value.trim();
-  if (
-    !normalized ||
-    normalized.length % 4 === 1 ||
-    !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)
-  ) {
+  if (!normalized || normalized.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
     throw new Error(code);
   }
   const bytes = Buffer.from(normalized, 'base64');
