@@ -41,18 +41,20 @@ describe('artist segmentation integrity', () => {
   });
 
   it('invokes local rembg with a human-segmentation model and alpha matting', async () => {
-    const runner = vi.fn(() => {
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const runner = (command: string, args: readonly string[]) => {
+      calls.push({ command, args });
       const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
       return Promise.reject(error);
-    });
+    };
     const provider = new LocalRembgSegmentationProvider('rembg-test', 'u2net_human_seg', runner);
 
     await expect(
       provider.segment({ sourceBytes: bytes, contentType: 'image/jpeg' }),
     ).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' });
 
-    expect(runner).toHaveBeenCalledTimes(1);
-    const args = runner.mock.calls[0]?.[1] ?? [];
-    expect(args.slice(0, 4)).toEqual(['i', '-m', 'u2net_human_seg', '-a']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe('rembg-test');
+    expect(calls[0]?.args.slice(0, 4)).toEqual(['i', '-m', 'u2net_human_seg', '-a']);
   });
 });
