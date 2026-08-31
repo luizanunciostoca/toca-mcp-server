@@ -171,11 +171,7 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
     const assets = managedPublicationAssets(schedule);
     const mediaUrls = await Promise.all(
       assets.map((asset) =>
-        this.delivery.createVerifiedDeliveryUrl(
-          asset.objectName,
-          asset.sha256,
-          asset.contentType,
-        ),
+        this.delivery.createVerifiedDeliveryUrl(asset.objectName, asset.sha256, asset.contentType),
       ),
     );
     const request: InstagramPublishRequest = {
