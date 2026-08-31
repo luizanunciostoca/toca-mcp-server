@@ -147,9 +147,7 @@ export class PostgresScheduler implements Scheduler {
       );
       if (duplicate.rows[0]) {
         if (duplicate.rows[0].tenant_id !== this.tenantId) {
-          throw new Error(
-            `SCHEDULER_IDEMPOTENCY_TENANT_CONFLICT:${replacement.idempotencyKey}`,
-          );
+          throw new Error(`SCHEDULER_IDEMPOTENCY_TENANT_CONFLICT:${replacement.idempotencyKey}`);
         }
         throw new Error(`SCHEDULER_REPLACE_IDEMPOTENCY_CONFLICT:${replacement.idempotencyKey}`);
       }
