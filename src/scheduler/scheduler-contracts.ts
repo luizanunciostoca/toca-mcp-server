@@ -45,11 +45,7 @@ export interface Scheduler {
 
 export interface ReconciliationResult {
   readonly status:
-    | 'IN_SYNC'
-    | 'LOCAL_STALE'
-    | 'PROVIDER_UNAVAILABLE'
-    | 'STATE_CONFLICT'
-    | 'RESOURCE_MISSING';
+    'IN_SYNC' | 'LOCAL_STALE' | 'PROVIDER_UNAVAILABLE' | 'STATE_CONFLICT' | 'RESOURCE_MISSING';
   readonly localState: string;
   readonly providerState?: string;
   readonly externalResourceId?: string;
