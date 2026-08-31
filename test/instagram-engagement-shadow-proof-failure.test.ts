@@ -36,6 +36,21 @@ describe('Instagram engagement shadow proof failure evidence', () => {
     expect(JSON.stringify(evidence)).not.toContain('private provider detail');
   });
 
+  it('retains safe codes from structured PostgreSQL rejections without leaking details', () => {
+    const rejection = {
+      name: 'DatabaseError',
+      code: '42703',
+      message: 'column created_at does not exist',
+      detail: 'private schema detail',
+    };
+    const evidence = buildSafeShadowProofFailureEvidence(rejection, 'INBOUND_READBACK', 'COMMENT');
+
+    expect(evidence.errorCode).toBe('42703');
+    expect(evidence.errorName).toBe('DatabaseError');
+    expect(JSON.stringify(evidence)).not.toContain('created_at');
+    expect(JSON.stringify(evidence)).not.toContain('private schema detail');
+  });
+
   it('fails closed to a generic code for unknown error payloads', () => {
     const evidence = buildSafeShadowProofFailureEvidence(
       'secret raw failure detail',
