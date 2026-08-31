@@ -30,10 +30,7 @@ describe('LocalMultiLayerCreativeComposer', () => {
     const runner = vi.fn(async (_command: string, args: readonly string[]) => {
       const output = args.at(-1);
       if (!output) throw new Error('missing output');
-      await writeFile(
-        output,
-        Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      );
+      await writeFile(output, Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     });
     const composer = new LocalMultiLayerCreativeComposer('convert', runner);
     const result = await composer.compose({
