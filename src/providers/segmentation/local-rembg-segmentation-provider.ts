@@ -33,11 +33,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
 
       const bytes = await readFile(outputPath);
       if (!isPng(bytes)) {
-        throw new ExecutionError(
-          'QUALITY_GATE_FAILED',
-          'REMBG_SEGMENTATION_OUTPUT_INVALID',
-          false,
-        );
+        throw new ExecutionError('QUALITY_GATE_FAILED', 'REMBG_SEGMENTATION_OUTPUT_INVALID', false);
       }
 
       return {
@@ -58,11 +54,7 @@ export class LocalRembgSegmentationProvider implements ArtistSegmentationProvide
       }
 
       const detail = error instanceof Error ? error.message : String(error);
-      throw new ExecutionError(
-        'PROVIDER_UNAVAILABLE',
-        `REMBG_SEGMENTATION_FAILED:${detail}`,
-        true,
-      );
+      throw new ExecutionError('PROVIDER_UNAVAILABLE', `REMBG_SEGMENTATION_FAILED:${detail}`, true);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
