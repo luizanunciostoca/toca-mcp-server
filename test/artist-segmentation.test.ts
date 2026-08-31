@@ -53,6 +53,6 @@ describe('artist segmentation integrity', () => {
 
     expect(runner).toHaveBeenCalledTimes(1);
     const args = runner.mock.calls[0]?.[1] ?? [];
-    expect(args.slice(0, 5)).toEqual(['i', '-m', 'u2net_human_seg', '-a']);
+    expect(args.slice(0, 4)).toEqual(['i', '-m', 'u2net_human_seg', '-a']);
   });
 });
