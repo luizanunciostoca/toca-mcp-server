@@ -174,7 +174,7 @@ export class TocaManagedInstagramPublicationJobHandler implements JobHandler {
         this.delivery.createVerifiedDeliveryUrl(
           asset.objectName,
           asset.sha256,
-          asset.contentType as PublicationAssetContentType,
+          asset.contentType,
         ),
       ),
     );
