@@ -32,12 +32,12 @@ Therefore face, hair, skin, body, hands, clothing and accessories in the transpa
 
 ## Local segmentation provider
 
-Production uses the local `rembg` CLI with `u2net_human_seg` by default. Override with:
+Production uses the local `rembg` Python API with `u2net_human_seg` by default. The provider executes through `python3` and does not install or depend on rembg's optional CLI/web stack. Override with:
 
-- `REMBG_BINARY`
+- `PYTHON_BINARY`
 - `REMBG_ARTIST_MODEL`
 
-The production container installs `rembg[cpu,cli]==2.0.81`. Model files are downloaded by rembg when first required and stored under `U2NET_HOME=/tmp/rembg-models` unless deployment configuration overrides it.
+The production container installs `rembg[cpu]==2.0.81`. This intentionally excludes the optional `cli` extra so FastAPI, Gradio, Starlette and python-multipart are not part of the runtime attack surface. Model files are downloaded by rembg when first required and stored under `U2NET_HOME=/tmp/rembg-models` unless deployment configuration overrides it.
 
 ## Recommended creative flow
 
