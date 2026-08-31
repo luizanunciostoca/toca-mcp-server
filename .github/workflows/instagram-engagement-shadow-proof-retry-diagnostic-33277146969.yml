@@ -19,6 +19,7 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   SOURCE_RUN_ID: '33277146969'
+  SOURCE_JOB: toca-ig-eng-proof-retry-33277146969-1
   SOURCE_EXECUTION: toca-ig-eng-proof-retry-33277146969-1-wggjw
 
 jobs:
@@ -52,6 +53,7 @@ jobs:
             "AUTHORIZATION_STATE=ACTIVE"
             "INSTAGRAM_ENGAGEMENT_SHADOW_PROOF_RETRY_DIAGNOSTIC=AUTHORIZED"
             "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_JOB=$SOURCE_JOB"
             "SOURCE_EXECUTION=$SOURCE_EXECUTION"
             "READ_ONLY_DIAGNOSTIC=true"
             "SERVICE_MUTATIONS_AUTHORIZED=false"
@@ -71,14 +73,16 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
 
-      - name: Read retained execution logs and publish sanitized diagnosis
+      - name: Read retained job logs and publish sanitized diagnosis
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p engagement-evidence
-          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.execution_name=\"${SOURCE_EXECUTION}\"" \
+          # Cloud Run Job monitored resources expose job_name as a resource label.
+          # execution_name is not a resource label, so filtering on it can return an empty set.
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_JOB}\"" \
             --project "$GCP_PROJECT_ID" --freshness=7d --limit=1000 --order=asc --format=json > /tmp/retained-logs.json
 
           node <<'NODE'
@@ -93,21 +97,30 @@ jobs:
             .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu,'<UUID>')
             .replace(/shadow-proof-[A-Z0-9_-]+/giu,'<SYNTHETIC_ID>')
             .replace(/\b\d{10,}\b/gu,'<ID>')
+            .replace(/\b[A-Z0-9_-]{24,}\b/giu,'<TOKEN>')
             .replace(/\s+/gu,' ').trim().slice(0,500);
           const strings=collect(entries);
-          const markers=[...new Set(strings.filter(v=>/instagram-engagement-shadow-e2e-failure|SHADOW_PROOF_|ERR_|ERROR|FAILED|TIMEOUT|DEADLINE|ECONN|EACCES|ENOENT|POSTGRES|DATABASE|FETCH|WEBHOOK/iu.test(v)).map(redact).filter(Boolean))].slice(0,80);
-          const evidence={schemaVersion:'toca.instagram-engagement.shadow-proof-retry-retained-log-diagnostic.v1',sourceRunId:process.env.SOURCE_RUN_ID,sourceExecution:process.env.SOURCE_EXECUTION,entries:Array.isArray(entries)?entries.length:0,safeMarkers:markers,rawPayloadPrinted:false,readOnlyDiagnostic:true,writesEnabled:false};
+          const markers=[...new Set(strings.filter(v=>/instagram-engagement-shadow-e2e-failure|SHADOW_PROOF_|ERR_|ERROR|FAILED|TIMEOUT|DEADLINE|ECONN|EACCES|ENOENT|POSTGRES|DATABASE|FETCH|WEBHOOK|FORBIDDEN|UNAUTHORIZED/iu.test(v)).map(redact).filter(Boolean))].slice(0,100);
+          const payloadSummaries=(Array.isArray(entries)?entries:[]).map(entry=>({
+            severity:String(entry?.severity??'DEFAULT'),
+            log:String(entry?.logName??'').replaceAll('%2F','/').split('/logs/').at(-1)??'unknown',
+            safeSignature:redact(typeof entry?.textPayload==='string'?entry.textPayload:typeof entry?.jsonPayload?.message==='string'?entry.jsonPayload.message:typeof entry?.protoPayload?.status?.message==='string'?entry.protoPayload.status.message:'')
+          })).filter(item=>item.safeSignature||item.severity==='ERROR').slice(0,80);
+          const evidence={schemaVersion:'toca.instagram-engagement.shadow-proof-retry-retained-log-diagnostic.v2',sourceRunId:process.env.SOURCE_RUN_ID,sourceJob:process.env.SOURCE_JOB,sourceExecution:process.env.SOURCE_EXECUTION,entries:Array.isArray(entries)?entries.length:0,safeMarkers:markers,payloadSummaries,rawPayloadPrinted:false,readOnlyDiagnostic:true,writesEnabled:false};
           fs.writeFileSync('engagement-evidence/retained-proof-retry-diagnostic.json',JSON.stringify(evidence,null,2)+'\n');
           NODE
 
           ENTRY_COUNT="$(jq -r '.entries' engagement-evidence/retained-proof-retry-diagnostic.json)"
           SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/retained-proof-retry-diagnostic.json)"
+          PAYLOAD_SUMMARIES="$(jq -c '.payloadSummaries' engagement-evidence/retained-proof-retry-diagnostic.json)"
           printf -v BODY '%s\n' \
             'RETAINED_PROOF_RETRY_DIAGNOSTIC_STATUS=PASS' \
             "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_JOB=${SOURCE_JOB}" \
             "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
             "ENTRY_COUNT=${ENTRY_COUNT}" \
             "SAFE_MARKERS=${SAFE_MARKERS}" \
+            "PAYLOAD_SUMMARIES=${PAYLOAD_SUMMARIES}" \
             'RAW_PAYLOAD_PRINTED=false' \
             'READ_ONLY_DIAGNOSTIC=true' \
             'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
