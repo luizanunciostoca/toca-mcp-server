@@ -15,11 +15,7 @@ import {
   parseWhatsAppWebhookEvents,
   type WhatsAppWebhookEvent,
 } from './providers/whatsapp/whatsapp-cloud-webhook.js';
-import {
-  createArtistSafeTocaServer,
-  SERVER_NAME,
-  SERVER_VERSION,
-} from './artist-safe-server.js';
+import { createArtistSafeTocaServer, SERVER_NAME, SERVER_VERSION } from './artist-safe-server.js';
 
 const MAX_META_WEBHOOK_BODY_BYTES = 1024 * 1024;
 const COMPLIANCE_CONTACT_EMAIL = 'adm@tocadomorcego.com';
