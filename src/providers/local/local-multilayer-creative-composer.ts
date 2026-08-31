@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { ArtistAsset, ArtistIntegrityEvidence } from '../../contracts/artist-integrity.js';
 import { ExecutionError } from '../../core/errors.js';
-import { evaluateArtistIntegrity, requireArtistIntegrity, sha256Artist } from '../../creative/artist-integrity.js';
+import {
+  evaluateArtistIntegrity,
+  requireArtistIntegrity,
+  sha256Artist,
+} from '../../creative/artist-integrity.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,14 +26,25 @@ export interface MultiLayerImageAsset {
 export interface LocalMultiLayerComposeInput {
   readonly artist: MultiLayerImageAsset & { readonly registry: ArtistAsset };
   readonly venue: MultiLayerImageAsset;
-  /** Grayscale mask aligned to artist source: white=protected artist pixels, black=background. */
+  /** Grayscale mask aligned to the artist source: white=artist, black=background. */
   readonly artistProtectionMaskBytes: Uint8Array;
   readonly maskContentType: ImageContentType;
+  /** SHA-256 of the exact artist source for which this mask was produced. */
+  readonly maskForArtistSourceSha256: string;
   readonly canvas: MultiLayerCanvas;
   readonly venueOpacityPercent?: number;
   readonly orangeTint?: string;
-  readonly fadeDirection?: 'LEFT_TO_RIGHT' | 'RIGHT_TO_LEFT' | 'TOP_TO_BOTTOM' | 'BOTTOM_TO_TOP';
-  readonly artistTransforms?: readonly ('CROP' | 'SCALE' | 'POSITION' | 'CONVENTIONAL_COLOR_CORRECTION')[];
+  readonly fadeDirection?:
+    | 'LEFT_TO_RIGHT'
+    | 'RIGHT_TO_LEFT'
+    | 'TOP_TO_BOTTOM'
+    | 'BOTTOM_TO_TOP';
+  readonly artistTransforms?: readonly (
+    | 'CROP'
+    | 'SCALE'
+    | 'POSITION'
+    | 'CONVENTIONAL_COLOR_CORRECTION'
+  )[];
 }
 
 export interface LocalMultiLayerComposeResult {
@@ -39,6 +54,7 @@ export interface LocalMultiLayerComposeResult {
   readonly artistSourceSha256: string;
   readonly venueSourceSha256: string;
   readonly protectionMaskSha256: string;
+  readonly maskForArtistSourceSha256: string;
   readonly artistIntegrity: ReturnType<typeof evaluateArtistIntegrity>;
   readonly provider: 'LOCAL_IMAGEMAGICK';
   readonly pipelineVersion: 'local-multilayer-creative-composer-v2';
@@ -49,7 +65,10 @@ export interface LocalMultiLayerComposeResult {
 export class LocalMultiLayerCreativeComposer {
   constructor(
     private readonly binary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
-    private readonly runner: (command: string, args: readonly string[]) => Promise<void> = defaultRunner,
+    private readonly runner: (
+      command: string,
+      args: readonly string[],
+    ) => Promise<void> = defaultRunner,
   ) {}
 
   async compose(input: LocalMultiLayerComposeInput): Promise<LocalMultiLayerComposeResult> {
@@ -57,6 +76,10 @@ export class LocalMultiLayerCreativeComposer {
     const artistSha = sha256Artist(input.artist.bytes);
     const venueSha = sha256Artist(input.venue.bytes);
     const maskSha = sha256Artist(input.artistProtectionMaskBytes);
+
+    if (input.maskForArtistSourceSha256.toLowerCase() !== artistSha.toLowerCase()) {
+      throw new ExecutionError('POLICY_DENIED', 'FAILED_ARTIST_MASK_INTRUSION', false);
+    }
 
     const evidence: ArtistIntegrityEvidence = {
       sourceSha256Observed: artistSha,
@@ -92,7 +115,11 @@ export class LocalMultiLayerCreativeComposer {
       );
       const outputBytes = await readFile(outputPath);
       if (!isPng(outputBytes)) {
-        throw new ExecutionError('QUALITY_GATE_FAILED', 'MULTILAYER_COMPOSER_OUTPUT_INVALID', false);
+        throw new ExecutionError(
+          'QUALITY_GATE_FAILED',
+          'MULTILAYER_COMPOSER_OUTPUT_INVALID',
+          false,
+        );
       }
       return {
         outputBytes,
@@ -101,6 +128,7 @@ export class LocalMultiLayerCreativeComposer {
         artistSourceSha256: artistSha,
         venueSourceSha256: venueSha,
         protectionMaskSha256: maskSha,
+        maskForArtistSourceSha256: input.maskForArtistSourceSha256,
         artistIntegrity,
         provider: 'LOCAL_IMAGEMAGICK',
         pipelineVersion: 'local-multilayer-creative-composer-v2',
@@ -111,7 +139,11 @@ export class LocalMultiLayerCreativeComposer {
       if (error instanceof ExecutionError) throw error;
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code === 'ENOENT') {
-        throw new ExecutionError('CAPABILITY_UNAVAILABLE', `LOCAL_MULTILAYER_BINARY_UNAVAILABLE:${this.binary}`, false);
+        throw new ExecutionError(
+          'CAPABILITY_UNAVAILABLE',
+          `LOCAL_MULTILAYER_BINARY_UNAVAILABLE:${this.binary}`,
+          false,
+        );
       }
       throw new ExecutionError(
         'PROVIDER_UNAVAILABLE',
@@ -134,51 +166,126 @@ function buildArgs(
   const [w, h] = input.canvas.split('x').map(Number);
   const opacity = Math.max(0, Math.min(100, input.venueOpacityPercent ?? 55));
   const orange = input.orangeTint ?? '#d96b16';
-  const gradient = gradientSpec(input.fadeDirection ?? 'RIGHT_TO_LEFT');
+  const gradientArgs = buildGradientArgs(
+    w,
+    h,
+    input.fadeDirection ?? 'RIGHT_TO_LEFT',
+  );
 
   return [
-    // Base: original artist photo, only geometric reframe to final canvas.
     artistPath,
-    '-auto-orient', '-colorspace', 'sRGB', '-filter', 'Lanczos',
-    '-resize', `${w}x${h}^`, '-gravity', 'center', '-extent', `${w}x${h}`,
+    '-auto-orient',
+    '-colorspace',
+    'sRGB',
+    '-filter',
+    'Lanczos',
+    '-resize',
+    `${w}x${h}^`,
+    '-gravity',
+    'center',
+    '-extent',
+    `${w}x${h}`,
     '(',
-      venuePath,
-      '-auto-orient', '-colorspace', 'sRGB', '-filter', 'Lanczos',
-      '-resize', `${w}x${h}^`, '-gravity', 'center', '-extent', `${w}x${h}`,
-      // conventional color integration only; no generative pixels
-      '(', '+clone', '-fill', orange, '-colorize', '28%', ')', '-compose', 'softlight', '-composite',
-      '-alpha', 'set', '-channel', 'A', '-evaluate', 'set', `${opacity}%`, '+channel',
+    venuePath,
+    '-auto-orient',
+    '-colorspace',
+    'sRGB',
+    '-filter',
+    'Lanczos',
+    '-resize',
+    `${w}x${h}^`,
+    '-gravity',
+    'center',
+    '-extent',
+    `${w}x${h}`,
+    '(',
+    '+clone',
+    '-fill',
+    orange,
+    '-colorize',
+    '28%',
+    ')',
+    '-compose',
+    'softlight',
+    '-composite',
+    '-alpha',
+    'set',
+    '-channel',
+    'A',
+    '-evaluate',
+    'set',
+    `${opacity}%`,
+    '+channel',
     ')',
     '(',
-      '-size', `${w}x${h}`, gradient,
-      // remove protected artist silhouette from venue reveal mask
-      '(', maskPath, '-resize', `${w}x${h}!`, '-colorspace', 'gray', '-negate', ')',
-      '-compose', 'multiply', '-composite',
+    ...gradientArgs,
+    '(',
+    maskPath,
+    '-auto-orient',
+    '-filter',
+    'Lanczos',
+    '-resize',
+    `${w}x${h}^`,
+    '-gravity',
+    'center',
+    '-extent',
+    `${w}x${h}`,
+    '-colorspace',
+    'gray',
+    '-negate',
     ')',
-    '-compose', 'over', '-composite',
-    '-strip', outputPath,
+    '-compose',
+    'multiply',
+    '-composite',
+    ')',
+    '-compose',
+    'over',
+    '-composite',
+    '-strip',
+    outputPath,
   ];
 }
 
-function gradientSpec(direction: NonNullable<LocalMultiLayerComposeInput['fadeDirection']>): string {
-  if (direction === 'LEFT_TO_RIGHT') return 'gradient:black-white';
-  if (direction === 'TOP_TO_BOTTOM') return 'gradient:black-white';
-  if (direction === 'BOTTOM_TO_TOP') return 'gradient:white-black';
-  return 'gradient:white-black';
+function buildGradientArgs(
+  width: number,
+  height: number,
+  direction: NonNullable<LocalMultiLayerComposeInput['fadeDirection']>,
+): string[] {
+  if (direction === 'TOP_TO_BOTTOM') {
+    return ['-size', `${width}x${height}`, 'gradient:black-white'];
+  }
+  if (direction === 'BOTTOM_TO_TOP') {
+    return ['-size', `${width}x${height}`, 'gradient:white-black'];
+  }
+  if (direction === 'LEFT_TO_RIGHT') {
+    return ['-size', `${height}x${width}`, 'gradient:black-white', '-rotate', '90'];
+  }
+  return ['-size', `${height}x${width}`, 'gradient:white-black', '-rotate', '90'];
 }
 
 function validateInput(input: LocalMultiLayerComposeInput): void {
   if (!input.artist.assetId.trim() || !input.venue.assetId.trim()) {
-    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'MULTILAYER_SOURCE_ASSET_ID_REQUIRED', false);
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'MULTILAYER_SOURCE_ASSET_ID_REQUIRED',
+      false,
+    );
   }
   if (!input.artist.registry.compositionAllowed) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_ARTIST_UNAPPROVED_RETOUCH', false);
   }
   if (input.artist.bytes.byteLength === 0 || input.venue.bytes.byteLength === 0) {
-    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'MULTILAYER_SOURCE_BYTES_REQUIRED', false);
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'MULTILAYER_SOURCE_BYTES_REQUIRED',
+      false,
+    );
   }
   if (input.artistProtectionMaskBytes.byteLength === 0) {
     throw new ExecutionError('POLICY_DENIED', 'FAILED_ARTIST_MASK_INTRUSION', false);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(input.maskForArtistSourceSha256)) {
+    throw new ExecutionError('POLICY_DENIED', 'FAILED_ARTIST_LINEAGE_MISSING', false);
   }
 }
 
@@ -189,7 +296,13 @@ function extensionFor(contentType: ImageContentType): string {
 }
 
 function isPng(bytes: Uint8Array): boolean {
-  return bytes.byteLength >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  return (
+    bytes.byteLength >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  );
 }
 
 async function defaultRunner(command: string, args: readonly string[]): Promise<void> {
