@@ -35,3 +35,22 @@ Therefore:
 - it is never evidence that Instagram has accepted a scheduled item;
 - native scheduling requires separate provider evidence before TOCA OS can write `SCHEDULED`;
 - unsupported native scheduling must fail closed as `PROVIDER_NATIVE_SCHEDULING_UNAVAILABLE` and use a manual provider handoff rather than a hidden timer.
+
+## TOCA-managed delayed execution
+
+The TOCA-managed scheduler is a durable local execution mechanism for `READY_TO_PUBLISH_AT_WINDOW`.
+It does not convert a local delayed job into provider-native scheduling evidence.
+
+For a managed publication:
+
+- the approved descriptor binds the execution window, target account, ordered assets, caption,
+  correlation identifier, and publication idempotency key;
+- each asset is verified against its approved SHA-256 and content type before any Instagram side
+  effect;
+- `IMAGE` accepts exactly one image, `REEL` accepts exactly one `video/mp4`, `STORY` accepts one
+  image or video, and `CAROUSEL` accepts two to ten ordered images;
+- rescheduling replaces the immutable scheduled job atomically so cancellation of the old job and
+  persistence of the replacement cannot be split across commits;
+- provider reconciliation/readback remains authoritative for deciding whether an uncertain or
+  completed execution actually resulted in a published Instagram resource;
+- integration into the protected `main` requires revalidation whenever the base branch advances.

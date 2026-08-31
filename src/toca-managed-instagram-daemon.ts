@@ -14,6 +14,10 @@ import {
   type TocaManagedInstagramApprovalDescriptor,
   type TocaManagedInstagramSchedulePayload,
 } from './scheduler/toca-managed-instagram-scheduler.js';
+import {
+  SchedulerWatchdog,
+  type SchedulerWatchdogSnapshot,
+} from './scheduler/scheduler-watchdog.js';
 import { runTocaManagedInstagramWorkerBatch } from './worker/toca-managed-instagram-worker-runtime.js';
 
 const config = loadConfig(process.env);
@@ -36,6 +40,7 @@ if (!config.DATABASE_URL) {
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
 const logger = new JsonConsoleLogger();
 const telemetry = new RuntimeTelemetry(logger);
+const schedulerWatchdog = new SchedulerWatchdog();
 const engagementRuntime = isTrue(process.env.INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED)
   ? createInstagramEngagementBatchRuntime({
       config,
@@ -53,6 +58,7 @@ let lastEngagementSucceeded = 0;
 let lastEngagementFailed = 0;
 let lastError: string | null = null;
 let lastDailyControlDay: string | null = null;
+let lastSchedulerWatchdogSnapshot: SchedulerWatchdogSnapshot | null = null;
 
 async function verifySchedulerPersistence(): Promise<void> {
   const scheduler = new TocaManagedInstagramScheduler(new PostgresScheduler(pool, tenantId));
@@ -182,6 +188,10 @@ async function tick(): Promise<TickResult> {
       tenantId,
       telemetry,
       logger,
+      watchdog: schedulerWatchdog,
+      onWatchdogSnapshot: (snapshot) => {
+        lastSchedulerWatchdogSnapshot = snapshot;
+      },
     });
     if (engagementRuntime) {
       const engagement = await engagementRuntime.runBatch();
@@ -205,6 +215,7 @@ async function tick(): Promise<TickResult> {
       engagementClaimed: lastEngagementClaimed,
       engagementSucceeded: lastEngagementSucceeded,
       engagementFailed: lastEngagementFailed,
+      schedulerWatchdogStatus: lastSchedulerWatchdogSnapshot?.status ?? null,
     });
     return {
       claimed: lastClaimed,
@@ -253,6 +264,8 @@ const server = createServer((request, response) => {
         schedulingTransport: 'protected-mcp',
         triggerMode: 'cloud-scheduler-http',
         running,
+        schedulerWatchdogState: schedulerWatchdog.state(),
+        schedulerWatchdog: lastSchedulerWatchdogSnapshot,
         engagementRuntimeEnabled: Boolean(engagementRuntime),
         engagementWritesEnabled: engagementRuntime?.writesEnabled ?? false,
         engagementKnowledgeAuthMode: engagementRuntime?.knowledgeAuthMode ?? null,
