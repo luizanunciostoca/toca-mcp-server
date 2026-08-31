@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { ArtistAsset } from '../contracts/artist-integrity.js';
 import { ExecutionError } from '../core/errors.js';
-import { evaluateArtistIntegrity, requireArtistIntegrity, sha256Artist } from './artist-integrity.js';
+import {
+  evaluateArtistIntegrity,
+  requireArtistIntegrity,
+  sha256Artist,
+} from './artist-integrity.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,7 +53,8 @@ export class ArtistSegmentationService {
   constructor(
     private readonly provider: ArtistSegmentationProvider,
     private readonly binary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
-    private readonly runner: (command: string, args: readonly string[]) => Promise<void> = defaultRunner,
+    private readonly runner: (command: string, args: readonly string[]) => Promise<void> =
+      defaultRunner,
   ) {}
 
   async segment(input: ArtistSegmentationInput): Promise<ArtistSegmentationResult> {
