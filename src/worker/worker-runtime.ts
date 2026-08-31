@@ -2,7 +2,10 @@ import type pg from 'pg';
 import { RuntimeTelemetry, type Telemetry } from '../core/observability.js';
 import { JsonConsoleLogger, type StructuredLogger } from '../core/structured-logger.js';
 import { PostgresScheduler } from '../scheduler/postgres-scheduler.js';
-import { SchedulerWatchdog } from '../scheduler/scheduler-watchdog.js';
+import {
+  SchedulerWatchdog,
+  type SchedulerWatchdogSnapshot,
+} from '../scheduler/scheduler-watchdog.js';
 import { PostgresDeadLetterSink } from './postgres-dead-letter.js';
 import {
   MapJobHandlerRegistry,
@@ -21,6 +24,7 @@ export interface WorkerRuntimeOptions {
   readonly batchSize?: number;
   readonly claimToolName?: string;
   readonly watchdog?: SchedulerWatchdog;
+  readonly onWatchdogSnapshot?: (snapshot: SchedulerWatchdogSnapshot) => void;
 }
 
 export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<number> {
@@ -58,6 +62,7 @@ export async function runWorkerBatch(options: WorkerRuntimeOptions): Promise<num
       'scheduler.watchdog.publication_lag_ms',
       watchdogSnapshot.publicationLagMs ?? 0,
     );
+    options.onWatchdogSnapshot?.(watchdogSnapshot);
     logger.info('scheduler.watchdog.snapshot', { ...watchdogSnapshot });
     logger.info('worker.batch.completed', { claimed });
     return claimed;
