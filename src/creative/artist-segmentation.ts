@@ -53,8 +53,10 @@ export class ArtistSegmentationService {
   constructor(
     private readonly provider: ArtistSegmentationProvider,
     private readonly binary = process.env.IMAGE_MAGICK_CONVERT_BINARY?.trim() || 'convert',
-    private readonly runner: (command: string, args: readonly string[]) => Promise<void> =
-      defaultRunner,
+    private readonly runner: (
+      command: string,
+      args: readonly string[],
+    ) => Promise<void> = defaultRunner,
   ) {}
 
   async segment(input: ArtistSegmentationInput): Promise<ArtistSegmentationResult> {
