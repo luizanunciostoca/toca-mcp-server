@@ -26,9 +26,10 @@ const REQUIRED_TABLES = [
   'event_outbox_delivery_attempts',
   'instagram_engagement_actions',
 ] as const;
-
+const DEFAULT_KB_SOURCE_IDS = ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'] as const;
 const ENGAGEMENT_MIGRATION = '035_instagram_engagement_e2e.sql';
 const KNOWLEDGE_MIGRATION = '036_instagram_engagement_knowledge.sql';
+const TIERED_KNOWLEDGE_MIGRATION = '037_instagram_engagement_tiered_knowledge.sql';
 const config = loadConfig();
 
 if (!isTrue(process.env.INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED)) {
@@ -46,15 +47,23 @@ if (spreadsheetId !== INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID) {
 }
 const knowledgeSource =
   process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE?.trim().toLowerCase() || 'google-sheets';
+const knowledgeBaseEnabled = isTrue(process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED);
+if (knowledgeBaseEnabled && knowledgeSource !== 'postgres') {
+  throw new Error('INSTAGRAM_ENGAGEMENT_KB_REQUIRES_POSTGRES');
+}
 const instagramUserId =
   config.INSTAGRAM_BUSINESS_ACCOUNT_ID ?? requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
 try {
-  const requiredTables =
-    knowledgeSource === 'postgres'
-      ? [...REQUIRED_TABLES, 'instagram_engagement_knowledge']
-      : [...REQUIRED_TABLES];
+  const requiredTables: string[] = [...REQUIRED_TABLES];
+  if (knowledgeSource === 'postgres') requiredTables.push('instagram_engagement_knowledge');
+  if (knowledgeBaseEnabled) {
+    requiredTables.push(
+      'instagram_engagement_knowledge_documents',
+      'instagram_engagement_knowledge_chunks',
+    );
+  }
   const tableRows = await pool.query<{ table_name: string; present: boolean }>(
     `select requested.table_name,
             to_regclass('public.' || requested.table_name) is not null as present
@@ -67,15 +76,21 @@ try {
     throw new Error(`INSTAGRAM_ENGAGEMENT_SCHEMA_MISSING:${missingTables.join(',')}`);
   }
 
+  const requiredMigrations = [ENGAGEMENT_MIGRATION, KNOWLEDGE_MIGRATION];
+  if (knowledgeBaseEnabled) requiredMigrations.push(TIERED_KNOWLEDGE_MIGRATION);
   const migrations = await pool.query<{ version: string }>(
     `select version from schema_migrations where version = any($1::text[])`,
-    [[ENGAGEMENT_MIGRATION, KNOWLEDGE_MIGRATION]],
+    [requiredMigrations],
   );
   const applied = new Set(migrations.rows.map((row) => row.version));
-  if (!applied.has(ENGAGEMENT_MIGRATION))
+  if (!applied.has(ENGAGEMENT_MIGRATION)) {
     throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');
+  }
 
   let knowledgeMode: 'postgres' | 'google-sheets:env' | 'google-sheets:gcp-iam';
+  let knowledgeBaseVerified = false;
+  let knowledgeBaseDocumentCount = 0;
+  let knowledgeBaseChunkCount = 0;
   if (knowledgeSource === 'postgres') {
     if (!applied.has(KNOWLEDGE_MIGRATION)) {
       throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_MIGRATION_NOT_APPLIED');
@@ -96,6 +111,48 @@ try {
       throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SNAPSHOT_STATUS_INVALID');
     }
     if (row?.hashes !== 1) throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SNAPSHOT_HASH_INVALID');
+
+    if (knowledgeBaseEnabled) {
+      if (!applied.has(TIERED_KNOWLEDGE_MIGRATION)) {
+        throw new Error('INSTAGRAM_ENGAGEMENT_KB_MIGRATION_NOT_APPLIED');
+      }
+      const sourceIds = configuredKbSourceIds();
+      const kb = await pool.query<{
+        documents: string;
+        chunks: string;
+        safe_chunks: string;
+        source_ids: string[] | null;
+      }>(
+        `select count(distinct d.document_id)::text as documents,
+                count(c.chunk_id)::text as chunks,
+                count(c.chunk_id) filter (
+                  where c.risk = 'LOW' and c.autonomy = 'AUTO_REPLY_ALLOWED'
+                )::text as safe_chunks,
+                array_agg(distinct d.source_id order by d.source_id) as source_ids
+           from instagram_engagement_knowledge_documents d
+           join instagram_engagement_knowledge_chunks c on c.document_id = d.document_id
+          where d.active = true and c.active = true and d.source_id = any($1::text[])`,
+        [sourceIds],
+      );
+      const kbRow = kb.rows[0];
+      knowledgeBaseDocumentCount = Number(kbRow?.documents ?? 0);
+      knowledgeBaseChunkCount = Number(kbRow?.chunks ?? 0);
+      const safeChunkCount = Number(kbRow?.safe_chunks ?? 0);
+      if (knowledgeBaseDocumentCount !== sourceIds.length) {
+        throw new Error('INSTAGRAM_ENGAGEMENT_KB_DOCUMENT_SET_INVALID');
+      }
+      if (knowledgeBaseChunkCount < sourceIds.length || safeChunkCount < 1) {
+        throw new Error('INSTAGRAM_ENGAGEMENT_KB_CHUNK_SET_INVALID');
+      }
+      const actualSourceIds = kbRow?.source_ids ?? [];
+      if (
+        actualSourceIds.length !== sourceIds.length ||
+        sourceIds.some((sourceId) => !actualSourceIds.includes(sourceId))
+      ) {
+        throw new Error('INSTAGRAM_ENGAGEMENT_KB_SOURCE_SET_INVALID');
+      }
+      knowledgeBaseVerified = true;
+    }
     knowledgeMode = 'postgres';
   } else if (knowledgeSource === 'google-sheets') {
     const sheetsAuth = createInstagramEngagementGoogleSheetsAuth();
@@ -139,6 +196,10 @@ try {
       knowledgeSchemaVerified: true,
       knowledgeSnapshotVerified: true,
       knowledgeAuthMode: knowledgeMode,
+      knowledgeBaseEnabled,
+      knowledgeBaseVerified,
+      knowledgeBaseDocumentCount,
+      knowledgeBaseChunkCount,
       scopeConfigured: Boolean(tenantId && workspaceId && organizationId),
       identitiesPrinted: false,
       secretsPrinted: false,
@@ -204,6 +265,21 @@ function validateCanonicalSheetSnapshot(values: readonly (readonly unknown[])[])
   if (seen.size !== expectedById.size) {
     throw new Error('INSTAGRAM_ENGAGEMENT_KNOWLEDGE_FAQ_SET_MISMATCH');
   }
+}
+
+function configuredKbSourceIds(): string[] {
+  const raw =
+    process.env.INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS?.trim() || DEFAULT_KB_SOURCE_IDS.join(',');
+  const ids = [
+    ...new Set(
+      raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
+  if (ids.length === 0) throw new Error('INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS_REQUIRED');
+  return ids;
 }
 
 function requiredColumn(index: ReadonlyMap<string, number>, key: string): number {

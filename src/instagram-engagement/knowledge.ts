@@ -11,6 +11,8 @@ export interface InstagramEngagementKnowledgeMatch {
   readonly source: string;
   readonly confidence: number;
   readonly factsVerified: boolean;
+  readonly tier?: 'FAQ' | 'KNOWLEDGE_BASE';
+  readonly chunkId?: string;
 }
 
 export interface InstagramEngagementKnowledgeSource {
@@ -116,6 +118,8 @@ export function resolveKnowledgeRows(
     source: best.source,
     confidence: bestScore,
     factsVerified: true,
+    tier: best.tier ?? 'FAQ',
+    ...(best.chunkId ? { chunkId: best.chunkId } : {}),
   };
 }
 
@@ -155,6 +159,7 @@ export function parseKnowledgeRows(
       confidence: 0,
       factsVerified,
       prompts: [...new Set(prompts)],
+      tier: 'FAQ',
     });
   }
   return rows;
@@ -201,6 +206,10 @@ export function isVerifiedKnowledgeConfiguration(
 
 export function normalizeKnowledgePrompt(value: string): string {
   return normalizeText(value);
+}
+
+export function knowledgeSimilarity(left: string, right: string): number {
+  return similarity(normalizeText(left), normalizeText(right));
 }
 
 function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {

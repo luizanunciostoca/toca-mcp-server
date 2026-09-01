@@ -39,8 +39,9 @@ export class PostgresInstagramEngagementActionStore {
       `insert into instagram_engagement_actions (
          event_id, tenant_id, workspace_id, organization_id, channel, intent, risk,
          autonomy, policy_reason, faq_id, knowledge_source, knowledge_confidence,
-         reply_sha256, status, execution_id, created_at, updated_at
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::timestamptz,$16::timestamptz)
+         knowledge_tier, knowledge_chunk_id, reply_sha256, status, execution_id,
+         created_at, updated_at
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::timestamptz,$18::timestamptz)
        on conflict (event_id) do update set updated_at = instagram_engagement_actions.updated_at
        returning status`,
       [
@@ -56,6 +57,8 @@ export class PostgresInstagramEngagementActionStore {
         input.knowledge?.faqId ?? null,
         input.knowledge?.source ?? null,
         input.knowledge?.confidence ?? null,
+        input.knowledge?.tier ?? (input.knowledge ? 'FAQ' : null),
+        input.knowledge?.chunkId ?? null,
         replySha256,
         input.status,
         input.executionId,
