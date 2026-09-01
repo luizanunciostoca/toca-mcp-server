@@ -1,0 +1,279 @@
+name: Instagram Engagement Tiered Knowledge Shadow
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: instagram-engagement-tiered-knowledge-shadow
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+
+jobs:
+  rollout:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram tiered knowledge shadow AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout exact authorized controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact authorization and immutable runtime
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_TIERED_KNOWLEDGE_SHADOW=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "DATABASE_MUTATIONS_AUTHORIZED=true"
+            "SERVICE_DEPLOY_AUTHORIZED=true"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          RUNTIME_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/toca-mcp/server@$RUNTIME_DIGEST"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$RUNTIME_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Run exact-head Quality Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and capture daemon prestate
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PREVIOUS_DAEMON_REVISION="$(printf '%s' "$DAEMON_JSON" | jq -r '.status.traffic[]? | select((.percent // 0) == 100) | .revisionName // empty' | head -n1)"
+          test -n "$PREVIOUS_DAEMON_REVISION"
+          echo "PREVIOUS_DAEMON_REVISION=$PREVIOUS_DAEMON_REVISION" >> "$GITHUB_ENV"
+
+          WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
+          PUB_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false"')"
+          test "$WRITES" = false
+          test "$PUB_WRITES" = false
+
+      - name: Apply migration 037 and synchronize FAQ plus TOCA OS knowledge
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_job() {
+            local job="$1" command_path="$2" env_vars="$3"
+            trap 'gcloud run jobs delete "'"$job"'" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' RETURN
+            gcloud run jobs deploy "$job" \
+              --image "$RUNTIME_IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+              --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+              --set-env-vars "$env_vars" \
+              --command node --args "$command_path" \
+              --tasks 1 --max-retries 0 --task-timeout 300s --quiet
+            gcloud run jobs execute "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+            gcloud run jobs delete "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+            trap - RETURN
+          }
+
+          run_job "toca-ig-kb-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            'dist/scripts/migrate-and-verify.js' \
+            'NODE_ENV=production'
+
+          run_job "toca-ig-faq-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            'dist/src/ops/sync-instagram-engagement-knowledge.js' \
+            "NODE_ENV=production,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID"
+
+          run_job "toca-ig-kb-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            'dist/src/ops/sync-instagram-engagement-knowledge-base.js' \
+            "NODE_ENV=production,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS,INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE=gcp-iam,INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL=$GCP_RUNTIME_SERVICE_ACCOUNT"
+
+      - name: Run fail-closed readiness with tiered knowledge enabled
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-kb-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "NODE_ENV=production,META_ENABLED=false,INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true,INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS" \
+            --command node --args dist/src/instagram-engagement-readiness-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 240s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          printf '%s' "$LOGS" | jq -e '[.[] | (.textPayload // .jsonPayload.message // "") | select(contains("instagram-engagement-readiness"))] | length > 0' >/dev/null
+          gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          trap - EXIT
+
+      - name: Prove production PostgreSQL knowledge retrieval
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-kb-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --command node --args dist/src/ops/verify-instagram-engagement-tiered-knowledge.js \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          printf '%s' "$LOGS" | jq -e '[.[] | (.textPayload // .jsonPayload.message // "") | select(contains("instagram-engagement-tiered-knowledge-smoke") and contains("\"status\":\"PASS\""))] | length > 0' >/dev/null
+          gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          trap - EXIT
+
+      - name: Promote tiered knowledge to daemon shadow with writes disabled
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$DAEMON_SERVICE_NAME" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true,INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS,INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58,INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --command node --args dist/src/toca-managed-instagram-daemon.js --quiet
+
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last == "true") and
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last == "false") and
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE") | .value] | last == "postgres") and
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED") | .value] | last == "true")
+          ' >/dev/null
+
+      - name: Roll back daemon on failed rollout
+        if: ${{ failure() && env.PREVIOUS_DAEMON_REVISION != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --to-revisions "$PREVIOUS_DAEMON_REVISION=100" --quiet
+
+      - name: Publish sanitized rollout evidence
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.auth.outputs.authorization_issue }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ job.status }}" == success ]]; then
+            STATUS=PASS
+          else
+            STATUS=FAIL
+          fi
+          printf -v COMMENT '%s\n' \
+            "TIERED_KNOWLEDGE_SHADOW_STATUS=$STATUS" \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            'KNOWLEDGE_SOURCE=postgres' \
+            'KNOWLEDGE_BASE_ENABLED=true' \
+            'KB_SOURCE_IDS=SRC-OPS-001,SRC-MENU-002,SRC-LOC-001' \
+            'FAQ_PRECEDENCE=true' \
+            'EXTERNAL_REPLY_WRITES=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
