@@ -17,7 +17,12 @@ try {
   if (!menu || menu.tier !== 'KNOWLEDGE_BASE' || !menu.factsVerified || !menu.chunkId) {
     throw new Error('INSTAGRAM_ENGAGEMENT_KB_SMOKE_MENU_FAILED');
   }
-  if (!location || location.tier !== 'KNOWLEDGE_BASE' || !location.factsVerified || !location.chunkId) {
+  if (
+    !location ||
+    location.tier !== 'KNOWLEDGE_BASE' ||
+    !location.factsVerified ||
+    !location.chunkId
+  ) {
     throw new Error('INSTAGRAM_ENGAGEMENT_KB_SMOKE_LOCATION_FAILED');
   }
 
