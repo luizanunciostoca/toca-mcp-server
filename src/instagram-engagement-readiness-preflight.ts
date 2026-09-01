@@ -270,7 +270,14 @@ function validateCanonicalSheetSnapshot(values: readonly (readonly unknown[])[])
 function configuredKbSourceIds(): string[] {
   const raw =
     process.env.INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS?.trim() || DEFAULT_KB_SOURCE_IDS.join(',');
-  const ids = [...new Set(raw.split(',').map((value) => value.trim()).filter(Boolean))].sort();
+  const ids = [
+    ...new Set(
+      raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
   if (ids.length === 0) throw new Error('INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS_REQUIRED');
   return ids;
 }
