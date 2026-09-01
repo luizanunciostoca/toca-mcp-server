@@ -83,8 +83,6 @@ Evento antigo: Bailão`,
   });
 
   it('does not turn policy documents into response content', () => {
-    expect(
-      buildKnowledgeBaseChunks(source('SRC-POL-001', 'POLICY'), 'policy content'),
-    ).toEqual([]);
+    expect(buildKnowledgeBaseChunks(source('SRC-POL-001', 'POLICY'), 'policy content')).toEqual([]);
   });
 });
