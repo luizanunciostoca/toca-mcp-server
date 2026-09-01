@@ -15,8 +15,9 @@ describe('TieredInstagramEngagementKnowledgeSource', () => {
         tier: 'FAQ',
       }),
     };
+    const knowledgeBaseResolve = vi.fn().mockResolvedValue(null);
     const knowledgeBase: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn().mockResolvedValue(null),
+      resolve: knowledgeBaseResolve,
     };
     const source = new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase });
 
@@ -24,24 +25,25 @@ describe('TieredInstagramEngagementKnowledgeSource', () => {
 
     expect(match?.faqId).toBe('FAQ-001');
     expect(match?.tier).toBe('FAQ');
-    expect(knowledgeBase.resolve).not.toHaveBeenCalled();
+    expect(knowledgeBaseResolve).not.toHaveBeenCalled();
   });
 
   it('falls back to the knowledge base only when FAQ resolution has no match', async () => {
     const faq: InstagramEngagementKnowledgeSource = {
       resolve: vi.fn().mockResolvedValue(null),
     };
+    const knowledgeBaseResolve = vi.fn().mockResolvedValue({
+      faqId: 'KB:src-menu-002:pedra-do-morcego',
+      intent: 'FAQ_OPERATIONAL',
+      answer: 'Pedra do Morcego. Preço vigente exibido no cardápio: R$ 50.',
+      source: 'CARDAPIO_CANONICO — Drive ID menu',
+      confidence: 0.83,
+      factsVerified: true,
+      tier: 'KNOWLEDGE_BASE',
+      chunkId: 'src-menu-002:pedra-do-morcego',
+    });
     const knowledgeBase: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn().mockResolvedValue({
-        faqId: 'KB:src-menu-002:pedra-do-morcego',
-        intent: 'FAQ_OPERATIONAL',
-        answer: 'Pedra do Morcego. Preço vigente exibido no cardápio: R$ 50.',
-        source: 'CARDAPIO_CANONICO — Drive ID menu',
-        confidence: 0.83,
-        factsVerified: true,
-        tier: 'KNOWLEDGE_BASE',
-        chunkId: 'src-menu-002:pedra-do-morcego',
-      }),
+      resolve: knowledgeBaseResolve,
     };
     const source = new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase });
 
@@ -49,6 +51,6 @@ describe('TieredInstagramEngagementKnowledgeSource', () => {
 
     expect(match?.tier).toBe('KNOWLEDGE_BASE');
     expect(match?.chunkId).toBe('src-menu-002:pedra-do-morcego');
-    expect(knowledgeBase.resolve).toHaveBeenCalledOnce();
+    expect(knowledgeBaseResolve).toHaveBeenCalledOnce();
   });
 });
