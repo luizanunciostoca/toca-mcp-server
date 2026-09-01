@@ -3,11 +3,7 @@ import type { EngagementIntent } from '../policy/engagement-policy.js';
 import { normalizeKnowledgePrompt } from './knowledge.js';
 
 export type InstagramKnowledgeSourceKind =
-  | 'OPERATIONS'
-  | 'MENU_STRUCTURED'
-  | 'LOCATION'
-  | 'POLICY'
-  | 'OTHER';
+  'OPERATIONS' | 'MENU_STRUCTURED' | 'LOCATION' | 'POLICY' | 'OTHER';
 
 export interface CanonicalKnowledgeSourceRegistryRow {
   readonly sourceId: string;
@@ -90,7 +86,9 @@ export function buildKnowledgeBaseChunks(
 }
 
 export function knowledgeDocumentSha256(text: string): string {
-  return createHash('sha256').update(text.replace(/^\uFEFF/, ''), 'utf8').digest('hex');
+  return createHash('sha256')
+    .update(text.replace(/^\uFEFF/, ''), 'utf8')
+    .digest('hex');
 }
 
 export function knowledgeDocumentId(sourceId: string): string {
@@ -135,7 +133,10 @@ function buildOperationsChunks(
       sourceReference,
     });
   }
-  const ticketRule = lineContaining(text, 'Valores de ingressos do SUNSET e das festas NÃO devem ser hardcoded');
+  const ticketRule = lineContaining(
+    text,
+    'Valores de ingressos do SUNSET e das festas NÃO devem ser hardcoded',
+  );
   if (ticketRule) {
     chunks.push({
       stableKey: 'ticket-current-price-policy',
@@ -353,11 +354,7 @@ function stripTerminalPunctuation(value: string): string {
   return value.trim().replace(/[.;:,]+$/, '');
 }
 
-function cell(
-  row: readonly unknown[],
-  index: ReadonlyMap<string, number>,
-  key: string,
-): string {
+function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
   const position = index.get(key);
   return position === undefined ? '' : scalar(row[position]);
 }
