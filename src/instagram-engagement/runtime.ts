@@ -174,12 +174,7 @@ function createKnowledgeSource(
       return { source: faq, mode: 'postgres' };
     }
     const knowledgeBase = new PostgresInstagramEngagementKnowledgeBaseSource(pool, {
-      minimumConfidence: boundedNumber(
-        env.INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE,
-        0.58,
-        0.3,
-        0.95,
-      ),
+      minimumConfidence: boundedNumber(env.INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE, 0.58, 0.3, 0.95),
       limit: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT, 12, 1, 50),
     });
     return {
