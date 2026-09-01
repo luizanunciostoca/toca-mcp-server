@@ -4,12 +4,11 @@ import { createPostgresPool } from '../persistence/postgres.js';
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error('INSTAGRAM_ENGAGEMENT_DATABASE_URL_REQUIRED');
 
-const source = new PostgresInstagramEngagementKnowledgeBaseSource(
-  createPostgresPool({ connectionString: databaseUrl }),
-  { minimumConfidence: 0.5, limit: 12 },
-);
-
-const pool = (source as unknown as { pool?: { end(): Promise<void> } }).pool;
+const pool = createPostgresPool({ connectionString: databaseUrl });
+const source = new PostgresInstagramEngagementKnowledgeBaseSource(pool, {
+  minimumConfidence: 0.5,
+  limit: 12,
+});
 
 try {
   const menu = await source.resolve('Quanto custa Pedra do Morcego?', 'FAQ_OPERATIONAL');
@@ -38,5 +37,5 @@ try {
     }),
   );
 } finally {
-  await pool?.end();
+  await pool.end();
 }
