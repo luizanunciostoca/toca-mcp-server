@@ -19,8 +19,10 @@ import {
   GoogleSheetsInstagramEngagementKnowledgeSource,
   type InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
+import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
 import { InstagramEngagementProcessor } from './processor.js';
+import { TieredInstagramEngagementKnowledgeSource } from './tiered-knowledge.js';
 import {
   claimInstagramEngagementEvents,
   recoverStaleInstagramEngagementClaims,
@@ -167,8 +169,21 @@ function createKnowledgeSource(
 ): { readonly source: InstagramEngagementKnowledgeSource; readonly mode: KnowledgeRuntimeMode } {
   const kind = env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE?.trim().toLowerCase() || 'google-sheets';
   if (kind === 'postgres') {
+    const faq = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
+    if (!isTrue(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED)) {
+      return { source: faq, mode: 'postgres' };
+    }
+    const knowledgeBase = new PostgresInstagramEngagementKnowledgeBaseSource(pool, {
+      minimumConfidence: boundedNumber(
+        env.INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE,
+        0.58,
+        0.3,
+        0.95,
+      ),
+      limit: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT, 12, 1, 50),
+    });
     return {
-      source: new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId),
+      source: new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase }),
       mode: 'postgres',
     };
   }
@@ -236,6 +251,20 @@ function boundedInteger(
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw new Error('INSTAGRAM_ENGAGEMENT_RUNTIME_INTEGER_INVALID');
+  }
+  return parsed;
+}
+
+function boundedNumber(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (!value?.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_RUNTIME_NUMBER_INVALID');
   }
   return parsed;
 }
