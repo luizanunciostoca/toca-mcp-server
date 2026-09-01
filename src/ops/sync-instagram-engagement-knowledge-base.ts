@@ -1,8 +1,6 @@
 import { loadConfig } from '../config.js';
 import { EnvSecretResolver, type SecretReference, type SecretResolver } from '../core/secrets.js';
-import {
-  INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
-} from '../instagram-engagement/knowledge-snapshot-current.js';
+import { INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID } from '../instagram-engagement/knowledge-snapshot-current.js';
 import {
   buildKnowledgeBaseChunks,
   knowledgeChunkId,
