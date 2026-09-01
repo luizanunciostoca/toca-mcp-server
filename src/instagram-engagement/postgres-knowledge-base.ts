@@ -13,11 +13,7 @@ interface KnowledgeBaseCandidate {
   readonly content: string;
   readonly search_text: string;
   readonly risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  readonly autonomy:
-    | 'READ_ONLY'
-    | 'SUGGEST_ONLY'
-    | 'AUTO_REPLY_ALLOWED'
-    | 'HUMAN_REVIEW_REQUIRED';
+  readonly autonomy: 'READ_ONLY' | 'SUGGEST_ONLY' | 'AUTO_REPLY_ALLOWED' | 'HUMAN_REVIEW_REQUIRED';
   readonly source_reference: string;
   readonly rank: number;
 }
@@ -39,9 +35,7 @@ export interface PostgresInstagramEngagementKnowledgeBaseOptions {
   readonly limit?: number;
 }
 
-export class PostgresInstagramEngagementKnowledgeBaseSource
-  implements InstagramEngagementKnowledgeSource
-{
+export class PostgresInstagramEngagementKnowledgeBaseSource implements InstagramEngagementKnowledgeSource {
   private readonly minimumConfidence: number;
   private readonly limit: number;
 
