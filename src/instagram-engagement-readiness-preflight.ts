@@ -56,7 +56,7 @@ const instagramUserId =
 
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
 try {
-  const requiredTables = [...REQUIRED_TABLES];
+  const requiredTables: string[] = [...REQUIRED_TABLES];
   if (knowledgeSource === 'postgres') requiredTables.push('instagram_engagement_knowledge');
   if (knowledgeBaseEnabled) {
     requiredTables.push(
