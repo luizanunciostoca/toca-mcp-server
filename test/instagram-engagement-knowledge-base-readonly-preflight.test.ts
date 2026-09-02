@@ -58,9 +58,11 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
   });
 
   it('sanitizes provider failures to bounded error codes', () => {
-    expect(sanitizeInstagramKnowledgePreflightError(new Error('GOOGLE_WORKSPACE_SCOPED_TOKEN_FAILED:403'))).toBe(
-      'GOOGLE_WORKSPACE_SCOPED_TOKEN_FAILED:403',
-    );
+    expect(
+      sanitizeInstagramKnowledgePreflightError(
+        new Error('GOOGLE_WORKSPACE_SCOPED_TOKEN_FAILED:403'),
+      ),
+    ).toBe('GOOGLE_WORKSPACE_SCOPED_TOKEN_FAILED:403');
     expect(
       sanitizeInstagramKnowledgePreflightError(
         new Error('Google Sheets read range failed with HTTP 403: sensitive provider detail'),
