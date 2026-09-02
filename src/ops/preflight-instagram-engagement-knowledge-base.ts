@@ -76,7 +76,12 @@ export async function runInstagramKnowledgeReadOnlyPreflight(
     if (bytes === 0 || !exported.text.trim()) {
       throw new Error(`INSTAGRAM_ENGAGEMENT_KB_SOURCE_EMPTY:${source.sourceId}`);
     }
-    documents.push({ sourceId: source.sourceId, mimeType: exported.mimeType, bytes, nonEmpty: true });
+    documents.push({
+      sourceId: source.sourceId,
+      mimeType: exported.mimeType,
+      bytes,
+      nonEmpty: true,
+    });
   }
 
   return {
@@ -126,7 +131,10 @@ function createRuntimeClients(env: NodeJS.ProcessEnv): {
   readonly sheets: GoogleSheetsRestClient;
   readonly drive: GoogleDriveReadOnlyTextClient;
 } {
-  const serviceAccountEmail = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL');
+  const serviceAccountEmail = requiredEnv(
+    env,
+    'INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL',
+  );
   const resolver: SecretResolver = new GcpGoogleWorkspaceTokenResolver({
     serviceAccountEmail,
     scopes: [GOOGLE_SHEETS_READONLY_SCOPE, GOOGLE_DRIVE_READONLY_SCOPE],
@@ -154,7 +162,12 @@ if (process.argv[1]?.endsWith('preflight-instagram-engagement-knowledge-base.js'
     .filter(Boolean);
   try {
     const { sheets, drive } = createRuntimeClients(process.env);
-    const result = await runInstagramKnowledgeReadOnlyPreflight(sheets, drive, spreadsheetId, sourceIds);
+    const result = await runInstagramKnowledgeReadOnlyPreflight(
+      sheets,
+      drive,
+      spreadsheetId,
+      sourceIds,
+    );
     console.log(JSON.stringify(result));
   } catch (error) {
     console.error(
