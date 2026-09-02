@@ -23,11 +23,7 @@ export type ContentLifecycleStatus =
   | 'RECONCILED'
   | 'CANCELED';
 
-export type ContentOperationalDisposition =
-  | 'ACTIVE'
-  | 'MISSED_WINDOW'
-  | 'SUPERSEDED'
-  | 'CANCELED';
+export type ContentOperationalDisposition = 'ACTIVE' | 'MISSED_WINDOW' | 'SUPERSEDED' | 'CANCELED';
 
 export interface SlotLifecycleInput {
   scheduledAt: string;
@@ -84,7 +80,11 @@ export function deriveOperationalDisposition(
   slotWindowState: SlotWindowState,
 ): ContentOperationalDisposition {
   if (currentStatus === 'CANCELED') return 'CANCELED';
-  if (slotWindowState === 'EXPIRED' && currentStatus !== 'PUBLISHED' && currentStatus !== 'RECONCILED') {
+  if (
+    slotWindowState === 'EXPIRED' &&
+    currentStatus !== 'PUBLISHED' &&
+    currentStatus !== 'RECONCILED'
+  ) {
     return 'MISSED_WINDOW';
   }
   return 'ACTIVE';

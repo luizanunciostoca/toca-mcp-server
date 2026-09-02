@@ -26,33 +26,43 @@ PLANNED
 ## State contracts
 
 ### PLANNED
+
 The editorial slot, product, channel, format, objective and timing exist. No source asset is yet canonically bound.
 
 ### SOURCE_BOUND
+
 The content item has an exact canonical source binding (`source_asset_id` / stable file identity) and lineage can be established. Asset discovery must not be repeated unless the binding is explicitly invalidated.
 
 ### BRIEFED
+
 Message, CTA, visual intent, product truth and production instructions are resolved against the bound source.
 
 ### PRODUCED
+
 A final candidate artifact exists. For static content this means the actual final image file; for video, the final candidate export. `PRODUCED` alone never authorizes scheduling or publication.
 
 ### QA_PASS
+
 The exact produced artifact passed the applicable Information, Visual, Copy, Strategy, Brand Integrity, Venue Fidelity and Quality gates. A QA failure leaves the item at `PRODUCED`; it does not invent a new lifecycle state.
 
 ### APPROVED
+
 Human or explicitly authorized approval exists for the exact artifact/copy/version combination. Any material change invalidates the approval and requires a new governed version.
 
 ### SCHEDULER_READY
+
 All publication prerequisites are complete: immutable final asset, exact asset binding, copy, schedule time/timezone, account, descriptor data, idempotency key and required gate evidence. This is the only normal predecessor of `TOCA_SCHEDULED`.
 
 ### TOCA_SCHEDULED
+
 A durable TOCA-managed scheduler job exists in PostgreSQL with immutable approved descriptor evidence. This does not mean Instagram provider-native scheduling.
 
 ### PUBLISHED
+
 Provider-backed publication confirmation exists.
 
 ### RECONCILED
+
 TOCA OS has reconciled the scheduler job, execution record and provider media evidence and has written the final canonical state/evidence back to the business registry. This is the normal terminal state.
 
 ## Operational dispositions
