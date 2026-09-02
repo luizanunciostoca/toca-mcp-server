@@ -6,6 +6,7 @@ import {
 } from '../crm/social-engagement-lead-engine.js';
 import { MetaApiError } from '../providers/meta/meta-api-client.js';
 import type {
+  EngagementDecision,
   InstagramEngagementProvider,
   InstagramWebhookEvent,
 } from '../providers/instagram/instagram-engagement-contracts.js';
@@ -23,6 +24,11 @@ import {
   PostgresInstagramEngagementActionStore,
   type InstagramEngagementActionStatus,
 } from './postgres-action-store.js';
+import { PostgresInstagramConversationOperations } from './conversation-operations.js';
+import {
+  recordConversationReply,
+  recordConversationReplyFailure,
+} from './conversation-reply-state.js';
 import type { ClaimedInstagramEngagementEvent } from './typed-outbox.js';
 
 export interface InstagramEngagementProcessorOptions {
@@ -34,12 +40,14 @@ export interface InstagramEngagementProcessorOptions {
   readonly instagramUserId: string;
   readonly writesEnabled: boolean;
   readonly actorPrincipalId?: string;
+  readonly groupingWindowMs?: number;
   readonly now?: () => Date;
 }
 
 export class InstagramEngagementProcessor {
   private readonly outbox: PostgresTransactionalOutbox;
   private readonly actions: PostgresInstagramEngagementActionStore;
+  private readonly conversations: PostgresInstagramConversationOperations;
   private readonly now: () => Date;
   private readonly actorPrincipalId: string;
 
@@ -48,6 +56,9 @@ export class InstagramEngagementProcessor {
     if (!options.instagramUserId.trim()) throw new Error('INSTAGRAM_BUSINESS_ACCOUNT_ID_REQUIRED');
     this.outbox = new PostgresTransactionalOutbox(options.pool);
     this.actions = new PostgresInstagramEngagementActionStore(options.pool);
+    this.conversations = new PostgresInstagramConversationOperations(options.pool, {
+      ...(options.groupingWindowMs === undefined ? {} : { groupingWindowMs: options.groupingWindowMs }),
+    });
     this.now = options.now ?? (() => new Date());
     this.actorPrincipalId = options.actorPrincipalId?.trim() || 'system:instagram-engagement';
   }
@@ -67,6 +78,24 @@ export class InstagramEngagementProcessor {
   private async processInbound(claimed: ClaimedInstagramEngagementEvent): Promise<void> {
     const payload = parseInstagramEngagementInboundPayload(claimed.payload);
     const now = this.now().toISOString();
+    const context = await this.conversations.claimMessageGroup({
+      payload,
+      tenantId: claimed.tenantId,
+      workspaceId: claimed.workspaceId,
+      organizationId: claimed.organizationId,
+      now,
+    });
+
+    if (!context.isGroupOwner) {
+      await this.outbox.markDelivered({
+        eventId: claimed.eventId,
+        executionId: claimed.executionId,
+        evidence: ['instagram:engagement:message-group-coalesced'],
+        now: this.now().toISOString(),
+      });
+      return;
+    }
+
     const webhookEvent: InstagramWebhookEvent = {
       eventId: payload.eventId,
       accountId: payload.accountId,
@@ -75,14 +104,16 @@ export class InstagramEngagementProcessor {
       ...(payload.commentId ? { commentId: payload.commentId } : {}),
       ...(payload.messageId ? { messageId: payload.messageId } : {}),
       ...(payload.mediaId ? { mediaId: payload.mediaId } : {}),
-      ...(payload.text ? { text: payload.text } : {}),
+      ...(context.groupedText ? { text: context.groupedText } : {}),
       occurredAt: payload.occurredAt ?? now,
       rawType: payload.rawType,
     };
-    const classification = classifySocialEngagement(payload.text ?? '');
-    const knowledge = payload.text
-      ? await this.options.knowledge.resolve(payload.text, classification.intent)
+    const classification = classifySocialEngagement(context.groupedText);
+    const knowledge = context.groupedText
+      ? await this.options.knowledge.resolve(context.groupedText, classification.intent)
       : null;
+    const autoWriteEligible =
+      this.options.writesEnabled && classification.confidence !== 'LOW' && !context.automationBlocked;
     const leadResult = await this.options.leadEngine.process({
       tenantId: claimed.tenantId,
       workspaceId: claimed.workspaceId,
@@ -90,32 +121,51 @@ export class InstagramEngagementProcessor {
       interaction: socialInteractionFromInstagramWebhook(webhookEvent),
       authorization: {
         factsVerified: knowledge?.factsVerified === true,
-        writesEnabled: this.options.writesEnabled,
+        writesEnabled: autoWriteEligible,
         consentAllowed: true,
         approvalRequired: false,
         approvalSatisfied: false,
         containsSensitivePersonalData: classification.containsPotentialSensitiveData,
+        classificationConfidence: classification.confidence,
+        threadAutomationBlocked: context.automationBlocked,
       },
-      idempotencyKey: `instagram-engagement:${payload.eventId}`,
+      idempotencyKey: `instagram-engagement:${context.groupSha256}`,
       executionId: claimed.executionId,
       correlationId: claimed.correlationId,
       actorPrincipalId: this.actorPrincipalId,
-      evidence: ['meta:webhook:persisted', 'instagram:engagement:classified'],
+      evidence: [
+        'meta:webhook:persisted',
+        'instagram:engagement:message-grouped',
+        `instagram:engagement:group-size:${context.messageCount}`,
+        'instagram:engagement:classified',
+      ],
       now,
     });
 
+    const effectiveDecision = conversationDecision({
+      decision: leadResult.policyDecision,
+      confidence: classification.confidence,
+      automationBlocked: context.automationBlocked,
+      channel: payload.channel,
+    });
+    const effectiveHumanRequired =
+      leadResult.humanRequired || effectiveDecision.autonomy === 'HUMAN_REVIEW_REQUIRED';
+    const effectiveDisposition = effectiveHumanRequired
+      ? 'HUMAN_REQUIRED' as const
+      : effectiveDecision.autonomy === 'AUTO_REPLY_ALLOWED'
+        ? 'AUTO_REPLY_ALLOWED' as const
+        : effectiveDecision.autonomy === 'SUGGEST_ONLY'
+          ? 'SUGGEST_ONLY' as const
+          : leadResult.replyDisposition;
+
     const reply = buildReplyPayload({
       event: webhookEvent,
-      disposition: leadResult.replyDisposition,
+      disposition: effectiveDisposition,
       knowledge,
       pageId: this.options.pageId,
       instagramUserId: this.options.instagramUserId,
     });
-    const status = resolveActionStatus(
-      leadResult.humanRequired,
-      leadResult.replyDisposition,
-      reply,
-    );
+    const status = resolveActionStatus(effectiveHumanRequired, effectiveDisposition, reply);
     await this.actions.createIfAbsent({
       eventId: payload.eventId,
       tenantId: claimed.tenantId,
@@ -123,11 +173,23 @@ export class InstagramEngagementProcessor {
       organizationId: claimed.organizationId,
       channel: payload.channel,
       intent: leadResult.classification.intent,
-      decision: leadResult.policyDecision,
+      decision: effectiveDecision,
       knowledge,
       ...(reply ? { replyMessage: reply.message } : {}),
       status,
       executionId: claimed.executionId,
+      now,
+      threadId: context.threadId,
+      messageGroupSha256: context.groupSha256,
+      classificationConfidence: classification.confidence,
+      priority: classification.priority,
+      secondaryIntents: classification.conversationIntents.slice(1),
+    });
+    await this.conversations.recordDecision({
+      threadId: context.threadId,
+      groupSha256: context.groupSha256,
+      classification,
+      actionStatus: status,
       now,
     });
 
@@ -162,7 +224,12 @@ export class InstagramEngagementProcessor {
     await this.outbox.markDelivered({
       eventId: claimed.eventId,
       executionId: claimed.executionId,
-      evidence: [`instagram:engagement:decision:${status}`],
+      evidence: [
+        `instagram:engagement:decision:${status}`,
+        `instagram:engagement:thread:${context.threadId.slice(0, 12)}`,
+        `instagram:engagement:confidence:${classification.confidence}`,
+        `instagram:engagement:priority:${classification.priority}`,
+      ],
       now: this.now().toISOString(),
     });
   }
@@ -177,6 +244,11 @@ export class InstagramEngagementProcessor {
         status: 'SENT',
         providerReplyId,
         executionId: claimed.executionId,
+        now,
+      });
+      await recordConversationReply(this.options.pool, {
+        engagementEventId: payload.engagementEventId,
+        providerReplyId,
         now,
       });
       await this.outbox.markDelivered({
@@ -195,6 +267,11 @@ export class InstagramEngagementProcessor {
         executionId: claimed.executionId,
         now,
       });
+      await recordConversationReplyFailure(this.options.pool, {
+        engagementEventId: payload.engagementEventId,
+        ambiguous,
+        now,
+      });
       await this.outbox.markFailed({
         eventId: claimed.eventId,
         executionId: claimed.executionId,
@@ -210,6 +287,33 @@ export class InstagramEngagementProcessor {
   }
 }
 
+function conversationDecision(input: {
+  readonly decision: EngagementDecision;
+  readonly confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  readonly automationBlocked: boolean;
+  readonly channel: 'COMMENT' | 'DIRECT';
+}): EngagementDecision {
+  if (input.automationBlocked) {
+    return {
+      channel: input.channel,
+      risk: 'HIGH',
+      autonomy: 'HUMAN_REVIEW_REQUIRED',
+      reason: 'thread_automation_blocked',
+      requiresHumanReview: true,
+    };
+  }
+  if (input.confidence === 'LOW' && input.decision.autonomy === 'AUTO_REPLY_ALLOWED') {
+    return {
+      channel: input.channel,
+      risk: 'MEDIUM',
+      autonomy: 'SUGGEST_ONLY',
+      reason: 'classification_confidence_low',
+      requiresHumanReview: false,
+    };
+  }
+  return input.decision;
+}
+
 function buildReplyPayload(input: {
   readonly event: InstagramWebhookEvent;
   readonly disposition: 'AUTO_REPLY_ALLOWED' | 'SUGGEST_ONLY' | 'HUMAN_REQUIRED' | 'NO_REPLY';
@@ -217,8 +321,7 @@ function buildReplyPayload(input: {
   readonly pageId: string;
   readonly instagramUserId: string;
 }): InstagramEngagementReplyPayload | undefined {
-  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified)
-    return undefined;
+  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified) return undefined;
   if (input.event.channel === 'COMMENT') {
     if (!input.event.commentId) return undefined;
     return {
@@ -258,10 +361,7 @@ async function executeProviderReply(
 ): Promise<string> {
   if (payload.channel === 'COMMENT') {
     if (!payload.commentId) throw new Error('INSTAGRAM_ENGAGEMENT_COMMENT_ID_REQUIRED');
-    const result = await provider.replyToComment({
-      commentId: payload.commentId,
-      message: payload.message,
-    });
+    const result = await provider.replyToComment({ commentId: payload.commentId, message: payload.message });
     return result.commentId;
   }
   if (!payload.pageId || !payload.instagramUserId || !payload.recipientScopedId) {
@@ -284,7 +384,6 @@ function isAmbiguousProviderFailure(error: unknown): boolean {
 
 function safeErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const first =
-    raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
+  const first = raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
   return /^[A-Z0-9_]+$/.test(first) ? first.slice(0, 120) : 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
 }
