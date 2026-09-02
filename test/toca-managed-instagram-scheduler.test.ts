@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { StaticCreativeQualityEvidence } from '../src/creative/static-creative-quality-gate.js';
 import type { InstagramPublicationExecutor } from '../src/providers/instagram/instagram-publication-executor.js';
 import { InMemoryScheduler } from '../src/scheduler/in-memory-scheduler.js';
 import {
@@ -25,7 +26,34 @@ const videoAsset = (suffix: string): TocaManagedInstagramAsset => ({
   contentType: 'video/mp4',
 });
 
+function qualityEvidence(asset: TocaManagedInstagramAsset): StaticCreativeQualityEvidence {
+  return {
+    evidenceId: `STATIC-QA:${asset.assetId}`,
+    assetId: asset.assetId,
+    outputSha256: asset.sha256,
+    policyId: 'TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1',
+    policyVersion: '1.0',
+    overallStatus: 'PASS',
+    sourceRole: 'ORIGINAL_MASTER',
+    sourceLineageStatus: 'PASS',
+    exactSourceMasterBinding: true,
+    sourceMasterSha256: 'b'.repeat(64),
+    sourceResolutionStatus: 'PASS',
+    effectiveUpscaleRatio: 1,
+    safeAreaStatus: 'PASS',
+    typographyStatus: 'PASS',
+    rightsStatus: 'PASS',
+    brandIntegrityStatus: 'PASS',
+    venueFidelityStatus: 'PASS',
+    copyQaStatus: 'PASS',
+    informationQaStatus: 'PASS',
+    visualArtifactStatus: 'PASS',
+    failureCodes: [],
+  };
+}
+
 function payload(overrides: Partial<TocaManagedInstagramSchedulePayload> = {}) {
+  const baseAsset = imageAsset('0001-V1');
   const base: TocaManagedInstagramSchedulePayload = {
     schemaVersion: 1,
     contentItemId: 'MKT-20260814-SUNSET-FEED-0900',
@@ -33,7 +61,8 @@ function payload(overrides: Partial<TocaManagedInstagramSchedulePayload> = {}) {
     timezone: 'America/Bahia',
     account: { pageId: 'page-1', instagramAccountId: 'ig-1' },
     mediaType: 'IMAGE',
-    asset: imageAsset('0001-V1'),
+    asset: baseAsset,
+    creativeQualityEvidence: [qualityEvidence(baseAsset)],
     caption: 'Legenda final.',
     correlationId: 'corr-1',
     publicationIdempotencyKey: 'publish-1',
@@ -46,6 +75,14 @@ function payload(overrides: Partial<TocaManagedInstagramSchedulePayload> = {}) {
   const merged = { ...base, ...overrides } as TocaManagedInstagramSchedulePayload;
   if (overrides.assets !== undefined) delete merged.asset;
   if (overrides.asset !== undefined) delete merged.assets;
+
+  if (overrides.creativeQualityEvidence === undefined) {
+    const assets = merged.assets ?? (merged.asset ? [merged.asset] : []);
+    merged.creativeQualityEvidence = assets
+      .filter((asset) => asset.contentType !== 'video/mp4')
+      .map(qualityEvidence);
+  }
+
   return {
     ...merged,
     approval: {
@@ -60,7 +97,7 @@ function managed(scheduler: InMemoryScheduler, createId: () => string = () => 'j
 }
 
 describe('TOCA-managed Instagram scheduler', () => {
-  it('persists a legacy single-image scheduled publication without calling Meta', async () => {
+  it('persists a quality-bound single-image scheduled publication without calling Meta', async () => {
     const scheduler = new InMemoryScheduler();
     const job = await managed(scheduler).schedule(payload());
 
@@ -68,6 +105,24 @@ describe('TOCA-managed Instagram scheduler', () => {
     expect(job.status).toBe('SCHEDULED');
     expect(job.toolName).toBe('internal.instagram.publication.toca-managed.execute');
     expect(job.runAt).toBe('2026-08-14T09:00:00-03:00');
+  });
+
+  it('rejects a new static schedule without exact creative quality evidence', () => {
+    const scheduler = new InMemoryScheduler();
+    const missing = payload({ creativeQualityEvidence: [] });
+    expect(() => managed(scheduler).schedule(missing)).toThrow(
+      'TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_REQUIRED',
+    );
+  });
+
+  it('rejects quality evidence bound to a different output hash', () => {
+    const scheduler = new InMemoryScheduler();
+    const asset = imageAsset('HASH-V1', '1'.repeat(64));
+    const evidence = { ...qualityEvidence(asset), outputSha256: '2'.repeat(64) };
+    const invalid = payload({ asset, creativeQualityEvidence: [evidence] });
+    expect(() => managed(scheduler).schedule(invalid)).toThrow(
+      'STATIC_CREATIVE_QUALITY_OUTPUT_SHA256_MISMATCH',
+    );
   });
 
   it('rejects a changed schedule when the approved descriptor hash is stale', () => {
@@ -112,7 +167,7 @@ describe('TOCA-managed Instagram scheduler', () => {
     );
   });
 
-  it('supports a video Story and an ordered image carousel', async () => {
+  it('supports a video Story and an ordered quality-bound image carousel', async () => {
     const storyScheduler = new InMemoryScheduler();
     const story = payload({ mediaType: 'STORY', asset: videoAsset('STORY-1') });
     await expect(managed(storyScheduler).schedule(story)).resolves.toMatchObject({
