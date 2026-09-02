@@ -14,13 +14,15 @@ const registry = [
 
 describe('Instagram engagement knowledge-base read-only preflight', () => {
   it('reads exactly the allowlisted sources without database or provider writes', async () => {
-    const readRange = vi.fn(async () => registry);
-    const readText = vi.fn(async (fileId: string) => ({
-      id: fileId,
-      name: 'source',
-      mimeType: 'text/plain',
-      text: `validated content for ${fileId}`,
-    }));
+    const readRange = vi.fn(() => Promise.resolve(registry));
+    const readText = vi.fn((fileId: string) =>
+      Promise.resolve({
+        id: fileId,
+        name: 'source',
+        mimeType: 'text/plain',
+        text: `validated content for ${fileId}`,
+      }),
+    );
 
     const result = await runInstagramKnowledgeReadOnlyPreflight(
       { readRange },
@@ -49,8 +51,10 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
     const incomplete = registry.slice(0, 3);
     await expect(
       runInstagramKnowledgeReadOnlyPreflight(
-        { readRange: async () => incomplete },
-        { readText: async () => ({ id: '', name: '', mimeType: '', text: 'x' }) },
+        { readRange: () => Promise.resolve(incomplete) },
+        {
+          readText: () => Promise.resolve({ id: '', name: '', mimeType: '', text: 'x' }),
+        },
         INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
         ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'],
       ),
