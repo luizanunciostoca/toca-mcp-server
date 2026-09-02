@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "LOGO_INTEGRITY_GATE_V1",
+  "status": "ACTIVE_CANONICAL",
+  "scope": "ALL_VISUAL_CREATIVES",
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "drivePolicyDocumentId": "1moeBgZrb2UcC_jm0dDvTvTA4kDBXefCZ7EyntogMulU",
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU"
+  },
+  "tocaWhiteLogo": {
+    "brandAssetId": "BRAND-TOCA-WHITE-V1",
+    "brand": "TOCA_DO_MORCEGO",
+    "variant": "WHITE",
+    "driveFileId": "1kd_Kk6SpAoFexwMgZsk1S1FpGpV-rdef",
+    "mimeType": "image/png",
+    "integrityMode": "SHA256_PINNED",
+    "sha256": "87e81cdbd2ef6ae7f9263f4cf3973d1c55ac991da2708b2e15d2674f45f65d5e",
+    "status": "ACTIVE_APPROVED",
+    "aiReconstructionAllowed": false
+  },
+  "generativeBoundary": {
+    "required": true,
+    "generateBaseWithoutGraphicLogo": true,
+    "allowAiGeneratedBrandOverlay": false,
+    "allowLogoAsStyleReferenceOnly": false,
+    "physicalSignageAlreadyInSource": "PRESERVE_AS_FACTUAL_SCENE_ELEMENT_ONLY",
+    "finalGraphicLogoMethod": "DETERMINISTIC_OFFICIAL_ASSET_COMPOSITE"
+  },
+  "preGenerationGate": [
+    "RESOLVE_ACTIVE_APPROVED_BRAND_ASSET",
+    "FETCH_EXACT_DRIVE_FILE",
+    "VERIFY_DRIVE_FILE_ID",
+    "VERIFY_MIME_TYPE",
+    "VERIFY_SHA256",
+    "ASSERT_AI_RECONSTRUCTION_FALSE"
+  ],
+  "postGenerationGate": [
+    "ASSERT_GENERATIVE_BASE_HAS_NO_GENERATED_BRAND_OVERLAY",
+    "COMPOSITE_EXACT_OFFICIAL_ASSET_DETERMINISTICALLY",
+    "VERIFY_EXACT_BRAND_ASSET_BINDING",
+    "PERSIST_BRAND_LINEAGE",
+    "BRAND_INTEGRITY_PASS_REQUIRED"
+  ],
+  "reviewBoundary": {
+    "reviewReadyRequires": [
+      "exact_brand_asset_binding=true",
+      "brand_integrity_status=PASSED",
+      "brand_asset_id",
+      "brand_drive_file_id",
+      "expected_brand_sha256",
+      "output_sha256"
+    ],
+    "failClosed": true
+  },
+  "failureCodes": [
+    "BRAND_ASSET_NOT_RESOLVED",
+    "BRAND_ASSET_NOT_ACTIVE_APPROVED",
+    "BRAND_DRIVE_FILE_ID_MISMATCH",
+    "BRAND_SHA256_MISMATCH",
+    "BRAND_MIME_MISMATCH",
+    "AI_GENERATED_LOGO_DETECTED",
+    "LOGO_RECONSTRUCTION_REQUESTED",
+    "LOGO_FROM_SCREENSHOT_OR_REFERENCE",
+    "LOGO_GEOMETRY_MODIFIED",
+    "LOGO_ASPECT_RATIO_MODIFIED",
+    "LOGO_COLOR_APPROXIMATED",
+    "LOGO_POST_COMPOSITE_NOT_VERIFIED",
+    "BRAND_LINEAGE_MISSING"
+  ]
+}
