@@ -164,9 +164,7 @@ function hasExpectedImageSignature(
       bytes[3] === 0x47
     );
   }
-  return (
-    bytes.byteLength >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP'
-  );
+  return bytes.byteLength >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP';
 }
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {
