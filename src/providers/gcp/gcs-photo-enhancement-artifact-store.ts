@@ -57,7 +57,9 @@ export class GcsPhotoEnhancementArtifactStore implements PhotoEnhancementArtifac
     });
   }
 
-  async store(request: PhotoEnhancementArtifactStoreRequest): Promise<StoredPhotoEnhancementArtifact> {
+  async store(
+    request: PhotoEnhancementArtifactStoreRequest,
+  ): Promise<StoredPhotoEnhancementArtifact> {
     const observedSha256 = sha256(request.bytes);
     if (
       request.bytes.byteLength === 0 ||
