@@ -91,6 +91,8 @@ function structured<T>(value: unknown): T {
 }
 
 function schedulePayload(correlationId: string) {
+  // The M-FOUND-12 proof validates Core routing/idempotency/readback, not image quality.
+  // Use video-only media so the proof cannot forge or bypass static-creative evidence.
   const descriptor: TocaManagedInstagramApprovalDescriptor = {
     schemaVersion: 1,
     contentItemId: 'M12-E2E-CORE-FACADE',
@@ -100,12 +102,12 @@ function schedulePayload(correlationId: string) {
       pageId: 'M12_PAGE_NO_PROVIDER_WRITE',
       instagramAccountId: 'M12_IG_NO_PROVIDER_WRITE',
     },
-    mediaType: 'IMAGE',
+    mediaType: 'REEL',
     asset: {
       assetId: 'M12-ASSET',
-      objectName: 'm12/e2e.jpg',
+      objectName: 'm12/e2e.mp4',
       sha256: '0'.repeat(64),
-      contentType: 'image/jpeg',
+      contentType: 'video/mp4',
     },
     caption: 'M-FOUND-12 deterministic Core facade proof',
     correlationId,
