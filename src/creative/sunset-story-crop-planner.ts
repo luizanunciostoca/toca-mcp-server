@@ -10,6 +10,8 @@ export interface SunsetStoryCropPlan {
   readonly transformedPrimarySubject: NormalizedRect | null;
   readonly subjectCoverage: number;
   readonly protectedOverlap: number;
+  readonly protectedFeatureOverlap: number;
+  readonly minimumProtectedFeatureCoverage: number;
   readonly placementScore: number;
   readonly planScore: number;
 }
@@ -89,6 +91,24 @@ function subjectCoverageRatio(subject: NormalizedRect, crop: NormalizedRect): nu
   return clamp(rectArea(visible) / rectArea(subject), 0, 1);
 }
 
+function protectedFeatureMetrics(
+  profile: SunsetStoryImageProfile,
+  cropWindow: NormalizedRect,
+  protectedRegions: readonly NormalizedRect[],
+): { readonly overlap: number; readonly minimumCoverage: number } {
+  if (profile.protectedFeatures.length === 0) return { overlap: 0, minimumCoverage: 1 };
+
+  let overlap = 0;
+  let minimumCoverage = 1;
+  for (const feature of profile.protectedFeatures) {
+    const coverage = subjectCoverageRatio(feature.box, cropWindow);
+    minimumCoverage = Math.min(minimumCoverage, coverage);
+    const transformed = transformRect(feature.box, cropWindow);
+    overlap = Math.max(overlap, protectedOverlapRatio(transformed, protectedRegions));
+  }
+  return { overlap, minimumCoverage };
+}
+
 function placementScore(
   transformedSubject: NormalizedRect,
   target: readonly [number, number],
@@ -113,13 +133,18 @@ function buildCandidate(
       width: cropWidth,
       height: cropHeight,
     };
+    const featureMetrics = protectedFeatureMetrics(profile, cropWindow, template.protectedRegions);
+    const planScore =
+      (1 - featureMetrics.overlap) * 55 + featureMetrics.minimumCoverage * 30 + 15;
     return {
       cropWindow,
       transformedPrimarySubject: null,
       subjectCoverage: 1,
       protectedOverlap: 0,
+      protectedFeatureOverlap: featureMetrics.overlap,
+      minimumProtectedFeatureCoverage: featureMetrics.minimumCoverage,
       placementScore: 1,
-      planScore: 100,
+      planScore: Math.round(planScore * 100) / 100,
     };
   }
 
@@ -138,14 +163,22 @@ function buildCandidate(
     transformedPrimarySubject,
     template.protectedRegions,
   );
+  const featureMetrics = protectedFeatureMetrics(profile, cropWindow, template.protectedRegions);
   const subjectPlacementScore = placementScore(transformedPrimarySubject, [targetX, targetY]);
-  const planScore = subjectCoverage * 55 + (1 - protectedOverlap) * 30 + subjectPlacementScore * 15;
+  const planScore =
+    subjectCoverage * 45 +
+    (1 - protectedOverlap) * 20 +
+    (1 - featureMetrics.overlap) * 20 +
+    featureMetrics.minimumCoverage * 10 +
+    subjectPlacementScore * 5;
 
   return {
     cropWindow,
     transformedPrimarySubject,
     subjectCoverage,
     protectedOverlap,
+    protectedFeatureOverlap: featureMetrics.overlap,
+    minimumProtectedFeatureCoverage: featureMetrics.minimumCoverage,
     placementScore: subjectPlacementScore,
     planScore: Math.round(planScore * 100) / 100,
   };
