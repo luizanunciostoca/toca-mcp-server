@@ -35,9 +35,9 @@ describe('Logo Integrity Gate', () => {
   });
 
   it('fails closed when the pinned logo SHA-256 drifts', () => {
-    expect(() =>
-      assertCanonicalTocaLogoAsset(canonicalAsset({ sha256: 'a'.repeat(64) })),
-    ).toThrow(/TOCA_CANONICAL_LOGO_BINDING_MISMATCH/);
+    expect(() => assertCanonicalTocaLogoAsset(canonicalAsset({ sha256: 'a'.repeat(64) }))).toThrow(
+      /TOCA_CANONICAL_LOGO_BINDING_MISMATCH/,
+    );
   });
 
   it('rejects an AI-generated base that already contains a graphic brand overlay', () => {
