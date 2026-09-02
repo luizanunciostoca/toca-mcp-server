@@ -1,0 +1,192 @@
+name: Scheduler Live Health Probe 2026-09-02
+
+on:
+  push:
+    branches:
+      - diag/scheduler-live-health-20260902
+    paths:
+      - .github/workflows/scheduler-live-health-probe-20260902.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate diagnostics session
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read Cloud Run and Cloud Scheduler topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scheduler-health-evidence
+          gcloud run services describe "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+            > scheduler-health-evidence/daemon-service.json
+          gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" \
+            --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json \
+            > scheduler-health-evidence/cloud-scheduler-job.json
+
+          SERVICE_URL="$(jq -r '.status.url // empty' scheduler-health-evidence/daemon-service.json)"
+          test -n "$SERVICE_URL"
+          echo "SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
+
+          jq -e '
+            any(.status.conditions[]?; .type == "Ready" and .status == "True") and
+            (.status.latestReadyRevisionName | type == "string" and length > 0) and
+            (.spec.template.spec.containerConcurrency == 1) and
+            ([.spec.template.spec.containers[0].env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED") | .value] == ["true"]) and
+            ([.spec.template.spec.containers[0].env[]? | select(.name == "TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED") | .value] == ["true"]) and
+            ([.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+          ' scheduler-health-evidence/daemon-service.json >/dev/null
+
+          jq -e --arg serviceUrl "$SERVICE_URL" --arg runtimeSa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .state == "ENABLED" and
+            .schedule == "* * * * *" and
+            .timeZone == "America/Bahia" and
+            .httpTarget.httpMethod == "POST" and
+            .httpTarget.uri == ($serviceUrl + "/tick") and
+            .httpTarget.oidcToken.serviceAccountEmail == $runtimeSa
+          ' scheduler-health-evidence/cloud-scheduler-job.json >/dev/null
+          echo 'SCHEDULER_TOPOLOGY_LIVE=PASS'
+
+      - name: Read authenticated daemon health
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=""
+          if TOKEN="$(gcloud auth print-identity-token \
+            --impersonate-service-account="$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --audiences="$SERVICE_URL" 2>scheduler-health-evidence/identity-token-error.txt)"; then
+            :
+          else
+            TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+          fi
+          test -n "$TOKEN"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "$SERVICE_URL/healthz" \
+            > scheduler-health-evidence/daemon-healthz.json
+          unset TOKEN
+
+          jq -e '
+            .ok == true and
+            .schedulerPersistenceVerified == true and
+            .schedulingTransport == "protected-mcp" and
+            .triggerMode == "cloud-scheduler-http" and
+            .lastError == null
+          ' scheduler-health-evidence/daemon-healthz.json >/dev/null
+          echo 'DAEMON_HEALTHZ_LIVE=PASS'
+
+      - name: Read recent scheduler and daemon evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          DAEMON_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE_NAME}\""
+          SCHEDULER_FILTER="resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${SCHEDULER_JOB_NAME}\""
+          gcloud logging read "$DAEMON_FILTER" \
+            --project "$GCP_PROJECT_ID" --freshness=15m --limit=2000 --order=asc --format=json \
+            > /tmp/daemon-logs.json || printf '[]\n' > /tmp/daemon-logs.json
+          gcloud logging read "$SCHEDULER_FILTER" \
+            --project "$GCP_PROJECT_ID" --freshness=15m --limit=1000 --order=asc --format=json \
+            > /tmp/scheduler-logs.json || printf '[]\n' > /tmp/scheduler-logs.json
+
+          node <<'NODE'
+          const fs = require('fs');
+          const daemon = JSON.parse(fs.readFileSync('/tmp/daemon-logs.json','utf8') || '[]');
+          const scheduler = JSON.parse(fs.readFileSync('/tmp/scheduler-logs.json','utf8') || '[]');
+          const strings = (v,out=[]) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach(x=>strings(x,out)); else if (v && typeof v === 'object') Object.values(v).forEach(x=>strings(x,out)); return out; };
+          const daemonJoined = daemon.map(x => strings(x).join(' '));
+          const tickCompleted = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.completed')).length;
+          const tickFailed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.failed')).length;
+          const selfTestPassed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.scheduler_self_test.passed')).length;
+          const tickHttp2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 200 && Number(x?.httpRequest?.status) < 300).length;
+          const tickHttpNon2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 400).length;
+          const schedulerSuccess = scheduler.filter(x => { const s=Number(x?.httpRequest?.status); return s>=200 && s<300; }).length;
+          const schedulerFailure = scheduler.filter(x => Number(x?.httpRequest?.status) >= 400).length;
+          const out = {
+            schemaVersion:'toca.scheduler.live-health-evidence.v1',
+            observedAt:new Date().toISOString(),
+            readOnlyProbe:true,
+            externalPublicationWritesAuthorized:false,
+            daemon:{logCount:daemon.length,tickCompleted,tickFailed,selfTestPassed,tickHttp2xx,tickHttpNon2xx},
+            cloudScheduler:{logCount:scheduler.length,httpSuccess:schedulerSuccess,httpFailure:schedulerFailure}
+          };
+          fs.writeFileSync('scheduler-health-evidence/recent-signals.json', JSON.stringify(out,null,2)+'\n');
+          if (tickCompleted < 1 || tickFailed > 0 || tickHttp2xx < 1 || tickHttpNon2xx > 0) process.exit(2);
+          NODE
+          echo 'RECENT_SCHEDULER_TICK_LIVE=PASS'
+
+      - name: Build sanitized live-health summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const read = p => { try { return JSON.parse(fs.readFileSync(p,'utf8')); } catch { return null; } };
+          const svc=read('scheduler-health-evidence/daemon-service.json');
+          const job=read('scheduler-health-evidence/cloud-scheduler-job.json');
+          const health=read('scheduler-health-evidence/daemon-healthz.json');
+          const signals=read('scheduler-health-evidence/recent-signals.json');
+          const summary={
+            schemaVersion:'toca.scheduler.live-health-summary.v1',
+            observedAt:new Date().toISOString(),
+            readOnlyProbe:true,
+            externalPublicationWritesAuthorized:false,
+            service:{
+              name:process.env.DAEMON_SERVICE_NAME,
+              latestReadyRevision:svc?.status?.latestReadyRevisionName ?? null,
+              ready:svc?.status?.conditions?.some?.(x=>x.type==='Ready'&&x.status==='True') ?? false
+            },
+            trigger:{
+              name:process.env.SCHEDULER_JOB_NAME,
+              state:job?.state ?? null,
+              schedule:job?.schedule ?? null,
+              timeZone:job?.timeZone ?? null,
+              lastAttemptTime:job?.lastAttemptTime ?? null
+            },
+            health: health ? {
+              ok:health.ok,
+              schedulerPersistenceVerified:health.schedulerPersistenceVerified,
+              lastRunStartedAt:health.lastRunStartedAt ?? null,
+              lastRunFinishedAt:health.lastRunFinishedAt ?? null,
+              lastClaimed:health.lastClaimed ?? null,
+              lastError:health.lastError ?? null,
+              schedulerWatchdog:health.schedulerWatchdog ?? null,
+              schedulerWatchdogState:health.schedulerWatchdogState ?? null
+            } : null,
+            recentSignals:signals
+          };
+          fs.writeFileSync('scheduler-health-evidence/summary.json',JSON.stringify(summary,null,2)+'\n');
+          console.log(JSON.stringify(summary,null,2));
+          NODE
+
+      - name: Upload live-health evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scheduler-live-health-${{ github.run_id }}
+          path: scheduler-health-evidence
+          if-no-files-found: error
+          retention-days: 30
