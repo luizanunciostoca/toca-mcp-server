@@ -1,0 +1,216 @@
+name: Instagram Tiered Knowledge DB Sync Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: instagram-tiered-knowledge-db-sync-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+
+jobs:
+  db-sync-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram tiered knowledge DB SYNC AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+
+          [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          required_lines=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_TIERED_KNOWLEDGE_DB_SYNC=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "DATABASE_MUTATIONS_AUTHORIZED=true"
+            "SERVICE_DEPLOY_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          RUNTIME_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/toca-mcp/server@$RUNTIME_DIGEST"
+          echo "runtime_source_sha=$RUNTIME_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$RUNTIME_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable runtime
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+      - name: Synchronize allowlisted knowledge into PostgreSQL
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-kb-syncdiag-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' EXIT
+          ENV_VARS="^#^NODE_ENV=production#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_GOOGLE_SHEETS_AUTH_MODE=gcp-iam#INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL=$GCP_RUNTIME_SERVICE_ACCOUNT"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "$ENV_VARS" \
+            --command node --args dist/src/ops/sync-instagram-engagement-knowledge-base.js \
+            --tasks 1 --max-retries 0 --task-timeout 300s --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXEC_STATUS=$?
+          set -e
+          sleep 3
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          STRUCTURED_PASS_COUNT="$(printf '%s' "$LOGS" | jq '[.[] | select(.jsonPayload.validation? == "instagram-engagement-knowledge-base-sync" and .jsonPayload.status? == "PASS")] | length')"
+          MESSAGE_LINES="$(printf '%s' "$LOGS" | jq -r '.[] | (.textPayload // (.jsonPayload | tojson) // "")' | tr '\n' ' ')"
+          PASS_MARKER="$(printf '%s' "$MESSAGE_LINES" | grep -o '"validation":"instagram-engagement-knowledge-base-sync","status":"PASS"' | head -n1 || true)"
+          SAFE_CODE="$(printf '%s' "$MESSAGE_LINES" | grep -oE '(GOOGLE_WORKSPACE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_DRIVE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_SHEETS_READ_RANGE_FAILED:[0-9]{3}|INSTAGRAM_ENGAGEMENT_KB_[A-Z0-9_]+(:[A-Za-z0-9._-]+)?|INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH|INSTAGRAM_ENGAGEMENT_DATABASE_URL_REQUIRED)' | head -n1 || true)"
+          if [[ $EXEC_STATUS -eq 0 && ( "$STRUCTURED_PASS_COUNT" -gt 0 || -n "$PASS_MARKER" ) ]]; then
+            SYNC_STATUS=PASS
+            SAFE_CODE=NONE
+          else
+            SYNC_STATUS=FAIL
+            [[ -n "$SAFE_CODE" ]] || SAFE_CODE=INSTAGRAM_ENGAGEMENT_KB_DB_SYNC_UNCLASSIFIED_FAILURE
+          fi
+          echo "KB_DB_SYNC_STATUS=$SYNC_STATUS" >> "$GITHUB_ENV"
+          echo "KB_DB_SYNC_SAFE_CODE=$SAFE_CODE" >> "$GITHUB_ENV"
+          gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          trap - EXIT
+          test "$SYNC_STATUS" = PASS
+
+      - name: Prove PostgreSQL retrieval without answer content
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-kb-smokediag-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true' EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --command node --args dist/src/ops/verify-instagram-engagement-tiered-knowledge.js \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXEC_STATUS=$?
+          set -e
+          sleep 3
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          STRUCTURED_PASS_COUNT="$(printf '%s' "$LOGS" | jq '[.[] | select(.jsonPayload.validation? == "instagram-engagement-tiered-knowledge-smoke" and .jsonPayload.status? == "PASS")] | length')"
+          MESSAGE_LINES="$(printf '%s' "$LOGS" | jq -r '.[] | (.textPayload // (.jsonPayload | tojson) // "")' | tr '\n' ' ')"
+          PASS_MARKER="$(printf '%s' "$MESSAGE_LINES" | grep -o '"validation":"instagram-engagement-tiered-knowledge-smoke","status":"PASS"' | head -n1 || true)"
+          SAFE_CODE="$(printf '%s' "$MESSAGE_LINES" | grep -oE '(INSTAGRAM_ENGAGEMENT_KB_[A-Z0-9_]+(:[A-Za-z0-9._-]+)?|INSTAGRAM_ENGAGEMENT_DATABASE_URL_REQUIRED)' | head -n1 || true)"
+          if [[ $EXEC_STATUS -eq 0 && ( "$STRUCTURED_PASS_COUNT" -gt 0 || -n "$PASS_MARKER" ) ]]; then
+            SMOKE_STATUS=PASS
+            SAFE_CODE=NONE
+          else
+            SMOKE_STATUS=FAIL
+            [[ -n "$SAFE_CODE" ]] || SAFE_CODE=INSTAGRAM_ENGAGEMENT_KB_SMOKE_UNCLASSIFIED_FAILURE
+          fi
+          echo "KB_DB_SMOKE_STATUS=$SMOKE_STATUS" >> "$GITHUB_ENV"
+          echo "KB_DB_SMOKE_SAFE_CODE=$SAFE_CODE" >> "$GITHUB_ENV"
+          gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+          trap - EXIT
+          test "$SMOKE_STATUS" = PASS
+
+      - name: Publish sanitized diagnostic evidence
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.auth.outputs.authorization_issue }}
+          RUNTIME_SOURCE_SHA: ${{ steps.auth.outputs.runtime_source_sha }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ job.status }}" == success ]]; then STATUS=PASS; else STATUS=FAIL; fi
+          printf -v COMMENT '%s\n' \
+            "TIERED_KNOWLEDGE_DB_SYNC_DIAGNOSTIC_STATUS=$STATUS" \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            "KB_DB_SYNC_STATUS=${KB_DB_SYNC_STATUS:-NOT_RUN}" \
+            "KB_DB_SYNC_SAFE_CODE=${KB_DB_SYNC_SAFE_CODE:-NONE}" \
+            "KB_DB_SMOKE_STATUS=${KB_DB_SMOKE_STATUS:-NOT_RUN}" \
+            "KB_DB_SMOKE_SAFE_CODE=${KB_DB_SMOKE_SAFE_CODE:-NONE}" \
+            'DATABASE_MUTATIONS=true' \
+            'SERVICE_DEPLOY=false' \
+            'PROVIDER_WRITES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'ANSWER_CONTENT_PRINTED=false' \
+            'SOURCE_CONTENT_PRINTED=false' \
+            'SECRETS_PRINTED=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
