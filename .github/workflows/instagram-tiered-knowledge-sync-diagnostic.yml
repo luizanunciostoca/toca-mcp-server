@@ -1,6 +1,7 @@
 name: Instagram Tiered Knowledge Sync Diagnostic
 
 on:
+  workflow_dispatch:
   issues:
     types: [opened]
 
@@ -27,6 +28,7 @@ env:
 jobs:
   diagnose:
     if: >-
+      github.event_name == 'issues' &&
       github.ref == 'refs/heads/main' &&
       github.event.issue.user.login == github.repository_owner &&
       startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram tiered knowledge sync DIAGNOSTIC AUTO')
@@ -114,7 +116,7 @@ jobs:
             --tasks 1 --max-retries 0 --task-timeout 180s --quiet
 
           set +e
-          EXEC_OUTPUT="$(gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet 2>&1)"
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/tmp/diag-exec.log 2>&1
           EXEC_STATUS=$?
           set -e
 
