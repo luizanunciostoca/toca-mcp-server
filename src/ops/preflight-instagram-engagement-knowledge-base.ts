@@ -3,7 +3,9 @@ import {
   parseCanonicalKnowledgeSourceRegistry,
   type CanonicalKnowledgeSourceRegistryRow,
 } from '../instagram-engagement/knowledge-base-ingest.js';
-import { INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID } from '../instagram-engagement/knowledge-snapshot-current.js';
+import {
+  INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
+} from '../instagram-engagement/knowledge-snapshot-current.js';
 import {
   GOOGLE_SHEETS_READONLY_SCOPE,
   GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
