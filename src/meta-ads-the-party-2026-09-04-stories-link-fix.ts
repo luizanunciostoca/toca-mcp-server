@@ -4,8 +4,7 @@ import { buildTheParty20260904Descriptor } from './providers/meta-ads/meta-ads-t
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
 const APPROVAL = 'APPROVED_THE_PARTY_2026_09_04_STORIES_ONLY_LINK_7175';
-const PRODUCT_URL =
-  'https://tocadomorcego.com.br/produtos/the-party-by-toca-experience-7175.html';
+const PRODUCT_URL = 'https://tocadomorcego.com.br/produtos/the-party-by-toca-experience-7175.html';
 
 const suppliedApproval = requiredEnv('META_ADS_THE_PARTY_0904_FIX_APPROVAL');
 if (suppliedApproval !== APPROVAL) {
