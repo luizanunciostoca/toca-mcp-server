@@ -1,0 +1,355 @@
+name: Meta Ads The Party 2026-09-04 Create Paused
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: Exact approval phrase for the fixed R$300 create-paused campaign
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - control/meta-ads-the-party-2026-09-04.create-paused
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-the-party-2026-09-04-create-paused
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  MCP_SERVICE_NAME: toca-mcp-production
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_2026_09_04_R300_CREATE_PAUSED
+  CAMPAIGN_START_UTC: '2026-09-02T23:30:00Z'
+  DRIVE_CREATIVE_1_ID: 1iL2v_mBCsLPgFxl5gi23DavqNqet3OUZ
+  DRIVE_CREATIVE_2_ID: 1_4RFeZ9FvkP93-huB_rBG3JeuPpPEtDq
+  DRIVE_CREATIVE_3_ID: 1IsQA4Hnl4uC1GNTK6jaiNC0IvjHugDj6
+  DRIVE_CREATIVE_4_ID: 1aXdTAZXpkW9DeW9dI0V7uu7GUNOuwoPz
+  DRIVE_CREATIVE_5_ID: 17gyfiyA4hAwmP1R_8kqxYHs3DcYTOGzq
+  CREATIVE_1_SHA256: f3f6cbefacea0367ce70f38c0d08fde01a00386dd87e5212ac80d9e31c1fb9af
+  CREATIVE_2_SHA256: d64e32bdf41f7eea918442256dfe36bc7c84c13ffcd64a8c630e4db0a8b60ce5
+  CREATIVE_3_SHA256: f966cd2e5a25a41ee69219b47c2c9b6dcbc6494a693bb7cb4c1320ac964406e2
+  CREATIVE_4_SHA256: 651ff66c4cca870304a7097fe7cb160f3e2b1b5bdbec8b14ffda97cb9178f331
+  CREATIVE_5_SHA256: a4fafe3b833138351ac60d42f8ef616812c664a25620a7b7a9fba888739ee4e8
+
+jobs:
+  execute-approved-create-paused:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate exact approval and campaign time lock
+        shell: bash
+        env:
+          PROVIDED_APPROVAL: ${{ github.event.inputs.approval || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$PROVIDED_APPROVAL" = "$EXPECTED_APPROVAL"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$GITHUB_REF" = "refs/heads/main"
+            test -f control/meta-ads-the-party-2026-09-04.create-paused
+            MARKER_APPROVAL="$(tr -d '\r\n' < control/meta-ads-the-party-2026-09-04.create-paused)"
+            test "$MARKER_APPROVAL" = "$EXPECTED_APPROVAL"
+            CHANGED_FILES="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+            test "$CHANGED_FILES" = "control/meta-ads-the-party-2026-09-04.create-paused"
+          else
+            echo "Unsupported event: $GITHUB_EVENT_NAME" >&2
+            exit 1
+          fi
+          now_epoch="$(date -u +%s)"
+          start_epoch="$(date -u -d "$CAMPAIGN_START_UTC" +%s)"
+          test "$now_epoch" -lt "$start_epoch"
+          echo 'THE_PARTY_0904_EXPLICIT_APPROVAL_VALIDATED=1'
+          echo 'THE_PARTY_0904_START_IS_STILL_FUTURE=1'
+
+      - name: Authenticate to Google Cloud and TOCA OS Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Hydrate and verify exact approved creatives from TOCA OS Drive
+        shell: bash
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          test -n "$DRIVE_ACCESS_TOKEN"
+          mkdir -p ops/meta-ads/the-party-2026-09-04
+
+          ids=(
+            "$DRIVE_CREATIVE_1_ID"
+            "$DRIVE_CREATIVE_2_ID"
+            "$DRIVE_CREATIVE_3_ID"
+            "$DRIVE_CREATIVE_4_ID"
+            "$DRIVE_CREATIVE_5_ID"
+          )
+          files=(
+            ops/meta-ads/the-party-2026-09-04/creative-01-hero.jpg
+            ops/meta-ads/the-party-2026-09-04/creative-02-experience.jpg
+            ops/meta-ads/the-party-2026-09-04/creative-03-urgency.jpg
+            ops/meta-ads/the-party-2026-09-04/creative-04-venue-crowd.jpg
+            ops/meta-ads/the-party-2026-09-04/creative-05-brand-statement.jpg
+          )
+          hashes=(
+            "$CREATIVE_1_SHA256"
+            "$CREATIVE_2_SHA256"
+            "$CREATIVE_3_SHA256"
+            "$CREATIVE_4_SHA256"
+            "$CREATIVE_5_SHA256"
+          )
+
+          for i in "${!files[@]}"; do
+            curl --fail --silent --show-error --location --retry 3 \
+              -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files/${ids[$i]}?alt=media" \
+              -o "${files[$i]}"
+            test "$(wc -c < "${files[$i]}")" -gt 100000
+            test "$(xxd -p -l 2 "${files[$i]}")" = "ffd8"
+            printf '%s  %s\n' "${hashes[$i]}" "${files[$i]}" | sha256sum --check --strict
+          done
+          echo 'THE_PARTY_0904_DRIVE_CREATIVES_VERIFIED=1'
+
+      - name: Quality Gate on hydrated execution image source
+        run: pnpm quality
+
+      - name: Assert public MCP Meta Ads writes remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? | select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] | length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_BEFORE_0904_CAMPAIGN=1'
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable event image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:the-party-20260904-${GITHUB_SHA}"
+          docker build -f Dockerfile.meta-ads-the-party-2026-09-04 -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-meta-ads-party-0904-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Deploy read-only PREPARE job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/meta-ads-the-party-2026-09-04.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_THE_PARTY_0904_MODE=PREPARE~META_ADS_THE_PARTY_0904_EXPLICIT_APPROVAL=$EXPECTED_APPROVAL" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 240s \
+            --quiet
+
+      - name: Execute PREPARE
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture exact prepared descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_0904_PREPARE_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=30m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_0904_PREPARE_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_0904_PREPARE_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "READY_FOR_EXACT_CREATE_PAUSED" and
+            .eventId == "THE_PARTY_2026_09_04" and
+            (.requestSha256 | test("^[a-f0-9]{64}$")) and
+            (.descriptorBase64 | length > 0) and
+            .budget.type == "LIFETIME" and
+            .budget.amountMinor == 30000 and
+            .budget.currency == "BRL" and
+            .schedule.startTime == "2026-09-02T20:30:00-03:00" and
+            .schedule.endTime == "2026-09-05T01:00:00-03:00" and
+            .promotedObject.pixel_id == "461233076843065" and
+            .promotedObject.custom_event_type == "PURCHASE" and
+            (.assets | length == 5) and
+            .deliveryEstimate.estimateReady == true and
+            .deliveryEstimate.upperBound > 0 and
+            .providerMutationExecuted == false and
+            (.grantedScopes | index("ads_management") != null)
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-0904-prepare.json
+          printf '%s' "$RESULT_JSON" | jq -r .requestSha256 > /tmp/approved-sha.txt
+          printf '%s' "$RESULT_JSON" | jq -r .descriptorBase64 > /tmp/descriptor.b64
+          echo 'THE_PARTY_0904_EXACT_DESCRIPTOR_PREPARED=1'
+
+      - name: Deploy exact EXECUTE_PAUSED job
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPROVED_SHA="$(cat /tmp/approved-sha.txt)"
+          DESCRIPTOR_B64="$(cat /tmp/descriptor.b64)"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/meta-ads-the-party-2026-09-04.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_THE_PARTY_0904_MODE=EXECUTE_PAUSED~META_ADS_THE_PARTY_0904_EXPLICIT_APPROVAL=$EXPECTED_APPROVAL~META_ADS_THE_PARTY_0904_APPROVED_SHA256=$APPROVED_SHA~META_ADS_THE_PARTY_0904_DESCRIPTOR_B64=$DESCRIPTOR_B64" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 420s \
+            --quiet
+
+      - name: Execute exact approved PAUSED creation
+        shell: bash
+        run: |
+          set -euo pipefail
+          now_epoch="$(date -u +%s)"
+          start_epoch="$(date -u -d "$CAMPAIGN_START_UTC" +%s)"
+          test "$now_epoch" -lt "$start_epoch"
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture provider-backed PAUSED configuration evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_0904_EXECUTE_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=30m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_0904_EXECUTE_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_0904_EXECUTE_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "PAUSED_READY_FOR_MANUAL_ACTIVATION" and
+            .eventId == "THE_PARTY_2026_09_04" and
+            (.campaignId | length > 0) and
+            (.adSetId | length > 0) and
+            (.creativeIds | length == 5) and
+            (.adIds | length == 5) and
+            (.imageHashes | length == 5) and
+            .budget.type == "LIFETIME" and
+            .budget.amountMinor == 30000 and
+            .budget.currency == "BRL" and
+            .schedule.startTime == "2026-09-02T20:30:00-03:00" and
+            .schedule.endTime == "2026-09-05T01:00:00-03:00" and
+            .activationPerformed == false and
+            .providerVerification.campaign.status == "PAUSED" and
+            .providerVerification.adSet.status == "PAUSED" and
+            ([.providerVerification.ads[].status] | all(. == "PAUSED"))
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-0904-execute-paused.json
+          echo 'THE_PARTY_0904_PROVIDER_BACKED_PAUSED_CONFIGURATION_VALIDATED=1'
+
+      - name: Reassert public MCP Meta Ads writes remain disabled
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? | select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] | length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_AFTER_0904_CAMPAIGN=1'
+
+      - name: Upload immutable campaign evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meta-ads-the-party-2026-09-04-${{ github.sha }}
+          path: |
+            meta-ads-the-party-0904-prepare.json
+            meta-ads-the-party-0904-execute-paused.json
+          if-no-files-found: error
+          retention-days: 180
+
+      - name: Remove one-time event job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --quiet || true
