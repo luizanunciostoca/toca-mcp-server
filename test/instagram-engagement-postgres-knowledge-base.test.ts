@@ -1,6 +1,8 @@
 import type pg from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { PostgresInstagramEngagementKnowledgeBaseSource } from '../src/instagram-engagement/postgres-knowledge-base.js';
+import {
+  PostgresInstagramEngagementKnowledgeBaseSource,
+} from '../src/instagram-engagement/postgres-knowledge-base.js';
 
 function candidate(heading: string, searchText: string) {
   return {
