@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { SecretReference, SecretResolver } from '../src/core/secrets.js';
+import type { SecretResolver } from '../src/core/secrets.js';
 import { GoogleDrivePhotoSourceLoader } from '../src/providers/google-drive/photo-source-loader.js';
 
 class FixedSecretResolver implements SecretResolver {
-  resolve(_reference: SecretReference): Promise<string> {
+  resolve(): Promise<string> {
     return Promise.resolve('drive-token');
   }
 }
