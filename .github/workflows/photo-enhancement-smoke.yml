@@ -1,0 +1,176 @@
+name: Photo Enhancement Smoke
+
+on:
+  push:
+    branches:
+      - feat/design-photo-enhance-mcp
+    paths:
+      - .github/workflows/photo-enhancement-smoke.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: photo-enhancement-smoke
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  JOB_NAME: toca-photo-enhancement-smoke
+  CONTENT_ITEM_ID: MKT-20260903-SUNSET-FEED-0900
+  SOURCE_ASSET_ID: SUN-0268
+  SOURCE_DRIVE_FILE_ID: 1bhYlL2AvmA9tTFDxYQyQnlX3bK-ZUS2f
+  CORRELATION_ID: smoke-SUN-0268-20260902
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Download exact source for independent evidence
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media&supportsAllDrives=true" \
+            --output smoke-source.jpg
+          test -s smoke-source.jpg
+          MIME="$(file --brief --mime-type smoke-source.jpg)"
+          case "$MIME" in
+            image/jpeg|image/png|image/webp) ;;
+            *) echo "Unexpected source MIME: $MIME" >&2; exit 1 ;;
+          esac
+          echo "SOURCE_EVIDENCE_SHA256=$(sha256sum smoke-source.jpg | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Build and push exact candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:photo-enhancement-smoke-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "SMOKE_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy write-isolated smoke job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$SMOKE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args="dist/src/photo-enhancement-smoke.js,--content-item-id,$CONTENT_ITEM_ID,--source-asset-id,$SOURCE_ASSET_ID,--source-drive-file-id,$SOURCE_DRIVE_FILE_ID,--correlation-id,$CORRELATION_ID" \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@META_ADS_WRITE_ENABLED=false@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_ASSET_BUCKET@TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL=$RUNTIME_SERVICE_ACCOUNT" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+      - name: Verify smoke job has no Instagram write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args[0] == "dist/src/photo-enhancement-smoke.js") and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute governed enhancement smoke
+        run: gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Capture and verify exact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"${CORRELATION_ID}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=30m \
+              --limit=100 \
+              --order=desc \
+              --format='value(textPayload)' | grep '"sourceAssetId":"SUN-0268"' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          printf '%s\n' "$RESULT_LINE" > photo-enhancement-smoke-evidence.json
+          jq -e \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg sourceAssetId "$SOURCE_ASSET_ID" \
+            --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+              .contentItemId == $contentItemId and
+              .sourceAssetId == $sourceAssetId and
+              .sourceDriveFileId == $sourceDriveFileId and
+              .sourceImageBound == true and
+              .editMode == "ENHANCE_EXISTING_IMAGE" and
+              .editorProvider == "LOCAL_IMAGEMAGICK" and
+              .reviewRequired == true and
+              .promotionEligible == false and
+              (.sourceSha256 | test("^[a-f0-9]{64}$")) and
+              (.outputSha256 | test("^[a-f0-9]{64}$")) and
+              (.publicationAsset.objectName | length > 0) and
+              .publicationAsset.contentType == "image/jpeg"
+            ' photo-enhancement-smoke-evidence.json >/dev/null
+          test "$(jq -r .sourceSha256 photo-enhancement-smoke-evidence.json)" = "$SOURCE_EVIDENCE_SHA256"
+          OBJECT_NAME="$(jq -r .publicationAsset.objectName photo-enhancement-smoke-evidence.json)"
+          gcloud storage cp "gs://${PUBLICATION_ASSET_BUCKET}/${OBJECT_NAME}" smoke-enhanced.jpg --quiet
+          test -s smoke-enhanced.jpg
+          test "$(sha256sum smoke-enhanced.jpg | awk '{print $1}')" = "$(jq -r .outputSha256 photo-enhancement-smoke-evidence.json)"
+
+      - name: Upload source, output and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: photo-enhancement-smoke-${{ env.SOURCE_ASSET_ID }}-${{ github.sha }}
+          path: |
+            smoke-source.jpg
+            smoke-enhanced.jpg
+            photo-enhancement-smoke-evidence.json
+          if-no-files-found: error
+          retention-days: 30
