@@ -33,6 +33,7 @@ function qualityEvidence(asset: TocaManagedInstagramAsset): StaticCreativeQualit
     outputSha256: asset.sha256,
     policyId: 'TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1',
     policyVersion: '1.0',
+    format: 'FEED_4_5',
     overallStatus: 'PASS',
     sourceRole: 'ORIGINAL_MASTER',
     sourceLineageStatus: 'PASS',
