@@ -70,7 +70,9 @@ jobs:
           ' scheduler-health-evidence/cloud-scheduler-job.json >/dev/null
           echo 'SCHEDULER_TOPOLOGY_LIVE=PASS'
 
-      - name: Read authenticated daemon health
+      - name: Try authenticated daemon health endpoint
+        id: healthz
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -80,7 +82,8 @@ jobs:
             --audiences="$SERVICE_URL" 2>scheduler-health-evidence/identity-token-error.txt)"; then
             :
           else
-            TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+            echo 'Runtime-SA impersonated ID token unavailable to deployer diagnostic identity.' >> scheduler-health-evidence/identity-token-error.txt
+            exit 3
           fi
           test -n "$TOKEN"
           curl --fail-with-body --silent --show-error \
@@ -88,7 +91,6 @@ jobs:
             "$SERVICE_URL/healthz" \
             > scheduler-health-evidence/daemon-healthz.json
           unset TOKEN
-
           jq -e '
             .ok == true and
             .schedulerPersistenceVerified == true and
@@ -99,6 +101,7 @@ jobs:
           echo 'DAEMON_HEALTHZ_LIVE=PASS'
 
       - name: Read recent scheduler and daemon evidence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -120,16 +123,18 @@ jobs:
           const tickCompleted = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.completed')).length;
           const tickFailed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.failed')).length;
           const selfTestPassed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.scheduler_self_test.passed')).length;
+          const watchdogHealthy = daemonJoined.filter(x => x.includes('schedulerWatchdogStatus') && x.includes('HEALTHY')).length;
           const tickHttp2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 200 && Number(x?.httpRequest?.status) < 300).length;
           const tickHttpNon2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 400).length;
           const schedulerSuccess = scheduler.filter(x => { const s=Number(x?.httpRequest?.status); return s>=200 && s<300; }).length;
           const schedulerFailure = scheduler.filter(x => Number(x?.httpRequest?.status) >= 400).length;
+          const latestTickCompletedAt = [...daemon].reverse().find(x => strings(x).join(' ').includes('toca.managed.instagram.daemon.tick.completed'))?.timestamp ?? null;
           const out = {
             schemaVersion:'toca.scheduler.live-health-evidence.v1',
             observedAt:new Date().toISOString(),
             readOnlyProbe:true,
             externalPublicationWritesAuthorized:false,
-            daemon:{logCount:daemon.length,tickCompleted,tickFailed,selfTestPassed,tickHttp2xx,tickHttpNon2xx},
+            daemon:{logCount:daemon.length,tickCompleted,tickFailed,selfTestPassed,watchdogHealthy,tickHttp2xx,tickHttpNon2xx,latestTickCompletedAt},
             cloudScheduler:{logCount:scheduler.length,httpSuccess:schedulerSuccess,httpFailure:schedulerFailure}
           };
           fs.writeFileSync('scheduler-health-evidence/recent-signals.json', JSON.stringify(out,null,2)+'\n');
@@ -166,7 +171,7 @@ jobs:
               timeZone:job?.timeZone ?? null,
               lastAttemptTime:job?.lastAttemptTime ?? null
             },
-            health: health ? {
+            healthEndpoint: health ? {
               ok:health.ok,
               schedulerPersistenceVerified:health.schedulerPersistenceVerified,
               lastRunStartedAt:health.lastRunStartedAt ?? null,
@@ -175,7 +180,7 @@ jobs:
               lastError:health.lastError ?? null,
               schedulerWatchdog:health.schedulerWatchdog ?? null,
               schedulerWatchdogState:health.schedulerWatchdogState ?? null
-            } : null,
+            } : {accessibleByDiagnosticIdentity:false},
             recentSignals:signals
           };
           fs.writeFileSync('scheduler-health-evidence/summary.json',JSON.stringify(summary,null,2)+'\n');
