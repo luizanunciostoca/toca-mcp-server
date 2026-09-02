@@ -93,6 +93,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > /tmp/photo-enhancement-smoke-env.yaml <<EOF
+          NODE_ENV: "production"
+          MCP_ENABLED: "false"
+          INSTAGRAM_PUBLICATION_WRITES_ENABLED: "false"
+          INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: "false"
+          META_ADS_WRITE_ENABLED: "false"
+          GCP_PROJECT_ID: "$PROJECT_ID"
+          INSTAGRAM_PUBLICATION_ASSET_BUCKET: "$PUBLICATION_ASSET_BUCKET"
+          TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL: "$RUNTIME_SERVICE_ACCOUNT"
+          EOF
           gcloud run jobs deploy "$JOB_NAME" \
             --image "$SMOKE_IMAGE" \
             --project "$PROJECT_ID" \
@@ -100,7 +110,7 @@ jobs:
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --command node \
             --args="dist/src/photo-enhancement-smoke.js,--content-item-id,$CONTENT_ITEM_ID,--source-asset-id,$SOURCE_ASSET_ID,--source-drive-file-id,$SOURCE_DRIVE_FILE_ID,--correlation-id,$CORRELATION_ID" \
-            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@META_ADS_WRITE_ENABLED=false@GCP_PROJECT_ID=$PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_ASSET_BUCKET@TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL=$RUNTIME_SERVICE_ACCOUNT" \
+            --env-vars-file /tmp/photo-enhancement-smoke-env.yaml \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 180s \
