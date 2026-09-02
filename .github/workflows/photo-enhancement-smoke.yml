@@ -137,20 +137,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RESULT_LINE=""
-          for attempt in $(seq 1 12); do
-            RESULT_LINE="$(gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"${CORRELATION_ID}\"" \
+          RESULT_JSON=""
+          LOGS_JSON='[]'
+          for attempt in $(seq 1 15); do
+            LOGS_JSON="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
               --project "$PROJECT_ID" \
               --freshness=30m \
-              --limit=100 \
-              --order=desc \
-              --format='value(textPayload)' | grep '"sourceAssetId":"SUN-0268"' | head -n1 || true)"
-            [ -n "$RESULT_LINE" ] && break
+              --limit=300 \
+              --order=asc \
+              --format=json || printf '[]')"
+            printf '%s\n' "$LOGS_JSON" > photo-enhancement-smoke-logs.json
+            RESULT_JSON="$(printf '%s' "$LOGS_JSON" | jq -c \
+              --arg contentItemId "$CONTENT_ITEM_ID" \
+              --arg sourceAssetId "$SOURCE_ASSET_ID" \
+              --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+                def parsed:
+                  if ((.jsonPayload? | type) == "object" and (.jsonPayload.sourceAssetId? != null)) then .jsonPayload
+                  elif ((.jsonPayload.message? | type) == "string") then (.jsonPayload.message | fromjson? // empty)
+                  elif ((.textPayload? | type) == "string") then (.textPayload | fromjson? // empty)
+                  else empty end;
+                [ .[] | parsed | select(
+                    .contentItemId? == $contentItemId and
+                    .sourceAssetId? == $sourceAssetId and
+                    .sourceDriveFileId? == $sourceDriveFileId
+                  ) ] | last // empty
+              ')"
+            [ -n "$RESULT_JSON" ] && break
             sleep 5
           done
-          test -n "$RESULT_LINE"
-          printf '%s\n' "$RESULT_LINE" > photo-enhancement-smoke-evidence.json
+          test -n "$RESULT_JSON"
+          printf '%s\n' "$RESULT_JSON" > photo-enhancement-smoke-evidence.json
           jq -e \
             --arg contentItemId "$CONTENT_ITEM_ID" \
             --arg sourceAssetId "$SOURCE_ASSET_ID" \
@@ -182,5 +199,6 @@ jobs:
             smoke-source.jpg
             smoke-enhanced.jpg
             photo-enhancement-smoke-evidence.json
+            photo-enhancement-smoke-logs.json
           if-no-files-found: error
           retention-days: 30
