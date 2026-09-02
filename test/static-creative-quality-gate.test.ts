@@ -11,6 +11,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
     evidenceId: 'STATIC-QA-1',
     assetId: 'SC-1',
     outputSha256: sha,
+    format: 'STORY_9_16' as const,
     sourceRole: 'ORIGINAL_MASTER' as const,
     sourceMasterSha256: 'b'.repeat(64),
     sourceWidth: 2160,
@@ -35,14 +36,34 @@ function candidate(overrides: Record<string, unknown> = {}) {
 }
 
 describe('static creative quality gate', () => {
-  it('passes a canonical master with safe layout and complete QA', () => {
+  it('passes a canonical Story master with safe layout and complete QA', () => {
     const evidence = evaluateStaticCreativeQuality(candidate());
     expect(evidence.overallStatus).toBe('PASS');
+    expect(evidence.format).toBe('STORY_9_16');
     expect(evidence.safeAreaStatus).toBe('PASS');
     expect(evidence.exactSourceMasterBinding).toBe(true);
     expect(() =>
       assertStaticCreativePublicationReady(evidence, { assetId: 'SC-1', outputSha256: sha }),
     ).not.toThrow();
+  });
+
+  it('passes a canonical 4:5 Feed using the Feed safe-area profile', () => {
+    const evidence = evaluateStaticCreativeQuality(
+      candidate({
+        format: 'FEED_4_5',
+        sourceWidth: 2160,
+        sourceHeight: 2700,
+        outputHeight: 1350,
+        layoutElements: [
+          { id: 'brand', role: 'BRAND', x: 64, y: 90, width: 300, height: 70 },
+          { id: 'headline', role: 'HEADLINE', x: 64, y: 270, width: 700, height: 180 },
+          { id: 'cta', role: 'CTA', x: 64, y: 1110, width: 700, height: 90 },
+        ],
+      }),
+    );
+    expect(evidence.overallStatus).toBe('PASS');
+    expect(evidence.format).toBe('FEED_4_5');
+    expect(evidence.safeAreaStatus).toBe('PASS');
   });
 
   it('fails when a template raster is used as the final source', () => {
@@ -64,6 +85,13 @@ describe('static creative quality gate', () => {
     );
     expect(evidence.safeAreaStatus).toBe('FAIL');
     expect(evidence.failureCodes).toContain('STATIC_CREATIVE_SAFE_AREA_VIOLATION');
+  });
+
+  it('fails a format/dimension mismatch instead of guessing a profile', () => {
+    const evidence = evaluateStaticCreativeQuality(
+      candidate({ format: 'FEED_4_5', outputWidth: 1080, outputHeight: 1920 }),
+    );
+    expect(evidence.safeAreaStatus).toBe('FAIL');
   });
 
   it('fails low-resolution upscales and unpinned typography', () => {
