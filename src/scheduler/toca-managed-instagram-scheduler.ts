@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
+import {
+  assertStaticCreativePublicationReady,
+  staticCreativeQualityEvidenceSchema,
+  type StaticCreativeQualityEvidence,
+} from '../creative/static-creative-quality-gate.js';
 import type { PublicationAssetContentType } from '../providers/gcp/gcs-publication-asset-stager.js';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
@@ -33,6 +38,12 @@ const descriptorObjectSchema = z.object({
   asset: tocaManagedInstagramAssetSchema.optional(),
   /** Canonical multi-asset representation for new schedules. Array order is publication order. */
   assets: z.array(tocaManagedInstagramAssetSchema).min(1).max(10).optional(),
+  /**
+   * Exact-output QA evidence for every static publication asset. Optional in the parser so
+   * already-persisted legacy schedules remain executable; mandatory for every new IMAGE,
+   * image STORY and CAROUSEL schedule through parseNewSchedule().
+   */
+  creativeQualityEvidence: z.array(staticCreativeQualityEvidenceSchema).max(10).optional(),
   caption: z.string().optional(),
   correlationId: z.string().min(1),
   publicationIdempotencyKey: z.string().min(1),
@@ -131,6 +142,7 @@ export class TocaManagedInstagramScheduler {
   ): TocaManagedInstagramSchedulePayload {
     const parsed = parseTocaManagedInstagramSchedulePayload(payload);
     assertApprovedTocaManagedDescriptor(parsed);
+    assertStaticCreativeEvidenceForNewSchedule(parsed);
     assertFutureManagedSchedule(parsed.scheduledFor, this.now());
     return parsed;
   }
@@ -206,6 +218,39 @@ export function managedPublicationAssets(
   if (value.assets) return value.assets;
   if (value.asset) return [value.asset];
   throw new Error('TOCA_MANAGED_INSTAGRAM_ASSET_REQUIRED');
+}
+
+export function assertStaticCreativeEvidenceForNewSchedule(
+  payload: TocaManagedInstagramSchedulePayload,
+): void {
+  const imageAssets = managedPublicationAssets(payload).filter(
+    (asset) => asset.contentType !== 'video/mp4',
+  );
+  if (imageAssets.length === 0) return;
+
+  const evidence = payload.creativeQualityEvidence ?? [];
+  if (evidence.length !== imageAssets.length) {
+    throw new Error('TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_REQUIRED');
+  }
+
+  const evidenceByAssetId = new Map<string, StaticCreativeQualityEvidence>();
+  for (const item of evidence) {
+    if (evidenceByAssetId.has(item.assetId)) {
+      throw new Error('TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_DUPLICATE');
+    }
+    evidenceByAssetId.set(item.assetId, item);
+  }
+
+  for (const asset of imageAssets) {
+    const item = evidenceByAssetId.get(asset.assetId);
+    if (!item) {
+      throw new Error(`TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_MISSING:${asset.assetId}`);
+    }
+    assertStaticCreativePublicationReady(item, {
+      assetId: asset.assetId,
+      outputSha256: asset.sha256,
+    });
+  }
 }
 
 export function assertFutureManagedSchedule(scheduledFor: string, now: Date = new Date()): void {
