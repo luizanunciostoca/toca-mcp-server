@@ -42,21 +42,21 @@
   "supportStrips": [
     {
       "text": "Venha para a Toca e",
-      "region": { "x": 63, "y": 428, "w": 456, "h": 48 },
+      "region": { "x": 64, "y": 428, "w": 456, "h": 48 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "sinta o dia se despedir",
-      "region": { "x": 63, "y": 485, "w": 498, "h": 49 },
+      "region": { "x": 64, "y": 485, "w": 498, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "de um jeito especial.",
-      "region": { "x": 63, "y": 544, "w": 441, "h": 49 },
+      "region": { "x": 64, "y": 544, "w": 441, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
@@ -93,7 +93,7 @@
     "colorMode": "WHITE"
   },
   "protectedRegions": [
-    { "id": "SUPPORT_COPY", "x": 63, "y": 428, "w": 498, "h": 165 },
+    { "id": "SUPPORT_COPY", "x": 64, "y": 428, "w": 498, "h": 165 },
     { "id": "CTA", "x": 299, "y": 815, "w": 483, "h": 65 },
     { "id": "HEADLINE", "x": 130, "y": 933, "w": 834, "h": 245 },
     { "id": "FOOTER", "x": 130, "y": 1663, "w": 819, "h": 150 }
