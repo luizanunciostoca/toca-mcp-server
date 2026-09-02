@@ -16,7 +16,7 @@ const sourceTextById: Readonly<Record<string, string>> = {
   'drive-ops': '- SUNSET: funciona das 16:30 às 22:00.\n- Site oficial: https://example.test',
   'drive-menu':
     'id,item,dominio,categoria,descricao,preco exibido,preco 1,preco 2,status\n1,Água,BEBIDAS,Águas,Água mineral,R$ 10,,,ATIVO',
-  'drive-loc': 'Localização: Morro de São Paulo, Bahia.',
+  'drive-loc': '\u200BLocalização:\u00A0Morro de São Paulo, Bahia.',
 };
 
 describe('Instagram engagement knowledge-base read-only preflight', () => {
