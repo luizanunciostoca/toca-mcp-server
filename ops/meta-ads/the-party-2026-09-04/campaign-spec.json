@@ -1,0 +1,104 @@
+{
+  "eventId": "THE_PARTY_2026_09_04",
+  "status": "AWAITING_CREATIVES",
+  "executionPolicy": {
+    "providerWriteBeforeCreatives": false,
+    "createState": "PAUSED",
+    "activationAllowed": false,
+    "requiresFreshPrepareSha": true,
+    "requiresProviderReadback": true
+  },
+  "account": {
+    "adAccountId": "311793958882290",
+    "currency": "BRL"
+  },
+  "campaign": {
+    "name": "TOCA | THE PARTY | 2026-09-04 | MORRO | PURCHASE",
+    "objective": "OUTCOME_SALES",
+    "specialAdCategories": []
+  },
+  "budget": {
+    "type": "LIFETIME",
+    "amountMinor": 25000,
+    "currency": "BRL",
+    "hardCampaignTotal": 250.0
+  },
+  "schedule": {
+    "timezone": "America/Bahia",
+    "startTime": "2026-09-02T14:33:00-03:00",
+    "endTime": "2026-09-05T01:00:00-03:00"
+  },
+  "adSet": {
+    "name": "THE PARTY | 2026-09-04 | Morro 2km | Broad 21-45 | Purchase",
+    "billingEvent": "IMPRESSIONS",
+    "optimizationGoal": "OFFSITE_CONVERSIONS",
+    "targeting": {
+      "age_min": 21,
+      "age_max": 45,
+      "targeting_automation": {
+        "advantage_audience": 0
+      },
+      "geo_locations": {
+        "custom_locations": [
+          {
+            "latitude": -13.3833,
+            "longitude": -38.9167,
+            "radius": 2,
+            "distance_unit": "kilometer"
+          }
+        ]
+      }
+    },
+    "promotedObject": {
+      "pixel_id": "461233076843065",
+      "custom_event_type": "PURCHASE"
+    }
+  },
+  "identity": {
+    "pageId": "306103746115875",
+    "instagramUserId": "17841402033495654"
+  },
+  "destination": {
+    "url": "https://tocadomorcego.com.br/produtos/the-party-3819.html",
+    "utm": {
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_party_2026_09_04_morro",
+      "utm_content": "{{creative_slot}}"
+    }
+  },
+  "placements": {
+    "platforms": ["facebook", "instagram"],
+    "preferred": ["feed", "stories", "reels"],
+    "excluded": ["audience_network", "messenger"]
+  },
+  "creativeSlots": [
+    {
+      "slot": "hero_event",
+      "required": true,
+      "preferredAspectRatio": "9:16",
+      "status": "MISSING"
+    },
+    {
+      "slot": "experience_video_or_motion",
+      "required": true,
+      "preferredAspectRatio": "9:16",
+      "status": "MISSING"
+    },
+    {
+      "slot": "urgency_friday",
+      "required": true,
+      "preferredAspectRatio": "9:16",
+      "status": "MISSING"
+    }
+  ],
+  "preflight": {
+    "requiredReads": [
+      "meta_ads.accounts.list",
+      "meta_ads.insights.get",
+      "meta_ads.audience.inspect"
+    ],
+    "geoRule": "Use Morro custom-location center with 2 km radius; fail closed if provider rejects the radius or targeting envelope.",
+    "objectiveRule": "Keep OUTCOME_SALES/PURCHASE unless fresh insights show insufficient purchase signal; any objective change requires a new spec and approval SHA."
+  }
+}
