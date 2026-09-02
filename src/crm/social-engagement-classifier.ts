@@ -333,7 +333,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     ugc,
     partnership,
     careers,
-    information: ticket || reservation || price || locationHours || operationalFaq || materialUnknown,
+    information:
+      ticket || reservation || price || locationHours || operationalFaq || materialUnknown,
   });
   const priority = classifyPriority({
     harassmentOrThreat: harassmentOrThreat || abusiveLanguage,
@@ -469,7 +470,10 @@ function classifyConfidence(input: {
 }
 
 function normalizeText(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }
 
 function hasAny(value: string, candidates: readonly string[]): boolean {

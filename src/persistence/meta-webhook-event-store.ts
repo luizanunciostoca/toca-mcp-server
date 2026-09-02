@@ -91,9 +91,8 @@ export class PostgresMetaWebhookEventStore {
 
           if (this.options.outbox && this.options.engagementScope) {
             const debounceMs = this.options.engagementDebounceMs ?? 0;
-            const availableAt = debounceMs > 0
-              ? new Date(Date.now() + debounceMs).toISOString()
-              : occurredAt;
+            const availableAt =
+              debounceMs > 0 ? new Date(Date.now() + debounceMs).toISOString() : occurredAt;
             await this.options.outbox.enqueue(
               client,
               createInstagramEngagementInboundEnvelope(
@@ -130,7 +129,12 @@ function defaultOptions(
   return {
     outbox: new PostgresTransactionalOutbox(pool),
     engagementScope: { tenantId, workspaceId, organizationId },
-    engagementDebounceMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_GROUP_DEBOUNCE_MS, 5_000, 0, 60_000),
+    engagementDebounceMs: boundedInteger(
+      env.INSTAGRAM_ENGAGEMENT_GROUP_DEBOUNCE_MS,
+      5_000,
+      0,
+      60_000,
+    ),
   };
 }
 

@@ -34,11 +34,21 @@ export interface EngagementPolicyInput {
 }
 
 const HUMAN_REQUIRED = new Set<EngagementIntent>([
-  'COMPLAINT', 'REFUND', 'LEGAL', 'SAFETY_INCIDENT', 'PRESS', 'PUBLIC_FIGURE',
-  'HARASSMENT_OR_THREAT', 'UNKNOWN',
+  'COMPLAINT',
+  'REFUND',
+  'LEGAL',
+  'SAFETY_INCIDENT',
+  'PRESS',
+  'PUBLIC_FIGURE',
+  'HARASSMENT_OR_THREAT',
+  'UNKNOWN',
 ]);
 const AUTO_ELIGIBLE = new Set<EngagementIntent>([
-  'FAQ_OPERATIONAL', 'EVENT_INFO', 'TICKET_INFO', 'LOCATION_HOURS', 'GENERAL_SOCIAL',
+  'FAQ_OPERATIONAL',
+  'EVENT_INFO',
+  'TICKET_INFO',
+  'LOCATION_HOURS',
+  'GENERAL_SOCIAL',
 ]);
 
 function decision(
@@ -47,7 +57,13 @@ function decision(
   autonomy: EngagementAutonomy,
   reason: string,
 ): EngagementDecision {
-  return { channel, risk, autonomy, reason, requiresHumanReview: autonomy === 'HUMAN_REVIEW_REQUIRED' };
+  return {
+    channel,
+    risk,
+    autonomy,
+    reason,
+    requiresHumanReview: autonomy === 'HUMAN_REVIEW_REQUIRED',
+  };
 }
 
 export function evaluateEngagementPolicy(input: EngagementPolicyInput): EngagementDecision {
@@ -76,7 +92,12 @@ export function evaluateEngagementPolicy(input: EngagementPolicyInput): Engageme
     if (input.writesEnabled !== true) {
       return decision(input.channel, 'LOW', 'SUGGEST_ONLY', 'engagement_writes_kill_switch');
     }
-    return decision(input.channel, 'LOW', 'AUTO_REPLY_ALLOWED', `verified_low_risk:${input.intent}`);
+    return decision(
+      input.channel,
+      'LOW',
+      'AUTO_REPLY_ALLOWED',
+      `verified_low_risk:${input.intent}`,
+    );
   }
   return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'unknown_or_unclassified');
 }

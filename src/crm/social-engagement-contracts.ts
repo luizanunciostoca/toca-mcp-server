@@ -56,10 +56,7 @@ export type SocialNextAction =
   | 'NO_ACTION';
 
 export type SocialReplyDisposition =
-  | 'AUTO_REPLY_ALLOWED'
-  | 'SUGGEST_ONLY'
-  | 'HUMAN_REQUIRED'
-  | 'NO_REPLY';
+  'AUTO_REPLY_ALLOWED' | 'SUGGEST_ONLY' | 'HUMAN_REQUIRED' | 'NO_REPLY';
 
 export interface SocialEngagementClassification {
   readonly intent: EngagementIntent;

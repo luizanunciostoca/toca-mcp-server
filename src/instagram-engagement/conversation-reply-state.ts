@@ -2,12 +2,19 @@ import type pg from 'pg';
 
 export async function recordConversationReply(
   pool: pg.Pool,
-  input: { readonly engagementEventId: string; readonly providerReplyId: string; readonly now: string },
+  input: {
+    readonly engagementEventId: string;
+    readonly providerReplyId: string;
+    readonly now: string;
+  },
 ): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const action = await client.query<{ thread_id: string | null; message_group_sha256: string | null }>(
+    const action = await client.query<{
+      thread_id: string | null;
+      message_group_sha256: string | null;
+    }>(
       `select thread_id, message_group_sha256
          from instagram_engagement_actions
         where event_id = $1
@@ -51,7 +58,10 @@ export async function recordConversationReplyFailure(
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const action = await client.query<{ thread_id: string | null; message_group_sha256: string | null }>(
+    const action = await client.query<{
+      thread_id: string | null;
+      message_group_sha256: string | null;
+    }>(
       `select thread_id, message_group_sha256
          from instagram_engagement_actions
         where event_id = $1

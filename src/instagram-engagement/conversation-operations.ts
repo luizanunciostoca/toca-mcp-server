@@ -54,7 +54,11 @@ export class PostgresInstagramConversationOperations {
     options: ConversationOperationsOptions = {},
   ) {
     this.#groupingWindowMs = options.groupingWindowMs ?? 8_000;
-    if (!Number.isInteger(this.#groupingWindowMs) || this.#groupingWindowMs < 0 || this.#groupingWindowMs > 60_000) {
+    if (
+      !Number.isInteger(this.#groupingWindowMs) ||
+      this.#groupingWindowMs < 0 ||
+      this.#groupingWindowMs > 60_000
+    ) {
       throw new Error('INSTAGRAM_ENGAGEMENT_GROUPING_WINDOW_MS_INVALID');
     }
   }
@@ -69,7 +73,9 @@ export class PostgresInstagramConversationOperations {
     const senderId = input.payload.senderId?.trim();
     const currentText = input.payload.text?.trim() ?? '';
     if (!senderId) {
-      const fallbackThreadId = digest(`thread|${input.tenantId}|${input.payload.channel}|${input.payload.eventId}`);
+      const fallbackThreadId = digest(
+        `thread|${input.tenantId}|${input.payload.channel}|${input.payload.eventId}`,
+      );
       const groupSha256 = digest(`group|${input.payload.eventId}|${digest(currentText)}`);
       return {
         threadId: fallbackThreadId,
@@ -84,7 +90,8 @@ export class PostgresInstagramConversationOperations {
 
     const threadId = threadKey(input.tenantId, input.payload);
     const occurredAt = new Date(input.payload.occurredAt ?? input.now);
-    if (!Number.isFinite(occurredAt.getTime())) throw new Error('INSTAGRAM_ENGAGEMENT_OCCURRED_AT_INVALID');
+    if (!Number.isFinite(occurredAt.getTime()))
+      throw new Error('INSTAGRAM_ENGAGEMENT_OCCURRED_AT_INVALID');
     const from = new Date(occurredAt.getTime() - this.#groupingWindowMs).toISOString();
     const to = new Date(occurredAt.getTime() + this.#groupingWindowMs).toISOString();
 
@@ -104,25 +111,40 @@ export class PostgresInstagramConversationOperations {
         senderId,
         from,
         to,
-        input.payload.channel === 'COMMENT' ? input.payload.mediaId ?? '' : null,
+        input.payload.channel === 'COMMENT' ? (input.payload.mediaId ?? '') : null,
       ],
     );
 
     const parsed = rows.rows
       .map((row) => ({ row, payload: safeInbound(row.payload) }))
-      .filter((entry): entry is { row: GroupRow; payload: InstagramEngagementInboundPayload } => Boolean(entry.payload));
+      .filter((entry): entry is { row: GroupRow; payload: InstagramEngagementInboundPayload } =>
+        Boolean(entry.payload),
+      );
     if (!parsed.some((entry) => entry.payload.eventId === input.payload.eventId)) {
-      parsed.push({ row: { event_id: input.payload.eventId, occurred_at: occurredAt, payload: input.payload }, payload: input.payload });
+      parsed.push({
+        row: { event_id: input.payload.eventId, occurred_at: occurredAt, payload: input.payload },
+        payload: input.payload,
+      });
     }
-    parsed.sort((a, b) => dateMs(a.row.occurred_at) - dateMs(b.row.occurred_at) || a.row.event_id.localeCompare(b.row.event_id));
+    parsed.sort(
+      (a, b) =>
+        dateMs(a.row.occurred_at) - dateMs(b.row.occurred_at) ||
+        a.row.event_id.localeCompare(b.row.event_id),
+    );
 
     const eventIds = [...new Set(parsed.map((entry) => entry.payload.eventId))];
-    const texts = parsed.map((entry) => entry.payload.text?.trim()).filter((value): value is string => Boolean(value));
+    const texts = parsed
+      .map((entry) => entry.payload.text?.trim())
+      .filter((value): value is string => Boolean(value));
     const groupedText = texts.join('\n');
     const textSha256 = digest(groupedText);
     const groupSha256 = digest(`group|${threadId}|${eventIds.join('|')}|${textSha256}`);
-    const occurredFrom = new Date(Math.min(...parsed.map((entry) => dateMs(entry.row.occurred_at)))).toISOString();
-    const occurredTo = new Date(Math.max(...parsed.map((entry) => dateMs(entry.row.occurred_at)))).toISOString();
+    const occurredFrom = new Date(
+      Math.min(...parsed.map((entry) => dateMs(entry.row.occurred_at))),
+    ).toISOString();
+    const occurredTo = new Date(
+      Math.max(...parsed.map((entry) => dateMs(entry.row.occurred_at))),
+    ).toISOString();
 
     const client = await this.pool.connect();
     try {
@@ -138,8 +160,18 @@ export class PostgresInstagramConversationOperations {
            last_inbound_at = greatest(instagram_engagement_threads.last_inbound_at, excluded.last_inbound_at),
            updated_at = excluded.updated_at,
            version = instagram_engagement_threads.version + 1`,
-        [threadId, input.tenantId, input.workspaceId, input.organizationId, input.payload.channel,
-          input.payload.eventId, eventIds.length, occurredFrom, occurredTo, input.now],
+        [
+          threadId,
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          input.payload.channel,
+          input.payload.eventId,
+          eventIds.length,
+          occurredFrom,
+          occurredTo,
+          input.now,
+        ],
       );
       const thread = await client.query<ThreadRow>(
         'select state from instagram_engagement_threads where thread_id = $1 for update',
@@ -152,8 +184,17 @@ export class PostgresInstagramConversationOperations {
            occurred_from, occurred_to, status, created_at, updated_at
          ) values ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz,'CLAIMED',$9::timestamptz,$9::timestamptz)
          on conflict (group_sha256) do nothing`,
-        [groupSha256, threadId, input.payload.eventId, eventIds, eventIds.length, textSha256,
-          occurredFrom, occurredTo, input.now],
+        [
+          groupSha256,
+          threadId,
+          input.payload.eventId,
+          eventIds,
+          eventIds.length,
+          textSha256,
+          occurredFrom,
+          occurredTo,
+          input.now,
+        ],
       );
       await client.query('commit');
       return {
@@ -184,7 +225,8 @@ export class PostgresInstagramConversationOperations {
     const groupStatus = input.actionStatus;
     const primary = input.classification.conversationIntents[0] ?? 'OTHER';
     const secondary = input.classification.conversationIntents.slice(1);
-    const followUpRequired = input.classification.commercialIntent === 'HIGH' && state !== 'ESCALATED';
+    const followUpRequired =
+      input.classification.commercialIntent === 'HIGH' && state !== 'ESCALATED';
     const client = await this.pool.connect();
     try {
       await client.query('begin');
@@ -201,9 +243,19 @@ export class PostgresInstagramConversationOperations {
            awaiting_since = case when $2 in ('AWAITING_APPROVAL','ESCALATED') then $11::timestamptz else awaiting_since end,
            updated_at = $11::timestamptz, version = version + 1
          where thread_id = $1`,
-        [input.threadId, state, primary, secondary, input.classification.priority,
-          input.classification.confidence, input.classification.commercialIntent,
-          input.classification.sentiment, followUpRequired, input.groupSha256, input.now],
+        [
+          input.threadId,
+          state,
+          primary,
+          secondary,
+          input.classification.priority,
+          input.classification.confidence,
+          input.classification.commercialIntent,
+          input.classification.sentiment,
+          followUpRequired,
+          input.groupSha256,
+          input.now,
+        ],
       );
       await client.query('commit');
     } catch (error) {
@@ -246,7 +298,11 @@ export class PostgresInstagramConversationOperations {
     }
   }
 
-  async markGroupNoAction(input: { readonly threadId: string; readonly groupSha256: string; readonly now: string }): Promise<void> {
+  async markGroupNoAction(input: {
+    readonly threadId: string;
+    readonly groupSha256: string;
+    readonly now: string;
+  }): Promise<void> {
     await this.pool.query(
       `update instagram_engagement_message_groups set status='NO_ACTION', updated_at=$3::timestamptz
         where group_sha256=$1 and thread_id=$2`,
@@ -257,18 +313,25 @@ export class PostgresInstagramConversationOperations {
 
 function threadKey(tenantId: string, payload: InstagramEngagementInboundPayload): string {
   const sender = payload.senderId?.trim() || payload.eventId;
-  const surface = payload.channel === 'COMMENT' ? payload.mediaId ?? payload.commentId ?? 'comment' : 'direct';
+  const surface =
+    payload.channel === 'COMMENT' ? (payload.mediaId ?? payload.commentId ?? 'comment') : 'direct';
   return digest(`thread|${tenantId}|${payload.channel}|${sender}|${surface}`);
 }
 
 function safeInbound(value: unknown): InstagramEngagementInboundPayload | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<InstagramEngagementInboundPayload>;
-  if (typeof candidate.eventId !== 'string' || (candidate.channel !== 'COMMENT' && candidate.channel !== 'DIRECT')) return null;
+  if (
+    typeof candidate.eventId !== 'string' ||
+    (candidate.channel !== 'COMMENT' && candidate.channel !== 'DIRECT')
+  )
+    return null;
   return candidate as InstagramEngagementInboundPayload;
 }
 
-function stateForAction(status: 'CLASSIFIED' | 'SUGGESTED' | 'HUMAN_REVIEW' | 'READY_TO_SEND'): InstagramConversationState {
+function stateForAction(
+  status: 'CLASSIFIED' | 'SUGGESTED' | 'HUMAN_REVIEW' | 'READY_TO_SEND',
+): InstagramConversationState {
   if (status === 'HUMAN_REVIEW') return 'ESCALATED';
   if (status === 'SUGGESTED') return 'AWAITING_APPROVAL';
   if (status === 'READY_TO_SEND') return 'RESPONDABLE';
