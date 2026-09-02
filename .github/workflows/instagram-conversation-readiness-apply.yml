@@ -1,0 +1,123 @@
+name: Instagram Conversation Readiness Apply
+
+on:
+  push:
+    branches:
+      - feat/instagram-conversation-readiness-v1-20260902
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/instagram-conversation-readiness-v1-20260902
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply fail-closed conversation readiness contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/instagram-engagement-readiness-preflight.ts')
+          source = path.read_text()
+
+          old_tables = """  'instagram_engagement_actions',\n] as const;"""
+          new_tables = """  'instagram_engagement_actions',\n  'instagram_engagement_threads',\n  'instagram_engagement_message_groups',\n] as const;"""
+          if old_tables not in source:
+              raise SystemExit('required table anchor missing')
+          source = source.replace(old_tables, new_tables, 1)
+
+          old_constants = """const TIERED_KNOWLEDGE_MIGRATION = '037_instagram_engagement_tiered_knowledge.sql';"""
+          new_constants = """const TIERED_KNOWLEDGE_MIGRATION = '037_instagram_engagement_tiered_knowledge.sql';\nconst CONVERSATION_OPERATIONS_MIGRATION = '038_instagram_conversation_operations.sql';"""
+          if old_constants not in source:
+              raise SystemExit('migration constant anchor missing')
+          source = source.replace(old_constants, new_constants, 1)
+
+          old_required = "const requiredMigrations = [ENGAGEMENT_MIGRATION, KNOWLEDGE_MIGRATION];"
+          new_required = "const requiredMigrations = [\n    ENGAGEMENT_MIGRATION,\n    KNOWLEDGE_MIGRATION,\n    CONVERSATION_OPERATIONS_MIGRATION,\n  ];"
+          if old_required not in source:
+              raise SystemExit('required migration anchor missing')
+          source = source.replace(old_required, new_required, 1)
+
+          old_guard = """  if (!applied.has(ENGAGEMENT_MIGRATION)) {\n    throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');\n  }"""
+          new_guard = """  if (!applied.has(ENGAGEMENT_MIGRATION)) {\n    throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');\n  }\n  if (!applied.has(CONVERSATION_OPERATIONS_MIGRATION)) {\n    throw new Error('INSTAGRAM_ENGAGEMENT_CONVERSATION_MIGRATION_NOT_APPLIED');\n  }"""
+          if old_guard not in source:
+              raise SystemExit('migration guard anchor missing')
+          source = source.replace(old_guard, new_guard, 1)
+
+          old_output = """      migrationVerified: true,\n      knowledgeReadable: true,"""
+          new_output = """      migrationVerified: true,\n      conversationOperationsVerified: true,\n      knowledgeReadable: true,"""
+          if old_output not in source:
+              raise SystemExit('readiness output anchor missing')
+          source = source.replace(old_output, new_output, 1)
+          path.write_text(source)
+          PY
+
+          cat > test/instagram-conversation-readiness-contract.test.ts <<'EOF'
+          import { readFile } from 'node:fs/promises';
+          import { describe, expect, it } from 'vitest';
+
+          describe('Instagram conversation operations readiness contract', () => {
+            it('fails closed unless migration 038 and both conversation tables are present', async () => {
+              const readiness = await readFile('src/instagram-engagement-readiness-preflight.ts', 'utf8');
+              const migration = await readFile('migrations/038_instagram_conversation_operations.sql', 'utf8');
+
+              expect(readiness).toContain("'instagram_engagement_threads'");
+              expect(readiness).toContain("'instagram_engagement_message_groups'");
+              expect(readiness).toContain("'038_instagram_conversation_operations.sql'");
+              expect(readiness).toContain('INSTAGRAM_ENGAGEMENT_CONVERSATION_MIGRATION_NOT_APPLIED');
+              expect(readiness).toContain('conversationOperationsVerified: true');
+
+              expect(migration).toContain('create table if not exists instagram_engagement_threads');
+              expect(migration).toContain('create table if not exists instagram_engagement_message_groups');
+              expect(migration).toContain("'AWAITING_APPROVAL'");
+              expect(migration).toContain("'FOLLOW_UP_REQUIRED'");
+              expect(migration).toContain("'ESCALATED'");
+            });
+          });
+          EOF
+
+      - name: Format exact changed sources
+        run: >-
+          pnpm exec prettier --write
+          src/instagram-engagement-readiness-preflight.ts
+          test/instagram-conversation-readiness-contract.test.ts
+
+      - name: Remove temporary apply workflow
+        run: rm .github/workflows/instagram-conversation-readiness-apply.yml
+
+      - name: Commit readiness hardening atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/instagram-engagement-readiness-preflight.ts \
+            test/instagram-conversation-readiness-contract.test.ts \
+            .github/workflows/instagram-conversation-readiness-apply.yml
+          git diff --cached --quiet && { echo 'Expected readiness changes missing' >&2; exit 1; }
+          git commit -m "feat(instagram): enforce conversation operations readiness"
+          git push origin HEAD:feat/instagram-conversation-readiness-v1-20260902
