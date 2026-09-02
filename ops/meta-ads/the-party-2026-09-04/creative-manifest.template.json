@@ -1,0 +1,39 @@
+{
+  "eventId": "THE_PARTY_2026_09_04",
+  "status": "AWAITING_FILES",
+  "assets": [
+    {
+      "slot": "hero_event",
+      "fileName": null,
+      "mimeType": null,
+      "sourceSha256": null,
+      "creativeName": "The Party 04-09 | Hero evento",
+      "adName": "The Party 04-09 | Hero evento",
+      "primaryText": null,
+      "headline": null,
+      "callToAction": "BUY_NOW"
+    },
+    {
+      "slot": "experience_video_or_motion",
+      "fileName": null,
+      "mimeType": null,
+      "sourceSha256": null,
+      "creativeName": "The Party 04-09 | Experiencia",
+      "adName": "The Party 04-09 | Experiencia",
+      "primaryText": null,
+      "headline": null,
+      "callToAction": "BUY_NOW"
+    },
+    {
+      "slot": "urgency_friday",
+      "fileName": null,
+      "mimeType": null,
+      "sourceSha256": null,
+      "creativeName": "The Party 04-09 | Urgencia sexta",
+      "adName": "The Party 04-09 | Urgencia sexta",
+      "primaryText": null,
+      "headline": null,
+      "callToAction": "BUY_NOW"
+    }
+  ]
+}
