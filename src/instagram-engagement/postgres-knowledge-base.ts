@@ -64,11 +64,13 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
     if (HUMAN_OR_SENSITIVE_INTENTS.has(expectedIntent)) return null;
     const query = normalizeKnowledgePrompt(text);
     if (!query) return null;
+    const tsQuery = buildNaturalLanguageTsQuery(query);
+    if (!tsQuery) return null;
 
     const result = await this.pool.query<KnowledgeBaseCandidate>(
       `select c.chunk_id, c.heading, c.content, c.search_text, c.risk, c.autonomy,
               c.source_reference,
-              ts_rank_cd(c.search_vector, plainto_tsquery('simple', $1))::double precision as rank
+              ts_rank_cd(c.search_vector, to_tsquery('simple', $1))::double precision as rank
          from instagram_engagement_knowledge_chunks c
          join instagram_engagement_knowledge_documents d on d.document_id = c.document_id
         where c.active = true
@@ -76,10 +78,10 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
           and $2 = any(c.intent_hints)
           and c.autonomy in ('AUTO_REPLY_ALLOWED','SUGGEST_ONLY')
           and c.risk in ('LOW','MEDIUM')
-          and c.search_vector @@ plainto_tsquery('simple', $1)
+          and c.search_vector @@ to_tsquery('simple', $1)
         order by rank desc, c.chunk_id asc
         limit $3`,
-      [query, expectedIntent, this.limit],
+      [tsQuery, expectedIntent, this.limit],
     );
 
     let best: KnowledgeBaseCandidate | undefined;
@@ -110,4 +112,16 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
       chunkId: best.chunk_id,
     };
   }
+}
+
+function buildNaturalLanguageTsQuery(query: string): string {
+  const tokens = [
+    ...new Set(
+      query
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length > 1 && /^[a-z0-9]+$/.test(token)),
+    ),
+  ];
+  return tokens.join(' | ');
 }
