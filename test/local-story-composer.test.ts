@@ -40,7 +40,9 @@ function renderer() {
 describe('LocalStoryComposer', () => {
   it('fails closed when master bytes are missing', async () => {
     const composer = new LocalStoryComposer(() => Promise.resolve());
-    await expect(composer.compose(base({ imageBytes: new Uint8Array() }))).rejects.toMatchObject({
+    await expect(
+      composer.compose(base({ imageBytes: new Uint8Array() })),
+    ).rejects.toMatchObject({
       code: 'SOURCE_IMAGE_BINDING_FAILURE',
     });
   });
@@ -52,7 +54,14 @@ describe('LocalStoryComposer', () => {
 
     const [, args] = runner.mock.calls[0] ?? [];
     expect(args).toEqual(
-      expect.arrayContaining(['-resize', '1080x1920^', '-extent', '1080x1920', '-quality', '95']),
+      expect.arrayContaining([
+        '-resize',
+        '1080x1920^',
+        '-extent',
+        '1080x1920',
+        '-quality',
+        '95',
+      ]),
     );
     expect(args).not.toContain('-annotate');
     expect(result).toMatchObject({
