@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import {
   evaluateStaticCreativeQuality,
   type StaticCreativeGateStatus,
+  type StaticCreativeLayoutElement,
   type StaticCreativeQualityEvidence,
   type StaticCreativeSourceRole,
 } from '../../creative/static-creative-quality-gate.js';
@@ -279,12 +280,12 @@ function buildCommandArgs(
   return args;
 }
 
-function storyLayoutElements(input: LocalStoryComposeInput) {
+function storyLayoutElements(input: LocalStoryComposeInput): StaticCreativeLayoutElement[] {
   if (input.templateId === 'PHOTO_ONLY') return [];
-  const elements = [
+  const elements: StaticCreativeLayoutElement[] = [
     {
       id: 'brand',
-      role: 'BRAND' as const,
+      role: 'BRAND',
       x: STORY_LEFT,
       y: STORY_BRAND_TOP,
       width: 420,
@@ -292,7 +293,7 @@ function storyLayoutElements(input: LocalStoryComposeInput) {
     },
     {
       id: 'message',
-      role: 'HEADLINE' as const,
+      role: 'HEADLINE',
       x: STORY_LEFT,
       y: STORY_MESSAGE_TOP,
       width: STORY_CONTENT_WIDTH,
@@ -302,7 +303,7 @@ function storyLayoutElements(input: LocalStoryComposeInput) {
   if (input.cta?.trim()) {
     elements.push({
       id: 'cta',
-      role: 'CTA' as const,
+      role: 'CTA',
       x: STORY_LEFT,
       y: STORY_CTA_TOP,
       width: STORY_CONTENT_WIDTH,
