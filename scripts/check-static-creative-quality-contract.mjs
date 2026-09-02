@@ -4,9 +4,18 @@ const policyPath = new URL(
   '../control/creative-standards/static-creative-quality-policy.v1.json',
   import.meta.url,
 );
-const gatePath = new URL('../src/creative/static-creative-quality-gate.ts', import.meta.url);
-const composerPath = new URL('../src/providers/local/local-story-composer.ts', import.meta.url);
-const schedulerPath = new URL('../src/scheduler/toca-managed-instagram-scheduler.ts', import.meta.url);
+const gatePath = new URL(
+  '../src/creative/static-creative-quality-gate.ts',
+  import.meta.url,
+);
+const composerPath = new URL(
+  '../src/providers/local/local-story-composer.ts',
+  import.meta.url,
+);
+const schedulerPath = new URL(
+  '../src/scheduler/toca-managed-instagram-scheduler.ts',
+  import.meta.url,
+);
 
 const [policyRaw, gate, composer, scheduler] = await Promise.all([
   readFile(policyPath, 'utf8'),
@@ -17,8 +26,14 @@ const [policyRaw, gate, composer, scheduler] = await Promise.all([
 
 const policy = JSON.parse(policyRaw);
 
-assert(policy.policyId === 'TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1', 'policy id drift');
-assert(policy.failureMode === 'FAIL_CLOSED', 'quality policy must fail closed');
+assert(
+  policy.policyId === 'TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1',
+  'policy id drift',
+);
+assert(
+  policy.failureMode === 'FAIL_CLOSED',
+  'quality policy must fail closed',
+);
 assert(
   policy.sourcePolicy?.referenceTemplatesMayBeFinalSource === false,
   'reference templates must never be final static sources',
@@ -37,15 +52,19 @@ assert(
   'Story safe-area contract drifted',
 );
 assert(
-  policy.visualArtifactPolicy?.forbiddenOverlayStyles?.includes('HARD_FULL_WIDTH_PANEL'),
+  policy.visualArtifactPolicy?.forbiddenOverlayStyles?.includes(
+    'HARD_FULL_WIDTH_PANEL',
+  ),
   'hard full-width render bands must remain forbidden',
 );
 assert(
-  policy.typographyPolicy?.canonicalFontPinRequiredWhenTypographyIsPresent === true,
+  policy.typographyPolicy?.canonicalFontPinRequiredWhenTypographyIsPresent ===
+    true,
   'canonical typography pin must remain mandatory',
 );
 assert(
-  policy.publicationPolicy?.newStaticScheduleRequiresExactQualityEvidence === true,
+  policy.publicationPolicy?.newStaticScheduleRequiresExactQualityEvidence ===
+    true,
   'new static schedules must require exact QA evidence',
 );
 
@@ -59,7 +78,10 @@ for (const required of [
   "candidate.overlayStyle === 'HARD_FULL_WIDTH_PANEL'",
   'STATIC_CREATIVE_QUALITY_OUTPUT_SHA256_MISMATCH',
 ]) {
-  assert(gate.includes(required), `runtime gate missing contract marker: ${required}`);
+  assert(
+    gate.includes(required),
+    `runtime gate missing contract marker: ${required}`,
+  );
 }
 
 assert(
@@ -87,7 +109,9 @@ assert(
   'scheduler static QA guard missing',
 );
 assert(
-  scheduler.includes('TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_REQUIRED'),
+  scheduler.includes(
+    'TOCA_MANAGED_INSTAGRAM_STATIC_CREATIVE_QUALITY_REQUIRED',
+  ),
   'scheduler must fail closed when static QA evidence is missing',
 );
 assert(
@@ -98,5 +122,7 @@ assert(
 console.log('static creative quality architecture contract: PASS');
 
 function assert(condition, message) {
-  if (!condition) throw new Error(`STATIC_CREATIVE_QUALITY_CONTRACT_FAILED:${message}`);
+  if (!condition) {
+    throw new Error(`STATIC_CREATIVE_QUALITY_CONTRACT_FAILED:${message}`);
+  }
 }
