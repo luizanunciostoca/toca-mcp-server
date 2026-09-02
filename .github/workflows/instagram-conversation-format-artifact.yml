@@ -1,6 +1,9 @@
 name: Instagram Conversation Format Artifact
 
 on:
+  push:
+    branches:
+      - feat/instagram-conversation-ops-v1-20260902
   pull_request:
     paths:
       - 'src/crm/social-engagement-classifier.ts'
@@ -21,7 +24,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup pnpm
@@ -52,7 +55,7 @@ jobs:
       - name: Upload exact formatted sources
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: instagram-conversation-formatted-${{ github.event.pull_request.head.sha }}
+          name: instagram-conversation-formatted-${{ github.sha }}
           path: |
             src/crm/social-engagement-classifier.ts
             src/crm/social-engagement-contracts.ts
