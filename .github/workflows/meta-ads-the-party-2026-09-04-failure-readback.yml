@@ -1,0 +1,89 @@
+name: Meta Ads The Party 2026-09-04 Failure Readback
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-ads-the-party-2026-09-04-failure-readback.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-the-party-2026-09-04-failure-readback
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  FAILED_JOB_NAME: toca-meta-ads-party-0904-33680313117
+  WINDOW_START: '2026-09-02T20:41:20Z'
+  WINDOW_END: '2026-09-02T20:41:47Z'
+
+jobs:
+  readback:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Authenticate read-only diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read and sanitize exact failed Cloud Run execution logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILTER="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${FAILED_JOB_NAME}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
+          gcloud logging read "$FILTER" \
+            --project "$GCP_PROJECT_ID" \
+            --limit=250 \
+            --order=asc \
+            --format=json > /tmp/raw.json
+
+          jq '[
+            .[]
+            | {
+                timestamp,
+                severity: (.severity // null),
+                execution: (.labels["run.googleapis.com/execution_name"] // .resource.labels.execution_name // null),
+                text: (.textPayload // .jsonPayload.message // .jsonPayload.error // .jsonPayload.stack // null)
+              }
+            | select(.text != null)
+            | .text |= (
+                gsub("Bearer [A-Za-z0-9._~+/=-]+"; "Bearer [REDACTED]")
+                | gsub("access_token=[^&[:space:]]+"; "access_token=[REDACTED]")
+              )
+          ]' /tmp/raw.json > /tmp/sanitized.json
+
+          COUNT="$(jq 'length' /tmp/sanitized.json)"
+          test "$COUNT" -gt 0
+          echo "META_ADS_0904_DIAGNOSTIC_ENTRY_COUNT=$COUNT"
+          echo 'META_ADS_0904_DIAGNOSTIC_BEGIN'
+          jq -c '.[]' /tmp/sanitized.json
+          echo 'META_ADS_0904_DIAGNOSTIC_END'
+
+          {
+            echo '## The Party 2026-09-04 CREATE_PAUSED failure readback'
+            echo
+            echo "- Job: \`$FAILED_JOB_NAME\`"
+            echo "- Window: \`$WINDOW_START\` → \`$WINDOW_END\`"
+            echo "- Sanitized log entries: \`$COUNT\`"
+            echo '- Provider mutation from this diagnostic: `false`'
+            echo '- Database mutation from this diagnostic: `false`'
+          } >> "$GITHUB_STEP_SUMMARY"
