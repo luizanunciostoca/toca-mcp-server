@@ -152,7 +152,9 @@ try {
       status: 'AD06_AD07_ADDED_AND_CAMPAIGN_ACTIVATED',
       campaignStatus: scalarString(activeVerification.campaign.status),
       adSetStatus: scalarString(activeVerification.adSet.status),
-      configuredActiveAds: activeVerification.ads.filter((ad) => scalarString(ad.status) === 'ACTIVE').length,
+      configuredActiveAds: activeVerification.ads.filter(
+        (ad) => scalarString(ad.status) === 'ACTIVE',
+      ).length,
       finalAdCount: activeVerification.ads.length,
       newAdIds: createdAdIds,
       newCreativeIds: createdCreativeIds,
@@ -210,7 +212,8 @@ async function readEnvelope(): Promise<Envelope> {
   );
   const adSet = asRecord(
     await api.get(ADSET_ID, {
-      fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,start_time,end_time,targeting,promoted_object',
+      fields:
+        'id,name,campaign_id,status,effective_status,lifetime_budget,start_time,end_time,targeting,promoted_object',
     }),
   );
   const ads = arrayRecords(
@@ -261,11 +264,15 @@ function assertPausedPreflight(envelope: Envelope): void {
   if (envelope.ads.some((ad) => scalarString(ad.status) !== 'PAUSED')) {
     throw new Error('META_ADS_THE_PARTY_0904_ADD_ACTIVATE_EXISTING_AD_NOT_PAUSED');
   }
-  for (const ad of envelope.ads) assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'PREFLIGHT_AD_ID')));
+  for (const ad of envelope.ads)
+    assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'PREFLIGHT_AD_ID')));
 }
 
 function assertSevenPaused(envelope: Envelope): void {
-  if (scalarString(envelope.campaign.status) !== 'PAUSED' || scalarString(envelope.adSet.status) !== 'PAUSED') {
+  if (
+    scalarString(envelope.campaign.status) !== 'PAUSED' ||
+    scalarString(envelope.adSet.status) !== 'PAUSED'
+  ) {
     throw new Error('META_ADS_THE_PARTY_0904_ADD_ACTIVATE_PAUSED_ENVELOPE_CHANGED');
   }
   if (finiteNumber(envelope.adSet.lifetime_budget) !== EXPECTED_BUDGET_MINOR) {
@@ -285,7 +292,8 @@ function assertSevenPaused(envelope: Envelope): void {
       throw new Error(`META_ADS_THE_PARTY_0904_ADD_ACTIVATE_NEW_AD_MISSING_${asset.key}`);
     }
   }
-  for (const ad of envelope.ads) assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'PAUSED_AD_ID')));
+  for (const ad of envelope.ads)
+    assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'PAUSED_AD_ID')));
 }
 
 function assertActiveFinal(envelope: Envelope): void {
@@ -307,7 +315,8 @@ function assertActiveFinal(envelope: Envelope): void {
   if (envelope.ads.some((ad) => scalarString(ad.status) !== 'ACTIVE')) {
     throw new Error('META_ADS_THE_PARTY_0904_ADD_ACTIVATE_FINAL_AD_NOT_ACTIVE');
   }
-  for (const ad of envelope.ads) assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'FINAL_AD_ID')));
+  for (const ad of envelope.ads)
+    assertCreativeLearnMore(envelope.creatives.get(requiredScalar(ad.id, 'FINAL_AD_ID')));
 }
 
 function assertCreativeLearnMore(creative: Record<string, unknown> | undefined): void {
@@ -377,7 +386,10 @@ async function rollbackToPaused(): Promise<string[]> {
   return errors;
 }
 
-async function writeAudit(decision: string, providerResult: Readonly<Record<string, unknown>>): Promise<void> {
+async function writeAudit(
+  decision: string,
+  providerResult: Readonly<Record<string, unknown>>,
+): Promise<void> {
   await pool.query(
     `insert into audit_events
        (correlation_id, actor_id, tool_name, risk_class, decision, normalized_payload, provider_result)
