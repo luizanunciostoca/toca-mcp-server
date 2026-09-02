@@ -9,7 +9,7 @@ class FixedSecretResolver implements SecretResolver {
   }
 }
 
-function jpegBytes(): Uint8Array {
+function jpegBytes(): Uint8Array<ArrayBuffer> {
   return new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0xff, 0xd9]);
 }
 
