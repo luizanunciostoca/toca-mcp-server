@@ -113,7 +113,13 @@ export class PhotoEnhancementRuntimeService {
 }
 
 function validateIdentity(input: PhotoEnhancementRuntimeInput): void {
-  for (const [name, value] of Object.entries(input)) {
+  const requiredValues: readonly (readonly [string, string])[] = [
+    ['contentItemId', input.contentItemId],
+    ['sourceAssetId', input.sourceAssetId],
+    ['sourceDriveFileId', input.sourceDriveFileId],
+    ['correlationId', input.correlationId],
+  ];
+  for (const [name, value] of requiredValues) {
     if (!value.trim()) throw new Error(`PHOTO_ENHANCEMENT_${name.toUpperCase()}_REQUIRED`);
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.correlationId)) {
