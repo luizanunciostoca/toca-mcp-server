@@ -149,7 +149,10 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function hasExpectedImageSignature(contentType: PhotoSourceContentType, bytes: Uint8Array): boolean {
+function hasExpectedImageSignature(
+  contentType: PhotoSourceContentType,
+  bytes: Uint8Array,
+): boolean {
   if (bytes.byteLength < 4) return false;
   if (contentType === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8;
   if (contentType === 'image/png') {
@@ -161,7 +164,9 @@ function hasExpectedImageSignature(contentType: PhotoSourceContentType, bytes: U
       bytes[3] === 0x47
     );
   }
-  return bytes.byteLength >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP';
+  return (
+    bytes.byteLength >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP'
+  );
 }
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {
