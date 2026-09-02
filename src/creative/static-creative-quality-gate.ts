@@ -6,11 +6,7 @@ export const TOCA_STATIC_CREATIVE_QUALITY_POLICY_ID =
 export const TOCA_STATIC_CREATIVE_QUALITY_POLICY_VERSION = '1.0' as const;
 export const STATIC_CREATIVE_MAX_UPSCALE_RATIO = 1.5 as const;
 
-export const staticCreativeFormatSchema = z.enum([
-  'STORY_9_16',
-  'FEED_4_5',
-  'FEED_1_1',
-]);
+export const staticCreativeFormatSchema = z.enum(['STORY_9_16', 'FEED_4_5', 'FEED_1_1']);
 export type StaticCreativeFormat = z.infer<typeof staticCreativeFormatSchema>;
 
 export const STATIC_CREATIVE_FORMAT_PROFILES = {
@@ -43,23 +39,15 @@ export const STATIC_CREATIVE_FORMAT_PROFILES = {
   }
 >;
 
-export const staticCreativeGateStatusSchema = z.enum([
-  'PASS',
-  'FAIL',
-  'NOT_APPLICABLE',
-]);
-export type StaticCreativeGateStatus = z.infer<
-  typeof staticCreativeGateStatusSchema
->;
+export const staticCreativeGateStatusSchema = z.enum(['PASS', 'FAIL', 'NOT_APPLICABLE']);
+export type StaticCreativeGateStatus = z.infer<typeof staticCreativeGateStatusSchema>;
 
 export const staticCreativeSourceRoleSchema = z.enum([
   'ORIGINAL_MASTER',
   'REFERENCE_TEMPLATE',
   'DERIVED_RASTER',
 ]);
-export type StaticCreativeSourceRole = z.infer<
-  typeof staticCreativeSourceRoleSchema
->;
+export type StaticCreativeSourceRole = z.infer<typeof staticCreativeSourceRoleSchema>;
 
 export const staticCreativeQualityEvidenceSchema = z.object({
   evidenceId: z.string().min(1),
@@ -72,7 +60,10 @@ export const staticCreativeQualityEvidenceSchema = z.object({
   sourceRole: staticCreativeSourceRoleSchema,
   sourceLineageStatus: staticCreativeGateStatusSchema,
   exactSourceMasterBinding: z.boolean(),
-  sourceMasterSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  sourceMasterSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   sourceResolutionStatus: staticCreativeGateStatusSchema,
   effectiveUpscaleRatio: z.number().finite().positive(),
   safeAreaStatus: staticCreativeGateStatusSchema,
@@ -86,17 +77,10 @@ export const staticCreativeQualityEvidenceSchema = z.object({
   failureCodes: z.array(z.string().min(1)),
 });
 
-export type StaticCreativeQualityEvidence = z.infer<
-  typeof staticCreativeQualityEvidenceSchema
->;
+export type StaticCreativeQualityEvidence = z.infer<typeof staticCreativeQualityEvidenceSchema>;
 
 export type StaticCreativeLayoutRole =
-  | 'HEADLINE'
-  | 'SUPPORT'
-  | 'CTA'
-  | 'BRAND'
-  | 'FOOTER'
-  | 'DECORATION';
+  'HEADLINE' | 'SUPPORT' | 'CTA' | 'BRAND' | 'FOOTER' | 'DECORATION';
 
 export interface StaticCreativeLayoutElement {
   readonly id: string;
@@ -108,11 +92,7 @@ export interface StaticCreativeLayoutElement {
 }
 
 export type StaticCreativeOverlayStyle =
-  | 'NONE'
-  | 'SOFT_GRADIENT'
-  | 'LOCAL_CONTRAST'
-  | 'LOCAL_PANEL'
-  | 'HARD_FULL_WIDTH_PANEL';
+  'NONE' | 'SOFT_GRADIENT' | 'LOCAL_CONTRAST' | 'LOCAL_PANEL' | 'HARD_FULL_WIDTH_PANEL';
 
 export interface StaticCreativeQualityCandidate {
   readonly evidenceId: string;
@@ -143,10 +123,8 @@ export function evaluateStaticCreativeQuality(
 
   const failureCodes: string[] = [];
   const exactSourceMasterBinding =
-    candidate.sourceRole === 'ORIGINAL_MASTER' &&
-    Boolean(candidate.sourceMasterSha256);
-  const sourceLineageStatus: StaticCreativeGateStatus =
-    exactSourceMasterBinding ? 'PASS' : 'FAIL';
+    candidate.sourceRole === 'ORIGINAL_MASTER' && Boolean(candidate.sourceMasterSha256);
+  const sourceLineageStatus: StaticCreativeGateStatus = exactSourceMasterBinding ? 'PASS' : 'FAIL';
   if (sourceLineageStatus !== 'PASS') {
     failureCodes.push('STATIC_CREATIVE_SOURCE_MASTER_REQUIRED');
   }
@@ -156,9 +134,7 @@ export function evaluateStaticCreativeQuality(
     candidate.outputHeight / candidate.sourceHeight,
   );
   const sourceResolutionStatus: StaticCreativeGateStatus =
-    effectiveUpscaleRatio <= STATIC_CREATIVE_MAX_UPSCALE_RATIO
-      ? 'PASS'
-      : 'FAIL';
+    effectiveUpscaleRatio <= STATIC_CREATIVE_MAX_UPSCALE_RATIO ? 'PASS' : 'FAIL';
   if (sourceResolutionStatus !== 'PASS') {
     failureCodes.push('STATIC_CREATIVE_SOURCE_RESOLUTION_TOO_LOW');
   }
@@ -249,9 +225,7 @@ export function assertStaticCreativePublicationReady(
     deny('STATIC_CREATIVE_QUALITY_OUTPUT_SHA256_MISMATCH');
   }
   if (parsed.overallStatus !== 'PASS') {
-    deny(
-      `STATIC_CREATIVE_QUALITY_NOT_READY:${parsed.failureCodes.join(',') || 'UNKNOWN'}`,
-    );
+    deny(`STATIC_CREATIVE_QUALITY_NOT_READY:${parsed.failureCodes.join(',') || 'UNKNOWN'}`);
   }
   if (!parsed.exactSourceMasterBinding || parsed.sourceLineageStatus !== 'PASS') {
     deny('STATIC_CREATIVE_QUALITY_EXACT_MASTER_BINDING_REQUIRED');
@@ -273,14 +247,9 @@ export function assertStaticCreativePublicationReady(
   }
 }
 
-function validateSafeArea(
-  candidate: StaticCreativeQualityCandidate,
-): StaticCreativeGateStatus {
+function validateSafeArea(candidate: StaticCreativeQualityCandidate): StaticCreativeGateStatus {
   const profile = STATIC_CREATIVE_FORMAT_PROFILES[candidate.format];
-  if (
-    candidate.outputWidth !== profile.width ||
-    candidate.outputHeight !== profile.height
-  ) {
+  if (candidate.outputWidth !== profile.width || candidate.outputHeight !== profile.height) {
     return 'FAIL';
   }
 
@@ -316,10 +285,7 @@ function validateCandidate(candidate: StaticCreativeQualityCandidate): void {
   if (!/^[a-f0-9]{64}$/i.test(candidate.outputSha256)) {
     deny('STATIC_CREATIVE_QUALITY_OUTPUT_SHA256_INVALID');
   }
-  if (
-    candidate.sourceMasterSha256 &&
-    !/^[a-f0-9]{64}$/i.test(candidate.sourceMasterSha256)
-  ) {
+  if (candidate.sourceMasterSha256 && !/^[a-f0-9]{64}$/i.test(candidate.sourceMasterSha256)) {
     deny('STATIC_CREATIVE_QUALITY_SOURCE_SHA256_INVALID');
   }
   for (const value of [
