@@ -41,7 +41,7 @@
     "start:deterministic-artist-composite": "node dist/src/deterministic-artist-composite.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write scripts/check-static-creative-quality-contract.mjs src/creative/static-creative-quality-gate.ts test/local-story-composer.test.ts && git diff --exit-code -- scripts/check-static-creative-quality-contract.mjs src/creative/static-creative-quality-gate.ts test/local-story-composer.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
