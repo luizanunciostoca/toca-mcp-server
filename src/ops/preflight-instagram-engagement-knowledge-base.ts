@@ -5,6 +5,7 @@ import {
   type CanonicalKnowledgeSourceRegistryRow,
 } from '../instagram-engagement/knowledge-base-ingest.js';
 import { INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID } from '../instagram-engagement/knowledge-snapshot-current.js';
+import { normalizeKnowledgeSourceText } from '../instagram-engagement/knowledge-source-text.js';
 import {
   GOOGLE_SHEETS_READONLY_SCOPE,
   GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
@@ -83,7 +84,8 @@ export async function runInstagramKnowledgeReadOnlyPreflight(
     if (bytes === 0 || !exported.text.trim()) {
       throw new Error(`INSTAGRAM_ENGAGEMENT_KB_SOURCE_EMPTY:${source.sourceId}`);
     }
-    const chunks = buildKnowledgeBaseChunks(source, exported.text);
+    const normalizedText = normalizeKnowledgeSourceText(exported.text);
+    const chunks = buildKnowledgeBaseChunks(source, normalizedText);
     if (chunks.length === 0) {
       throw new Error(`INSTAGRAM_ENGAGEMENT_KB_NO_CHUNKS:${source.sourceId}`);
     }
