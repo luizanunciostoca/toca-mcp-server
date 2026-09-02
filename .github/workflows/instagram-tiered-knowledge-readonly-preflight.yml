@@ -135,12 +135,17 @@ jobs:
 
           sleep 3
           LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
-          MESSAGE_LINES="$(printf '%s' "$LOGS" | jq -r '.[] | (.textPayload // .jsonPayload.message // "")' | tr '\n' ' ')"
+          MESSAGE_LINES="$(printf '%s' "$LOGS" | jq -r '.[] | (.textPayload // (.jsonPayload | tojson) // "")' | tr '\n' ' ')"
+          STRUCTURED_PASS_COUNT="$(printf '%s' "$LOGS" | jq '[.[] | select(.jsonPayload.validation? == "instagram-engagement-knowledge-base-readonly-preflight" and .jsonPayload.status? == "PASS")] | length')"
+          STRUCTURED_SAFE_CODE="$(printf '%s' "$LOGS" | jq -r '[.[] | .jsonPayload.safeErrorCode? // empty][0] // empty')"
 
-          SAFE_CODE="$(printf '%s' "$MESSAGE_LINES" | grep -oE '(GOOGLE_WORKSPACE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_DRIVE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_SHEETS_READ_RANGE_FAILED:[0-9]{3}|INSTAGRAM_ENGAGEMENT_KB_[A-Z0-9_]+(:[A-Za-z0-9._-]+)?|INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH)' | head -n1 || true)"
+          SAFE_CODE="$STRUCTURED_SAFE_CODE"
+          if [[ -z "$SAFE_CODE" ]]; then
+            SAFE_CODE="$(printf '%s' "$MESSAGE_LINES" | grep -oE '(GOOGLE_WORKSPACE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_DRIVE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_SHEETS_READ_RANGE_FAILED:[0-9]{3}|INSTAGRAM_ENGAGEMENT_KB_[A-Z0-9_]+(:[A-Za-z0-9._-]+)?|INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH)' | head -n1 || true)"
+          fi
           PASS_MARKER="$(printf '%s' "$MESSAGE_LINES" | grep -o '"validation":"instagram-engagement-knowledge-base-readonly-preflight","status":"PASS"' | head -n1 || true)"
 
-          if [[ $EXEC_STATUS -eq 0 && -n "$PASS_MARKER" ]]; then
+          if [[ $EXEC_STATUS -eq 0 && ( "$STRUCTURED_PASS_COUNT" -gt 0 || -n "$PASS_MARKER" ) ]]; then
             STATUS=PASS
             SAFE_CODE=NONE
           else
