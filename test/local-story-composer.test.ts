@@ -40,9 +40,7 @@ function renderer() {
 describe('LocalStoryComposer', () => {
   it('fails closed when master bytes are missing', async () => {
     const composer = new LocalStoryComposer(() => Promise.resolve());
-    await expect(
-      composer.compose(base({ imageBytes: new Uint8Array() })),
-    ).rejects.toMatchObject({
+    await expect(composer.compose(base({ imageBytes: new Uint8Array() }))).rejects.toMatchObject({
       code: 'SOURCE_IMAGE_BINDING_FAILURE',
     });
   });
@@ -54,14 +52,7 @@ describe('LocalStoryComposer', () => {
 
     const [, args] = runner.mock.calls[0] ?? [];
     expect(args).toEqual(
-      expect.arrayContaining([
-        '-resize',
-        '1080x1920^',
-        '-extent',
-        '1080x1920',
-        '-quality',
-        '95',
-      ]),
+      expect.arrayContaining(['-resize', '1080x1920^', '-extent', '1080x1920', '-quality', '95']),
     );
     expect(args).not.toContain('-annotate');
     expect(result).toMatchObject({
@@ -142,16 +133,16 @@ describe('LocalStoryComposer', () => {
 
   it('rejects a final Story when a reference template is used instead of an original master', async () => {
     const composer = new LocalStoryComposer(renderer(), 'convert');
-    await expect(
-      composer.compose(base({ sourceRole: 'REFERENCE_TEMPLATE' })),
-    ).rejects.toThrow('LOCAL_STORY_COMPOSER_FINAL_NOT_READY');
+    await expect(composer.compose(base({ sourceRole: 'REFERENCE_TEMPLATE' }))).rejects.toThrow(
+      'LOCAL_STORY_COMPOSER_FINAL_NOT_READY',
+    );
   });
 
   it('rejects low-resolution final source imagery before it can be declared ready', async () => {
     const composer = new LocalStoryComposer(renderer(), 'convert');
-    await expect(
-      composer.compose(base({ sourceWidth: 530, sourceHeight: 270 })),
-    ).rejects.toThrow('STATIC_CREATIVE_SOURCE_RESOLUTION_TOO_LOW');
+    await expect(composer.compose(base({ sourceWidth: 530, sourceHeight: 270 }))).rejects.toThrow(
+      'STATIC_CREATIVE_SOURCE_RESOLUTION_TOO_LOW',
+    );
   });
 
   it('rejects final graphic templates without canonical typography', async () => {
@@ -173,9 +164,9 @@ describe('LocalStoryComposer', () => {
 
   it('rejects graphic templates without a message and overlong copy', async () => {
     const composer = new LocalStoryComposer(() => Promise.resolve());
-    await expect(
-      composer.compose(base({ templateId: 'EDITORIAL_TEXT' })),
-    ).rejects.toMatchObject({ code: 'QUALITY_GATE_FAILED' });
+    await expect(composer.compose(base({ templateId: 'EDITORIAL_TEXT' }))).rejects.toMatchObject({
+      code: 'QUALITY_GATE_FAILED',
+    });
 
     await expect(
       composer.compose(
