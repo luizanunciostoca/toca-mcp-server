@@ -18,8 +18,8 @@ env:
   GCP_REGION: southamerica-east1
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  SOURCE_RUN_ID: '33274932765'
-  SOURCE_EXECUTION: toca-ig-eng-corrected-proof-33274932765-1-4d7pc
+  SOURCE_RUN_ID: '33571908935'
+  SOURCE_EXECUTION: toca-ig-kb-sync2-33571908935-1-4lgz4
 
 jobs:
   retained-log-diagnostic:
@@ -109,7 +109,7 @@ jobs:
           }
           const strings = collectStrings(entries);
           const markers = [...new Set(strings
-            .filter((v) => /SHADOW_PROOF_|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|FAILED|ERROR|ENOENT|EACCES|POSTGRES|DATABASE/iu.test(v))
+            .filter((v) => /SHADOW_PROOF_|GOOGLE_WORKSPACE_|GOOGLE_DRIVE_|INSTAGRAM_ENGAGEMENT_KB_|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ECONN|ETIMEDOUT|PERMISSION|DENIED|FAILED|ERROR|ENOENT|EACCES|POSTGRES|DATABASE/iu.test(v))
             .map(redact)
             .filter(Boolean))].slice(0, 40);
           const payloadSummaries = (Array.isArray(entries) ? entries : []).map((entry) => ({
