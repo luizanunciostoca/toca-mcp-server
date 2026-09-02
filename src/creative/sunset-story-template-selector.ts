@@ -107,7 +107,10 @@ function semanticScore(
   return clampScore(score);
 }
 
-function hasSubject(profile: SunsetStoryImageProfile, kinds: readonly SunsetStorySubjectKind[]): boolean {
+function hasSubject(
+  profile: SunsetStoryImageProfile,
+  kinds: readonly SunsetStorySubjectKind[],
+): boolean {
   return profile.subjects.some((subject) => kinds.includes(subject.kind));
 }
 
@@ -216,7 +219,9 @@ function scoreTemplate(
 ): SunsetStoryTemplateCandidate {
   const history = request.history ?? [];
   const cropPlan = planSunsetStoryCrop(request.profile, template);
-  const rejectionReasons: string[] = [...editorialRejectionReasons(request.profile, request.intent)];
+  const rejectionReasons: string[] = [
+    ...editorialRejectionReasons(request.profile, request.intent),
+  ];
 
   if (!template.intents.includes(request.intent)) {
     rejectionReasons.push('TEMPLATE_INTENT_MISMATCH');

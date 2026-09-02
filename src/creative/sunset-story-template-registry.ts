@@ -168,7 +168,13 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V8',
     templateClass: 'SUNSET_HERO_LIFESTYLE',
-    preferredScenes: ['MUSIC_DJ', 'SOCIAL_EXPERIENCE', 'PEOPLE_GOLDEN_HOUR', 'LIFESTYLE', 'SEA_VIEW'],
+    preferredScenes: [
+      'MUSIC_DJ',
+      'SOCIAL_EXPERIENCE',
+      'PEOPLE_GOLDEN_HOUR',
+      'LIFESTYLE',
+      'SEA_VIEW',
+    ],
     preferredSubjectKinds: ['DJ_GEAR', 'PERSON', 'GROUP', 'COUPLE', 'SCENERY'],
     preferredSubjectZones: ['CENTER_RIGHT', 'BOTTOM_RIGHT', 'CENTER'],
     preferredTextSpaceZones: ['TOP_CENTER', 'CENTER_LEFT'],

@@ -13,14 +13,7 @@ export const SUNSET_STORY_ZONES = [
 export type SunsetStoryZone = (typeof SUNSET_STORY_ZONES)[number];
 
 export type SunsetStorySubjectKind =
-  | 'PERSON'
-  | 'COUPLE'
-  | 'GROUP'
-  | 'DRINK'
-  | 'SCENERY'
-  | 'ARCHITECTURE'
-  | 'DJ_GEAR'
-  | 'OTHER';
+  'PERSON' | 'COUPLE' | 'GROUP' | 'DRINK' | 'SCENERY' | 'ARCHITECTURE' | 'DJ_GEAR' | 'OTHER';
 
 export type SunsetStorySceneClass =
   | 'PEOPLE_GOLDEN_HOUR'

@@ -134,8 +134,7 @@ function buildCandidate(
       height: cropHeight,
     };
     const featureMetrics = protectedFeatureMetrics(profile, cropWindow, template.protectedRegions);
-    const planScore =
-      (1 - featureMetrics.overlap) * 55 + featureMetrics.minimumCoverage * 30 + 15;
+    const planScore = (1 - featureMetrics.overlap) * 55 + featureMetrics.minimumCoverage * 30 + 15;
     return {
       cropWindow,
       transformedPrimarySubject: null,

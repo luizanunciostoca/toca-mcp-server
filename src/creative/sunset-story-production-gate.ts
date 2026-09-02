@@ -50,9 +50,7 @@ function tokens(value: string): ReadonlySet<string> {
   const normalized = normalizeToken(value);
   if (normalized.length === 0) return new Set();
   return new Set(
-    normalized
-      .split(/\s+/)
-      .filter((token) => token.length >= 3 && !STOPWORDS.has(token)),
+    normalized.split(/\s+/).filter((token) => token.length >= 3 && !STOPWORDS.has(token)),
   );
 }
 
@@ -68,9 +66,7 @@ export function sameDaySemanticSimilarity(left: string, right: string): number {
   return jaccard(tokens(left), tokens(right));
 }
 
-export function validateSunsetStoryProductionContext(
-  context: SunsetStoryProductionContext,
-): void {
+export function validateSunsetStoryProductionContext(context: SunsetStoryProductionContext): void {
   if (!context.contentItemId.startsWith('MKT-')) {
     throw new Error('SUNSET_CONTENT_ID_DRIFT');
   }

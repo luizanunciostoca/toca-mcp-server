@@ -166,9 +166,7 @@ describe('Sunset Story intelligent template selection', () => {
     expect(selection.mode).toBe('NO_SAFE_TEMPLATE');
     expect(
       selection.candidates.some((candidate) =>
-        candidate.rejectionReasons.includes(
-          'ASSET_EDITORIAL_MISMATCH:AMBIENCE_PERSON_DOMINANT',
-        ),
+        candidate.rejectionReasons.includes('ASSET_EDITORIAL_MISMATCH:AMBIENCE_PERSON_DOMINANT'),
       ),
     ).toBe(true);
   });
