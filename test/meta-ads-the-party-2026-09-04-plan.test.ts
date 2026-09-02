@@ -15,9 +15,7 @@ describe('The Party 2026-09-04 approved Meta Ads create-paused descriptor', () =
   it('pins the exact R$300 total budget, schedule, identity and purchase envelope', () => {
     const descriptor = buildTheParty20260904Descriptor();
 
-    expect(THE_PARTY_2026_09_04_APPROVAL).toBe(
-      'APPROVED_THE_PARTY_2026_09_04_R300_CREATE_PAUSED',
-    );
+    expect(THE_PARTY_2026_09_04_APPROVAL).toBe('APPROVED_THE_PARTY_2026_09_04_R300_CREATE_PAUSED');
     expect(descriptor.account).toEqual({ adAccountId: '311793958882290', currency: 'BRL' });
     expect(descriptor.campaign).toEqual({
       name: 'TOCA | THE PARTY | 2026-09-04 | MORRO | PURCHASE',
