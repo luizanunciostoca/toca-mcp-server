@@ -35,11 +35,25 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Resolve explicit observation window
+        shell: bash
+        run: |
+          set -euo pipefail
+          WINDOW_END="$(node -e 'console.log(new Date().toISOString())')"
+          WINDOW_START="$(node -e 'console.log(new Date(Date.now()-10*60*1000).toISOString())')"
+          {
+            echo "WINDOW_START=$WINDOW_START"
+            echo "WINDOW_END=$WINDOW_END"
+          } >> "$GITHUB_ENV"
+          mkdir -p scheduler-health-evidence
+          jq -n --arg start "$WINDOW_START" --arg end "$WINDOW_END" \
+            '{schemaVersion:"toca.scheduler.observation-window.v1",windowStart:$start,windowEnd:$end,readOnly:true}' \
+            > scheduler-health-evidence/window.json
+
       - name: Read Cloud Run and Cloud Scheduler topology
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scheduler-health-evidence
           gcloud run services describe "$DAEMON_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
             > scheduler-health-evidence/daemon-service.json
@@ -70,120 +84,136 @@ jobs:
           ' scheduler-health-evidence/cloud-scheduler-job.json >/dev/null
           echo 'SCHEDULER_TOPOLOGY_LIVE=PASS'
 
-      - name: Try authenticated daemon health endpoint
-        id: healthz
-        continue-on-error: true
+      - name: Read explicitly time-bounded live logs
         shell: bash
         run: |
           set -euo pipefail
-          TOKEN=""
-          if TOKEN="$(gcloud auth print-identity-token \
-            --impersonate-service-account="$GCP_RUNTIME_SERVICE_ACCOUNT" \
-            --audiences="$SERVICE_URL" 2>scheduler-health-evidence/identity-token-error.txt)"; then
-            :
-          else
-            echo 'Runtime-SA impersonated ID token unavailable to deployer diagnostic identity.' >> scheduler-health-evidence/identity-token-error.txt
-            exit 3
-          fi
-          test -n "$TOKEN"
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "$SERVICE_URL/healthz" \
-            > scheduler-health-evidence/daemon-healthz.json
-          unset TOKEN
-          jq -e '
-            .ok == true and
-            .schedulerPersistenceVerified == true and
-            .schedulingTransport == "protected-mcp" and
-            .triggerMode == "cloud-scheduler-http" and
-            .lastError == null
-          ' scheduler-health-evidence/daemon-healthz.json >/dev/null
-          echo 'DAEMON_HEALTHZ_LIVE=PASS'
-
-      - name: Read recent scheduler and daemon evidence
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          DAEMON_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE_NAME}\""
-          SCHEDULER_FILTER="resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${SCHEDULER_JOB_NAME}\""
+          DAEMON_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${DAEMON_SERVICE_NAME}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
+          SCHEDULER_FILTER="resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"${SCHEDULER_JOB_NAME}\" AND timestamp>=\"${WINDOW_START}\" AND timestamp<=\"${WINDOW_END}\""
           gcloud logging read "$DAEMON_FILTER" \
-            --project "$GCP_PROJECT_ID" --freshness=15m --limit=2000 --order=asc --format=json \
+            --project "$GCP_PROJECT_ID" --limit=3000 --order=asc --format=json \
             > /tmp/daemon-logs.json || printf '[]\n' > /tmp/daemon-logs.json
           gcloud logging read "$SCHEDULER_FILTER" \
-            --project "$GCP_PROJECT_ID" --freshness=15m --limit=1000 --order=asc --format=json \
+            --project "$GCP_PROJECT_ID" --limit=2000 --order=asc --format=json \
             > /tmp/scheduler-logs.json || printf '[]\n' > /tmp/scheduler-logs.json
 
           node <<'NODE'
           const fs = require('fs');
           const daemon = JSON.parse(fs.readFileSync('/tmp/daemon-logs.json','utf8') || '[]');
           const scheduler = JSON.parse(fs.readFileSync('/tmp/scheduler-logs.json','utf8') || '[]');
-          const strings = (v,out=[]) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach(x=>strings(x,out)); else if (v && typeof v === 'object') Object.values(v).forEach(x=>strings(x,out)); return out; };
-          const daemonJoined = daemon.map(x => strings(x).join(' '));
-          const tickCompleted = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.completed')).length;
-          const tickFailed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.tick.failed')).length;
-          const selfTestPassed = daemonJoined.filter(x => x.includes('toca.managed.instagram.daemon.scheduler_self_test.passed')).length;
-          const watchdogHealthy = daemonJoined.filter(x => x.includes('schedulerWatchdogStatus') && x.includes('HEALTHY')).length;
-          const tickHttp2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 200 && Number(x?.httpRequest?.status) < 300).length;
-          const tickHttpNon2xx = daemon.filter(x => String(x?.httpRequest?.requestUrl ?? '').includes('/tick') && Number(x?.httpRequest?.status) >= 400).length;
-          const schedulerSuccess = scheduler.filter(x => { const s=Number(x?.httpRequest?.status); return s>=200 && s<300; }).length;
-          const schedulerFailure = scheduler.filter(x => Number(x?.httpRequest?.status) >= 400).length;
-          const latestTickCompletedAt = [...daemon].reverse().find(x => strings(x).join(' ').includes('toca.managed.instagram.daemon.tick.completed'))?.timestamp ?? null;
-          const out = {
-            schemaVersion:'toca.scheduler.live-health-evidence.v1',
-            observedAt:new Date().toISOString(),
+          const start = Date.parse(process.env.WINDOW_START);
+          const end = Date.parse(process.env.WINDOW_END);
+          const strings = (v,out=[]) => {
+            if (typeof v === 'string') out.push(v);
+            else if (Array.isArray(v)) for (const x of v) strings(x,out);
+            else if (v && typeof v === 'object') for (const x of Object.values(v)) strings(x,out);
+            return out;
+          };
+          const inWindow = e => {
+            const t = Date.parse(e?.timestamp ?? '');
+            return Number.isFinite(t) && t >= start && t <= end;
+          };
+          if (!daemon.every(inWindow) || !scheduler.every(inWindow)) throw new Error('LOG_QUERY_RETURNED_ENTRY_OUTSIDE_EXPLICIT_WINDOW');
+
+          const daemonEvents = daemon.map(e => ({e, joined:strings(e).join(' ')}));
+          const completed = daemonEvents.filter(x => x.joined.includes('toca.managed.instagram.daemon.tick.completed'));
+          const failed = daemonEvents.filter(x => x.joined.includes('toca.managed.instagram.daemon.tick.failed'));
+          const selfTests = daemonEvents.filter(x => x.joined.includes('toca.managed.instagram.daemon.scheduler_self_test.passed'));
+          const latestCompleted = completed.at(-1)?.e?.timestamp ?? null;
+          const latestFailed = failed.at(-1)?.e?.timestamp ?? null;
+
+          const schedulerTypes = {};
+          const schedulerStatusCodes = {};
+          for (const e of scheduler) {
+            const type = e?.jsonPayload?.['@type'] ?? 'UNKNOWN';
+            schedulerTypes[type] = (schedulerTypes[type] ?? 0) + 1;
+            const code = e?.jsonPayload?.status ?? e?.httpRequest?.status ?? e?.severity ?? 'UNKNOWN';
+            const key = typeof code === 'object' ? JSON.stringify(code) : String(code);
+            schedulerStatusCodes[key] = (schedulerStatusCodes[key] ?? 0) + 1;
+          }
+          const schedulerErrorEntries = scheduler.filter(e => {
+            const joined = strings(e).join(' ');
+            const sev = String(e?.severity ?? '').toUpperCase();
+            const http = Number(e?.httpRequest?.status ?? 0);
+            return sev === 'ERROR' || sev === 'CRITICAL' || http >= 400 || /PERMISSION_DENIED|UNAUTHENTICATED|DEADLINE_EXCEEDED|INTERNAL/i.test(joined);
+          });
+
+          const result = {
+            schemaVersion:'toca.scheduler.time-bounded-live-evidence.v1',
+            windowStart:process.env.WINDOW_START,
+            windowEnd:process.env.WINDOW_END,
             readOnlyProbe:true,
             externalPublicationWritesAuthorized:false,
-            daemon:{logCount:daemon.length,tickCompleted,tickFailed,selfTestPassed,watchdogHealthy,tickHttp2xx,tickHttpNon2xx,latestTickCompletedAt},
-            cloudScheduler:{logCount:scheduler.length,httpSuccess:schedulerSuccess,httpFailure:schedulerFailure}
+            daemon:{
+              logCount:daemon.length,
+              tickCompletedCount:completed.length,
+              tickFailedCount:failed.length,
+              schedulerSelfTestPassedCount:selfTests.length,
+              latestTickCompletedAt:latestCompleted,
+              latestTickFailedAt:latestFailed
+            },
+            cloudScheduler:{
+              logCount:scheduler.length,
+              entryTypes:schedulerTypes,
+              observedStatusCodes:schedulerStatusCodes,
+              errorEntryCount:schedulerErrorEntries.length,
+              latestLogAt:scheduler.at(-1)?.timestamp ?? null
+            }
           };
-          fs.writeFileSync('scheduler-health-evidence/recent-signals.json', JSON.stringify(out,null,2)+'\n');
-          if (tickCompleted < 1 || tickFailed > 0 || tickHttp2xx < 1 || tickHttpNon2xx > 0) process.exit(2);
-          NODE
-          echo 'RECENT_SCHEDULER_TICK_LIVE=PASS'
+          fs.writeFileSync('scheduler-health-evidence/time-bounded-signals.json',JSON.stringify(result,null,2)+'\n');
+          console.log(JSON.stringify(result,null,2));
 
-      - name: Build sanitized live-health summary
+          if (completed.length < 1) throw new Error('NO_CURRENT_TICK_COMPLETED_IN_EXPLICIT_WINDOW');
+          if (failed.length > 0) throw new Error('CURRENT_TICK_FAILED_PRESENT_IN_EXPLICIT_WINDOW');
+          if (!latestCompleted || Date.parse(latestCompleted) < start) throw new Error('LATEST_TICK_COMPLETED_OUTSIDE_WINDOW');
+          if (scheduler.length < 1) throw new Error('NO_CURRENT_CLOUD_SCHEDULER_LOGS_IN_EXPLICIT_WINDOW');
+          if (schedulerErrorEntries.length > 0) throw new Error('CURRENT_CLOUD_SCHEDULER_ERROR_PRESENT_IN_EXPLICIT_WINDOW');
+          NODE
+          echo 'TIME_BOUNDED_LIVE_TICK=PASS'
+
+      - name: Validate current scheduler attempt timestamp
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const job=JSON.parse(fs.readFileSync('scheduler-health-evidence/cloud-scheduler-job.json','utf8'));
+          const start=Date.parse(process.env.WINDOW_START);
+          const last=Date.parse(job.lastAttemptTime ?? '');
+          if (!Number.isFinite(last) || last < start) throw new Error(`LAST_ATTEMPT_NOT_CURRENT:${job.lastAttemptTime}`);
+          fs.writeFileSync('scheduler-health-evidence/current-attempt.json',JSON.stringify({lastAttemptTime:job.lastAttemptTime,windowStart:process.env.WINDOW_START,current:true},null,2)+'\n');
+          console.log('CLOUD_SCHEDULER_CURRENT_ATTEMPT=PASS');
+          NODE
+
+      - name: Build final read-only scheduler summary
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           node <<'NODE'
-          const fs = require('fs');
-          const read = p => { try { return JSON.parse(fs.readFileSync(p,'utf8')); } catch { return null; } };
+          const fs=require('fs');
+          const read=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'))}catch{return null}};
           const svc=read('scheduler-health-evidence/daemon-service.json');
           const job=read('scheduler-health-evidence/cloud-scheduler-job.json');
-          const health=read('scheduler-health-evidence/daemon-healthz.json');
-          const signals=read('scheduler-health-evidence/recent-signals.json');
+          const sig=read('scheduler-health-evidence/time-bounded-signals.json');
+          const cur=read('scheduler-health-evidence/current-attempt.json');
           const summary={
-            schemaVersion:'toca.scheduler.live-health-summary.v1',
+            schemaVersion:'toca.scheduler.final-live-health-summary.v1',
             observedAt:new Date().toISOString(),
             readOnlyProbe:true,
             externalPublicationWritesAuthorized:false,
-            service:{
-              name:process.env.DAEMON_SERVICE_NAME,
+            topology:{
+              serviceReady:svc?.status?.conditions?.some?.(x=>x.type==='Ready'&&x.status==='True') ?? false,
               latestReadyRevision:svc?.status?.latestReadyRevisionName ?? null,
-              ready:svc?.status?.conditions?.some?.(x=>x.type==='Ready'&&x.status==='True') ?? false
-            },
-            trigger:{
-              name:process.env.SCHEDULER_JOB_NAME,
-              state:job?.state ?? null,
+              schedulerState:job?.state ?? null,
               schedule:job?.schedule ?? null,
               timeZone:job?.timeZone ?? null,
               lastAttemptTime:job?.lastAttemptTime ?? null
             },
-            healthEndpoint: health ? {
-              ok:health.ok,
-              schedulerPersistenceVerified:health.schedulerPersistenceVerified,
-              lastRunStartedAt:health.lastRunStartedAt ?? null,
-              lastRunFinishedAt:health.lastRunFinishedAt ?? null,
-              lastClaimed:health.lastClaimed ?? null,
-              lastError:health.lastError ?? null,
-              schedulerWatchdog:health.schedulerWatchdog ?? null,
-              schedulerWatchdogState:health.schedulerWatchdogState ?? null
-            } : {accessibleByDiagnosticIdentity:false},
-            recentSignals:signals
+            currentAttempt:cur,
+            timeBoundedSignals:sig
           };
-          fs.writeFileSync('scheduler-health-evidence/summary.json',JSON.stringify(summary,null,2)+'\n');
+          fs.writeFileSync('scheduler-health-evidence/final-summary.json',JSON.stringify(summary,null,2)+'\n');
           console.log(JSON.stringify(summary,null,2));
           NODE
 
