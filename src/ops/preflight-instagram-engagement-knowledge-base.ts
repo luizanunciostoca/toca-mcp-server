@@ -1,5 +1,6 @@
 import type { SecretReference, SecretResolver } from '../core/secrets.js';
 import {
+  buildKnowledgeBaseChunks,
   parseCanonicalKnowledgeSourceRegistry,
   type CanonicalKnowledgeSourceRegistryRow,
 } from '../instagram-engagement/knowledge-base-ingest.js';
@@ -38,10 +39,14 @@ export interface InstagramKnowledgePreflightResult {
   readonly status: 'PASS';
   readonly canonicalSpreadsheetMatched: true;
   readonly sourceCount: number;
+  readonly totalChunkCount: number;
+  readonly autoReplyChunkCount: number;
   readonly documents: readonly {
     readonly sourceId: string;
     readonly mimeType: string;
     readonly bytes: number;
+    readonly chunkCount: number;
+    readonly autoReplyChunkCount: number;
     readonly nonEmpty: true;
   }[];
   readonly databaseTouched: false;
@@ -70,18 +75,34 @@ export async function runInstagramKnowledgeReadOnlyPreflight(
   validateExactSourceSet(registry, requested);
 
   const documents: InstagramKnowledgePreflightResult['documents'][number][] = [];
+  let totalChunkCount = 0;
+  let autoReplyChunkCount = 0;
   for (const source of registry) {
     const exported = await drive.readText(source.driveId);
     const bytes = Buffer.byteLength(exported.text, 'utf8');
     if (bytes === 0 || !exported.text.trim()) {
       throw new Error(`INSTAGRAM_ENGAGEMENT_KB_SOURCE_EMPTY:${source.sourceId}`);
     }
+    const chunks = buildKnowledgeBaseChunks(source, exported.text);
+    if (chunks.length === 0) {
+      throw new Error(`INSTAGRAM_ENGAGEMENT_KB_NO_CHUNKS:${source.sourceId}`);
+    }
+    const sourceAutoReplyCount = chunks.filter(
+      (chunk) => chunk.risk === 'LOW' && chunk.autonomy === 'AUTO_REPLY_ALLOWED',
+    ).length;
+    totalChunkCount += chunks.length;
+    autoReplyChunkCount += sourceAutoReplyCount;
     documents.push({
       sourceId: source.sourceId,
       mimeType: exported.mimeType,
       bytes,
+      chunkCount: chunks.length,
+      autoReplyChunkCount: sourceAutoReplyCount,
       nonEmpty: true,
     });
+  }
+  if (autoReplyChunkCount === 0) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_KB_PREFLIGHT_AUTO_REPLY_EMPTY');
   }
 
   return {
@@ -89,6 +110,8 @@ export async function runInstagramKnowledgeReadOnlyPreflight(
     status: 'PASS',
     canonicalSpreadsheetMatched: true,
     sourceCount: requested.size,
+    totalChunkCount,
+    autoReplyChunkCount,
     documents,
     databaseTouched: false,
     providerWritesUsed: false,
