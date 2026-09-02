@@ -11,17 +11,40 @@ export type SocialEventInterest = 'NONE' | 'SUNSET' | 'THE_PARTY' | 'BOTH';
 export type SocialSentiment = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
 export type SocialUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type SocialLanguage = 'PT' | 'EN' | 'ES' | 'UNKNOWN';
+export type SocialPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type SocialClassificationConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+export type SocialConversationIntent =
+  | 'INFORMATION'
+  | 'COMMERCIAL'
+  | 'PURCHASE'
+  | 'EVENT'
+  | 'SUNSET'
+  | 'THE_PARTY'
+  | 'GASTRONOMY'
+  | 'SUPPORT'
+  | 'COMPLAINT'
+  | 'PRAISE'
+  | 'UGC_BRAND_MENTION'
+  | 'PARTNERSHIP'
+  | 'CAREERS'
+  | 'SPAM'
+  | 'ABUSE'
+  | 'OTHER';
+
 export type SocialTopic =
   | 'TICKETS'
   | 'RESERVATION'
   | 'PRICE'
   | 'EVENT_INFO'
   | 'LOCATION_HOURS'
+  | 'GASTRONOMY'
   | 'COMPLAINT'
   | 'REFUND'
   | 'LEGAL'
   | 'SAFETY'
   | 'PRESS'
+  | 'PARTNERSHIP'
+  | 'CAREERS'
   | 'GENERAL';
 
 export type SocialNextAction =
@@ -37,10 +60,13 @@ export type SocialReplyDisposition =
 
 export interface SocialEngagementClassification {
   readonly intent: EngagementIntent;
+  readonly conversationIntents: readonly SocialConversationIntent[];
   readonly commercialIntent: SocialCommercialIntent;
   readonly eventInterest: SocialEventInterest;
   readonly sentiment: SocialSentiment;
   readonly urgency: SocialUrgency;
+  readonly priority: SocialPriority;
+  readonly confidence: SocialClassificationConfidence;
   readonly topic: SocialTopic;
   readonly language: SocialLanguage;
   readonly productEvent: 'SUNSET' | 'THE_PARTY' | 'BOTH' | 'UNSPECIFIED';
@@ -65,6 +91,9 @@ export interface SocialEngagementAuthorization {
   readonly approvalRequired: boolean;
   readonly approvalSatisfied: boolean;
   readonly containsSensitivePersonalData?: boolean;
+  readonly classificationConfidence?: SocialClassificationConfidence;
+  readonly contextConflict?: boolean;
+  readonly threadAutomationBlocked?: boolean;
 }
 
 export interface SocialEngagementLeadInput extends CrmScope, CrmMutationMetadata {

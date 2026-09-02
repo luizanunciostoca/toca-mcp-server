@@ -4,6 +4,7 @@ import type {
   EngagementDecision,
   EngagementRisk,
 } from '../providers/instagram/instagram-engagement-contracts.js';
+import type { SocialClassificationConfidence } from '../crm/social-engagement-contracts.js';
 
 export type EngagementIntent =
   | 'FAQ_OPERATIONAL'
@@ -27,6 +28,9 @@ export interface EngagementPolicyInput {
   readonly factsVerified: boolean;
   readonly containsSensitivePersonalData?: boolean;
   readonly writesEnabled?: boolean;
+  readonly classificationConfidence?: SocialClassificationConfidence;
+  readonly contextConflict?: boolean;
+  readonly threadAutomationBlocked?: boolean;
 }
 
 const HUMAN_REQUIRED = new Set<EngagementIntent>([
@@ -39,7 +43,6 @@ const HUMAN_REQUIRED = new Set<EngagementIntent>([
   'HARASSMENT_OR_THREAT',
   'UNKNOWN',
 ]);
-
 const AUTO_ELIGIBLE = new Set<EngagementIntent>([
   'FAQ_OPERATIONAL',
   'EVENT_INFO',
@@ -67,19 +70,24 @@ export function evaluateEngagementPolicy(input: EngagementPolicyInput): Engageme
   if (input.containsSensitivePersonalData) {
     return decision(input.channel, 'HIGH', 'HUMAN_REVIEW_REQUIRED', 'sensitive_personal_data');
   }
-
+  if (input.threadAutomationBlocked) {
+    return decision(input.channel, 'HIGH', 'HUMAN_REVIEW_REQUIRED', 'thread_automation_blocked');
+  }
   if (HUMAN_REQUIRED.has(input.intent)) {
     return decision(input.channel, 'HIGH', 'HUMAN_REVIEW_REQUIRED', `intent:${input.intent}`);
   }
-
+  if (input.contextConflict) {
+    return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'context_conflict');
+  }
+  if (input.classificationConfidence === 'LOW') {
+    return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'classification_confidence_low');
+  }
   if (input.intent === 'COMMERCIAL_LEAD') {
     return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'commercial_lead_requires_handoff');
   }
-
   if (!input.factsVerified) {
     return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'facts_not_verified');
   }
-
   if (AUTO_ELIGIBLE.has(input.intent)) {
     if (input.writesEnabled !== true) {
       return decision(input.channel, 'LOW', 'SUGGEST_ONLY', 'engagement_writes_kill_switch');
@@ -91,6 +99,5 @@ export function evaluateEngagementPolicy(input: EngagementPolicyInput): Engageme
       `verified_low_risk:${input.intent}`,
     );
   }
-
   return decision(input.channel, 'MEDIUM', 'SUGGEST_ONLY', 'unknown_or_unclassified');
 }

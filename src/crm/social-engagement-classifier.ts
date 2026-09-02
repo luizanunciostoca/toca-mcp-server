@@ -1,7 +1,10 @@
 import type {
+  SocialClassificationConfidence,
   SocialCommercialIntent,
+  SocialConversationIntent,
   SocialEngagementClassification,
   SocialLanguage,
+  SocialPriority,
   SocialSentiment,
   SocialTopic,
   SocialUrgency,
@@ -47,6 +50,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
   const safety = hasAny(normalized, [
     'acidente',
     'agressao',
+    'agredido',
+    'agredida',
     'seguranca',
     'machucado',
     'machucada',
@@ -61,15 +66,38 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'press inquiry',
     'media request',
   ]);
+  const partnership = hasAny(normalized, [
+    'parceria',
+    'collab',
+    'colaboracao',
+    'patrocinio',
+    'fornecedor',
+    'agencia',
+    'influencer',
+    'criador de conteudo',
+    'artista',
+    'partnership',
+    'collaboration',
+    'sponsorship',
+  ]);
   const publicFigure = hasAny(normalized, [
     'vip',
-    'influencer',
     'celebridade',
     'famoso',
     'famosa',
     'artista conhecido',
     'public figure',
     'celebrity',
+  ]);
+  const careers = hasAny(normalized, [
+    'trabalhe conosco',
+    'vaga',
+    'curriculo',
+    'emprego',
+    'contratando',
+    'job opening',
+    'resume',
+    'work with you',
   ]);
   const complaint = hasAny(normalized, [
     'reclamacao',
@@ -80,9 +108,72 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'complaint',
     'terrible',
   ]);
+  const support =
+    complaint ||
+    refund ||
+    hasAny(normalized, [
+      'preciso de ajuda',
+      'nao funcionou',
+      'deu erro',
+      'problema com',
+      'suporte',
+      'help me',
+      'not working',
+      'support',
+    ]);
   const ticket = hasAny(normalized, ['ingresso', 'ticket', 'entrada', 'bilhete']);
   const reservation = hasAny(normalized, ['reserva', 'reservar', 'booking', 'book a table']);
   const price = hasAny(normalized, ['preco', 'valor', 'quanto custa', 'price', 'how much']);
+  const gastronomy = hasAny(normalized, [
+    'cardapio',
+    'menu',
+    'comida',
+    'prato',
+    'petisco',
+    'gastronomia',
+    'drink',
+    'bebida',
+    'cerveja',
+    'cocktail',
+    'food',
+  ]);
+  const praise = hasAny(normalized, [
+    'amei',
+    'adorei',
+    'maravilhoso',
+    'incrivel',
+    'parabens',
+    'melhor experiencia',
+    'love it',
+    'amazing',
+    'congratulations',
+  ]);
+  const ugc = hasAny(normalized, [
+    '@tocadomorcego',
+    'marquei voces',
+    'marquei vcs',
+    'repost',
+    'repostar',
+    'marcacao',
+    'tagged you',
+    'mentioned you',
+  ]);
+  const spam = hasAny(normalized, [
+    'ganhe seguidores',
+    'compre seguidores',
+    'divulgue seu perfil',
+    'bitcoin investment',
+    'crypto investment',
+    'seo service',
+    'social media growth service',
+  ]);
+  const abusiveLanguage = hasAny(normalized, [
+    'vou acabar com voces',
+    'vou pegar voces',
+    'matar voces',
+    'idiotas',
+    'desgracados',
+  ]);
   const locationHours = hasAny(normalized, [
     'horario',
     'que horas',
@@ -122,6 +213,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
   const commercialSignals = [ticket, reservation, price].filter(Boolean).length;
   const buyingSignal = hasAny(normalized, [
     'comprar',
+    'compro',
+    'onde compro',
     'quero ir',
     'quero ingresso',
     'garantir',
@@ -143,72 +236,237 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
             : 'NONE';
 
   const knownLowOrCommercial =
-    ticket || reservation || price || locationHours || operationalFaq || eventInterest !== 'NONE';
+    ticket ||
+    reservation ||
+    price ||
+    locationHours ||
+    operationalFaq ||
+    eventInterest !== 'NONE' ||
+    gastronomy ||
+    praise ||
+    ugc ||
+    partnership ||
+    careers ||
+    support ||
+    spam;
   const materialUnknown = !knownLowOrCommercial && isMaterialQuestion(normalized);
 
-  const intent = harassmentOrThreat
-    ? 'HARASSMENT_OR_THREAT'
-    : refund
-      ? 'REFUND'
-      : legal
-        ? 'LEGAL'
-        : safety
-          ? 'SAFETY_INCIDENT'
-          : press
-            ? 'PRESS'
-            : publicFigure
-              ? 'PUBLIC_FIGURE'
-              : complaint
-                ? 'COMPLAINT'
-                : commercialIntent === 'HIGH' || reservation || price
-                  ? 'COMMERCIAL_LEAD'
-                  : ticket
-                    ? 'TICKET_INFO'
-                    : locationHours
-                      ? 'LOCATION_HOURS'
-                      : eventInterest !== 'NONE'
-                        ? 'EVENT_INFO'
-                        : operationalFaq
-                          ? 'FAQ_OPERATIONAL'
-                          : materialUnknown
-                            ? 'UNKNOWN'
-                            : 'GENERAL_SOCIAL';
+  const intent =
+    harassmentOrThreat || abusiveLanguage
+      ? 'HARASSMENT_OR_THREAT'
+      : refund
+        ? 'REFUND'
+        : legal
+          ? 'LEGAL'
+          : safety
+            ? 'SAFETY_INCIDENT'
+            : press
+              ? 'PRESS'
+              : publicFigure
+                ? 'PUBLIC_FIGURE'
+                : complaint || support
+                  ? 'COMPLAINT'
+                  : commercialIntent === 'HIGH' || reservation || price
+                    ? 'COMMERCIAL_LEAD'
+                    : ticket
+                      ? 'TICKET_INFO'
+                      : locationHours
+                        ? 'LOCATION_HOURS'
+                        : eventInterest !== 'NONE'
+                          ? 'EVENT_INFO'
+                          : operationalFaq || gastronomy
+                            ? 'FAQ_OPERATIONAL'
+                            : partnership
+                              ? 'COMMERCIAL_LEAD'
+                              : materialUnknown || careers || spam
+                                ? 'UNKNOWN'
+                                : 'GENERAL_SOCIAL';
 
   const topic: SocialTopic = refund
     ? 'REFUND'
-    : legal || harassmentOrThreat
+    : legal || harassmentOrThreat || abusiveLanguage
       ? 'LEGAL'
       : safety
         ? 'SAFETY'
         : press
           ? 'PRESS'
-          : complaint
+          : complaint || support
             ? 'COMPLAINT'
-            : reservation
-              ? 'RESERVATION'
-              : price
-                ? 'PRICE'
-                : ticket
-                  ? 'TICKETS'
-                  : locationHours
-                    ? 'LOCATION_HOURS'
-                    : eventInterest !== 'NONE'
-                      ? 'EVENT_INFO'
-                      : operationalFaq
-                        ? 'LOCATION_HOURS'
-                        : 'GENERAL';
+            : partnership
+              ? 'PARTNERSHIP'
+              : careers
+                ? 'CAREERS'
+                : reservation
+                  ? 'RESERVATION'
+                  : price
+                    ? 'PRICE'
+                    : ticket
+                      ? 'TICKETS'
+                      : gastronomy
+                        ? 'GASTRONOMY'
+                        : locationHours
+                          ? 'LOCATION_HOURS'
+                          : eventInterest !== 'NONE'
+                            ? 'EVENT_INFO'
+                            : operationalFaq
+                              ? 'LOCATION_HOURS'
+                              : 'GENERAL';
+
+  const sentiment = classifySentiment(normalized);
+  const urgency = classifyUrgency(
+    normalized,
+    safety || harassmentOrThreat || abusiveLanguage,
+    refund,
+  );
+  const conversationIntents = classifyConversationIntents({
+    spam,
+    harassmentOrThreat: harassmentOrThreat || abusiveLanguage,
+    safety,
+    legal,
+    support,
+    complaint,
+    commercialIntent,
+    buyingSignal,
+    eventInterest,
+    gastronomy,
+    praise,
+    ugc,
+    partnership,
+    careers,
+    information:
+      ticket || reservation || price || locationHours || operationalFaq || materialUnknown,
+  });
+  const priority = classifyPriority({
+    harassmentOrThreat: harassmentOrThreat || abusiveLanguage,
+    safety,
+    legal,
+    containsPotentialSensitiveData,
+    complaint,
+    refund,
+    support,
+    commercialIntent,
+    urgency,
+  });
+  const confidence = classifyConfidence({
+    normalized,
+    materialUnknown,
+    spam,
+    highSpecificity:
+      harassmentOrThreat ||
+      abusiveLanguage ||
+      legal ||
+      safety ||
+      refund ||
+      complaint ||
+      support ||
+      ticket ||
+      reservation ||
+      price ||
+      locationHours ||
+      operationalFaq ||
+      gastronomy ||
+      partnership ||
+      careers ||
+      praise ||
+      ugc,
+    eventInterest,
+  });
 
   return {
     intent,
+    conversationIntents,
     commercialIntent,
     eventInterest,
-    sentiment: classifySentiment(normalized),
-    urgency: classifyUrgency(normalized, safety || harassmentOrThreat, refund),
+    sentiment,
+    urgency,
+    priority,
+    confidence,
     topic,
     language: classifyLanguage(normalized),
     productEvent,
     containsPotentialSensitiveData,
   };
+}
+
+function classifyConversationIntents(input: {
+  readonly spam: boolean;
+  readonly harassmentOrThreat: boolean;
+  readonly safety: boolean;
+  readonly legal: boolean;
+  readonly support: boolean;
+  readonly complaint: boolean;
+  readonly commercialIntent: SocialCommercialIntent;
+  readonly buyingSignal: boolean;
+  readonly eventInterest: 'NONE' | 'SUNSET' | 'THE_PARTY' | 'BOTH';
+  readonly gastronomy: boolean;
+  readonly praise: boolean;
+  readonly ugc: boolean;
+  readonly partnership: boolean;
+  readonly careers: boolean;
+  readonly information: boolean;
+}): readonly SocialConversationIntent[] {
+  const intents: SocialConversationIntent[] = [];
+  const add = (value: SocialConversationIntent) => {
+    if (!intents.includes(value)) intents.push(value);
+  };
+  if (input.spam) add('SPAM');
+  if (input.harassmentOrThreat) add('ABUSE');
+  if (input.harassmentOrThreat || input.safety || input.legal || input.support) add('SUPPORT');
+  if (input.complaint) add('COMPLAINT');
+  if (input.commercialIntent !== 'NONE') add('COMMERCIAL');
+  if (input.buyingSignal) add('PURCHASE');
+  if (input.eventInterest !== 'NONE') add('EVENT');
+  if (input.eventInterest === 'SUNSET' || input.eventInterest === 'BOTH') add('SUNSET');
+  if (input.eventInterest === 'THE_PARTY' || input.eventInterest === 'BOTH') add('THE_PARTY');
+  if (input.gastronomy) add('GASTRONOMY');
+  if (input.partnership) add('PARTNERSHIP');
+  if (input.careers) add('CAREERS');
+  if (input.praise) add('PRAISE');
+  if (input.ugc) add('UGC_BRAND_MENTION');
+  if (input.information) add('INFORMATION');
+  if (intents.length === 0) add('OTHER');
+  return intents;
+}
+
+function classifyPriority(input: {
+  readonly harassmentOrThreat: boolean;
+  readonly safety: boolean;
+  readonly legal: boolean;
+  readonly containsPotentialSensitiveData: boolean;
+  readonly complaint: boolean;
+  readonly refund: boolean;
+  readonly support: boolean;
+  readonly commercialIntent: SocialCommercialIntent;
+  readonly urgency: SocialUrgency;
+}): SocialPriority {
+  if (input.harassmentOrThreat || input.safety || input.legal || input.urgency === 'CRITICAL') {
+    return 'P0';
+  }
+  if (
+    input.containsPotentialSensitiveData ||
+    input.complaint ||
+    input.refund ||
+    input.support ||
+    input.commercialIntent === 'HIGH' ||
+    input.urgency === 'HIGH'
+  ) {
+    return 'P1';
+  }
+  if (input.commercialIntent === 'MEDIUM' || input.urgency === 'MEDIUM') return 'P2';
+  return 'P3';
+}
+
+function classifyConfidence(input: {
+  readonly normalized: string;
+  readonly materialUnknown: boolean;
+  readonly spam: boolean;
+  readonly highSpecificity: boolean;
+  readonly eventInterest: 'NONE' | 'SUNSET' | 'THE_PARTY' | 'BOTH';
+}): SocialClassificationConfidence {
+  if (!input.normalized.trim() || input.materialUnknown) return 'LOW';
+  if (input.spam || input.highSpecificity) return 'HIGH';
+  if (input.eventInterest !== 'NONE') return 'MEDIUM';
+  return 'MEDIUM';
 }
 
 function normalizeText(value: string): string {
