@@ -25,11 +25,14 @@ const REQUIRED_TABLES = [
   'event_outbox',
   'event_outbox_delivery_attempts',
   'instagram_engagement_actions',
+  'instagram_engagement_threads',
+  'instagram_engagement_message_groups',
 ] as const;
 const DEFAULT_KB_SOURCE_IDS = ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'] as const;
 const ENGAGEMENT_MIGRATION = '035_instagram_engagement_e2e.sql';
 const KNOWLEDGE_MIGRATION = '036_instagram_engagement_knowledge.sql';
 const TIERED_KNOWLEDGE_MIGRATION = '037_instagram_engagement_tiered_knowledge.sql';
+const CONVERSATION_OPERATIONS_MIGRATION = '038_instagram_conversation_operations.sql';
 const config = loadConfig();
 
 if (!isTrue(process.env.INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED)) {
@@ -76,7 +79,11 @@ try {
     throw new Error(`INSTAGRAM_ENGAGEMENT_SCHEMA_MISSING:${missingTables.join(',')}`);
   }
 
-  const requiredMigrations = [ENGAGEMENT_MIGRATION, KNOWLEDGE_MIGRATION];
+  const requiredMigrations = [
+    ENGAGEMENT_MIGRATION,
+    KNOWLEDGE_MIGRATION,
+    CONVERSATION_OPERATIONS_MIGRATION,
+  ];
   if (knowledgeBaseEnabled) requiredMigrations.push(TIERED_KNOWLEDGE_MIGRATION);
   const migrations = await pool.query<{ version: string }>(
     `select version from schema_migrations where version = any($1::text[])`,
@@ -85,6 +92,9 @@ try {
   const applied = new Set(migrations.rows.map((row) => row.version));
   if (!applied.has(ENGAGEMENT_MIGRATION)) {
     throw new Error('INSTAGRAM_ENGAGEMENT_MIGRATION_NOT_APPLIED');
+  }
+  if (!applied.has(CONVERSATION_OPERATIONS_MIGRATION)) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_CONVERSATION_MIGRATION_NOT_APPLIED');
   }
 
   let knowledgeMode: 'postgres' | 'google-sheets:env' | 'google-sheets:gcp-iam';
@@ -192,6 +202,7 @@ try {
       providerReadVerified,
       databaseSchemaVerified: true,
       migrationVerified: true,
+      conversationOperationsVerified: true,
       knowledgeReadable: true,
       knowledgeSchemaVerified: true,
       knowledgeSnapshotVerified: true,
