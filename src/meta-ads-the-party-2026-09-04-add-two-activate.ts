@@ -289,9 +289,7 @@ function assertSevenPaused(envelope: Envelope): void {
   }
   for (const asset of NEW_ASSETS) {
     if (!envelope.ads.some((ad) => scalarString(ad.name) === asset.adName)) {
-      throw new Error(
-        `META_ADS_THE_PARTY_0904_ADD_ACTIVATE_NEW_AD_MISSING_${asset.creativeCode}`,
-      );
+      throw new Error(`META_ADS_THE_PARTY_0904_ADD_ACTIVATE_NEW_AD_MISSING_${asset.creativeCode}`);
     }
   }
   for (const ad of envelope.ads) {
@@ -343,9 +341,7 @@ async function loadAndVerifyAssets(): Promise<readonly VerifiedAsset[]> {
   for (const asset of NEW_ASSETS) {
     const bytes = await readFile(`ops/meta-ads/the-party-2026-09-04/${asset.fileName}`);
     if (bytes.length < 100_000 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
-      throw new Error(
-        `META_ADS_THE_PARTY_0904_ADD_ACTIVATE_ASSET_INVALID_${asset.creativeCode}`,
-      );
+      throw new Error(`META_ADS_THE_PARTY_0904_ADD_ACTIVATE_ASSET_INVALID_${asset.creativeCode}`);
     }
     output.push({ base64: bytes.toString('base64') });
   }
