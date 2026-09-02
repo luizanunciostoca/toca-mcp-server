@@ -1,0 +1,183 @@
+name: Instagram Tiered Knowledge Readonly Preflight
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: instagram-tiered-knowledge-readonly-preflight
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  ARTIFACT_REPOSITORY: toca-mcp
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+
+jobs:
+  preflight:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram tiered knowledge READONLY PREFLIGHT AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
+
+          required_lines=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_TIERED_KNOWLEDGE_READONLY_PREFLIGHT=AUTHORIZED"
+            "ARTIFACT_REGISTRY_WRITE_AUTHORIZED=true"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "SERVICE_DEPLOY_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build immutable diagnostic image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="$GCP_REGION-docker.pkg.dev"
+          IMAGE="$HOST/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/server:kb-readonly-preflight-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          gcloud auth configure-docker "$HOST" --quiet
+          docker build --pull -t "$IMAGE" .
+          docker push "$IMAGE"
+          DIGEST="$(gcloud artifacts docker images describe "$IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image=$HOST/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/server@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Execute isolated read-only preflight
+        id: preflight
+        env:
+          RUNTIME_IMAGE: ${{ steps.image.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-kb-ro-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ENV_VARS="^#^NODE_ENV=production#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL=$GCP_RUNTIME_SERVICE_ACCOUNT"
+
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "$ENV_VARS" \
+            --command node \
+            --args dist/src/ops/preflight-instagram-engagement-knowledge-base.js \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/tmp/preflight-exec.log 2>&1
+          EXEC_STATUS=$?
+          set -e
+
+          sleep 3
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          MESSAGE_LINES="$(printf '%s' "$LOGS" | jq -r '.[] | (.textPayload // .jsonPayload.message // "")' | tr '\n' ' ')"
+
+          SAFE_CODE="$(printf '%s' "$MESSAGE_LINES" | grep -oE '(GOOGLE_WORKSPACE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_DRIVE_[A-Z0-9_]+(:[0-9]{3})?|GOOGLE_SHEETS_READ_RANGE_FAILED:[0-9]{3}|INSTAGRAM_ENGAGEMENT_KB_[A-Z0-9_]+(:[A-Za-z0-9._-]+)?|INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_MISMATCH)' | head -n1 || true)"
+          PASS_MARKER="$(printf '%s' "$MESSAGE_LINES" | grep -o '"validation":"instagram-engagement-knowledge-base-readonly-preflight","status":"PASS"' | head -n1 || true)"
+
+          if [[ $EXEC_STATUS -eq 0 && -n "$PASS_MARKER" ]]; then
+            STATUS=PASS
+            SAFE_CODE=NONE
+          else
+            STATUS=FAIL
+            if [[ -z "$SAFE_CODE" ]]; then SAFE_CODE=UNCLASSIFIED_READONLY_PREFLIGHT_FAILURE; fi
+          fi
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "execution_status=$EXEC_STATUS" >> "$GITHUB_OUTPUT"
+          echo "safe_code=$SAFE_CODE" >> "$GITHUB_OUTPUT"
+
+          cleanup
+          trap - EXIT
+
+      - name: Publish sanitized preflight evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.auth.outputs.authorization_issue }}
+          STATUS: ${{ steps.preflight.outputs.status }}
+          EXEC_STATUS: ${{ steps.preflight.outputs.execution_status }}
+          SAFE_CODE: ${{ steps.preflight.outputs.safe_code }}
+          RUNTIME_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v COMMENT '%s\n' \
+            "TIERED_KNOWLEDGE_READONLY_PREFLIGHT_STATUS=$STATUS" \
+            "EXECUTION_STATUS=$EXEC_STATUS" \
+            "SAFE_ERROR_CODE=$SAFE_CODE" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            'DATABASE_MUTATIONS=false' \
+            'SERVICE_DEPLOY=false' \
+            'PROVIDER_WRITES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'RAW_SOURCE_CONTENT_PRINTED=false' \
+            'DRIVE_IDS_PRINTED=false' \
+            'SECRETS_PRINTED=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
+
+          test "$STATUS" = PASS
