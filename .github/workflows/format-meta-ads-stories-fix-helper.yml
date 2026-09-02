@@ -8,7 +8,7 @@ on:
       - '.github/workflows/format-meta-ads-stories-fix-helper.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -33,12 +33,18 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format target and emit base64
+      - name: Format and commit target only
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec prettier --write src/meta-ads-the-party-2026-09-04-stories-link-fix.ts
-          echo 'FORMATTED_FILE_BASE64_BEGIN'
-          base64 -w0 src/meta-ads-the-party-2026-09-04-stories-link-fix.ts
-          echo
-          echo 'FORMATTED_FILE_BASE64_END'
+          target='src/meta-ads-the-party-2026-09-04-stories-link-fix.ts'
+          pnpm exec prettier --write "$target"
+          if git diff --quiet -- "$target"; then
+            echo 'FORMAT_ALREADY_CLEAN=1'
+            exit 0
+          fi
+          git config user.name 'toca-mcp-ci'
+          git config user.email 'toca-mcp-ci@users.noreply.github.com'
+          git add -- "$target"
+          git commit -m 'style(meta-ads): format stories-only correction'
+          git push origin HEAD:fix/meta-ads-the-party-0904-stories-only-link
