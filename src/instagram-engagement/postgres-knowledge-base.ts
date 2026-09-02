@@ -30,6 +30,51 @@ const HUMAN_OR_SENSITIVE_INTENTS = new Set<EngagementIntent>([
   'UNKNOWN',
 ]);
 
+const FTS_QUESTION_NOISE = new Set([
+  'a',
+  'as',
+  'o',
+  'os',
+  'um',
+  'uma',
+  'uns',
+  'umas',
+  'de',
+  'da',
+  'das',
+  'do',
+  'dos',
+  'e',
+  'em',
+  'no',
+  'na',
+  'nos',
+  'nas',
+  'para',
+  'por',
+  'quanto',
+  'quantos',
+  'quanta',
+  'quantas',
+  'custa',
+  'custam',
+  'custo',
+  'preco',
+  'precos',
+  'valor',
+  'valores',
+  'onde',
+  'fica',
+  'ficam',
+  'qual',
+  'quais',
+  'que',
+  'tem',
+  'me',
+  'diz',
+  'saber',
+]);
+
 export interface PostgresInstagramEngagementKnowledgeBaseOptions {
   readonly minimumConfidence?: number;
   readonly limit?: number;
@@ -64,6 +109,7 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
     if (HUMAN_OR_SENSITIVE_INTENTS.has(expectedIntent)) return null;
     const query = normalizeKnowledgePrompt(text);
     if (!query) return null;
+    const retrievalQuery = knowledgeRetrievalQuery(query);
 
     const result = await this.pool.query<KnowledgeBaseCandidate>(
       `select c.chunk_id, c.heading, c.content, c.search_text, c.risk, c.autonomy,
@@ -79,7 +125,7 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
           and c.search_vector @@ plainto_tsquery('simple', $1)
         order by rank desc, c.chunk_id asc
         limit $3`,
-      [query, expectedIntent, this.limit],
+      [retrievalQuery, expectedIntent, this.limit],
     );
 
     let best: KnowledgeBaseCandidate | undefined;
@@ -110,4 +156,11 @@ export class PostgresInstagramEngagementKnowledgeBaseSource implements Instagram
       chunkId: best.chunk_id,
     };
   }
+}
+
+function knowledgeRetrievalQuery(normalized: string): string {
+  const significant = normalized
+    .split(' ')
+    .filter((token) => token.length > 1 && !FTS_QUESTION_NOISE.has(token));
+  return significant.length > 0 ? significant.join(' ') : normalized;
 }
