@@ -16,6 +16,7 @@ export interface MetaWebhookPersistResult {
 export interface PostgresMetaWebhookEventStoreOptions {
   readonly outbox?: TransactionalOutboxWriter;
   readonly engagementScope?: InstagramEngagementScope;
+  readonly engagementDebounceMs?: number;
 }
 
 export class PostgresMetaWebhookEventStore {
@@ -28,6 +29,10 @@ export class PostgresMetaWebhookEventStore {
     this.options = options ?? defaultOptions(pool, process.env);
     if (Boolean(this.options.outbox) !== Boolean(this.options.engagementScope)) {
       throw new Error('META_WEBHOOK_ENGAGEMENT_OUTBOX_SCOPE_REQUIRED');
+    }
+    const debounceMs = this.options.engagementDebounceMs ?? 0;
+    if (!Number.isInteger(debounceMs) || debounceMs < 0 || debounceMs > 60_000) {
+      throw new Error('INSTAGRAM_ENGAGEMENT_GROUP_DEBOUNCE_MS_INVALID');
     }
   }
 
@@ -85,6 +90,10 @@ export class PostgresMetaWebhookEventStore {
           );
 
           if (this.options.outbox && this.options.engagementScope) {
+            const debounceMs = this.options.engagementDebounceMs ?? 0;
+            const availableAt = debounceMs > 0
+              ? new Date(Date.now() + debounceMs).toISOString()
+              : occurredAt;
             await this.options.outbox.enqueue(
               client,
               createInstagramEngagementInboundEnvelope(
@@ -92,7 +101,7 @@ export class PostgresMetaWebhookEventStore {
                 this.options.engagementScope,
                 occurredAt,
               ),
-              { maxAttempts: 5 },
+              { availableAt, maxAttempts: 5 },
             );
           }
         } else {
@@ -121,6 +130,7 @@ function defaultOptions(
   return {
     outbox: new PostgresTransactionalOutbox(pool),
     engagementScope: { tenantId, workspaceId, organizationId },
+    engagementDebounceMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_GROUP_DEBOUNCE_MS, 5_000, 0, 60_000),
   };
 }
 
@@ -132,4 +142,18 @@ function requiredEnv(env: NodeJS.ProcessEnv, key: string): string {
 
 function isTrue(value: string | undefined): boolean {
   return value?.trim().toLowerCase() === 'true';
+}
+
+function boundedInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (!value?.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_GROUP_DEBOUNCE_MS_INVALID');
+  }
+  return parsed;
 }
