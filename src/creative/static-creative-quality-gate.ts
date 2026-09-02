@@ -4,14 +4,40 @@ import { ExecutionError } from '../core/errors.js';
 export const TOCA_STATIC_CREATIVE_QUALITY_POLICY_ID =
   'TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1' as const;
 export const TOCA_STATIC_CREATIVE_QUALITY_POLICY_VERSION = '1.0' as const;
-
-export const INSTAGRAM_STORY_STATIC_FRAME = {
-  width: 1080,
-  height: 1920,
-  safeArea: { leftPx: 72, rightPx: 72, topPx: 250, bottomPx: 250 },
-} as const;
-
 export const STATIC_CREATIVE_MAX_UPSCALE_RATIO = 1.5 as const;
+
+export const staticCreativeFormatSchema = z.enum(['STORY_9_16', 'FEED_4_5', 'FEED_1_1']);
+export type StaticCreativeFormat = z.infer<typeof staticCreativeFormatSchema>;
+
+export const STATIC_CREATIVE_FORMAT_PROFILES = {
+  STORY_9_16: {
+    width: 1080,
+    height: 1920,
+    safeArea: { leftPx: 72, rightPx: 72, topPx: 250, bottomPx: 250 },
+  },
+  FEED_4_5: {
+    width: 1080,
+    height: 1350,
+    safeArea: { leftPx: 64, rightPx: 64, topPx: 80, bottomPx: 80 },
+  },
+  FEED_1_1: {
+    width: 1080,
+    height: 1080,
+    safeArea: { leftPx: 64, rightPx: 64, topPx: 64, bottomPx: 64 },
+  },
+} as const satisfies Record<
+  StaticCreativeFormat,
+  {
+    readonly width: number;
+    readonly height: number;
+    readonly safeArea: {
+      readonly leftPx: number;
+      readonly rightPx: number;
+      readonly topPx: number;
+      readonly bottomPx: number;
+    };
+  }
+>;
 
 export const staticCreativeGateStatusSchema = z.enum(['PASS', 'FAIL', 'NOT_APPLICABLE']);
 export type StaticCreativeGateStatus = z.infer<typeof staticCreativeGateStatusSchema>;
@@ -29,6 +55,7 @@ export const staticCreativeQualityEvidenceSchema = z.object({
   outputSha256: z.string().regex(/^[a-f0-9]{64}$/),
   policyId: z.literal(TOCA_STATIC_CREATIVE_QUALITY_POLICY_ID),
   policyVersion: z.literal(TOCA_STATIC_CREATIVE_QUALITY_POLICY_VERSION),
+  format: staticCreativeFormatSchema,
   overallStatus: z.enum(['PASS', 'FAIL']),
   sourceRole: staticCreativeSourceRoleSchema,
   sourceLineageStatus: staticCreativeGateStatusSchema,
@@ -77,6 +104,7 @@ export interface StaticCreativeQualityCandidate {
   readonly evidenceId: string;
   readonly assetId: string;
   readonly outputSha256: string;
+  readonly format: StaticCreativeFormat;
   readonly sourceRole: StaticCreativeSourceRole;
   readonly sourceMasterSha256?: string;
   readonly sourceWidth: number;
@@ -113,7 +141,7 @@ export function evaluateStaticCreativeQuality(
     effectiveUpscaleRatio <= STATIC_CREATIVE_MAX_UPSCALE_RATIO ? 'PASS' : 'FAIL';
   if (sourceResolutionStatus !== 'PASS') failureCodes.push('STATIC_CREATIVE_SOURCE_RESOLUTION_TOO_LOW');
 
-  const safeAreaStatus = validateStorySafeArea(candidate);
+  const safeAreaStatus = validateSafeArea(candidate);
   if (safeAreaStatus !== 'PASS') failureCodes.push('STATIC_CREATIVE_SAFE_AREA_VIOLATION');
 
   const typographyStatus: StaticCreativeGateStatus = candidate.typographyRequired
@@ -151,6 +179,7 @@ export function evaluateStaticCreativeQuality(
     outputSha256: candidate.outputSha256.toLowerCase(),
     policyId: TOCA_STATIC_CREATIVE_QUALITY_POLICY_ID,
     policyVersion: TOCA_STATIC_CREATIVE_QUALITY_POLICY_VERSION,
+    format: candidate.format,
     overallStatus: failureCodes.length === 0 ? 'PASS' : 'FAIL',
     sourceRole: candidate.sourceRole,
     sourceLineageStatus,
@@ -177,9 +206,7 @@ export function assertStaticCreativePublicationReady(
   expected: { readonly assetId: string; readonly outputSha256: string },
 ): void {
   const parsed = staticCreativeQualityEvidenceSchema.parse(evidence);
-  if (parsed.assetId !== expected.assetId) {
-    deny('STATIC_CREATIVE_QUALITY_ASSET_ID_MISMATCH');
-  }
+  if (parsed.assetId !== expected.assetId) deny('STATIC_CREATIVE_QUALITY_ASSET_ID_MISMATCH');
   if (parsed.outputSha256 !== expected.outputSha256.toLowerCase()) {
     deny('STATIC_CREATIVE_QUALITY_OUTPUT_SHA256_MISMATCH');
   }
@@ -204,15 +231,13 @@ export function assertStaticCreativePublicationReady(
   }
 }
 
-function validateStorySafeArea(candidate: StaticCreativeQualityCandidate): StaticCreativeGateStatus {
-  if (
-    candidate.outputWidth !== INSTAGRAM_STORY_STATIC_FRAME.width ||
-    candidate.outputHeight !== INSTAGRAM_STORY_STATIC_FRAME.height
-  ) {
+function validateSafeArea(candidate: StaticCreativeQualityCandidate): StaticCreativeGateStatus {
+  const profile = STATIC_CREATIVE_FORMAT_PROFILES[candidate.format];
+  if (candidate.outputWidth !== profile.width || candidate.outputHeight !== profile.height) {
     return 'FAIL';
   }
 
-  const safe = INSTAGRAM_STORY_STATIC_FRAME.safeArea;
+  const safe = profile.safeArea;
   const right = candidate.outputWidth - safe.rightPx;
   const bottom = candidate.outputHeight - safe.bottomPx;
   const protectedRoles = new Set<StaticCreativeLayoutRole>([
