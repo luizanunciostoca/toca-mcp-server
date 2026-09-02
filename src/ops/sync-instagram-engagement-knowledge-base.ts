@@ -8,6 +8,7 @@ import {
   knowledgeDocumentSha256,
   parseCanonicalKnowledgeSourceRegistry,
 } from '../instagram-engagement/knowledge-base-ingest.js';
+import { normalizeKnowledgeSourceText } from '../instagram-engagement/knowledge-source-text.js';
 import { normalizeKnowledgePrompt } from '../instagram-engagement/knowledge.js';
 import { createPostgresPool } from '../persistence/postgres.js';
 import {
@@ -54,8 +55,9 @@ if (registry.length !== sourceIds.size) {
 const documents = [];
 for (const source of registry) {
   const exported = await drive.readText(source.driveId);
+  const normalizedText = normalizeKnowledgeSourceText(exported.text);
   const sha256 = knowledgeDocumentSha256(exported.text);
-  const chunks = buildKnowledgeBaseChunks(source, exported.text);
+  const chunks = buildKnowledgeBaseChunks(source, normalizedText);
   if (chunks.length === 0) throw new Error(`INSTAGRAM_ENGAGEMENT_KB_NO_CHUNKS:${source.sourceId}`);
   documents.push({ source, exported, sha256, chunks });
 }
