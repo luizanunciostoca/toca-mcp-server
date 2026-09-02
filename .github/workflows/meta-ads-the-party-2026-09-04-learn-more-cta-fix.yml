@@ -1,0 +1,202 @@
+name: Meta Ads The Party 2026-09-04 Learn More CTA Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-ads-the-party-2026-09-04-learn-more-cta-fix.yml'
+      - 'src/meta-ads-the-party-2026-09-04-learn-more-cta-fix.ts'
+      - 'control/meta-ads-the-party-2026-09-04.learn-more-cta-fix'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-the-party-2026-09-04-learn-more-cta-fix
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_2026_09_04_LEARN_MORE_CTA
+
+jobs:
+  correct-paused-cta:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact CTA correction controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate explicit CTA correction authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f control/meta-ads-the-party-2026-09-04.learn-more-cta-fix
+          APPROVAL="$(tr -d '\r\n' < control/meta-ads-the-party-2026-09-04.learn-more-cta-fix)"
+          test "$APPROVAL" = "$EXPECTED_APPROVAL"
+          echo 'THE_PARTY_0904_LEARN_MORE_CTA_FIX_AUTHORIZED=1'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Quality Gate
+        run: pnpm quality
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Assert public Meta Ads writes remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe toca-mcp-production \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? |
+              select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] |
+              length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_BEFORE_CTA_FIX=1'
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable CTA correction image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-0904-learn-more-cta-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-meta-ads-0904-learn-more-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Deploy one-time paused CTA correction job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/meta-ads-the-party-2026-09-04-learn-more-cta-fix.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_THE_PARTY_0904_CTA_FIX_APPROVAL=$EXPECTED_APPROVAL" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 420s \
+            --quiet
+
+      - name: Execute exact paused Learn More CTA correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture provider-backed CTA evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=20m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | \
+              grep 'META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=' | \
+              head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            (.status == "LEARN_MORE_CTA_CORRECTED_PAUSED" or
+             .status == "ALREADY_LEARN_MORE_PAUSED") and
+            .activationPerformed == false and
+            .ctaType == "LEARN_MORE" and
+            (.placements | sort | join(",")) ==
+              "facebook_story,instagram_story"
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-0904-learn-more-cta-fix.json
+          echo 'THE_PARTY_0904_LEARN_MORE_CTA_FIX_VERIFIED=1'
+          echo 'THE_PARTY_0904_LEARN_MORE_CTA_FIX_JSON_BEGIN'
+          printf '%s\n' "$RESULT_JSON" | jq -c .
+          echo 'THE_PARTY_0904_LEARN_MORE_CTA_FIX_JSON_END'
+
+      - name: Reassert public Meta Ads writes remain disabled
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe toca-mcp-production \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? |
+              select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] |
+              length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_AFTER_CTA_FIX=1'
+
+      - name: Upload immutable CTA correction evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meta-ads-the-party-0904-learn-more-cta-${{ github.sha }}
+          path: meta-ads-the-party-0904-learn-more-cta-fix.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove one-time CTA correction job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --quiet || true
