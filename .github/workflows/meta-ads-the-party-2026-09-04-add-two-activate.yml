@@ -1,0 +1,243 @@
+name: Meta Ads The Party 2026-09-04 Add Two And Activate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'control/meta-ads-the-party-2026-09-04.add-two-activate'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-the-party-2026-09-04-financial-mutations
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  MCP_SERVICE_NAME: toca-mcp-production
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_2026_09_04_ADD_AD06_AD07_AND_ACTIVATE_R300
+  DRIVE_CREATIVE_6_ID: 1LVpEACJ2CD76kWv8kl-vxlUkAF9ECkVT
+  DRIVE_CREATIVE_7_ID: 1qjZAoEvZqnq1WPwW121cL2kO5kToOOVU
+  CREATIVE_6_SHA256: 43ce611d214dde861fab41f6a035a1d483ef08835e534c758a3b1dbbc50780bb
+  CREATIVE_7_SHA256: c34a823820b3d13fc71f0d194703e454db30e1271d509ed6d8bee2e03f4ece9c
+
+jobs:
+  add-two-and-activate:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Validate explicit financial authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f control/meta-ads-the-party-2026-09-04.add-two-activate
+          APPROVAL="$(tr -d '\r\n' < control/meta-ads-the-party-2026-09-04.add-two-activate)"
+          test "$APPROVAL" = "$EXPECTED_APPROVAL"
+          echo 'THE_PARTY_0904_ADD_TWO_ACTIVATE_AUTHORIZED=1'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Authenticate to Google Cloud and TOCA OS Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Hydrate and verify the two approved creatives from TOCA OS Drive
+        shell: bash
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          test -n "$DRIVE_ACCESS_TOKEN"
+          mkdir -p ops/meta-ads/the-party-2026-09-04
+
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            "https://www.googleapis.com/drive/v3/files/$DRIVE_CREATIVE_6_ID?alt=media" \
+            -o ops/meta-ads/the-party-2026-09-04/creative-06-duas-pistas-duas-energias.jpg
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+            "https://www.googleapis.com/drive/v3/files/$DRIVE_CREATIVE_7_ID?alt=media" \
+            -o ops/meta-ads/the-party-2026-09-04/creative-07-duas-pistas-duas-experiencias.jpg
+
+          test "$(wc -c < ops/meta-ads/the-party-2026-09-04/creative-06-duas-pistas-duas-energias.jpg)" -gt 100000
+          test "$(wc -c < ops/meta-ads/the-party-2026-09-04/creative-07-duas-pistas-duas-experiencias.jpg)" -gt 100000
+          test "$(xxd -p -l 2 ops/meta-ads/the-party-2026-09-04/creative-06-duas-pistas-duas-energias.jpg)" = "ffd8"
+          test "$(xxd -p -l 2 ops/meta-ads/the-party-2026-09-04/creative-07-duas-pistas-duas-experiencias.jpg)" = "ffd8"
+          printf '%s  %s\n' "$CREATIVE_6_SHA256" ops/meta-ads/the-party-2026-09-04/creative-06-duas-pistas-duas-energias.jpg | sha256sum --check --strict
+          printf '%s  %s\n' "$CREATIVE_7_SHA256" ops/meta-ads/the-party-2026-09-04/creative-07-duas-pistas-duas-experiencias.jpg | sha256sum --check --strict
+          echo 'THE_PARTY_0904_NEW_DRIVE_CREATIVES_VERIFIED=1'
+
+      - name: Quality Gate
+        run: pnpm quality
+
+      - name: Assert public Meta Ads writes remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? |
+              select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] |
+              length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_BEFORE_ADD_ACTIVATE=1'
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable execution image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-0904-add-two-activate-${GITHUB_SHA}"
+          docker build -f Dockerfile.meta-ads-the-party-2026-09-04 -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-meta-ads-0904-add-activate-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Deploy one-time governed financial job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/meta-ads-the-party-2026-09-04-add-two-activate.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=false~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_THE_PARTY_0904_ADD_ACTIVATE_APPROVAL=$EXPECTED_APPROVAL" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 420s \
+            --quiet
+
+      - name: Execute add-two and activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture provider-backed activation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=''
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_0904_ADD_ACTIVATE_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=20m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | \
+              grep 'META_ADS_THE_PARTY_0904_ADD_ACTIVATE_RESULT=' | \
+              head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_0904_ADD_ACTIVATE_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "AD06_AD07_ADDED_AND_CAMPAIGN_ACTIVATED" and
+            .campaignStatus == "ACTIVE" and
+            .adSetStatus == "ACTIVE" and
+            .configuredActiveAds == 7 and
+            .finalAdCount == 7 and
+            .lifetimeBudgetMinor == 30000 and
+            .currency == "BRL" and
+            .ctaType == "LEARN_MORE" and
+            (.placements | sort | join(",")) == "facebook_story,instagram_story" and
+            .providerMutationExecuted == true and
+            .activationPerformed == true
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-0904-add-two-activate.json
+          echo 'THE_PARTY_0904_ADD_TWO_ACTIVATION_VERIFIED=1'
+          echo 'THE_PARTY_0904_ADD_ACTIVATE_JSON_BEGIN'
+          printf '%s\n' "$RESULT_JSON" | jq -c .
+          echo 'THE_PARTY_0904_ADD_ACTIVATE_JSON_END'
+
+      - name: Reassert public Meta Ads writes remain disabled
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_JSON="$(gcloud run services describe "$MCP_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --format=json)"
+          printf '%s' "$MCP_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $container |
+            ([ $container.env[]? |
+              select(.name == "META_ADS_WRITE_ENABLED" and .value == "true") ] |
+              length == 0)
+          ' >/dev/null
+          echo 'META_ADS_PUBLIC_WRITE_DISABLED_AFTER_ADD_ACTIVATE=1'
+
+      - name: Upload immutable activation evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: meta-ads-the-party-0904-add-two-activate-${{ github.sha }}
+          path: meta-ads-the-party-0904-add-two-activate.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove one-time financial job
+        if: always()
+        shell: bash
+        run: |
+          gcloud run jobs delete "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --quiet || true
