@@ -18,7 +18,7 @@ if (suppliedApproval !== APPROVAL) {
   throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_APPROVAL_MISMATCH');
 }
 
-const account = { adAccountId: ACCOUNT_ID } as const;
+const account = { adAccountId: ACCOUNT_ID, currency: 'BRL' } as const;
 const api = createMetaPublicationApiClient(loadConfig(process.env));
 const provider = new MetaAdsControlledGraphProvider(api);
 
