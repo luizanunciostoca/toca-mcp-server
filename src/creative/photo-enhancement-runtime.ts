@@ -116,7 +116,7 @@ function validateIdentity(input: PhotoEnhancementRuntimeInput): void {
   for (const [name, value] of Object.entries(input)) {
     if (!value.trim()) throw new Error(`PHOTO_ENHANCEMENT_${name.toUpperCase()}_REQUIRED`);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.correlationId)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.correlationId)) {
     throw new Error('PHOTO_ENHANCEMENT_CORRELATION_ID_INVALID');
   }
 }
