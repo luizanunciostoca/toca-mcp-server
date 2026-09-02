@@ -36,6 +36,11 @@ env:
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   EXPECTED_APPROVAL: APPROVED_THE_PARTY_2026_09_04_R300_CREATE_PAUSED
   CAMPAIGN_START_UTC: '2026-09-02T23:30:00Z'
+  DRIVE_CREATIVE_1_ID: 1iL2v_mBCsLPgFxl5gi23DavqNqet3OUZ
+  DRIVE_CREATIVE_2_ID: 1_4RFeZ9FvkP93-huB_rBG3JeuPpPEtDq
+  DRIVE_CREATIVE_3_ID: 1IsQA4Hnl4uC1GNTK6jaiNC0IvjHugDj6
+  DRIVE_CREATIVE_4_ID: 1aXdTAZXpkW9DeW9dI0V7uu7GUNOuwoPz
+  DRIVE_CREATIVE_5_ID: 17gyfiyA4hAwmP1R_8kqxYHs3DcYTOGzq
   CREATIVE_1_SHA256: f3f6cbefacea0367ce70f38c0d08fde01a00386dd87e5212ac80d9e31c1fb9af
   CREATIVE_2_SHA256: d64e32bdf41f7eea918442256dfe36bc7c84c13ffcd64a8c630e4db0a8b60ce5
   CREATIVE_3_SHA256: f966cd2e5a25a41ee69219b47c2c9b6dcbc6494a693bb7cb4c1320ac964406e2
@@ -90,10 +95,33 @@ jobs:
           echo 'THE_PARTY_0904_EXPLICIT_APPROVAL_VALIDATED=1'
           echo 'THE_PARTY_0904_START_IS_STILL_FUTURE=1'
 
-      - name: Verify exact local creative assets
+      - name: Authenticate to Google Cloud and TOCA OS Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Hydrate and verify exact approved creatives from TOCA OS Drive
         shell: bash
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
+          test -n "$DRIVE_ACCESS_TOKEN"
+          mkdir -p ops/meta-ads/the-party-2026-09-04
+
+          ids=(
+            "$DRIVE_CREATIVE_1_ID"
+            "$DRIVE_CREATIVE_2_ID"
+            "$DRIVE_CREATIVE_3_ID"
+            "$DRIVE_CREATIVE_4_ID"
+            "$DRIVE_CREATIVE_5_ID"
+          )
           files=(
             ops/meta-ads/the-party-2026-09-04/creative-01-hero.jpg
             ops/meta-ads/the-party-2026-09-04/creative-02-experience.jpg
@@ -108,25 +136,20 @@ jobs:
             "$CREATIVE_4_SHA256"
             "$CREATIVE_5_SHA256"
           )
+
           for i in "${!files[@]}"; do
-            file="${files[$i]}"
-            test -f "$file"
-            test "$(wc -c < "$file")" -gt 100000
-            test "$(xxd -p -l 2 "$file")" = "ffd8"
-            printf '%s  %s\n' "${hashes[$i]}" "$file" | sha256sum --check --strict
+            curl --fail --silent --show-error --location --retry 3 \
+              -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN" \
+              "https://www.googleapis.com/drive/v3/files/${ids[$i]}?alt=media" \
+              -o "${files[$i]}"
+            test "$(wc -c < "${files[$i]}")" -gt 100000
+            test "$(xxd -p -l 2 "${files[$i]}")" = "ffd8"
+            printf '%s  %s\n' "${hashes[$i]}" "${files[$i]}" | sha256sum --check --strict
           done
-          echo 'THE_PARTY_0904_CREATIVES_VERIFIED=1'
+          echo 'THE_PARTY_0904_DRIVE_CREATIVES_VERIFIED=1'
 
-      - name: Quality Gate
+      - name: Quality Gate on hydrated execution image source
         run: pnpm quality
-
-      - name: Authenticate deployer to Google Cloud
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
-
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Assert public MCP Meta Ads writes remain disabled
         shell: bash
