@@ -1,0 +1,65 @@
+name: Instagram Conversation Format Artifact
+
+on:
+  pull_request:
+    paths:
+      - 'src/crm/social-engagement-classifier.ts'
+      - 'src/crm/social-engagement-contracts.ts'
+      - 'src/instagram-engagement/conversation-operations.ts'
+      - 'src/instagram-engagement/conversation-reply-state.ts'
+      - 'src/instagram-engagement/processor.ts'
+      - 'src/persistence/meta-webhook-event-store.ts'
+      - 'src/policy/engagement-policy.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  format-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format conversation sources with repository Prettier
+        run: >-
+          pnpm exec prettier --write
+          src/crm/social-engagement-classifier.ts
+          src/crm/social-engagement-contracts.ts
+          src/instagram-engagement/conversation-operations.ts
+          src/instagram-engagement/conversation-reply-state.ts
+          src/instagram-engagement/processor.ts
+          src/persistence/meta-webhook-event-store.ts
+          src/policy/engagement-policy.ts
+
+      - name: Upload exact formatted sources
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-conversation-formatted-${{ github.event.pull_request.head.sha }}
+          path: |
+            src/crm/social-engagement-classifier.ts
+            src/crm/social-engagement-contracts.ts
+            src/instagram-engagement/conversation-operations.ts
+            src/instagram-engagement/conversation-reply-state.ts
+            src/instagram-engagement/processor.ts
+            src/persistence/meta-webhook-event-store.ts
+            src/policy/engagement-policy.ts
+          if-no-files-found: error
+          retention-days: 1
