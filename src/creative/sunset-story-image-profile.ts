@@ -71,7 +71,7 @@ export interface SunsetStoryImageObservation {
   readonly width: number;
   readonly height: number;
   readonly subjects: readonly SunsetStoryObservedSubject[];
-  readonly protectedFeatures?: readonly SunsetStoryProtectedFeature[];
+  readonly protectedFeatures: readonly SunsetStoryProtectedFeature[];
   readonly negativeSpaceZones: readonly SunsetStoryZone[];
   readonly regionLuma: Readonly<Partial<Record<SunsetStoryZone, number>>>;
   readonly warmth: number;
@@ -179,7 +179,7 @@ export function buildSunsetStoryImageProfile(
     assertRect(subject.box);
     assertUnit(subject.salience, 'SUNSET_IMAGE_SUBJECT_SALIENCE_INVALID');
   }
-  for (const feature of observation.protectedFeatures ?? []) {
+  for (const feature of observation.protectedFeatures) {
     assertRect(feature.box);
     assertUnit(feature.salience, 'SUNSET_IMAGE_PROTECTED_FEATURE_SALIENCE_INVALID');
   }
@@ -204,7 +204,7 @@ export function buildSunsetStoryImageProfile(
     height: observation.height,
     sourceAspectRatio: observation.width / observation.height,
     subjects: [...observation.subjects],
-    protectedFeatures: [...(observation.protectedFeatures ?? [])],
+    protectedFeatures: [...observation.protectedFeatures],
     primarySubject,
     primarySubjectZone,
     negativeSpaceZones: [...new Set(observation.negativeSpaceZones)],
