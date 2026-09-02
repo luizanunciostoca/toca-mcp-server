@@ -65,6 +65,9 @@ async function verifySchedulerPersistence(): Promise<void> {
   const smokeId = randomUUID();
   const jobIds: string[] = [];
 
+  // This is intentionally a video-only descriptor. The smoke test validates persistence,
+  // read, atomic reschedule and cancel; it must not manufacture fake static-creative QA
+  // evidence merely to exercise the scheduler storage path.
   const descriptor = (
     scheduledFor: string,
     suffix: string,
@@ -77,12 +80,12 @@ async function verifySchedulerPersistence(): Promise<void> {
       pageId: 'SMOKE_PAGE_NO_PROVIDER_CALL',
       instagramAccountId: 'SMOKE_INSTAGRAM_NO_PROVIDER_CALL',
     },
-    mediaType: 'IMAGE',
+    mediaType: 'REEL',
     asset: {
       assetId: `SMOKE-ASSET-${smokeId}`,
-      objectName: `smoke/${smokeId}.jpg`,
+      objectName: `smoke/${smokeId}.mp4`,
       sha256: '0'.repeat(64),
-      contentType: 'image/jpeg',
+      contentType: 'video/mp4',
     },
     caption: 'TOCA scheduler persistence self-test; provider call prohibited',
     correlationId: `CORR-SMOKE-${smokeId}`,

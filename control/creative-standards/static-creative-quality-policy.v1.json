@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "policyId": "TOCA_STATIC_CREATIVE_QUALITY_POLICY_V1",
+  "version": "1.0",
+  "status": "ACTIVE_CANONICAL",
+  "purpose": "Fail closed before static social creatives can be marked publication-ready or scheduled.",
+  "sourcePolicy": {
+    "finalSourceRole": "ORIGINAL_MASTER",
+    "referenceTemplatesMayBeFinalSource": false,
+    "derivedRastersMayBeFinalSource": false,
+    "sourceMasterSha256Required": true,
+    "exactSourceMasterBindingRequired": true
+  },
+  "resolutionPolicy": {
+    "maxEffectiveUpscaleRatio": 1.5,
+    "rejectLowResolutionSource": true
+  },
+  "formats": {
+    "STORY_9_16": {
+      "width": 1080,
+      "height": 1920,
+      "safeArea": { "leftPx": 72, "rightPx": 72, "topPx": 250, "bottomPx": 250 }
+    },
+    "FEED_4_5": {
+      "width": 1080,
+      "height": 1350,
+      "safeArea": { "leftPx": 64, "rightPx": 64, "topPx": 80, "bottomPx": 80 }
+    },
+    "FEED_1_1": {
+      "width": 1080,
+      "height": 1080,
+      "safeArea": { "leftPx": 64, "rightPx": 64, "topPx": 64, "bottomPx": 64 }
+    }
+  },
+  "protectedLayoutRoles": ["HEADLINE", "SUPPORT", "CTA", "BRAND", "FOOTER"],
+  "visualArtifactPolicy": {
+    "forbiddenOverlayStyles": ["HARD_FULL_WIDTH_PANEL"],
+    "preferredReadabilityTreatments": ["SOFT_GRADIENT", "LOCAL_CONTRAST", "LOCAL_PANEL"]
+  },
+  "typographyPolicy": {
+    "canonicalFontPinRequiredWhenTypographyIsPresent": true,
+    "reviewFallbackAllowed": true,
+    "reviewFallbackPublicationEligible": false
+  },
+  "requiredGates": [
+    "sourceLineageStatus",
+    "sourceResolutionStatus",
+    "safeAreaStatus",
+    "typographyStatus",
+    "rightsStatus",
+    "brandIntegrityStatus",
+    "venueFidelityStatus",
+    "copyQaStatus",
+    "informationQaStatus",
+    "visualArtifactStatus"
+  ],
+  "publicationPolicy": {
+    "draftMayExistWithFailedGates": true,
+    "draftStoryReady": false,
+    "draftPublicationEligible": false,
+    "newStaticScheduleRequiresExactQualityEvidence": true,
+    "qualityEvidenceMustMatchAssetId": true,
+    "qualityEvidenceMustMatchOutputSha256": true,
+    "legacyPersistedSchedulesRemainParseCompatible": true
+  },
+  "failureMode": "FAIL_CLOSED"
+}
