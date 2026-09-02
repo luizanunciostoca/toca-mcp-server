@@ -64,7 +64,10 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
         id: fileId,
         name: 'source',
         mimeType: 'text/plain',
-        text: fileId === 'drive-loc' ? 'Documento sem campo de localização.' : (sourceTextById[fileId] ?? ''),
+        text:
+          fileId === 'drive-loc'
+            ? 'Documento sem campo de localização.'
+            : (sourceTextById[fileId] ?? ''),
       }),
     );
     await expect(
