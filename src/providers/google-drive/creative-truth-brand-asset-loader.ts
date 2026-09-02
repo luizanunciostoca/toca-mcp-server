@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { BrandAsset } from '../../contracts/creative-truth.js';
+import { assertCanonicalTocaLogoAsset } from '../../creative/logo-integrity-gate.js';
 import { ExecutionError } from '../../core/errors.js';
 import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 
@@ -123,6 +124,7 @@ export class GoogleDriveCreativeTruthBrandAssetLoader implements CreativeTruthBr
 }
 
 function validateAsset(asset: BrandAsset): void {
+  assertCanonicalTocaLogoAsset(asset);
   if (
     !asset.brandAssetId.trim() ||
     !asset.brand.trim() ||
