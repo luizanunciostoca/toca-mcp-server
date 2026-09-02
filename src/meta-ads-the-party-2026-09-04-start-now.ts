@@ -171,7 +171,10 @@ function assertInvariantEnvelope(envelope: Envelope): void {
   if (!isExpectedTargeting(asRecord(envelope.adSet.targeting))) {
     throw new Error('META_ADS_THE_PARTY_0904_START_NOW_TARGETING_MISMATCH');
   }
-  if (parseTime(requiredScalar(envelope.adSet.end_time, 'END_TIME'), 'END_TIME') !== parseTime(EXPECTED_END_TIME, 'EXPECTED_END_TIME')) {
+  if (
+    parseTime(requiredScalar(envelope.adSet.end_time, 'END_TIME'), 'END_TIME') !==
+    parseTime(EXPECTED_END_TIME, 'EXPECTED_END_TIME')
+  ) {
     throw new Error('META_ADS_THE_PARTY_0904_START_NOW_END_TIME_MISMATCH');
   }
   if (envelope.ads.length !== EXPECTED_AD_COUNT) {
