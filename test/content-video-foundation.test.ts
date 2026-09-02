@@ -98,7 +98,10 @@ describe('R20/R29 video and content foundation', () => {
     expect(() => assertContentItemStateTransition('APPROVED', 'PLANNED')).toThrow(
       'CONTENT_ITEM_STATE_TRANSITION_INVALID',
     );
-    expect(() => assertContentItemStateTransition('REVIEW', 'IN_PRODUCTION')).not.toThrow();
+    expect(() => assertContentItemStateTransition('BRIEFED', 'PRODUCED')).not.toThrow();
+    expect(() => assertContentItemStateTransition('PRODUCED', 'BRIEFED')).toThrow(
+      'CONTENT_ITEM_STATE_TRANSITION_INVALID',
+    );
   });
 
   it('requires factual sources and exact observed facts', () => {
