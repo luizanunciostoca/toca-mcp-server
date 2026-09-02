@@ -117,6 +117,7 @@ export class LocalStoryComposer {
         evidenceId: `STATIC-QA:${input.storyCreativeId}:${outputSha256.slice(0, 16)}`,
         assetId: input.outputAssetId,
         outputSha256,
+        format: 'STORY_9_16',
         sourceRole: input.sourceRole,
         ...(input.sourceRole === 'ORIGINAL_MASTER' ? { sourceMasterSha256: masterSha256 } : {}),
         sourceWidth: input.sourceWidth,
