@@ -13,6 +13,7 @@ import {
 import { ExecutionError } from '../core/errors.js';
 import type { GoogleSheetsCreativeTruthRegistry } from '../providers/google-sheets/creative-truth-registry.js';
 import { assertCreativeStandard, resolveCreativeMode } from './creative-truth.js';
+import { assertCanonicalTocaLogoAsset } from './logo-integrity-gate.js';
 
 export interface CreativeTruthResolutionRequest {
   readonly contentItemId: string;
@@ -149,7 +150,7 @@ export class CreativeTruthResolver {
       if (asset.aiReconstructionAllowed !== false) {
         throw new ExecutionError('POLICY_DENIED', 'FAILED_AI_LOGO_RECONSTRUCTION', false);
       }
-      resolved.push(asset);
+      resolved.push(assertCanonicalTocaLogoAsset(asset));
     }
     return resolved;
   }
