@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import type { EngagementDecision } from '../providers/instagram/instagram-engagement-contracts.js';
 import type { EngagementIntent } from '../policy/engagement-policy.js';
+import type {
+  SocialClassificationConfidence,
+  SocialConversationIntent,
+  SocialPriority,
+} from '../crm/social-engagement-contracts.js';
 import type { InstagramEngagementKnowledgeMatch } from './knowledge.js';
 
 export type InstagramEngagementActionStatus =
@@ -26,6 +31,11 @@ export interface EngagementActionDecision {
   readonly status: InstagramEngagementActionStatus;
   readonly executionId: string;
   readonly now: string;
+  readonly threadId?: string;
+  readonly messageGroupSha256?: string;
+  readonly classificationConfidence?: SocialClassificationConfidence;
+  readonly priority?: SocialPriority;
+  readonly secondaryIntents?: readonly SocialConversationIntent[];
 }
 
 export class PostgresInstagramEngagementActionStore {
@@ -40,8 +50,9 @@ export class PostgresInstagramEngagementActionStore {
          event_id, tenant_id, workspace_id, organization_id, channel, intent, risk,
          autonomy, policy_reason, faq_id, knowledge_source, knowledge_confidence,
          knowledge_tier, knowledge_chunk_id, reply_sha256, status, execution_id,
+         thread_id, message_group_sha256, classification_confidence, priority, secondary_intents,
          created_at, updated_at
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::timestamptz,$18::timestamptz)
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::timestamptz,$23::timestamptz)
        on conflict (event_id) do update set updated_at = instagram_engagement_actions.updated_at
        returning status`,
       [
@@ -62,6 +73,11 @@ export class PostgresInstagramEngagementActionStore {
         replySha256,
         input.status,
         input.executionId,
+        input.threadId ?? null,
+        input.messageGroupSha256 ?? null,
+        input.classificationConfidence ?? null,
+        input.priority ?? null,
+        input.secondaryIntents ?? [],
         input.now,
       ],
     );
