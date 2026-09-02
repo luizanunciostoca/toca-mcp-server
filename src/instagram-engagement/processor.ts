@@ -31,6 +31,11 @@ import {
 } from './conversation-reply-state.js';
 import type { ClaimedInstagramEngagementEvent } from './typed-outbox.js';
 
+type InboundActionStatus = Extract<
+  InstagramEngagementActionStatus,
+  'CLASSIFIED' | 'SUGGESTED' | 'HUMAN_REVIEW' | 'READY_TO_SEND'
+>;
+
 export interface InstagramEngagementProcessorOptions {
   readonly pool: pg.Pool;
   readonly knowledge: InstagramEngagementKnowledgeSource;
@@ -57,7 +62,9 @@ export class InstagramEngagementProcessor {
     this.outbox = new PostgresTransactionalOutbox(options.pool);
     this.actions = new PostgresInstagramEngagementActionStore(options.pool);
     this.conversations = new PostgresInstagramConversationOperations(options.pool, {
-      ...(options.groupingWindowMs === undefined ? {} : { groupingWindowMs: options.groupingWindowMs }),
+      ...(options.groupingWindowMs === undefined
+        ? {}
+        : { groupingWindowMs: options.groupingWindowMs }),
     });
     this.now = options.now ?? (() => new Date());
     this.actorPrincipalId = options.actorPrincipalId?.trim() || 'system:instagram-engagement';
@@ -113,7 +120,9 @@ export class InstagramEngagementProcessor {
       ? await this.options.knowledge.resolve(context.groupedText, classification.intent)
       : null;
     const autoWriteEligible =
-      this.options.writesEnabled && classification.confidence !== 'LOW' && !context.automationBlocked;
+      this.options.writesEnabled &&
+      classification.confidence !== 'LOW' &&
+      !context.automationBlocked;
     const leadResult = await this.options.leadEngine.process({
       tenantId: claimed.tenantId,
       workspaceId: claimed.workspaceId,
@@ -151,11 +160,11 @@ export class InstagramEngagementProcessor {
     const effectiveHumanRequired =
       leadResult.humanRequired || effectiveDecision.autonomy === 'HUMAN_REVIEW_REQUIRED';
     const effectiveDisposition = effectiveHumanRequired
-      ? 'HUMAN_REQUIRED' as const
+      ? ('HUMAN_REQUIRED' as const)
       : effectiveDecision.autonomy === 'AUTO_REPLY_ALLOWED'
-        ? 'AUTO_REPLY_ALLOWED' as const
+        ? ('AUTO_REPLY_ALLOWED' as const)
         : effectiveDecision.autonomy === 'SUGGEST_ONLY'
-          ? 'SUGGEST_ONLY' as const
+          ? ('SUGGEST_ONLY' as const)
           : leadResult.replyDisposition;
 
     const reply = buildReplyPayload({
@@ -321,7 +330,9 @@ function buildReplyPayload(input: {
   readonly pageId: string;
   readonly instagramUserId: string;
 }): InstagramEngagementReplyPayload | undefined {
-  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified) return undefined;
+  if (input.disposition !== 'AUTO_REPLY_ALLOWED' || !input.knowledge?.factsVerified) {
+    return undefined;
+  }
   if (input.event.channel === 'COMMENT') {
     if (!input.event.commentId) return undefined;
     return {
@@ -348,7 +359,7 @@ function resolveActionStatus(
   humanRequired: boolean,
   disposition: 'AUTO_REPLY_ALLOWED' | 'SUGGEST_ONLY' | 'HUMAN_REQUIRED' | 'NO_REPLY',
   reply: InstagramEngagementReplyPayload | undefined,
-): InstagramEngagementActionStatus {
+): InboundActionStatus {
   if (humanRequired || disposition === 'HUMAN_REQUIRED') return 'HUMAN_REVIEW';
   if (disposition === 'AUTO_REPLY_ALLOWED' && reply) return 'READY_TO_SEND';
   if (disposition === 'SUGGEST_ONLY' || disposition === 'AUTO_REPLY_ALLOWED') return 'SUGGESTED';
@@ -361,7 +372,10 @@ async function executeProviderReply(
 ): Promise<string> {
   if (payload.channel === 'COMMENT') {
     if (!payload.commentId) throw new Error('INSTAGRAM_ENGAGEMENT_COMMENT_ID_REQUIRED');
-    const result = await provider.replyToComment({ commentId: payload.commentId, message: payload.message });
+    const result = await provider.replyToComment({
+      commentId: payload.commentId,
+      message: payload.message,
+    });
     return result.commentId;
   }
   if (!payload.pageId || !payload.instagramUserId || !payload.recipientScopedId) {
@@ -384,6 +398,7 @@ function isAmbiguousProviderFailure(error: unknown): boolean {
 
 function safeErrorCode(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const first = raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
+  const first =
+    raw.split('|', 1)[0]?.split(':', 1)[0]?.trim() || 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
   return /^[A-Z0-9_]+$/.test(first) ? first.slice(0, 120) : 'INSTAGRAM_ENGAGEMENT_SEND_FAILED';
 }
