@@ -1,31 +1,23 @@
-name: Instagram Conversation Format Artifact
+name: Instagram Conversation Format Apply
 
 on:
   push:
     branches:
       - feat/instagram-conversation-ops-v1-20260902
-  pull_request:
-    paths:
-      - 'src/crm/social-engagement-classifier.ts'
-      - 'src/crm/social-engagement-contracts.ts'
-      - 'src/instagram-engagement/conversation-operations.ts'
-      - 'src/instagram-engagement/conversation-reply-state.ts'
-      - 'src/instagram-engagement/processor.ts'
-      - 'src/persistence/meta-webhook-event-store.ts'
-      - 'src/policy/engagement-policy.ts'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  format-artifact:
+  format-and-commit:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact candidate
+      - name: Checkout exact branch head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
+          ref: feat/instagram-conversation-ops-v1-20260902
+          persist-credentials: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -41,7 +33,7 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format conversation sources with repository Prettier
+      - name: Apply repository Prettier exactly
         run: >-
           pnpm exec prettier --write
           src/crm/social-engagement-classifier.ts
@@ -52,17 +44,27 @@ jobs:
           src/persistence/meta-webhook-event-store.ts
           src/policy/engagement-policy.ts
 
-      - name: Upload exact formatted sources
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: instagram-conversation-formatted-${{ github.sha }}
-          path: |
-            src/crm/social-engagement-classifier.ts
-            src/crm/social-engagement-contracts.ts
-            src/instagram-engagement/conversation-operations.ts
-            src/instagram-engagement/conversation-reply-state.ts
-            src/instagram-engagement/processor.ts
-            src/persistence/meta-webhook-event-store.ts
-            src/policy/engagement-policy.ts
-          if-no-files-found: error
-          retention-days: 1
+      - name: Remove temporary formatter workflow
+        run: rm .github/workflows/instagram-conversation-format-artifact.yml
+
+      - name: Commit exact formatted sources atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/crm/social-engagement-classifier.ts \
+            src/crm/social-engagement-contracts.ts \
+            src/instagram-engagement/conversation-operations.ts \
+            src/instagram-engagement/conversation-reply-state.ts \
+            src/instagram-engagement/processor.ts \
+            src/persistence/meta-webhook-event-store.ts \
+            src/policy/engagement-policy.ts \
+            .github/workflows/instagram-conversation-format-artifact.yml
+          if git diff --cached --quiet; then
+            echo "Expected formatter changes were not produced" >&2
+            exit 1
+          fi
+          git commit -m "style(instagram): apply exact conversation formatter"
+          git push origin HEAD:feat/instagram-conversation-ops-v1-20260902
