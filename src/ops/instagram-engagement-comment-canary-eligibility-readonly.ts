@@ -251,14 +251,14 @@ function parsePayload(payload: unknown): CommentPayload | null {
   ) {
     return null;
   }
-  return {
+  const base = {
     channel: value.channel,
     accountId: value.accountId,
     commentId: value.commentId,
     senderId: value.senderId,
     text: value.text,
-    occurredAt: value.occurredAt as string | undefined,
   };
+  return typeof value.occurredAt === 'string' ? { ...base, occurredAt: value.occurredAt } : base;
 }
 
 function requiredEnv(name: string): string {
