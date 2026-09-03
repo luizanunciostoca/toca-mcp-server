@@ -3,10 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('Instagram conversation shadow proof contract', () => {
   it('proves grouping, low-confidence fail-closed and P0 escalation with writes disabled', async () => {
-    const proof = await readFile(
-      'src/ops/instagram-conversation-shadow-proof.ts',
-      'utf8',
-    );
+    const proof = await readFile('src/ops/instagram-conversation-shadow-proof.ts', 'utf8');
 
     expect(proof).toContain('CONVERSATION_SHADOW_PROOF_REQUIRES_WRITES_DISABLED');
     expect(proof).toContain('message_count !== 2');
