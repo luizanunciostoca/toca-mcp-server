@@ -9,7 +9,9 @@ const workflow = readFileSync(
 describe('Instagram Meta subscription run11 retained diagnostic', () => {
   it('is exact-source and read-only', () => {
     expect(workflow).toContain("SOURCE_RUN_ID: '33704420071'");
-    expect(workflow).toContain('SOURCE_JOB: toca-ig-eng-subscribe-33704420071-1');
+    expect(workflow).toContain(
+      'SOURCE_JOB: toca-ig-eng-subscribe-33704420071-1',
+    );
     expect(workflow).toContain(
       'SOURCE_EXECUTION: toca-ig-eng-subscribe-33704420071-1-hvh7d',
     );
@@ -28,20 +30,23 @@ describe('Instagram Meta subscription run11 retained diagnostic', () => {
     expect(workflow).not.toContain('graph.facebook.com');
   });
 
-  it('publishes only bounded error markers and explicit non-write evidence', () => {
-    expect(workflow).toContain('META_APP_SUBSCRIPTION_FAILED');
-    expect(workflow).toContain('META_PAGE_SUBSCRIPTION_FAILED');
-    expect(workflow).toContain('META_INSTAGRAM_SUBSCRIPTION_FAILED');
-    expect(workflow).toContain('META_SUBSCRIPTION_READBACK_FAILED');
-    expect(workflow).toContain('META_SUBSCRIPTION_READBACK_APP_MISSING');
-    expect(workflow).toContain('rawPayloadPrinted: false');
-    expect(workflow).toContain('messageBodiesPrinted: false');
-    expect(workflow).toContain('identitiesPrinted: false');
-    expect(workflow).toContain('secretsPrinted: false');
-    expect(workflow).toContain('providerReadsPerformed: false');
-    expect(workflow).toContain('providerWritesPerformed: false');
-    expect(workflow).toContain('externalReplyWrites: false');
-  });
+  it(
+    'publishes only bounded error markers and explicit non-write evidence',
+    () => {
+      expect(workflow).toContain('META_APP_SUBSCRIPTION_FAILED');
+      expect(workflow).toContain('META_PAGE_SUBSCRIPTION_FAILED');
+      expect(workflow).toContain('META_INSTAGRAM_SUBSCRIPTION_FAILED');
+      expect(workflow).toContain('META_SUBSCRIPTION_READBACK_FAILED');
+      expect(workflow).toContain('META_SUBSCRIPTION_READBACK_APP_MISSING');
+      expect(workflow).toContain('rawPayloadPrinted: false');
+      expect(workflow).toContain('messageBodiesPrinted: false');
+      expect(workflow).toContain('identitiesPrinted: false');
+      expect(workflow).toContain('secretsPrinted: false');
+      expect(workflow).toContain('providerReadsPerformed: false');
+      expect(workflow).toContain('providerWritesPerformed: false');
+      expect(workflow).toContain('externalReplyWrites: false');
+    },
+  );
 
   it('uses pinned permanent actions', () => {
     expect(workflow).toContain(
