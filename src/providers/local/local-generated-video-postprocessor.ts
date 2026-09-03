@@ -181,7 +181,10 @@ function assertMp4(bytes: Uint8Array, code: string): void {
 
 function assertPng(bytes: Uint8Array): void {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-  if (bytes.byteLength < signature.length || signature.some((value, index) => bytes[index] !== value)) {
+  if (
+    bytes.byteLength < signature.length ||
+    signature.some((value, index) => bytes[index] !== value)
+  ) {
     throw new ExecutionError(
       'OUTPUT_TECH_SPEC_MISMATCH',
       'GENERATED_VIDEO_OVERLAY_INPUT_INVALID_PNG',
