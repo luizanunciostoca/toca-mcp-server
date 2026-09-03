@@ -11,6 +11,11 @@ const enabledByDefaultFromEnv = z
   .default('true')
   .transform((value) => value === 'true');
 
+const instagramEngagementAutoReplyChannelsFromEnv = z
+  .enum(['DIRECT', 'COMMENT', 'DIRECT,COMMENT'])
+  .default('DIRECT')
+  .transform((value): ('DIRECT' | 'COMMENT')[] => value.split(',') as ('DIRECT' | 'COMMENT')[]);
+
 const configSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -81,6 +86,7 @@ const configSchema = z
     META_WEBHOOK_ENABLED: booleanFromEnv,
     META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
     INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
+    INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS: instagramEngagementAutoReplyChannelsFromEnv,
     INSTAGRAM_PUBLICATION_WRITES_ENABLED: booleanFromEnv,
     INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256: z
       .string()

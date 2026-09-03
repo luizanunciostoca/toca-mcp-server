@@ -109,9 +109,9 @@ export function createInstagramEngagementBatchRuntime(
     pageId,
     instagramUserId,
     writesEnabled: config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED,
-    // Persistent production activation is intentionally DIRECT-only until a
-    // separate real COMMENT provider-acknowledgement gate is satisfied.
-    autoReplyChannels: ['DIRECT'],
+    // Production defaults to DIRECT. COMMENT must be selected explicitly by a
+    // separately governed provider-acknowledgement / promotion gate.
+    autoReplyChannels: config.INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS,
     autoReplyMaxAgeMs: 30 * 60 * 1000,
   });
 

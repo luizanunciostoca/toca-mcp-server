@@ -30,9 +30,9 @@ describe('Instagram engagement LIMITED persistent activation', () => {
   });
 
   it('keeps persistent auto-replies Direct-only until a separate Comment proof', () => {
-    expect(runtime).toContain("autoReplyChannels: ['DIRECT']");
+    expect(runtime).toContain('autoReplyChannels: config.INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS');
     expect(runtime).toContain('autoReplyMaxAgeMs: 30 * 60 * 1000');
-    expect(runtime).toContain('separate real COMMENT provider-acknowledgement gate');
+    expect(runtime).toContain('Production defaults to DIRECT');
     expect(workflow).toContain('AUTO_REPLY_CHANNELS=DIRECT');
     expect(workflow).toContain('COMMENT_AUTO_REPLY_AUTHORIZED=false');
     expect(workflow).toContain('COMMENT_AUTO_REPLY_ENABLED=false');
