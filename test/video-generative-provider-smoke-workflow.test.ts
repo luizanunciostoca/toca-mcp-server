@@ -12,9 +12,7 @@ describe('video generative provider smoke', () => {
   it('is hard-bound to the approved source/content and remains publication closed', () => {
     expect(runner).toContain("'VID-TP-20260904-DUAS-PISTAS-GEN-001'");
     expect(runner).toContain("'TP-GEN-0001'");
-    expect(runner).toContain(
-      "'e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b'",
-    );
+    expect(runner).toContain("'e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b'");
     expect(runner).toContain("routeType: 'GENERATIVE_SCENE_CONTINUATION_VIDEO'");
     expect(runner).toContain("result.manifest.provider !== 'OPENAI_VIDEO_API'");
     expect(runner).toContain('publicationAuthorized: false');
@@ -25,9 +23,7 @@ describe('video generative provider smoke', () => {
     expect(dispatchWorkflow).toContain('types: [opened]');
     expect(dispatchWorkflow).toContain('github.event.issue.user.login == github.repository_owner');
     expect(dispatchWorkflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
-    expect(dispatchWorkflow).toContain(
-      'VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001',
-    );
+    expect(dispatchWorkflow).toContain('VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001');
     expect(dispatchWorkflow).toContain('PUBLICATION_AUTHORIZED=false');
   });
 
