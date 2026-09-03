@@ -5,7 +5,7 @@ import { GoogleServiceIdentityOAuthResolver } from '../src/providers/gcp/google-
 describe('Google service identity OAuth resolvers', () => {
   it('uses the canonical metadata token endpoint for cloud-platform access and caches it', async () => {
     const fetchImpl = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL) =>
         new Response(
           JSON.stringify({ access_token: 'cloud-token', expires_in: 3600, token_type: 'Bearer' }),
           { status: 200, headers: { 'content-type': 'application/json' } },
