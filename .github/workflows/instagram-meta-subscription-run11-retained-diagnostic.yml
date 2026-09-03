@@ -1,0 +1,201 @@
+name: Instagram Meta Subscription Run11 Retained Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-meta-subscription-run11-retained-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_RUN_ID: '33704420071'
+  SOURCE_JOB: toca-ig-eng-subscribe-33704420071-1
+  SOURCE_EXECUTION: toca-ig-eng-subscribe-33704420071-1-hvh7d
+
+jobs:
+  retained-diagnostic:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION DIAGNOSTIC AUTHORIZATION — Instagram Meta subscription run11 AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact-SHA read-only authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required=(
+            "AUTHORIZED_DIAGNOSTIC_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_META_SUBSCRIPTION_RUN11_RETAINED_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_JOB=$SOURCE_JOB"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_READS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY"; done
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          mkdir -p engagement-evidence
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read retained subscription logs and emit bounded diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=24h --limit=1000 --order=asc --format=json > /tmp/subscription-logs.json
+
+          set +e
+          gcloud run jobs executions describe "$SOURCE_EXECUTION" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/execution.json 2>/dev/null
+          EXECUTION_DESCRIBE_RC=$?
+          set -e
+          if [[ "$EXECUTION_DESCRIBE_RC" -ne 0 ]]; then printf '{}' > /tmp/execution.json; fi
+
+          node <<'NODE'
+          import fs from 'node:fs';
+
+          const logs = JSON.parse(fs.readFileSync('/tmp/subscription-logs.json', 'utf8'));
+          const execution = JSON.parse(fs.readFileSync('/tmp/execution.json', 'utf8'));
+          const entries = Array.isArray(logs) ? logs : [];
+          const strings = [];
+          const walk = (value) => {
+            if (typeof value === 'string') strings.push(value);
+            else if (Array.isArray(value)) value.forEach(walk);
+            else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+          };
+          walk(entries);
+          walk(execution);
+
+          const markerPattern = /META_(?:WEBHOOK_CHALLENGE_FAILED|APP_SUBSCRIPTION_FAILED|PAGE_SUBSCRIPTION_FAILED|INSTAGRAM_SUBSCRIPTION_FAILED|SUBSCRIPTION_READBACK_FAILED|SUBSCRIPTION_READBACK_APP_MISSING)(?::(?:[A-Z0-9_-]+|[1-5][0-9]{2}))?/gu;
+          const markers = [...new Set(strings.flatMap((value) => value.match(markerPattern) ?? []))].sort();
+          const marker = markers[0] ?? 'META_SUBSCRIPTION_FAILURE_UNCLASSIFIED';
+          const stage = marker.startsWith('META_WEBHOOK_CHALLENGE_FAILED')
+            ? 'WEBHOOK_CHALLENGE'
+            : marker.startsWith('META_APP_SUBSCRIPTION_FAILED')
+              ? 'APP_SUBSCRIPTION'
+              : marker.startsWith('META_PAGE_SUBSCRIPTION_FAILED')
+                ? 'PAGE_SUBSCRIPTION'
+                : marker.startsWith('META_INSTAGRAM_SUBSCRIPTION_FAILED')
+                  ? 'INSTAGRAM_SUBSCRIPTION'
+                  : marker.startsWith('META_SUBSCRIPTION_READBACK_FAILED')
+                    ? 'READBACK_HTTP'
+                    : marker.startsWith('META_SUBSCRIPTION_READBACK_APP_MISSING')
+                      ? 'READBACK_APP_MISSING'
+                      : 'UNCLASSIFIED';
+          const httpStatuses = [...new Set(markers.flatMap((value) => {
+            const match = value.match(/:([1-5][0-9]{2})$/u);
+            return match ? [Number(match[1])] : [];
+          }))].sort((a, b) => a - b);
+          const executionConditions = Array.isArray(execution?.status?.conditions)
+            ? execution.status.conditions.map((condition) => ({
+                type: String(condition?.type ?? '').slice(0, 40),
+                state: String(condition?.state ?? '').slice(0, 40),
+                reason: String(condition?.reason ?? '').replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 64),
+              }))
+            : [];
+
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.meta-subscription-retained-diagnostic.v1',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceJob: process.env.SOURCE_JOB,
+            sourceExecution: process.env.SOURCE_EXECUTION,
+            entryCount: entries.length,
+            failureStage: stage,
+            errorMarkers: markers.slice(0, 12),
+            httpStatuses,
+            executionConditions: executionConditions.slice(0, 12),
+            executionDescriptionAvailable: Object.keys(execution).length > 0,
+            rawPayloadPrinted: false,
+            messageBodiesPrinted: false,
+            identitiesPrinted: false,
+            secretsPrinted: false,
+            readOnlyDiagnostic: true,
+            serviceMutationsPerformed: false,
+            databaseMutationsPerformed: false,
+            providerReadsPerformed: false,
+            providerWritesPerformed: false,
+            externalReplyWrites: false,
+          };
+          fs.writeFileSync(
+            'engagement-evidence/meta-subscription-retained-diagnostic.json',
+            `${JSON.stringify(evidence, null, 2)}\n`,
+          );
+          NODE
+
+          FAILURE_STAGE="$(jq -r '.failureStage' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          ERROR_MARKERS="$(jq -c '.errorMarkers' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          HTTP_STATUSES="$(jq -c '.httpStatuses' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          EXECUTION_CONDITIONS="$(jq -c '.executionConditions' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          ENTRY_COUNT="$(jq -r '.entryCount' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          EXEC_AVAILABLE="$(jq -r '.executionDescriptionAvailable' engagement-evidence/meta-subscription-retained-diagnostic.json)"
+          printf -v COMMENT '%s\n' \
+            'META_SUBSCRIPTION_RETAINED_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID" \
+            "SOURCE_JOB=$SOURCE_JOB" \
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION" \
+            "ENTRY_COUNT=$ENTRY_COUNT" \
+            "FAILURE_STAGE=$FAILURE_STAGE" \
+            "ERROR_MARKERS=$ERROR_MARKERS" \
+            "HTTP_STATUSES=$HTTP_STATUSES" \
+            "EXECUTION_CONDITIONS=$EXECUTION_CONDITIONS" \
+            "EXECUTION_DESCRIPTION_AVAILABLE=$EXEC_AVAILABLE" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'MESSAGE_BODIES_PRINTED=false' \
+            'IDENTITIES_PRINTED=false' \
+            'SECRETS_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_PERFORMED=false' \
+            'DATABASE_MUTATIONS_PERFORMED=false' \
+            'PROVIDER_READS_PERFORMED=false' \
+            'PROVIDER_WRITES_PERFORMED=false' \
+            'EXTERNAL_REPLY_WRITES=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Upload sanitized diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-meta-subscription-run11-retained-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
