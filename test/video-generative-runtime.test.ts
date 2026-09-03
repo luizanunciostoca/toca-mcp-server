@@ -2,7 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { videoGenerativeRuntimeConfigured } from '../src/mcp/video-generative-runtime.js';
 
 describe('video generative runtime configuration', () => {
-  it('accepts explicit short-lived Google access-token bindings', () => {
+  it('accepts Vertex Veo with the attached GCP service identity and no OpenAI secret', () => {
+    expect(
+      videoGenerativeRuntimeConfigured({
+        GCP_PROJECT_ID: 'project',
+        INSTAGRAM_PUBLICATION_ASSET_BUCKET: 'bucket',
+        VIDEO_SCENE_CONTINUATION_PROVIDER: 'GOOGLE_VERTEX_VEO',
+        VIDEO_GOOGLE_AUTH_MODE: 'GCP_SERVICE_IDENTITY',
+        VERTEX_VEO_LOCATION: 'us-central1',
+        VERTEX_VEO_MODEL: 'veo-3.1-generate-001',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts explicit short-lived Google access-token bindings for the OpenAI compatibility path', () => {
     expect(
       videoGenerativeRuntimeConfigured({
         GCP_PROJECT_ID: 'project',

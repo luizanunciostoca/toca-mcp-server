@@ -8,11 +8,15 @@ const requiredFiles = [
   'src/providers/google-sheets/photo-to-video-content-writeback.ts',
   'src/providers/google-drive/creative-video-source-loader.ts',
   'src/providers/gcp/gcs-photo-to-video-artifact-store.ts',
+  'src/providers/gcp/google-metadata-access-token-resolver.ts',
+  'src/providers/gcp/google-service-identity-oauth-resolver.ts',
+  'src/providers/gcp/vertex-veo-scene-continuation-video-provider.ts',
   'src/providers/local/local-photo-motion-video-composer.ts',
   'src/providers/local/local-photo-to-video-brand-composer.ts',
   'src/providers/openai/openai-scene-continuation-video-provider.ts',
   'src/creative/controlled-photo-to-video-generation.ts',
   'src/creative/controlled-photo-to-video-finalization.ts',
+  'src/mcp/video-generative-runtime.ts',
   'src/marketing-autopilot-video-generate.ts',
   'src/marketing-autopilot-video-finalize.ts',
   'test/photo-to-video-policy-guard.test.ts',
@@ -22,6 +26,8 @@ const requiredFiles = [
   'test/gcs-photo-to-video-artifact-store.test.ts',
   'test/photo-to-video-content-writeback.test.ts',
   'test/openai-scene-continuation-video-provider.test.ts',
+  'test/google-service-identity-oauth-resolver.test.ts',
+  'test/vertex-veo-scene-continuation-video-provider.test.ts',
   'docs/architecture/photo-to-video-routes-v1.md',
 ];
 for (const path of requiredFiles) {
@@ -33,8 +39,10 @@ requireIncludes('control/photo-to-video-policy.v1.json', [
   'REAL_PHOTO_TO_MOTION_VIDEO',
   'GENERATIVE_SCENE_CONTINUATION_VIDEO',
   'likenessConsentRequiredWhenPeoplePresent',
-  'OPENAI_VIDEO_API',
-  'sora-2',
+  'GOOGLE_VERTEX_VEO',
+  'veo-3.1-generate-001',
+  'GCP_SERVICE_IDENTITY',
+  'us-central1',
   'fullSyntheticVenueVideoWithoutSourceImage',
   'durableCandidateArtifactRequired',
   'artifactReadbackRequiredBeforeFinalization',
@@ -52,6 +60,7 @@ requireIncludes('src/contracts/photo-to-video.ts', [
   'photoToVideoCandidateManifestSchema',
   'photoToVideoReviewEvidenceSchema',
   'photoToVideoFinalManifestSchema',
+  "'GOOGLE_VERTEX_VEO'",
   'evidenceRef: z.string().trim().min(1)',
   'validatedAt: z.string().trim().min(1)',
   'artifactRef:',
@@ -132,6 +141,39 @@ requireIncludes('src/providers/gcp/gcs-photo-to-video-artifact-store.ts', [
   'loadExact',
 ]);
 
+requireIncludes('src/providers/gcp/google-metadata-access-token-resolver.ts', [
+  'metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+  "'Metadata-Flavor': 'Google'",
+  "reference.provider !== 'gcp-metadata-oauth'",
+  "reference.key !== 'cloud-platform'",
+  'GCP_METADATA_ACCESS_TOKEN_RESPONSE_INVALID',
+]);
+
+requireIncludes('src/providers/gcp/google-service-identity-oauth-resolver.ts', [
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'iamcredentials.googleapis.com/v1',
+  ':signBlob',
+  'urn:ietf:params:oauth:grant-type:jwt-bearer',
+  "provider !== 'gcp-service-identity-oauth'",
+  'GCP_SERVICE_IDENTITY_OAUTH_RESPONSE_INVALID',
+]);
+
+requireIncludes('src/providers/gcp/vertex-veo-scene-continuation-video-provider.ts', [
+  'VertexVeoSceneContinuationVideoProvider',
+  "'veo-3.1-generate-001'",
+  ':predictLongRunning',
+  ':fetchPredictOperation',
+  'generatedVideos',
+  "aspectRatio: '9:16'",
+  "resolution: '720p'",
+  "provider: 'GOOGLE_VERTEX_VEO'",
+  'approval.sourceAssetId !== request.sourceAssetId',
+  'VERTEX_VEO_TRUSTED_CLOCK_INVALID',
+  'Do not generate, redraw, repair, morph, translate or replace any logo',
+  'requiresSceneContinuationFidelityGate: true',
+]);
+
 requireIncludes('src/providers/local/local-photo-motion-video-composer.ts', [
   'semanticGenerationUsed: false',
   'sceneExpansionAllowed: false',
@@ -142,14 +184,8 @@ requireIncludes('src/providers/local/local-photo-motion-video-composer.ts', [
 requireIncludes('src/providers/openai/openai-scene-continuation-video-provider.ts', [
   "const OPENAI_VIDEOS_ENDPOINT = 'https://api.openai.com/v1/videos'",
   "'input_reference'",
-  "form.set('seconds'",
-  "form.set('size'",
-  '/content',
   'sora-2-pro',
-  'approval.sourceAssetId !== request.sourceAssetId',
-  'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID',
-  'Do not generate, redraw, repair or hallucinate any logo',
-  'requiresSceneContinuationFidelityGate: true',
+  'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
 ]);
 
 requireIncludes('src/providers/local/local-photo-to-video-brand-composer.ts', [
@@ -160,6 +196,7 @@ requireIncludes('src/providers/local/local-photo-to-video-brand-composer.ts', [
 
 requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
   'ControlledPhotoToVideoGenerationService',
+  'SceneContinuationVideoProvider',
   'const createdAt = trustedNow(this.now)',
   'policyGuard.assertCanonical(request.routeType)',
   'registry.resolve(request.contentItemId, request.routeType)',
@@ -195,13 +232,20 @@ requireIncludes('src/creative/controlled-photo-to-video-finalization.ts', [
   'recordFinalOutput',
 ]);
 
+requireIncludes('src/mcp/video-generative-runtime.ts', [
+  'createVideoGenerativeRuntimeFromEnvironment',
+  'VIDEO_SCENE_CONTINUATION_PROVIDER',
+  'GOOGLE_VERTEX_VEO',
+  'VIDEO_GOOGLE_AUTH_MODE',
+  'GCP_SERVICE_IDENTITY',
+  'GoogleServiceIdentityOAuthResolver',
+  'GoogleMetadataAccessTokenResolver',
+  'VertexVeoSceneContinuationVideoProvider',
+]);
+
 requireIncludes('src/marketing-autopilot-video-generate.ts', [
-  'GoogleSheetsPhotoToVideoParentPolicyGuard',
-  'GoogleSheetsPhotoToVideoRegistry',
-  'GoogleSheetsPhotoToVideoContentWriteback',
-  'GcsPhotoToVideoArtifactStore',
-  'OpenAiSceneContinuationVideoProvider',
-  'LocalPhotoMotionVideoComposer',
+  'createVideoGenerativeRuntimeFromEnvironment',
+  'runtime.generation.generate',
   'VIDEO_GENERATE_CALLER_TIME_FORBIDDEN',
 ]);
 requireIncludes('src/marketing-autopilot-video-finalize.ts', [
@@ -260,12 +304,27 @@ requireIncludes('test/openai-scene-continuation-video-provider.test.ts', [
   'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
   'OPENAI_VIDEO_TRUSTED_CLOCK_INVALID',
 ]);
+requireIncludes('test/google-service-identity-oauth-resolver.test.ts', [
+  'canonical metadata token endpoint',
+  'Drive and Sheets OAuth',
+  'signBlob',
+]);
+requireIncludes('test/vertex-veo-scene-continuation-video-provider.test.ts', [
+  'predictLongRunning',
+  'generatedVideos',
+  "aspectRatio: '9:16'",
+  "resolution: '720p'",
+  'VIDEO_SCENE_CONTINUATION_REQUEST_NOT_APPROVED',
+  'VERTEX_VEO_SIZE_UNSUPPORTED:1024x1792',
+]);
 
 requireIncludes('docs/architecture/photo-to-video-routes-v1.md', [
   'Canonical parent policy gate',
   'GoogleSheetsPhotoToVideoParentPolicyGuard',
   'POLICY!A1:AC20',
   'SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1',
+  'GOOGLE_VERTEX_VEO',
+  'GCP_SERVICE_IDENTITY',
 ]);
 
 requireIncludes('package.json', [

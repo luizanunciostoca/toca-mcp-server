@@ -30,16 +30,11 @@ jobs:
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
       GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
       GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
-      GCP_VIDEO_OPENAI_API_KEY_SECRET: ${{ vars.GCP_VIDEO_OPENAI_API_KEY_SECRET || vars.GCP_AG01_MODEL_API_KEY_SECRET || 'OPENAI_API_KEY' }}
-      GCP_VIDEO_OPENAI_API_KEY_SECRET_VERSION: ${{ vars.GCP_VIDEO_OPENAI_API_KEY_SECRET_VERSION || vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION || 'latest' }}
-      GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET || 'GOOGLE_OAUTH_CLIENT_ID' }}
-      GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET_VERSION: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET_VERSION || 'latest' }}
-      GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_SECRET: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_SECRET || 'GOOGLE_OAUTH_CLIENT_SECRET' }}
-      GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_VERSION: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_VERSION || 'latest' }}
-      GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET || 'GOOGLE_OAUTH_REFRESH_TOKEN' }}
-      GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET_VERSION || 'latest' }}
       INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
-      OPENAI_VIDEO_MODEL: ${{ vars.OPENAI_VIDEO_MODEL || 'sora-2' }}
+      VIDEO_SCENE_CONTINUATION_PROVIDER: GOOGLE_VERTEX_VEO
+      VIDEO_GOOGLE_AUTH_MODE: GCP_SERVICE_IDENTITY
+      VERTEX_VEO_LOCATION: us-central1
+      VERTEX_VEO_MODEL: veo-3.1-generate-001
 
     steps:
       - name: Checkout exact main candidate
@@ -82,7 +77,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Resolve governed runtime bindings without exposing secret values
+      - name: Resolve governed runtime bindings without long-lived provider secrets
         shell: bash
         run: |
           set -euo pipefail
@@ -95,47 +90,26 @@ jobs:
             fi
           }
 
-          OPENAI_SECRET="$GCP_VIDEO_OPENAI_API_KEY_SECRET"
-          OPENAI_VERSION="$GCP_VIDEO_OPENAI_API_KEY_SECRET_VERSION"
-          GOOGLE_CLIENT_ID_SECRET="$GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET"
-          GOOGLE_CLIENT_ID_VERSION="$GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET_VERSION"
-          GOOGLE_CLIENT_SECRET_SECRET="$GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_SECRET"
-          GOOGLE_CLIENT_SECRET_VERSION="$GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_VERSION"
-          GOOGLE_REFRESH_SECRET="$GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET"
-          GOOGLE_REFRESH_VERSION="$GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET_VERSION"
-
-          require_binding "$OPENAI_SECRET" openai_api_key_secret
-          require_binding "$OPENAI_VERSION" openai_api_key_secret_version
-          require_binding "$GOOGLE_CLIENT_ID_SECRET" google_oauth_client_id_secret
-          require_binding "$GOOGLE_CLIENT_ID_VERSION" google_oauth_client_id_secret_version
-          require_binding "$GOOGLE_CLIENT_SECRET_SECRET" google_oauth_client_secret_secret
-          require_binding "$GOOGLE_CLIENT_SECRET_VERSION" google_oauth_client_secret_version
-          require_binding "$GOOGLE_REFRESH_SECRET" google_oauth_refresh_token_secret
-          require_binding "$GOOGLE_REFRESH_VERSION" google_oauth_refresh_token_secret_version
-
           BUCKET="$INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED"
           require_binding "$BUCKET" instagram_publication_asset_bucket
+          require_binding "$GCP_RUNTIME_SERVICE_ACCOUNT" runtime_service_account
+          require_binding "$VERTEX_VEO_LOCATION" vertex_veo_location
+          require_binding "$VERTEX_VEO_MODEL" vertex_veo_model
+          test "$VIDEO_SCENE_CONTINUATION_PROVIDER" = 'GOOGLE_VERTEX_VEO'
+          test "$VIDEO_GOOGLE_AUTH_MODE" = 'GCP_SERVICE_IDENTITY'
+          test "$VERTEX_VEO_LOCATION" = 'us-central1'
+          test "$VERTEX_VEO_MODEL" = 'veo-3.1-generate-001'
 
-          {
-            echo "VIDEO_OPENAI_SECRET=$OPENAI_SECRET"
-            echo "VIDEO_OPENAI_VERSION=$OPENAI_VERSION"
-            echo "VIDEO_GOOGLE_CLIENT_ID_SECRET=$GOOGLE_CLIENT_ID_SECRET"
-            echo "VIDEO_GOOGLE_CLIENT_ID_VERSION=$GOOGLE_CLIENT_ID_VERSION"
-            echo "VIDEO_GOOGLE_CLIENT_SECRET_SECRET=$GOOGLE_CLIENT_SECRET_SECRET"
-            echo "VIDEO_GOOGLE_CLIENT_SECRET_VERSION=$GOOGLE_CLIENT_SECRET_VERSION"
-            echo "VIDEO_GOOGLE_REFRESH_SECRET=$GOOGLE_REFRESH_SECRET"
-            echo "VIDEO_GOOGLE_REFRESH_VERSION=$GOOGLE_REFRESH_VERSION"
-            echo "VIDEO_ASSET_BUCKET=$BUCKET"
-          } >> "$GITHUB_ENV"
+          echo "VIDEO_ASSET_BUCKET=$BUCKET" >> "$GITHUB_ENV"
 
           mkdir -p video-generative-evidence
           jq -n \
-            --arg openai "$OPENAI_SECRET" --arg openaiVersion "$OPENAI_VERSION" \
-            --arg clientId "$GOOGLE_CLIENT_ID_SECRET" --arg clientIdVersion "$GOOGLE_CLIENT_ID_VERSION" \
-            --arg clientSecret "$GOOGLE_CLIENT_SECRET_SECRET" --arg clientSecretVersion "$GOOGLE_CLIENT_SECRET_VERSION" \
-            --arg refresh "$GOOGLE_REFRESH_SECRET" --arg refreshVersion "$GOOGLE_REFRESH_VERSION" \
+            --arg provider "$VIDEO_SCENE_CONTINUATION_PROVIDER" \
+            --arg providerModel "$VERTEX_VEO_MODEL" \
+            --arg providerLocation "$VERTEX_VEO_LOCATION" \
+            --arg runtimeServiceAccount "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg bucket "$BUCKET" \
-            '{schemaVersion:1,openAiSecretId:$openai,openAiSecretVersion:$openaiVersion,googleOAuthClientIdSecretId:$clientId,googleOAuthClientIdSecretVersion:$clientIdVersion,googleOAuthClientSecretSecretId:$clientSecret,googleOAuthClientSecretSecretVersion:$clientSecretVersion,googleOAuthRefreshSecretId:$refresh,googleOAuthRefreshSecretVersion:$refreshVersion,assetBucket:$bucket,secretValuesExposed:false,secretEnumerationUsed:false}' \
+            '{schemaVersion:1,provider:$provider,providerModel:$providerModel,providerLocation:$providerLocation,runtimeServiceAccount:$runtimeServiceAccount,workspaceAuthMode:"GCP_SERVICE_IDENTITY_SIGNED_JWT",cloudAuthMode:"METADATA_SERVICE",assetBucket:$bucket,longLivedProviderSecretsUsed:false,serviceAccountPrivateKeyUsed:false,secretEnumerationUsed:false}' \
             > video-generative-evidence/runtime-bindings.json
 
       - name: Build and push exact immutable smoke image
@@ -161,8 +135,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          ENV_VARS="^~^VIDEO_GENERATIVE_SMOKE_SOURCE_SHA=$GITHUB_SHA~GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$VIDEO_ASSET_BUCKET~OPENAI_API_KEY_ENV_KEY=TOCA_SECRET_VIDEO_OPENAI_API_KEY~OPENAI_VIDEO_MODEL=$OPENAI_VIDEO_MODEL~VIDEO_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY=TOCA_SECRET_VIDEO_GOOGLE_CLIENT_ID~VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY=TOCA_SECRET_VIDEO_GOOGLE_CLIENT_SECRET~VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY=TOCA_SECRET_VIDEO_GOOGLE_REFRESH_TOKEN"
-          SECRET_BINDINGS="^~^TOCA_SECRET_VIDEO_OPENAI_API_KEY=$VIDEO_OPENAI_SECRET:$VIDEO_OPENAI_VERSION~TOCA_SECRET_VIDEO_GOOGLE_CLIENT_ID=$VIDEO_GOOGLE_CLIENT_ID_SECRET:$VIDEO_GOOGLE_CLIENT_ID_VERSION~TOCA_SECRET_VIDEO_GOOGLE_CLIENT_SECRET=$VIDEO_GOOGLE_CLIENT_SECRET_SECRET:$VIDEO_GOOGLE_CLIENT_SECRET_VERSION~TOCA_SECRET_VIDEO_GOOGLE_REFRESH_TOKEN=$VIDEO_GOOGLE_REFRESH_SECRET:$VIDEO_GOOGLE_REFRESH_VERSION"
+          ENV_VARS="^~^VIDEO_GENERATIVE_SMOKE_SOURCE_SHA=$GITHUB_SHA~GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$VIDEO_ASSET_BUCKET~VIDEO_SCENE_CONTINUATION_PROVIDER=$VIDEO_SCENE_CONTINUATION_PROVIDER~VIDEO_GOOGLE_AUTH_MODE=$VIDEO_GOOGLE_AUTH_MODE~VERTEX_VEO_LOCATION=$VERTEX_VEO_LOCATION~VERTEX_VEO_MODEL=$VERTEX_VEO_MODEL"
 
           gcloud run jobs deploy "$JOB_NAME" \
             --image "$IMAGE" \
@@ -172,7 +145,6 @@ jobs:
             --command node \
             --args dist/src/video-generative-provider-smoke.js \
             --set-env-vars "$ENV_VARS" \
-            --set-secrets "$SECRET_BINDINGS" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 1200s \
@@ -198,7 +170,10 @@ jobs:
             .routeType == "GENERATIVE_SCENE_CONTINUATION_VIDEO" and
             .sourceAssetId == "TP-GEN-0001" and
             .sourceSha256 == "e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b" and
-            .provider == "OPENAI_VIDEO_API" and
+            .provider == "GOOGLE_VERTEX_VEO" and
+            .providerModel == "veo-3.1-generate-001" and
+            .seconds == 8 and
+            .size == "720x1280" and
             (.outputSha256 | test("^[a-f0-9]{64}$")) and
             .requiresPostGenerationHumanReview == true and
             .publicationEligible == false and

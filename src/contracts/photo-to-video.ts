@@ -133,7 +133,7 @@ export const photoToVideoCandidateManifestSchema = z
     outputContentType: z.literal('video/mp4'),
     size: photoToVideoSizeSchema,
     seconds: photoToVideoDurationSchema,
-    provider: z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API']),
+    provider: z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO']),
     providerJobId: z.string().trim().min(1).optional(),
     providerModel: z.string().trim().min(1).optional(),
     exceptionId: z.string().trim().min(1).optional(),

@@ -33,9 +33,9 @@ export interface SceneContinuationVideoResult {
   readonly outputBytes: Uint8Array;
   readonly outputContentType: 'video/mp4';
   readonly outputSha256: string;
-  readonly provider: 'OPENAI_VIDEO_API';
+  readonly provider: 'OPENAI_VIDEO_API' | 'GOOGLE_VERTEX_VEO';
   readonly providerJobId: string;
-  readonly providerModel: 'sora-2' | 'sora-2-pro';
+  readonly providerModel: string;
   readonly requiresPostGenerationHumanReview: true;
   readonly requiresSceneContinuationFidelityGate: true;
 }

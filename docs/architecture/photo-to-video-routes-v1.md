@@ -18,7 +18,7 @@ The guard requires exactly one `TOCA_CREATIVE_TRUTH_POLICY_V1` row with `status=
 - `video_photo_motion=ACTIVE_V1` for `REAL_PHOTO_TO_MOTION_VIDEO`;
 - `video_generative_exception=SOURCE_ANCHORED_SCENE_CONTINUATION_GOVERNED_V1` for `GENERATIVE_SCENE_CONTINUATION_VIDEO`.
 
-Missing/ambiguous policy rows, schema drift, parent/child policy drift or route disablement fail closed before provider work. This prevents a stale repo mirror or caller from enabling a route that the canonical Drive policy no longer permits.
+Missing or ambiguous policy rows, schema drift, parent/child policy drift or route disablement fail closed before provider work.
 
 ## Routes
 
@@ -28,17 +28,32 @@ Safe default for Stories/Reels from an approved real photograph. The exact MARKE
 
 ### `GENERATIVE_SCENE_CONTINUATION_VIDEO`
 
-Controlled image-to-video continuation from an approved real photograph. The exact MARKETING_READY master is bound to an explicit `VIDEO_GENERATIVE_EXCEPTIONS` approval and sent as `input_reference` to the OpenAI Video API. The provider adapter supports `sora-2` and `sora-2-pro`, polls the provider job to completion and downloads the exact MP4 result.
+Controlled image-to-video continuation from an approved real photograph. The exact MARKETING_READY master is bound to an explicit `VIDEO_GENERATIVE_EXCEPTIONS` approval, downloaded from Drive and SHA-256 verified before provider access.
+
+The canonical V1 production provider is `GOOGLE_VERTEX_VEO`, using `veo-3.1-generate-001` in `us-central1`. The approved source bytes are supplied as the image anchor to Vertex AI `predictLongRunning`; the runtime polls `fetchPredictOperation`, accepts only output in the governed GCS bucket, downloads the exact MP4, hashes it and then applies the official brand deterministically.
+
+The alternative `veo-3.1-fast-generate-001` is allowed by the repository policy but is not the provider-smoke model. The legacy OpenAI/Sora adapter remains in the codebase only as an explicit compatibility path; it is not the canonical production provider for this route.
 
 This route is not full synthetic venue video. Full synthetic venue video without a canonical source photograph remains unsupported. The source image is always the factual anchor.
 
+## Runtime identity
+
+Production scene continuation uses `VIDEO_GOOGLE_AUTH_MODE=GCP_SERVICE_IDENTITY` and `VIDEO_SCENE_CONTINUATION_PROVIDER=GOOGLE_VERTEX_VEO`.
+
+Two short-lived token paths are deliberately separated:
+
+1. Vertex AI and GCS use the attached Cloud Run service identity through the Compute metadata token endpoint (`cloud-platform`). No provider API key is stored.
+2. Drive and Sheets use `GoogleServiceIdentityOAuthResolver`. It obtains the attached service-account identity and a short-lived metadata token, asks IAM Credentials `signBlob` to sign a JWT assertion, then exchanges that assertion at the Google OAuth token endpoint for short-lived Workspace OAuth scopes (`drive.readonly` and `spreadsheets`). No service-account private key, client secret or refresh token is stored.
+
+This reuses the existing production service identity and the same signing capability already required by governed GCS signed delivery URLs. Failure to obtain either class of token fails closed; the runtime does not fall back to guessed credentials.
+
 ## Product model
 
-The runtime is registry-driven. `PRODUCT_VISUAL_POLICIES` and `VIDEO_CREATIVE_STANDARDS` define product/operation rules. Sunset and The Party are seeded initially; future products are onboarded by canonical registry rows and a content visual standard, without hardcoding a new runtime branch.
+The runtime is registry-driven. `PRODUCT_VISUAL_POLICIES` and `VIDEO_CREATIVE_STANDARDS` define product/operation rules. Sunset and The Party are seeded initially; future products are onboarded by canonical registry rows and a content visual standard, without hardcoding a new product runtime branch.
 
 The Party keeps its existing edition/environment/visual-family authority. `GoogleSheetsThePartyContentOrchestration` is re-read before generation/finalization. Hybrid Networks remains blocked without canonical environment resolution.
 
-For The Party, the candidate itself binds `edition_id`, creative intent and canonical environment (when applicable). Finalization compares those values against a fresh orchestration read, so a later edition/intent/environment change cannot silently approve bytes generated for another context.
+For The Party, the candidate itself binds `edition_id`, creative intent and canonical environment when applicable. Finalization compares those values against a fresh orchestration read, so a later edition/intent/environment change cannot silently approve bytes generated for another context.
 
 ## Rights and likeness
 
@@ -48,14 +63,14 @@ For generative scene continuation when people are present, `likeness_consent_sta
 
 ## Trusted clock boundary
 
-Generation validates its trusted clock before canonical/provider work. The OpenAI provider independently validates its own trusted clock before resolving the API secret or issuing network access. Finalization uses one trusted finalization timestamp and requires `candidate.createdAt <= review.reviewedAt <= finalizedAt`. Caller-supplied `now` values are not accepted by the production CLIs.
+Generation validates its trusted clock before canonical/provider work. Each scene-continuation provider independently validates its own trusted clock before token/provider access. Finalization uses one trusted finalization timestamp and requires `candidate.createdAt <= review.reviewedAt <= finalizedAt`. Caller-supplied `now` values are not accepted by the production CLIs.
 
 ## Generation pipeline
 
 `CONTENT_ITEMS` → canonical parent policy gate → product/operation/output resolution → product policy → video standard → real venue master → rights/likeness → exact Drive download/hash → route execution → deterministic official hero-brand overlay → durable exact candidate artifact → `GENERATED_REVIEW_REQUIRED`.
 
 Route 1 provider: `LOCAL_FFMPEG`.  
-Route 2 provider: `OPENAI_VIDEO_API`.
+Route 2 canonical provider: `GOOGLE_VERTEX_VEO`.
 
 Provider output is never publishable by generation alone.
 
@@ -68,7 +83,7 @@ The immutable candidate manifest stores:
 - `outputSha256`;
 - `artifactRef` (`gcs://...`) and matching `artifactObjectName`;
 - source/master SHA-256 and Drive identity;
-- provider identity/job when applicable;
+- provider identity/job/model when applicable;
 - route, standard, operation and product identity;
 - official hero brand asset ID, Drive file ID and SHA-256;
 - The Party edition/intent/environment binding when applicable;
@@ -92,17 +107,9 @@ The exact durable generated branded MP4 is reviewed. Review evidence must bind t
 - Scene Continuation Fidelity PASS for Route 2;
 - `NOT_APPLICABLE` for Scene Continuation Fidelity on Route 1.
 
-`ControlledPhotoToVideoFinalizationService` does not trust caller-supplied video bytes. Before accepting the output, it:
+`ControlledPhotoToVideoFinalizationService` does not trust caller-supplied video bytes. Before accepting the output, it validates review chronology, re-runs the canonical parent policy gate, re-resolves content/product/standard/source/rights/approval and The Party context, downloads and re-hashes the canonical source and official hero brand, and loads the exact candidate from the durable `artifactRef`.
 
-1. validates review chronology against trusted time;
-2. re-runs the canonical parent policy gate for the candidate route;
-3. re-resolves canonical content/product/standard/source/rights/approval state;
-4. re-resolves The Party edition/intent/environment when applicable;
-5. downloads the canonical source master from Drive again and revalidates its exact SHA-256;
-6. re-resolves the official hero brand record and downloads the logo from Drive again, verifying asset ID, Drive ID and pinned SHA-256;
-7. loads the candidate from `artifactRef` through `PhotoToVideoArtifactStore.loadExact` and re-hashes the complete MP4.
-
-Policy drift, context drift, source bytes/hash drift, hero-brand registry/Drive drift, The Party context drift, standard drift, artifact drift, review chronology drift or approval drift fail closed.
+Policy drift, context drift, source bytes/hash drift, hero-brand drift, The Party context drift, standard drift, artifact drift, review chronology drift or approval drift fail closed.
 
 Successful finalization writes an idempotent `VIDEO_OUTPUTS` evidence row and writes back `video_final_asset_sha256`, `video_final_artifact_ref`, `video_review_status=VIDEO_CREATIVE_TRUTH_PASSED` and `video_output_evidence_id` to `CONTENT_ITEMS`. The final manifest returns `VIDEO_CREATIVE_TRUTH_PASSED`, `exactAssetBinding=true`, `readyForPrepare=true`, `publicationAuthorized=false`.
 
@@ -140,32 +147,17 @@ Generation and finalization both return publication authority as false. Publicat
 
 ## Provider governance
 
-The OpenAI video contract used by the adapter is the official `/v1/videos` job API: multipart create with optional `input_reference`, `seconds`, `size` and supported `sora-2` / `sora-2-pro`, followed by job retrieval and `/content` download.
+The Vertex Veo adapter is source-anchored and approval-bound. It may not invent venue architecture, reconstruct logos or typography, or silently replace the approved source. It requests portrait 9:16, exact canonical 8-second duration and 720p for the current The Party standard. Any unsupported canonical size/duration fails closed rather than silently changing the creative contract.
 
-OpenAI video generation is implemented as an internal runtime path but must not be promoted to `PRODUCTION_VALIDATED` until provider credentials/access, exact-source upload, provider job completion, output download, durable artifact readback, review/finalization and exact downstream asset smoke are evidenced on the exact release SHA.
+The OpenAI video adapter remains available for explicit noncanonical compatibility tests and environments with separately configured credentials. Provider selection is explicit; there is no automatic cross-provider fallback.
 
-The canonical Drive registry currently keeps video source rights blocked/unverified and has no approved `VIDEO_GENERATIVE_EXCEPTIONS` rows. This intentionally prevents real provider execution until explicit rights/likeness and approval evidence exists; the runtime must not invent or auto-promote those business facts.
+A real provider smoke is necessary but not sufficient for `PRODUCTION_VALIDATED`. Provider completion, exact MP4 SHA readback, source-vs-output human QA and canonical finalization are separate gates.
 
 ## Architecture/tests
 
-`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the canonical parent policy guard, governed route files, durable artifact store, canonical writeback, trusted-clock, provider, source/brand revalidation, The Party binding and negative tests.
+`pnpm architecture:check` includes `scripts/check-photo-to-video-contract.mjs`, which pins the canonical parent policy guard, governed route files, service-identity authentication, Vertex Veo adapter, durable artifact store, canonical writeback, trusted-clock, source/brand revalidation, The Party binding and negative tests.
 
-Tests cover at least:
-
-- exact canonical parent policy acceptance and fail-closed policy drift/route disablement/ambiguity/schema errors;
-- parent policy check before content/provider work;
-- durable artifact persistence before review-state writeback;
-- no writeback when artifact persistence fails;
-- real GCS adapter contract with exact full-SHA readback and configured-bucket binding using mocked provider I/O;
-- exact artifact readback before finalization;
-- candidate/final artifact binding in `CONTENT_ITEMS`;
-- required source-to-output review evidence;
-- final source and official hero-brand revalidation;
-- The Party context drift after generation;
-- invalid/out-of-order trusted review time;
-- explicit approval/source asset/SHA binding before OpenAI provider access;
-- invalid provider clock before secret/network access;
-- deterministic real-photo motion path.
+Tests cover at least canonical policy drift/disablement, exact source/approval/hash binding, service-identity token minting without private keys, Veo request/poll/GCS output, durable artifact full-SHA readback, deterministic branding, The Party context drift, review chronology, and publication fail-closed behavior.
 
 ## Fail-closed errors
 
@@ -195,6 +187,9 @@ Representative errors include:
 - `PHOTO_TO_VIDEO_REVIEW_ASSET_BINDING_MISMATCH`
 - `SCENE_CONTINUATION_FIDELITY_REVIEW_REQUIRED`
 - `PHOTO_TO_VIDEO_CANONICAL_CONTEXT_CHANGED`
-- `OPENAI_VIDEO_TRUSTED_CLOCK_INVALID`
+- `VERTEX_VEO_TRUSTED_CLOCK_INVALID`
+- `VERTEX_VEO_SIZE_UNSUPPORTED`
+- `GCP_SERVICE_IDENTITY_SIGN_BLOB_FAILED`
+- `GCP_SERVICE_IDENTITY_OAUTH_EXCHANGE_FAILED`
 
-No error automatically falls back from Route 2 to unrestricted generation or from either route to a different product/operation.
+No error automatically falls back from Route 2 to unrestricted generation or from either route to a different product, operation or provider.

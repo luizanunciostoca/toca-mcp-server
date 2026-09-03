@@ -5,6 +5,8 @@ const CONTENT_ITEM_ID = 'VID-TP-20260904-DUAS-PISTAS-GEN-001' as const;
 const EXPECTED_SOURCE_ASSET_ID = 'TP-GEN-0001' as const;
 const EXPECTED_SOURCE_SHA256 =
   'e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b' as const;
+const EXPECTED_PROVIDER = 'GOOGLE_VERTEX_VEO' as const;
+const EXPECTED_PROVIDER_MODEL = 'veo-3.1-generate-001' as const;
 
 const CREATIVE_DIRECTION = [
   'Create a premium cinematic vertical scene continuation anchored strictly to the supplied The Party poster source.',
@@ -28,7 +30,12 @@ if (
   result.manifest.sourceAssetId !== EXPECTED_SOURCE_ASSET_ID ||
   result.manifest.sourceSha256.toLowerCase() !== EXPECTED_SOURCE_SHA256 ||
   result.manifest.routeType !== 'GENERATIVE_SCENE_CONTINUATION_VIDEO' ||
-  result.manifest.provider !== 'OPENAI_VIDEO_API' ||
+  result.manifest.provider !== EXPECTED_PROVIDER ||
+  result.manifest.providerModel !== EXPECTED_PROVIDER_MODEL ||
+  result.manifest.seconds !== 8 ||
+  result.manifest.size !== '720x1280' ||
+  result.manifest.requiresPostGenerationHumanReview !== true ||
+  result.manifest.requiresSceneContinuationFidelityGate !== true ||
   result.manifest.publicationEligible !== false
 ) {
   throw new Error('VIDEO_GENERATIVE_PROVIDER_SMOKE_MANIFEST_MISMATCH');

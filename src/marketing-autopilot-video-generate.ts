@@ -1,64 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { ControlledPhotoToVideoGenerationService } from './creative/controlled-photo-to-video-generation.js';
 import {
   photoToVideoRouteTypeSchema,
   type PhotoToVideoRouteType,
 } from './contracts/photo-to-video.js';
-import { EnvironmentSecretResolver } from './core/secrets.js';
-import { GcsPhotoToVideoArtifactStore } from './providers/gcp/gcs-photo-to-video-artifact-store.js';
-import { GoogleDriveCreativeTruthBrandAssetLoader } from './providers/google-drive/creative-truth-brand-asset-loader.js';
-import { GoogleDriveCreativeVideoSourceLoader } from './providers/google-drive/creative-video-source-loader.js';
-import { GoogleSheetsRestClient } from './providers/google-sheets/client.js';
-import { GoogleSheetsPhotoToVideoContentWriteback } from './providers/google-sheets/photo-to-video-content-writeback.js';
-import { GoogleSheetsPhotoToVideoParentPolicyGuard } from './providers/google-sheets/photo-to-video-policy-guard.js';
-import { GoogleSheetsPhotoToVideoRegistry } from './providers/google-sheets/photo-to-video-registry.js';
-import { LocalPhotoMotionVideoComposer } from './providers/local/local-photo-motion-video-composer.js';
-import { LocalPhotoToVideoBrandComposer } from './providers/local/local-photo-to-video-brand-composer.js';
-import { OpenAiSceneContinuationVideoProvider } from './providers/openai/openai-scene-continuation-video-provider.js';
+import { createVideoGenerativeRuntimeFromEnvironment } from './mcp/video-generative-runtime.js';
 
 const args = parseArgs(process.argv.slice(2));
-const secrets = new EnvironmentSecretResolver(process.env);
-const sheetsTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
-const driveTokenEnvKey = process.env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
-const openAiApiKeyEnvKey = process.env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
-const openAiVideoModel = parseVideoModel(process.env.OPENAI_VIDEO_MODEL?.trim());
-const gcpProjectId = requiredEnv('GCP_PROJECT_ID');
-const artifactBucket = requiredEnv('INSTAGRAM_PUBLICATION_ASSET_BUCKET');
-const sheets = new GoogleSheetsRestClient(secrets, {
-  tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
-});
-const policyGuard = new GoogleSheetsPhotoToVideoParentPolicyGuard(sheets);
-const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
-const writeback = new GoogleSheetsPhotoToVideoContentWriteback(sheets);
-const artifactStore = new GcsPhotoToVideoArtifactStore({
-  projectId: gcpProjectId,
-  bucketName: artifactBucket,
-});
-const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
-  secretResolver: secrets,
-  accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
-});
-const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
-  secretResolver: secrets,
-  accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
-});
-const service = new ControlledPhotoToVideoGenerationService({
-  policyGuard,
-  registry,
-  writeback,
-  artifactStore,
-  sourceLoader,
-  brandLoader,
-  photoMotionComposer: new LocalPhotoMotionVideoComposer(),
-  sceneContinuationProvider: new OpenAiSceneContinuationVideoProvider({
-    secretResolver: secrets,
-    apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
-    ...(openAiVideoModel ? { model: openAiVideoModel } : {}),
-  }),
-  brandComposer: new LocalPhotoToVideoBrandComposer(),
-});
+const runtime = createVideoGenerativeRuntimeFromEnvironment(process.env);
 const creativeDirection = await resolveCreativeDirection(args);
-const result = await service.generate({
+const result = await runtime.generation.generate({
   contentItemId: args.contentItemId,
   routeType: args.routeType,
   ...(creativeDirection ? { creativeDirection } : {}),
@@ -80,6 +30,7 @@ process.stdout.write(
     artifactObjectName: result.manifest.artifactObjectName,
     provider: result.manifest.provider,
     providerJobId: result.manifest.providerJobId ?? null,
+    providerModel: result.manifest.providerModel ?? null,
     outputPath: args.output,
     manifestPath: args.manifest,
     canonicalParentPolicyChecked: true,
@@ -139,20 +90,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
   };
 }
 
-function parseVideoModel(value: string | undefined): 'sora-2' | 'sora-2-pro' | undefined {
-  if (!value) return undefined;
-  if (value === 'sora-2' || value === 'sora-2-pro') return value;
-  throw new Error('OPENAI_VIDEO_MODEL_UNSUPPORTED');
-}
-
 function required(values: ReadonlyMap<string, string>, key: string): string {
   const value = values.get(key)?.trim();
   if (!value) throw new Error(`VIDEO_GENERATE_ARG_REQUIRED:${key}`);
-  return value;
-}
-
-function requiredEnv(key: string): string {
-  const value = process.env[key]?.trim();
-  if (!value) throw new Error(`VIDEO_GENERATE_ENV_REQUIRED:${key}`);
   return value;
 }

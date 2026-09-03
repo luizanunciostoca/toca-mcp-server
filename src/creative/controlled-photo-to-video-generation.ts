@@ -13,7 +13,14 @@ import type { PhotoToVideoParentPolicyGuard } from '../providers/google-sheets/p
 import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-video-registry.js';
 import type { LocalPhotoMotionVideoComposer } from '../providers/local/local-photo-motion-video-composer.js';
 import type { LocalPhotoToVideoBrandComposer } from '../providers/local/local-photo-to-video-brand-composer.js';
-import type { OpenAiSceneContinuationVideoProvider } from '../providers/openai/openai-scene-continuation-video-provider.js';
+import type {
+  SceneContinuationVideoRequest,
+  SceneContinuationVideoResult,
+} from '../providers/openai/openai-scene-continuation-video-provider.js';
+
+export interface SceneContinuationVideoProvider {
+  generate(request: SceneContinuationVideoRequest): Promise<SceneContinuationVideoResult>;
+}
 
 export interface ControlledPhotoToVideoGenerationOptions {
   readonly policyGuard: PhotoToVideoParentPolicyGuard;
@@ -23,7 +30,7 @@ export interface ControlledPhotoToVideoGenerationOptions {
   readonly sourceLoader: CreativeVideoSourceLoader;
   readonly brandLoader: CreativeTruthBrandAssetLoader;
   readonly photoMotionComposer: LocalPhotoMotionVideoComposer;
-  readonly sceneContinuationProvider: OpenAiSceneContinuationVideoProvider;
+  readonly sceneContinuationProvider: SceneContinuationVideoProvider;
   readonly brandComposer: LocalPhotoToVideoBrandComposer;
   readonly now?: () => Date;
 }
@@ -86,13 +93,7 @@ export class ControlledPhotoToVideoGenerationService {
           readonly outputSha256: string;
           readonly provider: 'LOCAL_FFMPEG';
         }
-      | {
-          readonly outputBytes: Uint8Array;
-          readonly outputSha256: string;
-          readonly provider: 'OPENAI_VIDEO_API';
-          readonly providerJobId: string;
-          readonly providerModel: 'sora-2' | 'sora-2-pro';
-        };
+      | SceneContinuationVideoResult;
 
     if (request.routeType === 'REAL_PHOTO_TO_MOTION_VIDEO') {
       providerCandidate = await this.options.photoMotionComposer.compose({
