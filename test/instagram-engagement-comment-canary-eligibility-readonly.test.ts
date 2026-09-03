@@ -37,7 +37,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(source).not.toContain('skip locked');
   });
 
-  it('revalidates classification, knowledge and Comment policy exactly before READY', () => {
+  it('revalidates Comment safety before READY', () => {
     for (const marker of [
       "classification.confidence !== 'HIGH'",
       "['P2', 'P3'].includes(classification.priority)",
@@ -71,34 +71,31 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(source).not.toContain('replyToComment');
   });
 
-  it(
-    'distinguishes pipeline absence, state filtering, safety rejection and blocking ambiguity',
-    () => {
-      for (const marker of [
-        'RECENT_COMMENT_COUNT=',
-        'STATE_CANDIDATE_COUNT=',
-        'ELIGIBLE_COUNT=',
-        'UNRESOLVED_AMBIGUITY_COUNT=',
-        'ACTIVE_RESERVATION_COUNT=',
-        'REJECTED_SCOPE=',
-        'REJECTED_AGE=',
-        'REJECTED_CONFIDENCE=',
-        'REJECTED_PRIORITY=',
-        'REJECTED_SENSITIVE=',
-        'REJECTED_COMMERCIAL=',
-        'REJECTED_URGENCY=',
-        'REJECTED_KNOWLEDGE=',
-        'REJECTED_POLICY=',
-        "'BLOCKED_UNRESOLVED_AMBIGUITY'",
-        "'BLOCKED_ACTIVE_RESERVATION'",
-        "'NO_ELIGIBLE_TARGET'",
-        "'READY'",
-        "'MULTIPLE_ELIGIBLE_TARGETS'",
-      ]) {
-        expect(source).toContain(marker);
-      }
-    },
-  );
+  it('reports bounded rejection and blocking causes', () => {
+    for (const marker of [
+      'RECENT_COMMENT_COUNT=',
+      'STATE_CANDIDATE_COUNT=',
+      'ELIGIBLE_COUNT=',
+      'UNRESOLVED_AMBIGUITY_COUNT=',
+      'ACTIVE_RESERVATION_COUNT=',
+      'REJECTED_SCOPE=',
+      'REJECTED_AGE=',
+      'REJECTED_CONFIDENCE=',
+      'REJECTED_PRIORITY=',
+      'REJECTED_SENSITIVE=',
+      'REJECTED_COMMERCIAL=',
+      'REJECTED_URGENCY=',
+      'REJECTED_KNOWLEDGE=',
+      'REJECTED_POLICY=',
+      "'BLOCKED_UNRESOLVED_AMBIGUITY'",
+      "'BLOCKED_ACTIVE_RESERVATION'",
+      "'NO_ELIGIBLE_TARGET'",
+      "'READY'",
+      "'MULTIPLE_ELIGIBLE_TARGETS'",
+    ]) {
+      expect(source).toContain(marker);
+    }
+  });
 
   it('requires exact-main Comment-only immutable-image authorization', () => {
     for (const marker of [
@@ -118,14 +115,16 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).not.toContain('gcloud run services update');
   });
 
-  it('runs the Comment-specific compiled probe once and removes the temporary job', () => {
+  it('runs the Comment probe once and cleans up', () => {
     expect(workflow).toContain(
       'dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js',
     );
     expect(workflow).toContain('--max-retries 0');
     expect(workflow).toContain('--task-timeout 120s');
     expect(workflow).toContain('gcloud run jobs delete');
-    expect(workflow).not.toContain('scripts/instagram-engagement-comment-provider-canary.mjs');
+    expect(workflow).not.toContain(
+      'scripts/instagram-engagement-comment-provider-canary.mjs',
+    );
   });
 
   it('publishes only bounded counts, status and a hashed target', () => {
