@@ -1,0 +1,68 @@
+name: Instagram Hardening Commercial Projection Fix
+
+on:
+  push:
+    branches:
+      - codex/instagram-conversation-hardening-v3
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'fix low commercial projection') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: codex/instagram-conversation-hardening-v3
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Correct LOW commercial projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/instagram-engagement/conversation-control-plane.ts')
+          text = path.read_text()
+          old = "    else if (intent === 'COMMERCIAL' || intent === 'PURCHASE') intents.add('COMMERCIAL_LEAD');"
+          new = """    else if (intent === 'PURCHASE') intents.add('COMMERCIAL_LEAD');
+              else if (
+                intent === 'COMMERCIAL' &&
+                (classification.commercialIntent === 'MEDIUM' || classification.commercialIntent === 'HIGH')
+              )
+                intents.add('COMMERCIAL_LEAD');"""
+          if old not in text:
+              raise SystemExit('expected projection line not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          pnpm exec prettier --write src/instagram-engagement/conversation-control-plane.ts
+          pnpm exec vitest run test/instagram-conversation-control-plane.test.ts
+
+      - name: Commit focused correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/instagram-engagement/conversation-control-plane.ts
+          git diff --cached --quiet && { echo 'No code change required.'; exit 0; }
+          git commit -m 'fix(instagram): fix low commercial projection'
+          git push origin HEAD:codex/instagram-conversation-hardening-v3
