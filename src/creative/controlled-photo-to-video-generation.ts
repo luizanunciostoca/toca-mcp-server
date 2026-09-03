@@ -14,9 +14,13 @@ import type { PhotoToVideoRegistry } from '../providers/google-sheets/photo-to-v
 import type { LocalPhotoMotionVideoComposer } from '../providers/local/local-photo-motion-video-composer.js';
 import type { LocalPhotoToVideoBrandComposer } from '../providers/local/local-photo-to-video-brand-composer.js';
 import type {
-  OpenAiSceneContinuationVideoProvider,
+  SceneContinuationVideoRequest,
   SceneContinuationVideoResult,
 } from '../providers/openai/openai-scene-continuation-video-provider.js';
+
+export interface SceneContinuationVideoProvider {
+  generate(request: SceneContinuationVideoRequest): Promise<SceneContinuationVideoResult>;
+}
 
 export interface ControlledPhotoToVideoGenerationOptions {
   readonly policyGuard: PhotoToVideoParentPolicyGuard;
@@ -26,7 +30,7 @@ export interface ControlledPhotoToVideoGenerationOptions {
   readonly sourceLoader: CreativeVideoSourceLoader;
   readonly brandLoader: CreativeTruthBrandAssetLoader;
   readonly photoMotionComposer: LocalPhotoMotionVideoComposer;
-  readonly sceneContinuationProvider: Pick<OpenAiSceneContinuationVideoProvider, 'generate'>;
+  readonly sceneContinuationProvider: SceneContinuationVideoProvider;
   readonly brandComposer: LocalPhotoToVideoBrandComposer;
   readonly now?: () => Date;
 }
