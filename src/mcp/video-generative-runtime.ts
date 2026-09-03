@@ -7,6 +7,9 @@ import {
 } from '../core/secrets.js';
 import { GoogleOAuthRefreshSecretResolver } from '../orchestrator/google-oauth-secret-resolver.js';
 import { GcsPhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-video-artifact-store.js';
+import { GoogleMetadataAccessTokenResolver } from '../providers/gcp/google-metadata-access-token-resolver.js';
+import { GoogleServiceIdentityOAuthResolver } from '../providers/gcp/google-service-identity-oauth-resolver.js';
+import { VertexVeoSceneContinuationVideoProvider } from '../providers/gcp/vertex-veo-scene-continuation-video-provider.js';
 import { GoogleDriveCreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import { GoogleDriveCreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
 import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
@@ -25,6 +28,7 @@ export interface VideoGenerativeRuntime {
 }
 
 export type VideoGenerativeRuntimeResolver = () => VideoGenerativeRuntime;
+type SceneContinuationProviderId = 'OPENAI_VIDEO_API' | 'GOOGLE_VERTEX_VEO';
 
 interface GoogleAccessBinding {
   readonly resolver: SecretResolver;
@@ -43,13 +47,17 @@ export function createLazyVideoGenerativeRuntimeResolver(
 }
 
 export function videoGenerativeRuntimeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (
+    !env.GCP_PROJECT_ID?.trim() ||
+    !env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() ||
+    !googleAccessConfigured(env)
+  ) {
+    return false;
+  }
+  const provider = resolveSceneContinuationProviderId(env);
+  if (provider === 'GOOGLE_VERTEX_VEO') return true;
   const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
-  return Boolean(
-    env.GCP_PROJECT_ID?.trim() &&
-    env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() &&
-    env[openAiApiKeyEnvKey]?.trim() &&
-    googleAccessConfigured(env),
-  );
+  return Boolean(env[openAiApiKeyEnvKey]?.trim());
 }
 
 export function createVideoGenerativeRuntimeFromEnvironment(
@@ -61,8 +69,6 @@ export function createVideoGenerativeRuntimeFromEnvironment(
 
   const secrets = new EnvironmentSecretResolver(env);
   const google = resolveGoogleAccessBinding(env, secrets);
-  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
-  const openAiVideoModel = parseVideoModel(env.OPENAI_VIDEO_MODEL?.trim());
   const gcpProjectId = requiredEnv(env, 'GCP_PROJECT_ID');
   const artifactBucket = requiredEnv(env, 'INSTAGRAM_PUBLICATION_ASSET_BUCKET');
   const sheets = new GoogleSheetsRestClient(google.resolver, {
@@ -83,6 +89,11 @@ export function createVideoGenerativeRuntimeFromEnvironment(
     secretResolver: google.resolver,
     accessTokenReference: google.driveTokenReference,
   });
+  const sceneContinuationProvider = createSceneContinuationProvider(env, {
+    secrets,
+    gcpProjectId,
+    artifactBucket,
+  });
   const generation = new ControlledPhotoToVideoGenerationService({
     policyGuard,
     registry,
@@ -91,11 +102,7 @@ export function createVideoGenerativeRuntimeFromEnvironment(
     sourceLoader,
     brandLoader,
     photoMotionComposer: new LocalPhotoMotionVideoComposer(),
-    sceneContinuationProvider: new OpenAiSceneContinuationVideoProvider({
-      secretResolver: secrets,
-      apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
-      ...(openAiVideoModel ? { model: openAiVideoModel } : {}),
-    }),
+    sceneContinuationProvider,
     brandComposer: new LocalPhotoToVideoBrandComposer(),
   });
   const finalization = new ControlledPhotoToVideoFinalizationService({
@@ -114,7 +121,39 @@ export function createVideoGenerativeRuntimeFromEnvironment(
   };
 }
 
+function createSceneContinuationProvider(
+  env: NodeJS.ProcessEnv,
+  input: {
+    readonly secrets: EnvironmentSecretResolver;
+    readonly gcpProjectId: string;
+    readonly artifactBucket: string;
+  },
+) {
+  const provider = resolveSceneContinuationProviderId(env);
+  if (provider === 'GOOGLE_VERTEX_VEO') {
+    const cloudIdentity = new GoogleMetadataAccessTokenResolver();
+    return new VertexVeoSceneContinuationVideoProvider({
+      projectId: input.gcpProjectId,
+      artifactBucket: input.artifactBucket,
+      accessTokenResolver: cloudIdentity,
+      accessTokenReference: { provider: 'gcp-metadata-oauth', key: 'cloud-platform' },
+      location: env.VERTEX_VEO_LOCATION?.trim() || 'us-central1',
+      model: parseVertexVeoModel(env.VERTEX_VEO_MODEL?.trim()),
+    });
+  }
+
+  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
+  const openAiVideoModel = parseOpenAiVideoModel(env.OPENAI_VIDEO_MODEL?.trim());
+  return new OpenAiSceneContinuationVideoProvider({
+    secretResolver: input.secrets,
+    apiKeyReference: { provider: 'env', key: openAiApiKeyEnvKey },
+    ...(openAiVideoModel ? { model: openAiVideoModel } : {}),
+  });
+}
+
 function googleAccessConfigured(env: NodeJS.ProcessEnv): boolean {
+  if (env.VIDEO_GOOGLE_AUTH_MODE?.trim().toUpperCase() === 'GCP_SERVICE_IDENTITY') return true;
+
   const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
   const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
   if (
@@ -141,6 +180,19 @@ function resolveGoogleAccessBinding(
   env: NodeJS.ProcessEnv,
   secrets: EnvironmentSecretResolver,
 ): GoogleAccessBinding {
+  if (env.VIDEO_GOOGLE_AUTH_MODE?.trim().toUpperCase() === 'GCP_SERVICE_IDENTITY') {
+    const resolver = new GoogleServiceIdentityOAuthResolver();
+    const tokenReference = {
+      provider: 'gcp-service-identity-oauth',
+      key: 'video-workspace',
+    } as const;
+    return {
+      resolver,
+      sheetsTokenReference: tokenReference,
+      driveTokenReference: tokenReference,
+    };
+  }
+
   const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
   const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
   if (
@@ -173,6 +225,13 @@ function resolveGoogleAccessBinding(
     sheetsTokenReference: tokenReference,
     driveTokenReference: tokenReference,
   };
+}
+
+function resolveSceneContinuationProviderId(env: NodeJS.ProcessEnv): SceneContinuationProviderId {
+  const value = env.VIDEO_SCENE_CONTINUATION_PROVIDER?.trim().toUpperCase();
+  if (!value || value === 'OPENAI_VIDEO_API') return 'OPENAI_VIDEO_API';
+  if (value === 'GOOGLE_VERTEX_VEO') return 'GOOGLE_VERTEX_VEO';
+  throw new Error('VIDEO_SCENE_CONTINUATION_PROVIDER_UNSUPPORTED');
 }
 
 function googleOAuthConfig(env: NodeJS.ProcessEnv): {
@@ -210,10 +269,18 @@ function resolveOpenAiApiKeyEnvKey(env: NodeJS.ProcessEnv): string {
   return 'OPENAI_API_KEY';
 }
 
-function parseVideoModel(value: string | undefined): 'sora-2' | 'sora-2-pro' | undefined {
+function parseOpenAiVideoModel(value: string | undefined): 'sora-2' | 'sora-2-pro' | undefined {
   if (!value) return undefined;
   if (value === 'sora-2' || value === 'sora-2-pro') return value;
   throw new Error('OPENAI_VIDEO_MODEL_UNSUPPORTED');
+}
+
+function parseVertexVeoModel(
+  value: string | undefined,
+): 'veo-3.1-generate-001' | 'veo-3.1-fast-generate-001' | undefined {
+  if (!value) return undefined;
+  if (value === 'veo-3.1-generate-001' || value === 'veo-3.1-fast-generate-001') return value;
+  throw new Error('VERTEX_VEO_MODEL_UNSUPPORTED');
 }
 
 function requiredEnv(env: NodeJS.ProcessEnv, key: string): string {
