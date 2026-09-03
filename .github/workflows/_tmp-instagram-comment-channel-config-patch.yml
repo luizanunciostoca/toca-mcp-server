@@ -75,7 +75,7 @@ jobs:
           limited_test.write_text(text.replace(old, new, 1))
           PY
           pnpm install --frozen-lockfile
-          pnpm exec prettier --write src/config.ts src/instagram-engagement/runtime.ts .env.example test/config.test.ts test/instagram-engagement-limited-activation.test.ts
+          pnpm exec prettier --write src/config.ts src/instagram-engagement/runtime.ts test/config.test.ts test/instagram-engagement-limited-activation.test.ts
           pnpm typecheck
           pnpm exec vitest run test/config.test.ts test/instagram-engagement-limited-activation.test.ts
           git diff --check
