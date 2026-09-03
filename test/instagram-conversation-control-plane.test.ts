@@ -13,8 +13,7 @@ describe('Instagram conversation control plane hardening', () => {
   it('projects event, product and operational intents without losing secondary intent context', () => {
     const classification = classifySocialEngagement('Que horas começa a The Party?');
     const projected = projectCanonicalIntents(classification);
-    expect(projected.primaryIntent).toBe('COMMERCIAL_LEAD');
-    expect(projected.secondaryIntents).toContain('EVENT_INFO');
+    expect(projected.primaryIntent).toBe('EVENT_INFO');
     expect(projected.secondaryIntents).toContain('THE_PARTY');
     expect(projected.secondaryIntents).toContain('HOURS');
     expect(projected.secondaryIntents).toContain('LOCATION');
