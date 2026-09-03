@@ -1,0 +1,112 @@
+name: Instagram Scheduling Batch Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: instagram-scheduling-batch-command-20260903
+  cancel-in-progress: false
+
+env:
+  AUTHORIZATION_ISSUE: '523'
+  COMMAND_PREFIX: '/toca-schedule-authorized-48 '
+  ALLOWED_ACTOR: 'luizanunciostoca'
+  TARGET_WORKFLOW: 'instagram-scheduling-batch-one-shot.yml'
+  BUNDLE_SHA256: 9fb7c7cd85fd9ec431316e4cf4c81b31f8b01a5da3117a76deeda74797ec3476
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 523 &&
+      startsWith(github.event.comment.body, '/toca-schedule-authorized-48 ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Validate owner command and exact current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$AUTHORIZATION_ISSUE"
+
+          CANDIDATE_SHA="${COMMENT_BODY#${COMMAND_PREFIX}}"
+          test "$CANDIDATE_SHA" != "$COMMENT_BODY"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CANDIDATE_SHA" = "$MAIN_SHA"
+
+          AUTH_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" --jq '.body // ""')"
+          grep -Fqx 'AUTHORIZATION_STATE=ACTIVE' <<<"$AUTH_BODY"
+          grep -Fqx 'AUTHORIZATION_SOURCE=CHATGPT_USER_EXPLICIT' <<<"$AUTH_BODY"
+          grep -Fqx "BUNDLE_SHA256=$BUNDLE_SHA256" <<<"$AUTH_BODY"
+          grep -Fqx 'BUNDLE_ITEM_COUNT=48' <<<"$AUTH_BODY"
+          grep -Fqx 'APPROVE_SELECTED_ITEMS=ALL_48' <<<"$AUTH_BODY"
+          grep -Fqx 'DELETE_BRIDGE_JOB_AFTER_EXECUTION=true' <<<"$AUTH_BODY"
+
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/${TARGET_WORKFLOW}?ref=main" >/dev/null
+
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" \
+            -f body="SCHEDULING_BATCH_COMMAND=ACCEPTED candidate=${CANDIDATE_SHA} controller_run=${GITHUB_RUN_ID}" \
+            >/dev/null
+
+      - name: Dispatch canonical one-shot workflow and verify completion
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          PAYLOAD="$(jq -cn '{ref:"main",inputs:{confirm_schedule:"SCHEDULE_AUTHORIZED_48"}}')"
+          printf '%s' "$PAYLOAD" | gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            --input - >/dev/null
+
+          RUN_ID=''
+          for _ in $(seq 1 45); do
+            RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?event=workflow_dispatch&branch=main&per_page=30")"
+            RUN_ID="$(jq -r --arg sha "$CANDIDATE_SHA" --arg started "$STARTED_AT" '
+              [.workflow_runs[] | select(.head_sha == $sha and .created_at >= $started)]
+              | sort_by(.created_at) | last | .id // empty
+            ' <<<"$RUNS")"
+            [ -n "$RUN_ID" ] && break
+            sleep 4
+          done
+          test -n "$RUN_ID"
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" \
+            -f body="SCHEDULING_BATCH_ONE_SHOT_RUN=${RUN_ID} status=started candidate=${CANDIDATE_SHA}" \
+            >/dev/null
+
+          for _ in $(seq 1 300); do
+            RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+            STATUS="$(jq -r '.status' <<<"$RUN")"
+            CONCLUSION="$(jq -r '.conclusion // ""' <<<"$RUN")"
+            if [ "$STATUS" = completed ]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" \
+                -f body="SCHEDULING_BATCH_ONE_SHOT_RUN=${RUN_ID} status=${CONCLUSION} candidate=${CANDIDATE_SHA}" \
+                >/dev/null
+              test "$CONCLUSION" = success
+              echo "SCHEDULING_BATCH_DISPATCH_COMPLETE=PASS run_id=${RUN_ID}"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Timed out waiting for scheduling one-shot workflow run ${RUN_ID}" >&2
+          exit 1
