@@ -4,11 +4,12 @@ import { GoogleServiceIdentityOAuthResolver } from '../src/providers/gcp/google-
 
 describe('Google service identity OAuth resolvers', () => {
   it('uses the canonical metadata token endpoint for cloud-platform access and caches it', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ access_token: 'cloud-token', expires_in: 3600, token_type: 'Bearer' }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ access_token: 'cloud-token', expires_in: 3600, token_type: 'Bearer' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
     );
     const resolver = new GoogleMetadataAccessTokenResolver({
       fetchImpl: fetchImpl as typeof fetch,
@@ -50,16 +51,23 @@ describe('Google service identity OAuth resolvers', () => {
         expect(claims.iss).toBe('toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com');
         expect(claims.scope).toContain('https://www.googleapis.com/auth/drive.readonly');
         expect(claims.scope).toContain('https://www.googleapis.com/auth/spreadsheets');
-        return new Response(JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }), {
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }),
+          {
+            status: 200,
+          },
+        );
       }
       if (url === 'https://oauth2.googleapis.com/token') {
         expect(String(init?.body)).toContain(
           'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer',
         );
         return new Response(
-          JSON.stringify({ access_token: 'workspace-token', expires_in: 3600, token_type: 'Bearer' }),
+          JSON.stringify({
+            access_token: 'workspace-token',
+            expires_in: 3600,
+            token_type: 'Bearer',
+          }),
           { status: 200 },
         );
       }
@@ -82,8 +90,8 @@ describe('Google service identity OAuth resolvers', () => {
 
   it('fails closed on unsupported token references', async () => {
     const resolver = new GoogleServiceIdentityOAuthResolver({ fetchImpl: vi.fn() as typeof fetch });
-    await expect(
-      resolver.resolve({ provider: 'env', key: 'video-workspace' }),
-    ).rejects.toThrow('GCP_SERVICE_IDENTITY_OAUTH_REFERENCE_INVALID');
+    await expect(resolver.resolve({ provider: 'env', key: 'video-workspace' })).rejects.toThrow(
+      'GCP_SERVICE_IDENTITY_OAUTH_REFERENCE_INVALID',
+    );
   });
 });
