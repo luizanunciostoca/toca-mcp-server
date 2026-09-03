@@ -52,7 +52,9 @@ describe('video generative MCP surface', () => {
       creativeDirection: 'Subtle premium camera motion.',
     });
     const structured = (result as { structuredContent: Record<string, unknown> }).structuredContent;
-    expect(structured.outputBase64).toBe(Buffer.from([0, 0, 0, 0, 102, 116, 121, 112, 1, 2, 3, 4]).toString('base64'));
+    expect(structured.outputBase64).toBe(
+      Buffer.from([0, 0, 0, 0, 102, 116, 121, 112, 1, 2, 3, 4]).toString('base64'),
+    );
     expect(structured.publicationEligible).toBe(false);
   });
 });
