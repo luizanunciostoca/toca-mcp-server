@@ -67,6 +67,10 @@ export class SocialEngagementLeadEngine {
       factsVerified: input.authorization.factsVerified,
       containsSensitivePersonalData: sensitive,
       writesEnabled: hasWriteAuthority(input.authorization),
+      classificationConfidence:
+        input.authorization.classificationConfidence ?? classification.confidence,
+      contextConflict: input.authorization.contextConflict,
+      threadAutomationBlocked: input.authorization.threadAutomationBlocked,
     });
 
     if (!input.interaction.senderScopedId) {

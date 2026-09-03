@@ -44,6 +44,7 @@ export interface InstagramEngagementProcessorOptions {
   readonly pageId: string;
   readonly instagramUserId: string;
   readonly writesEnabled: boolean;
+  readonly autoReplyChannels?: readonly ('COMMENT' | 'DIRECT')[];
   readonly actorPrincipalId?: string;
   readonly groupingWindowMs?: number;
   readonly now?: () => Date;
@@ -119,9 +120,17 @@ export class InstagramEngagementProcessor {
     const knowledge = context.groupedText
       ? await this.options.knowledge.resolve(context.groupedText, classification.intent)
       : null;
+    const autoReplyChannels = new Set(
+      this.options.autoReplyChannels ?? (['COMMENT', 'DIRECT'] as const),
+    );
     const autoWriteEligible =
       this.options.writesEnabled &&
-      classification.confidence !== 'LOW' &&
+      autoReplyChannels.has(payload.channel) &&
+      classification.confidence === 'HIGH' &&
+      ['P2', 'P3'].includes(classification.priority) &&
+      !classification.containsPotentialSensitiveData &&
+      classification.commercialIntent === 'NONE' &&
+      classification.urgency === 'LOW' &&
       !context.automationBlocked;
     const leadResult = await this.options.leadEngine.process({
       tenantId: claimed.tenantId,
