@@ -30,7 +30,6 @@ jobs:
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
       GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
       GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
-      GCP_MCP_SERVICE: ${{ vars.GCP_CLOUD_RUN_MCP_SERVICE || 'toca-mcp-production' }}
       GCP_VIDEO_OPENAI_API_KEY_SECRET: ${{ vars.GCP_VIDEO_OPENAI_API_KEY_SECRET || vars.GCP_AG01_MODEL_API_KEY_SECRET || 'OPENAI_API_KEY' }}
       GCP_VIDEO_OPENAI_API_KEY_SECRET_VERSION: ${{ vars.GCP_VIDEO_OPENAI_API_KEY_SECRET_VERSION || vars.GCP_AG01_MODEL_API_KEY_SECRET_VERSION || 'latest' }}
       GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_ID_SECRET || 'GOOGLE_OAUTH_CLIENT_ID' }}
@@ -39,7 +38,7 @@ jobs:
       GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_VERSION: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_VERSION || 'latest' }}
       GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET || 'GOOGLE_OAUTH_REFRESH_TOKEN' }}
       GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET_VERSION: ${{ vars.GCP_VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_SECRET_VERSION || 'latest' }}
-      INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET }}
+      INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
       OPENAI_VIDEO_MODEL: ${{ vars.OPENAI_VIDEO_MODEL || 'sora-2' }}
 
     steps:
@@ -115,10 +114,6 @@ jobs:
           require_binding "$GOOGLE_REFRESH_VERSION" google_oauth_refresh_token_secret_version
 
           BUCKET="$INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED"
-          if [ -z "$BUCKET" ]; then
-            SERVICE_JSON="$(gcloud run services describe "$GCP_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-            BUCKET="$(printf '%s' "$SERVICE_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_ASSET_BUCKET") | .value][0] // empty')"
-          fi
           require_binding "$BUCKET" instagram_publication_asset_bucket
 
           {
