@@ -8,7 +8,9 @@ const workflow = readFileSync(
 
 describe('Instagram canary readiness retained-log diagnostic', () => {
   it('is owner-authorized, exact-main and read-only', () => {
-    expect(workflow).toContain("github.event.issue.user.login == github.repository_owner");
+    expect(workflow).toContain(
+      'github.event.issue.user.login == github.repository_owner',
+    );
     expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
     expect(workflow).toContain('READ_ONLY_DIAGNOSTIC=true');
     expect(workflow).toContain('SERVICE_MUTATIONS_AUTHORIZED=false');
@@ -33,7 +35,9 @@ describe('Instagram canary readiness retained-log diagnostic', () => {
 
   it('publishes only sanitized evidence and consumes the one-shot authorization', () => {
     expect(workflow).toContain('RAW_PAYLOAD_PRINTED=false');
-    expect(workflow).toContain(".replace(/\\bEA[A-Za-z0-9_-]{20,}\\b/gu, '<META_TOKEN>')");
+    expect(workflow).toContain(
+      ".replace(/\\bEA[A-Za-z0-9_-]{20,}\\b/gu, '<META_TOKEN>')",
+    );
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(workflow).toContain('-f state=closed -f state_reason=completed');
   });
