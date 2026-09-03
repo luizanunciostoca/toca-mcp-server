@@ -38,7 +38,7 @@ describe('Security Supply Chain registry resilience', () => {
   });
 
   it('prevents an earlier audit failure from suppressing Gitleaks evidence', () => {
-    expect(workflow).toContain("if: ${{ always() && github.event_name != 'workflow_dispatch' }}");
+    expect(workflow).toContain("if: github.event_name != 'workflow_dispatch' && always()");
     expect(workflow).toContain(
       'Install verified Gitleaks CLI for exact candidate ancestry\n        if: always()',
     );
