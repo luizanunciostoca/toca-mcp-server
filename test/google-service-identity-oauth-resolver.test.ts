@@ -75,9 +75,12 @@ describe('Google service identity OAuth resolvers', () => {
         expect(claims.scope).toContain('https://www.googleapis.com/auth/drive.readonly');
         expect(claims.scope).toContain('https://www.googleapis.com/auth/spreadsheets');
         return Promise.resolve(
-          new Response(JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }), {
-            status: 200,
-          }),
+          new Response(
+            JSON.stringify({ signedBlob: Buffer.from('signature').toString('base64') }),
+            {
+              status: 200,
+            },
+          ),
         );
       }
       if (url === 'https://oauth2.googleapis.com/token') {
