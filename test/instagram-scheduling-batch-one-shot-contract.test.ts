@@ -9,9 +9,7 @@ describe('Instagram scheduling batch one-shot contract', () => {
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain("confirm_schedule == 'SCHEDULE_AUTHORIZED_48'");
     expect(workflow).toContain("AUTHORIZATION_ISSUE: '523'");
-    expect(workflow).toContain(
-      'BUNDLE_DRIVE_FILE_ID: 1UyXBwoyT8Hbbho4pl8Bcr513OXDmNnDi',
-    );
+    expect(workflow).toContain('BUNDLE_DRIVE_FILE_ID: 1UyXBwoyT8Hbbho4pl8Bcr513OXDmNnDi');
     expect(workflow).toContain(
       'BUNDLE_SHA256: 9fb7c7cd85fd9ec431316e4cf4c81b31f8b01a5da3117a76deeda74797ec3476',
     );
