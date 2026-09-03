@@ -199,8 +199,7 @@ function googleOAuthConfig(env: NodeJS.ProcessEnv): {
 }
 
 function resolveOpenAiApiKeyEnvKey(env: NodeJS.ProcessEnv): string {
-  const explicit =
-    env.OPENAI_API_KEY_ENV_KEY?.trim() || env.AG01_OPENAI_API_KEY_ENV_KEY?.trim();
+  const explicit = env.OPENAI_API_KEY_ENV_KEY?.trim() || env.AG01_OPENAI_API_KEY_ENV_KEY?.trim();
   if (explicit) return explicit;
   if (
     env.AG01_MODEL_PROVIDER?.trim().toLowerCase() === 'openai' &&
