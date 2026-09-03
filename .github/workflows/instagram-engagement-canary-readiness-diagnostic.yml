@@ -1,0 +1,195 @@
+name: Instagram Engagement Canary Readiness Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-canary-readiness-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram canary readiness diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and read-only boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          SOURCE_RUN_ID="$(grep '^SOURCE_RUN_ID=' <<< "$BODY" | cut -d= -f2-)"
+          SOURCE_JOB="$(grep '^SOURCE_JOB=' <<< "$BODY" | cut -d= -f2-)"
+          SOURCE_EXECUTION="$(grep '^SOURCE_EXECUTION=' <<< "$BODY" | cut -d= -f2-)"
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$SOURCE_JOB" == "toca-ig-canary-ready-${SOURCE_RUN_ID}-"* ]]
+          [[ "$SOURCE_EXECUTION" == "${SOURCE_JOB}-"* ]]
+
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_CANARY_READINESS_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_JOB=$SOURCE_JOB"
+            "SOURCE_EXECUTION=$SOURCE_EXECUTION"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact diagnostic authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          echo "SOURCE_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
+          echo "SOURCE_JOB=$SOURCE_JOB" >> "$GITHUB_ENV"
+          echo "SOURCE_EXECUTION=$SOURCE_EXECUTION" >> "$GITHUB_ENV"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read retained readiness logs and publish sanitized diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p engagement-evidence
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=24h --limit=1000 --order=asc --format=json \
+            > /tmp/readiness-logs.json
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/readiness-logs.json', 'utf8'));
+          const collect = (value, out = []) => {
+            if (typeof value === 'string') out.push(value);
+            else if (Array.isArray(value)) value.forEach((item) => collect(item, out));
+            else if (value && typeof value === 'object') Object.values(value).forEach((item) => collect(item, out));
+            return out;
+          };
+          const redact = (value) => String(value)
+            .replace(/https?:\/\/[^\s]+/giu, '<URL>')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+            .replace(/sha256:[a-f0-9]{32,}/giu, '<DIGEST>')
+            .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu, '<UUID>')
+            .replace(/\b\d{10,}\b/gu, '<ID>')
+            .replace(/\bEA[A-Za-z0-9_-]{20,}\b/gu, '<META_TOKEN>')
+            .replace(/\b[A-Z0-9_-]{32,}\b/giu, '<TOKEN>')
+            .replace(/\s+/gu, ' ')
+            .trim()
+            .slice(0, 500);
+          const strings = collect(entries);
+          const markers = [...new Set(strings
+            .filter((value) => /INSTAGRAM_ENGAGEMENT_|META_|POSTGRES|DATABASE|PERMISSION|DENIED|UNAUTHORIZED|FORBIDDEN|ECONN|ETIMEDOUT|ERROR|FAILED|MIGRATION|SCHEMA|KNOWLEDGE|TOKEN/iu.test(value))
+            .map(redact)
+            .filter(Boolean))].slice(0, 80);
+          const summaries = (Array.isArray(entries) ? entries : []).map((entry) => ({
+            severity: String(entry?.severity ?? 'DEFAULT'),
+            log: String(entry?.logName ?? '').replaceAll('%2F', '/').split('/logs/').at(-1) ?? 'unknown',
+            safeSignature: redact(
+              typeof entry?.textPayload === 'string' ? entry.textPayload :
+              typeof entry?.jsonPayload?.message === 'string' ? entry.jsonPayload.message :
+              typeof entry?.protoPayload?.status?.message === 'string' ? entry.protoPayload.status.message : ''
+            ),
+          })).filter((item) => item.safeSignature || item.severity === 'ERROR').slice(0, 80);
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.canary-readiness-diagnostic.v1',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceJob: process.env.SOURCE_JOB,
+            sourceExecution: process.env.SOURCE_EXECUTION,
+            entryCount: Array.isArray(entries) ? entries.length : 0,
+            safeMarkers: markers,
+            payloadSummaries: summaries,
+            rawPayloadPrinted: false,
+            readOnlyDiagnostic: true,
+            serviceMutationsAuthorized: false,
+            databaseMutationsAuthorized: false,
+            providerWritesAuthorized: false,
+            externalReplyWritesAuthorized: false,
+          };
+          fs.writeFileSync(
+            'engagement-evidence/canary-readiness-diagnostic.json',
+            `${JSON.stringify(evidence, null, 2)}\n`,
+          );
+          NODE
+
+          ENTRY_COUNT="$(jq -r '.entryCount' engagement-evidence/canary-readiness-diagnostic.json)"
+          SAFE_MARKERS="$(jq -c '.safeMarkers' engagement-evidence/canary-readiness-diagnostic.json)"
+          PAYLOAD_SUMMARIES="$(jq -c '.payloadSummaries' engagement-evidence/canary-readiness-diagnostic.json)"
+          printf -v COMMENT '%s\n' \
+            'CANARY_READINESS_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_JOB=${SOURCE_JOB}" \
+            "SOURCE_EXECUTION=${SOURCE_EXECUTION}" \
+            "ENTRY_COUNT=${ENTRY_COUNT}" \
+            "SAFE_MARKERS=${SAFE_MARKERS}" \
+            "PAYLOAD_SUMMARIES=${PAYLOAD_SUMMARIES}" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_AUTHORIZED=false' \
+            'DATABASE_MUTATIONS_AUTHORIZED=false' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Upload sanitized readiness evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-canary-readiness-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Consume diagnostic authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE_NUMBER:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
