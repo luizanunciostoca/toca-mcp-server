@@ -75,7 +75,7 @@ describe('Instagram engagement LIMITED persistent activation', () => {
       '--no-traffic --quiet',
       '--revision-suffix "$REVISION_SUFFIX"',
       'gcloud run services update-traffic "$DAEMON_SERVICE_NAME"',
-      '--to-latest --quiet',
+      '--to-revisions="${CANDIDATE_REVISION}=100" --quiet',
       'ZERO_TRAFFIC_STAGE_VERIFIED=true',
       'SCHEDULER_MUTATION=false',
       'Roll back traffic to fail-closed revision on failure',
@@ -84,11 +84,14 @@ describe('Instagram engagement LIMITED persistent activation', () => {
     }
   });
 
-  it('keeps the serving fail-closed revision until the staged candidate is verified', () => {
+  it('keeps the serving fail-closed revision until the named candidate is verified', () => {
     expect(workflow).toContain('Stage write-enabled candidate revision at zero traffic');
     expect(workflow).toContain('Verify zero-traffic candidate before cutover');
-    expect(workflow).toContain('.status.latestReadyRevisionName == $candidate');
+    expect(workflow).toContain('--arg previous "$PRE_REVISION"');
     expect(workflow).toContain('== 0 and');
+    expect(workflow).toContain('== 100');
+    expect(workflow).not.toContain('.status.latestReadyRevisionName == $candidate');
+    expect(workflow).not.toContain('--to-latest --quiet');
     expect(workflow).toContain('Activate LIMITED runtime by explicit traffic cutover');
     expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100"');
     expect(workflow).toContain('DAEMON_ENV="^@^');
