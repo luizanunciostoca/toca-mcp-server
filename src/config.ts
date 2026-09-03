@@ -77,6 +77,7 @@ const configSchema = z
     INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().trim().min(1).optional(),
     META_ACCESS_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
     META_ENABLED: booleanFromEnv,
+    META_PROVIDER_VERIFIED: booleanFromEnv,
     META_WEBHOOK_ENABLED: booleanFromEnv,
     META_WEBHOOK_PERSISTENCE_ENABLED: booleanFromEnv,
     INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: booleanFromEnv,
@@ -303,6 +304,24 @@ const configSchema = z
       });
     }
 
+    if (config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED && !config.META_PROVIDER_VERIFIED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_PROVIDER_VERIFIED'],
+        message:
+          'META_PROVIDER_VERIFIED must be true when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      });
+    }
+
+    if (config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED && !config.META_ACCESS_TOKEN_ENV_KEY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['META_ACCESS_TOKEN_ENV_KEY'],
+        message:
+          'META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      });
+    }
+
     const coreDirectPublicationEnabled =
       config.MCP_ENABLED && config.INSTAGRAM_PUBLICATION_WRITES_ENABLED;
 
@@ -358,25 +377,39 @@ const configSchema = z
 
     if (!config.META_ENABLED) return;
 
-    const required = [
-      'META_APP_ID',
-      'META_APP_SECRET_PROVIDER',
-      'META_APP_SECRET_KEY',
-      'META_AUTHORIZATION_ENDPOINT',
-      'META_TOKEN_ENDPOINT',
-      'META_REDIRECT_URI',
-      'META_REQUESTED_SCOPES',
-      'META_GRAPH_BASE_URL',
-      'META_GRAPH_API_VERSION',
-    ] as const;
+    const verifiedTokenOnlyEngagement =
+      config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED &&
+      config.META_PROVIDER_VERIFIED &&
+      Boolean(config.META_ACCESS_TOKEN_ENV_KEY) &&
+      !config.META_WEBHOOK_ENABLED &&
+      !config.META_WEBHOOK_PERSISTENCE_ENABLED &&
+      !config.META_ADS_READ_ENABLED &&
+      !config.META_ADS_WRITE_ENABLED &&
+      !config.INSTAGRAM_READ_ENABLED &&
+      !config.INSTAGRAM_PUBLICATION_WRITES_ENABLED &&
+      !config.TOCA_MANAGED_INSTAGRAM_EXECUTOR_ENABLED;
 
-    for (const field of required) {
-      if (!config[field]) {
-        context.addIssue({
-          code: 'custom',
-          path: [field],
-          message: `${field} is required when META_ENABLED=true`,
-        });
+    if (!verifiedTokenOnlyEngagement) {
+      const required = [
+        'META_APP_ID',
+        'META_APP_SECRET_PROVIDER',
+        'META_APP_SECRET_KEY',
+        'META_AUTHORIZATION_ENDPOINT',
+        'META_TOKEN_ENDPOINT',
+        'META_REDIRECT_URI',
+        'META_REQUESTED_SCOPES',
+        'META_GRAPH_BASE_URL',
+        'META_GRAPH_API_VERSION',
+      ] as const;
+
+      for (const field of required) {
+        if (!config[field]) {
+          context.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} is required when META_ENABLED=true`,
+          });
+        }
       }
     }
 
@@ -434,6 +467,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     }
     if (!config.META_ACCESS_TOKEN_ENV_KEY) {
       throw new Error('META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_READ_ENABLED=true');
+    }
+    assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
+  }
+
+  if (config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED) {
+    if (!config.META_ACCESS_TOKEN_ENV_KEY) {
+      throw new Error(
+        'META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+      );
     }
     assertReferencedSecret(env, config.META_ACCESS_TOKEN_ENV_KEY, 'META_ACCESS_TOKEN_ENV_KEY');
   }

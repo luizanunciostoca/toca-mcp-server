@@ -138,6 +138,7 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
       tenantId: TENANT,
       roles: ['OPERATOR'],
       allowedCapabilityIds: ['instagram.toca_schedule.create', 'instagram.toca_schedule.status'],
+      allowedTargetAccounts: ['M12_IG_NO_PROVIDER_WRITE'],
       evidence: ['m12:trusted-test-identity'],
       now: NOW,
     });
@@ -238,6 +239,7 @@ describe('M-FOUND-12 governed Core facade E2E', () => {
       tenantId: TENANT,
       roles: ['OPERATOR'],
       allowedCapabilityIds: ['instagram.toca_schedule.create'],
+      allowedTargetAccounts: ['M12_IG_NO_PROVIDER_WRITE'],
       evidence: ['m12:trusted-test-identity'],
       now: NOW,
     });
