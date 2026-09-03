@@ -260,10 +260,7 @@ function parseItem(value: unknown): SchedulingBatchItem {
         value.assetStaging.assetId,
         'TOCA_SCHEDULE_BATCH_ASSET_ID_INVALID',
       ),
-      sha256: requireSha256(
-        value.assetStaging.sha256,
-        'TOCA_SCHEDULE_BATCH_ASSET_SHA256_INVALID',
-      ),
+      sha256: requireSha256(value.assetStaging.sha256, 'TOCA_SCHEDULE_BATCH_ASSET_SHA256_INVALID'),
       contentType,
     },
     approvedDescriptorSha256: requireSha256(
