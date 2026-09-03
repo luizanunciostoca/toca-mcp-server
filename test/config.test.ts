@@ -37,10 +37,35 @@ describe('runtime configuration', () => {
       NODE_ENV: 'test',
       META_ENABLED: false,
       META_WEBHOOK_ENABLED: false,
+      INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS: ['DIRECT'],
       GOOGLE_ADS_PHASE: 'OFF',
       GOOGLE_ADS_API_VERSION: 'v25',
       TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED: false,
     });
+  });
+
+  it('keeps engagement auto-reply channels fail-closed to Direct unless explicitly selected', () => {
+    expect(loadConfig({ NODE_ENV: 'test' }).INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS).toEqual([
+      'DIRECT',
+    ]);
+    expect(
+      loadConfig({
+        NODE_ENV: 'test',
+        INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS: 'COMMENT',
+      }).INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS,
+    ).toEqual(['COMMENT']);
+    expect(
+      loadConfig({
+        NODE_ENV: 'test',
+        INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS: 'DIRECT,COMMENT',
+      }).INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS,
+    ).toEqual(['DIRECT', 'COMMENT']);
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS: 'COMMENT,DIRECT',
+      }),
+    ).toThrow();
   });
 
   it('requires Postgres when TOCA-managed scheduling is enabled', () => {
