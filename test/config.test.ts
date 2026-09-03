@@ -73,6 +73,64 @@ describe('runtime configuration', () => {
     ).toThrow();
   });
 
+  it('accepts verified token-only Meta configuration for governed engagement writes', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      META_ENABLED: 'true',
+      META_PROVIDER_VERIFIED: 'true',
+      INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: 'true',
+      META_ACCESS_TOKEN_ENV_KEY: 'TOCA_META_ACCESS_TOKEN',
+      TOCA_META_ACCESS_TOKEN: 'test-access-token',
+    });
+
+    expect(config).toMatchObject({
+      META_ENABLED: true,
+      META_PROVIDER_VERIFIED: true,
+      INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: true,
+      META_ACCESS_TOKEN_ENV_KEY: 'TOCA_META_ACCESS_TOKEN',
+    });
+    expect(config.META_APP_ID).toBeUndefined();
+  });
+
+  it('rejects engagement writes unless the Meta provider is explicitly verified', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        META_ENABLED: 'true',
+        INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: 'true',
+        META_ACCESS_TOKEN_ENV_KEY: 'TOCA_META_ACCESS_TOKEN',
+        TOCA_META_ACCESS_TOKEN: 'test-access-token',
+      }),
+    ).toThrow('META_PROVIDER_VERIFIED must be true when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
+  });
+
+  it('rejects engagement writes without a referenced Meta access token', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        META_ENABLED: 'true',
+        META_PROVIDER_VERIFIED: 'true',
+        INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: 'true',
+      }),
+    ).toThrow(
+      'META_ACCESS_TOKEN_ENV_KEY is required when INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
+    );
+  });
+
+  it('does not let token-only engagement bypass the full OAuth configuration for webhook runtime', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        META_ENABLED: 'true',
+        META_PROVIDER_VERIFIED: 'true',
+        META_WEBHOOK_ENABLED: 'true',
+        INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: 'true',
+        META_ACCESS_TOKEN_ENV_KEY: 'TOCA_META_ACCESS_TOKEN',
+        TOCA_META_ACCESS_TOKEN: 'test-access-token',
+      }),
+    ).toThrow('META_APP_ID is required when META_ENABLED=true');
+  });
+
   it('accepts a complete Meta configuration using only a secret reference', () => {
     const config = loadConfig(completeMetaEnv);
 
