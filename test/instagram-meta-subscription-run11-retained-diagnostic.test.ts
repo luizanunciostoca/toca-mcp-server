@@ -10,7 +10,9 @@ describe('Instagram Meta subscription run11 retained diagnostic', () => {
   it('is exact-source and read-only', () => {
     expect(workflow).toContain("SOURCE_RUN_ID: '33704420071'");
     expect(workflow).toContain('SOURCE_JOB: toca-ig-eng-subscribe-33704420071-1');
-    expect(workflow).toContain('SOURCE_EXECUTION: toca-ig-eng-subscribe-33704420071-1-hvh7d');
+    expect(workflow).toContain(
+      'SOURCE_EXECUTION: toca-ig-eng-subscribe-33704420071-1-hvh7d',
+    );
     expect(workflow).toContain('READ_ONLY_DIAGNOSTIC=true');
     expect(workflow).toContain('SERVICE_MUTATIONS_AUTHORIZED=false');
     expect(workflow).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
@@ -42,9 +44,17 @@ describe('Instagram Meta subscription run11 retained diagnostic', () => {
   });
 
   it('uses pinned permanent actions', () => {
-    expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
-    expect(workflow).toContain('google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed');
-    expect(workflow).toContain('google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f');
-    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).toContain(
+      'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
+    );
+    expect(workflow).toContain(
+      'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed',
+    );
+    expect(workflow).toContain(
+      'google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f',
+    );
+    expect(workflow).toContain(
+      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    );
   });
 });
