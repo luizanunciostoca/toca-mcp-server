@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.3",
   "policyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
-  "policyVersion": "1.2",
+  "policyVersion": "1.3",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "brandScope": "TOCA_DO_MORCEGO",
@@ -28,8 +28,10 @@
       "architecturalInventionAllowed": false,
       "environmentDriftAllowed": false,
       "aiLogoGenerationAllowed": false,
-      "provider": "OPENAI_VIDEO_API",
-      "allowedModels": ["sora-2", "sora-2-pro"],
+      "provider": "GOOGLE_VERTEX_VEO",
+      "allowedModels": ["veo-3.1-generate-001", "veo-3.1-fast-generate-001"],
+      "runtimeAuthMode": "GCP_SERVICE_IDENTITY",
+      "providerLocation": "us-central1",
       "postGenerationHumanReviewRequired": true,
       "sceneContinuationFidelityGateRequired": true
     }
