@@ -27,6 +27,14 @@ describe('video generative provider smoke', () => {
     expect(dispatchWorkflow).toContain('PUBLICATION_AUTHORIZED=false');
   });
 
+  it('uses the canonical production publication bucket without dynamic resource discovery', () => {
+    expect(smokeWorkflow).toContain(
+      "vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets'",
+    );
+    expect(smokeWorkflow).not.toContain('gcloud run services describe');
+    expect(smokeWorkflow).not.toContain('gcloud storage buckets list');
+  });
+
   it('runs generation only under the production runtime identity and uploads review evidence', () => {
     expect(smokeWorkflow).toContain('environment: production');
     expect(smokeWorkflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
