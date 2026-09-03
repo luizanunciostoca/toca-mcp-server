@@ -31,11 +31,10 @@ export function createLazyVideoGenerativeRuntimeResolver(
   };
 }
 
-export function videoGenerativeRuntimeConfigured(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function videoGenerativeRuntimeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
-  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+  const driveTokenEnvKey =
+    env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
   const openAiApiKeyEnvKey = env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
   return Boolean(
     sheetsTokenEnvKey &&
@@ -57,7 +56,8 @@ export function createVideoGenerativeRuntimeFromEnvironment(
 
   const secrets = new EnvironmentSecretResolver(env);
   const sheetsTokenEnvKey = requiredEnv(env, 'GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
-  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+  const driveTokenEnvKey =
+    env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
   const openAiApiKeyEnvKey = env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
   const openAiVideoModel = parseVideoModel(env.OPENAI_VIDEO_MODEL?.trim());
   const gcpProjectId = requiredEnv(env, 'GCP_PROJECT_ID');
