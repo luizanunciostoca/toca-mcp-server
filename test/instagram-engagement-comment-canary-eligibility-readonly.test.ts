@@ -122,9 +122,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).toContain('--max-retries 0');
     expect(workflow).toContain('--task-timeout 120s');
     expect(workflow).toContain('gcloud run jobs delete');
-    expect(workflow).not.toContain(
-      'scripts/instagram-engagement-comment-provider-canary.mjs',
-    );
+    expect(workflow).not.toContain('scripts/instagram-engagement-comment-provider-canary.mjs');
   });
 
   it('publishes only bounded counts, status and a hashed target', () => {
