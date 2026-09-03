@@ -189,7 +189,9 @@ export class PostgresInstagramConversationAnalyticsScoped {
   }
 }
 
-function validateScope(scope: InstagramConversationAnalyticsScope): InstagramConversationAnalyticsScope {
+function validateScope(
+  scope: InstagramConversationAnalyticsScope,
+): InstagramConversationAnalyticsScope {
   const tenantId = scope.tenantId.trim();
   const workspaceId = scope.workspaceId.trim();
   const organizationId = scope.organizationId.trim();
