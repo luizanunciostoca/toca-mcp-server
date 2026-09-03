@@ -4,16 +4,6 @@ import type { SecretReference, SecretResolver } from '../../core/secrets.js';
 const DEFAULT_METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
 
-const SCOPE_SETS = {
-  'workspace-readonly': [
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
-  ],
-  'cloud-platform': ['https://www.googleapis.com/auth/cloud-platform'],
-} as const;
-
-export type GoogleMetadataScopeSet = keyof typeof SCOPE_SETS;
-
 interface CachedToken {
   readonly token: string;
   readonly expiresAtMs: number;
@@ -29,7 +19,7 @@ export class GoogleMetadataAccessTokenResolver implements SecretResolver {
   private readonly fetchImpl: typeof fetch;
   private readonly metadataTokenUrl: string;
   private readonly now: () => number;
-  private readonly cache = new Map<GoogleMetadataScopeSet, CachedToken>();
+  private cached: CachedToken | undefined;
 
   constructor(private readonly options: GoogleMetadataAccessTokenResolverOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -38,17 +28,13 @@ export class GoogleMetadataAccessTokenResolver implements SecretResolver {
   }
 
   async resolve(reference: SecretReference): Promise<string> {
-    if (reference.provider !== 'gcp-metadata-oauth' || !(reference.key in SCOPE_SETS)) {
+    if (reference.provider !== 'gcp-metadata-oauth' || reference.key !== 'cloud-platform') {
       throw new Error('GCP_METADATA_ACCESS_TOKEN_REFERENCE_INVALID');
     }
-    const scopeSet = reference.key as GoogleMetadataScopeSet;
-    const cached = this.cache.get(scopeSet);
     const nowMs = this.now();
-    if (cached && cached.expiresAtMs - 60_000 > nowMs) return cached.token;
+    if (this.cached && this.cached.expiresAtMs - 60_000 > nowMs) return this.cached.token;
 
-    const url = new URL(this.metadataTokenUrl);
-    url.searchParams.set('scopes', SCOPE_SETS[scopeSet].join(','));
-    const response = await this.fetchImpl(url, {
+    const response = await this.fetchImpl(this.metadataTokenUrl, {
       method: 'GET',
       headers: { 'Metadata-Flavor': 'Google' },
     });
@@ -79,10 +65,10 @@ export class GoogleMetadataAccessTokenResolver implements SecretResolver {
       );
     }
     const token = payload.access_token.trim();
-    this.cache.set(scopeSet, {
+    this.cached = {
       token,
       expiresAtMs: nowMs + payload.expires_in * 1_000,
-    });
+    };
     return token;
   }
 }
