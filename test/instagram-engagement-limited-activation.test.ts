@@ -84,6 +84,16 @@ describe('Instagram engagement LIMITED persistent activation', () => {
     }
   });
 
+  it('derives fail-closed prestate from the routed revision instead of the service template', () => {
+    expect(workflow).toContain('PRE_REVISION_JSON="$(gcloud run revisions describe "$PRE_REVISION"');
+    expect(workflow).toContain('printf \'%s\' "$PRE_REVISION_JSON" | jq -e');
+    expect(workflow).toContain('(.spec.serviceAccountName == $sa)');
+    expect(workflow).not.toContain(
+      'PRE_IMAGE="$(printf \'%s\' "$SERVICE_JSON" | jq -r \'.spec.template.spec.containers[0].image\')"',
+    );
+    expect(workflow).not.toContain('.spec.template.spec.containers[0] as $c |');
+  });
+
   it('keeps the serving fail-closed revision until the named candidate is verified', () => {
     expect(workflow).toContain('Stage write-enabled candidate revision at zero traffic');
     expect(workflow).toContain('Verify zero-traffic candidate before cutover');
