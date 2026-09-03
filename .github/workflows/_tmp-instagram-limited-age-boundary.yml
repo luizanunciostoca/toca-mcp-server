@@ -1,0 +1,100 @@
+name: TEMP Instagram Limited Age Boundary
+
+on:
+  push:
+    branches:
+      - fix/instagram-limited-activation-safety-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/instagram-limited-activation-safety-v1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Apply deterministic age boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          processor = Path('src/instagram-engagement/processor.ts')
+          text = processor.read_text()
+          old = """  readonly autoReplyChannels?: readonly ('COMMENT' | 'DIRECT')[];\n  readonly actorPrincipalId?: string;"""
+          new = """  readonly autoReplyChannels?: readonly ('COMMENT' | 'DIRECT')[];\n  readonly autoReplyMaxAgeMs?: number;\n  readonly actorPrincipalId?: string;"""
+          assert old in text
+          text = text.replace(old, new, 1)
+          old = """    const autoReplyChannels = new Set(\n      this.options.autoReplyChannels ?? (['COMMENT', 'DIRECT'] as const),\n    );\n    const autoWriteEligible =\n      this.options.writesEnabled &&\n      autoReplyChannels.has(payload.channel) &&"""
+          new = """    const autoReplyChannels = new Set(\n      this.options.autoReplyChannels ?? (['COMMENT', 'DIRECT'] as const),\n    );\n    const autoReplyMaxAgeMs = this.options.autoReplyMaxAgeMs ?? 30 * 60 * 1000;\n    const autoWriteEligible =\n      this.options.writesEnabled &&\n      autoReplyChannels.has(payload.channel) &&\n      isWithinAutoReplyWindow(payload.occurredAt ?? now, now, autoReplyMaxAgeMs) &&"""
+          assert old in text
+          text = text.replace(old, new, 1)
+          anchor = """function resolveActionStatus(\n"""
+          helper = """function isWithinAutoReplyWindow(\n  occurredAt: string,\n  now: string,\n  maxAgeMs: number,\n): boolean {\n  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return false;\n  const occurred = Date.parse(occurredAt);\n  const current = Date.parse(now);\n  if (!Number.isFinite(occurred) || !Number.isFinite(current)) return false;\n  const ageMs = current - occurred;\n  return ageMs >= 0 && ageMs <= maxAgeMs;\n}\n\n"""
+          assert anchor in text
+          processor.write_text(text.replace(anchor, helper + anchor, 1))
+
+          runtime = Path('src/instagram-engagement/runtime.ts')
+          text = runtime.read_text()
+          old = """    autoReplyChannels: ['DIRECT'],\n  });"""
+          new = """    autoReplyChannels: ['DIRECT'],\n    autoReplyMaxAgeMs: boundedInteger(\n      env.INSTAGRAM_ENGAGEMENT_AUTO_REPLY_MAX_AGE_MS,\n      1_800_000,\n      60_000,\n      3_600_000,\n    ),\n  });"""
+          assert old in text
+          runtime.write_text(text.replace(old, new, 1))
+
+          workflow = Path('.github/workflows/instagram-engagement-limited-activation.yml')
+          text = workflow.read_text()
+          text = text.replace(
+            'INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1,INSTAGRAM_ENGAGEMENT_TENANT_ID=',
+            'INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1,INSTAGRAM_ENGAGEMENT_AUTO_REPLY_MAX_AGE_MS=1800000,INSTAGRAM_ENGAGEMENT_TENANT_ID=',
+          )
+          old = """            ([$c.env[]? | select(.name==\"INSTAGRAM_ENGAGEMENT_BATCH_SIZE\") | .value] | last) == \"1\" and\n            ([$c.env[]? | select(.name==\"INSTAGRAM_PUBLICATION_WRITES_ENABLED\") | .value] | last) == \"false\" and"""
+          new = """            ([$c.env[]? | select(.name==\"INSTAGRAM_ENGAGEMENT_BATCH_SIZE\") | .value] | last) == \"1\" and\n            ([$c.env[]? | select(.name==\"INSTAGRAM_ENGAGEMENT_AUTO_REPLY_MAX_AGE_MS\") | .value] | last) == \"1800000\" and\n            ([$c.env[]? | select(.name==\"INSTAGRAM_PUBLICATION_WRITES_ENABLED\") | .value] | last) == \"false\" and"""
+          assert old in text
+          workflow.write_text(text.replace(old, new, 1))
+
+          test = Path('test/instagram-engagement-limited-activation.test.ts')
+          text = test.read_text()
+          old = """      'autoReplyChannels.has(payload.channel)',\n"""
+          new = """      'autoReplyChannels.has(payload.channel)',\n      'isWithinAutoReplyWindow(payload.occurredAt ?? now, now, autoReplyMaxAgeMs)',\n"""
+          assert old in text
+          text = text.replace(old, new, 1)
+          old = """    expect(runtime).toContain(\"autoReplyChannels: ['DIRECT']\");\n"""
+          new = """    expect(runtime).toContain(\"autoReplyChannels: ['DIRECT']\");\n    expect(runtime).toContain('INSTAGRAM_ENGAGEMENT_AUTO_REPLY_MAX_AGE_MS');\n    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_AUTO_REPLY_MAX_AGE_MS=1800000');\n"""
+          assert old in text
+          test.write_text(text.replace(old, new, 1))
+          PY
+          pnpm install --frozen-lockfile
+          pnpm exec prettier --write \
+            src/instagram-engagement/processor.ts \
+            src/instagram-engagement/runtime.ts \
+            .github/workflows/instagram-engagement-limited-activation.yml \
+            test/instagram-engagement-limited-activation.test.ts
+          pnpm typecheck
+          pnpm exec vitest run test/instagram-engagement-limited-activation.test.ts
+          git diff --check
+      - name: Commit age boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/instagram-engagement/processor.ts \
+            src/instagram-engagement/runtime.ts \
+            .github/workflows/instagram-engagement-limited-activation.yml \
+            test/instagram-engagement-limited-activation.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(instagram): bound persistent auto-replies to fresh inbound window'
+          git push origin HEAD:fix/instagram-limited-activation-safety-v1
