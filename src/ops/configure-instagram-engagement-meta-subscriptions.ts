@@ -6,7 +6,6 @@ const appId = requiredEnv('META_APP_ID');
 const appSecret = requiredEnv('META_APP_SECRET');
 const metaAccessToken = requiredEnv('META_ACCESS_TOKEN');
 const pageId = requiredEnv('INSTAGRAM_ENGAGEMENT_PAGE_ID');
-const instagramAccountId = requiredEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
 const graphBaseUrl = (
   process.env.META_GRAPH_BASE_URL?.trim() || 'https://graph.facebook.com'
 ).replace(/\/$/, '');
@@ -30,6 +29,13 @@ if (!challengeResponse.ok || (await challengeResponse.text()) !== challenge) {
   throw new Error(`META_WEBHOOK_CHALLENGE_FAILED:${challengeResponse.status}`);
 }
 
+// TOCA currently uses Instagram API with Facebook Login semantics: the Instagram
+// professional account is linked to a Facebook Page and provider access is made
+// with the Page access token. In this model we configure the Instagram webhook at
+// app level and bind messaging delivery through the linked Page. The separate
+// per-Instagram-account /subscribed_apps edge belongs to the Instagram Login
+// model (graph.instagram.com + Instagram access token) and must not be mixed into
+// this Page-token flow.
 await expectSuccess(
   `${graphBaseUrl}/${apiVersion}/${appId}/subscriptions`,
   new URLSearchParams({
@@ -48,25 +54,20 @@ await expectSuccess(
   'META_PAGE_SUBSCRIPTION_FAILED',
 );
 
-await expectSuccess(
-  `${graphBaseUrl}/${apiVersion}/${instagramAccountId}/subscribed_apps`,
-  new URLSearchParams({
-    subscribed_fields: 'comments,messages',
-    access_token: pageAccessToken,
-  }),
-  'META_INSTAGRAM_SUBSCRIPTION_FAILED',
-);
-
 await assertAssetSubscription(pageId, pageAccessToken, appId);
-await assertAssetSubscription(instagramAccountId, pageAccessToken, appId);
 
 console.log(
   JSON.stringify({
     validation: 'instagram-engagement-meta-subscriptions',
     status: 'PASS',
+    subscriptionModel: 'FACEBOOK_LOGIN_PAGE_BOUND',
     appSubscriptionConfigured: true,
     pageSubscriptionConfigured: true,
+    // Backwards-compatible meaning: Instagram webhook delivery is configured for
+    // this integration through app-level Instagram fields + linked Page binding.
     instagramSubscriptionConfigured: true,
+    instagramAccountSubscriptionRequired: false,
+    instagramAccountSubscriptionAttempted: false,
     pageAccessTokenResolved: true,
     verifyTokenDerived: true,
     secretsPrinted: false,
