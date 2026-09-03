@@ -135,6 +135,77 @@ jobs:
           }
           trap cleanup EXIT
 
+          capture_failure_evidence() {
+            local execution_status="$1"
+            mkdir -p video-generative-evidence
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=30m \
+              --limit=500 \
+              --order=asc \
+              --format=json > /tmp/video-smoke-failure-logs.json || printf '[]\n' > /tmp/video-smoke-failure-logs.json
+
+            VIDEO_SMOKE_EXECUTION_STATUS="$execution_status" VIDEO_SMOKE_JOB_NAME="$JOB_NAME" node <<'NODE'
+          import fs from 'node:fs';
+
+          const entries = JSON.parse(fs.readFileSync('/tmp/video-smoke-failure-logs.json', 'utf8'));
+          const redact = (value) =>
+            String(value)
+              .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/giu, 'Bearer <REDACTED>')
+              .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '<JWT>')
+              .replace(/\bya29\.[A-Za-z0-9._-]+\b/gu, '<GOOGLE_TOKEN>')
+              .replace(/https?:\/\/[^\s"']+/giu, '<URL>')
+              .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+              .replace(/\b[a-f0-9]{64}\b/giu, '<SHA256>')
+              .replace(/\b[A-Za-z0-9_-]{48,}\b/gu, '<TOKEN>')
+              .replace(/\s+/gu, ' ')
+              .trim()
+              .slice(0, 700);
+          const messageFor = (entry) => {
+            if (typeof entry?.textPayload === 'string') return entry.textPayload;
+            if (typeof entry?.jsonPayload?.message === 'string') return entry.jsonPayload.message;
+            if (typeof entry?.jsonPayload?.error === 'string') return entry.jsonPayload.error;
+            if (typeof entry?.protoPayload?.status?.message === 'string') {
+              return entry.protoPayload.status.message;
+            }
+            return '';
+          };
+          const relevant = (Array.isArray(entries) ? entries : [])
+            .map((entry) => ({
+              severity: String(entry?.severity ?? 'DEFAULT'),
+              log: String(entry?.logName ?? '').replaceAll('%2F', '/').split('/logs/').at(-1) ?? 'unknown',
+              timestamp: String(entry?.timestamp ?? ''),
+              message: redact(messageFor(entry)),
+            }))
+            .filter(
+              (entry) =>
+                entry.message &&
+                /ERROR|FAILED|PERMISSION|DENIED|UNAUTH|FORBIDDEN|IAM|SIGNBLOB|OAUTH|DRIVE|SHEETS|VERTEX|VEO|QUOTA|RATE|429|403|404|GCS|STORAGE|SOURCE|POLICY|APPROVAL|VIDEO/iu.test(
+                  entry.message,
+                ),
+            )
+            .slice(0, 80);
+          fs.writeFileSync(
+            'video-generative-evidence/failure-diagnostic.json',
+            `${JSON.stringify(
+              {
+                schemaVersion: 1,
+                jobName: process.env.VIDEO_SMOKE_JOB_NAME,
+                executionStatus: Number(process.env.VIDEO_SMOKE_EXECUTION_STATUS ?? '1'),
+                entryCount: Array.isArray(entries) ? entries.length : 0,
+                sanitizedEntries: relevant,
+                rawPayloadPrinted: false,
+                rawPayloadPersistedInArtifact: false,
+                publicationAuthorized: false,
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          NODE
+          }
+
           ENV_VARS="^~^VIDEO_GENERATIVE_SMOKE_SOURCE_SHA=$GITHUB_SHA~GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$VIDEO_ASSET_BUCKET~VIDEO_SCENE_CONTINUATION_PROVIDER=$VIDEO_SCENE_CONTINUATION_PROVIDER~VIDEO_GOOGLE_AUTH_MODE=$VIDEO_GOOGLE_AUTH_MODE~VERTEX_VEO_LOCATION=$VERTEX_VEO_LOCATION~VERTEX_VEO_MODEL=$VERTEX_VEO_MODEL"
 
           gcloud run jobs deploy "$JOB_NAME" \
@@ -150,7 +221,16 @@ jobs:
             --task-timeout 1200s \
             --quiet
 
+          set +e
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXECUTION_STATUS=$?
+          set -e
+          if [ "$EXECUTION_STATUS" -ne 0 ]; then
+            capture_failure_evidence "$EXECUTION_STATUS"
+            cleanup
+            trap - EXIT
+            exit "$EXECUTION_STATUS"
+          fi
 
           RESULT_JSON=''
           for attempt in $(seq 1 20); do
@@ -192,6 +272,7 @@ jobs:
           trap - EXIT
 
       - name: Upload exact candidate and sanitized evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: video-generative-tp-gen-0001-${{ github.sha }}
