@@ -27,18 +27,15 @@ describe('video generative provider smoke', () => {
     expect(dispatchWorkflow).toContain('PUBLICATION_AUTHORIZED=false');
   });
 
-  it(
-    'runs generation only under the production runtime identity and uploads review evidence',
-    () => {
-      expect(smokeWorkflow).toContain('environment: production');
-      expect(smokeWorkflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
-      expect(smokeWorkflow).toContain('dist/src/video-generative-provider-smoke.js');
-      expect(smokeWorkflow).toContain('VIDEO_GENERATIVE_PROVIDER_SMOKE_RESULT=');
-      expect(smokeWorkflow).toContain('publicationEligible == false');
-      expect(smokeWorkflow).toContain('publicationAuthorized == false');
-      expect(smokeWorkflow).toContain(
-        'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
-      );
-    },
-  );
+  it('runs generation only under the production runtime identity and uploads review evidence', () => {
+    expect(smokeWorkflow).toContain('environment: production');
+    expect(smokeWorkflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
+    expect(smokeWorkflow).toContain('dist/src/video-generative-provider-smoke.js');
+    expect(smokeWorkflow).toContain('VIDEO_GENERATIVE_PROVIDER_SMOKE_RESULT=');
+    expect(smokeWorkflow).toContain('publicationEligible == false');
+    expect(smokeWorkflow).toContain('publicationAuthorized == false');
+    expect(smokeWorkflow).toContain(
+      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    );
+  });
 });
