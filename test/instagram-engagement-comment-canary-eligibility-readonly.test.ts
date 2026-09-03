@@ -63,37 +63,42 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(source).toContain('PROVIDER_CALLS=false');
     expect(source).toContain('EXTERNAL_REPLY_WRITES=false');
     expect(source).toContain('RAW_USER_DATA_LOGGED=false');
-    expect(source).not.toMatch(/\b(update|insert into|delete from)\s+(event_outbox|instagram_engagement_actions)\b/iu);
+    expect(source).not.toMatch(
+      /\b(update|insert into|delete from)\s+(event_outbox|instagram_engagement_actions)\b/iu,
+    );
     expect(source).not.toContain('InstagramGraphEngagementProvider');
     expect(source).not.toContain('MetaApiClient');
     expect(source).not.toContain('replyToComment');
   });
 
-  it('distinguishes pipeline absence, state filtering, safety rejection and blocking ambiguity', () => {
-    for (const marker of [
-      'RECENT_COMMENT_COUNT=',
-      'STATE_CANDIDATE_COUNT=',
-      'ELIGIBLE_COUNT=',
-      'UNRESOLVED_AMBIGUITY_COUNT=',
-      'ACTIVE_RESERVATION_COUNT=',
-      'REJECTED_SCOPE=',
-      'REJECTED_AGE=',
-      'REJECTED_CONFIDENCE=',
-      'REJECTED_PRIORITY=',
-      'REJECTED_SENSITIVE=',
-      'REJECTED_COMMERCIAL=',
-      'REJECTED_URGENCY=',
-      'REJECTED_KNOWLEDGE=',
-      'REJECTED_POLICY=',
-      "'BLOCKED_UNRESOLVED_AMBIGUITY'",
-      "'BLOCKED_ACTIVE_RESERVATION'",
-      "'NO_ELIGIBLE_TARGET'",
-      "'READY'",
-      "'MULTIPLE_ELIGIBLE_TARGETS'",
-    ]) {
-      expect(source).toContain(marker);
-    }
-  });
+  it(
+    'distinguishes pipeline absence, state filtering, safety rejection and blocking ambiguity',
+    () => {
+      for (const marker of [
+        'RECENT_COMMENT_COUNT=',
+        'STATE_CANDIDATE_COUNT=',
+        'ELIGIBLE_COUNT=',
+        'UNRESOLVED_AMBIGUITY_COUNT=',
+        'ACTIVE_RESERVATION_COUNT=',
+        'REJECTED_SCOPE=',
+        'REJECTED_AGE=',
+        'REJECTED_CONFIDENCE=',
+        'REJECTED_PRIORITY=',
+        'REJECTED_SENSITIVE=',
+        'REJECTED_COMMERCIAL=',
+        'REJECTED_URGENCY=',
+        'REJECTED_KNOWLEDGE=',
+        'REJECTED_POLICY=',
+        "'BLOCKED_UNRESOLVED_AMBIGUITY'",
+        "'BLOCKED_ACTIVE_RESERVATION'",
+        "'NO_ELIGIBLE_TARGET'",
+        "'READY'",
+        "'MULTIPLE_ELIGIBLE_TARGETS'",
+      ]) {
+        expect(source).toContain(marker);
+      }
+    },
+  );
 
   it('requires exact-main Comment-only immutable-image authorization', () => {
     for (const marker of [
