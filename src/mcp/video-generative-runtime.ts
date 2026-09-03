@@ -1,6 +1,11 @@
 import { ControlledPhotoToVideoFinalizationService } from '../creative/controlled-photo-to-video-finalization.js';
 import { ControlledPhotoToVideoGenerationService } from '../creative/controlled-photo-to-video-generation.js';
-import { EnvironmentSecretResolver } from '../core/secrets.js';
+import {
+  EnvironmentSecretResolver,
+  type SecretReference,
+  type SecretResolver,
+} from '../core/secrets.js';
+import { GoogleOAuthRefreshSecretResolver } from '../orchestrator/google-oauth-secret-resolver.js';
 import { GcsPhotoToVideoArtifactStore } from '../providers/gcp/gcs-photo-to-video-artifact-store.js';
 import { GoogleDriveCreativeTruthBrandAssetLoader } from '../providers/google-drive/creative-truth-brand-asset-loader.js';
 import { GoogleDriveCreativeVideoSourceLoader } from '../providers/google-drive/creative-video-source-loader.js';
@@ -21,6 +26,12 @@ export interface VideoGenerativeRuntime {
 
 export type VideoGenerativeRuntimeResolver = () => VideoGenerativeRuntime;
 
+interface GoogleAccessBinding {
+  readonly resolver: SecretResolver;
+  readonly sheetsTokenReference: SecretReference;
+  readonly driveTokenReference: SecretReference;
+}
+
 export function createLazyVideoGenerativeRuntimeResolver(
   env: NodeJS.ProcessEnv = process.env,
 ): VideoGenerativeRuntimeResolver {
@@ -32,17 +43,12 @@ export function createLazyVideoGenerativeRuntimeResolver(
 }
 
 export function videoGenerativeRuntimeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
-  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
-  const openAiApiKeyEnvKey = env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
+  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
   return Boolean(
-    sheetsTokenEnvKey &&
-    driveTokenEnvKey &&
     env.GCP_PROJECT_ID?.trim() &&
-    env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() &&
-    env[sheetsTokenEnvKey]?.trim() &&
-    env[driveTokenEnvKey]?.trim() &&
-    env[openAiApiKeyEnvKey]?.trim(),
+      env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() &&
+      env[openAiApiKeyEnvKey]?.trim() &&
+      googleAccessConfigured(env),
   );
 }
 
@@ -54,14 +60,13 @@ export function createVideoGenerativeRuntimeFromEnvironment(
   }
 
   const secrets = new EnvironmentSecretResolver(env);
-  const sheetsTokenEnvKey = requiredEnv(env, 'GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
-  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
-  const openAiApiKeyEnvKey = env.OPENAI_API_KEY_ENV_KEY?.trim() || 'OPENAI_API_KEY';
+  const google = resolveGoogleAccessBinding(env, secrets);
+  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
   const openAiVideoModel = parseVideoModel(env.OPENAI_VIDEO_MODEL?.trim());
   const gcpProjectId = requiredEnv(env, 'GCP_PROJECT_ID');
   const artifactBucket = requiredEnv(env, 'INSTAGRAM_PUBLICATION_ASSET_BUCKET');
-  const sheets = new GoogleSheetsRestClient(secrets, {
-    tokenReference: { provider: 'env', key: sheetsTokenEnvKey },
+  const sheets = new GoogleSheetsRestClient(google.resolver, {
+    tokenReference: google.sheetsTokenReference,
   });
   const policyGuard = new GoogleSheetsPhotoToVideoParentPolicyGuard(sheets);
   const registry = new GoogleSheetsPhotoToVideoRegistry(sheets);
@@ -71,12 +76,12 @@ export function createVideoGenerativeRuntimeFromEnvironment(
     bucketName: artifactBucket,
   });
   const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
-    secretResolver: secrets,
-    accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
+    secretResolver: google.resolver,
+    accessTokenReference: google.driveTokenReference,
   });
   const brandLoader = new GoogleDriveCreativeTruthBrandAssetLoader({
-    secretResolver: secrets,
-    accessTokenReference: { provider: 'env', key: driveTokenEnvKey },
+    secretResolver: google.resolver,
+    accessTokenReference: google.driveTokenReference,
   });
   const generation = new ControlledPhotoToVideoGenerationService({
     policyGuard,
@@ -107,6 +112,103 @@ export function createVideoGenerativeRuntimeFromEnvironment(
     finalization,
     postProcessor: new LocalGeneratedVideoPostProcessor(),
   };
+}
+
+function googleAccessConfigured(env: NodeJS.ProcessEnv): boolean {
+  const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
+  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+  if (
+    sheetsTokenEnvKey &&
+    driveTokenEnvKey &&
+    env[sheetsTokenEnvKey]?.trim() &&
+    env[driveTokenEnvKey]?.trim()
+  ) {
+    return true;
+  }
+
+  const oauth = googleOAuthConfig(env);
+  return Boolean(
+    oauth.clientIdEnvKey &&
+      oauth.clientSecretEnvKey &&
+      oauth.refreshTokenEnvKey &&
+      env[oauth.clientIdEnvKey]?.trim() &&
+      env[oauth.clientSecretEnvKey]?.trim() &&
+      env[oauth.refreshTokenEnvKey]?.trim(),
+  );
+}
+
+function resolveGoogleAccessBinding(
+  env: NodeJS.ProcessEnv,
+  secrets: EnvironmentSecretResolver,
+): GoogleAccessBinding {
+  const sheetsTokenEnvKey = env.GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY?.trim();
+  const driveTokenEnvKey = env.GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY?.trim() || sheetsTokenEnvKey;
+  if (
+    sheetsTokenEnvKey &&
+    driveTokenEnvKey &&
+    env[sheetsTokenEnvKey]?.trim() &&
+    env[driveTokenEnvKey]?.trim()
+  ) {
+    return {
+      resolver: secrets,
+      sheetsTokenReference: { provider: 'env', key: sheetsTokenEnvKey },
+      driveTokenReference: { provider: 'env', key: driveTokenEnvKey },
+    };
+  }
+
+  const oauth = googleOAuthConfig(env);
+  if (!oauth.clientIdEnvKey || !oauth.clientSecretEnvKey || !oauth.refreshTokenEnvKey) {
+    throw new Error('VIDEO_GENERATIVE_GOOGLE_AUTH_NOT_CONFIGURED');
+  }
+  const resolver = new GoogleOAuthRefreshSecretResolver({
+    clientIdReference: { provider: 'env', key: oauth.clientIdEnvKey },
+    clientSecretReference: { provider: 'env', key: oauth.clientSecretEnvKey },
+    refreshTokenReference: { provider: 'env', key: oauth.refreshTokenEnvKey },
+    secrets,
+    tokenEndpoint: oauth.tokenEndpoint,
+  });
+  const tokenReference = { provider: 'google-oauth', key: 'sheets-readonly' } as const;
+  return {
+    resolver,
+    sheetsTokenReference: tokenReference,
+    driveTokenReference: tokenReference,
+  };
+}
+
+function googleOAuthConfig(env: NodeJS.ProcessEnv): {
+  readonly clientIdEnvKey?: string;
+  readonly clientSecretEnvKey?: string;
+  readonly refreshTokenEnvKey?: string;
+  readonly tokenEndpoint: string;
+} {
+  return {
+    clientIdEnvKey:
+      env.VIDEO_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY?.trim() ||
+      env.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY?.trim(),
+    clientSecretEnvKey:
+      env.VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY?.trim() ||
+      env.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY?.trim(),
+    refreshTokenEnvKey:
+      env.VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY?.trim() ||
+      env.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY?.trim(),
+    tokenEndpoint:
+      env.VIDEO_GOOGLE_OAUTH_TOKEN_ENDPOINT?.trim() ||
+      env.AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT?.trim() ||
+      'https://oauth2.googleapis.com/token',
+  };
+}
+
+function resolveOpenAiApiKeyEnvKey(env: NodeJS.ProcessEnv): string {
+  const explicit =
+    env.OPENAI_API_KEY_ENV_KEY?.trim() || env.AG01_OPENAI_API_KEY_ENV_KEY?.trim();
+  if (explicit) return explicit;
+  if (
+    env.AG01_MODEL_PROVIDER?.trim().toLowerCase() === 'openai' &&
+    env.AG01_MODEL_API_KEY_ENV_KEY?.trim()
+  ) {
+    return env.AG01_MODEL_API_KEY_ENV_KEY.trim();
+  }
+  return 'OPENAI_API_KEY';
 }
 
 function parseVideoModel(value: string | undefined): 'sora-2' | 'sora-2-pro' | undefined {
