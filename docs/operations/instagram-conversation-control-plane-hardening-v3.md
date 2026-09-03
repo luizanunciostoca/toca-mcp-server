@@ -17,15 +17,23 @@ Status: PR candidate. No provider-write authority is introduced by this hardenin
 
 - No persistent Instagram engagement write flag is enabled.
 - No provider send path is added.
-- Commercial intent keeps conservative precedence over lower-risk event/operational signals while secondary intents remain available for context.
-- Safety/legal/harassment/refund/complaint/support remain higher precedence than commercial/event intents.
+- Higher-risk safety/legal/harassment/refund/complaint/support signals retain precedence over lower-risk event/operational context.
+- Commercial-lead projection is only added when the underlying classifier produces the qualifying commercial signal; event, product and operational signals remain available as primary/secondary context according to the deterministic precedence table.
 - Follow-up queue membership is not execution authority.
 - FAQ and classifier evidence never self-promote facts or model changes.
 
 ## Multitenancy
 
-Migration 040 scopes recurring FAQ signals, classification feedback and response QA by tenant, workspace and organization. Existing V3 rows are backfilled to the canonical TOCA scope before NOT NULL constraints are applied. Runtime methods that write these analytics surfaces must carry the same scope before the PR may be merged into production main.
+Migration 040 introduces isolated scoped analytics surfaces rather than mutating the keys of the V3 legacy tables:
+
+- `instagram_engagement_faq_signals_scoped`;
+- `instagram_engagement_classification_feedback_scoped`;
+- `instagram_engagement_response_qa_scoped`.
+
+Each scoped surface requires `tenant_id`, `workspace_id` and `organization_id` in its primary key or write path. `PostgresInstagramConversationAnalyticsScoped` validates the complete scope before persistence, writes only to the scoped surfaces, validates hashed event/question identifiers and reads FAQ misses only inside the configured scope. This rollout intentionally leaves the legacy analytics tables unchanged so existing V3 code cannot be broken by an in-place primary-key migration.
+
+The legacy unscoped analytics methods in `PostgresInstagramConversationControlPlane` are not the canonical multitenant analytics path and must not be wired into a multitenant production runtime. The scoped analytics runtime is the governed target for FAQ aggregation, classification feedback and response QA.
 
 ## Release gate
 
-Do not merge this PR before the current exact-SHA Controlled Direct Canary proof is completed or intentionally superseded. Merging advances `main` and therefore requires a fresh immutable engagement runtime digest and authorization lineage.
+Do not merge this PR before the current Controlled Direct Canary readiness blocker is diagnosed and a fresh exact-SHA Direct canary either passes or is intentionally superseded. Merging advances `main` and therefore requires a fresh immutable engagement runtime digest and authorization lineage.
