@@ -1,0 +1,63 @@
+name: Instagram Shadow Runtime Binding Helper
+
+on:
+  push:
+    branches:
+      - chore/instagram-shadow-bind-runtime-d166
+
+permissions:
+  contents: write
+
+jobs:
+  transform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout binding branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Generate exact neutral binding outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .runtime-binding-output/instagram-engagement-shadow-production.yml ]]; then
+            echo 'Neutral runtime-binding outputs already exist; no further mutation required.'
+            exit 0
+          fi
+
+          mkdir -p .runtime-binding-output
+          python <<'PY'
+          from pathlib import Path
+
+          old_sha = 'bc9f02ff4663589c4f60fc585c89ca88b0369eba'
+          new_sha = 'd166d2447b544cad81bc16b93e863e9c88c613a8'
+          old_digest = 'sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a'
+          new_digest = 'sha256:44b24e15e0077f2386e426bdb65780318cf9f909b429bec508ffe723c7bb3339'
+
+          pairs = [
+              (Path('.github/workflows/instagram-engagement-shadow-production.yml'), Path('.runtime-binding-output/instagram-engagement-shadow-production.yml')),
+              (Path('.github/workflows/instagram-engagement-production-shadow-autodispatch.yml'), Path('.runtime-binding-output/instagram-engagement-production-shadow-autodispatch.yml')),
+              (Path('test/instagram-engagement-shadow-drs-continuation.test.ts'), Path('.runtime-binding-output/instagram-engagement-shadow-drs-continuation.test.ts')),
+              (Path('test/instagram-engagement-production-shadow-autodispatch.test.ts'), Path('.runtime-binding-output/instagram-engagement-production-shadow-autodispatch.test.ts')),
+          ]
+
+          for source, target in pairs:
+              text = source.read_text()
+              if old_sha not in text or old_digest not in text:
+                  raise SystemExit(f'Expected old binding missing from {source}')
+              updated = text.replace(old_sha, new_sha).replace(old_digest, new_digest)
+              if old_sha in updated or old_digest in updated:
+                  raise SystemExit(f'Old binding remained in {source}')
+              if new_sha not in updated or new_digest not in updated:
+                  raise SystemExit(f'New binding missing from transformed {source}')
+              target.write_text(updated)
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .runtime-binding-output
+          git commit -m 'chore(instagram): generate immutable runtime binding blobs'
+          git push origin HEAD:chore/instagram-shadow-bind-runtime-d166
