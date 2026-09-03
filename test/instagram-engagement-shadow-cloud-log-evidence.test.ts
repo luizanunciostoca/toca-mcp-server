@@ -52,6 +52,61 @@ describe('Instagram engagement Cloud Run shadow evidence extraction', () => {
     expect(payload.validation).toBe('instagram-engagement-shadow-e2e');
   });
 
+  it('extracts Conversation Operations shadow evidence', () => {
+    const result = extract('instagram-conversation-shadow-e2e', [
+      {
+        jsonPayload: {
+          message: JSON.stringify({
+            validation: 'instagram-conversation-shadow-e2e',
+            status: 'PASS',
+            grouping: {
+              inboundEvents: 2,
+              persistedGroups: 1,
+              decisions: 1,
+              messageCount: 2,
+            },
+            lowConfidence: {
+              confidence: 'LOW',
+              autoSendObserved: false,
+            },
+            p0: {
+              priority: 'P0',
+              actionStatus: 'HUMAN_REVIEW',
+              threadState: 'ESCALATED',
+            },
+            replyOutboxEvents: 0,
+            externalReplyObserved: false,
+            writesEnabled: false,
+          }),
+        },
+      },
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      validation: 'instagram-conversation-shadow-e2e',
+      status: 'PASS',
+      grouping: {
+        inboundEvents: 2,
+        persistedGroups: 1,
+        decisions: 1,
+        messageCount: 2,
+      },
+      lowConfidence: {
+        confidence: 'LOW',
+        autoSendObserved: false,
+      },
+      p0: {
+        priority: 'P0',
+        actionStatus: 'HUMAN_REVIEW',
+        threadState: 'ESCALATED',
+      },
+      replyOutboxEvents: 0,
+      externalReplyObserved: false,
+      writesEnabled: false,
+    });
+  });
+
   it('extracts structured logger message JSON without accepting unrelated payloads', () => {
     const result = extract('instagram-engagement-meta-subscriptions', [
       { jsonPayload: { message: 'not-json' } },
@@ -86,12 +141,15 @@ describe('Instagram engagement Cloud Run shadow evidence extraction', () => {
 
   it('requires the production shadow workflow to read full JSON log entries for all validators', () => {
     expect(workflow).not.toContain("--format='value(textPayload)'");
-    expect(workflow.match(/--format=json/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(workflow.match(/--format=json/g)?.length).toBeGreaterThanOrEqual(4);
     expect(workflow).toContain(
       'extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-readiness',
     );
     expect(workflow).toContain(
       'extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-shadow-e2e',
+    );
+    expect(workflow).toContain(
+      'extract-instagram-engagement-cloud-run-evidence.mjs instagram-conversation-shadow-e2e',
     );
     expect(workflow).toContain(
       'extract-instagram-engagement-cloud-run-evidence.mjs instagram-engagement-meta-subscriptions',
