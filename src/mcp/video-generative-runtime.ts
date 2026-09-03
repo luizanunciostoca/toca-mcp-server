@@ -132,13 +132,14 @@ function createSceneContinuationProvider(
   const provider = resolveSceneContinuationProviderId(env);
   if (provider === 'GOOGLE_VERTEX_VEO') {
     const cloudIdentity = new GoogleMetadataAccessTokenResolver();
+    const vertexVeoModel = parseVertexVeoModel(env.VERTEX_VEO_MODEL?.trim());
     return new VertexVeoSceneContinuationVideoProvider({
       projectId: input.gcpProjectId,
       artifactBucket: input.artifactBucket,
       accessTokenResolver: cloudIdentity,
       accessTokenReference: { provider: 'gcp-metadata-oauth', key: 'cloud-platform' },
       location: env.VERTEX_VEO_LOCATION?.trim() || 'us-central1',
-      model: parseVertexVeoModel(env.VERTEX_VEO_MODEL?.trim()),
+      ...(vertexVeoModel ? { model: vertexVeoModel } : {}),
     });
   }
 
