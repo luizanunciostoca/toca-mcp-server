@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "controlId": "INSTAGRAM_CONVERSATION_SHADOW_PROOF_V1",
+  "status": "CANDIDATE",
+  "writesEnabledRequired": false,
+  "requiredAssertions": [
+    "TWO_NEARBY_MESSAGES_ONE_GROUP",
+    "ONE_GROUP_ONE_DECISION",
+    "LOW_CONFIDENCE_ZERO_AUTOSEND",
+    "P0_HUMAN_REVIEW_ESCALATED",
+    "ZERO_REPLY_OUTBOX_EVENTS",
+    "ZERO_PROVIDER_REPLY_IDS"
+  ],
+  "evidenceValidation": "instagram-conversation-shadow-e2e"
+}
