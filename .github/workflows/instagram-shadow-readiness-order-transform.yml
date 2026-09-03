@@ -1,0 +1,62 @@
+name: Instagram Shadow Readiness Order Transform
+
+on:
+  push:
+    branches:
+      - fix/instagram-shadow-readiness-order-20260903
+
+permissions:
+  contents: write
+
+jobs:
+  transform:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/instagram-shadow-readiness-order-20260903
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply ordering correction
+        run: python .github/scripts/fix-production-shadow-readiness-order.py
+
+      - name: Apply repository formatter
+        run: >-
+          pnpm exec prettier --write
+          .github/workflows/instagram-engagement-shadow-production.yml
+          test/instagram-engagement-production-shadow-ordering.test.ts
+
+      - name: Stage neutral generated blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p control/generated-shadow-order-fix
+          cp .github/workflows/instagram-engagement-shadow-production.yml control/generated-shadow-order-fix/instagram-engagement-shadow-production.yml
+          cp test/instagram-engagement-production-shadow-ordering.test.ts control/generated-shadow-order-fix/instagram-engagement-production-shadow-ordering.test.ts
+
+      - name: Publish only neutral generated blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add control/generated-shadow-order-fix/
+          git diff --cached --quiet && { echo 'No generated blobs produced' >&2; exit 1; }
+          git commit -m "chore(instagram): publish shadow ordering blobs"
+          git push origin HEAD:fix/instagram-shadow-readiness-order-20260903
