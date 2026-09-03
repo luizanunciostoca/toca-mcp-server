@@ -530,7 +530,8 @@ function runtimeServiceIdentity(
       ...(directPublicationEnabled ? DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES : []),
     ],
     allowedTargetAccounts:
-      directPublicationEnabled && config.INSTAGRAM_BUSINESS_ACCOUNT_ID
+      (directPublicationEnabled || config.TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED) &&
+      config.INSTAGRAM_BUSINESS_ACCOUNT_ID
         ? [config.INSTAGRAM_BUSINESS_ACCOUNT_ID]
         : [],
     evidence: [
