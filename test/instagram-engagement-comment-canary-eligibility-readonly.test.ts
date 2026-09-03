@@ -10,6 +10,7 @@ const workflow = readFileSync(
   'utf8',
 );
 
+// Keep this read-only gate aligned with the real Comment canary PREPARE contract.
 describe('Instagram Comment canary read-only eligibility gate', () => {
   it('mirrors the real Comment canary state-selection contract', () => {
     for (const marker of [
