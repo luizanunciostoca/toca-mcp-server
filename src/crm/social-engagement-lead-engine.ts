@@ -69,8 +69,12 @@ export class SocialEngagementLeadEngine {
       writesEnabled: hasWriteAuthority(input.authorization),
       classificationConfidence:
         input.authorization.classificationConfidence ?? classification.confidence,
-      contextConflict: input.authorization.contextConflict,
-      threadAutomationBlocked: input.authorization.threadAutomationBlocked,
+      ...(input.authorization.contextConflict === undefined
+        ? {}
+        : { contextConflict: input.authorization.contextConflict }),
+      ...(input.authorization.threadAutomationBlocked === undefined
+        ? {}
+        : { threadAutomationBlocked: input.authorization.threadAutomationBlocked }),
     });
 
     if (!input.interaction.senderScopedId) {
