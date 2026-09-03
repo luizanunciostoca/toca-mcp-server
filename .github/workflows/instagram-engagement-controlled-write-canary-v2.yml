@@ -275,6 +275,7 @@ jobs:
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
       - name: Release pending canary reservations
+        id: reservation_cleanup
         if: ${{ always() && steps.auth.outputs.canary_session != '' }}
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
@@ -295,6 +296,7 @@ jobs:
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
       - name: Restore persistent daemon to runtime-on and writes-off
+        id: restore_daemon
         if: ${{ always() }}
         shell: bash
         run: |
@@ -317,19 +319,28 @@ jobs:
           RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
           POST_OUTCOME: ${{ steps.post.outcome }}
           PROVIDER_WRITE_OUTCOME: ${{ steps.provider_write.outcome }}
+          RESERVATION_CLEANUP_OUTCOME: ${{ steps.reservation_cleanup.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore_daemon.outcome }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$ISSUE_NUMBER"
-          if [[ "${{ job.status }}" == success && "$POST_OUTCOME" == success && "$PROVIDER_WRITE_OUTCOME" == success ]]; then
-            STATUS=PASS
+          STATUS=FAIL
+          if [[ "$POST_OUTCOME" == success ]]; then
             SENT=1
             ACK=true
-          else
-            STATUS=FAIL
+          elif [[ "$PROVIDER_WRITE_OUTCOME" == skipped ]]; then
             SENT=0
             ACK=false
+          else
+            SENT=UNKNOWN
+            ACK=UNKNOWN
           fi
+          if [[ "${{ job.status }}" == success && "$POST_OUTCOME" == success && "$PROVIDER_WRITE_OUTCOME" == success && "$RESERVATION_CLEANUP_OUTCOME" == success && "$RESTORE_OUTCOME" == success ]]; then
+            STATUS=PASS
+          fi
+          if [[ "$RESERVATION_CLEANUP_OUTCOME" == success ]]; then CLEANUP=true; else CLEANUP=false; fi
+          if [[ "$RESTORE_OUTCOME" == success ]]; then RESTORED=true; else RESTORED=false; fi
           printf -v COMMENT '%s\n' \
             "CONTROLLED_WRITE_CANARY_V2_STATUS=$STATUS" \
             "CONTROLLER_SHA=$GITHUB_SHA" \
@@ -340,7 +351,8 @@ jobs:
             "PROVIDER_ACKNOWLEDGED=$ACK" \
             'PERSISTENT_WRITES_ENABLED=false' \
             'PERSISTENT_AUTONOMY_PROMOTED=false' \
-            'DAEMON_ENGAGEMENT_RUNTIME_RESTORED=true' \
+            "CANARY_RESERVATIONS_CLEANED=$CLEANUP" \
+            "DAEMON_ENGAGEMENT_RUNTIME_RESTORED=$RESTORED" \
             'DAEMON_ENGAGEMENT_WRITES=false' \
             'RAW_USER_DATA_LOGGED=false'
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
