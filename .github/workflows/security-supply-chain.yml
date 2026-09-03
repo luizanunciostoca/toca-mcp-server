@@ -57,16 +57,41 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit Node dependency vulnerabilities
-        run: pnpm audit --audit-level high
+        id: pnpm_audit
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          pnpm audit --audit-level high > /tmp/pnpm-audit.stdout 2> /tmp/pnpm-audit.stderr
+          AUDIT_RC=$?
+          set -e
+
+          cat /tmp/pnpm-audit.stdout
+          cat /tmp/pnpm-audit.stderr >&2
+
+          if [[ "$AUDIT_RC" -eq 0 ]]; then
+            echo 'PNPM_AUDIT_STATUS=PASS' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if grep -Eq 'ERR_SOCKET_TIMEOUT|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ERR_PNPM_META_FETCH_FAIL|FetchError: request to https://registry\.npmjs\.org/-/npm/v1/security/audits failed' /tmp/pnpm-audit.stdout /tmp/pnpm-audit.stderr; then
+            echo 'PNPM_AUDIT_STATUS=INFRA_UNAVAILABLE_TRIVY_FALLBACK' >> "$GITHUB_ENV"
+            echo '::warning::npm audit endpoint unavailable; requiring independent Trivy HIGH/CRITICAL filesystem gate.'
+            exit 0
+          fi
+
+          echo 'PNPM_AUDIT_STATUS=VULNERABILITY_OR_UNCLASSIFIED_FAILURE' >> "$GITHUB_ENV"
+          exit "$AUDIT_RC"
 
       - name: Scan event-scoped commits for secrets
-        if: github.event_name != 'workflow_dispatch'
+        if: ${{ always() && github.event_name != 'workflow_dispatch' }}
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_VERSION: 8.24.3
 
       - name: Install verified Gitleaks CLI for exact candidate ancestry
+        if: always()
         run: |
           set -euo pipefail
           VERSION=8.24.3
@@ -99,6 +124,8 @@ jobs:
           retention-days: 90
 
       - name: Scan repository filesystem
+        id: trivy_fs
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
@@ -106,6 +133,18 @@ jobs:
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: '1'
+
+      - name: Verify npm audit infrastructure fallback coverage
+        if: always()
+        shell: bash
+        env:
+          TRIVY_FS_OUTCOME: ${{ steps.trivy_fs.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${PNPM_AUDIT_STATUS:-}" == 'INFRA_UNAVAILABLE_TRIVY_FALLBACK' ]]; then
+            test "$TRIVY_FS_OUTCOME" = 'success'
+            echo 'PNPM_AUDIT_FALLBACK_TRIVY=PASS'
+          fi
 
       - name: Build immutable candidate container
         run: docker build --pull -t "toca-mcp:${CANDIDATE_SHA}" .
