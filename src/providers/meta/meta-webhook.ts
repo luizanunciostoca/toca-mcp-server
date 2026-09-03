@@ -50,6 +50,12 @@ export function verifyMetaWebhookSignature(
 
 export function parseMetaWebhookEvents(rawBody: Buffer): readonly InstagramWebhookEvent[] {
   const payload = webhookPayloadSchema.parse(JSON.parse(rawBody.toString('utf8')));
+  // This parser is an Instagram-only boundary. Facebook Page/Messenger webhooks can use
+  // the same entry.messaging envelope, so accepting another Meta object here would risk
+  // misrouting Page messages as Instagram DIRECT events. Future Messenger support must
+  // have its own explicit provider/channel parser rather than sharing this normalization.
+  if (payload.object !== 'instagram') return [];
+
   const events: InstagramWebhookEvent[] = [];
 
   for (const entryValue of payload.entry) {
