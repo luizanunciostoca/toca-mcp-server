@@ -50,7 +50,13 @@ jobs:
           SOURCE_RUN_ID="$(grep '^SOURCE_RUN_ID=' <<< "$BODY" | cut -d= -f2-)"
           SOURCE_JOB="$(grep '^SOURCE_JOB=' <<< "$BODY" | cut -d= -f2-)"
           [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$SOURCE_JOB" == "toca-ig-canary-pre-${SOURCE_RUN_ID}-"* ]]
+          case "$SOURCE_JOB" in
+            "toca-ig-canary-pre-${SOURCE_RUN_ID}-"*|"toca-ig-comment-pre-${SOURCE_RUN_ID}-"*) ;;
+            *)
+              echo "SOURCE_JOB is not an allowed PREPARE lineage for SOURCE_RUN_ID" >&2
+              exit 1
+              ;;
+          esac
 
           required=(
             "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
@@ -107,11 +113,29 @@ jobs:
           const strings = collect(entries);
           const has = (needle) => strings.some((value) => value.includes(needle));
           let cause = 'UNKNOWN';
-          if (has('INSTAGRAM_ENGAGEMENT_CANARY_NO_SAFE_RECENT_CANDIDATE')) cause = 'NO_SAFE_RECENT_CANDIDATE';
-          else if (has('INSTAGRAM_ENGAGEMENT_CANARY_ACTIVE_RESERVATION_EXISTS')) cause = 'ACTIVE_RESERVATION_EXISTS';
+          if (
+            has('COMMENT_CANARY_NO_SAFE_RECENT_CANDIDATE') ||
+            has('INSTAGRAM_ENGAGEMENT_CANARY_NO_SAFE_RECENT_CANDIDATE')
+          ) cause = 'NO_SAFE_RECENT_CANDIDATE';
+          else if (
+            has('COMMENT_CANARY_ACTIVE_SESSION_EXISTS') ||
+            has('INSTAGRAM_ENGAGEMENT_CANARY_ACTIVE_RESERVATION_EXISTS')
+          ) cause = 'ACTIVE_RESERVATION_EXISTS';
           else if (has('INSTAGRAM_ENGAGEMENT_CANARY_RESERVED_PRIORITY_CONFLICT')) cause = 'RESERVED_PRIORITY_CONFLICT';
-          else if (has('INSTAGRAM_ENGAGEMENT_CANARY_RESERVATION_CONFLICT')) cause = 'RESERVATION_CONFLICT';
-          else if (strings.some((value) => /POSTGRES|DATABASE|ECONN|ETIMEDOUT|PERMISSION|DENIED|UNAUTHORIZED|FORBIDDEN/iu.test(value))) cause = 'INFRASTRUCTURE_OR_PERMISSION_ERROR';
+          else if (
+            has('COMMENT_CANARY_RESERVATION_CONFLICT') ||
+            has('INSTAGRAM_ENGAGEMENT_CANARY_RESERVATION_CONFLICT')
+          ) cause = 'RESERVATION_CONFLICT';
+          else if (
+            strings.some((value) =>
+              /ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find module|Cannot find package/iu.test(value),
+            )
+          ) cause = 'RUNTIME_SCRIPT_MISSING';
+          else if (
+            strings.some((value) =>
+              /POSTGRES|DATABASE|ECONN|ETIMEDOUT|PERMISSION|DENIED|UNAUTHORIZED|FORBIDDEN/iu.test(value),
+            )
+          ) cause = 'INFRASTRUCTURE_OR_PERMISSION_ERROR';
 
           const evidence = {
             schemaVersion: 'toca.instagram-engagement.canary-reservation-diagnostic.v1',
