@@ -72,6 +72,10 @@ jobs:
           old = """    expect(runtime).toContain(\"autoReplyChannels: ['DIRECT']\");\n"""
           new = """    expect(runtime).toContain(\n      'autoReplyChannels: config.INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS',\n    );\n"""
           assert old in text
+          text = text.replace(old, new, 1)
+          old = """    expect(runtime).toContain('separate real COMMENT provider-acknowledgement gate');\n"""
+          new = """    expect(runtime).toContain('Production defaults to DIRECT');\n"""
+          assert old in text
           limited_test.write_text(text.replace(old, new, 1))
           PY
           pnpm install --frozen-lockfile
