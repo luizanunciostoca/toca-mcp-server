@@ -1,0 +1,172 @@
+name: Instagram Engagement Canary Reservation Diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-canary-reservation-diagnostic
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+jobs:
+  diagnose:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram canary reservation diagnostic AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and read-only boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          SOURCE_RUN_ID="$(grep '^SOURCE_RUN_ID=' <<< "$BODY" | cut -d= -f2-)"
+          SOURCE_JOB="$(grep '^SOURCE_JOB=' <<< "$BODY" | cut -d= -f2-)"
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$SOURCE_JOB" == "toca-ig-canary-pre-${SOURCE_RUN_ID}-"* ]]
+
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_CANARY_RESERVATION_DIAGNOSTIC=AUTHORIZED"
+            "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            "SOURCE_JOB=$SOURCE_JOB"
+            "READ_ONLY_DIAGNOSTIC=true"
+            "SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact reservation diagnostic authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          echo "SOURCE_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
+          echo "SOURCE_JOB=$SOURCE_JOB" >> "$GITHUB_ENV"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read retained PREPARE logs and publish cause-only diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p engagement-evidence
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${SOURCE_JOB}\"" \
+            --project "$GCP_PROJECT_ID" --freshness=24h --limit=1000 --order=asc --format=json \
+            > /tmp/reservation-logs.json
+
+          node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/reservation-logs.json', 'utf8'));
+          const collect = (value, out = []) => {
+            if (typeof value === 'string') out.push(value);
+            else if (Array.isArray(value)) value.forEach((item) => collect(item, out));
+            else if (value && typeof value === 'object') Object.values(value).forEach((item) => collect(item, out));
+            return out;
+          };
+          const strings = collect(entries);
+          const has = (needle) => strings.some((value) => value.includes(needle));
+          let cause = 'UNKNOWN';
+          if (has('INSTAGRAM_ENGAGEMENT_CANARY_NO_SAFE_RECENT_CANDIDATE')) cause = 'NO_SAFE_RECENT_CANDIDATE';
+          else if (has('INSTAGRAM_ENGAGEMENT_CANARY_ACTIVE_RESERVATION_EXISTS')) cause = 'ACTIVE_RESERVATION_EXISTS';
+          else if (has('INSTAGRAM_ENGAGEMENT_CANARY_RESERVED_PRIORITY_CONFLICT')) cause = 'RESERVED_PRIORITY_CONFLICT';
+          else if (has('INSTAGRAM_ENGAGEMENT_CANARY_RESERVATION_CONFLICT')) cause = 'RESERVATION_CONFLICT';
+          else if (strings.some((value) => /POSTGRES|DATABASE|ECONN|ETIMEDOUT|PERMISSION|DENIED|UNAUTHORIZED|FORBIDDEN/iu.test(value))) cause = 'INFRASTRUCTURE_OR_PERMISSION_ERROR';
+
+          const evidence = {
+            schemaVersion: 'toca.instagram-engagement.canary-reservation-diagnostic.v1',
+            sourceRunId: process.env.SOURCE_RUN_ID,
+            sourceJob: process.env.SOURCE_JOB,
+            entryCount: Array.isArray(entries) ? entries.length : 0,
+            cause,
+            rawPayloadPrinted: false,
+            rawUserDataPrinted: false,
+            readOnlyDiagnostic: true,
+            serviceMutationsAuthorized: false,
+            databaseMutationsAuthorized: false,
+            providerWritesAuthorized: false,
+            externalReplyWritesAuthorized: false,
+          };
+          fs.writeFileSync(
+            'engagement-evidence/canary-reservation-diagnostic.json',
+            `${JSON.stringify(evidence, null, 2)}\n`,
+          );
+          NODE
+
+          ENTRY_COUNT="$(jq -r '.entryCount' engagement-evidence/canary-reservation-diagnostic.json)"
+          CAUSE="$(jq -r '.cause' engagement-evidence/canary-reservation-diagnostic.json)"
+          printf -v COMMENT '%s\n' \
+            'CANARY_RESERVATION_DIAGNOSTIC_STATUS=PASS' \
+            "SOURCE_RUN_ID=${SOURCE_RUN_ID}" \
+            "SOURCE_JOB=${SOURCE_JOB}" \
+            "ENTRY_COUNT=${ENTRY_COUNT}" \
+            "RESERVATION_FAILURE_CAUSE=${CAUSE}" \
+            'RAW_PAYLOAD_PRINTED=false' \
+            'RAW_USER_DATA_PRINTED=false' \
+            'READ_ONLY_DIAGNOSTIC=true' \
+            'SERVICE_MUTATIONS_AUTHORIZED=false' \
+            'DATABASE_MUTATIONS_AUTHORIZED=false' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Upload cause-only reservation evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-engagement-canary-reservation-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: engagement-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Consume diagnostic authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE_NUMBER:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
