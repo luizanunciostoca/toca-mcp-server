@@ -11,6 +11,11 @@ function requestUrl(input: string | URL | Request): string {
   return input instanceof URL ? input.toString() : input.url;
 }
 
+function jsonBody(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== 'string') throw new Error('expected JSON string body');
+  return JSON.parse(body) as unknown;
+}
+
 function request() {
   return {
     contentItemId: 'CONTENT-1',
@@ -58,7 +63,7 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
       if (url === `${modelEndpoint}:predictLongRunning`) {
         expect(init?.method).toBe('POST');
         expect(init?.headers).toMatchObject({ Authorization: 'Bearer cloud-token' });
-        const body = JSON.parse(String(init?.body)) as {
+        const body = jsonBody(init?.body) as {
           instances: Array<{
             prompt: string;
             image: { bytesBase64Encoded: string; mimeType: string };
@@ -87,7 +92,7 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
         });
       }
       if (url === `${modelEndpoint}:fetchPredictOperation`) {
-        expect(JSON.parse(String(init?.body))).toEqual({
+        expect(jsonBody(init?.body)).toEqual({
           operationName: 'projects/toca-mcp-production/locations/us-central1/operations/veo-123',
         });
         return Response.json({
@@ -145,7 +150,7 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
 
   it('rejects an approval/source mismatch before token or provider access', async () => {
     const fetchImpl = vi.fn();
-    const accessTokenResolver = { resolve: vi.fn(async () => 'cloud-token') };
+    const accessTokenResolver = { resolve: vi.fn(() => Promise.resolve('cloud-token')) };
     const provider = new VertexVeoSceneContinuationVideoProvider({
       projectId: 'toca-mcp-production',
       artifactBucket: 'toca-mcp-publication-assets',
@@ -167,7 +172,7 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
   });
 
   it('fails closed when the canonical requested size cannot be represented exactly', async () => {
-    const accessTokenResolver = { resolve: vi.fn(async () => 'cloud-token') };
+    const accessTokenResolver = { resolve: vi.fn(() => Promise.resolve('cloud-token')) };
     const fetchImpl = vi.fn();
     const provider = new VertexVeoSceneContinuationVideoProvider({
       projectId: 'toca-mcp-production',
