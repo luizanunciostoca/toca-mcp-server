@@ -1,0 +1,86 @@
+name: Video Generative Provider Smoke Autodispatch
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: video-generative-provider-smoke-autodispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      github.event.issue.title == 'PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout exact authorization controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner authorization and exact main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          AUTHORIZATION_REF="$(printf '%s' "$ISSUE_JSON" | jq -r '.html_url // empty')"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001")
+          ' >/dev/null
+
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001"
+            "VIDEO_GENERATIVE_SMOKE=AUTHORIZED"
+            "PUBLICATION_AUTHORIZED=false"
+            "AUTO_DISPATCH_AUTHORIZED=true"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+          test -n "$AUTHORIZATION_REF"
+          echo "AUTHORIZATION_REF=$AUTHORIZATION_REF" >> "$GITHUB_ENV"
+
+      - name: Dispatch exact governed provider smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          jq -n --arg ref main --arg authorizationRef "$AUTHORIZATION_REF" \
+            '{ref:$ref,inputs:{authorization_ref:$authorizationRef}}' > /tmp/dispatch.json
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/video-generative-provider-smoke.yml/dispatches" \
+            --input /tmp/dispatch.json
+          echo 'VIDEO_GENERATIVE_PROVIDER_SMOKE_DISPATCHED=true' >> "$GITHUB_STEP_SUMMARY"
+          echo "AUTHORIZATION_REF=$AUTHORIZATION_REF" >> "$GITHUB_STEP_SUMMARY"
+          echo "CONTROLLER_SHA=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PUBLICATION_AUTHORIZED=false' >> "$GITHUB_STEP_SUMMARY"
