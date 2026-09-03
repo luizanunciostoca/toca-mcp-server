@@ -1,0 +1,362 @@
+name: Instagram Engagement Controlled Write Canary V2
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-controlled-write-canary-v2
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+  BASE_SHADOW_CONTROLLER_SHA: 7aec1d86113b1e015ad002dda37a0009ec0b6038
+  BASE_SHADOW_RUNTIME_SOURCE_SHA: d166d2447b544cad81bc16b93e863e9c88c613a8
+  BASE_SHADOW_RUN_ID: '33709434008'
+  BASE_SHADOW_ARTIFACT_DIGEST: sha256:6ebbd3c2a2f1cd656ff6873fc7a50069d634d4fd63c1375caa6edaa105e81a7e
+
+jobs:
+  controlled-write-canary:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram engagement real-write CANARY V2 AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact authorized controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact one-reply authorization and shadow lineage
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_REAL_WRITE_CANARY=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "BASE_SHADOW_CONTROLLER_SHA=$BASE_SHADOW_CONTROLLER_SHA"
+            "BASE_SHADOW_RUNTIME_SOURCE_SHA=$BASE_SHADOW_RUNTIME_SOURCE_SHA"
+            "BASE_SHADOW_RUN_ID=$BASE_SHADOW_RUN_ID"
+            "BASE_SHADOW_ARTIFACT_DIGEST=$BASE_SHADOW_ARTIFACT_DIGEST"
+            "CANARY_CHANNEL=DIRECT"
+            "CANARY_MAX_EXTERNAL_REPLIES=1"
+            "TEMPORARY_JOB_ONLY=true"
+            "DAEMON_ENGAGEMENT_PAUSE_RESTORE_AUTHORIZED=true"
+            "PERSISTENT_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=true"
+            "AUTO_CANARY_AUTHORIZED=true"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact canary authorization field: $line" >&2
+              exit 1
+            }
+          done
+          SESSION="ig-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "canary_session=$SESSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Exact-head Quality Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and persistent write boundary
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
+          ' >/dev/null
+          CANARY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "CANARY_STARTED_AT=$CANARY_STARTED_AT" >> "$GITHUB_ENV"
+
+      - name: Prove provider readiness without sending
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS" \
+            --command node --args dist/src/instagram-engagement-readiness-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 240s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Pause only engagement consumption on persistent daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=false,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false" --quiet
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "false" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
+          ' >/dev/null
+
+      - name: Reserve one recent high-confidence verified DIRECT inbound
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-pre-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_CANARY_PROBE_MODE=PREPARE#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_CANARY_CHANNEL=DIRECT#INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID" \
+            --command node --args scripts/instagram-engagement-controlled-write-probe.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Phase 1 — classify exactly one reserved inbound without provider side effect
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-in-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1#INSTAGRAM_PUBLICATION_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION" \
+            --command node --args scripts/instagram-engagement-controlled-write-runner.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Verify policy/thread/fact gates and reserve exact reply
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_CANARY_PROBE_MODE=VERIFY_REPLY#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION" \
+            --command node --args scripts/instagram-engagement-controlled-write-probe.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Phase 2 — execute exactly one reserved provider reply
+        id: provider_write
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-send-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1#INSTAGRAM_PUBLICATION_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION" \
+            --command node --args scripts/instagram-engagement-controlled-write-runner.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Verify provider ACK, receipt and exact one-reply budget
+        id: post
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-post-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_CANARY_PROBE_MODE=POST#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_CANARY_STARTED_AT=$CANARY_STARTED_AT" \
+            --command node --args scripts/instagram-engagement-controlled-write-probe.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Release pending canary reservations
+        id: reservation_cleanup
+        if: ${{ always() && steps.auth.outputs.canary_session != '' }}
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-canary-clean-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_CANARY_PROBE_MODE=CANCEL#INSTAGRAM_ENGAGEMENT_CANARY_SESSION=$CANARY_SESSION" \
+            --command node --args scripts/instagram-engagement-controlled-write-probe.mjs \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Restore persistent daemon to runtime-on and writes-off
+        id: restore_daemon
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false" --quiet
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$DAEMON_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
+          ' >/dev/null
+
+      - name: Publish sanitized canary evidence and consume authorization
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.auth.outputs.authorization_issue }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          POST_OUTCOME: ${{ steps.post.outcome }}
+          PROVIDER_WRITE_OUTCOME: ${{ steps.provider_write.outcome }}
+          RESERVATION_CLEANUP_OUTCOME: ${{ steps.reservation_cleanup.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore_daemon.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ISSUE_NUMBER"
+          STATUS=FAIL
+          if [[ "$POST_OUTCOME" == success ]]; then
+            SENT=1
+            ACK=true
+          elif [[ "$PROVIDER_WRITE_OUTCOME" == skipped ]]; then
+            SENT=0
+            ACK=false
+          else
+            SENT=UNKNOWN
+            ACK=UNKNOWN
+          fi
+          if [[ "${{ job.status }}" == success && "$POST_OUTCOME" == success && "$PROVIDER_WRITE_OUTCOME" == success && "$RESERVATION_CLEANUP_OUTCOME" == success && "$RESTORE_OUTCOME" == success ]]; then
+            STATUS=PASS
+          fi
+          if [[ "$RESERVATION_CLEANUP_OUTCOME" == success ]]; then CLEANUP=true; else CLEANUP=false; fi
+          if [[ "$RESTORE_OUTCOME" == success ]]; then RESTORED=true; else RESTORED=false; fi
+          printf -v COMMENT '%s\n' \
+            "CONTROLLED_WRITE_CANARY_V2_STATUS=$STATUS" \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            'CANARY_CHANNEL=DIRECT' \
+            'CANARY_MAX_EXTERNAL_REPLIES=1' \
+            "CANARY_SENT_COUNT=$SENT" \
+            "PROVIDER_ACKNOWLEDGED=$ACK" \
+            'PERSISTENT_WRITES_ENABLED=false' \
+            'PERSISTENT_AUTONOMY_PROMOTED=false' \
+            "CANARY_RESERVATIONS_CLEANED=$CLEANUP" \
+            "DAEMON_ENGAGEMENT_RUNTIME_RESTORED=$RESTORED" \
+            'DAEMON_ENGAGEMENT_WRITES=false' \
+            'RAW_USER_DATA_LOGGED=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
