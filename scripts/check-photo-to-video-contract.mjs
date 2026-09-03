@@ -197,7 +197,6 @@ requireIncludes('src/providers/local/local-photo-to-video-brand-composer.ts', [
 requireIncludes('src/creative/controlled-photo-to-video-generation.ts', [
   'ControlledPhotoToVideoGenerationService',
   'SceneContinuationVideoProvider',
-  'GOOGLE_VERTEX_VEO',
   'const createdAt = trustedNow(this.now)',
   'policyGuard.assertCanonical(request.routeType)',
   'registry.resolve(request.contentItemId, request.routeType)',
