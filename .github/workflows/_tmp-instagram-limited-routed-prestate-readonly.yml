@@ -1,0 +1,94 @@
+name: TEMP Instagram Limited Routed Prestate Readonly
+
+on:
+  push:
+    branches:
+      - fix/instagram-limited-routed-prestate-v4
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+      GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+      DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+      SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Inspect sanitized serving state
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+
+          echo 'SERVICE_SAFE='
+          printf '%s' "$SERVICE_JSON" | jq -c '{
+            url: (.status.url // null),
+            latestReadyRevisionName: (.status.latestReadyRevisionName // null),
+            latestCreatedRevisionName: (.status.latestCreatedRevisionName // null),
+            traffic: [(.status.traffic // [])[] | {
+              revisionName: (.revisionName // null),
+              percent: (.percent // 0),
+              latestRevision: (.latestRevision // false),
+              tag: (.tag // null)
+            }],
+            template: {
+              image: (.spec.template.spec.containers[0].image // null),
+              runtimeEnabled: ([.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last // null),
+              writesEnabled: ([.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // null),
+              batchSize: ([.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last // null),
+              publicationWrites: ([.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // null)
+            }
+          }'
+
+          mapfile -t REVISIONS < <(printf '%s' "$SERVICE_JSON" | jq -r '[
+            (.status.traffic // [])[]?.revisionName,
+            .status.latestReadyRevisionName,
+            .status.latestCreatedRevisionName,
+            "toca-managed-instagram-daemon-d9434008a1",
+            "toca-managed-instagram-daemon-l1733157a1"
+          ] | map(select(. != null and . != "")) | unique[]')
+
+          for revision in "${REVISIONS[@]}"; do
+            if REVISION_JSON="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json 2>/dev/null)"; then
+              printf 'REVISION_SAFE=%s ' "$revision"
+              printf '%s' "$REVISION_JSON" | jq -c '{
+                ready: (([.status.conditions[]? | select(.type == "Ready") | .status] | last // null)),
+                image: (.spec.containers[0].image // null),
+                serviceAccountName: (.spec.serviceAccountName // null),
+                runtimeEnabled: ([.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last // null),
+                writesEnabled: ([.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // null),
+                batchSize: ([.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last // null),
+                publicationWrites: ([.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // null),
+                providerVerified: ([.spec.containers[0].env[]? | select(.name == "META_PROVIDER_VERIFIED") | .value] | last // null)
+              }'
+            fi
+          done
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          echo 'SCHEDULER_SAFE='
+          printf '%s' "$SCHEDULER_JSON" | jq -c '{
+            state: (.state // null),
+            uri: (.httpTarget.uri // null),
+            method: (.httpTarget.httpMethod // null),
+            oidcServiceAccount: (.httpTarget.oidcToken.serviceAccountEmail // null),
+            audience: (.httpTarget.oidcToken.audience // null)
+          }'
