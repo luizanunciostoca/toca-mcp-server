@@ -26,9 +26,7 @@ describe('video generative provider smoke', () => {
   it('requires an owner-authored exact-main authorization issue before dispatch', () => {
     expect(dispatchWorkflow).toContain('issues:');
     expect(dispatchWorkflow).toContain('types: [opened]');
-    expect(dispatchWorkflow).toContain(
-      "github.event.issue.user.login == github.repository_owner",
-    );
+    expect(dispatchWorkflow).toContain("github.event.issue.user.login == github.repository_owner");
     expect(dispatchWorkflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
     expect(dispatchWorkflow).toContain(
       'VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001',
@@ -43,6 +41,8 @@ describe('video generative provider smoke', () => {
     expect(smokeWorkflow).toContain('VIDEO_GENERATIVE_PROVIDER_SMOKE_RESULT=');
     expect(smokeWorkflow).toContain('publicationEligible == false');
     expect(smokeWorkflow).toContain('publicationAuthorized == false');
-    expect(smokeWorkflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(smokeWorkflow).toContain(
+      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    );
   });
 });
