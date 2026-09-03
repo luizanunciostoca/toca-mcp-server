@@ -702,6 +702,7 @@ function resolveBinding(
             tocaManagedInstagramSchedulePayloadSchema,
             (input, context) => schedulerForContext(services, context).schedule(input),
             {
+              targetAccount: (input) => input.account.instagramAccountId,
               idempotencyKey: scheduleIdempotencyKey,
               providerReadback: (result) => scheduleReadback(services, result),
               sideEffectValidated: true,
