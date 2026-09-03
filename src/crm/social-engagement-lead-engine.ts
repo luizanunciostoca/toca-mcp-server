@@ -67,6 +67,14 @@ export class SocialEngagementLeadEngine {
       factsVerified: input.authorization.factsVerified,
       containsSensitivePersonalData: sensitive,
       writesEnabled: hasWriteAuthority(input.authorization),
+      classificationConfidence:
+        input.authorization.classificationConfidence ?? classification.confidence,
+      ...(input.authorization.contextConflict === undefined
+        ? {}
+        : { contextConflict: input.authorization.contextConflict }),
+      ...(input.authorization.threadAutomationBlocked === undefined
+        ? {}
+        : { threadAutomationBlocked: input.authorization.threadAutomationBlocked }),
     });
 
     if (!input.interaction.senderScopedId) {

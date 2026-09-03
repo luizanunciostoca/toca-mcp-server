@@ -44,6 +44,8 @@ export interface InstagramEngagementProcessorOptions {
   readonly pageId: string;
   readonly instagramUserId: string;
   readonly writesEnabled: boolean;
+  readonly autoReplyChannels?: readonly ('COMMENT' | 'DIRECT')[];
+  readonly autoReplyMaxAgeMs?: number;
   readonly actorPrincipalId?: string;
   readonly groupingWindowMs?: number;
   readonly now?: () => Date;
@@ -119,9 +121,19 @@ export class InstagramEngagementProcessor {
     const knowledge = context.groupedText
       ? await this.options.knowledge.resolve(context.groupedText, classification.intent)
       : null;
+    const autoReplyChannels = new Set(
+      this.options.autoReplyChannels ?? (['COMMENT', 'DIRECT'] as const),
+    );
+    const autoReplyMaxAgeMs = this.options.autoReplyMaxAgeMs ?? 30 * 60 * 1000;
     const autoWriteEligible =
       this.options.writesEnabled &&
-      classification.confidence !== 'LOW' &&
+      autoReplyChannels.has(payload.channel) &&
+      isWithinAutoReplyWindow(payload.occurredAt ?? now, now, autoReplyMaxAgeMs) &&
+      classification.confidence === 'HIGH' &&
+      ['P2', 'P3'].includes(classification.priority) &&
+      !classification.containsPotentialSensitiveData &&
+      classification.commercialIntent === 'NONE' &&
+      classification.urgency === 'LOW' &&
       !context.automationBlocked;
     const leadResult = await this.options.leadEngine.process({
       tenantId: claimed.tenantId,
@@ -353,6 +365,15 @@ function buildReplyPayload(input: {
     message: input.knowledge.answer,
     faqId: input.knowledge.faqId,
   };
+}
+
+function isWithinAutoReplyWindow(occurredAt: string, now: string, maxAgeMs: number): boolean {
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return false;
+  const occurred = Date.parse(occurredAt);
+  const current = Date.parse(now);
+  if (!Number.isFinite(occurred) || !Number.isFinite(current)) return false;
+  const ageMs = current - occurred;
+  return ageMs >= 0 && ageMs <= maxAgeMs;
 }
 
 function resolveActionStatus(

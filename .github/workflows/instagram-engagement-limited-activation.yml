@@ -1,0 +1,296 @@
+name: Instagram Engagement LIMITED Activation
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-limited-activation
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+
+jobs:
+  activate-limited:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram engagement LIMITED activation AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact authorized controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact LIMITED activation authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_LIMITED_ACTIVATION=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "AUTONOMY_STAGE=LIMITED"
+            "AUTO_REPLY_CHANNELS=DIRECT"
+            "PERSISTENT_WRITES_AUTHORIZED=true"
+            "COMMENT_AUTO_REPLY_AUTHORIZED=false"
+            "DATABASE_MIGRATIONS_AUTHORIZED=true"
+            "SERVICE_MUTATION_AUTHORIZED=true"
+            "BATCH_SIZE=1"
+            "ROLLBACK_ON_FAILURE=true"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact LIMITED activation authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Exact-head Quality Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and capture prestate
+        id: prestate
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PRE_IMAGE="$(printf '%s' "$SERVICE_JSON" | jq -r '.spec.template.spec.containers[0].image')"
+          test -n "$PRE_IMAGE"
+          printf '%s' "$SERVICE_JSON" | jq -e '
+            .spec.template.spec.containers[0] as $c |
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
+          ' >/dev/null
+          SCHEDULER_STATE="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format='value(state)')"
+          [[ "$SCHEDULER_STATE" =~ ^(ENABLED|PAUSED)$ ]]
+          echo "pre_image=$PRE_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "scheduler_state=$SCHEDULER_STATE" >> "$GITHUB_OUTPUT"
+
+      - name: Apply and verify production migrations
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-limited-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --command node --args dist/scripts/migrate-and-verify.js \
+            --tasks 1 --max-retries 0 --task-timeout 300s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Prove provider and conversation readiness without sending
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-limited-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12" \
+            --command node --args dist/src/instagram-engagement-readiness-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 240s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Verify clean reply boundary before persistent enablement
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-limited-pre-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID" \
+            --command node --args dist/src/ops/instagram-engagement-limited-activation-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Pause scheduler for atomic activation
+        id: pause
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ steps.prestate.outputs.scheduler_state }}' == 'ENABLED' ]]; then
+            gcloud scheduler jobs pause "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+            echo 'paused_by_workflow=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'paused_by_workflow=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Activate persistent LIMITED Direct-only runtime
+        id: deploy
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$DAEMON_SERVICE_NAME" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --update-secrets "TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --update-env-vars "NODE_ENV=production,META_ENABLED=true,META_PROVIDER_VERIFIED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN,META_GRAPH_BASE_URL=https://graph.facebook.com,META_GRAPH_API_VERSION=v24.0,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true,INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true,INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS,INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58,INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12" \
+            --min-instances 0 --max-instances 1 --concurrency 1 --quiet
+
+      - name: Verify LIMITED runtime readback
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$SERVICE_JSON" | jq -e --arg image "$RUNTIME_IMAGE" '
+            .spec.template.spec.containers[0] as $c |
+            ($c.image == $image) and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1" and
+            ([$c.env[]? | select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false" and
+            ([$c.env[]? | select(.name=="META_PROVIDER_VERIFIED") | .value] | last) == "true"
+          ' >/dev/null
+          echo 'INSTAGRAM_ENGAGEMENT_LIMITED_RUNTIME_READBACK=PASS'
+
+      - name: Restore scheduler state and publish PASS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ steps.pause.outputs.paused_by_workflow }}' == 'true' ]]; then
+            gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+          fi
+          printf -v COMMENT '%s\n' \
+            'LIMITED_ACTIVATION_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_IMAGE_DIGEST=${{ steps.auth.outputs.runtime_digest }}" \
+            'AUTONOMY_STAGE=LIMITED' \
+            'AUTO_REPLY_CHANNELS=DIRECT' \
+            'PERSISTENT_WRITES_ENABLED=true' \
+            'COMMENT_AUTO_REPLY_ENABLED=false' \
+            'BATCH_SIZE=1' \
+            'ROLLBACK_REQUIRED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Roll back persistent writes on failure
+        if: failure()
+        env:
+          PRE_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${PRE_IMAGE:-}" ]]; then
+            gcloud run services update "$DAEMON_SERVICE_NAME" \
+              --image "$PRE_IMAGE" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false" \
+              --quiet
+          fi
+          if [[ '${{ steps.pause.outputs.paused_by_workflow }}' == 'true' ]]; then
+            gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+          fi
+          exit 0
+
+      - name: Consume single-use activation authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
