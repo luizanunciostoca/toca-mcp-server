@@ -153,11 +153,7 @@ export class VertexVeoSceneContinuationVideoProvider {
     }
     const outputBytes = new Uint8Array(await mediaResponse.arrayBuffer());
     if (!isMp4(outputBytes)) {
-      throw new ExecutionError(
-        'OUTPUT_TECH_SPEC_MISMATCH',
-        'VERTEX_VEO_OUTPUT_INVALID_MP4',
-        false,
-      );
+      throw new ExecutionError('OUTPUT_TECH_SPEC_MISMATCH', 'VERTEX_VEO_OUTPUT_INVALID_MP4', false);
     }
 
     return {
@@ -261,21 +257,23 @@ function extractVideoGcsUri(response: unknown): string {
   };
   if (Array.isArray(value.generatedVideos)) {
     const first = value.generatedVideos[0] as
-      | { video?: { uri?: unknown; gcsUri?: unknown; mimeType?: unknown } }
-      | undefined;
+      { video?: { uri?: unknown; gcsUri?: unknown; mimeType?: unknown } } | undefined;
     const candidate = first?.video?.uri ?? first?.video?.gcsUri;
     if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
   }
   if (Array.isArray(value.videos)) {
     const first = value.videos[0] as { gcsUri?: unknown; mimeType?: unknown } | undefined;
-    if (first?.mimeType === 'video/mp4' && typeof first.gcsUri === 'string' && first.gcsUri.trim()) {
+    if (
+      first?.mimeType === 'video/mp4' &&
+      typeof first.gcsUri === 'string' &&
+      first.gcsUri.trim()
+    ) {
       return first.gcsUri.trim();
     }
   }
   if (Array.isArray(value.generatedSamples)) {
     const first = value.generatedSamples[0] as
-      | { video?: { gcsUri?: unknown; uri?: unknown; mimeType?: unknown } }
-      | undefined;
+      { video?: { gcsUri?: unknown; uri?: unknown; mimeType?: unknown } } | undefined;
     const candidate = first?.video?.gcsUri ?? first?.video?.uri;
     if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
   }
@@ -296,7 +294,11 @@ function parseExpectedGcsUri(uri: string, bucket: string): string {
   }
   const objectName = uri.slice(prefix.length);
   if (!objectName || objectName.includes('..')) {
-    throw new ExecutionError('SOURCE_IMAGE_BINDING_FAILURE', 'VERTEX_VEO_OUTPUT_URI_INVALID', false);
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'VERTEX_VEO_OUTPUT_URI_INVALID',
+      false,
+    );
   }
   return objectName;
 }
@@ -318,7 +320,8 @@ function nonEmptyString(value: unknown, error: string): string {
 
 function safeSegment(value: string): string {
   const normalized = value.trim().replace(/[^A-Za-z0-9._-]+/g, '-');
-  if (!normalized) throw new ExecutionError('POLICY_DENIED', 'VERTEX_VEO_CONTENT_ID_INVALID', false);
+  if (!normalized)
+    throw new ExecutionError('POLICY_DENIED', 'VERTEX_VEO_CONTENT_ID_INVALID', false);
   return normalized.slice(0, 128);
 }
 
