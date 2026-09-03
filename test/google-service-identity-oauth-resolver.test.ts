@@ -113,9 +113,15 @@ describe('Google service identity OAuth resolvers', () => {
   });
 
   it('fails closed on unsupported token references', async () => {
-    const resolver = new GoogleServiceIdentityOAuthResolver({ fetchImpl: vi.fn() as typeof fetch });
+    const fetchImpl = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(new Response('unexpected', { status: 500 }));
+    });
+    const resolver = new GoogleServiceIdentityOAuthResolver({ fetchImpl });
     await expect(resolver.resolve({ provider: 'env', key: 'video-workspace' })).rejects.toThrow(
       'GCP_SERVICE_IDENTITY_OAUTH_REFERENCE_INVALID',
     );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
