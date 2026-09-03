@@ -56,7 +56,7 @@ describe('Instagram engagement LIMITED persistent activation', () => {
     expect(preflight).toContain('PROVIDER_CALLS=false');
   });
 
-  it('binds activation to exact main, immutable image, batch one and rollback', () => {
+  it('binds activation to exact main, immutable image, zero-traffic stage and rollback', () => {
     for (const marker of [
       'test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"',
       'AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA',
@@ -65,21 +65,43 @@ describe('Instagram engagement LIMITED persistent activation', () => {
       'PERSISTENT_WRITES_AUTHORIZED=true',
       'DATABASE_MIGRATIONS_AUTHORIZED=true',
       'SERVICE_MUTATION_AUTHORIZED=true',
+      'SCHEDULER_MUTATION_AUTHORIZED=false',
+      'ZERO_TRAFFIC_STAGE_REQUIRED=true',
       'BATCH_SIZE=1',
       'ROLLBACK_ON_FAILURE=true',
       'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
       'INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1',
       'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false',
-      'Roll back persistent writes on failure',
+      '--no-traffic --quiet',
+      '--revision-suffix "$REVISION_SUFFIX"',
+      'gcloud run services update-traffic "$DAEMON_SERVICE_NAME"',
+      '--to-latest --quiet',
+      'ZERO_TRAFFIC_STAGE_VERIFIED=true',
+      'SCHEDULER_MUTATION=false',
+      'Roll back traffic to fail-closed revision on failure',
     ]) {
       expect(workflow).toContain(marker);
     }
   });
 
-  it('does not perform a synthetic or blind provider send during activation', () => {
+  it('keeps the serving fail-closed revision until the staged candidate is verified', () => {
+    expect(workflow).toContain('Stage write-enabled candidate revision at zero traffic');
+    expect(workflow).toContain('Verify zero-traffic candidate before cutover');
+    expect(workflow).toContain('.status.latestReadyRevisionName == $candidate');
+    expect(workflow).toContain('== 0 and');
+    expect(workflow).toContain('Activate LIMITED runtime by explicit traffic cutover');
+    expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100"');
+    expect(workflow).toContain('DAEMON_ENV="^@^');
+    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS');
+  });
+
+  it('does not mutate the Scheduler or perform a synthetic provider send during activation', () => {
+    expect(workflow).not.toContain('gcloud scheduler jobs pause');
+    expect(workflow).not.toContain('gcloud scheduler jobs resume');
+    expect(workflow).not.toContain('gcloud scheduler jobs update');
+    expect(workflow).not.toContain('gcloud scheduler jobs run');
     expect(workflow).not.toContain('sendDirectReply');
     expect(workflow).not.toContain('replyToComment');
     expect(workflow).not.toContain('CANARY_MAX_EXTERNAL_REPLIES');
-    expect(workflow).not.toContain('gcloud scheduler jobs run');
   });
 });
