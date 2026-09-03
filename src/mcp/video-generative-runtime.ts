@@ -176,9 +176,9 @@ function resolveGoogleAccessBinding(
 }
 
 function googleOAuthConfig(env: NodeJS.ProcessEnv): {
-  readonly clientIdEnvKey?: string;
-  readonly clientSecretEnvKey?: string;
-  readonly refreshTokenEnvKey?: string;
+  readonly clientIdEnvKey: string | undefined;
+  readonly clientSecretEnvKey: string | undefined;
+  readonly refreshTokenEnvKey: string | undefined;
   readonly tokenEndpoint: string;
 } {
   return {
