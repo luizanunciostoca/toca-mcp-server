@@ -70,10 +70,12 @@ function fakeRuntime(): VideoGenerativeRuntime {
   } as unknown as PhotoToVideoCandidateManifest;
   return {
     generation: {
-      generate: vi.fn(async () => ({
-        outputBytes: Uint8Array.from([0, 0, 0, 0, 102, 116, 121, 112, 1, 2, 3, 4]),
-        manifest,
-      })),
+      generate: vi.fn(() =>
+        Promise.resolve({
+          outputBytes: Uint8Array.from([0, 0, 0, 0, 102, 116, 121, 112, 1, 2, 3, 4]),
+          manifest,
+        }),
+      ),
     } as unknown as VideoGenerativeRuntime['generation'],
     finalization: {
       finalize: vi.fn(),
