@@ -46,17 +46,20 @@ describe('Instagram canary read-only eligibility gate', () => {
     expect(source).not.toContain('console.log(text');
   });
 
-  it('requires exact-main immutable-image authorization without external writes', () => {
-    expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
-    expect(workflow).toContain('RUNTIME_SOURCE_SHA=$GITHUB_SHA');
-    expect(workflow).toContain('READ_ONLY_ELIGIBILITY=true');
-    expect(workflow).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
-    expect(workflow).toContain('PROVIDER_CALLS_AUTHORIZED=false');
-    expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
-    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
-    expect(workflow).not.toContain('TOCA_SECRET_META_ACCESS_TOKEN');
-    expect(workflow).not.toContain('gcloud run services update');
-  });
+  it(
+    'requires exact-main immutable-image authorization without external writes',
+    () => {
+      expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
+      expect(workflow).toContain('RUNTIME_SOURCE_SHA=$GITHUB_SHA');
+      expect(workflow).toContain('READ_ONLY_ELIGIBILITY=true');
+      expect(workflow).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
+      expect(workflow).toContain('PROVIDER_CALLS_AUTHORIZED=false');
+      expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
+      expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
+      expect(workflow).not.toContain('TOCA_SECRET_META_ACCESS_TOKEN');
+      expect(workflow).not.toContain('gcloud run services update');
+    },
+  );
 
   it('publishes only bounded status, counts and a hashed target', () => {
     expect(workflow).toContain('ELIGIBILITY=${STATUS}');
