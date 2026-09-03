@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const smokeWorkflow = readFileSync(
-  '.github/workflows/video-generative-provider-smoke.yml',
-  'utf8',
-);
+const smokeWorkflow = readFileSync('.github/workflows/video-generative-provider-smoke.yml', 'utf8');
 const dispatchWorkflow = readFileSync(
   '.github/workflows/video-generative-provider-smoke-autodispatch.yml',
   'utf8',
@@ -26,9 +23,7 @@ describe('video generative provider smoke', () => {
   it('requires an owner-authored exact-main authorization issue before dispatch', () => {
     expect(dispatchWorkflow).toContain('issues:');
     expect(dispatchWorkflow).toContain('types: [opened]');
-    expect(dispatchWorkflow).toContain(
-      'github.event.issue.user.login == github.repository_owner',
-    );
+    expect(dispatchWorkflow).toContain('github.event.issue.user.login == github.repository_owner');
     expect(dispatchWorkflow).toContain('AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA');
     expect(dispatchWorkflow).toContain(
       'VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001',
