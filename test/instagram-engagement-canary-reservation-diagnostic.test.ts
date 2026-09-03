@@ -17,9 +17,10 @@ describe('Instagram canary reservation retained-log diagnostic', () => {
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
   });
 
-  it('only accepts the PREPARE job lineage for the declared canary run', () => {
+  it('only accepts legacy or Comment PREPARE lineage for the declared canary run', () => {
     expect(workflow).toContain('[[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]');
     expect(workflow).toContain('toca-ig-canary-pre-${SOURCE_RUN_ID}-');
+    expect(workflow).toContain('toca-ig-comment-pre-${SOURCE_RUN_ID}-');
     expect(workflow).not.toContain('SOURCE_EXECUTION');
   });
 
@@ -37,11 +38,16 @@ describe('Instagram canary reservation retained-log diagnostic', () => {
       'ACTIVE_RESERVATION_EXISTS',
       'RESERVED_PRIORITY_CONFLICT',
       'RESERVATION_CONFLICT',
+      'RUNTIME_SCRIPT_MISSING',
       'INFRASTRUCTURE_OR_PERMISSION_ERROR',
       'UNKNOWN',
     ]) {
       expect(workflow).toContain(cause);
     }
+    expect(workflow).toContain('COMMENT_CANARY_NO_SAFE_RECENT_CANDIDATE');
+    expect(workflow).toContain('COMMENT_CANARY_ACTIVE_SESSION_EXISTS');
+    expect(workflow).toContain('COMMENT_CANARY_RESERVATION_CONFLICT');
+    expect(workflow).toContain('ERR_MODULE_NOT_FOUND');
     expect(workflow).toContain('RAW_PAYLOAD_PRINTED=false');
     expect(workflow).toContain('RAW_USER_DATA_PRINTED=false');
     expect(workflow).not.toContain('SAFE_MARKERS=');
