@@ -15,16 +15,38 @@ The generation tool is **not** a bypass around the existing route. It always inv
 
 ## Runtime configuration
 
-The lazy MCP runtime requires:
+The lazy MCP runtime supports two Google authentication modes.
+
+### Short-lived access-token mode
 
 - `GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY` and the referenced token value;
-- optional `GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY` (falls back to the Sheets token key);
-- `OPENAI_API_KEY_ENV_KEY` or `OPENAI_API_KEY`;
+- optional `GOOGLE_DRIVE_ACCESS_TOKEN_ENV_KEY` (falls back to the Sheets token key).
+
+### Renewable OAuth mode
+
+Preferred for long-running Cloud Run runtimes. It reuses the AG-01 renewable OAuth contract when available:
+
+- `VIDEO_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY` or `AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY`;
+- `VIDEO_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY` or `AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY`;
+- `VIDEO_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY` or `AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY`;
+- optional `VIDEO_GOOGLE_OAUTH_TOKEN_ENDPOINT` or `AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT`.
+
+The referenced OAuth credentials are resolved from environment-backed secret references, exchanged for short-lived Google access tokens and cached only in memory by `GoogleOAuthRefreshSecretResolver`. The refresh token must have sufficient read/write access for the canonical TOCA_OS Sheets used by the photo-to-video registry and read access to the exact Drive source/brand files. Insufficient provider scope fails closed at provider access time.
+
+OpenAI credentials are resolved in this order:
+
+1. `OPENAI_API_KEY_ENV_KEY`;
+2. `AG01_OPENAI_API_KEY_ENV_KEY`;
+3. `AG01_MODEL_API_KEY_ENV_KEY` only when `AG01_MODEL_PROVIDER=openai`;
+4. direct `OPENAI_API_KEY`.
+
+Additional required configuration:
+
 - `GCP_PROJECT_ID`;
 - `INSTAGRAM_PUBLICATION_ASSET_BUCKET`;
 - optional `OPENAI_VIDEO_MODEL=sora-2|sora-2-pro`.
 
-The runtime is constructed lazily on first tool invocation. Missing credentials do not prevent MCP server startup; invocation fails closed with `VIDEO_GENERATIVE_RUNTIME_NOT_CONFIGURED`.
+The runtime is constructed lazily on first tool invocation. Missing or incomplete credentials do not prevent MCP server startup; invocation fails closed with `VIDEO_GENERATIVE_RUNTIME_NOT_CONFIGURED` or the relevant provider/auth error.
 
 ## Generation
 
@@ -62,6 +84,10 @@ The local post-processing tools do not change the canonical candidate or grant p
 ## 5-second The Party motion use case
 
 Current canonical The Party scene-continuation standards are 8 seconds. The runtime intentionally does not mutate that standard for a one-off 5-second request. Generate the canonical 8-second candidate, then create a deterministic 5-second approval derivative.
+
+## Container runtime
+
+The primary MCP container installs `ffmpeg`, which is required by the deterministic overlay and trim capabilities. The OpenAI provider remains network-based and continues to use the existing `/v1/videos` adapter.
 
 ## Capability lifecycle
 
