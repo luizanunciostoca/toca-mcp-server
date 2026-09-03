@@ -59,7 +59,10 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
         expect(init?.method).toBe('POST');
         expect(init?.headers).toMatchObject({ Authorization: 'Bearer cloud-token' });
         const body = JSON.parse(String(init?.body)) as {
-          instances: Array<{ prompt: string; image: { bytesBase64Encoded: string; mimeType: string } }>;
+          instances: Array<{
+            prompt: string;
+            image: { bytesBase64Encoded: string; mimeType: string };
+          }>;
           parameters: Record<string, unknown>;
         };
         expect(body.instances).toHaveLength(1);
