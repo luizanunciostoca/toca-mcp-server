@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(
-  'src/ops/configure-instagram-engagement-meta-subscriptions.ts',
-  'utf8',
-);
+const source = readFileSync('src/ops/configure-instagram-engagement-meta-subscriptions.ts', 'utf8');
 
 describe('Instagram engagement Meta subscription boundary', () => {
   it('uses the Facebook Login Page-bound subscription model', () => {
