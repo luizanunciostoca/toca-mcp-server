@@ -84,7 +84,7 @@ jobs:
           exit "$AUDIT_RC"
 
       - name: Scan event-scoped commits for secrets
-        if: ${{ always() && github.event_name != 'workflow_dispatch' }}
+        if: github.event_name != 'workflow_dispatch' && always()
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
