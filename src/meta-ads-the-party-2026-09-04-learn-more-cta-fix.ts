@@ -65,9 +65,7 @@ if (ads.length !== EXPECTED_AD_COUNT) {
 }
 if (
   ads.some(
-    (ad) =>
-      scalarString(ad.adset_id) !== ADSET_ID ||
-      scalarString(ad.campaign_id) !== CAMPAIGN_ID,
+    (ad) => scalarString(ad.adset_id) !== ADSET_ID || scalarString(ad.campaign_id) !== CAMPAIGN_ID,
   )
 ) {
   throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_AD_ENVELOPE_MISMATCH');
@@ -106,7 +104,12 @@ const mismatchedAds = ads.filter((ad) => {
 
 if (mismatchedAds.length === 0) {
   const verification = await readback();
-  const summary = assertFinalState(verification, originals, initialCampaignStatus, initialAdSetStatus);
+  const summary = assertFinalState(
+    verification,
+    originals,
+    initialCampaignStatus,
+    initialAdSetStatus,
+  );
   console.log(
     `META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=${JSON.stringify({
       status: 'ALREADY_LEARN_MORE',
@@ -180,7 +183,12 @@ try {
   }
 
   const verification = await readback();
-  const summary = assertFinalState(verification, originals, initialCampaignStatus, initialAdSetStatus);
+  const summary = assertFinalState(
+    verification,
+    originals,
+    initialCampaignStatus,
+    initialAdSetStatus,
+  );
   console.log(
     `META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=${JSON.stringify({
       status: 'LEARN_MORE_CTA_CORRECTED',
