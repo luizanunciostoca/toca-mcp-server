@@ -23,9 +23,9 @@ describe('Instagram engagement production shadow issue autodispatch', () => {
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_SHADOW=AUTHORIZED');
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_DRS_CONTINUATION=AUTHORIZED');
     expect(workflow).toContain('PRODUCTION_MODE=SHADOW_ONLY');
-    expect(workflow).toContain('RUNTIME_SOURCE_SHA=bc9f02ff4663589c4f60fc585c89ca88b0369eba');
+    expect(workflow).toContain('RUNTIME_SOURCE_SHA=d166d2447b544cad81bc16b93e863e9c88c613a8');
     expect(workflow).toContain(
-      'RUNTIME_IMAGE_DIGEST=sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a',
+      'RUNTIME_IMAGE_DIGEST=sha256:44b24e15e0077f2386e426bdb65780318cf9f909b429bec508ffe723c7bb3339',
     );
   });
 
