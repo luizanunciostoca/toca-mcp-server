@@ -262,7 +262,12 @@ export function projectCanonicalIntents(
     else if (intent === 'GASTRONOMY') intents.add('GASTRONOMIA');
     else if (intent === 'SUNSET') intents.add('SUNSET');
     else if (intent === 'THE_PARTY') intents.add('THE_PARTY');
-    else if (intent === 'COMMERCIAL' || intent === 'PURCHASE') intents.add('COMMERCIAL_LEAD');
+    else if (intent === 'PURCHASE') intents.add('COMMERCIAL_LEAD');
+    else if (
+      intent === 'COMMERCIAL' &&
+      (classification.commercialIntent === 'MEDIUM' || classification.commercialIntent === 'HIGH')
+    )
+      intents.add('COMMERCIAL_LEAD');
   }
 
   if (intents.size === 0) intents.add('OTHER');
