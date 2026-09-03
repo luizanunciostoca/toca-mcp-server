@@ -85,7 +85,9 @@ describe('Instagram engagement LIMITED persistent activation', () => {
   });
 
   it('derives fail-closed prestate from the routed revision instead of the service template', () => {
-    expect(workflow).toContain('PRE_REVISION_JSON="$(gcloud run revisions describe "$PRE_REVISION"');
+    expect(workflow).toContain(
+      'PRE_REVISION_JSON="$(gcloud run revisions describe "$PRE_REVISION"',
+    );
     expect(workflow).toContain('printf \'%s\' "$PRE_REVISION_JSON" | jq -e');
     expect(workflow).toContain('(.spec.serviceAccountName == $sa)');
     expect(workflow).not.toContain(
