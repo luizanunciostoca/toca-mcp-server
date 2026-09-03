@@ -62,6 +62,13 @@ export class VertexVeoSceneContinuationVideoProvider {
         false,
       );
     }
+    if (request.size !== '720x1280') {
+      throw new ExecutionError(
+        'OUTPUT_TECH_SPEC_MISMATCH',
+        `VERTEX_VEO_SIZE_UNSUPPORTED:${request.size}`,
+        false,
+      );
+    }
     if (request.source.contentType === 'image/webp') {
       throw new ExecutionError(
         'OUTPUT_TECH_SPEC_MISMATCH',
@@ -139,7 +146,10 @@ export class VertexVeoSceneContinuationVideoProvider {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!mediaResponse.ok) {
-      throw providerHttpError(mediaResponse.status, `DOWNLOAD:${(await safeText(mediaResponse)).slice(0, 400)}`);
+      throw providerHttpError(
+        mediaResponse.status,
+        `DOWNLOAD:${(await safeText(mediaResponse)).slice(0, 400)}`,
+      );
     }
     const outputBytes = new Uint8Array(await mediaResponse.arrayBuffer());
     if (!isMp4(outputBytes)) {
@@ -244,10 +254,18 @@ function extractVideoGcsUri(response: unknown): string {
     throw new ExecutionError('PROVIDER_UNAVAILABLE', 'VERTEX_VEO_RESPONSE_MISSING', false);
   }
   const value = response as {
+    generatedVideos?: unknown;
     videos?: unknown;
     generatedSamples?: unknown;
     raiMediaFilteredCount?: unknown;
   };
+  if (Array.isArray(value.generatedVideos)) {
+    const first = value.generatedVideos[0] as
+      | { video?: { uri?: unknown; gcsUri?: unknown; mimeType?: unknown } }
+      | undefined;
+    const candidate = first?.video?.uri ?? first?.video?.gcsUri;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
   if (Array.isArray(value.videos)) {
     const first = value.videos[0] as { gcsUri?: unknown; mimeType?: unknown } | undefined;
     if (first?.mimeType === 'video/mp4' && typeof first.gcsUri === 'string' && first.gcsUri.trim()) {
