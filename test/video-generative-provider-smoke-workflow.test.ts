@@ -58,4 +58,20 @@ describe('video generative provider smoke', () => {
       'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
     );
   });
+
+  it('captures sanitized retained Cloud Run evidence before cleanup when provider execution fails', () => {
+    expect(smokeWorkflow).toContain('capture_failure_evidence()');
+    expect(smokeWorkflow).toContain(
+      'resource.type=\\"cloud_run_job\\" AND resource.labels.job_name=\\"${JOB_NAME}\\"',
+    );
+    expect(smokeWorkflow).toContain('/tmp/video-smoke-failure-logs.json');
+    expect(smokeWorkflow).toContain('failure-diagnostic.json');
+    expect(smokeWorkflow).toContain('.replace(/Bearer\\s+');
+    expect(smokeWorkflow).toContain('.replace(/\\beyJ');
+    expect(smokeWorkflow).toContain('rawPayloadPrinted: false');
+    expect(smokeWorkflow).toContain('rawPayloadPersistedInArtifact: false');
+    expect(smokeWorkflow).toContain('publicationAuthorized: false');
+    expect(smokeWorkflow).toContain('if: always()');
+    expect(smokeWorkflow).not.toContain('cat /tmp/video-smoke-failure-logs.json');
+  });
 });
