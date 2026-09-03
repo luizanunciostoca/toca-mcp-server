@@ -30,7 +30,7 @@ describe('Security Supply Chain registry resilience', () => {
       'id: trivy_fs',
       "severity: 'CRITICAL,HIGH'",
       'TRIVY_FS_OUTCOME: ${{ steps.trivy_fs.outcome }}',
-      "test \"$TRIVY_FS_OUTCOME\" = 'success'",
+      'test "$TRIVY_FS_OUTCOME" = \'success\'',
       'PNPM_AUDIT_FALLBACK_TRIVY=PASS',
     ]) {
       expect(workflow).toContain(marker);
@@ -39,8 +39,14 @@ describe('Security Supply Chain registry resilience', () => {
 
   it('prevents an earlier audit failure from suppressing Gitleaks evidence', () => {
     expect(workflow).toContain("if: ${{ always() && github.event_name != 'workflow_dispatch' }}");
-    expect(workflow).toContain('Install verified Gitleaks CLI for exact candidate ancestry\n        if: always()');
-    expect(workflow).toContain('Scan complete candidate ancestry for secrets\n        if: always()');
-    expect(workflow).toContain('Upload complete-history secret-scan evidence\n        if: always()');
+    expect(workflow).toContain(
+      'Install verified Gitleaks CLI for exact candidate ancestry\n        if: always()',
+    );
+    expect(workflow).toContain(
+      'Scan complete candidate ancestry for secrets\n        if: always()',
+    );
+    expect(workflow).toContain(
+      'Upload complete-history secret-scan evidence\n        if: always()',
+    );
   });
 });
