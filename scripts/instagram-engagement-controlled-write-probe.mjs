@@ -20,7 +20,12 @@ const session = validateSession(requiredEnv('INSTAGRAM_ENGAGEMENT_CANARY_SESSION
 const channel = optionalChannel(process.env.INSTAGRAM_ENGAGEMENT_CANARY_CHANNEL);
 const spreadsheetId = process.env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID?.trim();
 const startedAt = process.env.INSTAGRAM_ENGAGEMENT_CANARY_STARTED_AT?.trim() || null;
-const maxAgeMinutes = boundedInteger(process.env.INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES, 30, 1, 60);
+const maxAgeMinutes = boundedInteger(
+  process.env.INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES,
+  30,
+  1,
+  60,
+);
 const sessionMarker = `instagram:engagement:canary-session:${session}`;
 const inboundMarker = 'instagram:engagement:canary-phase:inbound';
 const replyMarker = 'instagram:engagement:canary-phase:reply';
@@ -55,7 +60,8 @@ async function prepareInbound() {
           )`,
       [INBOUND_TYPE, REPLY_TYPE],
     );
-    if ((active.rows[0]?.count ?? 0) !== 0) fail('INSTAGRAM_ENGAGEMENT_CANARY_ACTIVE_RESERVATION_EXISTS');
+    if ((active.rows[0]?.count ?? 0) !== 0)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_ACTIVE_RESERVATION_EXISTS');
 
     const infinity = await client.query(
       `select count(*)::int as count
@@ -65,7 +71,8 @@ async function prepareInbound() {
           and available_at = '-infinity'::timestamptz`,
       [INBOUND_TYPE, REPLY_TYPE],
     );
-    if ((infinity.rows[0]?.count ?? 0) !== 0) fail('INSTAGRAM_ENGAGEMENT_CANARY_RESERVED_PRIORITY_CONFLICT');
+    if ((infinity.rows[0]?.count ?? 0) !== 0)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_RESERVED_PRIORITY_CONFLICT');
 
     const candidates = await client.query(
       `select event_id, payload
@@ -179,17 +186,25 @@ async function verifyAndReserveReply() {
     );
     if (result.rowCount !== 1) fail('INSTAGRAM_ENGAGEMENT_CANARY_INBOUND_RESULT_NOT_UNIQUE');
     const row = result.rows[0];
-    if (row.inbound_status !== 'DELIVERED') fail('INSTAGRAM_ENGAGEMENT_CANARY_INBOUND_NOT_DELIVERED');
+    if (row.inbound_status !== 'DELIVERED')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_INBOUND_NOT_DELIVERED');
     if (row.risk !== 'LOW') fail('INSTAGRAM_ENGAGEMENT_CANARY_RISK_NOT_LOW');
-    if (row.autonomy !== 'AUTO_REPLY_ALLOWED') fail('INSTAGRAM_ENGAGEMENT_CANARY_AUTONOMY_NOT_AUTO');
+    if (row.autonomy !== 'AUTO_REPLY_ALLOWED')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_AUTONOMY_NOT_AUTO');
     if (row.action_status !== 'READY_TO_SEND') fail('INSTAGRAM_ENGAGEMENT_CANARY_ACTION_NOT_READY');
-    if (row.classification_confidence !== 'HIGH') fail('INSTAGRAM_ENGAGEMENT_CANARY_CONFIDENCE_NOT_HIGH');
+    if (row.classification_confidence !== 'HIGH')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_CONFIDENCE_NOT_HIGH');
     if (!['P2', 'P3'].includes(row.priority)) fail('INSTAGRAM_ENGAGEMENT_CANARY_PRIORITY_NOT_LOW');
-    if (!row.faq_id || !row.knowledge_source || !row.reply_sha256) fail('INSTAGRAM_ENGAGEMENT_CANARY_FACT_EVIDENCE_MISSING');
-    if (row.provider_reply_id || row.failure_code) fail('INSTAGRAM_ENGAGEMENT_CANARY_PREMATURE_PROVIDER_OUTCOME');
-    if (row.thread_state !== 'RESPONDABLE') fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_NOT_RESPONDABLE');
-    if (row.thread_confidence !== 'HIGH') fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_CONFIDENCE_NOT_HIGH');
-    if (!['P2', 'P3'].includes(row.thread_priority)) fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_PRIORITY_NOT_LOW');
+    if (!row.faq_id || !row.knowledge_source || !row.reply_sha256)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_FACT_EVIDENCE_MISSING');
+    if (row.provider_reply_id || row.failure_code)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_PREMATURE_PROVIDER_OUTCOME');
+    if (row.thread_state !== 'RESPONDABLE')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_NOT_RESPONDABLE');
+    if (row.thread_confidence !== 'HIGH')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_CONFIDENCE_NOT_HIGH');
+    if (!['P2', 'P3'].includes(row.thread_priority))
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_PRIORITY_NOT_LOW');
     if (row.group_status !== 'READY_TO_SEND') fail('INSTAGRAM_ENGAGEMENT_CANARY_GROUP_NOT_READY');
     if (!row.engagement_event_id) fail('INSTAGRAM_ENGAGEMENT_CANARY_ENGAGEMENT_EVENT_MISSING');
 
@@ -202,11 +217,19 @@ async function verifyAndReserveReply() {
     );
     if (reply.rowCount !== 1) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_EVENT_MISSING');
     const replyRow = reply.rows[0];
-    if (replyRow.event_type !== REPLY_TYPE || replyRow.status !== 'PENDING') fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_NOT_PENDING');
-    if (replyRow.attempts !== 0 || replyRow.max_attempts !== 1) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_ATTEMPT_BOUNDARY_INVALID');
-    if (replyRow.payload?.engagementEventId !== row.engagement_event_id) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_CORRELATION_INVALID');
-    if (replyRow.payload?.channel !== row.channel) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_CHANNEL_INVALID');
-    if (!Array.isArray(replyRow.evidence) || !replyRow.evidence.includes('instagram:engagement:verified-fact')) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_FACT_EVIDENCE_MISSING');
+    if (replyRow.event_type !== REPLY_TYPE || replyRow.status !== 'PENDING')
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_NOT_PENDING');
+    if (replyRow.attempts !== 0 || replyRow.max_attempts !== 1)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_ATTEMPT_BOUNDARY_INVALID');
+    if (replyRow.payload?.engagementEventId !== row.engagement_event_id)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_CORRELATION_INVALID');
+    if (replyRow.payload?.channel !== row.channel)
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_CHANNEL_INVALID');
+    if (
+      !Array.isArray(replyRow.evidence) ||
+      !replyRow.evidence.includes('instagram:engagement:verified-fact')
+    )
+      fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_FACT_EVIDENCE_MISSING');
 
     const updated = await client.query(
       `update event_outbox
@@ -229,7 +252,8 @@ async function verifyAndReserveReply() {
 }
 
 async function verifyPostcondition() {
-  if (!startedAt || !Number.isFinite(Date.parse(startedAt))) fail('INSTAGRAM_ENGAGEMENT_CANARY_STARTED_AT_INVALID');
+  if (!startedAt || !Number.isFinite(Date.parse(startedAt)))
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_STARTED_AT_INVALID');
   const result = await pool.query(
     `select
        action.status as action_status,
@@ -258,10 +282,19 @@ async function verifyPostcondition() {
   );
   if (result.rowCount !== 1) fail('INSTAGRAM_ENGAGEMENT_CANARY_POST_RESULT_NOT_UNIQUE');
   const row = result.rows[0];
-  if (row.action_status !== 'SENT' || !row.provider_reply_id || row.failure_code) fail('INSTAGRAM_ENGAGEMENT_CANARY_PROVIDER_ACK_MISSING');
-  if (row.thread_state !== 'AWAITING_CUSTOMER') fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_POST_STATE_INVALID');
-  if (row.group_status !== 'RESPONDED') fail('INSTAGRAM_ENGAGEMENT_CANARY_GROUP_POST_STATE_INVALID');
-  if (row.reply_status !== 'DELIVERED' || row.reply_attempts !== 1 || row.reply_max_attempts !== 1 || !row.delivered_at) fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_RECEIPT_INVALID');
+  if (row.action_status !== 'SENT' || !row.provider_reply_id || row.failure_code)
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_PROVIDER_ACK_MISSING');
+  if (row.thread_state !== 'AWAITING_CUSTOMER')
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_THREAD_POST_STATE_INVALID');
+  if (row.group_status !== 'RESPONDED')
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_GROUP_POST_STATE_INVALID');
+  if (
+    row.reply_status !== 'DELIVERED' ||
+    row.reply_attempts !== 1 ||
+    row.reply_max_attempts !== 1 ||
+    !row.delivered_at
+  )
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_REPLY_RECEIPT_INVALID');
 
   const window = await pool.query(
     `select
@@ -313,9 +346,12 @@ async function assertCleanGlobalState() {
       where event_type in ($1,$2) and status = 'CLAIMED'`,
     [INBOUND_TYPE, REPLY_TYPE],
   );
-  if ((deadLetter.rows[0]?.count ?? 0) !== 0) fail('INSTAGRAM_ENGAGEMENT_CANARY_DEAD_LETTER_NOT_CLEAN');
-  if ((ambiguous.rows[0]?.count ?? 0) !== 0) fail('INSTAGRAM_ENGAGEMENT_CANARY_AMBIGUOUS_NOT_CLEAN');
-  if ((claimed.rows[0]?.count ?? 0) !== 0) fail('INSTAGRAM_ENGAGEMENT_CANARY_CLAIMED_BACKLOG_NOT_CLEAN');
+  if ((deadLetter.rows[0]?.count ?? 0) !== 0)
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_DEAD_LETTER_NOT_CLEAN');
+  if ((ambiguous.rows[0]?.count ?? 0) !== 0)
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_AMBIGUOUS_NOT_CLEAN');
+  if ((claimed.rows[0]?.count ?? 0) !== 0)
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_CLAIMED_BACKLOG_NOT_CLEAN');
 }
 
 function safeText(payload) {
@@ -332,7 +368,8 @@ function requiredEnv(key) {
 function optionalChannel(value) {
   const normalized = value?.trim().toUpperCase();
   if (!normalized) return null;
-  if (normalized !== 'DIRECT' && normalized !== 'COMMENT') fail('INSTAGRAM_ENGAGEMENT_CANARY_CHANNEL_INVALID');
+  if (normalized !== 'DIRECT' && normalized !== 'COMMENT')
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_CHANNEL_INVALID');
   return normalized;
 }
 
@@ -344,7 +381,8 @@ function validateSession(value) {
 function boundedInteger(value, fallback, minimum, maximum) {
   if (!value?.trim()) return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) fail('INSTAGRAM_ENGAGEMENT_CANARY_INTEGER_INVALID');
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum)
+    fail('INSTAGRAM_ENGAGEMENT_CANARY_INTEGER_INVALID');
   return parsed;
 }
 

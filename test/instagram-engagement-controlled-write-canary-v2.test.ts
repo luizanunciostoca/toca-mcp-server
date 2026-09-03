@@ -31,9 +31,7 @@ describe('Instagram engagement controlled-write canary V2', () => {
   it('never promotes persistent engagement writes from the canary', () => {
     expect(workflow).not.toContain('PERSIST_LIMITED_WRITES_ONLY_AFTER_ACK=true');
     expect(workflow).not.toContain('LIMITED_WRITES_ENABLED=true');
-    expect(workflow).not.toContain(
-      '--update-env-vars "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true',
-    );
+    expect(workflow).not.toContain('--update-env-vars "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
     expect(workflow).toContain(
       '--update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=false,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false"',
     );
@@ -73,7 +71,7 @@ describe('Instagram engagement controlled-write canary V2', () => {
     expect(probe).toContain("row.action_status !== 'READY_TO_SEND'");
     expect(probe).toContain("row.thread_state !== 'RESPONDABLE'");
     expect(probe).toContain("row.group_status !== 'READY_TO_SEND'");
-    expect(probe).toContain("replyRow.max_attempts !== 1");
+    expect(probe).toContain('replyRow.max_attempts !== 1');
   });
 
   it('reserves exact outbox phases without exposing raw event ids in evidence output', () => {
