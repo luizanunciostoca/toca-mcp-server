@@ -21,6 +21,8 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts/capture-platform-evidence.mjs ./scripts/capture-platform-evidence.mjs
+COPY --from=build /app/scripts/instagram-engagement-controlled-write-probe.mjs ./scripts/instagram-engagement-controlled-write-probe.mjs
+COPY --from=build /app/scripts/instagram-engagement-controlled-write-runner.mjs ./scripts/instagram-engagement-controlled-write-runner.mjs
 COPY control ./control
 COPY migrations ./migrations
 USER node
