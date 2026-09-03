@@ -23,6 +23,7 @@ describe('Instagram engagement LIMITED persistent activation', () => {
       "classification.urgency === 'LOW'",
       '!context.automationBlocked',
       'autoReplyChannels.has(payload.channel)',
+      'isWithinAutoReplyWindow(payload.occurredAt ?? now, now, autoReplyMaxAgeMs)',
     ]) {
       expect(processor).toContain(marker);
     }
@@ -30,6 +31,7 @@ describe('Instagram engagement LIMITED persistent activation', () => {
 
   it('keeps persistent auto-replies Direct-only until a separate Comment proof', () => {
     expect(runtime).toContain("autoReplyChannels: ['DIRECT']");
+    expect(runtime).toContain('autoReplyMaxAgeMs: 30 * 60 * 1000');
     expect(runtime).toContain('separate real COMMENT provider-acknowledgement gate');
     expect(workflow).toContain('AUTO_REPLY_CHANNELS=DIRECT');
     expect(workflow).toContain('COMMENT_AUTO_REPLY_AUTHORIZED=false');

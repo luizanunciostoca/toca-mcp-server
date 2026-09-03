@@ -112,6 +112,7 @@ export function createInstagramEngagementBatchRuntime(
     // Persistent production activation is intentionally DIRECT-only until a
     // separate real COMMENT provider-acknowledgement gate is satisfied.
     autoReplyChannels: ['DIRECT'],
+    autoReplyMaxAgeMs: 30 * 60 * 1000,
   });
 
   return {
