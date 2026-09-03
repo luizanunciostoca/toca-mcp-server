@@ -46,9 +46,9 @@ export function videoGenerativeRuntimeConfigured(env: NodeJS.ProcessEnv = proces
   const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
   return Boolean(
     env.GCP_PROJECT_ID?.trim() &&
-      env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() &&
-      env[openAiApiKeyEnvKey]?.trim() &&
-      googleAccessConfigured(env),
+    env.INSTAGRAM_PUBLICATION_ASSET_BUCKET?.trim() &&
+    env[openAiApiKeyEnvKey]?.trim() &&
+    googleAccessConfigured(env),
   );
 }
 
@@ -129,11 +129,11 @@ function googleAccessConfigured(env: NodeJS.ProcessEnv): boolean {
   const oauth = googleOAuthConfig(env);
   return Boolean(
     oauth.clientIdEnvKey &&
-      oauth.clientSecretEnvKey &&
-      oauth.refreshTokenEnvKey &&
-      env[oauth.clientIdEnvKey]?.trim() &&
-      env[oauth.clientSecretEnvKey]?.trim() &&
-      env[oauth.refreshTokenEnvKey]?.trim(),
+    oauth.clientSecretEnvKey &&
+    oauth.refreshTokenEnvKey &&
+    env[oauth.clientIdEnvKey]?.trim() &&
+    env[oauth.clientSecretEnvKey]?.trim() &&
+    env[oauth.refreshTokenEnvKey]?.trim(),
   );
 }
 
