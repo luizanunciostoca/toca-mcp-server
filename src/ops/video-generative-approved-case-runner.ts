@@ -22,8 +22,8 @@ const commandSchema = z.object({
   approvalRef: z.string().trim().min(1).max(512),
 });
 
-const commandPath = process.env.VIDEO_GENERATIVE_COMMAND_PATH?.trim() ||
-  'control/video-generative-command.json';
+const commandPath =
+  process.env.VIDEO_GENERATIVE_COMMAND_PATH?.trim() || 'control/video-generative-command.json';
 const command = commandSchema.parse(JSON.parse(await readFile(commandPath, 'utf8')));
 const googleTokenEnvKey = requiredEnv('GOOGLE_SHEETS_ACCESS_TOKEN_ENV_KEY');
 const googleToken = requiredEnv(googleTokenEnvKey);
@@ -123,7 +123,9 @@ async function assertNoExistingCandidate(
   }
   const idIndex = requiredHeader(headers, 'content_item_id');
   const candidateIndex = requiredHeader(headers, 'video_candidate_sha256');
-  const matches = rows.slice(1).filter((row) => String(row[idIndex] ?? '').trim() === contentItemId);
+  const matches = rows
+    .slice(1)
+    .filter((row) => String(row[idIndex] ?? '').trim() === contentItemId);
   if (matches.length !== 1) throw new Error('VIDEO_GENERATIVE_CONTENT_ITEM_NOT_RESOLVED');
   if (String(matches[0]?.[candidateIndex] ?? '').trim()) {
     throw new Error('VIDEO_GENERATIVE_CANDIDATE_ALREADY_EXISTS');
