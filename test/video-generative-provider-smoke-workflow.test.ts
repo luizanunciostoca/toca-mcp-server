@@ -66,8 +66,8 @@ describe('video generative provider smoke', () => {
     );
     expect(smokeWorkflow).toContain('/tmp/video-smoke-failure-logs.json');
     expect(smokeWorkflow).toContain('failure-diagnostic.json');
-    expect(smokeWorkflow).toContain(".replace(/Bearer\\s+");
-    expect(smokeWorkflow).toContain(".replace(/\\beyJ");
+    expect(smokeWorkflow).toContain('.replace(/Bearer\\s+');
+    expect(smokeWorkflow).toContain('.replace(/\\beyJ');
     expect(smokeWorkflow).toContain('rawPayloadPrinted: false');
     expect(smokeWorkflow).toContain('rawPayloadPersistedInArtifact: false');
     expect(smokeWorkflow).toContain('publicationAuthorized: false');
