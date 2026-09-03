@@ -3,6 +3,7 @@
 const ALLOWED_VALIDATIONS = new Set([
   'instagram-engagement-readiness',
   'instagram-engagement-shadow-e2e',
+  'instagram-conversation-shadow-e2e',
   'instagram-engagement-meta-subscriptions',
 ]);
 
