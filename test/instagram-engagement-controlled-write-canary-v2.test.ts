@@ -43,6 +43,17 @@ describe('Instagram engagement controlled-write canary V2', () => {
     expect(workflow).not.toContain('gcloud scheduler jobs run');
   });
 
+  it('reports ambiguous provider outcomes as UNKNOWN and records cleanup truthfully', () => {
+    expect(workflow).toContain('id: reservation_cleanup');
+    expect(workflow).toContain('id: restore_daemon');
+    expect(workflow).toContain('SENT=UNKNOWN');
+    expect(workflow).toContain('ACK=UNKNOWN');
+    expect(workflow).toContain('PROVIDER_WRITE_OUTCOME" == skipped');
+    expect(workflow).toContain('CANARY_RESERVATIONS_CLEANED=$CLEANUP');
+    expect(workflow).toContain('DAEMON_ENGAGEMENT_RUNTIME_RESTORED=$RESTORED');
+    expect(workflow).not.toContain("'DAEMON_ENGAGEMENT_RUNTIME_RESTORED=true'");
+  });
+
   it('uses the two-phase isolated ordering before the provider side effect', () => {
     const reserve = workflow.indexOf('Reserve one recent high-confidence verified DIRECT inbound');
     const phase1 = workflow.indexOf('Phase 1 — classify exactly one reserved inbound');
