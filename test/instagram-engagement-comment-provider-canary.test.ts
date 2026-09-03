@@ -7,6 +7,7 @@ const workflow = readFileSync(
 );
 const runner = readFileSync('scripts/instagram-engagement-comment-provider-canary.mjs', 'utf8');
 const provider = readFileSync('src/providers/instagram/instagram-engagement-provider.ts', 'utf8');
+const dockerfile = readFileSync('Dockerfile', 'utf8');
 
 describe('Instagram real Comment provider canary', () => {
   it('requires a single-use Comment-only authorization without persistent promotion', () => {
@@ -22,6 +23,12 @@ describe('Instagram real Comment provider canary', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+  });
+
+  it('packages the canary runner into the production runtime image', () => {
+    expect(dockerfile).toContain(
+      'COPY --from=build /app/scripts/instagram-engagement-comment-provider-canary.mjs ./scripts/instagram-engagement-comment-provider-canary.mjs',
+    );
   });
 
   it('never mutates the serving Direct runtime or Cloud Scheduler', () => {
