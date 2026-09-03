@@ -32,7 +32,9 @@ Migration 040 introduces isolated scoped analytics surfaces rather than mutating
 
 Each scoped surface requires `tenant_id`, `workspace_id` and `organization_id` in its primary key or write path. `PostgresInstagramConversationAnalyticsScoped` validates the complete scope before persistence, writes only to the scoped surfaces, validates hashed event/question identifiers and reads FAQ misses only inside the configured scope. This rollout intentionally leaves the legacy analytics tables unchanged so existing V3 code cannot be broken by an in-place primary-key migration.
 
-The legacy unscoped analytics methods in `PostgresInstagramConversationControlPlane` are not the canonical multitenant analytics path and must not be wired into a multitenant production runtime. The scoped analytics runtime is the governed target for FAQ aggregation, classification feedback and response QA.
+`PostgresInstagramConversationStatusDashboardScoped` is the canonical multitenant dashboard path. It scopes thread, human-queue, action, `event_outbox` dead-letter and FAQ-miss counters by tenant, workspace and organization. The legacy `getStatusDashboard` method in `PostgresInstagramConversationControlPlane` is retained only for compatibility and must not be wired into a multitenant production runtime.
+
+The legacy unscoped analytics methods in `PostgresInstagramConversationControlPlane` are not the canonical multitenant analytics path and must not be wired into a multitenant production runtime. The scoped analytics runtime is the governed target for FAQ aggregation, classification feedback, response QA and operational dashboard reads.
 
 ## Release gate
 
