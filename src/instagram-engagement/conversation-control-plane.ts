@@ -198,10 +198,7 @@ export function projectCanonicalIntents(
     intents.add('SUNSET');
     intents.add('EVENT_INFO');
   }
-  if (
-    classification.eventInterest === 'THE_PARTY' ||
-    classification.eventInterest === 'BOTH'
-  ) {
+  if (classification.eventInterest === 'THE_PARTY' || classification.eventInterest === 'BOTH') {
     intents.add('THE_PARTY');
     intents.add('EVENT_INFO');
   }
@@ -312,7 +309,10 @@ export class PostgresInstagramConversationControlPlane {
     }
   }
 
-  async getConversationContext(threadId: string, limit = 12): Promise<SanitizedConversationContext> {
+  async getConversationContext(
+    threadId: string,
+    limit = 12,
+  ): Promise<SanitizedConversationContext> {
     if (!threadId.trim()) throw new Error('INSTAGRAM_ENGAGEMENT_THREAD_ID_REQUIRED');
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
       throw new Error('INSTAGRAM_ENGAGEMENT_CONTEXT_LIMIT_INVALID');
@@ -398,15 +398,26 @@ export class PostgresInstagramConversationControlPlane {
       }
 
       const queueId = digest(`human|${input.threadId}|${input.reasonCode}|${input.now}`);
-      const slaDueAt = new Date(nowMs + this.options.humanEscalationSlaMs[input.priority]).toISOString();
+      const slaDueAt = new Date(
+        nowMs + this.options.humanEscalationSlaMs[input.priority],
+      ).toISOString();
       await client.query(
         `insert into instagram_engagement_human_queue (
            queue_id,thread_id,tenant_id,workspace_id,organization_id,priority,primary_intent,
            reason_code,owner,state,created_at,sla_due_at,updated_at
          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',$10::timestamptz,$11::timestamptz,$10::timestamptz)`,
         [
-          queueId,input.threadId,input.tenantId,input.workspaceId,input.organizationId,input.priority,
-          input.primaryIntent,input.reasonCode,input.owner ?? null,input.now,slaDueAt,
+          queueId,
+          input.threadId,
+          input.tenantId,
+          input.workspaceId,
+          input.organizationId,
+          input.priority,
+          input.primaryIntent,
+          input.reasonCode,
+          input.owner ?? null,
+          input.now,
+          slaDueAt,
         ],
       );
       await client.query(
@@ -436,7 +447,8 @@ export class PostgresInstagramConversationControlPlane {
     readonly consentVerified?: boolean;
     readonly now: string;
   }): Promise<{ readonly followUpIdSha256: string; readonly reused: boolean }> {
-    if (!input.contextAuthorized) throw new Error('INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONTEXT_NOT_AUTHORIZED');
+    if (!input.contextAuthorized)
+      throw new Error('INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONTEXT_NOT_AUTHORIZED');
     const nowMs = validDateMs(input.now, 'INSTAGRAM_ENGAGEMENT_FOLLOW_UP_NOW_INVALID');
     const dueMs = validDateMs(input.dueAt, 'INSTAGRAM_ENGAGEMENT_FOLLOW_UP_DUE_INVALID');
     if (dueMs <= nowMs) throw new Error('INSTAGRAM_ENGAGEMENT_FOLLOW_UP_DUE_NOT_FUTURE');
@@ -474,8 +486,14 @@ export class PostgresInstagramConversationControlPlane {
            context_authorized,consent_required,consent_verified,created_at,updated_at
          ) values ($1,$2,$3,$4::timestamptz,'PENDING',0,$5,true,$6,$7,$8::timestamptz,$8::timestamptz)`,
         [
-          followUpId,input.threadId,input.reasonCode,input.dueAt,maxAttempts,
-          input.consentRequired ?? false,input.consentVerified ?? false,input.now,
+          followUpId,
+          input.threadId,
+          input.reasonCode,
+          input.dueAt,
+          maxAttempts,
+          input.consentRequired ?? false,
+          input.consentVerified ?? false,
+          input.now,
         ],
       );
       await client.query(
@@ -523,8 +541,14 @@ export class PostgresInstagramConversationControlPlane {
          end,
          updated_at=excluded.updated_at`,
       [
-        normalized.sha256,normalized.redacted,input.primaryIntent,input.kbHit ? 1 : 0,
-        input.kbHit ? 0 : 1,input.resolved ? 1 : 0,input.now,this.#faqReviewMinOccurrences,
+        normalized.sha256,
+        normalized.redacted,
+        input.primaryIntent,
+        input.kbHit ? 1 : 0,
+        input.kbHit ? 0 : 1,
+        input.resolved ? 1 : 0,
+        input.now,
+        this.#faqReviewMinOccurrences,
       ],
     );
     return { questionSha256: normalized.sha256 };
@@ -552,12 +576,18 @@ export class PostgresInstagramConversationControlPlane {
          review_state,created_at,updated_at
        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'RECORDED',$12::timestamptz,$12::timestamptz)`,
       [
-        feedbackId,eventSha256,input.predictedIntent,input.expectedIntent,
-        input.predictedPriority ?? null,input.expectedPriority ?? null,
-        input.predictedAutonomy ?? null,input.expectedAutonomy ?? null,
+        feedbackId,
+        eventSha256,
+        input.predictedIntent,
+        input.expectedIntent,
+        input.predictedPriority ?? null,
+        input.expectedPriority ?? null,
+        input.predictedAutonomy ?? null,
+        input.expectedAutonomy ?? null,
         input.predictedIntent !== input.expectedIntent,
         (input.predictedPriority ?? null) !== (input.expectedPriority ?? null),
-        (input.predictedAutonomy ?? null) !== (input.expectedAutonomy ?? null),input.now,
+        (input.predictedAutonomy ?? null) !== (input.expectedAutonomy ?? null),
+        input.now,
       ],
     );
     return { feedbackId };
@@ -585,8 +615,12 @@ export class PostgresInstagramConversationControlPlane {
          attribution_verified=true,updated_at=$6::timestamptz,version=version+1
        where thread_id=$1`,
       [
-        input.threadId,input.campaignId ?? null,input.adSetId ?? null,input.adId ?? null,
-        input.creativeId ?? null,input.now,
+        input.threadId,
+        input.campaignId ?? null,
+        input.adSetId ?? null,
+        input.adId ?? null,
+        input.creativeId ?? null,
+        input.now,
       ],
     );
   }

@@ -30,10 +30,33 @@ describe('Instagram conversation control plane hardening', () => {
 
   it('supports the requested explicit canonical taxonomy', () => {
     for (const intent of [
-      'EVENT_INFO','SUNSET','THE_PARTY','GASTRONOMIA','TICKET_INFO','PRICE','RESERVATION',
-      'LOCATION','HOURS','COMMERCIAL_LEAD','SUPPORT','COMPLAINT','REFUND','SAFETY','LEGAL',
-      'PRESS','PUBLIC_FIGURE','HARASSMENT','PRAISE','UGC','MARKING','PARTNERSHIP','WORK_WITH_US',
-      'SPAM','ABUSE','UNKNOWN','OTHER',
+      'EVENT_INFO',
+      'SUNSET',
+      'THE_PARTY',
+      'GASTRONOMIA',
+      'TICKET_INFO',
+      'PRICE',
+      'RESERVATION',
+      'LOCATION',
+      'HOURS',
+      'COMMERCIAL_LEAD',
+      'SUPPORT',
+      'COMPLAINT',
+      'REFUND',
+      'SAFETY',
+      'LEGAL',
+      'PRESS',
+      'PUBLIC_FIGURE',
+      'HARASSMENT',
+      'PRAISE',
+      'UGC',
+      'MARKING',
+      'PARTNERSHIP',
+      'WORK_WITH_US',
+      'SPAM',
+      'ABUSE',
+      'UNKNOWN',
+      'OTHER',
     ]) {
       expect(source).toContain(`| '${intent}'`);
     }
@@ -55,7 +78,9 @@ describe('Instagram conversation control plane hardening', () => {
     expect(migration).toContain('create table if not exists instagram_engagement_human_queue');
     expect(migration).toContain('create table if not exists instagram_engagement_follow_up_queue');
     expect(migration).toContain('create table if not exists instagram_engagement_faq_signals');
-    expect(migration).toContain('create table if not exists instagram_engagement_classification_feedback');
+    expect(migration).toContain(
+      'create table if not exists instagram_engagement_classification_feedback',
+    );
     expect(migration).toContain('create table if not exists instagram_engagement_response_qa');
     expect(source).not.toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
     expect(source).not.toContain('provider.send');
@@ -68,8 +93,8 @@ describe('Instagram conversation control plane hardening', () => {
   });
 
   it('enforces follow-up context and consent gates before queueing any follow-up', () => {
-    expect(source).toContain("INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONTEXT_NOT_AUTHORIZED");
-    expect(source).toContain("INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONSENT_NOT_VERIFIED");
+    expect(source).toContain('INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONTEXT_NOT_AUTHORIZED');
+    expect(source).toContain('INSTAGRAM_ENGAGEMENT_FOLLOW_UP_CONSENT_NOT_VERIFIED');
     expect(source).toContain("state === 'RESOLVED' || state === 'CLOSED'");
     expect(source).toContain("state='FOLLOW_UP_REQUIRED'");
   });
