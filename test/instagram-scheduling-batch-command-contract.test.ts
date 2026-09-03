@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const workflow = readFileSync('.github/workflows/instagram-scheduling-batch-command.yml', 'utf8');
+const workflow = readFileSync(
+  '.github/workflows/instagram-scheduling-batch-command.yml',
+  'utf8',
+);
 
 describe('Instagram scheduling batch command contract', () => {
   it('accepts only the owner command on authorization issue 523', () => {
