@@ -31,7 +31,9 @@ describe('Instagram canary read-only eligibility gate', () => {
     expect(source).toContain("candidate.payload->>'channel' = 'DIRECT'");
     expect(source).toContain('DATABASE_MUTATIONS=false');
     expect(source).toContain('PROVIDER_CALLS=false');
-    expect(source).not.toMatch(/\b(update|insert into|delete from)\s+event_outbox\b/iu);
+    expect(source).not.toMatch(
+      /\b(update|insert into|delete from)\s+event_outbox\b/iu,
+    );
     expect(source).not.toContain('InstagramGraphEngagementProvider');
     expect(source).not.toContain('MetaApiClient');
   });
