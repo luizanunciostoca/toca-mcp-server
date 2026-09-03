@@ -10,7 +10,7 @@ const PAGE_ID = '306103746115875';
 const INSTAGRAM_USER_ID = '17841402033495654';
 const PRODUCT_PATH = '/produtos/the-party-by-toca-experience-7175.html';
 const DESIRED_CTA = 'LEARN_MORE';
-const EXPECTED_AD_COUNT = 5;
+const EXPECTED_AD_COUNT = 7;
 const EXPECTED_BUDGET_MINOR = 30_000;
 
 const suppliedApproval = requiredEnv('META_ADS_THE_PARTY_0904_CTA_FIX_APPROVAL');
@@ -27,8 +27,9 @@ const campaign = asRecord(
     fields: 'id,name,status,effective_status,objective',
   }),
 );
-if (scalarString(campaign.status) !== 'PAUSED') {
-  throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_CAMPAIGN_NOT_PAUSED');
+const initialCampaignStatus = requiredScalar(campaign.status, 'CAMPAIGN_STATUS');
+if (initialCampaignStatus !== 'ACTIVE') {
+  throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_CAMPAIGN_NOT_ACTIVE');
 }
 
 const adSet = asRecord(
@@ -36,8 +37,9 @@ const adSet = asRecord(
     fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,targeting',
   }),
 );
-if (scalarString(adSet.status) !== 'PAUSED') {
-  throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_ADSET_NOT_PAUSED');
+const initialAdSetStatus = requiredScalar(adSet.status, 'ADSET_STATUS');
+if (initialAdSetStatus !== 'ACTIVE') {
+  throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_ADSET_NOT_ACTIVE');
 }
 if (scalarString(adSet.campaign_id) !== CAMPAIGN_ID) {
   throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_ADSET_CAMPAIGN_MISMATCH');
@@ -64,7 +66,6 @@ if (ads.length !== EXPECTED_AD_COUNT) {
 if (
   ads.some(
     (ad) =>
-      scalarString(ad.status) !== 'PAUSED' ||
       scalarString(ad.adset_id) !== ADSET_ID ||
       scalarString(ad.campaign_id) !== CAMPAIGN_ID,
   )
@@ -72,12 +73,13 @@ if (
   throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_AD_ENVELOPE_MISMATCH');
 }
 
-const originals = new Map<string, string>();
+const originals = new Map<string, { creativeId: string; status: string }>();
 const currentCreatives = new Map<string, Record<string, unknown>>();
 for (const ad of ads) {
   const adId = requiredScalar(ad.id, 'AD_ID');
+  const status = requiredScalar(ad.status, 'AD_STATUS');
   const creativeId = requiredScalar(asRecord(ad.creative).id, 'CREATIVE_ID');
-  originals.set(adId, creativeId);
+  originals.set(adId, { creativeId, status });
   currentCreatives.set(
     adId,
     asRecord(
@@ -88,29 +90,53 @@ for (const ad of ads) {
   );
 }
 
-if (allAlreadyLearnMore(ads, currentCreatives)) {
+const mismatchedAds = ads.filter((ad) => {
+  const creative = currentCreatives.get(scalarString(ad.id));
+  if (!creative) return true;
+  const linkData = asRecord(asRecord(creative.object_story_spec).link_data);
+  const link = scalarString(linkData.link);
+  const cta = asRecord(linkData.call_to_action);
+  const ctaValue = asRecord(cta.value);
+  return !(
+    isProductDestination(link) &&
+    scalarString(cta.type) === DESIRED_CTA &&
+    scalarString(ctaValue.link) === link
+  );
+});
+
+if (mismatchedAds.length === 0) {
+  const verification = await readback();
+  const summary = assertFinalState(verification, originals, initialCampaignStatus, initialAdSetStatus);
   console.log(
     `META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=${JSON.stringify({
-      status: 'ALREADY_LEARN_MORE_PAUSED',
-      campaignId: CAMPAIGN_ID,
-      adSetId: ADSET_ID,
-      adIds: ads.map((ad) => scalarString(ad.id)),
+      status: 'ALREADY_LEARN_MORE',
+      campaignStatus: summary.campaignStatus,
+      adSetStatus: summary.adSetStatus,
+      finalAdCount: summary.finalAdCount,
+      activeAdCount: summary.activeAdCount,
+      lifetimeBudgetMinor: summary.lifetimeBudgetMinor,
       ctaType: DESIRED_CTA,
       placements: ['facebook_story', 'instagram_story'],
+      correctedAdCount: 0,
+      correctedAdNames: [],
       providerMutationExecuted: false,
       activationPerformed: false,
+      statusesPreserved: true,
     })}`,
   );
   process.exit(0);
 }
 
 const createdCreativeIds: string[] = [];
+const correctedAdNames: string[] = [];
 try {
-  for (const ad of ads) {
+  for (const ad of mismatchedAds) {
     const adId = requiredScalar(ad.id, 'AD_ID');
+    const adName = requiredScalar(ad.name, 'AD_NAME');
+    const original = originals.get(adId);
     const currentCreative = currentCreatives.get(adId);
-    if (!currentCreative) {
-      throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_CURRENT_CREATIVE_MISSING');
+    if (!original || !currentCreative) {
+      throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_CURRENT_STATE_MISSING');
     }
 
     const currentSpec = asRecord(currentCreative.object_story_spec);
@@ -139,7 +165,7 @@ try {
     };
 
     const created = await provider.createCreative(account, {
-      name: `${scalarString(currentCreative.name)} | Learn More`,
+      name: `${scalarString(currentCreative.name) || adName} | Learn More`,
       pageId: PAGE_ID,
       instagramActorId: INSTAGRAM_USER_ID,
       objectStorySpec: nextSpec,
@@ -148,36 +174,41 @@ try {
 
     await api.post(adId, {
       creative: JSON.stringify({ creative_id: created.id }),
-      status: 'PAUSED',
+      status: original.status,
     });
+    correctedAdNames.push(adName);
   }
 
   const verification = await readback();
-  assertFinalState(verification);
+  const summary = assertFinalState(verification, originals, initialCampaignStatus, initialAdSetStatus);
   console.log(
     `META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=${JSON.stringify({
-      status: 'LEARN_MORE_CTA_CORRECTED_PAUSED',
-      campaignId: CAMPAIGN_ID,
-      adSetId: ADSET_ID,
-      adIds: ads.map((ad) => scalarString(ad.id)),
-      newCreativeIds: createdCreativeIds,
+      status: 'LEARN_MORE_CTA_CORRECTED',
+      campaignStatus: summary.campaignStatus,
+      adSetStatus: summary.adSetStatus,
+      finalAdCount: summary.finalAdCount,
+      activeAdCount: summary.activeAdCount,
+      lifetimeBudgetMinor: summary.lifetimeBudgetMinor,
       ctaType: DESIRED_CTA,
       placements: ['facebook_story', 'instagram_story'],
+      correctedAdCount: correctedAdNames.length,
+      correctedAdNames,
+      newCreativeIds: createdCreativeIds,
       providerMutationExecuted: true,
       activationPerformed: false,
-      verification,
+      statusesPreserved: true,
     })}`,
   );
 } catch (error) {
   const rollbackErrors: string[] = [];
   for (const ad of ads) {
     const adId = scalarString(ad.id);
-    const originalCreativeId = originals.get(adId);
-    if (!adId || !originalCreativeId) continue;
+    const original = originals.get(adId);
+    if (!adId || !original) continue;
     try {
       await api.post(adId, {
-        creative: JSON.stringify({ creative_id: originalCreativeId }),
-        status: 'PAUSED',
+        creative: JSON.stringify({ creative_id: original.creativeId }),
+        status: original.status,
       });
     } catch (rollbackError) {
       rollbackErrors.push(normalizeError(rollbackError));
@@ -188,25 +219,6 @@ try {
       rollbackErrors,
     )}`,
   );
-}
-
-function allAlreadyLearnMore(
-  adValues: readonly Readonly<Record<string, unknown>>[],
-  creativeByAdId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
-): boolean {
-  return adValues.every((ad) => {
-    const creative = creativeByAdId.get(scalarString(ad.id));
-    if (!creative) return false;
-    const linkData = asRecord(asRecord(creative.object_story_spec).link_data);
-    const link = scalarString(linkData.link);
-    const cta = asRecord(linkData.call_to_action);
-    const ctaValue = asRecord(cta.value);
-    return (
-      isProductDestination(link) &&
-      scalarString(cta.type) === DESIRED_CTA &&
-      scalarString(ctaValue.link) === link
-    );
-  });
 }
 
 async function readback(): Promise<Readonly<Record<string, unknown>>> {
@@ -247,19 +259,33 @@ async function readback(): Promise<Readonly<Record<string, unknown>>> {
   };
 }
 
-function assertFinalState(verification: Readonly<Record<string, unknown>>): void {
+function assertFinalState(
+  verification: Readonly<Record<string, unknown>>,
+  originalByAdId: ReadonlyMap<string, { creativeId: string; status: string }>,
+  expectedCampaignStatus: string,
+  expectedAdSetStatus: string,
+): {
+  campaignStatus: string;
+  adSetStatus: string;
+  finalAdCount: number;
+  activeAdCount: number;
+  lifetimeBudgetMinor: number;
+} {
   const campaignValue = asRecord(verification.campaign);
   const adSetValue = asRecord(verification.adSet);
   const adValues = arrayRecords(verification.ads);
   const creativeValues = arrayRecords(verification.creatives);
+  const campaignStatus = scalarString(campaignValue.status);
+  const adSetStatus = scalarString(adSetValue.status);
+  const lifetimeBudgetMinor = finiteNumber(adSetValue.lifetime_budget);
 
-  if (scalarString(campaignValue.status) !== 'PAUSED') {
-    throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_CAMPAIGN_NOT_PAUSED');
+  if (campaignStatus !== expectedCampaignStatus) {
+    throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_CAMPAIGN_STATUS_CHANGED');
   }
-  if (scalarString(adSetValue.status) !== 'PAUSED') {
-    throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_ADSET_NOT_PAUSED');
+  if (adSetStatus !== expectedAdSetStatus) {
+    throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_ADSET_STATUS_CHANGED');
   }
-  if (finiteNumber(adSetValue.lifetime_budget) !== EXPECTED_BUDGET_MINOR) {
+  if (lifetimeBudgetMinor !== EXPECTED_BUDGET_MINOR) {
     throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_BUDGET_MISMATCH');
   }
   if (!isStoriesOnlyTargeting(asRecord(adSetValue.targeting))) {
@@ -268,8 +294,13 @@ function assertFinalState(verification: Readonly<Record<string, unknown>>): void
   if (adValues.length !== EXPECTED_AD_COUNT || creativeValues.length !== EXPECTED_AD_COUNT) {
     throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_COUNTS_MISMATCH');
   }
-  if (adValues.some((ad) => scalarString(ad.status) !== 'PAUSED')) {
-    throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_AD_NOT_PAUSED');
+
+  for (const ad of adValues) {
+    const adId = requiredScalar(ad.id, 'FINAL_AD_ID');
+    const original = originalByAdId.get(adId);
+    if (!original || scalarString(ad.status) !== original.status) {
+      throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_AD_STATUS_CHANGED');
+    }
   }
 
   for (const creative of creativeValues) {
@@ -285,6 +316,14 @@ function assertFinalState(verification: Readonly<Record<string, unknown>>): void
       throw new Error('META_ADS_THE_PARTY_0904_CTA_FIX_FINAL_CTA_LINK_MISMATCH');
     }
   }
+
+  return {
+    campaignStatus,
+    adSetStatus,
+    finalAdCount: adValues.length,
+    activeAdCount: adValues.filter((ad) => scalarString(ad.status) === 'ACTIVE').length,
+    lifetimeBudgetMinor: lifetimeBudgetMinor ?? 0,
+  };
 }
 
 function isStoriesOnlyTargeting(targeting: Readonly<Record<string, unknown>>): boolean {
