@@ -78,6 +78,8 @@ jobs:
             "COMMENT_AUTO_REPLY_AUTHORIZED=false"
             "DATABASE_MIGRATIONS_AUTHORIZED=true"
             "SERVICE_MUTATION_AUTHORIZED=true"
+            "SCHEDULER_MUTATION_AUTHORIZED=false"
+            "ZERO_TRAFFIC_STAGE_REQUIRED=true"
             "BATCH_SIZE=1"
             "ROLLBACK_ON_FAILURE=true"
           )
@@ -119,7 +121,7 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Verify immutable image and capture prestate
+      - name: Verify immutable image and capture fail-closed prestate
         id: prestate
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
@@ -130,18 +132,40 @@ jobs:
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
 
+          current_revision() {
+            local service="$1"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              | jq -r '. as $s | [($s.status.traffic // [])[] | select((.percent // 0) == 100) | (.revisionName // (if (.latestRevision // false) then $s.status.latestReadyRevisionName else empty end))] | unique | if length == 1 then .[0] else empty end'
+          }
+
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           PRE_IMAGE="$(printf '%s' "$SERVICE_JSON" | jq -r '.spec.template.spec.containers[0].image')"
+          PRE_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
+          DAEMON_URL="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.url // empty')"
           test -n "$PRE_IMAGE"
+          test -n "$PRE_REVISION"
+          test -n "$DAEMON_URL"
           printf '%s' "$SERVICE_JSON" | jq -e '
             .spec.template.spec.containers[0] as $c |
             ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
             ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
           ' >/dev/null
-          SCHEDULER_STATE="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format='value(state)')"
-          [[ "$SCHEDULER_STATE" =~ ^(ENABLED|PAUSED)$ ]]
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_URL}/tick" \
+            --arg audience "$DAEMON_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .state == "ENABLED" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+
           echo "pre_image=$PRE_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "scheduler_state=$SCHEDULER_STATE" >> "$GITHUB_OUTPUT"
+          echo "pre_revision=$PRE_REVISION" >> "$GITHUB_OUTPUT"
+          echo "daemon_url=$DAEMON_URL" >> "$GITHUB_OUTPUT"
 
       - name: Apply and verify production migrations
         env:
@@ -196,88 +220,152 @@ jobs:
             --tasks 1 --max-retries 0 --task-timeout 120s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
 
-      - name: Pause scheduler for atomic activation
-        id: pause
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ '${{ steps.prestate.outputs.scheduler_state }}' == 'ENABLED' ]]; then
-            gcloud scheduler jobs pause "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
-            echo 'paused_by_workflow=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'paused_by_workflow=false' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Activate persistent LIMITED Direct-only runtime
-        id: deploy
+      - name: Stage write-enabled candidate revision at zero traffic
+        id: stage
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
-          gcloud run services update "$DAEMON_SERVICE_NAME" \
+          RUN_TAIL="${GITHUB_RUN_ID: -7}"
+          REVISION_SUFFIX="l${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
+          CANDIDATE_REVISION="${DAEMON_SERVICE_NAME}-${REVISION_SUFFIX}"
+          DAEMON_ENV="^@^NODE_ENV=production@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true@INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true@INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS@INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58@INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12"
+
+          gcloud run deploy "$DAEMON_SERVICE_NAME" \
             --image "$RUNTIME_IMAGE" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --update-env-vars "NODE_ENV=production,META_ENABLED=true,META_PROVIDER_VERIFIED=true,META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN,META_GRAPH_BASE_URL=https://graph.facebook.com,META_GRAPH_API_VERSION=v24.0,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true,INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1,INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID,INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres,INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true,INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS,INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58,INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12" \
-            --min-instances 0 --max-instances 1 --concurrency 1 --quiet
+            --update-env-vars "$DAEMON_ENV" \
+            --command node --args dist/src/toca-managed-instagram-daemon.js \
+            --revision-suffix "$REVISION_SUFFIX" \
+            --min-instances 0 --max-instances 1 --concurrency 1 \
+            --no-traffic --quiet
 
-      - name: Verify LIMITED runtime readback
+          echo "candidate_revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify zero-traffic candidate before cutover
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$CANDIDATE_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e \
+            --arg digest "$RUNTIME_DIGEST" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg sources "$KB_SOURCE_IDS" '
+              .spec.containers[0] as $c |
+              (.spec.serviceAccountName == $sa) and
+              ($c.image | contains($digest)) and
+              ($c.command == ["node"]) and
+              ($c.args == ["dist/src/toca-managed-instagram-daemon.js"]) and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false") and
+              (([($c.env // [])[] | select(.name == "META_PROVIDER_VERIFIED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS") | .value] | last) == $sources)
+            ' >/dev/null
+
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          printf '%s' "$SERVICE_JSON" | jq -e --arg image "$RUNTIME_IMAGE" '
-            .spec.template.spec.containers[0] as $c |
-            ($c.image == $image) and
-            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
-            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true" and
-            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1" and
-            ([$c.env[]? | select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false" and
-            ([$c.env[]? | select(.name=="META_PROVIDER_VERIFIED") | .value] | last) == "true"
+          printf '%s' "$SERVICE_JSON" | jq -e --arg candidate "$CANDIDATE_REVISION" '
+            ([.status.traffic[]? | select((.revisionName // "") == $candidate) | (.percent // 0)] | add // 0) == 0 and
+            .status.latestReadyRevisionName == $candidate
           ' >/dev/null
+          echo 'INSTAGRAM_ENGAGEMENT_LIMITED_ZERO_TRAFFIC_STAGE=PASS'
+
+      - name: Activate LIMITED runtime by explicit traffic cutover
+        id: cutover
+        env:
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_REVISION"
+          gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --to-latest --quiet
+          echo 'traffic_cutover=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify LIMITED runtime readback and unchanged scheduler
+        env:
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          DAEMON_URL: ${{ steps.prestate.outputs.daemon_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_revision() {
+            local service="$1"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json \
+              | jq -r '. as $s | [($s.status.traffic // [])[] | select((.percent // 0) == 100) | (.revisionName // (if (.latestRevision // false) then $s.status.latestReadyRevisionName else empty end))] | unique | if length == 1 then .[0] else empty end'
+          }
+
+          ROUTED_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
+          test "$ROUTED_REVISION" = "$CANDIDATE_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e --arg digest "$RUNTIME_DIGEST" '
+            .spec.containers[0] as $c |
+            ($c.image | contains($digest)) and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false")
+          ' >/dev/null
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_URL}/tick" \
+            --arg audience "$DAEMON_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .state == "ENABLED" and
+              .httpTarget.uri == $uri and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
           echo 'INSTAGRAM_ENGAGEMENT_LIMITED_RUNTIME_READBACK=PASS'
 
-      - name: Restore scheduler state and publish PASS
+      - name: Publish LIMITED activation PASS
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ '${{ steps.pause.outputs.paused_by_workflow }}' == 'true' ]]; then
-            gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
-          fi
           printf -v COMMENT '%s\n' \
             'LIMITED_ACTIVATION_STATUS=PASS' \
             "CONTROLLER_SHA=$GITHUB_SHA" \
             "RUNTIME_IMAGE_DIGEST=${{ steps.auth.outputs.runtime_digest }}" \
+            "ACTIVATION_REVISION=${CANDIDATE_REVISION}" \
             'AUTONOMY_STAGE=LIMITED' \
             'AUTO_REPLY_CHANNELS=DIRECT' \
             'PERSISTENT_WRITES_ENABLED=true' \
             'COMMENT_AUTO_REPLY_ENABLED=false' \
             'BATCH_SIZE=1' \
+            'TRAFFIC_PERCENT=100' \
+            'ZERO_TRAFFIC_STAGE_VERIFIED=true' \
+            'SCHEDULER_MUTATION=false' \
             'ROLLBACK_REQUIRED=false'
           gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
 
-      - name: Roll back persistent writes on failure
+      - name: Roll back traffic to fail-closed revision on failure
         if: failure()
         env:
-          PRE_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
         run: |
           set +e
-          if [[ -n "${PRE_IMAGE:-}" ]]; then
-            gcloud run services update "$DAEMON_SERVICE_NAME" \
-              --image "$PRE_IMAGE" \
+          if [[ -n "${PRE_REVISION:-}" ]]; then
+            gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-              --update-env-vars "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false" \
-              --quiet
-          fi
-          if [[ '${{ steps.pause.outputs.paused_by_workflow }}' == 'true' ]]; then
-            gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --quiet
+              --to-revisions="${PRE_REVISION}=100" --quiet
           fi
           exit 0
 
