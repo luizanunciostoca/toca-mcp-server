@@ -11,7 +11,9 @@ describe('Instagram engagement production shadow issue autodispatch', () => {
     expect(workflow).toContain('issues:');
     expect(workflow).toContain('types: [opened]');
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
-    expect(workflow).toContain('github.event.issue.user.login == github.repository_owner');
+    expect(workflow).toContain(
+      'github.event.issue.user.login == github.repository_owner',
+    );
     expect(workflow).toContain(
       'PRODUCTION AUTHORIZATION — Instagram conversation production shadow AUTO',
     );
@@ -32,7 +34,9 @@ describe('Instagram engagement production shadow issue autodispatch', () => {
   });
 
   it('keeps external reply writes disabled and requires explicit autodispatch', () => {
-    expect(workflow).toContain('WRITE_BOUNDARY=INSTAGRAM_ENGAGEMENT_WRITES_ENABLED:false');
+    expect(workflow).toContain(
+      'WRITE_BOUNDARY=INSTAGRAM_ENGAGEMENT_WRITES_ENABLED:false',
+    );
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
     expect(workflow).toContain('AUTO_DISPATCH_AUTHORIZED=true');
     expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true');
