@@ -108,7 +108,7 @@ jobs:
           echo "canary_issue=$CANARY_ISSUE" >> "$GITHUB_OUTPUT"
           echo "canary_run_id=$CANARY_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Verify immutable real-Comment canary evidence
+      - name: Verify immutable real-Comment canary evidence and runtime lineage
         env:
           GH_TOKEN: ${{ github.token }}
           RUNTIME_SHA: ${{ steps.auth.outputs.runtime_sha }}
@@ -162,6 +162,20 @@ jobs:
               .actor.login == $owner and
               .display_title == $title
             ' <<< "$RUN_JSON" >/dev/null
+
+          COMPARE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${GITHUB_SHA}")"
+          jq -e \
+            --arg runtime "$RUNTIME_SHA" '
+              .status == "ahead" and
+              .base_commit.sha == $runtime and
+              .merge_base_commit.sha == $runtime and
+              (.ahead_by >= 1) and
+              (([.files[].filename] | sort) == [
+                ".github/workflows/instagram-engagement-comment-limited-promotion.yml",
+                "test/instagram-engagement-comment-limited-promotion.test.ts"
+              ])
+            ' <<< "$COMPARE_JSON" >/dev/null
+          echo 'COMMENT_PROMOTION_RUNTIME_DRIFT_GATE=PASS'
 
           COMMENT_BODIES="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${CANARY_ISSUE}/comments" --jq '.[].body // ""')"
           evidence_required=(
