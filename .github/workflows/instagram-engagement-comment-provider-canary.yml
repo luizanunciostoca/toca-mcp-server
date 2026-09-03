@@ -253,17 +253,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "COMMENT_CANARY_STATUS=PASS
-CONTROLLER_SHA=$GITHUB_SHA
-RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST
-CANARY_CHANNEL=COMMENT
-CANARY_SENT_COUNT=1
-PROVIDER_ACKNOWLEDGED=true
-CONVERSATION_RECEIPT=PASS
-PERSISTENT_COMMENT_PROMOTION=false
-DIRECT_LIMITED_REVISION_UNCHANGED=$DIRECT_REVISION
-DIRECT_LIMITED_RUNTIME_ACTIVE=true
-GENERAL_AUTONOMY_PROMOTED=false"
+          PASS_BODY="$(printf '%s\n' \
+            'COMMENT_CANARY_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            'CANARY_CHANNEL=COMMENT' \
+            'CANARY_SENT_COUNT=1' \
+            'PROVIDER_ACKNOWLEDGED=true' \
+            'CONVERSATION_RECEIPT=PASS' \
+            'PERSISTENT_COMMENT_PROMOTION=false' \
+            "DIRECT_LIMITED_REVISION_UNCHANGED=$DIRECT_REVISION" \
+            'DIRECT_LIMITED_RUNTIME_ACTIVE=true' \
+            'GENERAL_AUTONOMY_PROMOTED=false')"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$PASS_BODY"
 
       - name: Release reservation only when no provider attempt occurred
         if: failure()
