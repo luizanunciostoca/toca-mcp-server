@@ -1,0 +1,276 @@
+name: Instagram Scheduling Batch One Shot
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_schedule:
+        description: Type SCHEDULE_AUTHORIZED_48 to execute the exact authorized batch
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: instagram-scheduling-batch-20260903
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  PUBLICATION_BUCKET: toca-mcp-publication-assets
+  AUTHORIZATION_ISSUE: '523'
+  BUNDLE_DRIVE_FILE_ID: 1UyXBwoyT8Hbbho4pl8Bcr513OXDmNnDi
+  BUNDLE_SHA256: 9fb7c7cd85fd9ec431316e4cf4c81b31f8b01a5da3117a76deeda74797ec3476
+  BUNDLE_ITEM_COUNT: '48'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  PAGE_ID: '306103746115875'
+
+jobs:
+  schedule-batch:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_schedule == 'SCHEDULE_AUTHORIZED_48' }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify exact human scheduling authorization before cloud authentication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            > /tmp/scheduling-authorization.json
+
+          jq -e \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --arg bundleSha "$BUNDLE_SHA256" \
+            --arg bundleFile "$BUNDLE_DRIVE_FILE_ID" \
+            --arg count "$BUNDLE_ITEM_COUNT" \
+            --arg instagram "$INSTAGRAM_ACCOUNT_ID" \
+            --arg page "$PAGE_ID" '
+              (.state == "open") and
+              (has("pull_request") | not) and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION SCHEDULING AUTHORIZATION")) and
+              ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+              ((.body // "") | contains("AUTHORIZATION_SOURCE=CHATGPT_USER_EXPLICIT")) and
+              ((.body // "") | contains("BUNDLE_SHA256=" + $bundleSha)) and
+              ((.body // "") | contains("BUNDLE_DRIVE_FILE_ID=" + $bundleFile)) and
+              ((.body // "") | contains("BUNDLE_ITEM_COUNT=" + $count)) and
+              ((.body // "") | contains("TARGET_INSTAGRAM_ACCOUNT_ID=" + $instagram)) and
+              ((.body // "") | contains("TARGET_PAGE_ID=" + $page)) and
+              ((.body // "") | contains("APPROVE_SELECTED_ITEMS=ALL_48")) and
+              ((.body // "") | contains("ALLOW_PRIVATE_GCS_ASSET_STAGING=true")) and
+              ((.body // "") | contains("MUTATION_SURFACE=TOCA_MANAGED_INSTAGRAM_SCHEDULE_COMMAND_ONE_SHOT")) and
+              ((.body // "") | contains("SCHEDULER_LAYER_APPROVAL_HASH_REQUIRED=true")) and
+              ((.body // "") | contains("NO_DIRECT_SCHEDULED_JOBS_SQL=true")) and
+              ((.body // "") | contains("NO_PROVIDER_CALL_DURING_SCHEDULE_CREATE=true")) and
+              ((.body // "") | contains("DELETE_BRIDGE_JOB_AFTER_EXECUTION=true"))
+            ' /tmp/scheduling-authorization.json >/dev/null
+          echo 'TOCA_SCHEDULE_BATCH_HUMAN_AUTHORIZATION=VERIFIED'
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate deployer for bounded Drive read and GCP job deployment
+        id: gcp_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Download and verify immutable bundle and 48 final assets
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.gcp_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .schedule-batch/assets
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${BUNDLE_DRIVE_FILE_ID}?alt=media" \
+            --output .schedule-batch/bundle.json
+
+          test "$(sha256sum .schedule-batch/bundle.json | awk '{print $1}')" = "$BUNDLE_SHA256"
+          jq -e \
+            --argjson count "$BUNDLE_ITEM_COUNT" \
+            --arg instagram "$INSTAGRAM_ACCOUNT_ID" \
+            --arg page "$PAGE_ID" '
+              .schemaVersion == 1 and
+              .timezone == "America/Bahia" and
+              .state.eligibleCount == $count and
+              (.items | length) == $count and
+              .account.instagramAccountId == $instagram and
+              .account.pageId == $page and
+              ([.items[].contentItemId] | unique | length) == $count and
+              ([.items[].approvedDescriptorSha256] | all(test("^[a-f0-9]{64}$"))) and
+              ([.items[].createPayload.approval.status] | all(. == "APPROVED")) and
+              ([.items[] | .approvedDescriptorSha256 == .createPayload.approval.approvedDescriptorSha256] | all)
+            ' .schedule-batch/bundle.json >/dev/null
+
+          jq -c '.items[]' .schedule-batch/bundle.json | while IFS= read -r item; do
+            content_item_id="$(jq -r .contentItemId <<<"$item")"
+            drive_file_id="$(jq -r .sourceDriveFileId <<<"$item")"
+            expected_sha="$(jq -r .assetStaging.sha256 <<<"$item")"
+            expected_type="$(jq -r .assetStaging.contentType <<<"$item")"
+            printf '%s' "$content_item_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+            printf '%s' "$drive_file_id" | grep -Eq '^[A-Za-z0-9_-]{10,128}$'
+            printf '%s' "$expected_sha" | grep -Eq '^[a-f0-9]{64}$'
+            case "$expected_type" in
+              image/jpeg|image/png|image/webp) ;;
+              *) echo "Unsupported content type for $content_item_id: $expected_type" >&2; exit 1 ;;
+            esac
+
+            target=".schedule-batch/assets/${content_item_id}"
+            curl --fail --silent --show-error --location \
+              --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+              "https://www.googleapis.com/drive/v3/files/${drive_file_id}?alt=media" \
+              --output "$target"
+            test -s "$target"
+            actual_sha="$(sha256sum "$target" | awk '{print $1}')"
+            actual_type="$(file --brief --mime-type "$target")"
+            test "$actual_sha" = "$expected_sha"
+            test "$actual_type" = "$expected_type"
+          done
+          test "$(find .schedule-batch/assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "$BUNDLE_ITEM_COUNT"
+          echo 'TOCA_SCHEDULE_BATCH_DRIVE_ASSETS=VERIFIED'
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable one-shot batch image
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:schedule-batch-base-${GITHUB_SHA}"
+          BATCH_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:schedule-batch-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          docker build -t "$BASE_IMAGE" .
+          docker push "$BASE_IMAGE"
+          cat >/tmp/schedule-batch.Dockerfile <<'EOF'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          USER root
+          COPY .schedule-batch /app/schedule-batch
+          RUN chown -R node:node /app/schedule-batch && chmod -R u=rwX,go=rX /app/schedule-batch
+          USER node
+          EOF
+          docker build \
+            --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            -f /tmp/schedule-batch.Dockerfile \
+            -t "$BATCH_IMAGE" .
+          docker push "$BATCH_IMAGE"
+          echo "BATCH_IMAGE=$BATCH_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy and execute one-shot scheduler bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_NAME="toca-schedule-batch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BATCH_JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$BATCH_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/toca-managed-instagram-schedule-batch-command.js \
+            --set-env-vars "^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_MANAGED_INSTAGRAM_SCHEDULER_ENABLED=true@TOCA_DEFAULT_TENANT_ID=toca@GCP_PROJECT_ID=$GCP_PROJECT_ID@INSTAGRAM_PUBLICATION_ASSET_BUCKET=$PUBLICATION_BUCKET@TOCA_SCHEDULE_BATCH_BUNDLE_PATH=/app/schedule-batch/bundle.json@TOCA_SCHEDULE_BATCH_ASSET_DIR=/app/schedule-batch/assets@TOCA_SCHEDULE_BATCH_EXPECTED_SHA256=$BUNDLE_SHA256@TOCA_SCHEDULE_BATCH_EXPECTED_ITEM_COUNT=$BUNDLE_ITEM_COUNT" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 1800s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture and verify 48 real scheduler receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_LINE=""
+          for attempt in $(seq 1 12); do
+            RESULT_LINE="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${BATCH_JOB_NAME}\" AND textPayload:\"TOCA_SCHEDULE_BATCH_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=30m \
+              --limit=50 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'TOCA_SCHEDULE_BATCH_RESULT=' | head -n1 || true)"
+            [ -n "$RESULT_LINE" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_LINE"
+          RESULT_JSON="${RESULT_LINE#TOCA_SCHEDULE_BATCH_RESULT=}"
+          printf '%s\n' "$RESULT_JSON" | jq -e \
+            --arg bundleSha "$BUNDLE_SHA256" \
+            --argjson count "$BUNDLE_ITEM_COUNT" '
+              .schemaVersion == 1 and
+              .bundleSha256 == $bundleSha and
+              .itemCount == $count and
+              (.createdCount + .recoveredCount) == $count and
+              .status == "SCHEDULED" and
+              .providerCallDuringScheduleCreate == false and
+              (.receipts | length) == $count and
+              ([.receipts[].jobId] | unique | length) == $count and
+              ([.receipts[].status] | all(. == "SCHEDULED")) and
+              ([.receipts[].assetSha256] | all(test("^[a-f0-9]{64}$")))
+            ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq '.' > scheduling-batch-result.json
+          echo 'TOCA_SCHEDULE_BATCH_POSTGRES_READBACK=VERIFIED'
+          cat scheduling-batch-result.json
+
+      - name: Upload immutable scheduling receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-scheduling-batch-20260903-${{ github.run_id }}
+          path: scheduling-batch-result.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove one-shot Cloud Run Job
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${BATCH_JOB_NAME:-}" ]; then
+            gcloud run jobs delete "$BATCH_JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet
+          fi
+          set -e
