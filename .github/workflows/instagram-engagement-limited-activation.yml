@@ -251,10 +251,12 @@ jobs:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
           CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CANDIDATE_REVISION"
+          test -n "$PRE_REVISION"
           REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           printf '%s' "$REVISION_JSON" | jq -e \
             --arg digest "$RUNTIME_DIGEST" \
@@ -274,10 +276,12 @@ jobs:
             ' >/dev/null
 
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          printf '%s' "$SERVICE_JSON" | jq -e --arg candidate "$CANDIDATE_REVISION" '
-            ([.status.traffic[]? | select((.revisionName // "") == $candidate) | (.percent // 0)] | add // 0) == 0 and
-            .status.latestReadyRevisionName == $candidate
-          ' >/dev/null
+          printf '%s' "$SERVICE_JSON" | jq -e \
+            --arg candidate "$CANDIDATE_REVISION" \
+            --arg previous "$PRE_REVISION" '
+              ([.status.traffic[]? | select((.revisionName // "") == $candidate) | (.percent // 0)] | add // 0) == 0 and
+              ([.status.traffic[]? | select((.revisionName // "") == $previous) | (.percent // 0)] | add // 0) == 100
+            ' >/dev/null
           echo 'INSTAGRAM_ENGAGEMENT_LIMITED_ZERO_TRAFFIC_STAGE=PASS'
 
       - name: Activate LIMITED runtime by explicit traffic cutover
@@ -290,7 +294,7 @@ jobs:
           test -n "$CANDIDATE_REVISION"
           gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --to-latest --quiet
+            --to-revisions="${CANDIDATE_REVISION}=100" --quiet
           echo 'traffic_cutover=true' >> "$GITHUB_OUTPUT"
 
       - name: Verify LIMITED runtime readback and unchanged scheduler
