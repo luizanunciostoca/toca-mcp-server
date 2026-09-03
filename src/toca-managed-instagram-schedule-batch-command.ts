@@ -132,8 +132,7 @@ try {
       throw new Error(`TOCA_SCHEDULE_BATCH_ACCOUNT_OR_TIMEZONE_MISMATCH:${item.contentItemId}`);
     }
 
-    const expectedIdempotencyKey =
-      `internal:instagram:toca-managed:${payload.contentItemId}:${descriptorSha256}`;
+    const expectedIdempotencyKey = `internal:instagram:toca-managed:${payload.contentItemId}:${descriptorSha256}`;
     const existing = existingByIdempotency.get(expectedIdempotencyKey);
     if (existing) {
       if (existing.status !== 'SCHEDULED') {
