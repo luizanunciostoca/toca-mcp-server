@@ -41,9 +41,9 @@ env:
   TOCA_ORGANIZATION_ID: toca
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
-  RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f
-  RUNTIME_IMAGE_DIGEST: sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
-  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30
+  RUNTIME_SOURCE_SHA: bc9f02ff4663589c4f60fc585c89ca88b0369eba
+  RUNTIME_IMAGE_DIGEST: sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a
 
 jobs:
   shadow-rollout:
@@ -156,8 +156,8 @@ jobs:
           test "$INSTAGRAM_ACCOUNT_ID" = '17841402033495654'
           test "$INSTAGRAM_PAGE_ID" = '306103746115875'
           test "$CANONICAL_FAQ_SPREADSHEET_ID" = '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU'
-          test "$RUNTIME_SOURCE_SHA" = 'd23039fa360b1e1674964a59bd003ca76227e48f'
-          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30'
+          test "$RUNTIME_SOURCE_SHA" = 'bc9f02ff4663589c4f60fc585c89ca88b0369eba'
+          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a'
 
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           [[ "$DESCRIBED_DIGEST" == "$RUNTIME_IMAGE_DIGEST" ]] || {
@@ -327,6 +327,7 @@ jobs:
             .providerReadVerified == false and
             .databaseSchemaVerified == true and
             .migrationVerified == true and
+            .conversationOperationsVerified == true and
             .knowledgeReadable == true and
             .knowledgeSchemaVerified == true and
             .knowledgeSnapshotVerified == true and
@@ -335,7 +336,7 @@ jobs:
             .identitiesPrinted == false and
             .secretsPrinted == false
           ' >/dev/null
-          printf '%s' "$READINESS" | jq -c '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status,writesEnabled,knowledgeSource:.knowledgeAuthMode,databaseSchemaVerified,migrationVerified,knowledgeSnapshotVerified,scopeConfigured,secretsPrinted}' \
+          printf '%s' "$READINESS" | jq -c '{schemaVersion:"toca.instagram-engagement.shadow-readiness.v1",status,writesEnabled,knowledgeSource:.knowledgeAuthMode,databaseSchemaVerified,migrationVerified,conversationOperationsVerified,knowledgeSnapshotVerified,scopeConfigured,secretsPrinted}' \
             > engagement-evidence/readiness.json
 
           cleanup
@@ -477,6 +478,54 @@ jobs:
           cleanup
           trap - EXIT
 
+      - name: Prove conversation grouping, confidence and P0 escalation with writes disabled
+        env:
+          WEBHOOK_URL: ${{ steps.deployed.outputs.webhook_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-conversation-shadow-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest" \
+            --set-env-vars "NODE_ENV=production,INSTAGRAM_ENGAGEMENT_SHADOW_WEBHOOK_URL=$WEBHOOK_URL,INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false" \
+            --command node --args dist/src/ops/instagram-conversation-shadow-proof.js \
+            --tasks 1 --max-retries 0 --task-timeout 300s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          LOG_ENTRIES="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=300 --order=asc --format=json || true)"
+          PROOF="$(printf '%s' "$LOG_ENTRIES" | node scripts/extract-instagram-engagement-cloud-run-evidence.mjs instagram-conversation-shadow-e2e)"
+          printf '%s' "$PROOF" | jq -e '
+            .status == "PASS" and
+            .grouping.inboundEvents == 2 and
+            .grouping.persistedGroups == 1 and
+            .grouping.decisions == 1 and
+            .grouping.messageCount == 2 and
+            .lowConfidence.confidence == "LOW" and
+            .lowConfidence.autoSendObserved == false and
+            .p0.priority == "P0" and
+            .p0.actionStatus == "HUMAN_REVIEW" and
+            .p0.threadState == "ESCALATED" and
+            .replyOutboxEvents == 0 and
+            .externalReplyObserved == false and
+            .writesEnabled == false and
+            .messageTextPrinted == false and
+            .userIdentityPrinted == false and
+            .secretsPrinted == false
+          ' >/dev/null
+          printf '%s\n' "$PROOF" > engagement-evidence/conversation-shadow-proof.json
+
+          cleanup
+          trap - EXIT
+
       - name: Configure and read back Meta COMMENT and DIRECT subscriptions
         env:
           WEBHOOK_URL: ${{ steps.deployed.outputs.webhook_url }}
@@ -525,7 +574,7 @@ jobs:
             --arg account "$INSTAGRAM_ACCOUNT_ID" \
             --arg page "$INSTAGRAM_PAGE_ID" \
             --arg sheet "$CANONICAL_FAQ_SPREADSHEET_ID" \
-            '{schemaVersion:"toca.instagram-engagement.production-shadow-drs.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,instagramAccountId:$account,pageId:$page,canonicalKnowledgeSpreadsheetId:$sheet,channels:["COMMENT","DIRECT"],runtimeConnected:true,webhookPersistenceConnected:true,webhookPublicViaInvokerIamCheckDisabled:true,legacyAllUsersInvoker:false,metaSubscriptionsProviderReadback:true,syntheticShadowProof:"PASS",externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
+            '{schemaVersion:"toca.instagram-engagement.production-shadow-drs.v1",controllerSha:$controllerSha,runtimeSourceSha:$runtimeSha,runtimeImageDigest:$digest,instagramAccountId:$account,pageId:$page,canonicalKnowledgeSpreadsheetId:$sheet,channels:["COMMENT","DIRECT"],runtimeConnected:true,webhookPersistenceConnected:true,webhookPublicViaInvokerIamCheckDisabled:true,legacyAllUsersInvoker:false,metaSubscriptionsProviderReadback:true,syntheticShadowProof:"PASS",conversationShadowProof:"PASS",externalReplyWritesEnabled:false,productionWriteValidation:"PENDING_EXPLICIT_AUTHORIZATION"}' \
             > engagement-evidence/closeout.json
           cat engagement-evidence/closeout.json >> "$GITHUB_STEP_SUMMARY"
 

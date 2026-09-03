@@ -15,12 +15,12 @@ describe('Instagram engagement production shadow DRS-safe primary workflow', () 
   });
 
   it('uses the exact previously validated immutable runtime image', () => {
-    expect(workflow).toContain('RUNTIME_SOURCE_SHA: d23039fa360b1e1674964a59bd003ca76227e48f');
+    expect(workflow).toContain('RUNTIME_SOURCE_SHA: bc9f02ff4663589c4f60fc585c89ca88b0369eba');
     expect(workflow).toContain(
-      'RUNTIME_IMAGE_DIGEST: sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30',
+      'RUNTIME_IMAGE_DIGEST: sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a',
     );
     expect(workflow).toContain(
-      'server@sha256:4f7f9775fea909416341b18e0bc042fe0318037d6c1791fc7bcb4e121af24e30',
+      'server@sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a',
     );
   });
 
