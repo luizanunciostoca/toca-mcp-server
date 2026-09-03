@@ -44,6 +44,21 @@ describe('Instagram Comment LIMITED promotion controller', () => {
     }
   });
 
+  it('fails closed on any post-canary runtime drift', () => {
+    for (const marker of [
+      'compare/${RUNTIME_SHA}...${GITHUB_SHA}',
+      '.status == "ahead"',
+      '.base_commit.sha == $runtime',
+      '.merge_base_commit.sha == $runtime',
+      '(.ahead_by >= 1)',
+      '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
+      'test/instagram-engagement-comment-limited-promotion.test.ts',
+      'COMMENT_PROMOTION_RUNTIME_DRIFT_GATE=PASS',
+    ]) {
+      expect(workflow).toContain(marker);
+    }
+  });
+
   it('requires a healthy Direct-only LIMITED prestate', () => {
     for (const marker of [
       'DIRECT_LIMITED_PROMOTION_PRESTATE=PASS',
