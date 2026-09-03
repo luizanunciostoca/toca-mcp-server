@@ -29,7 +29,7 @@ env:
   EXPECTED_APPROVAL: APPROVED_THE_PARTY_2026_09_04_LEARN_MORE_CTA
 
 jobs:
-  correct-paused-cta:
+  correct-active-cta:
     if: github.ref == 'refs/heads/main'
     environment: production
     runs-on: ubuntu-latest
@@ -105,7 +105,7 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "JOB_NAME=toca-meta-ads-0904-learn-more-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
-      - name: Deploy one-time paused CTA correction job
+      - name: Deploy one-time active-safe CTA correction job
         shell: bash
         run: |
           set -euo pipefail
@@ -122,7 +122,7 @@ jobs:
             --task-timeout 420s \
             --quiet
 
-      - name: Execute exact paused Learn More CTA correction
+      - name: Execute exact Learn More CTA correction
         shell: bash
         run: |
           set -euo pipefail
@@ -153,10 +153,16 @@ jobs:
           test -n "$RESULT_LINE"
           RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_0904_CTA_FIX_RESULT=}"
           printf '%s' "$RESULT_JSON" | jq -e '
-            (.status == "LEARN_MORE_CTA_CORRECTED_PAUSED" or
-             .status == "ALREADY_LEARN_MORE_PAUSED") and
-            .activationPerformed == false and
+            (.status == "LEARN_MORE_CTA_CORRECTED" or
+             .status == "ALREADY_LEARN_MORE") and
+            .campaignStatus == "ACTIVE" and
+            .adSetStatus == "ACTIVE" and
+            .finalAdCount == 7 and
+            .activeAdCount == 7 and
+            .lifetimeBudgetMinor == 30000 and
             .ctaType == "LEARN_MORE" and
+            .activationPerformed == false and
+            .statusesPreserved == true and
             (.placements | sort | join(",")) ==
               "facebook_story,instagram_story"
           ' >/dev/null
