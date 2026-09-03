@@ -42,9 +42,9 @@ env:
   TOCA_ORGANIZATION_ID: toca
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
-  RUNTIME_SOURCE_SHA: bc9f02ff4663589c4f60fc585c89ca88b0369eba
-  RUNTIME_IMAGE_DIGEST: sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a
-  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a
+  RUNTIME_SOURCE_SHA: d166d2447b544cad81bc16b93e863e9c88c613a8
+  RUNTIME_IMAGE_DIGEST: sha256:44b24e15e0077f2386e426bdb65780318cf9f909b429bec508ffe723c7bb3339
+  RUNTIME_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:44b24e15e0077f2386e426bdb65780318cf9f909b429bec508ffe723c7bb3339
 
 jobs:
   shadow-rollout:
@@ -157,8 +157,8 @@ jobs:
           test "$INSTAGRAM_ACCOUNT_ID" = '17841402033495654'
           test "$INSTAGRAM_PAGE_ID" = '306103746115875'
           test "$CANONICAL_FAQ_SPREADSHEET_ID" = '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU'
-          test "$RUNTIME_SOURCE_SHA" = 'bc9f02ff4663589c4f60fc585c89ca88b0369eba'
-          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:4fdcea3fbc9e87f9790ca6cd6917176152104e840f6f37b31d680a42fa13b32a'
+          test "$RUNTIME_SOURCE_SHA" = 'd166d2447b544cad81bc16b93e863e9c88c613a8'
+          test "$RUNTIME_IMAGE_DIGEST" = 'sha256:44b24e15e0077f2386e426bdb65780318cf9f909b429bec508ffe723c7bb3339'
 
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           [[ "$DESCRIBED_DIGEST" == "$RUNTIME_IMAGE_DIGEST" ]] || {
