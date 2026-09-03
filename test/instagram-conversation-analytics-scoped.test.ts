@@ -5,7 +5,7 @@ import { PostgresInstagramConversationAnalyticsScoped } from '../src/instagram-e
 function poolStub() {
   const calls: Array<{ text: string; values: readonly unknown[] }> = [];
   const pool = {
-    query: async (text: string, values: readonly unknown[] = []) => {
+    query: (text: string, values: readonly unknown[] = []) => {
       calls.push({ text, values });
       if (text.includes('sum(kb_miss_count)')) return { rows: [{ faq_misses: '3' }] };
       return { rows: [] };
