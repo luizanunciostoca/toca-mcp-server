@@ -139,16 +139,21 @@ jobs:
           }
 
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          PRE_IMAGE="$(printf '%s' "$SERVICE_JSON" | jq -r '.spec.template.spec.containers[0].image')"
           PRE_REVISION="$(current_revision "$DAEMON_SERVICE_NAME")"
           DAEMON_URL="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.url // empty')"
-          test -n "$PRE_IMAGE"
           test -n "$PRE_REVISION"
           test -n "$DAEMON_URL"
-          printf '%s' "$SERVICE_JSON" | jq -e '
-            .spec.template.spec.containers[0] as $c |
-            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
-            ([$c.env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false"
+
+          PRE_REVISION_JSON="$(gcloud run revisions describe "$PRE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PRE_IMAGE="$(printf '%s' "$PRE_REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
+          test -n "$PRE_IMAGE"
+          printf '%s' "$PRE_REVISION_JSON" | jq -e --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .spec.containers[0] as $c |
+            (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
+            (.spec.serviceAccountName == $sa) and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false") == "false") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false") == "false")
           ' >/dev/null
 
           SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
