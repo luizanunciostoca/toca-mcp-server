@@ -5,7 +5,10 @@ const workflow = readFileSync(
   '.github/workflows/instagram-engagement-comment-provider-canary.yml',
   'utf8',
 );
-const runner = readFileSync('scripts/instagram-engagement-comment-provider-canary.mjs', 'utf8');
+const runner = readFileSync(
+  'scripts/instagram-engagement-comment-provider-canary.mjs',
+  'utf8',
+);
 const provider = readFileSync(
   'src/providers/instagram/instagram-engagement-provider.ts',
   'utf8',
@@ -94,6 +97,8 @@ describe('Instagram real Comment provider canary', () => {
 
   it('uses the canonical Instagram comment reply endpoint and requires an ACK id', () => {
     expect(provider).toContain('`${input.commentId}/replies`');
-    expect(provider).toContain("return { commentId: requireString(response.id, 'id') }");
+    expect(provider).toContain(
+      "return { commentId: requireString(response.id, 'id') }",
+    );
   });
 });
