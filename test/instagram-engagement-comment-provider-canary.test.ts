@@ -54,7 +54,7 @@ describe('Instagram real Comment provider canary', () => {
   it('binds reservation and provider execution to the exact sanitized eligible target', () => {
     const propagation =
       'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256=$ELIGIBLE_TARGET_SHA';
-    expect(workflow.match(new RegExp(propagation.replace('$', '\\$'), 'g'))).toHaveLength(2);
+    expect(workflow.split(propagation)).toHaveLength(3);
     expect(workflow).toContain('eligible_target_sha=$ELIGIBLE_TARGET_SHA');
     expect(workflow).toContain(
       'ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}',
