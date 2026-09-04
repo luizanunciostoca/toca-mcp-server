@@ -1,0 +1,158 @@
+name: TEMP The Party Real Photo Reel V02
+
+on:
+  push:
+    branches:
+      - ops/the-party-real-photo-reel-v02-20260904
+    paths:
+      - .github/workflows/_tmp-the-party-real-photo-reel-v02.yml
+
+permissions:
+  contents: read
+  id-token: write
+  issues: read
+
+concurrency:
+  group: the-party-real-photo-reel-v02-20260904
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  BUCKET: toca-mcp-publication-assets
+  AUTHORIZATION_REF: https://github.com/luizanunciostoca/toca-mcp-server/issues/621
+  VERTEX_VEO_MODEL: veo-3.1-generate-001
+
+jobs:
+  generate:
+    if: github.ref == 'refs/heads/ops/the-party-real-photo-reel-v02-20260904'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout governed batch branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate owner one-shot authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/${GITHUB_REPOSITORY}/issues/621 > /tmp/auth.json
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and
+            .user.login == $owner and
+            .title == "GENERATIVE BATCH AUTHORIZATION — The Party Real Photo Reel 2026-09-04 V02" and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("PUBLICATION_AUTHORIZED=false")) and
+            ((.body // "") | contains("SCHEDULING_AUTHORIZED=false")) and
+            ((.body // "") | contains("MARKETING_READY_AUTHORIZED=false")) and
+            ((.body // "") | contains("PROVIDER=GOOGLE_VERTEX_VEO")) and
+            ((.body // "") | contains("MODEL=veo-3.1-generate-001")) and
+            ((.body // "") | contains("DURATION_PER_SHOT=4")) and
+            ((.body // "") | contains("SIZE=720x1280")) and
+            ((.body // "") | contains("ALLOW_ENVIRONMENT_EXPANSION=false")) and
+            ((.body // "") | contains("ALLOW_ARCHITECTURAL_INVENTION=false")) and
+            ((.body // "") | contains("ALLOW_AI_LOGO_GENERATION=false")) and
+            ((.body // "") | contains("RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"))
+          ' /tmp/auth.json >/dev/null
+          grep -F "key: 'video-workspace'" src/the-party-real-photo-reel-v02-batch.ts >/dev/null
+
+      - name: Authenticate proven deployer identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build batch image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:tp-realphoto-v02-${GITHUB_SHA}"
+          JOB_NAME="toca-tp-realphoto-v02-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Generate six governed Veo shots
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set -e
+          }
+          trap cleanup EXIT
+          ENV_VARS="^~^GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$BUCKET~THE_PARTY_REALPHOTO_V02_APPROVAL_REF=$AUTHORIZATION_REF~VERTEX_VEO_MODEL=$VERTEX_VEO_MODEL"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/the-party-real-photo-reel-v02-batch.js \
+            --set-env-vars "$ENV_VARS" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 3300s \
+            --memory 2Gi \
+            --cpu 2 \
+            --quiet
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 40); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"THE_PARTY_REALPHOTO_V02_BATCH_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=90m --limit=100 --order=desc \
+              --format='value(textPayload)' | grep 'THE_PARTY_REALPHOTO_V02_BATCH_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#THE_PARTY_REALPHOTO_V02_BATCH_RESULT=}"; break; fi
+            sleep 5
+          done
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .schemaVersion == 1 and
+            .provider == "GOOGLE_VERTEX_VEO" and
+            .model == "veo-3.1-generate-001" and
+            .secondsPerShot == 4 and
+            .size == "720x1280" and
+            .publicationAuthorized == false and
+            .schedulingAuthorized == false and
+            .marketingReadyAuthorized == false and
+            .rightsGate == "UNVERIFIED_BLOCKED_FOR_MARKETING" and
+            (.results | length == 6)
+          ' >/dev/null
+          mkdir -p generated
+          printf '%s\n' "$RESULT_JSON" | jq 'del(.results[].deliveryUrl)' > generated/batch-result.json
+          printf '%s' "$RESULT_JSON" | jq -c '.results[]' | while read -r item; do
+            ID="$(printf '%s' "$item" | jq -r '.id')"
+            URL="$(printf '%s' "$item" | jq -r '.deliveryUrl')"
+            SHA="$(printf '%s' "$item" | jq -r '.outputSha256')"
+            FILE="generated/${ID}.mp4"
+            curl --fail --silent --show-error --location "$URL" --output "$FILE"
+            OBSERVED="$(sha256sum "$FILE" | awk '{print $1}')"
+            test "$OBSERVED" = "$SHA"
+          done
+          cleanup
+          trap - EXIT
+
+      - name: Upload generated shots and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: the-party-real-photo-reel-v02-shots-20260904
+          path: generated/
+          if-no-files-found: error
+          retention-days: 14
