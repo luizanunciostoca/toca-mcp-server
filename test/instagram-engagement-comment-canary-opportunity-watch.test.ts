@@ -53,6 +53,21 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('test "$RESERVATION_COUNT" = \'0\'');
   });
 
+  it('fails closed unless probe safety attestations are unique and exact', () => {
+    expect(workflow).toContain('read_single_marker() {');
+    expect(workflow).toContain('test "$count" = \'1\'');
+    expect(workflow).toContain('read_exact_marker CANARY_CHANNEL COMMENT');
+    expect(workflow).toContain('read_exact_marker READ_ONLY_ELIGIBILITY true');
+    expect(workflow).toContain('read_exact_marker DATABASE_MUTATIONS false');
+    expect(workflow).toContain('read_exact_marker PROVIDER_CALLS false');
+    expect(workflow).toContain('read_exact_marker EXTERNAL_REPLY_WRITES false');
+    expect(workflow).toContain('read_exact_marker RAW_USER_DATA_LOGGED false');
+    expect(workflow).toContain(
+      'STATUS="$(read_single_marker INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY)"',
+    );
+    expect(workflow).toContain('TARGET_SHA="$(read_single_marker ELIGIBLE_TARGET_SHA256)"');
+  });
+
   it('creates only a sanitized opportunity and never dispatches or performs a real canary', () => {
     expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_STATUS=READY');
     expect(workflow).toContain('ELIGIBLE_TARGET_SHA256=$TARGET_SHA');
