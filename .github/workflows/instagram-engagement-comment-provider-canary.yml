@@ -64,14 +64,19 @@ jobs:
           test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
           RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
           RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          TARGET_COUNT="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$BODY" || true)"
+          test "$TARGET_COUNT" = '1'
+          ELIGIBLE_TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$BODY" | cut -d= -f2-)"
           test "$RUNTIME_SHA" = "$GITHUB_SHA"
           [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
           required=(
             "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
             "AUTHORIZATION_STATE=ACTIVE"
             "INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED"
             "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
             "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"
             "CANARY_CHANNEL=COMMENT"
             "CANARY_MAX_EXTERNAL_REPLIES=1"
             "TEMPORARY_JOB_ONLY=true"
@@ -90,6 +95,7 @@ jobs:
           STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
           echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "eligible_target_sha=$ELIGIBLE_TARGET_SHA" >> "$GITHUB_OUTPUT"
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           echo "canary_session=$SESSION" >> "$GITHUB_OUTPUT"
           echo "started_at=$STARTED_AT" >> "$GITHUB_OUTPUT"
@@ -170,6 +176,7 @@ jobs:
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+          ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -180,7 +187,7 @@ jobs:
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MODE=PREPARE#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MODE=PREPARE#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256=$ELIGIBLE_TARGET_SHA#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --command node --args scripts/instagram-engagement-comment-provider-canary.mjs \
             --tasks 1 --max-retries 0 --task-timeout 120s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
@@ -189,6 +196,7 @@ jobs:
         env:
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           CANARY_SESSION: ${{ steps.auth.outputs.canary_session }}
+          ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -199,7 +207,7 @@ jobs:
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
-            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=COMMENT#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MODE=EXECUTE#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=COMMENT#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MODE=EXECUTE#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_SESSION=$CANARY_SESSION#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256=$ELIGIBLE_TARGET_SHA#INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --command node --args scripts/instagram-engagement-comment-provider-canary.mjs \
             --tasks 1 --max-retries 0 --task-timeout 120s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
@@ -249,6 +257,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.auth.outputs.authorization_issue }}
           RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}
           DIRECT_REVISION: ${{ steps.boundary.outputs.direct_revision }}
         shell: bash
         run: |
@@ -257,6 +266,7 @@ jobs:
             'COMMENT_CANARY_STATUS=PASS' \
             "CONTROLLER_SHA=$GITHUB_SHA" \
             "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+            "ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA" \
             'CANARY_CHANNEL=COMMENT' \
             'CANARY_SENT_COUNT=1' \
             'PROVIDER_ACKNOWLEDGED=true' \
