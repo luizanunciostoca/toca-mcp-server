@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "src/the-party-agency-generative-reel-v04.ts"
+  ]
+}
