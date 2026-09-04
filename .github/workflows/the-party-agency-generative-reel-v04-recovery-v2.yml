@@ -1,0 +1,146 @@
+name: The Party Agency Generative Reel V04 Recovery V2
+
+on:
+  push:
+    branches:
+      - ops/the-party-agency-generative-reel-v04
+    paths:
+      - .github/workflows/the-party-agency-generative-reel-v04-recovery-v2.yml
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+  GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
+  GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
+  GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
+  INSTAGRAM_PUBLICATION_ASSET_BUCKET: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
+  AUTHORIZATION_ISSUE: '622'
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate recovery-only contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" > /tmp/auth.json
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PROVIDER AUTHORIZATION — The Party Agency Generative Reel V04") and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("PUBLICATION_AUTHORIZED=false")) and
+            ((.body // "") | contains("RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"))
+          ' /tmp/auth.json >/dev/null
+          grep -q "POST_ONLY_FROM_PERSISTED_VEO_SHOTS" src/the-party-agency-generative-reel-v04-recovery.ts
+          ! grep -q "provider.generate" src/the-party-agency-generative-reel-v04-recovery.ts
+          grep -q 'the-party-agency-generative-reel-v04.ts' tsconfig.video-recovery.json
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build lean recovery image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:tp-agency-v04-recovery-v2-${GITHUB_SHA}"
+          JOB_NAME="toca-tp-agency-v04-recover-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -f Dockerfile.video-recovery -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Recover four persisted Veo shots and render final package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery-package
+          cleanup() { set +e; gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; set -e; }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --memory 4Gi --cpu 2 \
+            --command node --args dist/src/the-party-agency-generative-reel-v04-recovery.js \
+            --set-env-vars "GCP_PROJECT_ID=$GCP_PROJECT_ID,INSTAGRAM_PUBLICATION_ASSET_BUCKET=$INSTAGRAM_PUBLICATION_ASSET_BUCKET" \
+            --tasks 1 --max-retries 0 --task-timeout 1800s --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" --project "$GCP_PROJECT_ID" --freshness=40m --limit=300 --order=asc --format='value(textPayload)' | tail -n 120 > recovery-package/failure.log || true
+            cleanup; trap - EXIT; exit "$STATUS"
+          fi
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 20); do
+            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=40m --limit=100 --order=desc --format='value(textPayload)' | grep 'THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=}"; break; fi
+            sleep 4
+          done
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .productionId == "VID-TP-20260904-AGENCY-GEN-004" and
+            .status == "GENERATED_REVIEW_REQUIRED" and
+            .recoveryMode == "POST_ONLY_FROM_PERSISTED_VEO_SHOTS" and
+            .newProviderCalls == 0 and
+            (.recoveredShots | length == 4) and
+            .exactReadback == true and
+            .publicationAuthorized == false
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > recovery-package/result.json
+
+          get_output() {
+            local key="$1" file="$2" url sha
+            url="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.url")"
+            sha="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.sha256")"
+            curl --fail --silent --show-error --location "$url" -o "recovery-package/$file"
+            observed="$(sha256sum "recovery-package/$file" | awk '{print $1}')"
+            test "$observed" = "$sha"
+          }
+          get_output approval TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_APPROVAL.mp4
+          get_output master TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_MASTER.mp4
+          get_output cover TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_COVER.jpg
+          get_output contactSheet TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_CONTACT_SHEET.jpg
+          cleanup; trap - EXIT
+
+      - name: Upload recovered package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: the-party-agency-generative-reel-v04-recovery-v2-${{ github.sha }}
+          path: recovery-package/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Consume authorization
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "AUTHORIZATION_CONSUMED_AFTER_POST_RECOVERY=true; RECOVERY_RUN_ID=${GITHUB_RUN_ID}; ORIGINAL_VEO_RUN_ID=33923739299; NEW_PROVIDER_CALLS=0; STATUS=GENERATED_REVIEW_REQUIRED; PUBLICATION_AUTHORIZED=false; RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"
+          gh issue close "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
