@@ -13,6 +13,7 @@ describe('Instagram real Comment provider canary', () => {
   it('requires a single-use Comment-only authorization without persistent promotion', () => {
     for (const marker of [
       'INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED',
+      'ELIGIBLE_TARGET_SHA256=',
       'CANARY_CHANNEL=COMMENT',
       'CANARY_MAX_EXTERNAL_REPLIES=1',
       'TEMPORARY_JOB_ONLY=true',
@@ -23,6 +24,9 @@ describe('Instagram real Comment provider canary', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+    expect(workflow).toContain("TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='");
+    expect(workflow).toContain("test \"$TARGET_COUNT\" = '1'");
+    expect(workflow).toContain('[[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]');
   });
 
   it('packages the canary runner into the production runtime image', () => {
@@ -45,6 +49,28 @@ describe('Instagram real Comment provider canary', () => {
     expect(workflow).toContain('DIRECT_LIMITED_PRESTATE=PASS');
     expect(workflow).toContain('DIRECT_LIMITED_POSTSTATE=PASS');
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=COMMENT');
+  });
+
+  it('binds reservation and provider execution to the exact sanitized eligible target', () => {
+    const propagation =
+      'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256=$ELIGIBLE_TARGET_SHA';
+    expect(workflow.match(new RegExp(propagation.replace('$', '\\$'), 'g'))).toHaveLength(2);
+    expect(workflow).toContain('eligible_target_sha=$ELIGIBLE_TARGET_SHA');
+    expect(workflow).toContain('ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}');
+
+    expect(runner).toContain('INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256');
+    expect(runner).toContain('COMMENT_CANARY_EXPECTED_TARGET_SHA256_INVALID');
+    expect(runner).toContain('digest(row.engagement_event_id) !== expectedTargetSha256');
+    expect(runner).toContain('COMMENT_CANARY_EXPECTED_TARGET_NOT_ELIGIBLE');
+    expect(runner).toContain('digest(candidate.engagement_event_id) !== expectedTargetSha256');
+    expect(runner).toContain('COMMENT_CANARY_RESERVED_TARGET_MISMATCH');
+
+    const executeBinding = runner.indexOf('COMMENT_CANARY_RESERVED_TARGET_MISMATCH');
+    const inFlight = runner.indexOf("status='SEND_AMBIGUOUS'");
+    const providerCall = runner.indexOf('await provider.replyToComment({');
+    expect(executeBinding).toBeGreaterThan(-1);
+    expect(inFlight).toBeGreaterThan(executeBinding);
+    expect(providerCall).toBeGreaterThan(inFlight);
   });
 
   it('selects only previously classified kill-switch Comments and revalidates safety', () => {
