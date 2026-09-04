@@ -13,6 +13,7 @@ describe('Instagram Comment LIMITED promotion controller', () => {
       'github.event.issue.user.login == github.repository_owner',
       'AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA',
       'INSTAGRAM_ENGAGEMENT_COMMENT_LIMITED_PROMOTION=AUTHORIZED',
+      'ELIGIBLE_TARGET_SHA256=',
       'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=true',
       'AUTO_REPLY_CHANNELS=DIRECT,COMMENT',
       'AUTONOMY_STAGE=LIMITED',
@@ -39,6 +40,25 @@ describe('Instagram Comment LIMITED promotion controller', () => {
       'CONVERSATION_RECEIPT=PASS',
       'DIRECT_LIMITED_RUNTIME_ACTIVE=true',
       'GENERAL_AUTONOMY_PROMOTED=false',
+    ]) {
+      expect(workflow).toContain(marker);
+    }
+  });
+
+  it('binds promotion authorization, canary authorization and PASS evidence to one target', () => {
+    for (const marker of [
+      "TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='",
+      "test \"$TARGET_COUNT\" = '1'",
+      '[[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]',
+      'eligible_target_sha=$ELIGIBLE_TARGET_SHA',
+      'ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}',
+      "CANARY_TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='",
+      "test \"$CANARY_TARGET_COUNT\" = '1'",
+      '"ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"',
+      'EVIDENCE_TARGET_COUNT=',
+      "test \"$EVIDENCE_TARGET_COUNT\" = '1'",
+      'COMMENT_CANARY_TARGET_BINDING=PASS',
+      '"ELIGIBLE_TARGET_SHA256=${{ steps.auth.outputs.eligible_target_sha }}"',
     ]) {
       expect(workflow).toContain(marker);
     }
@@ -120,6 +140,7 @@ describe('Instagram Comment LIMITED promotion controller', () => {
   it('publishes a bounded LIMITED promotion receipt and keeps GENERAL disabled', () => {
     for (const marker of [
       'COMMENT_LIMITED_PROMOTION_STATUS=PASS',
+      'ELIGIBLE_TARGET_SHA256=',
       'AUTO_REPLY_CHANNELS=DIRECT,COMMENT',
       'PERSISTENT_WRITES_ENABLED=true',
       'COMMENT_AUTO_REPLY_ENABLED=true',
