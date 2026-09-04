@@ -48,15 +48,15 @@ describe('Instagram Comment LIMITED promotion controller', () => {
   it('binds promotion authorization, canary authorization and PASS evidence to one target', () => {
     for (const marker of [
       "TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='",
-      "test \"$TARGET_COUNT\" = '1'",
+      'test "$TARGET_COUNT" = \'1\'',
       '[[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]',
       'eligible_target_sha=$ELIGIBLE_TARGET_SHA',
       'ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}',
       "CANARY_TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='",
-      "test \"$CANARY_TARGET_COUNT\" = '1'",
+      'test "$CANARY_TARGET_COUNT" = \'1\'',
       '"ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"',
       'EVIDENCE_TARGET_COUNT=',
-      "test \"$EVIDENCE_TARGET_COUNT\" = '1'",
+      'test "$EVIDENCE_TARGET_COUNT" = \'1\'',
       'COMMENT_CANARY_TARGET_BINDING=PASS',
       '"ELIGIBLE_TARGET_SHA256=${{ steps.auth.outputs.eligible_target_sha }}"',
     ]) {
