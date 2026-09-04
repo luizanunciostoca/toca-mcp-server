@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  GH_TOKEN: ${{ github.token }}
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
   GCP_ARTIFACT_REPOSITORY: toca-mcp
@@ -45,8 +46,6 @@ jobs:
 
       - name: Resolve one active owner-authored read-only watch
         id: auth
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -275,7 +274,6 @@ jobs:
       - name: Handle sanitized eligibility decision
         if: success()
         env:
-          GH_TOKEN: ${{ github.token }}
           WATCH_ISSUE: ${{ needs.authorization-preflight.outputs.watch_issue }}
           RUNTIME_DIGEST: ${{ needs.authorization-preflight.outputs.runtime_digest }}
           STATUS: ${{ steps.decision.outputs.status }}
@@ -367,7 +365,6 @@ jobs:
       - name: Consume watch after probe or controller failure
         if: failure()
         env:
-          GH_TOKEN: ${{ github.token }}
           WATCH_ISSUE: ${{ needs.authorization-preflight.outputs.watch_issue }}
         shell: bash
         run: |
