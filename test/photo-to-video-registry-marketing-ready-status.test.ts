@@ -137,8 +137,6 @@ describe('photo-to-video marketing-ready venue status', () => {
   it('accepts the canonical VENUE_VERIFIED_MARKETING_READY status', async () => {
     const registry = new GoogleSheetsPhotoToVideoRegistry(
       clientFor('VENUE_VERIFIED_MARKETING_READY'),
-      'creative-truth',
-      'content-registry',
     );
 
     const resolved = await registry.resolve(CONTENT_ITEM_ID, 'REAL_PHOTO_TO_MOTION_VIDEO');
@@ -151,8 +149,6 @@ describe('photo-to-video marketing-ready venue status', () => {
   it('keeps legacy master revalidation status fail-closed', async () => {
     const registry = new GoogleSheetsPhotoToVideoRegistry(
       clientFor('VENUE_VERIFIED_LEGACY_MASTER_REVALIDATION_REQUIRED'),
-      'creative-truth',
-      'content-registry',
     );
 
     await expect(registry.resolve(CONTENT_ITEM_ID, 'REAL_PHOTO_TO_MOTION_VIDEO')).rejects.toThrow(
