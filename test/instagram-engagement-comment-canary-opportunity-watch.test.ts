@@ -26,14 +26,16 @@ describe('Instagram Comment canary opportunity watch', () => {
   });
 
   it('requires exactly one owner-authored current-main authorization and exact immutable image', () => {
-    expect(workflow).toContain("test \"$GITHUB_REF\" = 'refs/heads/main'");
+    expect(workflow).toContain('test "$GITHUB_REF" = \'refs/heads/main\'');
     expect(workflow).toContain('select(.user.login == $owner)');
-    expect(workflow).toContain("if [[ \"$COUNT\" != '1' ]]");
+    expect(workflow).toContain('if [[ "$COUNT" != \'1\' ]]');
     expect(workflow).toContain('test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"');
     expect(workflow).toContain('if [[ "$RUNTIME_SHA" != "$GITHUB_SHA" ]]');
     expect(workflow).toContain('^sha256:[0-9a-f]{64}$');
     expect(workflow).toContain('gcloud artifacts docker images describe');
-    expect(workflow).toContain('RUNTIME_DIGEST: ${{ needs.authorization-preflight.outputs.runtime_digest }}');
+    expect(workflow).toContain(
+      'RUNTIME_DIGEST: ${{ needs.authorization-preflight.outputs.runtime_digest }}',
+    );
     expect(workflow).toContain('GH_TOKEN: ${{ github.token }}');
   });
 
@@ -45,10 +47,10 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30');
     expect(workflow).toContain("grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY");
     expect(workflow).toContain('RAW_USER_DATA_LOGGED');
-    expect(workflow).toContain("if [[ \"$STATUS\" = 'READY' ]]");
-    expect(workflow).toContain("test \"$ELIGIBLE_COUNT\" = '1'");
-    expect(workflow).toContain("test \"$AMBIGUITY_COUNT\" = '0'");
-    expect(workflow).toContain("test \"$RESERVATION_COUNT\" = '0'");
+    expect(workflow).toContain('if [[ "$STATUS" = \'READY\' ]]');
+    expect(workflow).toContain('test "$ELIGIBLE_COUNT" = \'1\'');
+    expect(workflow).toContain('test "$AMBIGUITY_COUNT" = \'0\'');
+    expect(workflow).toContain('test "$RESERVATION_COUNT" = \'0\'');
   });
 
   it('creates only a sanitized opportunity and never dispatches or performs a real canary', () => {
@@ -60,19 +62,23 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('gh issue create');
     expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED');
     expect(workflow).not.toContain('EXTERNAL_COMMENT_REPLY_AUTHORIZED=true');
-    expect(workflow).not.toContain('actions/workflows/instagram-engagement-comment-provider-canary.yml/dispatches');
+    expect(workflow).not.toContain(
+      'actions/workflows/instagram-engagement-comment-provider-canary.yml/dispatches',
+    );
     expect(workflow).not.toContain('gcloud run services ');
     expect(workflow).not.toContain('gcloud scheduler ');
   });
 
   it('keeps no-target watches active but consumes terminal, stale, expired, or failed watches', () => {
-    expect(workflow).toContain("if [[ \"$STATUS\" = 'NO_ELIGIBLE_TARGET' ]]");
+    expect(workflow).toContain('if [[ "$STATUS" = \'NO_ELIGIBLE_TARGET\' ]]');
     expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
     expect(workflow).toContain("close_watch 'STALE_MAIN'");
     expect(workflow).toContain("close_watch 'EXPIRED'");
     expect(workflow).toContain("close_watch 'READY_FOUND'");
     expect(workflow).toContain('close_watch "BLOCKED_${STATUS}"');
-    expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE');
+    expect(workflow).toContain(
+      'COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE',
+    );
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(workflow).toContain('-f state=closed -f state_reason=completed');
   });
