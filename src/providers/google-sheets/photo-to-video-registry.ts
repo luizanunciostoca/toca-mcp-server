@@ -444,7 +444,7 @@ function assertSourceAsset(venue: VenueAsset, content: PhotoToVideoContentContex
     venue.operation !== content.operation ||
     !venue.venueVerified ||
     !venue.marketingReady ||
-    venue.status !== 'ACTIVE_APPROVED' ||
+    (venue.status !== 'ACTIVE_APPROVED' && venue.status !== 'VENUE_VERIFIED_MARKETING_READY') ||
     !venue.masterAssetId ||
     !venue.masterDriveFileId ||
     !venue.masterSha256
