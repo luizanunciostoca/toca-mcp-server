@@ -61,8 +61,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          AUDIT_TIMEOUT_SECONDS=90
           set +e
-          pnpm audit --audit-level high > /tmp/pnpm-audit.stdout 2> /tmp/pnpm-audit.stderr
+          timeout --signal=TERM --kill-after=10s "${AUDIT_TIMEOUT_SECONDS}s" pnpm audit --audit-level high > /tmp/pnpm-audit.stdout 2> /tmp/pnpm-audit.stderr
           AUDIT_RC=$?
           set -e
 
@@ -71,6 +72,12 @@ jobs:
 
           if [[ "$AUDIT_RC" -eq 0 ]]; then
             echo 'PNPM_AUDIT_STATUS=PASS' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [[ "$AUDIT_RC" -eq 124 || "$AUDIT_RC" -eq 137 ]]; then
+            echo 'PNPM_AUDIT_STATUS=INFRA_UNAVAILABLE_TRIVY_FALLBACK' >> "$GITHUB_ENV"
+            echo '::warning::npm audit exceeded bounded registry wait; requiring independent Trivy HIGH/CRITICAL filesystem gate.'
             exit 0
           fi
 
