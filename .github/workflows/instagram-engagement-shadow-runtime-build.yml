@@ -177,3 +177,38 @@ jobs:
             echo 'SERVICE_DEPLOY=false'
             echo 'EXTERNAL_REPLY_WRITES=false'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Consume single-use build authorization
+        if: always() && env.AUTHORIZATION_ISSUE_NUMBER != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram engagement shadow runtime build AUTO"))
+          ' >/dev/null
+
+          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
+            BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          else
+            grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
+          fi
+
+          BODY="$(sed 's/^AUTO_BUILD_AUTHORIZED=true$/AUTO_BUILD_AUTHORIZED=false/' <<< "$BODY")"
+
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
+            -f state=closed \
+            -f state_reason=completed \
+            -f body="$BODY" >/dev/null
+
+          {
+            echo 'SHADOW_RUNTIME_BUILD_AUTHORIZATION_CONSUMED=true'
+            echo "AUTHORIZATION_ISSUE_NUMBER=$AUTHORIZATION_ISSUE_NUMBER"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -45,4 +45,20 @@ describe('Instagram engagement shadow runtime build-only workflow', () => {
     expect(workflow).toContain('SERVICE_DEPLOY=false');
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES=false');
   });
+
+  it('always consumes and closes the single-use authorization after validation', () => {
+    for (const marker of [
+      'Consume single-use build authorization',
+      "if: always() && env.AUTHORIZATION_ISSUE_NUMBER != ''",
+      'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED',
+      'AUTO_BUILD_AUTHORIZED=false',
+      's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/',
+      's/^AUTO_BUILD_AUTHORIZED=true$/AUTO_BUILD_AUTHORIZED=false/',
+      '-f state=closed',
+      '-f state_reason=completed',
+      'SHADOW_RUNTIME_BUILD_AUTHORIZATION_CONSUMED=true',
+    ]) {
+      expect(workflow).toContain(marker);
+    }
+  });
 });
