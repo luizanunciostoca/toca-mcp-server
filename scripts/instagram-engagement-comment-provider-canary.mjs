@@ -196,14 +196,8 @@ async function execute() {
   );
   if (marked.rowCount !== 1) fail('COMMENT_CANARY_ACTION_STATE_CONFLICT');
 
-  // Fail closed before the provider side effect. If the process disappears after
-  // the call but before acknowledgement persistence, this state prevents blind retry.
-  await recordConversationReplyFailure(pool, {
-    engagementEventId: candidate.engagement_event_id,
-    ambiguous: true,
-    now,
-  });
-
+  // Fail closed before the provider side effect using only the durable action-level
+  // in-flight marker. Conversation failure state is applied only after an uncertain outcome.
   const config = loadConfig(process.env);
   if (!config.META_ENABLED || !config.META_PROVIDER_VERIFIED) {
     fail('COMMENT_CANARY_META_PROVIDER_NOT_VERIFIED');

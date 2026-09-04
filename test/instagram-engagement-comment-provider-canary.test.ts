@@ -98,11 +98,14 @@ describe('Instagram real Comment provider canary', () => {
     }
   });
 
-  it('fails closed as ambiguous before the one provider side effect', () => {
+  it('fails closed at action level before send and escalates conversation only on uncertainty', () => {
     const inFlight = runner.indexOf("status='SEND_AMBIGUOUS'");
     const providerCall = runner.indexOf('await provider.replyToComment({');
+    const conversationFailure = runner.indexOf('await recordConversationReplyFailure(pool');
     expect(inFlight).toBeGreaterThan(-1);
     expect(providerCall).toBeGreaterThan(inFlight);
+    expect(conversationFailure).toBeGreaterThan(providerCall);
+    expect(runner.split('await recordConversationReplyFailure(pool')).toHaveLength(2);
     expect(runner).toContain('COMMENT_CANARY_SEND_IN_FLIGHT');
     expect(runner).toContain('COMMENT_CANARY_PROVIDER_OUTCOME_UNKNOWN');
     expect(runner).toContain('COMMENT_CANARY_PROVIDER_OUTCOME_AMBIGUOUS');
