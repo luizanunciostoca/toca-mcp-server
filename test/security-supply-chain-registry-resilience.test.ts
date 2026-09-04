@@ -19,6 +19,18 @@ describe('Security Supply Chain registry resilience', () => {
     }
   });
 
+  it('bounds npm audit registry wait and treats timeout only as infrastructure unavailability', () => {
+    for (const marker of [
+      'AUDIT_TIMEOUT_SECONDS=90',
+      'timeout --signal=TERM --kill-after=10s "${AUDIT_TIMEOUT_SECONDS}s" pnpm audit --audit-level high',
+      '"$AUDIT_RC" -eq 124 || "$AUDIT_RC" -eq 137',
+      'npm audit exceeded bounded registry wait',
+      'PNPM_AUDIT_STATUS=INFRA_UNAVAILABLE_TRIVY_FALLBACK',
+    ]) {
+      expect(workflow).toContain(marker);
+    }
+  });
+
   it('keeps vulnerability and unclassified audit failures fail-closed', () => {
     expect(workflow).toContain('PNPM_AUDIT_STATUS=VULNERABILITY_OR_UNCLASSIFIED_FAILURE');
     expect(workflow).toContain('exit "$AUDIT_RC"');
