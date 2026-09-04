@@ -1,0 +1,194 @@
+name: The Party Agency Generative Reel V04 Recovery
+
+on:
+  push:
+    branches:
+      - ops/the-party-agency-generative-reel-v04
+    paths:
+      - src/the-party-agency-generative-reel-v04-recovery.ts
+      - .github/workflows/the-party-agency-generative-reel-v04-recovery.yml
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+  GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
+  GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
+  GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
+  INSTAGRAM_PUBLICATION_ASSET_BUCKET: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
+  AUTHORIZATION_ISSUE: '622'
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact recovery candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate active authorization and post-only recovery contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'ops/the-party-agency-generative-reel-v04'
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" > /tmp/auth.json
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PROVIDER AUTHORIZATION — The Party Agency Generative Reel V04") and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("VIDEO_PRODUCTION_ID=VID-TP-20260904-AGENCY-GEN-004")) and
+            ((.body // "") | contains("PUBLICATION_AUTHORIZED=false")) and
+            ((.body // "") | contains("RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"))
+          ' /tmp/auth.json >/dev/null
+          grep -q "POST_ONLY_FROM_PERSISTED_VEO_SHOTS" src/the-party-agency-generative-reel-v04-recovery.ts
+          ! grep -q "provider.generate" src/the-party-agency-generative-reel-v04-recovery.ts
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build immutable recovery image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:tp-agency-v04-recovery-${GITHUB_SHA}"
+          JOB_NAME="toca-tp-agency-v04-recover-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Recover persisted Veo shots and finish post-production
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p agency-reel-v04-recovery-evidence
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set -e
+          }
+          trap cleanup EXIT
+
+          capture_failure() {
+            local status="$1"
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=45m --limit=500 --order=asc --format=json > /tmp/recovery-logs.json || printf '[]\n' > /tmp/recovery-logs.json
+            STATUS="$status" JOB="$JOB_NAME" node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/recovery-logs.json', 'utf8'));
+          const redact = (v) => String(v)
+            .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/giu, 'Bearer <REDACTED>')
+            .replace(/\bya29\.[A-Za-z0-9._-]+\b/gu, '<GOOGLE_TOKEN>')
+            .replace(/https?:\/\/[^\s"']+/giu, '<URL>')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+            .replace(/\s+/gu, ' ').trim().slice(0, 1200);
+          const msg = (e) => typeof e?.textPayload === 'string' ? e.textPayload : typeof e?.jsonPayload?.message === 'string' ? e.jsonPayload.message : typeof e?.protoPayload?.status?.message === 'string' ? e.protoPayload.status.message : '';
+          const sanitized = (Array.isArray(entries) ? entries : []).map(e => ({severity:String(e?.severity ?? 'DEFAULT'),timestamp:String(e?.timestamp ?? ''),message:redact(msg(e))})).filter(e => e.message).slice(-100);
+          fs.writeFileSync('agency-reel-v04-recovery-evidence/failure-diagnostic.json', JSON.stringify({schemaVersion:1,executionStatus:Number(process.env.STATUS ?? '1'),jobName:process.env.JOB,sanitizedEntries:sanitized,newProviderCalls:0,publicationAuthorized:false}, null, 2));
+          NODE
+          }
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --memory 4Gi --cpu 2 \
+            --command node \
+            --args dist/src/the-party-agency-generative-reel-v04-recovery.js \
+            --set-env-vars "GCP_PROJECT_ID=$GCP_PROJECT_ID,INSTAGRAM_PUBLICATION_ASSET_BUCKET=$INSTAGRAM_PUBLICATION_ASSET_BUCKET" \
+            --tasks 1 --max-retries 0 --task-timeout 2400s --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            capture_failure "$STATUS"
+            cleanup
+            trap - EXIT
+            exit "$STATUS"
+          fi
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 20); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=45m --limit=100 --order=desc --format='value(textPayload)' | grep 'THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#THE_PARTY_AGENCY_GEN_V04_RECOVERY_RESULT=}"; break; fi
+            sleep 5
+          done
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .schemaVersion == 1 and
+            .productionId == "VID-TP-20260904-AGENCY-GEN-004" and
+            .status == "GENERATED_REVIEW_REQUIRED" and
+            .recoveryMode == "POST_ONLY_FROM_PERSISTED_VEO_SHOTS" and
+            .newProviderCalls == 0 and
+            (.recoveredShots | length == 4) and
+            ([.recoveredShots[].sourceAssetId] == ["TP-0048","TP-0087","TP-0071","TP-0130"]) and
+            (.outputs.approval.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.master.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.cover.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.contactSheet.sha256 | test("^[a-f0-9]{64}$")) and
+            .rightsStatus == "UNVERIFIED_BLOCKED_FOR_MARKETING" and
+            .publicationAuthorized == false and
+            .exactReadback == true
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > agency-reel-v04-recovery-evidence/result.json
+
+          download_and_verify() {
+            local key="$1" name="$2"
+            local url sha
+            url="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.url")"
+            sha="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.sha256")"
+            curl --fail --silent --show-error --location "$url" --output "agency-reel-v04-recovery-evidence/$name"
+            test "$(sha256sum "agency-reel-v04-recovery-evidence/$name" | awk '{print $1}')" = "$sha"
+          }
+          download_and_verify approval TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_APPROVAL.mp4
+          download_and_verify master TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_MASTER.mp4
+          download_and_verify cover TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_COVER.jpg
+          download_and_verify contactSheet TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_CONTACT_SHEET.jpg
+
+          jq -n --arg runSha "$GITHUB_SHA" --arg originalRun "33923739299" '{schemaVersion:1,recoveryRunSha:$runSha,originalVeoRunId:$originalRun,recoveryMode:"POST_ONLY_FROM_PERSISTED_VEO_SHOTS",newProviderCalls:0,publicationAuthorized:false,rightsStatus:"UNVERIFIED_BLOCKED_FOR_MARKETING"}' > agency-reel-v04-recovery-evidence/recovery-evidence.json
+          cleanup
+          trap - EXIT
+
+      - name: Upload recovered production package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: the-party-agency-generative-reel-v04-recovered-${{ github.sha }}
+          path: agency-reel-v04-recovery-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Consume one-shot authorization after complete recovered package
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "AUTHORIZATION_CONSUMED_AFTER_POST_RECOVERY=true; RECOVERY_RUN_ID=${GITHUB_RUN_ID}; ORIGINAL_VEO_RUN_ID=33923739299; NEW_PROVIDER_CALLS=0; STATUS=GENERATED_REVIEW_REQUIRED; PUBLICATION_AUTHORIZED=false; RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"
+          gh issue close "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
