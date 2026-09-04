@@ -32,6 +32,12 @@ const maxAgeMinutes = boundedInteger(
   1,
   60,
 );
+const expectedTargetSha256 =
+  mode === 'PREPARE' || mode === 'EXECUTE'
+    ? validateTargetSha256(
+        requiredEnv('INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_EXPECTED_TARGET_SHA256'),
+      )
+    : null;
 const startedAt = process.env.INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_STARTED_AT?.trim() || null;
 const pool = new Pool({ connectionString: databaseUrl, max: 3 });
 const knowledge = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
@@ -136,13 +142,14 @@ async function prepare() {
 
     let selected = null;
     for (const row of result.rows) {
+      if (digest(row.engagement_event_id) !== expectedTargetSha256) continue;
       const validated = await validateCandidate(row);
       if (validated) {
         selected = { row, validated };
         break;
       }
     }
-    if (!selected) fail('COMMENT_CANARY_NO_SAFE_RECENT_CANDIDATE');
+    if (!selected) fail('COMMENT_CANARY_EXPECTED_TARGET_NOT_ELIGIBLE');
 
     const updated = await client.query(
       `update event_outbox
@@ -169,6 +176,9 @@ async function prepare() {
 async function execute() {
   await assertNoOtherUnresolvedAmbiguity();
   const candidate = await loadReservedCandidate();
+  if (digest(candidate.engagement_event_id) !== expectedTargetSha256) {
+    fail('COMMENT_CANARY_RESERVED_TARGET_MISMATCH');
+  }
   const validated = await validateCandidate(candidate);
   if (!validated) fail('COMMENT_CANARY_RESERVED_TARGET_NO_LONGER_ELIGIBLE');
 
@@ -457,6 +467,11 @@ async function assertNoOtherUnresolvedAmbiguity() {
 
 function validateSession(value) {
   if (!/^[A-Za-z0-9._-]{8,120}$/.test(value)) fail('COMMENT_CANARY_SESSION_INVALID');
+  return value;
+}
+
+function validateTargetSha256(value) {
+  if (!/^[0-9a-f]{64}$/.test(value)) fail('COMMENT_CANARY_EXPECTED_TARGET_SHA256_INVALID');
   return value;
 }
 
