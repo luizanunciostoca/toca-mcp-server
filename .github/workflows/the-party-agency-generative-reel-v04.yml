@@ -1,0 +1,243 @@
+name: The Party Agency Generative Reel V04
+
+on:
+  push:
+    branches:
+      - ops/the-party-agency-generative-reel-v04
+    paths:
+      - src/the-party-agency-generative-reel-v04.ts
+      - .github/workflows/the-party-agency-generative-reel-v04.yml
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+  GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
+  GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
+  GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
+  INSTAGRAM_PUBLICATION_ASSET_BUCKET: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
+  AUTHORIZATION_ISSUE: '622'
+  AUTHORIZED_BASE_MAIN_SHA: '01d14f4e3f289c4514bbb73925a393048ed6408f'
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact operational candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate one-shot owner authorization and source bindings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'ops/the-party-agency-generative-reel-v04'
+          git merge-base --is-ancestor "$AUTHORIZED_BASE_MAIN_SHA" "$GITHUB_SHA"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" > /tmp/auth.json
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" --arg base "$AUTHORIZED_BASE_MAIN_SHA" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PROVIDER AUTHORIZATION — The Party Agency Generative Reel V04") and
+            ((.body // "") | contains("AUTHORIZED_BASE_MAIN_SHA=" + $base)) and
+            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
+            ((.body // "") | contains("VIDEO_PRODUCTION_ID=VID-TP-20260904-AGENCY-GEN-004")) and
+            ((.body // "") | contains("PROVIDER=GOOGLE_VERTEX_VEO")) and
+            ((.body // "") | contains("MODEL=veo-3.1-generate-001")) and
+            ((.body // "") | contains("SOURCE_1_SHA256=1c8e62431be258cce8f77af7336b7c8a6cab0ef0c1fd82ba19d21aaa30fd3c01")) and
+            ((.body // "") | contains("SOURCE_2_SHA256=f02b570987134e150a98d56bb12ecf141efee6c364571017bd92bacb8871fd55")) and
+            ((.body // "") | contains("SOURCE_3_SHA256=d4bdb6462f4963c97a84fe21ba76682d03b3f121eea5b2e4b2d7b4bef8cf7f6d")) and
+            ((.body // "") | contains("SOURCE_4_SHA256=ef92beddf5d56c18639992ff79631e24706c48daf878cf7a752412d924d5ca71")) and
+            ((.body // "") | contains("PUBLICATION_AUTHORIZED=false")) and
+            ((.body // "") | contains("SCHEDULING_AUTHORIZED=false")) and
+            ((.body // "") | contains("RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"))
+          ' /tmp/auth.json >/dev/null
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build and push immutable production runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:tp-agency-gen-v04-${GITHUB_SHA}"
+          JOB_NAME="toca-tp-agency-gen-v04-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Execute governed Vertex/Veo production
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p agency-reel-v04-evidence
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set -e
+          }
+          trap cleanup EXIT
+
+          capture_failure() {
+            local status="$1"
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=90m --limit=800 --order=asc --format=json \
+              > /tmp/tp-agency-v04-failure.json || printf '[]\n' > /tmp/tp-agency-v04-failure.json
+            STATUS="$status" JOB="$JOB_NAME" node <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync('/tmp/tp-agency-v04-failure.json', 'utf8'));
+          const redact = (value) => String(value)
+            .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/giu, 'Bearer <REDACTED>')
+            .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '<JWT>')
+            .replace(/\bya29\.[A-Za-z0-9._-]+\b/gu, '<GOOGLE_TOKEN>')
+            .replace(/https?:\/\/[^\s"']+/giu, '<URL>')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '<EMAIL>')
+            .replace(/\s+/gu, ' ').trim().slice(0, 1200);
+          const messageFor = (entry) => {
+            if (typeof entry?.textPayload === 'string') return entry.textPayload;
+            if (typeof entry?.jsonPayload?.message === 'string') return entry.jsonPayload.message;
+            if (typeof entry?.jsonPayload?.error === 'string') return entry.jsonPayload.error;
+            if (typeof entry?.protoPayload?.status?.message === 'string') return entry.protoPayload.status.message;
+            return '';
+          };
+          const sanitized = (Array.isArray(entries) ? entries : []).map((entry) => ({
+            severity: String(entry?.severity ?? 'DEFAULT'),
+            timestamp: String(entry?.timestamp ?? ''),
+            message: redact(messageFor(entry)),
+          })).filter((entry) => entry.message).slice(-120);
+          fs.writeFileSync('agency-reel-v04-evidence/failure-diagnostic.json', JSON.stringify({
+            schemaVersion: 1,
+            executionStatus: Number(process.env.STATUS ?? '1'),
+            jobName: process.env.JOB,
+            sanitizedEntries: sanitized,
+            publicationAuthorized: false,
+          }, null, 2));
+          NODE
+          }
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/the-party-agency-generative-reel-v04.js \
+            --set-env-vars "GCP_PROJECT_ID=$GCP_PROJECT_ID,INSTAGRAM_PUBLICATION_ASSET_BUCKET=$INSTAGRAM_PUBLICATION_ASSET_BUCKET" \
+            --tasks 1 --max-retries 0 --task-timeout 3600s --quiet
+
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            capture_failure "$STATUS"
+            cleanup
+            trap - EXIT
+            exit "$STATUS"
+          fi
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 30); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"THE_PARTY_AGENCY_GEN_V04_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=90m --limit=100 --order=desc \
+              --format='value(textPayload)' | grep 'THE_PARTY_AGENCY_GEN_V04_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#THE_PARTY_AGENCY_GEN_V04_RESULT=}"; break; fi
+            sleep 5
+          done
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .schemaVersion == 1 and
+            .productionId == "VID-TP-20260904-AGENCY-GEN-004" and
+            .status == "GENERATED_REVIEW_REQUIRED" and
+            .provider == "GOOGLE_VERTEX_VEO" and
+            .providerModel == "veo-3.1-generate-001" and
+            .editionId == "TP-20260904" and
+            .sourceCount == 4 and
+            (.shots | length == 4) and
+            ([.shots[].sourceAssetId] == ["TP-0048","TP-0087","TP-0071","TP-0130"]) and
+            (.outputs.approval.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.master.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.cover.sha256 | test("^[a-f0-9]{64}$")) and
+            (.outputs.contactSheet.sha256 | test("^[a-f0-9]{64}$")) and
+            .rightsStatus == "UNVERIFIED_BLOCKED_FOR_MARKETING" and
+            .publicationAuthorized == false and
+            .schedulingAuthorized == false and
+            .marketingReadyAuthorized == false and
+            .exactReadback == true
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > agency-reel-v04-evidence/result.json
+
+          download_and_verify() {
+            local key="$1" name="$2"
+            local url sha
+            url="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.url")"
+            sha="$(printf '%s' "$RESULT_JSON" | jq -r ".outputs.${key}.sha256")"
+            curl --fail --silent --show-error --location "$url" --output "agency-reel-v04-evidence/$name"
+            test "$(sha256sum "agency-reel-v04-evidence/$name" | awk '{print $1}')" = "$sha"
+          }
+          download_and_verify approval TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_APPROVAL.mp4
+          download_and_verify master TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_MASTER.mp4
+          download_and_verify cover TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_COVER.jpg
+          download_and_verify contactSheet TOCA_THEPARTY_REEL_AGENCY_GENERATIVE_9x16_18s_v04_CONTACT_SHEET.jpg
+
+          for index in 0 1 2 3; do
+            num=$((index + 1))
+            url="$(printf '%s' "$RESULT_JSON" | jq -r ".shots[$index].stagedShotUrl")"
+            sha="$(printf '%s' "$RESULT_JSON" | jq -r ".shots[$index].stagedShotSha256")"
+            file="agency-reel-v04-evidence/SHOT_${num}_VEO_RAW.mp4"
+            curl --fail --silent --show-error --location "$url" --output "$file"
+            test "$(sha256sum "$file" | awk '{print $1}')" = "$sha"
+          done
+
+          jq -n \
+            --arg runSha "$GITHUB_SHA" \
+            --arg authorization "https://github.com/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            '{schemaVersion:1,runSha:$runSha,authorizationRef:$authorization,sourceBindings:[
+              {assetId:"TP-0048",sha256:"1c8e62431be258cce8f77af7336b7c8a6cab0ef0c1fd82ba19d21aaa30fd3c01"},
+              {assetId:"TP-0087",sha256:"f02b570987134e150a98d56bb12ecf141efee6c364571017bd92bacb8871fd55"},
+              {assetId:"TP-0071",sha256:"d4bdb6462f4963c97a84fe21ba76682d03b3f121eea5b2e4b2d7b4bef8cf7f6d"},
+              {assetId:"TP-0130",sha256:"ef92beddf5d56c18639992ff79631e24706c48daf878cf7a752412d924d5ca71"}
+            ],provider:"GOOGLE_VERTEX_VEO",providerModel:"veo-3.1-generate-001",publicationAuthorized:false,rightsStatus:"UNVERIFIED_BLOCKED_FOR_MARKETING"}' \
+            > agency-reel-v04-evidence/production-evidence.json
+
+          cleanup
+          trap - EXIT
+
+      - name: Upload production package and evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: the-party-agency-generative-reel-v04-${{ github.sha }}
+          path: agency-reel-v04-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Consume authorization after successful production
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "AUTHORIZATION_CONSUMED_BY_RUN=${GITHUB_RUN_ID}; CANDIDATE_SHA=${GITHUB_SHA}; STATUS=GENERATED_REVIEW_REQUIRED; PUBLICATION_AUTHORIZED=false; RIGHTS_GATE=UNVERIFIED_BLOCKED_FOR_MARKETING"
+          gh issue close "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
