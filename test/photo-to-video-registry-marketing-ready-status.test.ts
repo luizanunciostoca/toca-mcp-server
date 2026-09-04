@@ -30,7 +30,17 @@ function rowsFor(status: string): Readonly<Record<string, readonly (readonly unk
         'future_product_runtime_mode',
         'status',
       ],
-      ['SUNSET', 'SUNSET', 'Sunset', true, false, 'TOCA_DO_MORCEGO', 'WHITE', 'REGISTRY_DRIVEN', 'ACTIVE'],
+      [
+        'SUNSET',
+        'SUNSET',
+        'Sunset',
+        true,
+        false,
+        'TOCA_DO_MORCEGO',
+        'WHITE',
+        'REGISTRY_DRIVEN',
+        'ACTIVE',
+      ],
     ],
     'VIDEO_CREATIVE_STANDARDS!A1:N1000': [
       [
@@ -116,7 +126,9 @@ function rowsFor(status: string): Readonly<Record<string, readonly (readonly unk
 function clientFor(status: string): SpreadsheetValuesClient {
   const ranges = rowsFor(status);
   return {
-    readRange: vi.fn((_spreadsheetId: string, range: string) => Promise.resolve(ranges[range] ?? [])),
+    readRange: vi.fn((_spreadsheetId: string, range: string) =>
+      Promise.resolve(ranges[range] ?? []),
+    ),
     appendRow: vi.fn(() => Promise.resolve()),
   };
 }
@@ -143,8 +155,8 @@ describe('photo-to-video marketing-ready venue status', () => {
       'content-registry',
     );
 
-    await expect(
-      registry.resolve(CONTENT_ITEM_ID, 'REAL_PHOTO_TO_MOTION_VIDEO'),
-    ).rejects.toThrow('PHOTO_TO_VIDEO_MARKETING_READY_SOURCE_REQUIRED');
+    await expect(registry.resolve(CONTENT_ITEM_ID, 'REAL_PHOTO_TO_MOTION_VIDEO')).rejects.toThrow(
+      'PHOTO_TO_VIDEO_MARKETING_READY_SOURCE_REQUIRED',
+    );
   });
 });
