@@ -79,6 +79,8 @@ const sources = [
 
 const createdAt = new Date().toISOString();
 
+type SourceDef = (typeof sources)[number];
+
 type ShotResult = {
   id: string;
   contentItemId: string;
@@ -90,7 +92,7 @@ type ShotResult = {
   deliveryUrl: string;
 };
 
-async function generateShot(sourceDef: (typeof sources)[number]): Promise<ShotResult> {
+async function generateShot(sourceDef: SourceDef): Promise<ShotResult> {
   const source = await sourceLoader.load({
     driveFileId: sourceDef.driveFileId,
     expectedSha256: sourceDef.sha256,
@@ -152,11 +154,37 @@ async function generateShot(sourceDef: (typeof sources)[number]): Promise<ShotRe
   };
 }
 
+async function generateWithQuotaBackoff(sourceDef: SourceDef): Promise<ShotResult> {
+  const backoffMs = [0, 120_000, 240_000, 360_000] as const;
+  for (let attempt = 0; attempt < backoffMs.length; attempt += 1) {
+    const waitMs = backoffMs[attempt] ?? 0;
+    if (waitMs > 0) {
+      console.warn(`THE_PARTY_REALPHOTO_V02_QUOTA_BACKOFF:${sourceDef.id}:${attempt}:${waitMs}`);
+      await sleep(waitMs);
+    }
+    try {
+      return await generateShot(sourceDef);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isQuota429 =
+        message.includes('VERTEX_VEO_REQUEST_FAILED_429') &&
+        (message.includes('long_running_online_prediction_requests_per_base_model') ||
+          message.includes('RESOURCE_EXHAUSTED'));
+      const finalAttempt = attempt === backoffMs.length - 1;
+      if (!isQuota429 || finalAttempt) {
+        throw error;
+      }
+      console.warn(`THE_PARTY_REALPHOTO_V02_QUOTA_RETRY:${sourceDef.id}:${attempt + 1}`);
+    }
+  }
+  throw new Error(`THE_PARTY_REALPHOTO_V02_RETRY_EXHAUSTED:${sourceDef.id}`);
+}
+
 const results: ShotResult[] = [];
-for (let index = 0; index < sources.length; index += 2) {
-  const pair = sources.slice(index, index + 2);
-  const generated = await Promise.all(pair.map((source) => generateShot(source)));
-  results.push(...generated);
+for (const sourceDef of sources) {
+  const generated = await generateWithQuotaBackoff(sourceDef);
+  results.push(generated);
+  console.log(`THE_PARTY_REALPHOTO_V02_SHOT_COMPLETE:${sourceDef.id}:${generated.outputSha256}`);
 }
 
 console.log(
@@ -171,6 +199,7 @@ console.log(
     marketingReadyAuthorized: false,
     rightsGate: 'UNVERIFIED_BLOCKED_FOR_MARKETING',
     approvalRef,
+    executionMode: 'SERIAL_WITH_QUOTA_429_BACKOFF',
     results,
   })}`,
 );
@@ -179,4 +208,8 @@ function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`THE_PARTY_REALPHOTO_V02_ENV_REQUIRED:${name}`);
   return value;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
