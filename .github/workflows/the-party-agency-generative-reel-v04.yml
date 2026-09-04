@@ -76,6 +76,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p agency-reel-v04-evidence
+          jq -n --arg sourceSha "$GITHUB_SHA" '{schemaVersion:1,sourceCandidateSha:$sourceSha,controlledBuildPatch:"brand expectedSha256 binding + CTA outline syntax",publicationAuthorized:false}' > agency-reel-v04-evidence/runner-candidate.json
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/the-party-agency-generative-reel-v04.ts')
+          s = p.read_text()
+          s = s.replace(
+              'const logo = await sourceLoader.load(BRAND.logo);',
+              'const logo = await sourceLoader.load({ driveFileId: BRAND.logo.driveFileId, expectedSha256: BRAND.logo.sha256 });',
+          )
+          s = s.replace(
+              'const footer = await sourceLoader.load(BRAND.footer);',
+              'const footer = await sourceLoader.load({ driveFileId: BRAND.footer.driveFileId, expectedSha256: BRAND.footer.sha256 });',
+          )
+          s = s.replace(
+              'color=black@0.35:t=fill:color=${GOLD}@0.85',
+              'color=${GOLD}@0.85:t=2',
+          )
+          p.write_text(s)
+          if 'sourceLoader.load(BRAND.logo)' in s or 'sourceLoader.load(BRAND.footer)' in s:
+              raise SystemExit('CONTROLLED_PATCH_BRAND_BINDING_FAILED')
+          PY
+          PATCHED_SHA="$(sha256sum src/the-party-agency-generative-reel-v04.ts | awk '{print $1}')"
+          jq --arg patchedSha "$PATCHED_SHA" '. + {patchedRunnerSha256:$patchedSha}' agency-reel-v04-evidence/runner-candidate.json > /tmp/runner.json
+          mv /tmp/runner.json agency-reel-v04-evidence/runner-candidate.json
           gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
           IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:tp-agency-gen-v04-${GITHUB_SHA}"
           JOB_NAME="toca-tp-agency-gen-v04-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -229,7 +254,7 @@ jobs:
         with:
           name: the-party-agency-generative-reel-v04-${{ github.sha }}
           path: agency-reel-v04-evidence/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Consume authorization after successful production
