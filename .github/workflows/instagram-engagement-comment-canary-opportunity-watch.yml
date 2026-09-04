@@ -229,13 +229,37 @@ jobs:
             | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
             || true)"
 
-          STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          read_single_marker() {
+            local marker="$1"
+            local matches count
+            matches="$(grep "^${marker}=" <<< "$SAFE_LINES" || true)"
+            count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+            test "$count" = '1'
+            printf '%s' "${matches#*=}"
+          }
+
+          read_exact_marker() {
+            local marker="$1"
+            local expected="$2"
+            local value
+            value="$(read_single_marker "$marker")"
+            test "$value" = "$expected"
+          }
+
+          STATUS="$(read_single_marker INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY)"
           [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]
+
+          read_exact_marker CANARY_CHANNEL COMMENT
+          read_exact_marker READ_ONLY_ELIGIBILITY true
+          read_exact_marker DATABASE_MUTATIONS false
+          read_exact_marker PROVIDER_CALLS false
+          read_exact_marker EXTERNAL_REPLY_WRITES false
+          read_exact_marker RAW_USER_DATA_LOGGED false
 
           read_numeric() {
             local marker="$1"
             local value
-            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+            value="$(read_single_marker "$marker")"
             [[ "$value" =~ ^[0-9]+$ ]]
             printf '%s' "$value"
           }
@@ -244,7 +268,7 @@ jobs:
           ELIGIBLE_COUNT="$(read_numeric ELIGIBLE_COUNT)"
           AMBIGUITY_COUNT="$(read_numeric UNRESOLVED_AMBIGUITY_COUNT)"
           RESERVATION_COUNT="$(read_numeric ACTIVE_RESERVATION_COUNT)"
-          TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
+          TARGET_SHA="$(read_single_marker ELIGIBLE_TARGET_SHA256)"
 
           if [[ "$STATUS" = 'READY' ]]; then
             test "$ELIGIBLE_COUNT" = '1'
