@@ -6,6 +6,7 @@ on:
       - ops/recover-tp-gen-0001
     paths:
       - .github/workflows/_tmp-recover-tp-gen-0001.yml
+      - src/video-generative-candidate-recovery.ts
 
 permissions:
   contents: read
@@ -13,8 +14,11 @@ permissions:
 
 env:
   GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   BUCKET: toca-mcp-publication-assets
   PREFIX: instagram/scene-continuation-review-v1/photo-video-265d244dbd5f052cb2c6288d-
 
@@ -22,6 +26,7 @@ jobs:
   recover:
     if: github.ref == 'refs/heads/ops/recover-tp-gen-0001'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout exact recovery branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -38,17 +43,73 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Recover exact persisted candidate
+      - name: Build exact recovery image
         shell: bash
         run: |
           set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:video-recovery-${GITHUB_SHA}"
+          JOB_NAME="toca-video-recover-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Recover persisted candidate through runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set -e
+          }
+          trap cleanup EXIT
+
+          ENV_VARS="^~^GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$BUCKET~VIDEO_RECOVERY_PREFIX=$PREFIX"
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/video-generative-candidate-recovery.js \
+            --set-env-vars "$ENV_VARS" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 300s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 20); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"VIDEO_GENERATIVE_RECOVERY_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=30m --limit=100 --order=desc \
+              --format='value(textPayload)' | grep 'VIDEO_GENERATIVE_RECOVERY_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#VIDEO_GENERATIVE_RECOVERY_RESULT=}"; break; fi
+            sleep 3
+          done
+          test -n "$RESULT_JSON"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .schemaVersion == 1 and
+            .contentItemId == "VID-TP-20260904-DUAS-PISTAS-GEN-001" and
+            (.objectName | startswith("instagram/scene-continuation-review-v1/photo-video-265d244dbd5f052cb2c6288d-")) and
+            (.sha256 | test("^[a-f0-9]{64}$")) and
+            .sizeBytes > 0 and
+            .candidateCount >= 1 and
+            .publicationAuthorized == false and
+            .generationRepeated == false and
+            (.deliveryUrl | startswith("https://storage.googleapis.com/"))
+          ' >/dev/null
+
           mkdir -p recovered
-          gcloud storage ls "gs://${BUCKET}/${PREFIX}*.mp4" > /tmp/matches.txt
-          test "$(grep -c '^gs://' /tmp/matches.txt)" -eq 1
-          OBJECT="$(grep '^gs://' /tmp/matches.txt)"
-          gcloud storage cp "$OBJECT" recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4
-          SHA="$(sha256sum recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4 | awk '{print $1}')"
-          SIZE="$(stat -c '%s' recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4)"
+          DELIVERY_URL="$(printf '%s' "$RESULT_JSON" | jq -r '.deliveryUrl')"
+          EXPECTED_SHA="$(printf '%s' "$RESULT_JSON" | jq -r '.sha256')"
+          curl --fail --silent --show-error --location "$DELIVERY_URL" --output recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4
+          OBSERVED_SHA="$(sha256sum recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4 | awk '{print $1}')"
+          test "$OBSERVED_SHA" = "$EXPECTED_SHA"
           python - <<'PY'
           from pathlib import Path
           p=Path('recovered/TOCA_THEPARTY_DUAS-PISTAS_GENERATIVE_MASTER_8s_v01.mp4')
@@ -56,7 +117,10 @@ jobs:
           if len(b)<12 or b[4:8] != b'ftyp':
               raise SystemExit('RECOVERED_FILE_NOT_MP4')
           PY
-          printf '%s\n' "{\"schemaVersion\":1,\"sourceContentItemId\":\"VID-TP-20260904-DUAS-PISTAS-GEN-001\",\"gcsObject\":\"${OBJECT}\",\"sha256\":\"${SHA}\",\"sizeBytes\":${SIZE},\"publicationAuthorized\":false,\"generationRepeated\":false}" > recovered/recovery.json
+          printf '%s\n' "$RESULT_JSON" | jq --arg observed "$OBSERVED_SHA" '. + {observedSha256:$observed,exactReadback:(.sha256==$observed)} | del(.deliveryUrl)' > recovered/recovery.json
+
+          cleanup
+          trap - EXIT
 
       - name: Upload recovered candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
