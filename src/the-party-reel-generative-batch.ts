@@ -14,7 +14,7 @@ const model = (process.env.VERTEX_VEO_MODEL?.trim() || 'veo-3.1-generate-001') a
   | 'veo-3.1-fast-generate-001';
 
 const driveResolver = new GoogleServiceIdentityOAuthResolver();
-const driveTokenReference = { provider: 'gcp-service-identity-oauth', key: 'the-party-reel-batch' } as const;
+const driveTokenReference = { provider: 'gcp-service-identity-oauth', key: 'video-workspace' } as const;
 const sourceLoader = new GoogleDriveCreativeVideoSourceLoader({
   secretResolver: driveResolver,
   accessTokenReference: driveTokenReference,
