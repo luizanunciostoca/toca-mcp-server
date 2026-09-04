@@ -25,7 +25,7 @@ describe('Instagram real Comment provider canary', () => {
       expect(workflow).toContain(marker);
     }
     expect(workflow).toContain("TARGET_COUNT=\"$(grep -c '^ELIGIBLE_TARGET_SHA256='");
-    expect(workflow).toContain("test \"$TARGET_COUNT\" = '1'");
+    expect(workflow).toContain('test "$TARGET_COUNT" = \'1\'');
     expect(workflow).toContain('[[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]');
   });
 
