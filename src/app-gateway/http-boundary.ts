@@ -14,6 +14,10 @@ import { listVideoCreationOptions } from './video-creation-options.js';
 
 const API_PREFIX = '/api/v1';
 const MAX_ACTION_BODY_BYTES = 128 * 1024;
+const MAX_SESSION_SUBJECT_LENGTH = 512;
+const MAX_SESSION_TENANT_LENGTH = 160;
+const MAX_SESSION_ROLE_LENGTH = 120;
+const MAX_SESSION_ROLES = 50;
 
 const appGatewayCreateActionSchema = z
   .object({
@@ -72,6 +76,15 @@ export function createAppGatewayHttpHandler(options: AppGatewayHttpOptions): App
     }
 
     const method = request.method ?? 'GET';
+
+    if (url.pathname === `${API_PREFIX}/session`) {
+      if (method !== 'GET') return methodNotAllowed(response);
+      sendJson(response, 200, {
+        api_version: 'v1',
+        session: serializeSessionPrincipal(principal),
+      });
+      return true;
+    }
 
     if (url.pathname === `${API_PREFIX}/capabilities`) {
       if (method !== 'GET') return methodNotAllowed(response);
@@ -152,6 +165,25 @@ async function handlePrepareAction(
     const code = safeActionError(error);
     sendJson(response, code.status, { error: code.error });
   }
+}
+
+function serializeSessionPrincipal(principal: AppGatewayPrincipal): Record<string, unknown> {
+  const subject = principal.subject.trim().slice(0, MAX_SESSION_SUBJECT_LENGTH);
+  const tenantId = principal.tenantId?.trim().slice(0, MAX_SESSION_TENANT_LENGTH);
+  const roles = [...new Set(principal.roles ?? [])]
+    .map((role) => role.trim())
+    .filter(Boolean)
+    .slice(0, MAX_SESSION_ROLES)
+    .map((role) => role.slice(0, MAX_SESSION_ROLE_LENGTH));
+
+  return {
+    subject,
+    ...(tenantId ? { tenant_id: tenantId } : {}),
+    roles,
+    authorization_source: 'SERVER_PRINCIPAL_MAPPER',
+    capability_authority: 'TOCA_CORE_RUNTIME',
+    execution_boundary: 'PREPARE_ONLY',
+  };
 }
 
 function serializeActionCard(card: ActionCardSnapshot): Record<string, unknown> {
