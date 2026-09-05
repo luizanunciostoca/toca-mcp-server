@@ -129,15 +129,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
-            --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=asc --format=json)"
-          SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
-            | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
-            || true)"
-
-          STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
-          [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]
-
           numeric_markers=(
             RECENT_COMMENT_COUNT STATE_CANDIDATE_COUNT ELIGIBLE_COUNT
             UNRESOLVED_AMBIGUITY_COUNT ACTIVE_RESERVATION_COUNT
@@ -145,23 +136,86 @@ jobs:
             REJECTED_SENSITIVE REJECTED_COMMERCIAL REJECTED_URGENCY
             REJECTED_KNOWLEDGE REJECTED_POLICY
           )
+
+          SAFE_LINES=''
+          STATUS=''
+          TARGET_SHA=''
+          MARKERS_COMPLETE=false
+          POLL_ATTEMPTS=0
+
+          for attempt in 1 2 3 4 5 6; do
+            POLL_ATTEMPTS="$attempt"
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
+              || true)"
+
+            STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+            if [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]; then
+              MARKERS_COMPLETE=true
+              for marker in "${numeric_markers[@]}"; do
+                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+                if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                  MARKERS_COMPLETE=false
+                  break
+                fi
+              done
+
+              TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+              if [[ -z "$TARGET_SHA" ]]; then
+                MARKERS_COMPLETE=false
+              elif [[ "$STATUS" == 'READY' ]] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+                MARKERS_COMPLETE=false
+              elif [[ "$STATUS" != 'READY' && "$TARGET_SHA" != 'NONE' ]]; then
+                MARKERS_COMPLETE=false
+              fi
+            fi
+
+            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then
+              break
+            fi
+            if [[ "$attempt" != '6' ]]; then
+              sleep 10
+            fi
+          done
+
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            printf -v BLOCKED_REPORT '%s\n' \
+              'COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=BLOCKED_LOG_PROPAGATION' \
+              "LOG_POLL_ATTEMPTS=$POLL_ATTEMPTS" \
+              'ELIGIBILITY=UNAVAILABLE' \
+              'CANARY_CHANNEL=COMMENT' \
+              'READ_ONLY_ELIGIBILITY=true' \
+              'DATABASE_MUTATIONS=false' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'RAW_USER_DATA_LOGGED=false'
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" \
+              -f body="$BLOCKED_REPORT" >/dev/null
+            echo 'Comment eligibility sanitized markers did not become complete within the bounded logging window' >&2
+            exit 1
+          fi
+
           REPORT="COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=PASS"$'\n'
           REPORT+="ELIGIBILITY=${STATUS}"$'\n'
+          REPORT+="LOG_POLL_ATTEMPTS=${POLL_ATTEMPTS}"$'\n'
           for marker in "${numeric_markers[@]}"; do
-            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2-)"
             [[ "$value" =~ ^[0-9]+$ ]]
             REPORT+="${marker}=${value}"$'\n'
           done
-          TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
-          if [[ -n "$TARGET_SHA" ]]; then [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; fi
-          REPORT+="ELIGIBLE_TARGET_SHA256=${TARGET_SHA:-NONE}"$'\n'
+          REPORT+="ELIGIBLE_TARGET_SHA256=${TARGET_SHA}"$'\n'
           REPORT+='CANARY_CHANNEL=COMMENT'$'\n'
           REPORT+='READ_ONLY_ELIGIBILITY=true'$'\n'
           REPORT+='DATABASE_MUTATIONS=false'$'\n'
           REPORT+='PROVIDER_CALLS=false'$'\n'
           REPORT+='EXTERNAL_REPLY_WRITES=false'$'\n'
           REPORT+='RAW_USER_DATA_LOGGED=false'$'\n'
-          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" \
+            -f body="$REPORT" >/dev/null
 
       - name: Delete temporary Comment eligibility job
         if: always()
