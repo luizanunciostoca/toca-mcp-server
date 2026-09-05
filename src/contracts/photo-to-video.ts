@@ -43,6 +43,9 @@ export const likenessConsentStatusSchema = z.enum([
 ]);
 export type LikenessConsentStatus = z.infer<typeof likenessConsentStatusSchema>;
 
+export const videoProviderIdSchema = z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO']);
+export type VideoProviderId = z.infer<typeof videoProviderIdSchema>;
+
 export const productVideoPolicySchema = z.object({
   productId: z.string().trim().min(1),
   operation: z.string().trim().min(1),
@@ -84,6 +87,18 @@ export const photoToVideoSourceRightsSchema = z.object({
   evidenceRef: z.string().trim().min(1),
   status: z.enum(['ACTIVE', 'BLOCKED', 'REVOKED']),
   validatedAt: z.string().trim().min(1),
+  rightsRecordId: z.string().trim().min(1).optional(),
+  evidenceType: z.string().trim().min(1).optional(),
+  evidenceDriveFileId: z.string().trim().min(1).optional(),
+  evidenceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  validFrom: z.string().trim().min(1).optional(),
+  validUntil: z.string().trim().min(1).optional(),
+  territories: z.array(z.string().trim().min(1)).optional(),
+  channels: z.array(z.string().trim().min(1)).optional(),
+  paidMediaAllowed: z.boolean().optional(),
+  generativeDerivationAllowed: z.boolean().optional(),
+  reviewDueAt: z.string().trim().min(1).optional(),
+  validationVersion: z.string().trim().min(1).optional(),
 });
 export type PhotoToVideoSourceRights = z.infer<typeof photoToVideoSourceRightsSchema>;
 
@@ -133,9 +148,11 @@ export const photoToVideoCandidateManifestSchema = z
     outputContentType: z.literal('video/mp4'),
     size: photoToVideoSizeSchema,
     seconds: photoToVideoDurationSchema,
-    provider: z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO']),
+    provider: videoProviderIdSchema,
     providerJobId: z.string().trim().min(1).optional(),
     providerModel: z.string().trim().min(1).optional(),
+    providerAttemptChain: z.array(z.enum(['OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO'])).min(1).optional(),
+    providerFallbackUsed: z.boolean().optional(),
     exceptionId: z.string().trim().min(1).optional(),
     approvalRef: z.string().trim().min(1).optional(),
     thePartyEditionId: z.string().trim().min(1).optional(),
@@ -159,6 +176,23 @@ export const photoToVideoCandidateManifestSchema = z
         path: ['artifactObjectName'],
         message: 'PHOTO_TO_VIDEO_ARTIFACT_REF_OBJECT_MISMATCH',
       });
+    }
+    if (candidate.providerAttemptChain) {
+      const finalProvider = candidate.providerAttemptChain.at(-1);
+      if (finalProvider !== candidate.provider) {
+        context.addIssue({
+          code: 'custom',
+          path: ['providerAttemptChain'],
+          message: 'PHOTO_TO_VIDEO_PROVIDER_ATTEMPT_CHAIN_MISMATCH',
+        });
+      }
+      if (candidate.providerFallbackUsed !== (candidate.providerAttemptChain.length > 1)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['providerFallbackUsed'],
+          message: 'PHOTO_TO_VIDEO_PROVIDER_FALLBACK_FLAG_MISMATCH',
+        });
+      }
     }
     const partyFieldsPresent = Boolean(
       candidate.thePartyEditionId || candidate.thePartyIntent || candidate.thePartyEnvironment,
