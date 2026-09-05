@@ -116,12 +116,16 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).not.toContain('gcloud run services update');
   });
 
-  it('runs the Comment probe once and cleans up', () => {
+  it('runs the Comment probe once, polls logs boundedly and cleans up', () => {
     expect(workflow).toContain(
       'dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js',
     );
     expect(workflow).toContain('--max-retries 0');
     expect(workflow).toContain('--task-timeout 120s');
+    expect(workflow).toContain('for attempt in 1 2 3 4 5 6; do');
+    expect(workflow).toContain('sleep 10');
+    expect(workflow).toContain("MARKERS_COMPLETE=false");
+    expect(workflow).toContain("MARKERS_COMPLETE=true");
     expect(workflow).toContain('gcloud run jobs delete');
     expect(workflow).not.toContain('scripts/instagram-engagement-comment-provider-canary.mjs');
   });
@@ -129,7 +133,10 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
   it('publishes only bounded counts, status and a hashed target', () => {
     for (const marker of [
       'COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=PASS',
+      'COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=BLOCKED_LOG_PROPAGATION',
       'ELIGIBILITY=${STATUS}',
+      'ELIGIBILITY=UNAVAILABLE',
+      'LOG_POLL_ATTEMPTS=',
       'ELIGIBLE_TARGET_SHA256=${TARGET_SHA:-NONE}',
       'RAW_USER_DATA_LOGGED=false',
       'DATABASE_MUTATIONS=false',
@@ -138,6 +145,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+    expect(workflow).toContain('gh api --method POST');
     expect(workflow).not.toContain('PAYLOAD_SUMMARIES=');
     expect(workflow).not.toContain('RAW_TEXT=');
   });
