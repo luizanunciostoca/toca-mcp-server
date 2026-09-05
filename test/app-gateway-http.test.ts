@@ -60,9 +60,7 @@ async function listenWithoutAuthorization(): Promise<string> {
   return startServer(createAppGatewayHttpServer({ registry: registry() }));
 }
 
-async function startServer(
-  server: ReturnType<typeof createAppGatewayHttpServer>,
-): Promise<string> {
+async function startServer(server: ReturnType<typeof createAppGatewayHttpServer>): Promise<string> {
   servers.push(server);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
