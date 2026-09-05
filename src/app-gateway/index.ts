@@ -16,9 +16,15 @@ export {
   createTocaActionEvent,
 } from './events.js';
 export {
+  VIDEO_CREATION_OPTIONS,
+  getVideoCreationOption,
+  listVideoCreationOptions,
+} from './video-creation-options.js';
+export {
   actionModeSchema,
   actionTypeSchema,
   tocaActionRequestSchema,
+  videoCreationRouteSchema,
   type ActionAvailability,
   type ActionCapabilityRequirement,
   type ActionCardDefinition,
@@ -32,4 +38,8 @@ export {
   type TocaActionEvent,
   type TocaActionRequest,
   type TocaActionState,
+  type VideoCreationAvailability,
+  type VideoCreationOptionDefinition,
+  type VideoCreationRoute,
+  type VideoDriftRisk,
 } from './contracts.js';
