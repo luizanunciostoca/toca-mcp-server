@@ -48,7 +48,7 @@ async function listen(overrides: Partial<AppGatewayHttpOptions> = {}): Promise<s
     authorize: (request) =>
       Promise.resolve(
         request.headers.authorization === bearer
-          ? { subject: 'user-1', roles: ['marketing'] }
+          ? { subject: 'user-1', tenantId: 'toca-do-morcego', roles: ['marketing'] }
           : undefined,
       ),
     ...overrides,
@@ -83,12 +83,37 @@ describe('Android App Gateway HTTP boundary', () => {
 
   it('fails closed when the app session is unauthorized', async () => {
     const baseUrl = await listen();
-    const response = await fetch(`${baseUrl}/api/v1/capabilities`, {
+    const response = await fetch(`${baseUrl}/api/v1/session`, {
       headers: { authorization: 'Bearer wrong-token' },
     });
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'UNAUTHORIZED' });
+  });
+
+  it('returns only the safe server-side session projection', async () => {
+    const baseUrl = await listen();
+    const response = await fetch(`${baseUrl}/api/v1/session`, {
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.json();
+    expect(body).toEqual({
+      api_version: 'v1',
+      session: {
+        subject: 'user-1',
+        tenant_id: 'toca-do-morcego',
+        roles: ['marketing'],
+        authorization_source: 'SERVER_PRINCIPAL_MAPPER',
+        capability_authority: 'TOCA_CORE_RUNTIME',
+        execution_boundary: 'PREPARE_ONLY',
+      },
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('app-session-token');
+    expect(serialized).not.toContain('Bearer');
   });
 
   it('returns capability-driven action cards without treating system.capabilities as an execution gate', async () => {
