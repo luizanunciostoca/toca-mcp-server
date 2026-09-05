@@ -83,9 +83,7 @@ describe('App Gateway bounded action runtime store', () => {
     const store = createStore();
     const noOwner = { subject: '   ' };
 
-    expect(() => store.put(action('ACT-1'), noOwner)).toThrow(
-      'APP_GATEWAY_ACTION_OWNER_REQUIRED',
-    );
+    expect(() => store.put(action('ACT-1'), noOwner)).toThrow('APP_GATEWAY_ACTION_OWNER_REQUIRED');
     expect(() => createStore({ ttlMs: 0 })).toThrow(
       'APP_GATEWAY_ACTION_STORE_CONFIGURATION_INVALID',
     );
