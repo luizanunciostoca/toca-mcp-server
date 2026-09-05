@@ -42,11 +42,7 @@ function registry(): ToolRegistry {
   return result;
 }
 
-async function listen(
-  overrides: Omit<Partial<AppGatewayHttpOptions>, 'authorize'> & {
-    authorize?: AppGatewayHttpOptions['authorize'] | undefined;
-  } = {},
-): Promise<string> {
+async function listen(overrides: Partial<AppGatewayHttpOptions> = {}): Promise<string> {
   const server = createAppGatewayHttpServer({
     registry: registry(),
     authorize: (request) =>
@@ -57,6 +53,16 @@ async function listen(
       ),
     ...overrides,
   });
+  return startServer(server);
+}
+
+async function listenWithoutAuthorization(): Promise<string> {
+  return startServer(createAppGatewayHttpServer({ registry: registry() }));
+}
+
+async function startServer(
+  server: ReturnType<typeof createAppGatewayHttpServer>,
+): Promise<string> {
   servers.push(server);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -70,7 +76,7 @@ function authorizedHeaders(extra: Record<string, string> = {}): Record<string, s
 
 describe('Android App Gateway HTTP boundary', () => {
   it('does not expose the API when no authorization boundary is configured', async () => {
-    const baseUrl = await listen({ authorize: undefined });
+    const baseUrl = await listenWithoutAuthorization();
     const response = await fetch(`${baseUrl}/api/v1/capabilities`);
 
     expect(response.status).toBe(404);
