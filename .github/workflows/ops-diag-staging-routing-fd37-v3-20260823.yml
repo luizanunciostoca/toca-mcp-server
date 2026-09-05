@@ -1,0 +1,148 @@
+name: TEMP Staging Routing Diagnostic fd37 V3 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  compare-hosts:
+    if: github.head_ref == 'ops/diag-staging-ingress-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve registered deterministic and legacy hosts
+        id: hosts
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json
+          LEGACY_SERVICE_URL="$(jq -r '.status.url // empty' /tmp/service.json)"
+          LEGACY_TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty' /tmp/service.json)"
+          URLS_RAW="$(jq -r '.metadata.annotations["run.googleapis.com/urls"] // "[]"' /tmp/service.json)"
+          DETERMINISTIC_SERVICE_URL="$(jq -r --arg p "$GCP_PROJECT_NUMBER" 'map(select(contains($p))) | first // empty' <<<"$URLS_RAW")"
+          test -n "$LEGACY_SERVICE_URL"; test -n "$LEGACY_TAG_URL"; test -n "$DETERMINISTIC_SERVICE_URL"
+          DETERMINISTIC_TAG_URL="https://staging-mcp-fd37991---${DETERMINISTIC_SERVICE_URL#https://}"
+          echo "legacy_service_url=$LEGACY_SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "legacy_tag_url=$LEGACY_TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "det_service_url=$DETERMINISTIC_SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "det_tag_url=$DETERMINISTIC_TAG_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint token for legacy canonical service host
+        id: legacy_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.hosts.outputs.legacy_service_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Mint token for deterministic canonical service host
+        id: det_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.hosts.outputs.det_service_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Compare hosts and publish sanitized results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ steps.legacy_token.outputs.id_token }}
+          DET_TOKEN: ${{ steps.det_token.outputs.id_token }}
+          LEGACY_SERVICE_URL: ${{ steps.hosts.outputs.legacy_service_url }}
+          LEGACY_TAG_URL: ${{ steps.hosts.outputs.legacy_tag_url }}
+          DET_SERVICE_URL: ${{ steps.hosts.outputs.det_service_url }}
+          DET_TAG_URL: ${{ steps.hosts.outputs.det_tag_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v3
+          : > /tmp/v3/results.txt
+
+          probe() {
+            local label="$1" url="$2" token="$3" code ctype body
+            code="$(curl --silent --show-error -D "/tmp/v3/${label}.headers" -o "/tmp/v3/${label}.body" --write-out '%{http_code}' -H "Authorization: Bearer $token" "$url/healthz" || true)"
+            ctype="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]+:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' "/tmp/v3/${label}.headers")"
+            body="$(head -c 180 "/tmp/v3/${label}.body" | tr '\r\n' '  ' | tr -cd '[:print:]')"
+            {
+              echo "${label}_HTTP=${code}"
+              echo "${label}_CONTENT_TYPE=${ctype:-none}"
+              echo "${label}_BODY_PREFIX=${body:-empty}"
+            } >> /tmp/v3/results.txt
+          }
+
+          probe LEGACY_TAG_LEGACY_AUD "$LEGACY_TAG_URL" "$LEGACY_TOKEN"
+          probe DET_TAG_LEGACY_AUD "$DET_TAG_URL" "$LEGACY_TOKEN"
+          probe DET_TAG_DET_AUD "$DET_TAG_URL" "$DET_TOKEN"
+          probe LEGACY_TAG_DET_AUD "$LEGACY_TAG_URL" "$DET_TOKEN"
+          probe DET_SERVICE_DET_AUD "$DET_SERVICE_URL" "$DET_TOKEN"
+
+          LOG_ACCESS=PASS
+          if gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$GCP_CLOUD_RUN_MCP_SERVICE\" AND resource.labels.revision_name=\"toca-mcp-next-staging-mcp-fd379915\" AND httpRequest.requestUrl:\"healthz\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=50 --format=json > /tmp/v3/logs.json 2>/tmp/v3/log-error.txt; then
+            REQUEST_LOG_COUNT="$(jq 'length' /tmp/v3/logs.json)"
+            REQUEST_LOG_STATUSES="$(jq -c '[.[].httpRequest.status] | unique' /tmp/v3/logs.json)"
+          else
+            LOG_ACCESS=DENIED
+            REQUEST_LOG_COUNT=unknown
+            REQUEST_LOG_STATUSES=unknown
+          fi
+
+          {
+            echo "STAGING_ROUTING_DIAG_V3 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74"
+            echo
+            echo "REGISTERED_LEGACY_SERVICE_HOST=true"
+            echo "REGISTERED_DETERMINISTIC_SERVICE_HOST=true"
+            cat /tmp/v3/results.txt
+            echo "CLOUD_LOGGING_ACCESS=${LOG_ACCESS}"
+            echo "CANDIDATE_HEALTHZ_REQUEST_LOG_COUNT=${REQUEST_LOG_COUNT}"
+            echo "CANDIDATE_HEALTHZ_REQUEST_LOG_STATUSES=${REQUEST_LOG_STATUSES}"
+            echo
+            echo "READ_ONLY=true"
+            echo "PRODUCTION_ACCESS=false"
+            echo "PROVIDER_ACCESS=false"
+            echo "TRAFFIC_MUTATION=false"
+            echo "IAM_MUTATION=false"
+          } > /tmp/comment.md
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
