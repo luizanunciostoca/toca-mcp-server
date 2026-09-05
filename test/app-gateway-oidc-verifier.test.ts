@@ -114,10 +114,7 @@ describe('App Gateway OIDC bearer verifier', () => {
       verifier.verify(createJwt(fixture, {}, { alg: 'HS256' })),
       'OIDC_ALGORITHM_REJECTED',
     );
-    await expectCode(
-      verifier.verify(createJwt(fixture, {}, { kid: '' })),
-      'OIDC_KID_REQUIRED',
-    );
+    await expectCode(verifier.verify(createJwt(fixture, {}, { kid: '' })), 'OIDC_KID_REQUIRED');
     await expectCode(
       verifier.verify(createJwt(fixture, {}, { jku: 'https://attacker.example/jwks' })),
       'OIDC_HEADER_UNSUPPORTED',
@@ -128,10 +125,7 @@ describe('App Gateway OIDC bearer verifier', () => {
     const fixture = signingFixture();
     const other = signingFixture('other-key');
 
-    await expectCode(
-      verifierFor(fixture).verify(createJwt(other)),
-      'OIDC_KEY_NOT_FOUND',
-    );
+    await expectCode(verifierFor(fixture).verify(createJwt(other)), 'OIDC_KEY_NOT_FOUND');
 
     const wrongSignature = createJwt(fixture).split('.');
     const attackerSignature = createJwt(other).split('.')[2];
@@ -162,18 +156,12 @@ describe('App Gateway OIDC bearer verifier', () => {
       verifier.verify(createJwt(fixture, { aud: 'wrong-audience' })),
       'OIDC_AUDIENCE_MISMATCH',
     );
-    await expectCode(
-      verifier.verify(createJwt(fixture, { exp: NOW })),
-      'OIDC_TOKEN_EXPIRED',
-    );
+    await expectCode(verifier.verify(createJwt(fixture, { exp: NOW })), 'OIDC_TOKEN_EXPIRED');
     await expectCode(
       verifier.verify(createJwt(fixture, { nbf: NOW + 1 })),
       'OIDC_TOKEN_NOT_ACTIVE',
     );
-    await expectCode(
-      verifier.verify(createJwt(fixture, { sub: '   ' })),
-      'OIDC_SUBJECT_REQUIRED',
-    );
+    await expectCode(verifier.verify(createJwt(fixture, { sub: '   ' })), 'OIDC_SUBJECT_REQUIRED');
 
     const arrayAudience = await verifier.verify(
       createJwt(fixture, { aud: ['other-audience', AUDIENCE] }),
