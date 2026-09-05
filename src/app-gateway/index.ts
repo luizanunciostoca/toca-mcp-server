@@ -12,6 +12,12 @@ export {
   resolveActionCard,
 } from './action-service.js';
 export {
+  createInMemoryAppGatewayActionRuntimeStore,
+  type AppGatewayActionOwner,
+  type AppGatewayActionRuntimeStore,
+  type InMemoryAppGatewayActionRuntimeStoreOptions,
+} from './action-runtime-store.js';
+export {
   createAppGatewayHttpHandler,
   createAppGatewayHttpServer,
   type AppGatewayAuthorize,
