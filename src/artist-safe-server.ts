@@ -18,7 +18,8 @@ export function createArtistSafeTocaServer(options: TocaServerOptions = {}): Mcp
     ...options,
     onRuntimeComposition: (composition) => {
       for (const tool of VIDEO_GENERATIVE_TOOL_DEFINITIONS) composition.registry.register(tool);
-      for (const tool of VIDEO_ASSET_SELECTION_TOOL_DEFINITIONS) composition.registry.register(tool);
+      for (const tool of VIDEO_ASSET_SELECTION_TOOL_DEFINITIONS)
+        composition.registry.register(tool);
       options.onRuntimeComposition?.(composition);
     },
   });
