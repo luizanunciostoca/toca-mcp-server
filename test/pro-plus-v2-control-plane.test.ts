@@ -61,7 +61,9 @@ describe('PRO+ v2 control plane', () => {
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).toContain('candidate_source_sha=$CANDIDATE_SOURCE_SHA');
-    expect(build).toContain('CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}');
+    expect(build).toContain(
+      'CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}',
+    );
     expect(build).toContain('SOURCE_SHA=$RUNTIME_SOURCE_SHA');
     expect(build).toContain('test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"');
     expect(build).toContain('BUILD_REUSED=');
