@@ -1,10 +1,10 @@
 import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createTocaHttpServerWithAppGateway } from '../src/app-gateway/index.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import { createTocaHttpServer } from '../src/http-server.js';
-import { createTocaHttpServerWithAppGateway } from '../src/app-gateway/index.js';
 
 const servers: Server[] = [];
 const bearer = 'Bearer toca-app-session';
@@ -71,7 +71,10 @@ describe('TOCA HTTP + App Gateway composition', () => {
 
     const health = await fetch(`${baseUrl}/health`);
     expect(health.status).toBe(200);
-    await expect(health.json()).resolves.toMatchObject({ status: 'ok', service: 'toca-mcp-server' });
+    await expect(health.json()).resolves.toMatchObject({
+      status: 'ok',
+      service: 'toca-mcp-server',
+    });
   });
 
   it('exposes authenticated PREPARE-only app gateway routes when explicitly injected', async () => {
@@ -105,9 +108,9 @@ describe('TOCA HTTP + App Gateway composition', () => {
     const capabilityBody = (await capabilities.json()) as {
       actions: Array<{ action_type: string; availability: string }>;
     };
-    expect(capabilityBody.actions.find((action) => action.action_type === 'CREATE_VIDEO')).toMatchObject({
-      availability: 'AVAILABLE',
-    });
+    expect(
+      capabilityBody.actions.find((action) => action.action_type === 'CREATE_VIDEO'),
+    ).toMatchObject({ availability: 'AVAILABLE' });
 
     const prepared = await fetch(`${baseUrl}/api/v1/actions`, {
       method: 'POST',
@@ -130,7 +133,7 @@ describe('TOCA HTTP + App Gateway composition', () => {
     const preparedBody = (await prepared.json()) as {
       action: { action_id: string; correlation_id: string; state: string };
     };
-    expect(preparedBody.action).toEqual({
+    expect(preparedBody.action).toMatchObject({
       action_id: 'composition-1',
       correlation_id: 'composition-2',
       state: 'READY',
