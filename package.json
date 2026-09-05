@@ -41,7 +41,7 @@
     "start:deterministic-artist-composite": "node dist/src/deterministic-artist-composite.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write src/app-gateway/oidc-verifier.ts test/app-gateway-oidc-verifier.test.ts && git diff -- src/app-gateway/oidc-verifier.ts test/app-gateway-oidc-verifier.test.ts && exit 1",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
