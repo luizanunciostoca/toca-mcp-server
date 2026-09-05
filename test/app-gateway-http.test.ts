@@ -99,7 +99,17 @@ describe('Android App Gateway HTTP boundary', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    const body = await response.json();
+    const body = (await response.json()) as {
+      api_version: string;
+      session: {
+        subject: string;
+        tenant_id?: string;
+        roles: string[];
+        authorization_source: string;
+        capability_authority: string;
+        execution_boundary: string;
+      };
+    };
     expect(body).toEqual({
       api_version: 'v1',
       session: {
