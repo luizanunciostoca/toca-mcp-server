@@ -143,7 +143,7 @@ jobs:
           COMMENTS="$(gh api graphql \
             -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){comments(last:100){nodes{body createdAt databaseId author{login}}}}}}' \
             -f owner="$REPO_OWNER" -f repo="$REPO_NAME" -F number=641 \
-            | jq '[.data.repository.issue.comments.nodes[] | {body, created_at: .createdAt, id: .databaseId, user: {login: (.author.login // "")}}]')"
+            | jq '[.data.repository.issue.comments.nodes[] | {body, created_at: .createdAt, id: .databaseId, user: {login: (if (.author.login // "") == "github-actions" then "github-actions[bot]" else (.author.login // "") end)}}]')"
           LATEST_BODY="$(jq -r --arg evidence_id "$EVIDENCE_ID" --arg owner "$GITHUB_REPOSITORY_OWNER" '
             [ .[]
               | select(.user.login == $owner or .user.login == "github-actions[bot]")
