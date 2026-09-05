@@ -5,6 +5,7 @@ import {
   capabilityStatusToAvailability,
   createTocaActionEvent,
   listActionCards,
+  listVideoCreationOptions,
   prepareTocaAction,
 } from '../src/app-gateway/index.js';
 
@@ -108,6 +109,60 @@ describe('Android app gateway contracts', () => {
 
     expect(publishCard?.availability).toBe('AVAILABLE');
     expect(publishCard?.approvalHint).toBe(true);
+  });
+
+  it('exposes the ten governed video creation options from the visual manual', () => {
+    const options = listVideoCreationOptions();
+
+    expect(options).toHaveLength(10);
+    expect(options.map((option) => option.manualOrder)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(options.at(-1)).toMatchObject({
+      route: 'SYNTHETIC_TEXT_TO_VIDEO_RESTRICTED',
+      restricted: true,
+      driftRisk: 'ALTO',
+    });
+  });
+
+  it('requires an explicit route for video creation requests', () => {
+    const registry = baseRegistry();
+    registry.register(tool({ name: 'video.select_assets' }));
+
+    expect(() =>
+      prepareTocaAction(
+        {
+          action_type: 'CREATE_VIDEO',
+          operation: 'THE_PARTY',
+          objective: 'Criar Reel hero',
+        },
+        registry,
+      ),
+    ).toThrow('VIDEO_CREATION_ROUTE_REQUIRED');
+  });
+
+  it('prepares video creation with the selected governed route', () => {
+    const registry = baseRegistry();
+    registry.register(tool({ name: 'video.select_assets' }));
+
+    const action = prepareTocaAction(
+      {
+        action_type: 'CREATE_VIDEO',
+        operation: 'THE_PARTY',
+        objective: 'Criar Reel hero',
+        video_route: 'REAL_FOOTAGE_FILM',
+      },
+      registry,
+      {
+        createId: (() => {
+          let index = 0;
+          return () => `video-${++index}`;
+        })(),
+        now: () => '2026-09-05T02:00:00.000Z',
+      },
+    );
+
+    expect(action.state).toBe('READY');
+    expect(action.request.video_route).toBe('REAL_FOOTAGE_FILM');
+    expect(action.reasons.join(' ')).toContain('REAL_FOOTAGE_FILM');
   });
 
   it('maps provider uncertainty to an explicit non-success state', () => {
