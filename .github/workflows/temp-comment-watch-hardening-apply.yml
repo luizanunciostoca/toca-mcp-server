@@ -7,7 +7,7 @@ on:
       - .github/workflows/temp-comment-watch-hardening-apply.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apply:
@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/comment-opportunity-watch-log-propagation
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 1
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Apply patch and repository formatting
+      - name: Apply patch, format and persist non-workflow transfer files
         shell: bash
         run: |
           set -euo pipefail
@@ -36,14 +36,11 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec prettier --write .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml test/instagram-engagement-comment-canary-opportunity-watch.test.ts
           git diff --check
-          mkdir -p /tmp/comment-watch-patch/.github/workflows /tmp/comment-watch-patch/test
-          cp .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml /tmp/comment-watch-patch/.github/workflows/
-          cp test/instagram-engagement-comment-canary-opportunity-watch.test.ts /tmp/comment-watch-patch/test/
-      - name: Upload exact formatted patch files
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: comment-watch-hardening-${{ github.run_id }}
-          path: /tmp/comment-watch-patch
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 1
+          mkdir -p tmp/comment-watch-transfer
+          cp .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml tmp/comment-watch-transfer/watch-workflow.yml.txt
+          cp test/instagram-engagement-comment-canary-opportunity-watch.test.ts tmp/comment-watch-transfer/watch-test.ts.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tmp/comment-watch-transfer/watch-workflow.yml.txt tmp/comment-watch-transfer/watch-test.ts.txt
+          git commit -m 'chore(temp): persist formatted Comment watch transfer files'
+          git push origin HEAD:fix/comment-opportunity-watch-log-propagation
