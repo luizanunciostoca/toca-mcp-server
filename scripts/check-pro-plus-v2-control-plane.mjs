@@ -39,8 +39,7 @@ const statePlane = json('control/pro-plus/state-plane.json');
 if (schema.schemaVersion !== 2 || schema.driveProtocolId !== protocolId)
   fail('schema/protocol mismatch');
 if (schema.$defs?.gitSha?.pattern !== '^[0-9a-f]{40}$') fail('git SHA contract missing');
-if (schema.$defs?.imageDigest?.pattern !== '^sha256:[0-9a-f]{64}$')
-  fail('digest contract missing');
+if (schema.$defs?.imageDigest?.pattern !== '^sha256:[0-9a-f]{64}$') fail('digest contract missing');
 
 const requireEnum = (name, required) => {
   const values = schema.$defs?.[name]?.enum ?? [];
