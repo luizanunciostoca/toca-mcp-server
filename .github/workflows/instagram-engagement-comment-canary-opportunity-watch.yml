@@ -223,11 +223,50 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
-            --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=asc --format=json)"
-          SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
-            | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
-            || true)"
+          SAFE_LINES=''
+          MARKERS_COMPLETE=false
+          POLL_ATTEMPTS=0
+          required_markers=(
+            INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY
+            RECENT_COMMENT_COUNT STATE_CANDIDATE_COUNT ELIGIBLE_COUNT ELIGIBLE_TARGET_SHA256
+            UNRESOLVED_AMBIGUITY_COUNT ACTIVE_RESERVATION_COUNT
+            REJECTED_SCOPE REJECTED_AGE REJECTED_CONFIDENCE REJECTED_PRIORITY
+            REJECTED_SENSITIVE REJECTED_COMMERCIAL REJECTED_URGENCY
+            REJECTED_KNOWLEDGE REJECTED_POLICY
+            CANARY_CHANNEL READ_ONLY_ELIGIBILITY DATABASE_MUTATIONS PROVIDER_CALLS
+            EXTERNAL_REPLY_WRITES RAW_USER_DATA_LOGGED
+          )
+
+          for attempt in 1 2 3 4 5 6; do
+            POLL_ATTEMPTS="$attempt"
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
+              || true)"
+
+            MARKERS_COMPLETE=true
+            for marker in "${required_markers[@]}"; do
+              count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+              if [[ "$count" != '1' ]]; then
+                MARKERS_COMPLETE=false
+                break
+              fi
+            done
+            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then
+              break
+            fi
+            if [[ "$attempt" != '6' ]]; then
+              sleep 10
+            fi
+          done
+
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            echo "COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION" >&2
+            exit 1
+          fi
 
           read_single_marker() {
             local marker="$1"
@@ -275,6 +314,8 @@ jobs:
             test "$AMBIGUITY_COUNT" = '0'
             test "$RESERVATION_COUNT" = '0'
             [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+          else
+            test "$TARGET_SHA" = 'NONE'
           fi
 
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
