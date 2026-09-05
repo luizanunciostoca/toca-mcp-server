@@ -11,6 +11,7 @@ import {
   type TocaAction,
   type TocaActionRequest,
 } from './contracts.js';
+import { getVideoCreationOption } from './video-creation-options.js';
 
 const availabilityScore: Readonly<Record<ActionAvailability, number>> = {
   AVAILABLE: 4,
@@ -59,6 +60,8 @@ export function prepareTocaAction(
   } = {},
 ): TocaAction {
   const request = tocaActionRequestSchema.parse(rawRequest);
+  validateVideoRouteSelection(request);
+
   const definition = ACTION_CARD_CATALOG.find(
     (candidate) => candidate.actionType === request.action_type,
   );
@@ -69,6 +72,7 @@ export function prepareTocaAction(
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
   const blocked = card.availability === 'BLOCKED' || card.availability === 'UNAVAILABLE';
+  const routeReasons = videoRouteReasons(request);
 
   return {
     actionId: createId(),
@@ -78,16 +82,31 @@ export function prepareTocaAction(
     availability: card.availability,
     approvalHint: card.approvalHint,
     reasons: blocked
-      ? card.reasons.length > 0
-        ? card.reasons
-        : ['Required capability path is unavailable.']
-      : card.reasons,
+      ? [...(card.reasons.length > 0 ? card.reasons : ['Required capability path is unavailable.']), ...routeReasons]
+      : [...card.reasons, ...routeReasons],
     createdAt: now(),
   };
 }
 
 export function parseTocaActionRequest(input: unknown): TocaActionRequest {
   return tocaActionRequestSchema.parse(input);
+}
+
+function validateVideoRouteSelection(request: TocaActionRequest): void {
+  if (request.action_type === 'CREATE_VIDEO' && !request.video_route) {
+    throw new Error('VIDEO_CREATION_ROUTE_REQUIRED');
+  }
+  if (request.video_route) getVideoCreationOption(request.video_route);
+}
+
+function videoRouteReasons(request: TocaActionRequest): readonly string[] {
+  if (!request.video_route) return [];
+  const option = getVideoCreationOption(request.video_route);
+  return option.restricted
+    ? [
+        `${option.route}: rota restrita; não pode substituir footage factual nem contornar source binding, Creative Truth, aprovação ou QA.`,
+      ]
+    : [`${option.route}: rota de vídeo selecionada pelo cliente para resolução governada.`];
 }
 
 function resolveAllOfAvailability(capabilities: readonly CapabilitySnapshot[]): ActionAvailability {
