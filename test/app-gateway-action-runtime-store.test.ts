@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createInMemoryAppGatewayActionRuntimeStore,
+  createInMemoryAppGatewayActionRuntimeStore as createStore,
   type AppGatewayActionOwner,
   type TocaAction,
 } from '../src/app-gateway/index.js';
 
-const ownerA: AppGatewayActionOwner = { subject: 'user-a', tenantId: 'toca' };
-const ownerB: AppGatewayActionOwner = { subject: 'user-b', tenantId: 'toca' };
+const ownerA: AppGatewayActionOwner = {
+  subject: 'user-a',
+  tenantId: 'toca',
+};
+const ownerB: AppGatewayActionOwner = {
+  subject: 'user-b',
+  tenantId: 'toca',
+};
 
 function action(actionId: string): TocaAction {
   return {
@@ -29,22 +35,27 @@ function action(actionId: string): TocaAction {
 
 describe('App Gateway bounded action runtime store', () => {
   it('returns an action only to the bound subject and tenant', () => {
-    const store = createInMemoryAppGatewayActionRuntimeStore();
+    const store = createStore();
+    const wrongTenant = {
+      subject: 'user-a',
+      tenantId: 'other',
+    };
+    const spacedOwner = {
+      subject: ' user-a ',
+      tenantId: ' toca ',
+    };
+
     store.put(action('ACT-1'), ownerA);
 
     expect(store.get('ACT-1', ownerA)?.actionId).toBe('ACT-1');
     expect(store.get('ACT-1', ownerB)).toBeUndefined();
-    expect(
-      store.get('ACT-1', { subject: 'user-a', tenantId: 'other' }),
-    ).toBeUndefined();
-    expect(
-      store.get('ACT-1', { subject: ' user-a ', tenantId: ' toca ' })?.actionId,
-    ).toBe('ACT-1');
+    expect(store.get('ACT-1', wrongTenant)).toBeUndefined();
+    expect(store.get('ACT-1', spacedOwner)?.actionId).toBe('ACT-1');
   });
 
   it('expires records after the configured TTL', () => {
     let now = 1_000;
-    const store = createInMemoryAppGatewayActionRuntimeStore({
+    const store = createStore({
       ttlMs: 100,
       nowEpochMs: () => now,
     });
@@ -58,7 +69,7 @@ describe('App Gateway bounded action runtime store', () => {
   });
 
   it('evicts the oldest records when capacity is exceeded', () => {
-    const store = createInMemoryAppGatewayActionRuntimeStore({ capacity: 2 });
+    const store = createStore({ capacity: 2 });
     store.put(action('ACT-1'), ownerA);
     store.put(action('ACT-2'), ownerA);
     store.put(action('ACT-3'), ownerA);
@@ -69,15 +80,16 @@ describe('App Gateway bounded action runtime store', () => {
   });
 
   it('fails closed on invalid owner or unbounded configuration', () => {
-    const store = createInMemoryAppGatewayActionRuntimeStore();
-    expect(() => store.put(action('ACT-1'), { subject: '   ' })).toThrow(
+    const store = createStore();
+    const noOwner = { subject: '   ' };
+
+    expect(() => store.put(action('ACT-1'), noOwner)).toThrow(
       'APP_GATEWAY_ACTION_OWNER_REQUIRED',
     );
-
-    expect(() => createInMemoryAppGatewayActionRuntimeStore({ ttlMs: 0 })).toThrow(
+    expect(() => createStore({ ttlMs: 0 })).toThrow(
       'APP_GATEWAY_ACTION_STORE_CONFIGURATION_INVALID',
     );
-    expect(() => createInMemoryAppGatewayActionRuntimeStore({ capacity: 5_001 })).toThrow(
+    expect(() => createStore({ capacity: 5_001 })).toThrow(
       'APP_GATEWAY_ACTION_STORE_CONFIGURATION_INVALID',
     );
   });
