@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TOCA OS PRO+ v2 Control Plane",
+  "schemaVersion": 2,
+  "driveProtocolId": "17DLQXnLkhVRfN2ina4WDcE-fjQL6AHqH2x6UzhXZxUw",
+  "$defs": {
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "laneStatus": {
+      "enum": [
+        "PLANNED",
+        "READY_PARALLEL",
+        "ACTIVE",
+        "STACKED",
+        "SERIAL_WAIT",
+        "NEEDS_LOCK",
+        "CI_RUNNING",
+        "READY_FOR_INTEGRATION",
+        "FROZEN",
+        "MERGE_RESERVED",
+        "MERGED",
+        "POST_MERGE_ACCEPTANCE",
+        "ACCEPTED",
+        "BLOCKED_EXTERNAL",
+        "SUPERSEDED",
+        "CANCELED",
+        "FAILED"
+      ]
+    },
+    "integrationStatus": {
+      "enum": [
+        "READY_FOR_INTEGRATION",
+        "FROZEN",
+        "CI_RUNNING",
+        "MERGE_RESERVED",
+        "MERGED",
+        "POST_MERGE_ACCEPTANCE",
+        "ACCEPTED"
+      ]
+    },
+    "evidenceValidity": {
+      "enum": ["VALID", "STALE", "SUPERSEDED", "AMBIGUOUS", "FAILED", "NOT_EXECUTED"]
+    },
+    "backlogClass": {
+      "enum": [
+        "ACTIVE_IMPLEMENTATION",
+        "READY_FOR_INTEGRATION",
+        "STALE_NEEDS_SYNC",
+        "SUPERSEDED_BY_MAIN",
+        "SUPERSEDED_BY_PR",
+        "EVIDENCE_ONLY",
+        "DO_NOT_MERGE_DIAGNOSTIC",
+        "BLOCKED_EXTERNAL",
+        "DEPENDABOT_ROUTINE",
+        "HISTORICAL"
+      ]
+    }
+  },
+  "requiredLaneFields": [
+    "lane_id",
+    "mission",
+    "owner_agent",
+    "base_sha",
+    "branch",
+    "files_owned",
+    "hotspot_locks",
+    "depends_on",
+    "side_effect_scope",
+    "status",
+    "next_action"
+  ],
+  "requiredEvidenceFields": [
+    "evidence_id",
+    "evidence_type",
+    "source_sha",
+    "result",
+    "validity",
+    "external_side_effects",
+    "database_mutations",
+    "service_mutations"
+  ]
+}
