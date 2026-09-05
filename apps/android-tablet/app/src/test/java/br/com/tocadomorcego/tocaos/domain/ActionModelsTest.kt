@@ -1,6 +1,7 @@
 package br.com.tocadomorcego.tocaos.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActionModelsTest {
@@ -13,6 +14,18 @@ class ActionModelsTest {
     @Test
     fun `client action types match gateway wire names`() {
         assertEquals("CREATE_CONTENT", ActionType.CREATE_CONTENT.name)
+        assertEquals("CREATE_VIDEO", ActionType.CREATE_VIDEO.name)
         assertEquals("PUBLISH_SCHEDULE", ActionType.PUBLISH_SCHEDULE.name)
+    }
+
+    @Test
+    fun `video creation options mirror the visual manual routes`() {
+        assertEquals(10, VIDEO_CREATION_OPTIONS.size)
+        assertEquals(VideoCreationRoute.REAL_FOOTAGE_FILM, VIDEO_CREATION_OPTIONS.first().route)
+        assertEquals(
+            VideoCreationRoute.SYNTHETIC_TEXT_TO_VIDEO_RESTRICTED,
+            VIDEO_CREATION_OPTIONS.last().route,
+        )
+        assertTrue(VIDEO_CREATION_OPTIONS.last().restricted)
     }
 }
