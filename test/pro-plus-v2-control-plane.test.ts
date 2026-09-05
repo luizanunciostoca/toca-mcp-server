@@ -64,7 +64,9 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).not.toContain('--paginate --slurp');
     expect(validation).toContain('comments(last:100)');
     expect(validation).toContain("$GITHUB_EVENT_NAME\" == 'issue_comment'");
+    expect(validation).toContain('== "github-actions" then "github-actions[bot]"');
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
+    expect(stateValidation).toContain("[expectedOwner, 'github-actions[bot]'].includes(author)");
     expect(stateValidation).toContain("'MERGE_RESERVED'");
     expect(stateValidation).toContain("'MERGED'");
     expect(stateValidation).toContain("'POST_MERGE_ACCEPTANCE'");
@@ -73,6 +75,7 @@ describe('PRO+ v2 control plane', () => {
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).not.toContain('--paginate --slurp');
     expect(build).toContain('comments(last:100)');
+    expect(build).toContain('== "github-actions" then "github-actions[bot]"');
     expect(build).toContain('sort_by([.created_at, (.id // 0)])');
     expect(build).not.toContain('sort_by(.created_at, .id)');
     expect(build).toContain('BUILD_BROKER_EVIDENCE_SCAN_LIMIT=100');
