@@ -131,8 +131,16 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).toContain('--order=desc');
     expect(workflow).toContain('head -1 | cut -d= -f2-');
     expect(workflow).not.toContain('--order=asc');
+    expect(workflow).toContain('if ! LOGS="$(gcloud logging read');
+    expect(workflow).toContain("LOGS='[]'");
     expect(workflow).toContain('gcloud run jobs delete');
     expect(workflow).not.toContain('scripts/instagram-engagement-comment-provider-canary.mjs');
+  });
+
+  it('requires a complete target marker and fails closed on non-READY hashes', () => {
+    expect(workflow).toContain('if [[ -z "$TARGET_SHA" ]]');
+    expect(workflow).toContain('[[ "$STATUS" == \'READY\' ]]');
+    expect(workflow).toContain('[[ "$STATUS" != \'READY\' && "$TARGET_SHA" != \'NONE\' ]]');
   });
 
   it('publishes only bounded counts, status and a hashed or explicit NONE target', () => {
@@ -142,7 +150,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
       'ELIGIBILITY=${STATUS}',
       'ELIGIBILITY=UNAVAILABLE',
       'LOG_POLL_ATTEMPTS=',
-      'ELIGIBLE_TARGET_SHA256=${TARGET_SHA:-NONE}',
+      'ELIGIBLE_TARGET_SHA256=${TARGET_SHA}',
       'RAW_USER_DATA_LOGGED=false',
       'DATABASE_MUTATIONS=false',
       'PROVIDER_CALLS=false',
@@ -150,7 +158,6 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
-    expect(workflow).toContain('[[ -n "$TARGET_SHA" && "$TARGET_SHA" != \'NONE\' ]]');
     expect(workflow).toContain('gh api --method POST');
     expect(workflow).not.toContain('PAYLOAD_SUMMARIES=');
     expect(workflow).not.toContain('RAW_TEXT=');
