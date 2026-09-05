@@ -1,4 +1,8 @@
-import { createPublicKey, verify as verifySignature } from 'node:crypto';
+import {
+  createPublicKey,
+  verify as verifySignature,
+  type JsonWebKey,
+} from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { TextDecoder } from 'node:util';
 import type { AppGatewayAuthorize, AppGatewayPrincipal } from './http-boundary.js';
