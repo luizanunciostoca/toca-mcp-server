@@ -82,7 +82,12 @@ export function prepareTocaAction(
     availability: card.availability,
     approvalHint: card.approvalHint,
     reasons: blocked
-      ? [...(card.reasons.length > 0 ? card.reasons : ['Required capability path is unavailable.']), ...routeReasons]
+      ? [
+          ...(card.reasons.length > 0
+            ? card.reasons
+            : ['Required capability path is unavailable.']),
+          ...routeReasons,
+        ]
       : [...card.reasons, ...routeReasons],
     createdAt: now(),
   };
@@ -104,7 +109,10 @@ function videoRouteReasons(request: TocaActionRequest): readonly string[] {
   const option = getVideoCreationOption(request.video_route);
   return option.restricted
     ? [
-        `${option.route}: rota restrita; não pode substituir footage factual nem contornar source binding, Creative Truth, aprovação ou QA.`,
+        [
+          `${option.route}: rota restrita; não pode substituir footage factual`,
+          'nem contornar source binding, Creative Truth, aprovação ou QA.',
+        ].join(' '),
       ]
     : [`${option.route}: rota de vídeo selecionada pelo cliente para resolução governada.`];
 }
