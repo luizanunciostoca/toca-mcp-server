@@ -41,8 +41,19 @@ jobs:
           for issue in 639 640 641 642; do
             gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "$RUNNER_TEMP/pro-plus-v2-${issue}.json"
           done
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/issues/641/comments?per_page=100" \
-            | jq '[.[][]]' > "$RUNNER_TEMP/pro-plus-v2-641-comments.json"
+
+          if [[ "$GITHUB_EVENT_NAME" == 'issue_comment' ]]; then
+            jq '[.comment | {body, created_at, id, user: {login: (.user.login // "")}}]' \
+              "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pro-plus-v2-641-comments.json"
+          else
+            REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+            REPO_NAME="${GITHUB_REPOSITORY#*/}"
+            gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){comments(last:100){nodes{body createdAt databaseId author{login}}}}}}' \
+              -f owner="$REPO_OWNER" -f repo="$REPO_NAME" -F number=641 \
+              | jq '[.data.repository.issue.comments.nodes[] | {body, created_at: .createdAt, id: .databaseId, user: {login: (.author.login // "")}}]' \
+              > "$RUNNER_TEMP/pro-plus-v2-641-comments.json"
+          fi
 
       - name: Validate PRO+ v2 state plane
         env:
