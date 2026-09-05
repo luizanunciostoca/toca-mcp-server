@@ -2,6 +2,8 @@
 
 Follow root `AGENTS.md` and `control/pro-plus/README.md`.
 
+Canonical protocol: `TOCA_OS — ORQUESTRACAO_DE_DESENVOLVIMENTO_PARALELO_GITHUB_COPILOT_PRO_PLUS_v2.0`, Drive ID `17DLQXnLkhVRfN2ina4WDcE-fjQL6AHqH2x6UzhXZxUw`.
+
 Before coding, revalidate live `main`, read the v2 state plane (#639–#642), reconcile competing work, and obtain an isolated Lane Contract. Never write outside owned paths or a lock-required hotspot without Control Tower assignment.
 
 Use #639 for mutable lanes/locks, #640 for Integration Queue/Main Stability, #641 for sanitized evidence validity, and #642 for backlog classification. Routine state changes must not create `main` commits.
