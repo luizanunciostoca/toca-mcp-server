@@ -55,11 +55,14 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).not.toContain('issues: write');
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
     expect(stateValidation).toContain("'MERGE_RESERVED',\n  'MERGED',\n  'POST_MERGE_ACCEPTANCE'");
+    expect(stateValidation).toContain("const evidenceId = marker(body, 'EVIDENCE_ID');");
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).toContain('BUILD_REUSED=');
     expect(build).toContain('key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"');
     expect(build).toContain('value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"');
     expect(build).toContain('marker must be unique and exact');
+    expect(build).toContain('grep -Fxc "TREE_SHA=$TREE_SHA"');
+    expect(build).toContain('grep -Fxc "RUNTIME_CONTRACT=$RUNTIME_CONTRACT"');
   });
 });
