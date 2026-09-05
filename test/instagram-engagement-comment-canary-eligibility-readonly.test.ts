@@ -150,7 +150,9 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
-    expect(workflow).toContain("[[ -n \"$TARGET_SHA\" && \"$TARGET_SHA\" != 'NONE' ]]");
+    expect(workflow).toContain(
+      "[[ -n \"$TARGET_SHA\" && \"$TARGET_SHA\" != 'NONE' ]]",
+    );
     expect(workflow).toContain('gh api --method POST');
     expect(workflow).not.toContain('PAYLOAD_SUMMARIES=');
     expect(workflow).not.toContain('RAW_TEXT=');
