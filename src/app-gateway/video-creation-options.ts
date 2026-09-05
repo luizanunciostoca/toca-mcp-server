@@ -1,7 +1,4 @@
-import type {
-  VideoCreationOptionDefinition,
-  VideoCreationRoute,
-} from './contracts.js';
+import type { VideoCreationOptionDefinition, VideoCreationRoute } from './contracts.js';
 
 export const VIDEO_CREATION_OPTIONS: readonly VideoCreationOptionDefinition[] = [
   {
@@ -150,9 +147,7 @@ export function listVideoCreationOptions(): readonly VideoCreationOptionDefiniti
 }
 
 export function getVideoCreationOption(route: VideoCreationRoute): VideoCreationOptionDefinition {
-  const option = VIDEO_CREATION_OPTIONS.find(
-    (candidate) => candidate.route === route,
-  );
+  const option = VIDEO_CREATION_OPTIONS.find((candidate) => candidate.route === route);
   if (!option) throw new Error(`VIDEO_CREATION_ROUTE_NOT_CATALOGUED:${route}`);
   return option;
 }
