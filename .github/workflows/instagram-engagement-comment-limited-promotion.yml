@@ -1,0 +1,494 @@
+name: Instagram Engagement Comment LIMITED Promotion
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-comment-limited-promotion
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+  KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001
+
+jobs:
+  promote-comment-limited:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram engagement COMMENT LIMITED promotion AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact promotion controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact promotion authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          ELIGIBLE_TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$BODY" | cut -d= -f2-)"
+          TARGET_COUNT="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$BODY" || true)"
+          CANARY_ISSUE="$(grep '^CANARY_AUTHORIZATION_ISSUE=' <<< "$BODY" | cut -d= -f2-)"
+          CANARY_RUN_ID="$(grep '^CANARY_RUN_ID=' <<< "$BODY" | cut -d= -f2-)"
+          [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$TARGET_COUNT" = '1'
+          [[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANARY_ISSUE" =~ ^[0-9]+$ ]]
+          [[ "$CANARY_RUN_ID" =~ ^[0-9]+$ ]]
+
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_COMMENT_LIMITED_PROMOTION=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"
+            "CANARY_AUTHORIZATION_ISSUE=$CANARY_ISSUE"
+            "CANARY_RUN_ID=$CANARY_RUN_ID"
+            "AUTONOMY_STAGE=LIMITED"
+            "AUTO_REPLY_CHANNELS=DIRECT,COMMENT"
+            "PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=true"
+            "PERSISTENT_WRITES_AUTHORIZED=true"
+            "SERVICE_MUTATION_AUTHORIZED=true"
+            "SCHEDULER_MUTATION_AUTHORIZED=false"
+            "DATABASE_MIGRATIONS_AUTHORIZED=false"
+            "GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false"
+            "ZERO_TRAFFIC_STAGE_REQUIRED=true"
+            "BATCH_SIZE=1"
+            "ROLLBACK_ON_FAILURE=true"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact Comment LIMITED promotion authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha=$RUNTIME_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "eligible_target_sha=$ELIGIBLE_TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "canary_issue=$CANARY_ISSUE" >> "$GITHUB_OUTPUT"
+          echo "canary_run_id=$CANARY_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Verify immutable real-Comment canary evidence and runtime lineage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_SHA: ${{ steps.auth.outputs.runtime_sha }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          ELIGIBLE_TARGET_SHA: ${{ steps.auth.outputs.eligible_target_sha }}
+          CANARY_ISSUE: ${{ steps.auth.outputs.canary_issue }}
+          CANARY_RUN_ID: ${{ steps.auth.outputs.canary_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+          CANARY_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${CANARY_ISSUE}")"
+          CANARY_TITLE="$(jq -r '.title // ""' <<< "$CANARY_JSON")"
+          CANARY_BODY="$(jq -r '.body // ""' <<< "$CANARY_JSON")"
+          CANARY_TARGET_COUNT="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$CANARY_BODY" || true)"
+          test "$CANARY_TARGET_COUNT" = '1'
+          jq -e --arg owner "$REPO_OWNER" '
+            .state == "closed" and
+            .user.login == $owner
+          ' <<< "$CANARY_JSON" >/dev/null
+          [[ "$CANARY_TITLE" == 'PRODUCTION AUTHORIZATION — Instagram engagement real-write COMMENT CANARY AUTO'* ]]
+
+          canary_required=(
+            "AUTHORIZED_CONTROLLER_SHA=$RUNTIME_SHA"
+            "AUTHORIZATION_STATE=CONSUMED_AND_CLOSED"
+            "INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"
+            "CANARY_CHANNEL=COMMENT"
+            "CANARY_MAX_EXTERNAL_REPLIES=1"
+            "TEMPORARY_JOB_ONLY=true"
+            "PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false"
+            "EXTERNAL_COMMENT_REPLY_AUTHORIZED=true"
+            "DIRECT_LIMITED_RUNTIME_MUST_REMAIN_ACTIVE=true"
+          )
+          for line in "${canary_required[@]}"; do
+            grep -Fxq "$line" <<< "$CANARY_BODY" || {
+              echo "Missing exact successful canary authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          RUN_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANARY_RUN_ID}")"
+          jq -e \
+            --arg sha "$RUNTIME_SHA" \
+            --arg owner "$REPO_OWNER" \
+            --arg title "$CANARY_TITLE" '
+              .head_sha == $sha and
+              .head_branch == "main" and
+              .event == "issues" and
+              .status == "completed" and
+              .conclusion == "success" and
+              .path == ".github/workflows/instagram-engagement-comment-provider-canary.yml" and
+              .actor.login == $owner and
+              .display_title == $title
+            ' <<< "$RUN_JSON" >/dev/null
+
+          COMPARE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${RUNTIME_SHA}...${GITHUB_SHA}")"
+          jq -e \
+            --arg runtime "$RUNTIME_SHA" '
+              .status == "ahead" and
+              .base_commit.sha == $runtime and
+              .merge_base_commit.sha == $runtime and
+              (.ahead_by >= 1) and
+              (([.files[].filename] | sort) == [
+                ".github/workflows/instagram-engagement-comment-limited-promotion.yml",
+                "test/instagram-engagement-comment-limited-promotion.test.ts"
+              ])
+            ' <<< "$COMPARE_JSON" >/dev/null
+          echo 'COMMENT_PROMOTION_RUNTIME_DRIFT_GATE=PASS'
+
+          COMMENT_BODIES="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${CANARY_ISSUE}/comments" --jq '.[].body // ""')"
+          EVIDENCE_TARGET_COUNT="$(grep -c "^ELIGIBLE_TARGET_SHA256=${ELIGIBLE_TARGET_SHA}$" <<< "$COMMENT_BODIES" || true)"
+          test "$EVIDENCE_TARGET_COUNT" = '1'
+          evidence_required=(
+            'COMMENT_CANARY_STATUS=PASS'
+            "CONTROLLER_SHA=$RUNTIME_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "ELIGIBLE_TARGET_SHA256=$ELIGIBLE_TARGET_SHA"
+            'CANARY_CHANNEL=COMMENT'
+            'CANARY_SENT_COUNT=1'
+            'PROVIDER_ACKNOWLEDGED=true'
+            'CONVERSATION_RECEIPT=PASS'
+            'PERSISTENT_COMMENT_PROMOTION=false'
+            'DIRECT_LIMITED_RUNTIME_ACTIVE=true'
+            'GENERAL_AUTONOMY_PROMOTED=false'
+          )
+          for line in "${evidence_required[@]}"; do
+            grep -Fxq "$line" <<< "$COMMENT_BODIES" || {
+              echo "Missing verified Comment canary PASS evidence: $line" >&2
+              exit 1
+            }
+          done
+          echo 'COMMENT_CANARY_TARGET_BINDING=PASS'
+          echo 'COMMENT_CANARY_PROMOTION_EVIDENCE=PASS'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Exact-controller Quality Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm quality
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and active Direct LIMITED prestate
+        id: prestate
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          PRE_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          DAEMON_URL="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.url // empty')"
+          test -n "$PRE_REVISION"
+          test -n "$DAEMON_URL"
+
+          PRE_REVISION_JSON="$(gcloud run revisions describe "$PRE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$PRE_REVISION_JSON" | jq -e --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .spec.containers[0] as $c |
+            (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
+            (.spec.serviceAccountName == $sa) and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last // "DIRECT") == "DIRECT") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false") == "false")
+          ' >/dev/null
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_URL}/tick" \
+            --arg audience "$DAEMON_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .state == "ENABLED" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+
+          echo "pre_revision=$PRE_REVISION" >> "$GITHUB_OUTPUT"
+          echo "daemon_url=$DAEMON_URL" >> "$GITHUB_OUTPUT"
+          echo 'DIRECT_LIMITED_PROMOTION_PRESTATE=PASS'
+
+      - name: Prove dual-channel readiness without sending
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-comment-promote-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^NODE_ENV=production#META_ENABLED=true#META_PROVIDER_VERIFIED=true#META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0#INSTAGRAM_PUBLICATION_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true#INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1#INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12" \
+            --command node --args dist/src/instagram-engagement-readiness-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 240s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Verify clean reply boundary before promotion
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-comment-promote-pre-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID,INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID,INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID" \
+            --command node --args dist/src/ops/instagram-engagement-limited-activation-preflight.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Stage DIRECT and COMMENT LIMITED candidate at zero traffic
+        id: stage
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_TAIL="${GITHUB_RUN_ID: -7}"
+          REVISION_SUFFIX="c${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
+          CANDIDATE_REVISION="${DAEMON_SERVICE_NAME}-${REVISION_SUFFIX}"
+          DAEMON_ENV="^@^NODE_ENV=production@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_PUBLICATION_WRITES_ENABLED=false@INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true@INSTAGRAM_ENGAGEMENT_BATCH_SIZE=1@INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres@INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true@INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS@INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58@INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12"
+
+          gcloud run deploy "$DAEMON_SERVICE_NAME" \
+            --image "$RUNTIME_IMAGE" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --update-secrets "TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --update-env-vars "$DAEMON_ENV" \
+            --command node --args dist/src/toca-managed-instagram-daemon.js \
+            --revision-suffix "$REVISION_SUFFIX" \
+            --min-instances 0 --max-instances 1 --concurrency 1 \
+            --no-traffic --quiet
+
+          echo "candidate_revision=$CANDIDATE_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify zero-traffic dual-channel candidate
+        env:
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_REVISION"
+          test -n "$PRE_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e \
+            --arg digest "$RUNTIME_DIGEST" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg sources "$KB_SOURCE_IDS" '
+              .spec.containers[0] as $c |
+              (.spec.serviceAccountName == $sa) and
+              ($c.image | contains($digest)) and
+              ($c.command == ["node"]) and
+              ($c.args == ["dist/src/toca-managed-instagram-daemon.js"]) and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last) == "DIRECT,COMMENT") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false") and
+              (([($c.env // [])[] | select(.name == "META_PROVIDER_VERIFIED") | .value] | last) == "true") and
+              (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS") | .value] | last) == $sources)
+            ' >/dev/null
+
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$SERVICE_JSON" | jq -e \
+            --arg candidate "$CANDIDATE_REVISION" \
+            --arg previous "$PRE_REVISION" '
+              ([.status.traffic[]? | select((.revisionName // "") == $candidate) | (.percent // 0)] | add // 0) == 0 and
+              ([.status.traffic[]? | select((.revisionName // "") == $previous) | (.percent // 0)] | add // 0) == 100
+            ' >/dev/null
+          echo 'COMMENT_LIMITED_ZERO_TRAFFIC_STAGE=PASS'
+
+      - name: Promote dual-channel LIMITED runtime by explicit traffic cutover
+        id: cutover
+        env:
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_REVISION"
+          gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --to-revisions="${CANDIDATE_REVISION}=100" --quiet
+          echo 'traffic_cutover=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify dual-channel LIMITED readback and unchanged scheduler
+        env:
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          DAEMON_URL: ${{ steps.prestate.outputs.daemon_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ROUTED_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$ROUTED_REVISION" = "$CANDIDATE_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e --arg digest "$RUNTIME_DIGEST" '
+            .spec.containers[0] as $c |
+            ($c.image | contains($digest)) and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last) == "DIRECT,COMMENT") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last) == "false")
+          ' >/dev/null
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          printf '%s' "$SCHEDULER_JSON" | jq -e \
+            --arg uri "${DAEMON_URL}/tick" \
+            --arg audience "$DAEMON_URL" \
+            --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+              .state == "ENABLED" and
+              .httpTarget.uri == $uri and
+              .httpTarget.httpMethod == "POST" and
+              .httpTarget.oidcToken.serviceAccountEmail == $sa and
+              .httpTarget.oidcToken.audience == $audience
+            ' >/dev/null
+          echo 'COMMENT_LIMITED_RUNTIME_READBACK=PASS'
+
+      - name: Publish Comment LIMITED promotion PASS
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v COMMENT '%s\n' \
+            'COMMENT_LIMITED_PROMOTION_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "RUNTIME_SOURCE_SHA=${{ steps.auth.outputs.runtime_sha }}" \
+            "RUNTIME_IMAGE_DIGEST=${{ steps.auth.outputs.runtime_digest }}" \
+            "ELIGIBLE_TARGET_SHA256=${{ steps.auth.outputs.eligible_target_sha }}" \
+            "CANARY_AUTHORIZATION_ISSUE=${{ steps.auth.outputs.canary_issue }}" \
+            "CANARY_RUN_ID=${{ steps.auth.outputs.canary_run_id }}" \
+            "PREVIOUS_DIRECT_REVISION=${PRE_REVISION}" \
+            "PROMOTED_REVISION=${CANDIDATE_REVISION}" \
+            'AUTONOMY_STAGE=LIMITED' \
+            'AUTO_REPLY_CHANNELS=DIRECT,COMMENT' \
+            'PERSISTENT_WRITES_ENABLED=true' \
+            'COMMENT_AUTO_REPLY_ENABLED=true' \
+            'BATCH_SIZE=1' \
+            'TRAFFIC_PERCENT=100' \
+            'ZERO_TRAFFIC_STAGE_VERIFIED=true' \
+            'SCHEDULER_MUTATION=false' \
+            'DATABASE_MIGRATIONS=false' \
+            'GENERAL_AUTONOMY_PROMOTED=false' \
+            'ROLLBACK_REQUIRED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$COMMENT"
+
+      - name: Roll back traffic to previous Direct LIMITED revision on failure
+        if: failure()
+        env:
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${PRE_REVISION:-}" ]]; then
+            gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
+              --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --to-revisions="${PRE_REVISION}=100" --quiet
+          fi
+          exit 0
+
+      - name: Consume single-use Comment promotion authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
