@@ -463,7 +463,7 @@ function parseJwks(body: string): readonly JwksKeyRecord[] {
       throw new OidcVerificationError('OIDC_JWKS_INVALID');
     }
     if (!value.keys.every(isRecord)) throw new OidcVerificationError('OIDC_JWKS_INVALID');
-    return value.keys as readonly JwksKeyRecord[];
+    return value.keys;
   } catch (error) {
     if (error instanceof OidcVerificationError) throw error;
     throw new OidcVerificationError('OIDC_JWKS_INVALID');
