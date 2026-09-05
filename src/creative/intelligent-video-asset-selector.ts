@@ -118,8 +118,7 @@ export class IntelligentVideoAssetSelectorService {
     );
     const chosen = chooseCoverageFirst(scored, request.requiredStoryFunctions, maxResults);
     const selectedAssets = chosen.map((candidate, index) => toSelectedAsset(candidate, index + 1));
-    const coverageStatus =
-      missingStoryFunctions.length === 0 ? 'COMPLETE' : 'VIDEO_COVERAGE_GAP';
+    const coverageStatus = missingStoryFunctions.length === 0 ? 'COMPLETE' : 'VIDEO_COVERAGE_GAP';
 
     await this.recordSelectionAudit({
       requestId,
@@ -318,8 +317,7 @@ function parseShots(rows: readonly (readonly unknown[])[]): CanonicalShot[] {
         rowNumber: index + 2,
         shotId,
         driveFileId,
-        driveUrl:
-          value(row, 'drive_url') || `https://drive.google.com/file/d/${driveFileId}/view`,
+        driveUrl: value(row, 'drive_url') || `https://drive.google.com/file/d/${driveFileId}/view`,
         sourceLibraryId: value(row, 'source_library_id') || 'CANONICAL_INTERNAL',
         sourceType,
         operation: value(row, 'operation'),
@@ -440,11 +438,7 @@ function scoreShot(
     shot.storyFunctions.includes(storyFunction),
   );
   const storyFunctionScore =
-    matchedRequiredFunctions.length > 0
-      ? 100
-      : optionalMatches.length > 0
-        ? 75
-        : 35;
+    matchedRequiredFunctions.length > 0 ? 100 : optionalMatches.length > 0 ? 75 : 35;
   const technicalScore = shot.technicalScore;
   const briefFitScore = semanticFitScore(shot, request);
   const energyScore = energyFitScore(shot, request);
@@ -517,9 +511,7 @@ function toSelectedAsset(candidate: ScoredShot, rank: number): SelectedVideoAsse
     sourceType: candidate.shot.sourceType,
     storyFunctions: [...candidate.shot.storyFunctions],
     matchedRequiredFunctions: [...candidate.matchedRequiredFunctions],
-    ...(candidate.shot.visualClusterId
-      ? { visualClusterId: candidate.shot.visualClusterId }
-      : {}),
+    ...(candidate.shot.visualClusterId ? { visualClusterId: candidate.shot.visualClusterId } : {}),
     score: roundScore(candidate.finalScore),
     selectionStatus: candidate.selectionStatus as 'TOP_PICK' | 'STRONG' | 'VALID',
     generativeEligible: isGenerativeEligible(candidate.shot),
@@ -570,7 +562,10 @@ function antiRepeatScoreFor(
   policy: RankingPolicy,
   eligiblePool: readonly CanonicalShot[],
 ): number {
-  const usageBase = Math.max(policy.antiRepeatFloor, 100 - shot.usageCount * policy.useCountPenalty);
+  const usageBase = Math.max(
+    policy.antiRepeatFloor,
+    100 - shot.usageCount * policy.useCountPenalty,
+  );
   const days = shot.lastUsedAt ? ageDays(shot.lastUsedAt, generatedAt) : Number.POSITIVE_INFINITY;
   const recencyFactor =
     policy.recency.find((window) => days <= window.days)?.factor ?? policy.recencyDefault;
@@ -603,8 +598,10 @@ function selectionReason(candidate: ScoredShot): string {
 
 function compareScoredShots(left: ScoredShot, right: ScoredShot): number {
   if (right.finalScore !== left.finalScore) return right.finalScore - left.finalScore;
-  if (right.antiRepeatScore !== left.antiRepeatScore) return right.antiRepeatScore - left.antiRepeatScore;
-  if (right.technicalScore !== left.technicalScore) return right.technicalScore - left.technicalScore;
+  if (right.antiRepeatScore !== left.antiRepeatScore)
+    return right.antiRepeatScore - left.antiRepeatScore;
+  if (right.technicalScore !== left.technicalScore)
+    return right.technicalScore - left.technicalScore;
   return left.shot.shotId.localeCompare(right.shot.shotId);
 }
 
@@ -631,7 +628,8 @@ function findUsageRecord(
   if (matches.length > 1) deny('VIDEO_USAGE_LOG_DUPLICATE_USAGE_ID');
   const row = matches[0];
   if (!row) return undefined;
-  const read = (name: string) => cell(row[requireHeader(headers, name, 'VIDEO_USAGE_LOG_SCHEMA_INVALID')]);
+  const read = (name: string) =>
+    cell(row[requireHeader(headers, name, 'VIDEO_USAGE_LOG_SCHEMA_INVALID')]);
   return {
     shotId: read('shot_id'),
     driveFileId: read('drive_file_id'),
@@ -702,7 +700,8 @@ function splitPipe(value: string): string[] {
 
 function normalizeSourceType(value: string): VideoSourceType {
   const normalized = value.trim().toUpperCase();
-  if (normalized === 'CAMERA' || normalized === 'DRONE' || normalized === 'MIXED') return normalized;
+  if (normalized === 'CAMERA' || normalized === 'DRONE' || normalized === 'MIXED')
+    return normalized;
   return 'UNKNOWN';
 }
 
