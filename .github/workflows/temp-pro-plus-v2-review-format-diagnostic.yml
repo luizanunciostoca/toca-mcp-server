@@ -35,3 +35,4 @@ jobs:
           set -euo pipefail
           pnpm exec prettier test/pro-plus-v2-control-plane.test.ts --write
           git diff -- test/pro-plus-v2-control-plane.test.ts
+          echo 'DIAGNOSTIC_VERSION=2'
