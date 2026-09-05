@@ -13,12 +13,11 @@ describe('PRO+ v2 control plane', () => {
     };
     expect(state.storage).toBe('GITHUB_ISSUES');
     expect(state.mutationsChangeMainSha).toBe(false);
-    expect(Object.values(state.issues).map((entry) => entry.number).sort((a, b) => a - b)).toEqual([
-      639,
-      640,
-      641,
-      642,
-    ]);
+    expect(
+      Object.values(state.issues)
+        .map((entry) => entry.number)
+        .sort((a, b) => a - b),
+    ).toEqual([639, 640, 641, 642]);
     for (const entry of Object.values(state.issues))
       expect(entry.externalSideEffectsAuthorized).toBe(false);
   });
