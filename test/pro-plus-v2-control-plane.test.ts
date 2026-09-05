@@ -50,7 +50,7 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).not.toContain('issues: write');
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
-    expect(build).toContain('RUNTIME_CONTRACT=SERVER_IMAGE_V1');
+    expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).toContain('BUILD_REUSED=');
   });
 });
