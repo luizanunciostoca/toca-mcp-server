@@ -42,3 +42,4 @@ jobs:
             scripts/check-pro-plus-v2-control-plane.mjs \
             scripts/check-pro-plus-v2-state-plane.mjs \
             test/pro-plus-v2-control-plane.test.ts
+          echo 'DIAGNOSTIC_VERSION=2'
