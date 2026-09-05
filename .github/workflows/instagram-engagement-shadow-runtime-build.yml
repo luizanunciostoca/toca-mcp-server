@@ -149,7 +149,7 @@ jobs:
               | select(.user.login == $owner or .user.login == "github-actions[bot]")
               | select((.body // "") | contains("EVIDENCE_ID=" + $evidence_id))
             ]
-            | sort_by(.created_at, .id)
+            | sort_by([.created_at, (.id // 0)])
             | last
             | .body // ""
           ' <<< "$COMMENTS")"
