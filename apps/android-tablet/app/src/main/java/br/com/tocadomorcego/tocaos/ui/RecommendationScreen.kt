@@ -19,14 +19,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.tocadomorcego.tocaos.domain.ActionType
+import br.com.tocadomorcego.tocaos.domain.VideoCreationRoute
+import br.com.tocadomorcego.tocaos.domain.displayTitle
 
 @Composable
 fun RecommendationScreen(
+    actionType: ActionType,
     operation: String,
     objective: String,
+    videoRoute: VideoCreationRoute,
     onBack: () -> Unit,
     onCreate: () -> Unit,
 ) {
+    val isVideo = actionType == ActionType.CREATE_VIDEO
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
     ) {
@@ -38,23 +44,38 @@ fun RecommendationScreen(
 
         RecommendationCard(
             rank = "01",
-            title = "Sequência de 3 Stories",
-            body = "Desejo → prova social → CTA. Melhor equilíbrio entre impacto, contexto e conversão.",
+            title = if (isVideo) videoRoute.displayTitle() else "Sequência de 3 Stories",
+            body = if (isVideo) {
+                "Rota de vídeo governada com story arc, source binding, seleção de takes e QA antes de qualquer entrega."
+            } else {
+                "Desejo → prova social → CTA. Melhor equilíbrio entre impacto, contexto e conversão."
+            },
             selected = true,
         )
         Spacer(Modifier.height(14.dp))
-        RecommendationCard("02", "Feed Experiência", "Peça foto-first para reforçar prova social e desejo.", false)
+        RecommendationCard(
+            "02",
+            if (isVideo) "Director's Cut / Recut alternativo" else "Feed Experiência",
+            if (isVideo) "Fallback de reuso/recut antes de gerar material novo." else "Peça foto-first para reforçar prova social e desejo.",
+            false,
+        )
         Spacer(Modifier.height(14.dp))
-        RecommendationCard("03", "Story complementar", "Apoio editorial com outra função narrativa e foto menos saturada.", false)
+        RecommendationCard(
+            "03",
+            if (isVideo) "Editorial motion complementar" else "Story complementar",
+            if (isVideo) "Motion design para impacto sem inventar cena nova." else "Apoio editorial com outra função narrativa e foto menos saturada.",
+            false,
+        )
 
         Spacer(Modifier.height(28.dp))
         Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp)) {
             Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
                 Text("O sistema fará automaticamente", fontWeight = FontWeight.Bold)
                 Text("• resolver fatos da edição", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("• analisar e ranquear fotos reais", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("• aplicar Visual Memory / anti-repetição", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("• produzir e executar QA", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("• aplicar story arc e funções narrativas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("• ranquear takes reais com anti-repetição", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("• preservar source binding e Creative Truth", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("• produzir master, approval, cover e QA", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
