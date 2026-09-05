@@ -64,7 +64,9 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).not.toContain('--paginate --slurp');
     expect(validation).toContain('comments(last:100)');
     expect(validation).toContain("$GITHUB_EVENT_NAME\" == 'issue_comment'");
+    expect(validation).toContain('== "github-actions" then "github-actions[bot]"');
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
+    expect(stateValidation).toContain("[expectedOwner, 'github-actions[bot]'].includes(author)");
     expect(stateValidation).toContain("'MERGE_RESERVED'");
     expect(stateValidation).toContain("'MERGED'");
     expect(stateValidation).toContain("'POST_MERGE_ACCEPTANCE'");
