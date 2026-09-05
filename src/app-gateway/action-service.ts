@@ -90,9 +90,7 @@ export function parseTocaActionRequest(input: unknown): TocaActionRequest {
   return tocaActionRequestSchema.parse(input);
 }
 
-function resolveAllOfAvailability(
-  capabilities: readonly CapabilitySnapshot[],
-): ActionAvailability {
+function resolveAllOfAvailability(capabilities: readonly CapabilitySnapshot[]): ActionAvailability {
   if (capabilities.length === 0) return 'AVAILABLE';
   return capabilities.reduce<ActionAvailability>(
     (current, capability) => worstAvailability(current, capability.availability),
@@ -100,9 +98,7 @@ function resolveAllOfAvailability(
   );
 }
 
-function resolveAnyOfAvailability(
-  capabilities: readonly CapabilitySnapshot[],
-): ActionAvailability {
+function resolveAnyOfAvailability(capabilities: readonly CapabilitySnapshot[]): ActionAvailability {
   if (capabilities.length === 0) return 'AVAILABLE';
   return capabilities.reduce<ActionAvailability>(
     (current, capability) => bestAvailability(current, capability.availability),
