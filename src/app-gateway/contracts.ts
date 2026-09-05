@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const actionTypeSchema = z.enum([
   'CREATE_CONTENT',
+  'CREATE_VIDEO',
   'PLAN_CONTENT',
   'PUBLISH_SCHEDULE',
   'META_ADS',
@@ -15,12 +16,26 @@ export const actionTypeSchema = z.enum([
 
 export const actionModeSchema = z.enum(['AUTO', 'GUIDED', 'ADVANCED']);
 
+export const videoCreationRouteSchema = z.enum([
+  'REAL_FOOTAGE_FILM',
+  'PHOTO_MOTION',
+  'IMAGE_TO_VIDEO_SOURCE_BOUND',
+  'MULTI_SHOT_SOURCE_BOUND',
+  'HYBRID_GENERATIVE_EDITORIAL',
+  'DIRECTORS_CUT_RECUT',
+  'EDITORIAL_MOTION',
+  'DUAL_TRACK_FILM',
+  'SPOTLIGHT_MONOTHEMATIC',
+  'SYNTHETIC_TEXT_TO_VIDEO_RESTRICTED',
+]);
+
 export const tocaActionRequestSchema = z
   .object({
     action_type: actionTypeSchema,
     operation: z.string().trim().min(1).max(120),
     objective: z.string().trim().min(1).max(800),
     mode: actionModeSchema.default('AUTO'),
+    video_route: videoCreationRouteSchema.optional(),
     inputs: z.record(z.string(), z.unknown()).default({}),
     client_context: z
       .object({
@@ -35,9 +50,26 @@ export const tocaActionRequestSchema = z
 
 export type ActionType = z.infer<typeof actionTypeSchema>;
 export type ActionMode = z.infer<typeof actionModeSchema>;
+export type VideoCreationRoute = z.infer<typeof videoCreationRouteSchema>;
 export type TocaActionRequest = z.infer<typeof tocaActionRequestSchema>;
 
 export type ActionAvailability = 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'BLOCKED';
+export type VideoCreationAvailability = 'DISPONIVEL' | 'CONDICIONAL' | 'GATED' | 'RESTRITO';
+export type VideoDriftRisk = 'BAIXO' | 'BAIXO_MEDIO' | 'MEDIO' | 'VARIAVEL' | 'ALTO';
+
+export interface VideoCreationOptionDefinition {
+  readonly route: VideoCreationRoute;
+  readonly manualOrder: number;
+  readonly title: string;
+  readonly description: string;
+  readonly availabilityLabel: VideoCreationAvailability;
+  readonly sourceBinding: boolean;
+  readonly generative: boolean;
+  readonly restricted: boolean;
+  readonly bestUse: string;
+  readonly driftRisk: VideoDriftRisk;
+  readonly requiresCoverageEvidence: boolean;
+}
 
 export type TocaActionState =
   | 'DRAFT'
