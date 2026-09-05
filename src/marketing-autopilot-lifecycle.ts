@@ -12,15 +12,18 @@ export type SlotWindowState = 'FUTURE' | 'ACTIVE' | 'EXPIRED';
 
 export type ContentLifecycleStatus =
   | 'PLANNED'
+  | 'SOURCE_BOUND'
   | 'BRIEFED'
   | 'PRODUCED'
-  | 'REVIEW'
-  | 'READY_FOR_SCHEDULING'
+  | 'QA_PASS'
+  | 'APPROVED'
+  | 'SCHEDULER_READY'
   | 'TOCA_SCHEDULED'
-  | 'READY_FOR_NATIVE_SCHEDULING'
-  | 'SCHEDULED'
-  | 'MISSED_WINDOW'
-  | 'PUBLISHED';
+  | 'PUBLISHED'
+  | 'RECONCILED'
+  | 'CANCELED';
+
+export type ContentOperationalDisposition = 'ACTIVE' | 'MISSED_WINDOW' | 'SUPERSEDED' | 'CANCELED';
 
 export interface SlotLifecycleInput {
   scheduledAt: string;
@@ -60,15 +63,31 @@ export function deriveSlotWindow({
   return { state: 'ACTIVE', expiredAt, isPrepareEligible: true };
 }
 
+/**
+ * Lifecycle state is never rewritten because a publication window expired.
+ * Missed windows, cancellation and supersession are operational dispositions,
+ * while the canonical content lifecycle remains monotonic and auditable.
+ */
 export function deriveLifecycleStatus(
   currentStatus: ContentLifecycleStatus,
-  slotWindowState: SlotWindowState,
+  _slotWindowState: SlotWindowState,
 ): ContentLifecycleStatus {
-  if (currentStatus === 'PUBLISHED') return 'PUBLISHED';
-  if (currentStatus === 'TOCA_SCHEDULED') return 'TOCA_SCHEDULED';
-  if (currentStatus === 'SCHEDULED') return 'SCHEDULED';
-  if (slotWindowState === 'EXPIRED') return 'MISSED_WINDOW';
   return currentStatus;
+}
+
+export function deriveOperationalDisposition(
+  currentStatus: ContentLifecycleStatus,
+  slotWindowState: SlotWindowState,
+): ContentOperationalDisposition {
+  if (currentStatus === 'CANCELED') return 'CANCELED';
+  if (
+    slotWindowState === 'EXPIRED' &&
+    currentStatus !== 'PUBLISHED' &&
+    currentStatus !== 'RECONCILED'
+  ) {
+    return 'MISSED_WINDOW';
+  }
+  return 'ACTIVE';
 }
 
 export function assertExternalWriteCapability(status: CapabilityStatus): void {
@@ -94,19 +113,20 @@ export interface CoverageItem {
 
 function hasReached(
   status: ContentLifecycleStatus,
-  threshold: 'BRIEFED' | 'PRODUCED' | 'READY_FOR_SCHEDULING',
+  threshold: 'BRIEFED' | 'PRODUCED' | 'SCHEDULER_READY',
 ): boolean {
   const rank: Record<ContentLifecycleStatus, number> = {
     PLANNED: 0,
-    BRIEFED: 1,
-    PRODUCED: 2,
-    REVIEW: 2,
-    READY_FOR_SCHEDULING: 3,
-    READY_FOR_NATIVE_SCHEDULING: 3,
-    TOCA_SCHEDULED: 4,
-    SCHEDULED: 4,
-    MISSED_WINDOW: -1,
-    PUBLISHED: 5,
+    SOURCE_BOUND: 1,
+    BRIEFED: 2,
+    PRODUCED: 3,
+    QA_PASS: 4,
+    APPROVED: 5,
+    SCHEDULER_READY: 6,
+    TOCA_SCHEDULED: 7,
+    PUBLISHED: 8,
+    RECONCILED: 9,
+    CANCELED: -1,
   };
   const thresholdRank = rank[threshold];
   return rank[status] >= thresholdRank;
@@ -114,7 +134,7 @@ function hasReached(
 
 export function deriveCompleteDayCoverage(
   items: CoverageItem[],
-  threshold: 'BRIEFED' | 'PRODUCED' | 'READY_FOR_SCHEDULING',
+  threshold: 'BRIEFED' | 'PRODUCED' | 'SCHEDULER_READY',
 ): number {
   const byDate = new Map<string, CoverageItem[]>();
   for (const item of items) {

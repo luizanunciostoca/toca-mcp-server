@@ -1,9 +1,5 @@
 export type SchedulingState =
-  | 'READY_FOR_SCHEDULING'
-  | 'TOCA_SCHEDULED'
-  | 'READY_FOR_NATIVE_SCHEDULING'
-  | 'SCHEDULED'
-  | 'PUBLISHED';
+  'SCHEDULER_READY' | 'TOCA_SCHEDULED' | 'READY_FOR_NATIVE_SCHEDULING' | 'SCHEDULED' | 'PUBLISHED';
 
 export type SchedulingPolicy =
   'TOCA_MANAGED_SCHEDULING' | 'NATIVE_PROVIDER_SCHEDULING' | 'SHARE_NOW';
@@ -99,13 +95,13 @@ export function deriveSchedulingDisposition(input: {
   }
   if (input.policy === 'TOCA_MANAGED_SCHEDULING') {
     if (!input.tocaManagedSchedulerAvailable) throw new Error('TOCA_MANAGED_SCHEDULER_UNAVAILABLE');
-    return 'READY_FOR_SCHEDULING';
+    return 'SCHEDULER_READY';
   }
   if (input.policy === 'NATIVE_PROVIDER_SCHEDULING') {
     if (!input.providerNativeApiAvailable) throw new Error('NATIVE_PROVIDER_SCHEDULER_UNAVAILABLE');
     return 'READY_FOR_NATIVE_SCHEDULING';
   }
-  return 'READY_FOR_SCHEDULING';
+  return 'SCHEDULER_READY';
 }
 
 function isProviderScheduleEvidence(
