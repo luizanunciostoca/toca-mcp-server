@@ -47,6 +47,25 @@ class AppGatewayHttpClient private constructor(
         AppGatewayTransport(request),
     )
 
+    fun fetchSessionProfile(): AppSessionProfile {
+        val body = transport.request(AppGatewayTransportRequest("/api/v1/session", "GET"))
+        val session = JSONObject(body).getJSONObject("session")
+        return AppSessionProfile(
+            subject = session.getString("subject"),
+            tenantId = session.optString("tenant_id").takeIf(String::isNotBlank),
+            roles = session.optJSONArray("roles")?.stringValues().orEmpty(),
+            authorizationSource = session.optString(
+                "authorization_source",
+                "SERVER_PRINCIPAL_MAPPER",
+            ),
+            capabilityAuthority = session.optString(
+                "capability_authority",
+                "TOCA_CORE_RUNTIME",
+            ),
+            executionBoundary = session.optString("execution_boundary", "PREPARE_ONLY"),
+        )
+    }
+
     fun fetchActionCards(): List<ActionCard> {
         val body = transport.request(AppGatewayTransportRequest("/api/v1/capabilities", "GET"))
         val actions = JSONObject(body).getJSONArray("actions")
@@ -203,6 +222,13 @@ object AppGatewayEndpointPolicy {
 private fun <T> JSONArray.mapObjects(transform: (JSONObject) -> T): List<T> =
     buildList(length()) {
         for (index in 0 until length()) add(transform(getJSONObject(index)))
+    }
+
+private fun JSONArray.stringValues(): List<String> =
+    buildList(length()) {
+        for (index in 0 until length()) {
+            optString(index).takeIf(String::isNotBlank)?.let(::add)
+        }
     }
 
 private fun JSONArray.firstStringOrNull(): String? =
