@@ -18,6 +18,7 @@ enum class GatewayExecutionMode { DEMO, PREPARE_ONLY }
 interface ActionGateway {
     val executionMode: GatewayExecutionMode
 
+    suspend fun sessionProfile(): AppSessionProfile
     suspend fun actionCards(): List<ActionCard>
     suspend fun videoOptions(): List<VideoCreationOption>
     suspend fun prepare(request: TocaActionRequest): TocaAction
@@ -29,6 +30,8 @@ class RemoteActionGateway(
     private val sessionStore: MutableAppSessionTokenStore,
 ) : ActionGateway {
     override val executionMode = GatewayExecutionMode.PREPARE_ONLY
+
+    override suspend fun sessionProfile(): AppSessionProfile = ioRequest { client.fetchSessionProfile() }
 
     override suspend fun actionCards(): List<ActionCard> = ioRequest { client.fetchActionCards() }
 
@@ -57,6 +60,15 @@ class RemoteActionGateway(
  */
 class FakeActionGateway : ActionGateway {
     override val executionMode = GatewayExecutionMode.DEMO
+
+    override suspend fun sessionProfile(): AppSessionProfile = AppSessionProfile(
+        subject = "demo-user",
+        tenantId = "demo",
+        roles = listOf("DEMO"),
+        authorizationSource = "DEBUG_DEMO",
+        capabilityAuthority = "DEMO_ONLY",
+        executionBoundary = "NO_PROVIDER_EXECUTION",
+    )
 
     override suspend fun actionCards(): List<ActionCard> = listOf(
         ActionCard(
