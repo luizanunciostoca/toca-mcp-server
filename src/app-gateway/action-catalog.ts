@@ -17,6 +17,16 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     },
   },
   {
+    actionType: 'CREATE_VIDEO',
+    title: 'Criar vídeo',
+    description: 'Footage real, photo motion, source-bound, recut, motion editorial e rotas restritas.',
+    defaultMode: 'AUTO',
+    requirement: {
+      allOf: ['system.capabilities'],
+      anyOf: ['video.select_assets'],
+    },
+  },
+  {
     actionType: 'PLAN_CONTENT',
     title: 'Planejar conteúdo',
     description: 'Calendário, campanha, sequência editorial e cobertura de eventos.',
