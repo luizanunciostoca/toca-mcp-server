@@ -50,6 +50,24 @@ class AppGatewayHttpClientTest {
     }
 
     @Test
+    fun `maps safe authenticated session projection`() {
+        val client = AppGatewayHttpClient { request ->
+            assertEquals("/api/v1/session", request.path)
+            assertEquals("GET", request.method)
+            """{"api_version":"v1","session":{"subject":"mapped:user-1","tenant_id":"toca-do-morcego","roles":["APP_USER","MARKETING"],"authorization_source":"SERVER_PRINCIPAL_MAPPER","capability_authority":"TOCA_CORE_RUNTIME","execution_boundary":"PREPARE_ONLY"}}"""
+        }
+
+        assertEquals(
+            AppSessionProfile(
+                subject = "mapped:user-1",
+                tenantId = "toca-do-morcego",
+                roles = listOf("APP_USER", "MARKETING"),
+            ),
+            client.fetchSessionProfile(),
+        )
+    }
+
+    @Test
     fun `maps mocked capability and video option responses`() {
         val routes = VideoCreationRoute.entries.joinToString(",") { route ->
             val restricted = route == VideoCreationRoute.SYNTHETIC_TEXT_TO_VIDEO_RESTRICTED

@@ -1,5 +1,14 @@
 package br.com.tocadomorcego.tocaos.data
 
+data class AppSessionProfile(
+    val subject: String,
+    val tenantId: String? = null,
+    val roles: List<String> = emptyList(),
+    val authorizationSource: String = "SERVER_PRINCIPAL_MAPPER",
+    val capabilityAuthority: String = "TOCA_CORE_RUNTIME",
+    val executionBoundary: String = "PREPARE_ONLY",
+)
+
 interface MutableAppSessionTokenStore : AppSessionTokenProvider {
     fun bind(token: String)
     fun clear()
