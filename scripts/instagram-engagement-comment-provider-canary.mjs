@@ -453,7 +453,7 @@ async function assertNoOtherUnresolvedAmbiguity() {
     `select count(*)::int as count
        from instagram_engagement_actions
       where status='SEND_AMBIGUOUS'
-        and execution_id <> $1`,
+        and execution_id is distinct from $1`,
     [`comment-canary:${session}`],
   );
   if ((result.rows[0]?.count ?? 0) !== 0) fail('COMMENT_CANARY_OTHER_AMBIGUITY_EXISTS');

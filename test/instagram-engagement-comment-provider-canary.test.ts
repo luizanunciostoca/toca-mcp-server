@@ -29,6 +29,20 @@ describe('Instagram real Comment provider canary', () => {
     expect(workflow).toContain('[[ "$ELIGIBLE_TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]');
   });
 
+  it('revalidates single-use authorization live before any provider-side setup', () => {
+    expect(workflow).toContain(
+      'ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"',
+    );
+    expect(workflow).toContain('(.state == "open") and');
+    expect(workflow).toContain('(.user.login == $owner)');
+    expect(workflow).not.toContain("jq -r '.issue.body //");
+  });
+
+  it('treats NULL execution ids as unresolved ambiguity during execute', () => {
+    expect(runner).toContain('and execution_id is distinct from $1');
+    expect(runner).not.toContain('and execution_id <> $1');
+  });
+
   it('packages the canary runner into the production runtime image', () => {
     expect(dockerfile).toContain(
       'COPY --from=build /app/scripts/instagram-engagement-comment-provider-canary.mjs ./scripts/instagram-engagement-comment-provider-canary.mjs',
