@@ -8,20 +8,57 @@ import br.com.tocadomorcego.tocaos.domain.ActionState
 import br.com.tocadomorcego.tocaos.domain.ActionType
 import br.com.tocadomorcego.tocaos.domain.TocaAction
 import br.com.tocadomorcego.tocaos.domain.TocaActionRequest
+import br.com.tocadomorcego.tocaos.domain.VIDEO_CREATION_OPTIONS
+import br.com.tocadomorcego.tocaos.domain.VideoCreationOption
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+enum class GatewayExecutionMode { DEMO, PREPARE_ONLY }
 
 interface ActionGateway {
-    fun actionCards(): List<ActionCard>
-    fun prepare(request: TocaActionRequest): TocaAction
+    val executionMode: GatewayExecutionMode
+
+    suspend fun actionCards(): List<ActionCard>
+    suspend fun videoOptions(): List<VideoCreationOption>
+    suspend fun prepare(request: TocaActionRequest): TocaAction
     fun executionPreview(action: TocaAction): List<ActionEvent>
 }
 
+class RemoteActionGateway(
+    private val client: AppGatewayHttpClient,
+    private val sessionStore: MutableAppSessionTokenStore,
+) : ActionGateway {
+    override val executionMode = GatewayExecutionMode.PREPARE_ONLY
+
+    override suspend fun actionCards(): List<ActionCard> = ioRequest { client.fetchActionCards() }
+
+    override suspend fun videoOptions(): List<VideoCreationOption> = ioRequest { client.fetchVideoOptions() }
+
+    override suspend fun prepare(request: TocaActionRequest): TocaAction = ioRequest { client.prepare(request) }
+
+    override fun executionPreview(action: TocaAction): List<ActionEvent> = listOf(
+        ActionEvent(1, "Ação preparada no TOCA App Gateway", ActionState.READY),
+    )
+
+    private suspend fun <T> ioRequest(block: () -> T): T = try {
+        withContext(Dispatchers.IO) { block() }
+    } catch (error: AppGatewayHttpException) {
+        if (error.statusCode == 401) {
+            sessionStore.clear()
+            throw AppSessionRequiredException("APP_SESSION_EXPIRED")
+        }
+        throw error
+    }
+}
+
 /**
- * Local-only gateway used by the first UI slice. It does not contact providers and it must not be
- * interpreted as capability truth. The production implementation will hydrate the same models from
- * the TOCA App Gateway/BFF and live `system.capabilities` output.
+ * Explicit debug/demo gateway. It never contacts providers and must never be interpreted as
+ * capability truth or production execution evidence.
  */
 class FakeActionGateway : ActionGateway {
-    override fun actionCards(): List<ActionCard> = listOf(
+    override val executionMode = GatewayExecutionMode.DEMO
+
+    override suspend fun actionCards(): List<ActionCard> = listOf(
         ActionCard(
             type = ActionType.CREATE_CONTENT,
             title = "Criar conteúdo",
@@ -91,7 +128,9 @@ class FakeActionGateway : ActionGateway {
         ),
     )
 
-    override fun prepare(request: TocaActionRequest): TocaAction = TocaAction(
+    override suspend fun videoOptions(): List<VideoCreationOption> = VIDEO_CREATION_OPTIONS
+
+    override suspend fun prepare(request: TocaActionRequest): TocaAction = TocaAction(
         actionId = "ACT-DEMO-001",
         correlationId = "CORR-DEMO-001",
         request = request,

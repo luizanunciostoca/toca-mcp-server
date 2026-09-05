@@ -29,7 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.tocadomorcego.tocaos.domain.ActionType
-import br.com.tocadomorcego.tocaos.domain.VIDEO_CREATION_OPTIONS
+import br.com.tocadomorcego.tocaos.domain.VideoCreationOption
 import br.com.tocadomorcego.tocaos.domain.VideoCreationRoute
 
 @Composable
@@ -38,6 +38,7 @@ fun CreateContentWizardScreen(
     initialObjective: String,
     initialOperation: String,
     initialVideoRoute: VideoCreationRoute,
+    videoOptions: List<VideoCreationOption>,
     onBack: () -> Unit,
     onContinue: (operation: String, objective: String, videoRoute: VideoCreationRoute) -> Unit,
 ) {
@@ -95,15 +96,22 @@ fun CreateContentWizardScreen(
                 Spacer(Modifier.height(30.dp))
                 Text("3. Escolha a rota de criação de vídeo", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
-                VIDEO_CREATION_OPTIONS.forEach { option ->
-                    VideoRouteOptionCard(
-                        title = option.title,
-                        description = option.description,
-                        label = option.availabilityLabel,
-                        selected = option.route == videoRoute,
-                        onClick = { videoRoute = option.route },
+                if (videoOptions.isEmpty()) {
+                    Text(
+                        "As rotas de vídeo não foram disponibilizadas pelo App Gateway.",
+                        color = MaterialTheme.colorScheme.error,
                     )
-                    Spacer(Modifier.height(10.dp))
+                } else {
+                    videoOptions.forEach { option ->
+                        VideoRouteOptionCard(
+                            title = option.title,
+                            description = option.description,
+                            label = option.availabilityLabel,
+                            selected = option.route == videoRoute,
+                            onClick = { videoRoute = option.route },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
                 }
             }
 
@@ -122,7 +130,8 @@ fun CreateContentWizardScreen(
         Spacer(Modifier.height(16.dp))
         Button(
             modifier = Modifier.fillMaxWidth().height(58.dp),
-            enabled = objective.isNotBlank(),
+            enabled = objective.isNotBlank() &&
+                (actionType != ActionType.CREATE_VIDEO || videoOptions.any { it.route == videoRoute }),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             onClick = { onContinue(operation, objective.trim(), videoRoute) },
         ) {
