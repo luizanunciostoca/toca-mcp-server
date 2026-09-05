@@ -72,11 +72,12 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(source).not.toContain('replyToComment');
   });
 
-  it('reports bounded rejection and blocking causes', () => {
+  it('reports bounded rejection and blocking causes with an explicit safe target marker', () => {
     for (const marker of [
       'RECENT_COMMENT_COUNT=',
       'STATE_CANDIDATE_COUNT=',
       'ELIGIBLE_COUNT=',
+      'ELIGIBLE_TARGET_SHA256=',
       'UNRESOLVED_AMBIGUITY_COUNT=',
       'ACTIVE_RESERVATION_COUNT=',
       'REJECTED_SCOPE=',
@@ -96,6 +97,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(source).toContain(marker);
     }
+    expect(source).toContain("eligible.length === 1 ? eligible[0] : 'NONE'");
   });
 
   it('requires exact-main Comment-only immutable-image authorization', () => {
@@ -116,7 +118,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).not.toContain('gcloud run services update');
   });
 
-  it('runs the Comment probe once, polls logs boundedly and cleans up', () => {
+  it('runs the Comment probe once, polls newest logs boundedly and cleans up', () => {
     expect(workflow).toContain(
       'dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js',
     );
@@ -126,11 +128,14 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     expect(workflow).toContain('sleep 10');
     expect(workflow).toContain("MARKERS_COMPLETE=false");
     expect(workflow).toContain("MARKERS_COMPLETE=true");
+    expect(workflow).toContain('--order=desc');
+    expect(workflow).toContain("head -1 | cut -d= -f2-");
+    expect(workflow).not.toContain('--order=asc');
     expect(workflow).toContain('gcloud run jobs delete');
     expect(workflow).not.toContain('scripts/instagram-engagement-comment-provider-canary.mjs');
   });
 
-  it('publishes only bounded counts, status and a hashed target', () => {
+  it('publishes only bounded counts, status and a hashed or explicit NONE target', () => {
     for (const marker of [
       'COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=PASS',
       'COMMENT_CANARY_ELIGIBILITY_READONLY_STATUS=BLOCKED_LOG_PROPAGATION',
@@ -145,6 +150,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+    expect(workflow).toContain("[[ -n \"$TARGET_SHA\" && \"$TARGET_SHA\" != 'NONE' ]]");
     expect(workflow).toContain('gh api --method POST');
     expect(workflow).not.toContain('PAYLOAD_SUMMARIES=');
     expect(workflow).not.toContain('RAW_TEXT=');
