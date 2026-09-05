@@ -62,7 +62,7 @@ function createJwt(
 function transportFor(
   keys: readonly Record<string, unknown>[],
 ): ReturnType<typeof vi.fn<OidcJwksTransport>> {
-  return vi.fn<OidcJwksTransport>(async () => JSON.stringify({ keys }));
+  return vi.fn<OidcJwksTransport>(() => Promise.resolve(JSON.stringify({ keys })));
 }
 
 function verifierFor(
@@ -85,6 +85,20 @@ async function expectCode(
   code: OidcVerificationErrorCode,
 ): Promise<void> {
   await expect(promise).rejects.toEqual(expect.objectContaining({ code }));
+}
+
+function expectConfigurationError(block: () => unknown): void {
+  let thrown: unknown;
+  try {
+    block();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(OidcVerificationError);
+  if (!(thrown instanceof OidcVerificationError)) {
+    throw new Error('EXPECTED_OIDC_CONFIGURATION_ERROR');
+  }
+  expect(thrown.code).toBe('OIDC_CONFIGURATION_INVALID');
 }
 
 describe('App Gateway OIDC bearer verifier', () => {
@@ -172,16 +186,16 @@ describe('App Gateway OIDC bearer verifier', () => {
   it('requires an explicitly configured HTTPS JWKS URI and bounded configuration', () => {
     const fixture = signingFixture();
 
-    expect(() =>
+    expectConfigurationError(() =>
       createOidcBearerVerifier({
         issuer: ISSUER,
         audience: AUDIENCE,
         jwksUri: 'http://identity.example.test/jwks.json',
         transport: transportFor([fixture.jwk]),
       }),
-    ).toThrowError(expect.objectContaining({ code: 'OIDC_CONFIGURATION_INVALID' }));
+    );
 
-    expect(() =>
+    expectConfigurationError(() =>
       createOidcBearerVerifier({
         issuer: ISSUER,
         audience: AUDIENCE,
@@ -189,7 +203,7 @@ describe('App Gateway OIDC bearer verifier', () => {
         clockSkewSeconds: 301,
         transport: transportFor([fixture.jwk]),
       }),
-    ).toThrowError(expect.objectContaining({ code: 'OIDC_CONFIGURATION_INVALID' }));
+    );
   });
 
   it('bounds JWKS payloads and fails closed when the transport fails', async () => {
@@ -199,16 +213,14 @@ describe('App Gateway OIDC bearer verifier', () => {
     await expectCode(
       verifierFor(fixture, {
         maximumJwksBytes: 32,
-        transport: async () => JSON.stringify({ keys: [fixture.jwk] }),
+        transport: () => Promise.resolve(JSON.stringify({ keys: [fixture.jwk] })),
       }).verify(token),
       'OIDC_JWKS_TOO_LARGE',
     );
 
     await expectCode(
       verifierFor(fixture, {
-        transport: async () => {
-          throw new Error('network details that must not escape');
-        },
+        transport: () => Promise.reject(new Error('network details that must not escape')),
       }).verify(token),
       'OIDC_JWKS_FETCH_FAILED',
     );
@@ -218,9 +230,9 @@ describe('App Gateway OIDC bearer verifier', () => {
     const first = signingFixture('first');
     const rotated = signingFixture('rotated');
     let calls = 0;
-    const transport: OidcJwksTransport = async () => {
+    const transport: OidcJwksTransport = () => {
       calls += 1;
-      return JSON.stringify({ keys: calls === 1 ? [first.jwk] : [rotated.jwk] });
+      return Promise.resolve(JSON.stringify({ keys: calls === 1 ? [first.jwk] : [rotated.jwk] }));
     };
     const verifier = verifierFor(first, {
       transport,
