@@ -51,7 +51,7 @@
     "validatedAtRequired": true,
     "routeSpecificApprovedUseRequired": true,
     "likenessConfirmedForGenerativePeople": true,
-    "validityWindowEnforcedWhenPresent": true,
+    "validityWindowMetadataSupported": true,
     "revocationAlwaysFailClosed": true,
     "noInferenceFromDriveFolderPriorPublicationOrMarketingReady": true
   },
