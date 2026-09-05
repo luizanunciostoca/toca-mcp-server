@@ -75,6 +75,7 @@ describe('PRO+ v2 control plane', () => {
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).not.toContain('--paginate --slurp');
     expect(build).toContain('comments(last:100)');
+    expect(build).toContain('== "github-actions" then "github-actions[bot]"');
     expect(build).toContain('sort_by([.created_at, (.id // 0)])');
     expect(build).not.toContain('sort_by(.created_at, .id)');
     expect(build).toContain('BUILD_BROKER_EVIDENCE_SCAN_LIMIT=100');
