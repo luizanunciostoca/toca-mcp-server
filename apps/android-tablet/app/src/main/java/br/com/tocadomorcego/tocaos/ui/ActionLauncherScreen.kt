@@ -29,12 +29,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.tocadomorcego.tocaos.data.AppSessionProfile
 import br.com.tocadomorcego.tocaos.domain.ActionAvailability
 import br.com.tocadomorcego.tocaos.domain.ActionCard
 import br.com.tocadomorcego.tocaos.domain.ActionType
 
 @Composable
-fun ActionLauncherScreen(cards: List<ActionCard>, onStartAction: (ActionType) -> Unit) {
+fun ActionLauncherScreen(
+    cards: List<ActionCard>,
+    sessionProfile: AppSessionProfile?,
+    onStartAction: (ActionType) -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(28.dp),
     ) {
@@ -46,6 +51,14 @@ fun ActionLauncherScreen(cards: List<ActionCard>, onStartAction: (ActionType) ->
                     "Escolha uma ação ou descreva seu objetivo. O sistema resolve a rota.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                sessionProfile?.let { profile ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        connectedSessionLabel(profile),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                }
             }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -80,6 +93,14 @@ fun ActionLauncherScreen(cards: List<ActionCard>, onStartAction: (ActionType) ->
             }
         }
     }
+}
+
+private fun connectedSessionLabel(profile: AppSessionProfile): String {
+    val tenant = profile.tenantId?.let { " • $it" }.orEmpty()
+    val roles = profile.roles.takeIf(List<String>::isNotEmpty)?.joinToString(", ")
+        ?.let { " • $it" }
+        .orEmpty()
+    return "Conectado: ${profile.subject}$tenant$roles"
 }
 
 @Composable
