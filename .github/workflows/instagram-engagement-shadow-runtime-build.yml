@@ -150,19 +150,24 @@ jobs:
           ' <<< "$COMMENTS")"
 
           CANDIDATE_DIGEST='NONE'
+          CANDIDATE_SOURCE_SHA='NONE'
           if [[ -n "$LATEST_BODY" ]] && \
             [[ "$(grep -Fxc "EVIDENCE_ID=$EVIDENCE_ID" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "SOURCE_SHA=$GITHUB_SHA" <<< "$LATEST_BODY" || true)" == '1' ]] && \
             [[ "$(grep -Fxc "TREE_SHA=$TREE_SHA" <<< "$LATEST_BODY" || true)" == '1' ]] && \
             [[ "$(grep -Fxc "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" <<< "$LATEST_BODY" || true)" == '1' ]] && \
             [[ "$(grep -Fxc 'VALIDITY=VALID' <<< "$LATEST_BODY" || true)" == '1' ]] && \
             [[ "$(grep -Ec '^RUNTIME_IMAGE_DIGEST=sha256:[0-9a-f]{64}$' <<< "$LATEST_BODY" || true)" == '1' ]]; then
+            CANDIDATE_SOURCE_SHA="$(grep '^SOURCE_SHA=' <<< "$LATEST_BODY" | cut -d= -f2-)"
             CANDIDATE_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$LATEST_BODY" | cut -d= -f2-)"
+            [[ "$CANDIDATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || CANDIDATE_SOURCE_SHA='NONE'
             [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || CANDIDATE_DIGEST='NONE'
           fi
 
           echo "tree_sha=$TREE_SHA" >> "$GITHUB_OUTPUT"
           echo "runtime_contract=$RUNTIME_CONTRACT" >> "$GITHUB_OUTPUT"
           echo "evidence_id=$EVIDENCE_ID" >> "$GITHUB_OUTPUT"
+          echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "candidate_digest=$CANDIDATE_DIGEST" >> "$GITHUB_OUTPUT"
 
           {
@@ -206,6 +211,7 @@ jobs:
       - name: Reuse or build immutable shadow runtime
         id: image
         env:
+          CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}
           CANDIDATE_DIGEST: ${{ steps.broker.outputs.candidate_digest }}
         shell: bash
         run: |
@@ -216,12 +222,15 @@ jobs:
 
           REUSED=false
           DIGEST=''
-          if [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          RUNTIME_SOURCE_SHA="$GITHUB_SHA"
+          if [[ "$CANDIDATE_SOURCE_SHA" == "$GITHUB_SHA" ]] && \
+            [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             CANDIDATE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$CANDIDATE_DIGEST"
             if DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$CANDIDATE_IMAGE" \
               --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)' 2>/dev/null)" && \
               [[ "$DESCRIBED_DIGEST" == "$CANDIDATE_DIGEST" ]]; then
               DIGEST="$CANDIDATE_DIGEST"
+              RUNTIME_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
               REUSED=true
             fi
           fi
@@ -232,8 +241,11 @@ jobs:
             docker push "$IMAGE_TAG"
             DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
               --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+            RUNTIME_SOURCE_SHA="$GITHUB_SHA"
           fi
 
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo 'Published or reused runtime digest is invalid' >&2
             exit 1
@@ -243,7 +255,7 @@ jobs:
             --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$DIGEST"
 
-          echo "runtime_source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_source_sha=$RUNTIME_SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "runtime_image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "runtime_image=$IMMUTABLE_IMAGE" >> "$GITHUB_OUTPUT"
           echo "build_reused=$REUSED" >> "$GITHUB_OUTPUT"
@@ -260,6 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
           [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$RUNTIME_IMAGE" == *"@${RUNTIME_IMAGE_DIGEST}" ]]
@@ -297,6 +310,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_ID: ${{ steps.broker.outputs.evidence_id }}
+          RUNTIME_SOURCE_SHA: ${{ steps.image.outputs.runtime_source_sha }}
           TREE_SHA: ${{ steps.broker.outputs.tree_sha }}
           RUNTIME_CONTRACT: ${{ steps.broker.outputs.runtime_contract }}
           RUNTIME_IMAGE_DIGEST: ${{ steps.image.outputs.runtime_image_digest }}
@@ -304,6 +318,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
           [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$BUILD_REUSED" =~ ^(true|false)$ ]]
@@ -311,7 +327,7 @@ jobs:
           printf -v LEDGER_RECORD '%s\n' \
             "EVIDENCE_ID=$EVIDENCE_ID" \
             'EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD' \
-            "SOURCE_SHA=$GITHUB_SHA" \
+            "SOURCE_SHA=$RUNTIME_SOURCE_SHA" \
             "TREE_SHA=$TREE_SHA" \
             "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" \
             "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" \
