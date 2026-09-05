@@ -7,7 +7,7 @@ on:
       - .github/workflows/temp-comment-watch-hardening-apply.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   apply:
@@ -28,9 +28,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Materialize formatted patch as immutable Git commit object
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Apply patch and repository formatting
         shell: bash
         run: |
           set -euo pipefail
@@ -38,14 +36,13 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec prettier --write .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml test/instagram-engagement-comment-canary-opportunity-watch.test.ts
           git diff --check
-          BASE_SHA="$(git rev-parse HEAD)"
-          BASE_TREE="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${BASE_SHA}" --jq '.tree.sha')"
-          WATCH_BLOB="$(jq -Rs '{content: ., encoding: "utf-8"}' .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq '.sha')"
-          TEST_BLOB="$(jq -Rs '{content: ., encoding: "utf-8"}' test/instagram-engagement-comment-canary-opportunity-watch.test.ts | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq '.sha')"
-          TREE_PAYLOAD="$(jq -n --arg base "$BASE_TREE" --arg watch "$WATCH_BLOB" --arg test "$TEST_BLOB" '{base_tree:$base,tree:[{path:".github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml",mode:"100644",type:"blob",sha:$watch},{path:"test/instagram-engagement-comment-canary-opportunity-watch.test.ts",mode:"100644",type:"blob",sha:$test}]}')"
-          NEW_TREE="$(printf '%s' "$TREE_PAYLOAD" | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" --input - --jq '.sha')"
-          COMMIT_PAYLOAD="$(jq -n --arg message 'fix(instagram): harden Comment opportunity watch log polling' --arg tree "$NEW_TREE" --arg parent "$BASE_SHA" '{message:$message,tree:$tree,parents:[$parent]}')"
-          CANDIDATE_COMMIT_SHA="$(printf '%s' "$COMMIT_PAYLOAD" | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq '.sha')"
-          echo "CANDIDATE_COMMIT_SHA=$CANDIDATE_COMMIT_SHA"
-          echo "WATCH_BLOB=$WATCH_BLOB"
-          echo "TEST_BLOB=$TEST_BLOB"
+          mkdir -p /tmp/comment-watch-patch/.github/workflows /tmp/comment-watch-patch/test
+          cp .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml /tmp/comment-watch-patch/.github/workflows/
+          cp test/instagram-engagement-comment-canary-opportunity-watch.test.ts /tmp/comment-watch-patch/test/
+      - name: Upload exact formatted patch files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: comment-watch-hardening-${{ github.run_id }}
+          path: /tmp/comment-watch-patch
+          if-no-files-found: error
+          retention-days: 1
