@@ -1,7 +1,9 @@
 package br.com.tocadomorcego.tocaos.data
 
+import br.com.tocadomorcego.tocaos.domain.ActionAvailability
 import br.com.tocadomorcego.tocaos.domain.ActionMode
 import br.com.tocadomorcego.tocaos.domain.ActionState
+import br.com.tocadomorcego.tocaos.domain.ActionStatusSnapshot
 import br.com.tocadomorcego.tocaos.domain.ActionType
 import br.com.tocadomorcego.tocaos.domain.TocaActionRequest
 import br.com.tocadomorcego.tocaos.domain.VideoCreationRoute
@@ -100,7 +102,7 @@ class AppGatewayHttpClientTest {
             assertEquals("/api/v1/actions", request.path)
             assertEquals("POST", request.method)
             assertTrue(request.jsonBody.orEmpty().contains("REAL_FOOTAGE_FILM"))
-            """{"client_request_id":"client-1","action":{"action_id":"ACT-1","correlation_id":"CORR-1","state":"READY","availability":"AVAILABLE","approval_hint":false,"reasons":[],"request":{"action_type":"CREATE_VIDEO","operation":"THE_PARTY","objective":"Criar Reel","mode":"AUTO","video_route":"REAL_FOOTAGE_FILM","inputs":{"video_route":"REAL_FOOTAGE_FILM"}}}}"""
+            """{"client_request_id":"client-1","action":{"action_id":"ACT-1","correlation_id":"CORR-1","state":"READY","availability":"AVAILABLE","approval_hint":false,"reasons":[],"request":{"action_type":"CREATE_VIDEO","operation":"THE_PARTY","objective":"Criar Reel","mode":"AUTO","video_route":"REAL_FOOTAGE_FILM"}},"persistence":"IN_MEMORY_RUNTIME_ONLY"}"""
         }
 
         val request = TocaActionRequest(
@@ -115,5 +117,38 @@ class AppGatewayHttpClientTest {
         assertEquals("ACT-1", action.actionId)
         assertEquals("CORR-1", action.correlationId)
         assertEquals(ActionState.READY, action.state)
+    }
+
+    @Test
+    fun `maps safe prepared action status readback`() {
+        val client = AppGatewayHttpClient { request ->
+            assertEquals("/api/v1/actions/ACT-1", request.path)
+            assertEquals("GET", request.method)
+            """{"api_version":"v1","persistence":"IN_MEMORY_RUNTIME_ONLY","action":{"action_id":"ACT-1","correlation_id":"CORR-1","state":"READY","availability":"LIMITED","approval_hint":true,"reasons":["APPROVAL_REQUIRED"],"created_at":"2026-09-05T09:00:00.000Z","request":{"action_type":"CREATE_CONTENT","operation":"THE_PARTY","objective":"Criar conteúdo","mode":"AUTO"}}}"""
+        }
+
+        assertEquals(
+            ActionStatusSnapshot(
+                actionId = "ACT-1",
+                correlationId = "CORR-1",
+                state = ActionState.READY,
+                availability = ActionAvailability.LIMITED,
+                approvalHint = true,
+                reasons = listOf("APPROVAL_REQUIRED"),
+                createdAt = "2026-09-05T09:00:00.000Z",
+                persistence = "IN_MEMORY_RUNTIME_ONLY",
+            ),
+            client.fetchActionStatus(" ACT-1 "),
+        )
+    }
+
+    @Test
+    fun `rejects unsafe action ids before making a status request`() {
+        val client = AppGatewayHttpClient { error("Transport must not be called") }
+        listOf("", "../ACT-1", "ACT/1", "ACT 1", "x".repeat(201)).forEach { actionId ->
+            assertThrows(IllegalArgumentException::class.java) {
+                client.fetchActionStatus(actionId)
+            }
+        }
     }
 }
