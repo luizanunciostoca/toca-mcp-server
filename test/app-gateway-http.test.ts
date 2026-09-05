@@ -42,7 +42,11 @@ function registry(): ToolRegistry {
   return result;
 }
 
-async function listen(overrides: Partial<AppGatewayHttpOptions> = {}): Promise<string> {
+async function listen(
+  overrides: Omit<Partial<AppGatewayHttpOptions>, 'authorize'> & {
+    authorize?: AppGatewayHttpOptions['authorize'] | undefined;
+  } = {},
+): Promise<string> {
   const server = createAppGatewayHttpServer({
     registry: registry(),
     authorize: (request) =>
