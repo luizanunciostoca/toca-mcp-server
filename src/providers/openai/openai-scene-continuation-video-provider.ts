@@ -36,6 +36,8 @@ export interface SceneContinuationVideoResult {
   readonly provider: 'OPENAI_VIDEO_API' | 'GOOGLE_VERTEX_VEO';
   readonly providerJobId: string;
   readonly providerModel: string;
+  readonly providerAttemptChain?: readonly ('OPENAI_VIDEO_API' | 'GOOGLE_VERTEX_VEO')[];
+  readonly providerFallbackUsed?: boolean;
   readonly requiresPostGenerationHumanReview: true;
   readonly requiresSceneContinuationFidelityGate: true;
 }

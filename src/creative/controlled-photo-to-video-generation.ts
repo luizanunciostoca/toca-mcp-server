@@ -170,6 +170,14 @@ export class ControlledPhotoToVideoGenerationService {
       );
     }
 
+    const providerProvenance =
+      'providerAttemptChain' in providerCandidate && providerCandidate.providerAttemptChain
+        ? {
+            providerAttemptChain: [...providerCandidate.providerAttemptChain],
+            providerFallbackUsed: providerCandidate.providerFallbackUsed ?? false,
+          }
+        : {};
+
     const manifest = photoToVideoCandidateManifestSchema.parse({
       schemaVersion: 1,
       status: 'GENERATED_REVIEW_REQUIRED',
@@ -193,6 +201,7 @@ export class ControlledPhotoToVideoGenerationService {
       size: resolved.standard.size,
       seconds: resolved.standard.seconds,
       provider: providerCandidate.provider,
+      ...providerProvenance,
       ...('providerJobId' in providerCandidate
         ? {
             providerJobId: providerCandidate.providerJobId,

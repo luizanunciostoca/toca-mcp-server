@@ -13,6 +13,23 @@ The surface adds four tools:
 
 The generation tool is **not** a bypass around the existing route. It always invokes `ControlledPhotoToVideoGenerationService` with `GENERATIVE_SCENE_CONTINUATION_VIDEO`, so canonical parent policy, product policy, video standard, exact source binding, `VIDEO_SOURCE_RIGHTS`, likeness consent, `VIDEO_GENERATIVE_EXCEPTIONS`, official hero-brand binding, GCS durable artifact persistence and candidate writeback remain mandatory.
 
+## Provider plan
+
+The canonical scene-continuation provider is Google Vertex Veo. The runtime can also configure OpenAI Video API as an ordered secondary provider.
+
+Provider order may be expressed by:
+
+- `VIDEO_SCENE_CONTINUATION_PROVIDER_ORDER=GOOGLE_VERTEX_VEO,OPENAI_VIDEO_API`; or
+- legacy `VIDEO_SCENE_CONTINUATION_PROVIDER=<primary>` plus `VIDEO_SCENE_CONTINUATION_FALLBACK_PROVIDER=<secondary>`.
+
+If no explicit provider plan exists, the historical single-provider default remains `OPENAI_VIDEO_API` for backward compatibility.
+
+Failover is deliberately narrow. The secondary provider is attempted only after an `ExecutionError` marked retryable with code `PROVIDER_UNAVAILABLE` or `PROVIDER_RATE_LIMITED`. There is **no** failover for policy denial, missing/expired approval, uncleared rights, likeness failure, source/hash binding errors, fidelity failures, deterministic output-spec failures, state conflicts or any other non-retryable error. A provider can never be used to bypass a governance gate.
+
+Each successful generated candidate can preserve `providerAttemptChain` and `providerFallbackUsed`. The final provider identity must match the last provider in the attempt chain or manifest validation fails closed.
+
+Runway is not part of the runtime provider plan. It must not be treated as a production fallback until a connected workspace exposes an eligible video model and a TOCA runtime adapter is explicitly implemented and production-validated.
+
 ## Runtime configuration
 
 The lazy MCP runtime supports two Google authentication modes.
@@ -40,13 +57,28 @@ OpenAI credentials are resolved in this order:
 3. `AG01_MODEL_API_KEY_ENV_KEY` only when `AG01_MODEL_PROVIDER=openai`;
 4. direct `OPENAI_API_KEY`.
 
-Additional required configuration:
+Additional configuration:
 
 - `GCP_PROJECT_ID`;
 - `INSTAGRAM_PUBLICATION_ASSET_BUCKET`;
-- optional `OPENAI_VIDEO_MODEL=sora-2|sora-2-pro`.
+- optional `VERTEX_VEO_MODEL=veo-3.1-generate-001|veo-3.1-fast-generate-001`;
+- optional `OPENAI_VIDEO_MODEL=sora-2|sora-2-pro`;
+- optional provider plan variables described above.
 
-The runtime is constructed lazily on first tool invocation. Missing or incomplete credentials do not prevent MCP server startup; invocation fails closed with `VIDEO_GENERATIVE_RUNTIME_NOT_CONFIGURED` or the relevant provider/auth error.
+The runtime is constructed lazily on first tool invocation. Missing or incomplete credentials do not prevent MCP server startup. A selected provider plan is considered configured only when every provider in that plan has the required runtime configuration. Invocation otherwise fails closed with `VIDEO_GENERATIVE_RUNTIME_NOT_CONFIGURED` or the relevant provider/auth error.
+
+## Source-library readiness
+
+Generation does not solve a footage-library gap. Canonical source selection remains grounded in Creative Truth and exact source bytes. Operationally, The Party maintains:
+
+- `02_VIDEOS/00_INTAKE` for files not yet cataloged;
+- `02_VIDEOS/01_CANONICAL_SOURCES` for source-bound footage;
+- `02_VIDEOS/02_RIGHTS_EVIDENCE` for durable rights/likeness evidence;
+- `CREATIVE_TRUTH_REGISTRY.VIDEO_SHOTS` for shot metadata and story-function coverage;
+- `VIDEO_SOURCE_RIGHTS` as rights authority;
+- `VIDEO_RIGHTS_QUEUE` as the materialized operational blocker queue.
+
+A missing essential story function should be represented as a coverage gap, not filled by generic or fully synthetic venue footage.
 
 ## Generation
 
@@ -58,7 +90,7 @@ The runtime is constructed lazily on first tool invocation. Missing or incomplet
 
 The tool does not allow the caller to choose a different route or disable policy gates. The exact canonical content binding determines product, operation, output type, source asset, standard, duration and size.
 
-The tool returns the immutable candidate manifest, exact output SHA-256, durable `artifactRef`, provider/job identity and optionally the exact generated branded MP4 as base64. `publicationEligible` is always false at generation time.
+The tool returns the immutable candidate manifest, exact output SHA-256, durable `artifactRef`, provider/job identity, provider-attempt provenance when applicable and optionally the exact generated branded MP4 as base64. `publicationEligible` is always false at generation time.
 
 ## Finalization
 
@@ -87,8 +119,8 @@ Current canonical The Party scene-continuation standards are 8 seconds. The runt
 
 ## Container runtime
 
-The primary MCP container installs `ffmpeg`, which is required by the deterministic overlay and trim capabilities. The OpenAI provider remains network-based and continues to use the existing `/v1/videos` adapter.
+The primary MCP container installs `ffmpeg`, which is required by the deterministic overlay and trim capabilities. Scene continuation remains network-based through the selected governed provider plan.
 
 ## Capability lifecycle
 
-The four MCP capabilities are registered as `IMPLEMENTED`, not `PRODUCTION_VALIDATED`. Production validation still requires provider credentials/access, a real approved source and exception row, successful OpenAI Video API job completion, exact candidate artifact readback, human review/finalization and downstream exact-asset smoke evidence on the release SHA.
+The four MCP capabilities remain `IMPLEMENTED`, not automatically `PRODUCTION_VALIDATED`. Production validation requires provider credentials/access for the configured plan, a real approved source and exception row, successful provider job completion, exact candidate artifact readback, human review/finalization and downstream exact-asset smoke evidence on the release SHA. A secondary provider that is only code-ready must not be described as live redundancy until its credential and real-call evidence is revalidated.
