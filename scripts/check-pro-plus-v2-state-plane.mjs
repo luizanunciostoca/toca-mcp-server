@@ -223,6 +223,8 @@ for (const comment of evidenceComments) {
   const author = comment.user?.login;
   if (![expectedOwner, 'github-actions[bot]'].includes(author))
     fail('untrusted evidence comment author');
+  const evidenceId = marker(body, 'EVIDENCE_ID');
+  if (!evidenceId) fail('empty evidence comment id');
   const validity = marker(body, 'VALIDITY');
   if (!evidenceValidities.has(validity)) fail('invalid evidence comment validity');
   const sourceSha = marker(body, 'SOURCE_SHA');
