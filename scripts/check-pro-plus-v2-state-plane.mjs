@@ -138,6 +138,7 @@ const liveStatuses = new Set([
   'READY_FOR_INTEGRATION',
   'FROZEN',
   'MERGE_RESERVED',
+  'MERGED',
   'POST_MERGE_ACCEPTANCE',
 ]);
 for (const lane of lanes) {
