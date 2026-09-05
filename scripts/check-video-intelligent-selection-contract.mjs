@@ -75,7 +75,8 @@ console.log('Video intelligent asset selection contract OK');
 function requireIncludes(path, markers) {
   const content = readFileSync(path, 'utf8');
   for (const marker of markers) {
-    if (!content.includes(marker)) fail(`Video intelligent selection contract missing in ${path}: ${marker}`);
+    if (!content.includes(marker))
+      fail(`Video intelligent selection contract missing in ${path}: ${marker}`);
   }
 }
 
