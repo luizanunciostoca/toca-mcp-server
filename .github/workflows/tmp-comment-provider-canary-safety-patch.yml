@@ -6,7 +6,7 @@ on:
       - fix/comment-provider-canary-authority-null-safety
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   patch:
@@ -39,13 +39,23 @@ jobs:
           pnpm exec prettier --write .github/workflows/instagram-engagement-comment-provider-canary.yml scripts/instagram-engagement-comment-provider-canary.mjs test/instagram-engagement-comment-provider-canary.test.ts
           pnpm exec vitest run test/instagram-engagement-comment-provider-canary.test.ts
 
-      - name: Commit permanent patch and remove temporary files
+      - name: Record exact tested file digests
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/tmp-comment-provider-canary-safety-patch.yml .tmp/patch-comment-provider-canary-safety.py
-          git add .github/workflows/instagram-engagement-comment-provider-canary.yml scripts/instagram-engagement-comment-provider-canary.mjs test/instagram-engagement-comment-provider-canary.test.ts
-          git diff --cached --quiet && exit 1
-          git commit -m 'fix(instagram): harden Comment canary authority checks'
-          git push origin HEAD:fix/comment-provider-canary-authority-null-safety
+          sha256sum \
+            .github/workflows/instagram-engagement-comment-provider-canary.yml \
+            scripts/instagram-engagement-comment-provider-canary.mjs \
+            test/instagram-engagement-comment-provider-canary.test.ts \
+            | tee tested-files.sha256
+
+      - name: Upload exact tested patch artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: comment-provider-canary-tested-patch-${{ github.run_id }}
+          path: |
+            .github/workflows/instagram-engagement-comment-provider-canary.yml
+            scripts/instagram-engagement-comment-provider-canary.mjs
+            test/instagram-engagement-comment-provider-canary.test.ts
+            tested-files.sha256
+          if-no-files-found: error
+          retention-days: 1
