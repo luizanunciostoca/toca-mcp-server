@@ -17,6 +17,8 @@ const requiredFiles = [
   '.github/prompts/merge-reservation.prompt.md',
   '.github/prompts/backlog-reconcile.prompt.md',
   '.github/prompts/promotion-materialize.prompt.md',
+  '.github/workflows/pro-plus-v2-state-plane-validation.yml',
+  'scripts/check-pro-plus-v2-state-plane.mjs',
 ];
 
 const fail = (message) => {
@@ -146,6 +148,14 @@ for (const path of [
     fail(`${path} invalid custom-agent frontmatter`);
 }
 
+const stateWorkflow = readFileSync('.github/workflows/pro-plus-v2-state-plane-validation.yml', 'utf8');
+if (!stateWorkflow.includes('issues: read') || stateWorkflow.includes('issues: write')) {
+  fail('state-plane validator must remain read-only');
+}
+for (const marker of ['639', '640', '641', '642', 'check-pro-plus-v2-state-plane.mjs']) {
+  if (!stateWorkflow.includes(marker)) fail(`state-plane validator missing ${marker}`);
+}
+
 const buildWorkflow = readFileSync(
   '.github/workflows/instagram-engagement-shadow-runtime-build.yml',
   'utf8',
@@ -156,9 +166,13 @@ for (const marker of [
   'EVALUATED_MAIN_SHA=$GITHUB_SHA',
   'MERGE_RESERVATION=NONE',
   'issues/640',
+  'issues/641/comments',
+  'EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD',
+  'RUNTIME_CONTRACT=SERVER_IMAGE_V1',
+  'BUILD_REUSED=',
 ]) {
   if (!buildWorkflow.includes(marker))
-    fail(`shadow runtime build missing stability marker: ${marker}`);
+    fail(`shadow runtime build missing Build Broker marker: ${marker}`);
 }
 
 console.log('PRO_PLUS_V2_CONTROL_PLANE=PASS');
