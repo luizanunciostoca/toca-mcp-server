@@ -6,7 +6,7 @@ on:
       - fix/comment-provider-canary-authority-null-safety
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   patch:
@@ -39,14 +39,55 @@ jobs:
           pnpm exec prettier --write .github/workflows/instagram-engagement-comment-provider-canary.yml scripts/instagram-engagement-comment-provider-canary.mjs test/instagram-engagement-comment-provider-canary.test.ts
           pnpm exec vitest run test/instagram-engagement-comment-provider-canary.test.ts
 
-      - name: Record exact tested file digests
+      - name: Stage exact tested candidate commit without moving branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          sha256sum \
-            .github/workflows/instagram-engagement-comment-provider-canary.yml \
-            scripts/instagram-engagement-comment-provider-canary.mjs \
-            test/instagram-engagement-comment-provider-canary.test.ts \
-            | tee tested-files.sha256
+          paths=(
+            '.github/workflows/instagram-engagement-comment-provider-canary.yml'
+            'scripts/instagram-engagement-comment-provider-canary.mjs'
+            'test/instagram-engagement-comment-provider-canary.test.ts'
+          )
+
+          declare -A blobs
+          for path in "${paths[@]}"; do
+            file_sha256="$(sha256sum "$path" | awk '{print $1}')"
+            blob_sha="$(jq -Rs '{content: ., encoding: "utf-8"}' < "$path" \
+              | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq '.sha')"
+            [[ "$blob_sha" =~ ^[0-9a-f]{40}$ ]]
+            blobs["$path"]="$blob_sha"
+            echo "TESTED_FILE_SHA256[$path]=$file_sha256"
+            echo "TESTED_BLOB_SHA[$path]=$blob_sha"
+          done
+
+          base_tree="$(git rev-parse 'HEAD^{tree}')"
+          tree_payload="$(jq -n \
+            --arg base_tree "$base_tree" \
+            --arg workflow_blob "${blobs[.github/workflows/instagram-engagement-comment-provider-canary.yml]}" \
+            --arg runner_blob "${blobs[scripts/instagram-engagement-comment-provider-canary.mjs]}" \
+            --arg test_blob "${blobs[test/instagram-engagement-comment-provider-canary.test.ts]}" \
+            '{base_tree:$base_tree,tree:[
+              {path:".github/workflows/instagram-engagement-comment-provider-canary.yml",mode:"100644",type:"blob",sha:$workflow_blob},
+              {path:"scripts/instagram-engagement-comment-provider-canary.mjs",mode:"100644",type:"blob",sha:$runner_blob},
+              {path:"test/instagram-engagement-comment-provider-canary.test.ts",mode:"100644",type:"blob",sha:$test_blob},
+              {path:".github/workflows/tmp-comment-provider-canary-safety-patch.yml",mode:"100644",type:"blob",sha:null},
+              {path:".tmp/patch-comment-provider-canary-safety.py",mode:"100644",type:"blob",sha:null}
+            ]}')"
+          tree_sha="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" --input - --jq '.sha' <<< "$tree_payload")"
+          [[ "$tree_sha" =~ ^[0-9a-f]{40}$ ]]
+
+          commit_payload="$(jq -n \
+            --arg message 'fix(instagram): harden Comment canary authority checks' \
+            --arg tree "$tree_sha" \
+            --arg parent "$GITHUB_SHA" \
+            '{message:$message,tree:$tree,parents:[$parent]}')"
+          commit_sha="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq '.sha' <<< "$commit_payload")"
+          [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "CANDIDATE_TREE_SHA=$tree_sha"
+          echo "CANDIDATE_COMMIT_SHA=$commit_sha"
+          echo 'BRANCH_REF_UPDATED=false'
 
       - name: Upload exact tested patch artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -56,6 +97,5 @@ jobs:
             .github/workflows/instagram-engagement-comment-provider-canary.yml
             scripts/instagram-engagement-comment-provider-canary.mjs
             test/instagram-engagement-comment-provider-canary.test.ts
-            tested-files.sha256
           if-no-files-found: error
           retention-days: 1
