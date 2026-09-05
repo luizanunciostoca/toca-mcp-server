@@ -153,7 +153,7 @@ jobs:
             REPORT+="${marker}=${value}"$'\n'
           done
           TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
-          if [[ -n "$TARGET_SHA" ]]; then [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; fi
+          if [[ "$TARGET_SHA" != 'NONE' ]]; then [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; fi
           REPORT+="ELIGIBLE_TARGET_SHA256=${TARGET_SHA:-NONE}"$'\n'
           REPORT+='CANARY_CHANNEL=COMMENT'$'\n'
           REPORT+='READ_ONLY_ELIGIBILITY=true'$'\n'
