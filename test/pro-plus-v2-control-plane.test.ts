@@ -26,6 +26,7 @@ describe('PRO+ v2 control plane', () => {
     const build = readJson('control/pro-plus/build-broker-policy.json') as {
       mainStabilityRequired: boolean;
       artifactReusePolicy: string;
+      sourceShaMustEqualCurrentMain: boolean;
       subjectiveEquivalenceAllowed: boolean;
     };
     const promotion = readJson('control/pro-plus/promotion-materialization-policy.json') as {
@@ -35,6 +36,7 @@ describe('PRO+ v2 control plane', () => {
     };
     expect(build.mainStabilityRequired).toBe(true);
     expect(build.artifactReusePolicy).toBe('EXACT_TREE_AND_RUNTIME_CONTRACT_ONLY');
+    expect(build.sourceShaMustEqualCurrentMain).toBe(true);
     expect(build.subjectiveEquivalenceAllowed).toBe(false);
     expect(promotion.defaultStrategy).toBe('MATERIALIZE_ON_DEMAND');
     expect(promotion.longLivedDraftDefault).toBe(false);
@@ -58,10 +60,15 @@ describe('PRO+ v2 control plane', () => {
     expect(stateValidation).toContain("const evidenceId = marker(body, 'EVIDENCE_ID');");
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
+    expect(build).toContain('candidate_source_sha=$CANDIDATE_SOURCE_SHA');
+    expect(build).toContain('CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}');
+    expect(build).toContain('SOURCE_SHA=$RUNTIME_SOURCE_SHA');
+    expect(build).toContain('test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"');
     expect(build).toContain('BUILD_REUSED=');
     expect(build).toContain('key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"');
     expect(build).toContain('value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"');
     expect(build).toContain('marker must be unique and exact');
+    expect(build).toContain('grep -Fxc "SOURCE_SHA=$GITHUB_SHA"');
     expect(build).toContain('grep -Fxc "TREE_SHA=$TREE_SHA"');
     expect(build).toContain('grep -Fxc "RUNTIME_CONTRACT=$RUNTIME_CONTRACT"');
   });
