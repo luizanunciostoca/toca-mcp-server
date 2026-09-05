@@ -163,6 +163,17 @@ data class TocaAction(
     val approvalPreview: ApprovalPreview? = null,
 )
 
+data class ActionStatusSnapshot(
+    val actionId: String,
+    val correlationId: String,
+    val state: ActionState,
+    val availability: ActionAvailability,
+    val approvalHint: Boolean,
+    val reasons: List<String>,
+    val createdAt: String,
+    val persistence: String,
+)
+
 data class ActionEvent(
     val sequence: Int,
     val label: String,
