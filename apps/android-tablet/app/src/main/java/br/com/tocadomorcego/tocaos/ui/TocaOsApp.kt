@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import br.com.tocadomorcego.tocaos.data.ActionGateway
 import br.com.tocadomorcego.tocaos.data.AppGatewayHttpException
+import br.com.tocadomorcego.tocaos.data.AppSessionProfile
 import br.com.tocadomorcego.tocaos.data.AppSessionRequiredException
 import br.com.tocadomorcego.tocaos.data.GatewayExecutionMode
 import br.com.tocadomorcego.tocaos.domain.ActionCard
@@ -33,6 +34,7 @@ fun TocaOsApp(
     var operation by remember { mutableStateOf("THE_PARTY") }
     var videoRoute by remember { mutableStateOf(VideoCreationRoute.REAL_FOOTAGE_FILM) }
     var action by remember { mutableStateOf<TocaAction?>(null) }
+    var sessionProfile by remember(gateway) { mutableStateOf<AppSessionProfile?>(null) }
     var cards by remember(gateway) { mutableStateOf<List<ActionCard>>(emptyList()) }
     var videoOptions by remember(gateway) { mutableStateOf<List<VideoCreationOption>>(emptyList()) }
     var runtimeState by remember(gateway) { mutableStateOf(AppRuntimeState.BOOTSTRAPPING) }
@@ -44,6 +46,7 @@ fun TocaOsApp(
         runtimeState = AppRuntimeState.BOOTSTRAPPING
         runtimeError = null
         try {
+            sessionProfile = gateway.sessionProfile()
             cards = gateway.actionCards()
             videoOptions = gateway.videoOptions()
             runtimeState = AppRuntimeState.READY
@@ -61,7 +64,7 @@ fun TocaOsApp(
     when (runtimeState) {
         AppRuntimeState.BOOTSTRAPPING -> RuntimeStatusScreen(
             title = "Conectando ao TOCA OS",
-            message = "Validando a sessão e carregando capabilities e rotas de criação.",
+            message = "Validando sua sessão antes de carregar capabilities e rotas de criação.",
         )
 
         AppRuntimeState.AUTH_REQUIRED -> RuntimeStatusScreen(
@@ -84,6 +87,7 @@ fun TocaOsApp(
         AppRuntimeState.READY -> when (screen) {
             AppScreen.HOME -> ActionLauncherScreen(
                 cards = cards,
+                sessionProfile = sessionProfile,
                 onStartAction = { selected ->
                     actionType = selected
                     screen = AppScreen.WIZARD
