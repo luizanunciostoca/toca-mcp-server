@@ -21,25 +21,40 @@ fun interface AppSessionTokenProvider {
     fun appSessionToken(): String
 }
 
+internal fun interface AppGatewayTransport {
+    fun request(request: AppGatewayTransportRequest): String
+}
+
+internal data class AppGatewayTransportRequest(
+    val path: String,
+    val method: String,
+    val jsonBody: String? = null,
+)
+
 /**
- * Blocking transport for the TOCA App Gateway. Callers must execute these methods off the Android
- * main thread. This client carries only the TOCA app/session token; provider credentials must never
- * be supplied to or stored by the Android application.
+ * Client for the TOCA App Gateway. Provider credentials must never be supplied to or stored by the
+ * Android application. The default transport carries only the TOCA app-session bearer token.
  */
-class AppGatewayHttpClient(
-    baseUrl: String,
-    private val sessionTokenProvider: AppSessionTokenProvider,
+class AppGatewayHttpClient private constructor(
+    private val transport: AppGatewayTransport,
 ) {
-    private val origin = AppGatewayEndpointPolicy.normalizeBaseUrl(baseUrl)
+    constructor(
+        baseUrl: String,
+        sessionTokenProvider: AppSessionTokenProvider,
+    ) : this(HttpUrlConnectionAppGatewayTransport(baseUrl, sessionTokenProvider))
+
+    internal constructor(request: (AppGatewayTransportRequest) -> String) : this(
+        AppGatewayTransport(request),
+    )
 
     fun fetchActionCards(): List<ActionCard> {
-        val body = request("/api/v1/capabilities", "GET")
+        val body = transport.request(AppGatewayTransportRequest("/api/v1/capabilities", "GET"))
         val actions = JSONObject(body).getJSONArray("actions")
         return actions.mapObjects(::parseActionCard)
     }
 
     fun fetchVideoOptions(): List<VideoCreationOption> {
-        val body = request("/api/v1/video-options", "GET")
+        val body = transport.request(AppGatewayTransportRequest("/api/v1/video-options", "GET"))
         val options = JSONObject(body).getJSONArray("video_options")
         return options.mapObjects(::parseVideoOption)
     }
@@ -63,10 +78,12 @@ class AppGatewayHttpClient(
             requestBody.put("video_route", route)
         }
 
-        val body = request(
-            path = "/api/v1/actions",
-            method = "POST",
-            jsonBody = requestBody.toString(),
+        val body = transport.request(
+            AppGatewayTransportRequest(
+                path = "/api/v1/actions",
+                method = "POST",
+                jsonBody = requestBody.toString(),
+            ),
         )
         val action = JSONObject(body).getJSONObject("action")
         return TocaAction(
@@ -76,44 +93,6 @@ class AppGatewayHttpClient(
             state = ActionState.valueOf(action.getString("state")),
             approvalPreview = action.optJSONObject("approval_preview")?.let(::parseApprovalPreview),
         )
-    }
-
-    private fun request(path: String, method: String, jsonBody: String? = null): String {
-        val token = sessionTokenProvider.appSessionToken().trim()
-        require(token.isNotEmpty()) { "APP_SESSION_TOKEN_REQUIRED" }
-        require(!token.contains('\r') && !token.contains('\n')) { "APP_SESSION_TOKEN_INVALID" }
-
-        val connection = URL("$origin$path").openConnection() as HttpURLConnection
-        try {
-            connection.requestMethod = method
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
-            connection.useCaches = false
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("Authorization", "Bearer $token")
-
-            if (jsonBody != null) {
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.use { output ->
-                    output.write(jsonBody.toByteArray(Charsets.UTF_8))
-                }
-            }
-
-            val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) {
-                val safeCode = runCatching { JSONObject(responseBody).optString("error") }
-                    .getOrNull()
-                    ?.takeIf(String::isNotBlank)
-                    ?: "APP_GATEWAY_HTTP_ERROR"
-                throw AppGatewayHttpException(status, safeCode)
-            }
-            return responseBody
-        } finally {
-            connection.disconnect()
-        }
     }
 
     private fun parseActionCard(value: JSONObject): ActionCard = ActionCard(
@@ -144,6 +123,51 @@ class AppGatewayHttpClient(
         expiresAt = value.getString("expires_at"),
         status = value.getString("status"),
     )
+}
+
+private class HttpUrlConnectionAppGatewayTransport(
+    baseUrl: String,
+    private val sessionTokenProvider: AppSessionTokenProvider,
+) : AppGatewayTransport {
+    private val origin = AppGatewayEndpointPolicy.normalizeBaseUrl(baseUrl)
+
+    override fun request(request: AppGatewayTransportRequest): String {
+        val token = sessionTokenProvider.appSessionToken().trim()
+        require(token.isNotEmpty()) { "APP_SESSION_TOKEN_REQUIRED" }
+        require(!token.contains('\r') && !token.contains('\n')) { "APP_SESSION_TOKEN_INVALID" }
+
+        val connection = URL("$origin${request.path}").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = request.method
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.useCaches = false
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $token")
+
+            if (request.jsonBody != null) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.outputStream.use { output ->
+                    output.write(request.jsonBody.toByteArray(Charsets.UTF_8))
+                }
+            }
+
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                val safeCode = runCatching { JSONObject(responseBody).optString("error") }
+                    .getOrNull()
+                    ?.takeIf(String::isNotBlank)
+                    ?: "APP_GATEWAY_HTTP_ERROR"
+                throw AppGatewayHttpException(status, safeCode)
+            }
+            return responseBody
+        } finally {
+            connection.disconnect()
+        }
+    }
 }
 
 class AppGatewayHttpException(
