@@ -145,6 +145,7 @@ describe('App Gateway OIDC bearer verifier', () => {
     const attackerSignature = createJwt(other).split('.')[2];
     expect(wrongSignature).toHaveLength(3);
     expect(attackerSignature).toBeTruthy();
+    if (!attackerSignature) throw new Error('EXPECTED_ATTACKER_SIGNATURE');
     wrongSignature[2] = attackerSignature;
     await expectCode(
       verifierFor(fixture).verify(wrongSignature.join('.')),
