@@ -61,7 +61,7 @@ export function createInMemoryAppGatewayActionRuntimeStore(
         expiresAtMs: nowEpochMs() + ttlMs,
       });
       while (actions.size > capacity) {
-        const oldestActionId = actions.keys().next().value as string | undefined;
+        const oldestActionId = actions.keys().next().value;
         if (!oldestActionId) break;
         actions.delete(oldestActionId);
       }
