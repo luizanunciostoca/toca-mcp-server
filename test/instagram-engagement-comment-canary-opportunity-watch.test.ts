@@ -78,6 +78,9 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('MARKERS_COMPLETE=false');
     expect(workflow).toContain('if [[ "$count" != \'1\' ]]');
     expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION');
+    expect(workflow).toContain('echo \'status=BLOCKED_LOG_PROPAGATION\' >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_WATCH_RESULT=BLOCKED_LOG_PROPAGATION');
+    expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
     expect(workflow).toContain('test "$TARGET_SHA" = \'NONE\'');
   });
 

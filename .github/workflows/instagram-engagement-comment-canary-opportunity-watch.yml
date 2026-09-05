@@ -264,8 +264,12 @@ jobs:
           done
 
           if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
-            echo "COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION" >&2
-            exit 1
+            echo 'status=BLOCKED_LOG_PROPAGATION' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION' >> "$GITHUB_STEP_SUMMARY"
+            echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
+            echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+            echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
           read_single_marker() {
@@ -371,6 +375,14 @@ jobs:
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" \
               -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
           }
+
+          if [[ "$STATUS" = 'BLOCKED_LOG_PROPAGATION' ]]; then
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH_RESULT=BLOCKED_LOG_PROPAGATION' >> "$GITHUB_STEP_SUMMARY"
+            echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
+            echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+            echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           if [[ "$STATUS" = 'NO_ELIGIBLE_TARGET' ]]; then
             echo 'COMMENT_CANARY_OPPORTUNITY_WATCH_RESULT=NO_ELIGIBLE_TARGET' >> "$GITHUB_STEP_SUMMARY"
