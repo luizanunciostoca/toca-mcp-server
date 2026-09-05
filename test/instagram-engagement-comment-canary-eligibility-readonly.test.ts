@@ -77,6 +77,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
       'RECENT_COMMENT_COUNT=',
       'STATE_CANDIDATE_COUNT=',
       'ELIGIBLE_COUNT=',
+      'ELIGIBLE_TARGET_SHA256=',
       'UNRESOLVED_AMBIGUITY_COUNT=',
       'ACTIVE_RESERVATION_COUNT=',
       'REJECTED_SCOPE=',
@@ -96,6 +97,12 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(source).toContain(marker);
     }
+    expect(source).toContain("eligible.length === 1 ? eligible[0] : 'NONE'");
+  });
+
+  it('gives Cloud Logging a bounded flush window before the ephemeral job exits', () => {
+    expect(source).toContain('const LOG_FLUSH_GRACE_MS = 10_000;');
+    expect(source).toContain('setTimeout(resolve, LOG_FLUSH_GRACE_MS)');
   });
 
   it('requires exact-main Comment-only immutable-image authorization', () => {
@@ -138,6 +145,7 @@ describe('Instagram Comment canary read-only eligibility gate', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+    expect(workflow).toContain('if [[ "$TARGET_SHA" != \'NONE\' ]]');
     expect(workflow).not.toContain('PAYLOAD_SUMMARIES=');
     expect(workflow).not.toContain('RAW_TEXT=');
   });
