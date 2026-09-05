@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.3",
+  "schemaVersion": "1.4",
   "policyId": "TOCA_PHOTO_TO_VIDEO_POLICY_V1",
-  "policyVersion": "1.3",
+  "policyVersion": "1.4",
   "status": "ACTIVE_CANONICAL",
   "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
   "brandScope": "TOCA_DO_MORCEGO",
@@ -29,12 +29,40 @@
       "environmentDriftAllowed": false,
       "aiLogoGenerationAllowed": false,
       "provider": "GOOGLE_VERTEX_VEO",
-      "allowedModels": ["veo-3.1-generate-001", "veo-3.1-fast-generate-001"],
+      "providerStrategy": "ORDERED_FAILOVER",
+      "primaryProvider": "GOOGLE_VERTEX_VEO",
+      "fallbackProviders": ["OPENAI_VIDEO_API"],
+      "fallbackOnlyOnRetryableProviderFailure": true,
+      "fallbackForbiddenForPolicyApprovalRightsBindingFidelityOrSpecFailures": true,
+      "providerAttemptChainEvidenceRequired": true,
+      "allowedModelsByProvider": {
+        "GOOGLE_VERTEX_VEO": ["veo-3.1-generate-001", "veo-3.1-fast-generate-001"],
+        "OPENAI_VIDEO_API": ["sora-2", "sora-2-pro"]
+      },
       "runtimeAuthMode": "GCP_SERVICE_IDENTITY",
       "providerLocation": "us-central1",
       "postGenerationHumanReviewRequired": true,
       "sceneContinuationFidelityGateRequired": true
     }
+  },
+  "rightsReadiness": {
+    "activeRecordRequired": true,
+    "durableEvidenceRefRequired": true,
+    "validatedAtRequired": true,
+    "routeSpecificApprovedUseRequired": true,
+    "likenessConfirmedForGenerativePeople": true,
+    "validityWindowEnforcedWhenPresent": true,
+    "revocationAlwaysFailClosed": true,
+    "noInferenceFromDriveFolderPriorPublicationOrMarketingReady": true
+  },
+  "sourceLibrary": {
+    "canonicalRegistry": "CREATIVE_TRUTH_REGISTRY.VIDEO_SHOTS",
+    "sourceDriveFileIdRequired": true,
+    "sourceSha256RequiredBeforeAutomaticUse": true,
+    "venueVerifiedRequired": true,
+    "rightsEligibilityRequired": true,
+    "storyFunctionMetadataRecommended": true,
+    "usageAndAntiRepeatMetadataRecommended": true
   },
   "reviewBoundary": {
     "durableCandidateArtifactRequired": true,
