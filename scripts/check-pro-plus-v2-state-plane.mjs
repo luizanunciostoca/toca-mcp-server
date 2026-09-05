@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-const [lanePath, queuePath, evidencePath, backlogPath, evidenceCommentsPath] = process.argv.slice(2);
+const [lanePath, queuePath, evidencePath, backlogPath, evidenceCommentsPath] =
+  process.argv.slice(2);
 const expectedOwner = process.env.EXPECTED_OWNER?.trim();
 
 if (!lanePath || !queuePath || !evidencePath || !backlogPath || !evidenceCommentsPath) {
@@ -144,7 +145,8 @@ for (const lane of lanes) {
   laneIds.add(lane.lane_id);
   if (!laneStatuses.has(lane.status)) fail(`invalid lane status ${lane.lane_id}`);
   if (!shaPattern.test(lane.base_sha ?? '')) fail(`invalid lane base_sha ${lane.lane_id}`);
-  if (lane.head_sha && !shaPattern.test(lane.head_sha)) fail(`invalid lane head_sha ${lane.lane_id}`);
+  if (lane.head_sha && !shaPattern.test(lane.head_sha))
+    fail(`invalid lane head_sha ${lane.lane_id}`);
   if (!Array.isArray(lane.files_owned) || !Array.isArray(lane.hotspot_locks)) {
     fail(`invalid ownership arrays ${lane.lane_id}`);
   }
@@ -162,7 +164,8 @@ const lockedResources = new Set();
 for (const lock of locks) {
   if (!lock.lock_id || lockIds.has(lock.lock_id)) fail('duplicate or missing lock_id');
   lockIds.add(lock.lock_id);
-  if (!lock.resource || lockedResources.has(lock.resource)) fail('duplicate or missing lock resource');
+  if (!lock.resource || lockedResources.has(lock.resource))
+    fail('duplicate or missing lock resource');
   lockedResources.add(lock.resource);
   if (!laneIds.has(lock.owner_lane)) fail(`lock owner lane missing: ${lock.lock_id}`);
   if (!['HELD', 'RELEASED'].includes(lock.state)) fail(`invalid lock state: ${lock.lock_id}`);
@@ -191,19 +194,22 @@ if (stability?.status !== stabilityMarker || stability?.evaluatedMainSha !== eva
   fail('main stability marker/JSON mismatch');
 }
 const reservation = queueEnvelope.state.mergeReservation ?? null;
-if (reservationMarker === 'NONE' && reservation !== null) fail('merge reservation marker/JSON mismatch');
+if (reservationMarker === 'NONE' && reservation !== null)
+  fail('merge reservation marker/JSON mismatch');
 if (reservation !== null) {
   if (reservationMarker === 'NONE') fail('missing merge reservation marker');
   if (!laneIds.has(reservation.lane_id)) fail('merge reservation references missing lane');
   if (!shaPattern.test(reservation.head_sha ?? '')) fail('invalid merge reservation head_sha');
 }
-if (stabilityMarker === 'PASS' && reservation !== null) fail('stable main cannot have merge reservation');
+if (stabilityMarker === 'PASS' && reservation !== null)
+  fail('stable main cannot have merge reservation');
 
 if (evidenceEnvelope.state.schemaVersion !== 2) fail('evidence ledger schema version');
 const bodyRecords = evidenceEnvelope.state.records ?? [];
 if (!Array.isArray(bodyRecords)) fail('evidence records must be an array');
 for (const record of bodyRecords) {
-  if (!record.evidence_id || !evidenceValidities.has(record.validity)) fail('invalid evidence record');
+  if (!record.evidence_id || !evidenceValidities.has(record.validity))
+    fail('invalid evidence record');
   if (record.source_sha && !shaPattern.test(record.source_sha)) fail('invalid evidence source_sha');
   if (record.runtime_image_digest && !digestPattern.test(record.runtime_image_digest)) {
     fail('invalid evidence digest');
@@ -214,13 +220,15 @@ for (const comment of evidenceComments) {
   const body = comment.body ?? '';
   if (!body.includes('EVIDENCE_ID=')) continue;
   const author = comment.user?.login;
-  if (![expectedOwner, 'github-actions[bot]'].includes(author)) fail('untrusted evidence comment author');
+  if (![expectedOwner, 'github-actions[bot]'].includes(author))
+    fail('untrusted evidence comment author');
   const validity = marker(body, 'VALIDITY');
   if (!evidenceValidities.has(validity)) fail('invalid evidence comment validity');
   const sourceSha = marker(body, 'SOURCE_SHA');
   const treeSha = marker(body, 'TREE_SHA');
   const digest = marker(body, 'RUNTIME_IMAGE_DIGEST');
-  if (!shaPattern.test(sourceSha) || !shaPattern.test(treeSha)) fail('invalid evidence comment SHA');
+  if (!shaPattern.test(sourceSha) || !shaPattern.test(treeSha))
+    fail('invalid evidence comment SHA');
   if (!digestPattern.test(digest)) fail('invalid evidence comment digest');
 }
 

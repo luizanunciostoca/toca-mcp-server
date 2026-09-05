@@ -148,7 +148,10 @@ for (const path of [
     fail(`${path} invalid custom-agent frontmatter`);
 }
 
-const stateWorkflow = readFileSync('.github/workflows/pro-plus-v2-state-plane-validation.yml', 'utf8');
+const stateWorkflow = readFileSync(
+  '.github/workflows/pro-plus-v2-state-plane-validation.yml',
+  'utf8',
+);
 if (!stateWorkflow.includes('issues: read') || stateWorkflow.includes('issues: write')) {
   fail('state-plane validator must remain read-only');
 }
