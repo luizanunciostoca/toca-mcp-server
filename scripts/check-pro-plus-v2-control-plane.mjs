@@ -171,7 +171,7 @@ for (const marker of [
   'issues/640',
   'issues/641/comments',
   'EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD',
-  'RUNTIME_CONTRACT=SERVER_IMAGE_V1',
+  "RUNTIME_CONTRACT='SERVER_IMAGE_V1'",
   'BUILD_REUSED=',
 ]) {
   if (!buildWorkflow.includes(marker))
