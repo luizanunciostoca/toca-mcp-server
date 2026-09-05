@@ -75,6 +75,7 @@ fun TocaOsApp(gateway: ActionGateway) {
 
         AppScreen.REVIEW -> ReviewScreen(
             objective = objective,
+            approvalPreview = action?.approvalPreview,
             onRequestChanges = { screen = AppScreen.WIZARD },
             onApprove = { screen = AppScreen.RESULT },
         )

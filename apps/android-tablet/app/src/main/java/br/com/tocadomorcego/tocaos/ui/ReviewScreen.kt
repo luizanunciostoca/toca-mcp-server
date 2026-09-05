@@ -17,12 +17,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.tocadomorcego.tocaos.domain.ApprovalPreview
 
 @Composable
-fun ReviewScreen(objective: String, onRequestChanges: () -> Unit, onApprove: () -> Unit) {
+fun ReviewScreen(
+    objective: String,
+    approvalPreview: ApprovalPreview?,
+    onRequestChanges: () -> Unit,
+    onApprove: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
     ) {
@@ -43,6 +50,42 @@ fun ReviewScreen(objective: String, onRequestChanges: () -> Unit, onApprove: () 
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
+            }
+        }
+
+        approvalPreview?.let { approval ->
+            Spacer(Modifier.height(18.dp))
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text(
+                        "Aprovação descriptor-bound",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("Approval ID: ${approval.approvalId}")
+                    Text("Capability: ${approval.capabilityId}")
+                    Text("Route: ${approval.routeId}")
+                    Text("Conta alvo: ${approval.targetAccount}")
+                    Text("Status: ${approval.status}")
+                    Text("Expira em: ${approval.expiresAt}")
+                    approval.financialCeiling?.let { ceiling ->
+                        Text("Teto financeiro: $ceiling")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("Descriptor SHA-256", fontWeight = FontWeight.Bold)
+                    Text(
+                        approval.descriptorSha256,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "O app exibe este vínculo; a autorização efetiva continua pertencendo ao Core.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

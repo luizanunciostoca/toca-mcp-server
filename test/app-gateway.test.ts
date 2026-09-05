@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import {
   actionStateFromExecutionPhase,
+  attachApprovalPreview,
   capabilityStatusToAvailability,
   createTocaActionEvent,
   listActionCards,
@@ -109,6 +110,55 @@ describe('Android app gateway contracts', () => {
 
     expect(publishCard?.availability).toBe('AVAILABLE');
     expect(publishCard?.approvalHint).toBe(true);
+  });
+
+  it('preserves descriptor-bound approval preview fields supplied by the Core', () => {
+    const registry = baseRegistry();
+    registry.register(tool({ name: 'copy.generate' }));
+    const action = prepareTocaAction(
+      {
+        action_type: 'CREATE_CONTENT',
+        operation: 'THE_PARTY',
+        objective: 'Criar Story',
+      },
+      registry,
+      {
+        createId: (() => {
+          let index = 0;
+          return () => `approval-${++index}`;
+        })(),
+        now: () => '2026-09-05T02:00:00.000Z',
+      },
+    );
+    const descriptor = 'a'.repeat(64);
+
+    const withApproval = attachApprovalPreview(action, {
+      approval_id: 'APR-001',
+      capability_id: 'instagram.publication.publish',
+      route_id: 'R20',
+      target_account: 'instagram:toca',
+      descriptor_sha256: descriptor,
+      expires_at: '2026-09-05T03:00:00-03:00',
+      status: 'REQUESTED',
+    });
+
+    expect(withApproval.approvalPreview).toMatchObject({
+      approval_id: 'APR-001',
+      route_id: 'R20',
+      target_account: 'instagram:toca',
+      descriptor_sha256: descriptor,
+    });
+    expect(() =>
+      attachApprovalPreview(action, {
+        approval_id: 'APR-INVALID',
+        capability_id: 'instagram.publication.publish',
+        route_id: 'R20',
+        target_account: 'instagram:toca',
+        descriptor_sha256: 'not-a-sha256',
+        expires_at: '2026-09-05T03:00:00-03:00',
+        status: 'REQUESTED',
+      }),
+    ).toThrow();
   });
 
   it('exposes the ten governed video creation options from the visual manual', () => {

@@ -126,6 +126,17 @@ val VIDEO_CREATION_OPTIONS = listOf(
 fun VideoCreationRoute.displayTitle(): String =
     VIDEO_CREATION_OPTIONS.first { it.route == this }.title
 
+data class ApprovalPreview(
+    val approvalId: String,
+    val capabilityId: String,
+    val routeId: String,
+    val targetAccount: String,
+    val descriptorSha256: String,
+    val financialCeiling: Double? = null,
+    val expiresAt: String,
+    val status: String,
+)
+
 data class ActionCard(
     val type: ActionType,
     val title: String,
@@ -149,6 +160,7 @@ data class TocaAction(
     val correlationId: String,
     val request: TocaActionRequest,
     val state: ActionState,
+    val approvalPreview: ApprovalPreview? = null,
 )
 
 data class ActionEvent(

@@ -29,6 +29,19 @@ export const videoCreationRouteSchema = z.enum([
   'SYNTHETIC_TEXT_TO_VIDEO_RESTRICTED',
 ]);
 
+export const approvalPreviewSchema = z
+  .object({
+    approval_id: z.string().trim().min(1).max(200),
+    capability_id: z.string().trim().min(1).max(200),
+    route_id: z.string().trim().min(1).max(200),
+    target_account: z.string().trim().min(1).max(300),
+    descriptor_sha256: z.string().regex(/^[0-9a-f]{64}$/i),
+    financial_ceiling: z.number().nonnegative().optional(),
+    expires_at: z.string().trim().min(1).max(120),
+    status: z.string().trim().min(1).max(80),
+  })
+  .strict();
+
 export const tocaActionRequestSchema = z
   .object({
     action_type: actionTypeSchema,
@@ -51,6 +64,7 @@ export const tocaActionRequestSchema = z
 export type ActionType = z.infer<typeof actionTypeSchema>;
 export type ActionMode = z.infer<typeof actionModeSchema>;
 export type VideoCreationRoute = z.infer<typeof videoCreationRouteSchema>;
+export type ActionApprovalPreview = z.infer<typeof approvalPreviewSchema>;
 export type TocaActionRequest = z.infer<typeof tocaActionRequestSchema>;
 
 export type ActionAvailability = 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'BLOCKED';
@@ -123,6 +137,7 @@ export interface TocaAction {
   readonly state: TocaActionState;
   readonly availability: ActionAvailability;
   readonly approvalHint: boolean;
+  readonly approvalPreview?: ActionApprovalPreview;
   readonly reasons: readonly string[];
   readonly createdAt: string;
 }

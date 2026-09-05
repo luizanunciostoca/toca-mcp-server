@@ -3,6 +3,7 @@ import type { ToolRegistry } from '../core/tool-registry.js';
 import { ACTION_CARD_CATALOG } from './action-catalog.js';
 import { resolveCapabilitySnapshot } from './capability-view.js';
 import {
+  approvalPreviewSchema,
   tocaActionRequestSchema,
   type ActionAvailability,
   type ActionCardDefinition,
@@ -90,6 +91,14 @@ export function prepareTocaAction(
         ]
       : [...card.reasons, ...routeReasons],
     createdAt: now(),
+  };
+}
+
+export function attachApprovalPreview(action: TocaAction, rawApproval: unknown): TocaAction {
+  const approvalPreview = approvalPreviewSchema.parse(rawApproval);
+  return {
+    ...action,
+    approvalPreview,
   };
 }
 

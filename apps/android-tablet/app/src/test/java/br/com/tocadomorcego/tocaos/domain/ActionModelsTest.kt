@@ -28,4 +28,22 @@ class ActionModelsTest {
         )
         assertTrue(VIDEO_CREATION_OPTIONS.last().restricted)
     }
+
+    @Test
+    fun `approval preview preserves descriptor binding from server`() {
+        val descriptor = "a".repeat(64)
+        val preview = ApprovalPreview(
+            approvalId = "APR-001",
+            capabilityId = "instagram.publication.publish",
+            routeId = "R20",
+            targetAccount = "instagram:toca",
+            descriptorSha256 = descriptor,
+            expiresAt = "2026-09-05T03:00:00-03:00",
+            status = "REQUESTED",
+        )
+
+        assertEquals(descriptor, preview.descriptorSha256)
+        assertEquals("R20", preview.routeId)
+        assertEquals("instagram:toca", preview.targetAccount)
+    }
 }

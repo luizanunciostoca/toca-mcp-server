@@ -5,6 +5,7 @@ export {
   resolveCapabilitySnapshot,
 } from './capability-view.js';
 export {
+  attachApprovalPreview,
   listActionCards,
   parseTocaActionRequest,
   prepareTocaAction,
@@ -23,8 +24,10 @@ export {
 export {
   actionModeSchema,
   actionTypeSchema,
+  approvalPreviewSchema,
   tocaActionRequestSchema,
   videoCreationRouteSchema,
+  type ActionApprovalPreview,
   type ActionAvailability,
   type ActionCapabilityRequirement,
   type ActionCardDefinition,
