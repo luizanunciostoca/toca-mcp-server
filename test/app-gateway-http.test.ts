@@ -47,7 +47,9 @@ async function listen(overrides: Partial<AppGatewayHttpOptions> = {}): Promise<s
     registry: registry(),
     authorize: (request) =>
       Promise.resolve(
-        request.headers.authorization === bearer ? { subject: 'user-1', roles: ['marketing'] } : undefined,
+        request.headers.authorization === bearer
+          ? { subject: 'user-1', roles: ['marketing'] }
+          : undefined,
       ),
     ...overrides,
   });
