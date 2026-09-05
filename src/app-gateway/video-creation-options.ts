@@ -52,7 +52,8 @@ export const VIDEO_CREATION_OPTIONS: readonly VideoCreationOptionDefinition[] = 
     sourceBinding: true,
     generative: true,
     restricted: false,
-    bestUse: 'Filmes generativos em múltiplos shots com assets reais distintos por função narrativa.',
+    bestUse:
+      'Filmes generativos em múltiplos shots com assets reais distintos por função narrativa.',
     driftRisk: 'MEDIO',
     requiresCoverageEvidence: true,
   },
