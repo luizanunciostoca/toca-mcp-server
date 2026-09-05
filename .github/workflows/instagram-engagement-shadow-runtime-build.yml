@@ -109,10 +109,13 @@ jobs:
             'SERVICE_MUTATIONS_AUTHORIZED=false'
           )
           for required in "${required_stability_lines[@]}"; do
-            grep -Fxq "$required" <<< "$STABILITY_BODY" || {
-              echo "PRO_PLUS_V2_MAIN_STABILITY_BLOCKED: missing $required" >&2
+            key="${required%%=*}"
+            key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"
+            value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"
+            if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+              echo "PRO_PLUS_V2_MAIN_STABILITY_BLOCKED: marker must be unique and exact: $required" >&2
               exit 1
-            }
+            fi
           done
 
           {
