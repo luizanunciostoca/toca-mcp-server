@@ -29,7 +29,9 @@ export function createLazyVideoAssetSelectionRuntimeResolver(
   };
 }
 
-export function videoAssetSelectionRuntimeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+export function videoAssetSelectionRuntimeConfigured(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
   return googleSheetsAccessConfigured(env);
 }
 
