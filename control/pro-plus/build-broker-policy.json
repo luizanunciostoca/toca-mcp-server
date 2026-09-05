@@ -19,6 +19,9 @@
   ],
   "artifactReusePolicy": "EXACT_TREE_AND_RUNTIME_CONTRACT_ONLY",
   "sourceShaMustEqualCurrentMain": true,
+  "maxEvidenceCommentsScanned": 100,
+  "evidenceLookupWindow": "LATEST_100_COMMENTS",
+  "evidenceLookupMissAction": "REBUILD",
   "subjectiveEquivalenceAllowed": false,
   "invalidateOn": ["MAIN_SHA_CHANGE", "TREE_SHA_CHANGE", "RUNTIME_CONTRACT_CHANGE"]
 }
