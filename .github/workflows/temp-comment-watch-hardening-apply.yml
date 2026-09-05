@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/comment-opportunity-watch-log-propagation
-          persist-credentials: true
+          persist-credentials: false
           fetch-depth: 1
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -28,7 +28,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Apply patch and repository formatting
+      - name: Materialize formatted patch as immutable Git commit object
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -36,8 +38,14 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec prettier --write .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml test/instagram-engagement-comment-canary-opportunity-watch.test.ts
           git diff --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml test/instagram-engagement-comment-canary-opportunity-watch.test.ts
-          git commit -m 'fix(instagram): harden Comment opportunity watch log polling'
-          git push origin HEAD:fix/comment-opportunity-watch-log-propagation
+          BASE_SHA="$(git rev-parse HEAD)"
+          BASE_TREE="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${BASE_SHA}" --jq '.tree.sha')"
+          WATCH_BLOB="$(jq -Rs '{content: ., encoding: "utf-8"}' .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq '.sha')"
+          TEST_BLOB="$(jq -Rs '{content: ., encoding: "utf-8"}' test/instagram-engagement-comment-canary-opportunity-watch.test.ts | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq '.sha')"
+          TREE_PAYLOAD="$(jq -n --arg base "$BASE_TREE" --arg watch "$WATCH_BLOB" --arg test "$TEST_BLOB" '{base_tree:$base,tree:[{path:".github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml",mode:"100644",type:"blob",sha:$watch},{path:"test/instagram-engagement-comment-canary-opportunity-watch.test.ts",mode:"100644",type:"blob",sha:$test}]}')"
+          NEW_TREE="$(printf '%s' "$TREE_PAYLOAD" | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" --input - --jq '.sha')"
+          COMMIT_PAYLOAD="$(jq -n --arg message 'fix(instagram): harden Comment opportunity watch log polling' --arg tree "$NEW_TREE" --arg parent "$BASE_SHA" '{message:$message,tree:$tree,parents:[$parent]}')"
+          CANDIDATE_COMMIT_SHA="$(printf '%s' "$COMMIT_PAYLOAD" | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq '.sha')"
+          echo "CANDIDATE_COMMIT_SHA=$CANDIDATE_COMMIT_SHA"
+          echo "WATCH_BLOB=$WATCH_BLOB"
+          echo "TEST_BLOB=$TEST_BLOB"
