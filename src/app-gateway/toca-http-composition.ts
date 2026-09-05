@@ -1,9 +1,6 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createTocaHttpServer, type TocaHttpServerOptions } from '../http-server.js';
-import {
-  createAppGatewayHttpHandler,
-  type AppGatewayHttpOptions,
-} from './http-boundary.js';
+import { createAppGatewayHttpHandler, type AppGatewayHttpOptions } from './http-boundary.js';
 
 export interface TocaAppGatewayHttpCompositionOptions {
   readonly toca?: TocaHttpServerOptions;
