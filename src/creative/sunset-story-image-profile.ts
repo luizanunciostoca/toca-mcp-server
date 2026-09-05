@@ -13,7 +13,7 @@ export const SUNSET_STORY_ZONES = [
 export type SunsetStoryZone = (typeof SUNSET_STORY_ZONES)[number];
 
 export type SunsetStorySubjectKind =
-  'PERSON' | 'COUPLE' | 'GROUP' | 'DRINK' | 'SCENERY' | 'ARCHITECTURE' | 'OTHER';
+  'PERSON' | 'COUPLE' | 'GROUP' | 'DRINK' | 'SCENERY' | 'ARCHITECTURE' | 'DJ_GEAR' | 'OTHER';
 
 export type SunsetStorySceneClass =
   | 'PEOPLE_GOLDEN_HOUR'
@@ -23,7 +23,21 @@ export type SunsetStorySceneClass =
   | 'LIFESTYLE'
   | 'SCENERY'
   | 'ARCHITECTURE'
+  | 'VENUE_AMBIENCE'
+  | 'MUSIC_DJ'
   | 'UNKNOWN';
+
+export type SunsetStoryProtectedFeatureKind =
+  | 'FACE'
+  | 'EYES'
+  | 'HANDS'
+  | 'DRINK_PRODUCT'
+  | 'SUN'
+  | 'HORIZON'
+  | 'SUN_REFLECTION'
+  | 'LOGO_EXISTING'
+  | 'DJ_GEAR'
+  | 'VENUE_FEATURE';
 
 export type SunsetStoryBrightness = 'DARK' | 'MEDIUM' | 'BRIGHT';
 
@@ -40,10 +54,17 @@ export interface SunsetStoryObservedSubject {
   readonly salience: number;
 }
 
+export interface SunsetStoryProtectedFeature {
+  readonly kind: SunsetStoryProtectedFeatureKind;
+  readonly box: NormalizedRect;
+  readonly salience: number;
+}
+
 export interface SunsetStoryImageObservation {
   readonly width: number;
   readonly height: number;
   readonly subjects: readonly SunsetStoryObservedSubject[];
+  readonly protectedFeatures: readonly SunsetStoryProtectedFeature[];
   readonly negativeSpaceZones: readonly SunsetStoryZone[];
   readonly regionLuma: Readonly<Partial<Record<SunsetStoryZone, number>>>;
   readonly warmth: number;
@@ -56,6 +77,8 @@ export interface SunsetStoryImageProfile {
   readonly width: number;
   readonly height: number;
   readonly sourceAspectRatio: number;
+  readonly subjects: readonly SunsetStoryObservedSubject[];
+  readonly protectedFeatures: readonly SunsetStoryProtectedFeature[];
   readonly primarySubject: SunsetStoryObservedSubject | null;
   readonly primarySubjectZone: SunsetStoryZone | null;
   readonly negativeSpaceZones: readonly SunsetStoryZone[];
@@ -110,6 +133,7 @@ function resolveSceneClass(
   const explicit = observation.sceneHints[0];
   if (explicit) return explicit;
   if (primarySubject?.kind === 'DRINK') return 'DRINKS';
+  if (primarySubject?.kind === 'DJ_GEAR') return 'MUSIC_DJ';
   if (primarySubject?.kind === 'COUPLE' || primarySubject?.kind === 'GROUP') {
     return 'SOCIAL_EXPERIENCE';
   }
@@ -148,6 +172,10 @@ export function buildSunsetStoryImageProfile(
     assertRect(subject.box);
     assertUnit(subject.salience, 'SUNSET_IMAGE_SUBJECT_SALIENCE_INVALID');
   }
+  for (const feature of observation.protectedFeatures) {
+    assertRect(feature.box);
+    assertUnit(feature.salience, 'SUNSET_IMAGE_PROTECTED_FEATURE_SALIENCE_INVALID');
+  }
   for (const value of Object.values(observation.regionLuma)) {
     assertUnit(value, 'SUNSET_IMAGE_LUMA_INVALID');
   }
@@ -168,6 +196,8 @@ export function buildSunsetStoryImageProfile(
     width: observation.width,
     height: observation.height,
     sourceAspectRatio: observation.width / observation.height,
+    subjects: [...observation.subjects],
+    protectedFeatures: [...observation.protectedFeatures],
     primarySubject,
     primarySubjectZone,
     negativeSpaceZones: [...new Set(observation.negativeSpaceZones)],

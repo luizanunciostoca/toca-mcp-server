@@ -23,6 +23,7 @@ function observation(
     width: 1080,
     height: 1920,
     subjects: [],
+    protectedFeatures: [],
     negativeSpaceZones: ['TOP_LEFT', 'TOP_CENTER', 'CENTER_LEFT'],
     regionLuma: {
       TOP_LEFT: 0.28,
@@ -53,6 +54,25 @@ function personRightObservation(): SunsetStoryImageObservation {
 }
 
 function drinkObservation(): SunsetStoryImageObservation {
+  return observation({
+    subjects: [
+      {
+        kind: 'DRINK',
+        box: { x: 0.36, y: 0.1, width: 0.28, height: 0.3 },
+        salience: 0.96,
+      },
+      {
+        kind: 'PERSON',
+        box: { x: 0.7, y: 0.25, width: 0.18, height: 0.3 },
+        salience: 0.55,
+      },
+    ],
+    negativeSpaceZones: ['BOTTOM_CENTER', 'BOTTOM_LEFT', 'BOTTOM_RIGHT'],
+    sceneHints: ['DRINKS'],
+  });
+}
+
+function productOnlyDrinkObservation(): SunsetStoryImageObservation {
   return observation({
     subjects: [
       {
@@ -91,6 +111,8 @@ function fakeCandidate(
       transformedPrimarySubject: null,
       subjectCoverage: 1,
       protectedOverlap: 0,
+      protectedFeatureOverlap: 0,
+      minimumProtectedFeatureCoverage: 1,
       placementScore: 1,
       planScore: 100,
     },
@@ -103,6 +125,7 @@ describe('Sunset Story intelligent template selection', () => {
     expect(profile.sceneClass).toBe('PEOPLE_GOLDEN_HOUR');
     expect(profile.primarySubjectZone).toBe('CENTER_RIGHT');
     expect(profile.brightness).toBe('MEDIUM');
+    expect(profile.protectedFeatures).toEqual([]);
   });
 
   it('prefers V5 for a right-side lifestyle subject with left-side negative space', () => {
@@ -114,12 +137,64 @@ describe('Sunset Story intelligent template selection', () => {
     expect(selection.mode).not.toBe('NO_SAFE_TEMPLATE');
   });
 
-  it('prefers V4 for a drinks-led image and drinks intent', () => {
+  it('prefers V4 for a drinks-led image that preserves human service context', () => {
     const selection = selectSunsetStoryTemplate({
       profile: buildSunsetStoryImageProfile(drinkObservation()),
       intent: 'DRINKS',
     });
     expect(selection.selectedTemplateId).toBe('SUNSET_TEMPLATE_MASTER_V4');
+  });
+
+  it('rejects a product-only drink crop when experience context is required', () => {
+    const selection = selectSunsetStoryTemplate({
+      profile: buildSunsetStoryImageProfile(productOnlyDrinkObservation()),
+      intent: 'DRINKS',
+    });
+    expect(selection.mode).toBe('NO_SAFE_TEMPLATE');
+    expect(
+      selection.candidates.some((candidate) =>
+        candidate.rejectionReasons.includes('PRODUCT_ONLY_COMPOSITION'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a dominant person for an ambience editorial slot', () => {
+    const selection = selectSunsetStoryTemplate({
+      profile: buildSunsetStoryImageProfile(personRightObservation()),
+      intent: 'AMBIENCE',
+    });
+    expect(selection.mode).toBe('NO_SAFE_TEMPLATE');
+    expect(
+      selection.candidates.some((candidate) =>
+        candidate.rejectionReasons.includes('ASSET_EDITORIAL_MISMATCH:AMBIENCE_PERSON_DOMINANT'),
+      ),
+    ).toBe(true);
+  });
+
+  it('requires explicit DJ or music gear evidence for a music slot and selects V8 when present', () => {
+    const missingMusicEvidence = selectSunsetStoryTemplate({
+      profile: buildSunsetStoryImageProfile(personRightObservation()),
+      intent: 'MUSIC',
+    });
+    expect(missingMusicEvidence.mode).toBe('NO_SAFE_TEMPLATE');
+
+    const musicObservation = observation({
+      subjects: [
+        {
+          kind: 'DJ_GEAR',
+          box: { x: 0.68, y: 0.42, width: 0.18, height: 0.12 },
+          salience: 0.96,
+        },
+      ],
+      negativeSpaceZones: ['TOP_CENTER', 'CENTER_LEFT'],
+      sceneHints: ['MUSIC_DJ'],
+      warmth: 0.45,
+    });
+    const selection = selectSunsetStoryTemplate({
+      profile: buildSunsetStoryImageProfile(musicObservation),
+      intent: 'MUSIC',
+    });
+    expect(selection.selectedTemplateId).toBe('SUNSET_TEMPLATE_MASTER_V8');
   });
 
   it('prefers V9 for scenery with usable central negative space', () => {
@@ -140,6 +215,29 @@ describe('Sunset Story intelligent template selection', () => {
     expect(selection.mode).toBe('NO_SAFE_TEMPLATE');
     expect(selection.selectedTemplateId).toBeNull();
     expect(selection.candidates.every((candidate) => candidate.hardRejected)).toBe(true);
+  });
+
+  it('fails closed when a protected photo feature collides with every layout', () => {
+    const profile = buildSunsetStoryImageProfile(
+      observation({
+        sceneHints: ['SEA_VIEW'],
+        horizonY: 0.48,
+        protectedFeatures: [
+          {
+            kind: 'SUN_REFLECTION',
+            box: { x: 0, y: 0, width: 1, height: 1 },
+            salience: 1,
+          },
+        ],
+      }),
+    );
+    const selection = selectSunsetStoryTemplate({ profile, intent: 'SCENERY' });
+    expect(selection.mode).toBe('NO_SAFE_TEMPLATE');
+    expect(
+      selection.candidates.some((candidate) =>
+        candidate.rejectionReasons.includes('PROTECTED_FEATURE_OVERLAP'),
+      ),
+    ).toBe(true);
   });
 
   it('applies anti-repeat as a penalty without making it a hard rejection', () => {
@@ -201,7 +299,7 @@ describe('Sunset Story intelligent template selection', () => {
     const v4 = result.selection.candidates.find(
       (candidate) => candidate.templateId === 'SUNSET_TEMPLATE_MASTER_V4',
     );
-    expect(result.previewEvaluations).toHaveLength(3);
+    expect(result.previewEvaluations).toHaveLength(1);
     expect(v4?.hardRejected).toBe(true);
     expect(result.selection.selectedTemplateId).not.toBe('SUNSET_TEMPLATE_MASTER_V4');
   });

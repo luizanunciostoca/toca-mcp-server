@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "templateId": "SUNSET_TEMPLATE_MASTER_V6",
   "status": "APPROVED_VISUAL_CONTRACT",
   "runtimeEligible": false,
@@ -94,7 +94,7 @@
   },
   "footer": {
     "region": { "x": 174, "y": 1674, "w": 715, "h": 130 },
-    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
+    "brandOrder": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
     "allowAiBrandReconstruction": false,
     "colorMode": "WHITE"
@@ -112,7 +112,9 @@
     "FIXED_FOOTER_ORDER",
     "FIXED_TYPOGRAPHY_ROLES",
     "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
-    "NO_EDITOR_PLACEHOLDER_IN_FINAL_EXPORT"
+    "NO_EDITOR_PLACEHOLDER_IN_FINAL_EXPORT",
+    "NO_PROTECTED_FEATURE_OVERLAP",
+    "SAFE_AREA_HARD_GATE"
   ],
   "qualityGate": [
     "CANVAS_1080X1920",
@@ -126,6 +128,9 @@
     "FOOTER_ORDER_MATCHES",
     "PLACEHOLDER_REMOVED",
     "SUFFICIENT_CONTRAST",
+    "PROTECTED_FEATURE_AUDIT_PASS",
+    "SAFE_AREA_PASS",
+    "MOBILE_LEGIBILITY_PASS",
     "NO_AI_RECONSTRUCTED_LOGOS",
     "NO_CROSS_TEMPLATE_MIXING",
     "NO_TECHNICAL_GUIDANCE_IN_EXPORT"

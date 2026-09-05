@@ -17,6 +17,10 @@ import {
   type SunsetStoryBrandAssetResolverPort,
   type SunsetStoryFontResolverPort,
 } from '../src/creative/sunset-story-svg-renderer.js';
+import {
+  sameDaySemanticSimilarity,
+  validateSunsetStoryProductionContext,
+} from '../src/creative/sunset-story-production-gate.js';
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -33,6 +37,7 @@ function lifestyleObservation(): SunsetStoryImageObservation {
         salience: 0.95,
       },
     ],
+    protectedFeatures: [],
     negativeSpaceZones: ['TOP_LEFT', 'CENTER_LEFT'],
     regionLuma: { TOP_LEFT: 0.28, CENTER_LEFT: 0.32, BOTTOM_CENTER: 0.44 },
     warmth: 0.78,
@@ -64,6 +69,13 @@ const brandAssetResolver: SunsetStoryBrandAssetResolverPort = {
       sha256: sha256(brandAssetBytes),
     }),
 };
+
+const productionContext = {
+  contentItemId: 'MKT-20260903-SUNSET-STORY-1100',
+  sourceTaskId: 'CONT-20260903-SUNSET-STORY-1100',
+  currentMessage: 'Seu fim de tarde começa nos detalhes da experiência.',
+  sameDayMessages: ['Uma vista que transforma o fim da tarde.'],
+} as const;
 
 describe('Sunset Story AI dynamic replication', () => {
   it('normalizes all nine approved template contracts from the canonical library', async () => {
@@ -112,12 +124,43 @@ describe('Sunset Story AI dynamic replication', () => {
     ).toThrow(/SUNSET_RENDER_COPY_DRIFT/);
   });
 
+  it('rejects exact output when a protected photo feature is covered by template elements', async () => {
+    const contract = await loadSunsetStoryTemplateContract('SUNSET_TEMPLATE_MASTER_V5');
+    const selector = new SunsetStoryTemplateSelectionService({
+      analyze: () =>
+        Promise.resolve({
+          ...lifestyleObservation(),
+          protectedFeatures: [
+            {
+              kind: 'FACE' as const,
+              box: { x: 0.05, y: 0.16, width: 0.5, height: 0.2 },
+              salience: 1,
+            },
+          ],
+        }),
+    });
+    const selected = await selector.select({
+      assetId: 'asset-face-collision',
+      imageBytes: new Uint8Array([1]),
+      intent: 'LIFESTYLE',
+    });
+    expect(selected.selection.mode).toBe('NO_SAFE_TEMPLATE');
+    expect(
+      selected.selection.candidates.some((candidate) =>
+        candidate.rejectionReasons.includes('PROTECTED_FEATURE_OVERLAP'),
+      ),
+    ).toBe(true);
+    expect(contract.templateId).toBe('SUNSET_TEMPLATE_MASTER_V5');
+  });
+
   it('renders a fresh vector composition from the photo and official assets without a template PNG', async () => {
     const contract = await loadSunsetStoryTemplateContract('SUNSET_TEMPLATE_MASTER_V9');
     const profile = {
       width: 1080,
       height: 1920,
       sourceAspectRatio: 9 / 16,
+      subjects: [],
+      protectedFeatures: [],
       primarySubject: null,
       primarySubjectZone: null,
       negativeSpaceZones: ['CENTER'] as const,
@@ -133,6 +176,8 @@ describe('Sunset Story AI dynamic replication', () => {
       transformedPrimarySubject: null,
       subjectCoverage: 1,
       protectedOverlap: 0,
+      protectedFeatureOverlap: 0,
+      minimumProtectedFeatureCoverage: 1,
       placementScore: 1,
       planScore: 100,
     };
@@ -150,6 +195,29 @@ describe('Sunset Story AI dynamic replication', () => {
     expect(svg).toContain('Hoje tem um pôr do sol');
     expect(svg).not.toContain('INSIRA A IMAGEM DE FUNDO');
     expect(svg).not.toContain('SUNSET_TEMPLATE_MASTER_V9_REFERENCE');
+  });
+
+  it('blocks CONT task aliases from replacing the canonical MKT content item id', () => {
+    expect(() =>
+      validateSunsetStoryProductionContext({
+        contentItemId: 'CONT-20260903-SUNSET-STORY-1100',
+        currentMessage: 'Mensagem válida',
+      }),
+    ).toThrow(/SUNSET_CONTENT_ID_DRIFT/);
+  });
+
+  it('blocks same-day semantic repetition before rendering', () => {
+    const current = 'Um drink, a vista e tempo para desacelerar na Toca.';
+    const prior = 'O fim de tarde começa com um drink, a vista e tempo para desacelerar na Toca.';
+    expect(sameDaySemanticSimilarity(current, prior)).toBeGreaterThanOrEqual(0.62);
+    expect(() =>
+      validateSunsetStoryProductionContext({
+        contentItemId: 'MKT-20260903-SUNSET-STORY-1100',
+        sourceTaskId: 'CONT-20260903-SUNSET-STORY-1100',
+        currentMessage: current,
+        sameDayMessages: [prior],
+      }),
+    ).toThrow(/SUNSET_SAME_DAY_SEMANTIC_DUPLICATION/);
   });
 
   it('keeps the generated preview non-publishable even when visual QA passes', async () => {
@@ -191,6 +259,7 @@ describe('Sunset Story AI dynamic replication', () => {
       imageBytes: new Uint8Array([1, 2, 3]),
       imageMimeType: 'image/jpeg',
       intent: 'LIFESTYLE',
+      productionContext,
       referenceImageBytes: new Uint8Array([9, 8, 7]),
     });
     expect(selectedContract).not.toBeNull();
@@ -229,6 +298,11 @@ describe('Sunset Story AI dynamic replication', () => {
       imageBytes: new Uint8Array([1, 2, 3]),
       imageMimeType: 'image/jpeg',
       intent: 'LIFESTYLE',
+      productionContext: {
+        ...productionContext,
+        contentItemId: 'MKT-20260903-SUNSET-STORY-1600',
+        sourceTaskId: 'CONT-20260903-SUNSET-STORY-1600',
+      },
       referenceImageBytes: new Uint8Array([9, 8, 7]),
     });
     expect(result.visualQaStatus).toBe('FAIL');

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "templateId": "SUNSET_TEMPLATE_MASTER_V7",
   "status": "APPROVED_VISUAL_CONTRACT",
   "runtimeEligible": false,
@@ -42,36 +42,21 @@
   "supportStrips": [
     {
       "text": "Venha para a Toca e",
-      "region": {
-        "x": 63,
-        "y": 428,
-        "w": 456,
-        "h": 48
-      },
+      "region": { "x": 64, "y": 428, "w": 456, "h": 48 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "sinta o dia se despedir",
-      "region": {
-        "x": 63,
-        "y": 485,
-        "w": 498,
-        "h": 49
-      },
+      "region": { "x": 64, "y": 485, "w": 498, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "de um jeito especial.",
-      "region": {
-        "x": 63,
-        "y": 544,
-        "w": 441,
-        "h": 49
-      },
+      "region": { "x": 64, "y": 544, "w": 441, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
@@ -79,12 +64,7 @@
   ],
   "cta": {
     "text": "Garanta seu ingresso",
-    "region": {
-      "x": 299,
-      "y": 815,
-      "w": 483,
-      "h": 65
-    },
+    "region": { "x": 299, "y": 815, "w": 483, "h": 65 },
     "background": "TRANSPARENT",
     "borderColor": "#FFFFFF",
     "textColor": "#FFFFFF",
@@ -94,21 +74,11 @@
     "lines": [
       {
         "text": "Viva a melhor",
-        "region": {
-          "x": 130,
-          "y": 933,
-          "w": 834,
-          "h": 108
-        }
+        "region": { "x": 130, "y": 933, "w": 834, "h": 108 }
       },
       {
         "text": "vista da ilha!",
-        "region": {
-          "x": 162,
-          "y": 1070,
-          "w": 760,
-          "h": 108
-        }
+        "region": { "x": 162, "y": 1070, "w": 760, "h": 108 }
       }
     ],
     "fontRole": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
@@ -116,25 +86,29 @@
     "alignment": "CENTER"
   },
   "footer": {
-    "region": {
-      "x": 130,
-      "y": 1663,
-      "w": 819,
-      "h": 150
-    },
-    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
+    "region": { "x": 130, "y": 1663, "w": 819, "h": 150 },
+    "brandOrder": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
     "allowAiBrandReconstruction": false,
     "colorMode": "WHITE"
   },
+  "protectedRegions": [
+    { "id": "SUPPORT_COPY", "x": 64, "y": 428, "w": 498, "h": 165 },
+    { "id": "CTA", "x": 299, "y": 815, "w": 483, "h": 65 },
+    { "id": "HEADLINE", "x": 130, "y": 933, "w": 834, "h": 245 },
+    { "id": "FOOTER", "x": 130, "y": 1663, "w": 819, "h": 150 }
+  ],
   "invariants": [
+    "VIEW_SCENERY_FAMILY",
     "FIXED_SUPPORT_COPY_AND_POSITIONS",
     "FIXED_CTA",
     "FIXED_HEADLINE_AND_ALIGNMENT",
     "FIXED_FOOTER_ORDER",
     "FIXED_TYPOGRAPHY_ROLES",
     "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
-    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT"
+    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT",
+    "NO_PROTECTED_FEATURE_OVERLAP",
+    "SAFE_AREA_HARD_GATE"
   ],
   "qualityGate": [
     "CANVAS_1080X1920",
@@ -148,6 +122,9 @@
     "FOOTER_ORDER_MATCHES",
     "EDITOR_GUIDANCE_REMOVED",
     "SUFFICIENT_CONTRAST",
+    "PROTECTED_FEATURE_AUDIT_PASS",
+    "SAFE_AREA_PASS",
+    "MOBILE_LEGIBILITY_PASS",
     "NO_AI_RECONSTRUCTED_LOGOS",
     "NO_CROSS_TEMPLATE_MIXING",
     "NO_TECHNICAL_GUIDANCE_IN_EXPORT"
