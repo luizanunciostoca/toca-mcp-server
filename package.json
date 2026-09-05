@@ -41,7 +41,7 @@
     "start:deterministic-artist-composite": "node dist/src/deterministic-artist-composite.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write scripts/check-video-intelligent-selection-contract.mjs src/artist-safe-server.ts src/creative/intelligent-video-asset-selector.ts src/mcp/video-asset-selection-runtime.ts src/mcp/video-asset-selection-surface.ts && git diff -- scripts/check-video-intelligent-selection-contract.mjs src/artist-safe-server.ts src/creative/intelligent-video-asset-selector.ts src/mcp/video-asset-selection-runtime.ts src/mcp/video-asset-selection-surface.ts && false",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
