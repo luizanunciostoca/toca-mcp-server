@@ -54,9 +54,7 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).toContain('issues: read');
     expect(validation).not.toContain('issues: write');
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
-    expect(stateValidation).toContain(
-      "'MERGE_RESERVED',\n  'MERGED',\n  'POST_MERGE_ACCEPTANCE'",
-    );
+    expect(stateValidation).toContain("'MERGE_RESERVED',\n  'MERGED',\n  'POST_MERGE_ACCEPTANCE'");
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).toContain('BUILD_REUSED=');
