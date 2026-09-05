@@ -120,10 +120,11 @@ describe('App Gateway OIDC bearer verifier', () => {
 
   it('rejects malformed, oversized and unsupported-algorithm tokens', async () => {
     const fixture = signingFixture();
-    const verifier = verifierFor(fixture, { maximumTokenBytes: 512 });
+    const boundedVerifier = verifierFor(fixture, { maximumTokenBytes: 512 });
+    const verifier = verifierFor(fixture);
 
-    await expectCode(verifier.verify('not-a-jwt'), 'OIDC_TOKEN_MALFORMED');
-    await expectCode(verifier.verify('x'.repeat(513)), 'OIDC_TOKEN_TOO_LARGE');
+    await expectCode(boundedVerifier.verify('not-a-jwt'), 'OIDC_TOKEN_MALFORMED');
+    await expectCode(boundedVerifier.verify('x'.repeat(513)), 'OIDC_TOKEN_TOO_LARGE');
     await expectCode(
       verifier.verify(createJwt(fixture, {}, { alg: 'HS256' })),
       'OIDC_ALGORITHM_REJECTED',
