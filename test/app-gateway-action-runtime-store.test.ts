@@ -34,10 +34,12 @@ describe('App Gateway bounded action runtime store', () => {
 
     expect(store.get('ACT-1', ownerA)?.actionId).toBe('ACT-1');
     expect(store.get('ACT-1', ownerB)).toBeUndefined();
-    expect(store.get('ACT-1', { subject: 'user-a', tenantId: 'other' })).toBeUndefined();
-    expect(store.get('ACT-1', { subject: ' user-a ', tenantId: ' toca ' })?.actionId).toBe(
-      'ACT-1',
-    );
+    expect(
+      store.get('ACT-1', { subject: 'user-a', tenantId: 'other' }),
+    ).toBeUndefined();
+    expect(
+      store.get('ACT-1', { subject: ' user-a ', tenantId: ' toca ' })?.actionId,
+    ).toBe('ACT-1');
   });
 
   it('expires records after the configured TTL', () => {
