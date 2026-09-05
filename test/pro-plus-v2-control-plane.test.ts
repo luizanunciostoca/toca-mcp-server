@@ -57,9 +57,7 @@ describe('PRO+ v2 control plane', () => {
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
     expect(build).toContain('BUILD_REUSED=');
     expect(build).toContain('key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"');
-    expect(build).toContain(
-      'value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"',
-    );
+    expect(build).toContain('value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"');
     expect(build).toContain('marker must be unique and exact');
   });
 });
