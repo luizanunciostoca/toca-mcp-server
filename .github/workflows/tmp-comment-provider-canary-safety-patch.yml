@@ -1,0 +1,104 @@
+name: TEMP Comment Provider Canary Safety Patch
+
+on:
+  push:
+    branches:
+      - fix/comment-provider-canary-authority-null-safety
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.ref_name == 'fix/comment-provider-canary-authority-null-safety'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact safety patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = 'fix/comment-provider-canary-authority-null-safety'
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/instagram-engagement-comment-provider-canary.yml')
+          workflow = workflow_path.read_text()
+          old = '''          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+'''
+          new = '''          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram engagement real-write COMMENT CANARY AUTO"))
+          ' >/dev/null
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+'''
+          if workflow.count(old) != 1:
+              raise SystemExit('expected exactly one event-payload authorization block')
+          workflow_path.write_text(workflow.replace(old, new, 1))
+
+          runner_path = Path('scripts/instagram-engagement-comment-provider-canary.mjs')
+          runner = runner_path.read_text()
+          old_sql = '        and execution_id <> $1'
+          new_sql = '        and execution_id is distinct from $1'
+          if runner.count(old_sql) != 1:
+              raise SystemExit('expected exactly one non-NULL-safe ambiguity predicate')
+          runner_path.write_text(runner.replace(old_sql, new_sql, 1))
+
+          test_path = Path('test/instagram-engagement-comment-provider-canary.test.ts')
+          test = test_path.read_text()
+          anchor = '''  it('packages the canary runner into the production runtime image', () => {\n'''
+          regression = '''  it('revalidates single-use authorization live before any provider-side setup', () => {\n    expect(workflow).toContain(\n      'ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"',\n    );\n    expect(workflow).toContain('( .state == "open" )'.replaceAll(' ', ''));\n    expect(workflow).toContain('(.user.login == $owner)');\n    expect(workflow).not.toContain("jq -r '.issue.body //");\n  });\n\n  it('treats NULL execution ids as unresolved ambiguity during execute', () => {\n    expect(runner).toContain('and execution_id is distinct from $1');\n    expect(runner).not.toContain('and execution_id <> $1');\n  });\n\n'''
+          # Use a direct state assertion string rather than a generated representation.
+          regression = regression.replace("expect(workflow).toContain('( .state == \\\"open\\\" )'.replaceAll(' ', ''));", "expect(workflow).toContain('(.state == \\\"open\\\") and');")
+          if test.count(anchor) != 1:
+              raise SystemExit('expected exactly one test insertion anchor')
+          test_path.write_text(test.replace(anchor, regression + anchor, 1))
+          PY
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Format and run focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm exec prettier --write \
+            .github/workflows/instagram-engagement-comment-provider-canary.yml \
+            scripts/instagram-engagement-comment-provider-canary.mjs \
+            test/instagram-engagement-comment-provider-canary.test.ts
+          pnpm exec vitest run test/instagram-engagement-comment-provider-canary.test.ts
+
+      - name: Commit permanent patch and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/tmp-comment-provider-canary-safety-patch.yml
+          git add \
+            .github/workflows/instagram-engagement-comment-provider-canary.yml \
+            scripts/instagram-engagement-comment-provider-canary.mjs \
+            test/instagram-engagement-comment-provider-canary.test.ts
+          git diff --cached --quiet && { echo 'No patch produced' >&2; exit 1; }
+          git commit -m 'fix(instagram): harden Comment canary authority checks'
+          git push origin HEAD:fix/comment-provider-canary-authority-null-safety
