@@ -25,7 +25,7 @@ export class FailoverSceneContinuationVideoProvider implements SceneContinuation
 
   async generate(request: SceneContinuationVideoRequest): Promise<SceneContinuationVideoResult> {
     const attemptChain: SceneContinuationProviderId[] = [];
-    let lastRetryableError: unknown;
+    let lastRetryableError: ExecutionError | undefined;
 
     for (let index = 0; index < this.providers.length; index += 1) {
       const entry = this.providers[index]!;
@@ -54,7 +54,7 @@ export class FailoverSceneContinuationVideoProvider implements SceneContinuation
   }
 }
 
-function shouldFailOver(error: unknown): boolean {
+function shouldFailOver(error: unknown): error is ExecutionError {
   return (
     error instanceof ExecutionError &&
     error.retryable &&
