@@ -1,0 +1,101 @@
+package br.com.tocadomorcego.tocaos.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+@Composable
+fun CreateContentWizardScreen(
+    initialObjective: String,
+    initialOperation: String,
+    onBack: () -> Unit,
+    onContinue: (operation: String, objective: String) -> Unit,
+) {
+    var objective by remember(initialObjective) { mutableStateOf(initialObjective) }
+    var operation by remember(initialOperation) { mutableStateOf(initialOperation) }
+    val operations = listOf("THE_PARTY", "SUNSET", "TOCA", "EVENTO_ESPECIAL")
+
+    Column(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
+    ) {
+        Text("← Voltar", modifier = Modifier.clickable(onClick = onBack), color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(22.dp))
+        Text("Criar conteúdo", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Informe o objetivo. O TOCA OS escolhe formato, mídia e rota adequados.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(32.dp))
+
+        Text("1. Qual produto ou evento?", fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            operations.forEach { item ->
+                Surface(
+                    modifier = Modifier.clickable { operation = item },
+                    color = if (operation == item) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                    contentColor = if (operation == item) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Text(item.replace('_', ' '), modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
+        Text("2. Qual é o objetivo?", fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = objective,
+            onValueChange = { objective = it },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 4,
+            placeholder = { Text("Ex.: vender ingressos, gerar desejo, divulgar artista...") },
+            shape = RoundedCornerShape(18.dp),
+        )
+
+        Spacer(Modifier.height(26.dp))
+        Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                Text("Modo automático", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "O sistema analisará fatos vigentes, banco de mídia, histórico de uso e standards antes de recomendar o que criar.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+        Button(
+            modifier = Modifier.fillMaxWidth().height(58.dp),
+            enabled = objective.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            onClick = { onContinue(operation, objective.trim()) },
+        ) {
+            Text("Analisar e recomendar", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+        }
+    }
+}
