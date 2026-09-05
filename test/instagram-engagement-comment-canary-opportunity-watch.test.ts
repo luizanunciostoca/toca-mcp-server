@@ -68,6 +68,19 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('TARGET_SHA="$(read_single_marker ELIGIBLE_TARGET_SHA256)"');
   });
 
+  it('polls Cloud Logging boundedly and treats transient reads as retryable evidence gaps', () => {
+    expect(workflow).toContain('for attempt in 1 2 3 4 5 6; do');
+    expect(workflow).toContain('sleep 10');
+    expect(workflow).toContain('--order=desc');
+    expect(workflow).not.toContain('--order=asc');
+    expect(workflow).toContain('if ! LOGS="$(gcloud logging read');
+    expect(workflow).toContain("LOGS='[]'");
+    expect(workflow).toContain('MARKERS_COMPLETE=false');
+    expect(workflow).toContain('if [[ "$count" != \'1\' ]]');
+    expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION');
+    expect(workflow).toContain('test "$TARGET_SHA" = \'NONE\'');
+  });
+
   it('creates only a sanitized opportunity and never dispatches or performs a real canary', () => {
     expect(workflow).toContain('COMMENT_CANARY_OPPORTUNITY_STATUS=READY');
     expect(workflow).toContain('ELIGIBLE_TARGET_SHA256=$TARGET_SHA');
