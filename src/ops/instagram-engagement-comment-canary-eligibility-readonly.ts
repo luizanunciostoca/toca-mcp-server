@@ -7,6 +7,7 @@ import { evaluateEngagementPolicy } from '../policy/engagement-policy.js';
 const { Pool } = pg;
 const INBOUND_TYPE = 'instagram.engagement.inbound.v1';
 const SESSION_PREFIX = 'instagram:engagement:comment-canary-session:';
+const LOG_FLUSH_GRACE_MS = 10_000;
 
 interface CandidateRow {
   inbound_outbox_id: string;
@@ -173,7 +174,7 @@ try {
   console.log(`RECENT_COMMENT_COUNT=${recentCommentCount}`);
   console.log(`STATE_CANDIDATE_COUNT=${stateCandidates.rowCount ?? stateCandidates.rows.length}`);
   console.log(`ELIGIBLE_COUNT=${eligible.length}`);
-  if (eligible.length === 1) console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
+  console.log(`ELIGIBLE_TARGET_SHA256=${eligible.length === 1 ? eligible[0] : 'NONE'}`);
   console.log(`UNRESOLVED_AMBIGUITY_COUNT=${unresolvedAmbiguityCount}`);
   console.log(`ACTIVE_RESERVATION_COUNT=${activeReservationCount}`);
   console.log(`REJECTED_SCOPE=${rejected.scope}`);
@@ -191,6 +192,7 @@ try {
   console.log('PROVIDER_CALLS=false');
   console.log('EXTERNAL_REPLY_WRITES=false');
   console.log('RAW_USER_DATA_LOGGED=false');
+  await new Promise((resolve) => setTimeout(resolve, LOG_FLUSH_GRACE_MS));
 } finally {
   await pool.end();
 }
