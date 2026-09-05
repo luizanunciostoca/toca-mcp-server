@@ -37,8 +37,7 @@ export const VIDEO_ASSET_SELECTION_TOOL_DEFINITIONS: readonly ToolDefinition[] =
 
 export function registerVideoAssetSelectionSurface(
   server: McpServer,
-  resolveRuntime: VideoAssetSelectionRuntimeResolver =
-    createLazyVideoAssetSelectionRuntimeResolver(),
+  resolveRuntime: VideoAssetSelectionRuntimeResolver = createLazyVideoAssetSelectionRuntimeResolver(),
 ): void {
   server.registerTool(
     VIDEO_SELECT_ASSETS_TOOL,
