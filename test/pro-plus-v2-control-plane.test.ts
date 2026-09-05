@@ -27,6 +27,9 @@ describe('PRO+ v2 control plane', () => {
       mainStabilityRequired: boolean;
       artifactReusePolicy: string;
       sourceShaMustEqualCurrentMain: boolean;
+      maxEvidenceCommentsScanned: number;
+      evidenceLookupWindow: string;
+      evidenceLookupMissAction: string;
       subjectiveEquivalenceAllowed: boolean;
     };
     const promotion = readJson('control/pro-plus/promotion-materialization-policy.json') as {
@@ -37,6 +40,9 @@ describe('PRO+ v2 control plane', () => {
     expect(build.mainStabilityRequired).toBe(true);
     expect(build.artifactReusePolicy).toBe('EXACT_TREE_AND_RUNTIME_CONTRACT_ONLY');
     expect(build.sourceShaMustEqualCurrentMain).toBe(true);
+    expect(build.maxEvidenceCommentsScanned).toBe(100);
+    expect(build.evidenceLookupWindow).toBe('LATEST_100_COMMENTS');
+    expect(build.evidenceLookupMissAction).toBe('REBUILD');
     expect(build.subjectiveEquivalenceAllowed).toBe(false);
     expect(promotion.defaultStrategy).toBe('MATERIALIZE_ON_DEMAND');
     expect(promotion.longLivedDraftDefault).toBe(false);
@@ -55,11 +61,17 @@ describe('PRO+ v2 control plane', () => {
     );
     expect(validation).toContain('issues: read');
     expect(validation).not.toContain('issues: write');
+    expect(validation).not.toContain('--paginate --slurp');
+    expect(validation).toContain('comments(last:100)');
+    expect(validation).toContain("$GITHUB_EVENT_NAME\" == 'issue_comment'");
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
     expect(stateValidation).toContain("'MERGE_RESERVED',\n  'MERGED',\n  'POST_MERGE_ACCEPTANCE'");
     expect(stateValidation).toContain("const evidenceId = marker(body, 'EVIDENCE_ID');");
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
+    expect(build).not.toContain('--paginate --slurp');
+    expect(build).toContain('comments(last:100)');
+    expect(build).toContain('BUILD_BROKER_EVIDENCE_SCAN_LIMIT=100');
     expect(build).toContain('candidate_source_sha=$CANDIDATE_SOURCE_SHA');
     expect(build).toContain(
       'CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}',
