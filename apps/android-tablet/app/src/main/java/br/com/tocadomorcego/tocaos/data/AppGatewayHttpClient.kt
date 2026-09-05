@@ -4,6 +4,7 @@ import br.com.tocadomorcego.tocaos.domain.ActionAvailability
 import br.com.tocadomorcego.tocaos.domain.ActionCard
 import br.com.tocadomorcego.tocaos.domain.ActionMode
 import br.com.tocadomorcego.tocaos.domain.ActionState
+import br.com.tocadomorcego.tocaos.domain.ActionStatusSnapshot
 import br.com.tocadomorcego.tocaos.domain.ActionType
 import br.com.tocadomorcego.tocaos.domain.ApprovalPreview
 import br.com.tocadomorcego.tocaos.domain.TocaAction
@@ -16,6 +17,8 @@ import java.net.URL
 import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
+
+private val SAFE_ACTION_ID = Regex("^[A-Za-z0-9._:-]{1,200}$")
 
 fun interface AppSessionTokenProvider {
     fun appSessionToken(): String
@@ -76,6 +79,28 @@ class AppGatewayHttpClient private constructor(
         val body = transport.request(AppGatewayTransportRequest("/api/v1/video-options", "GET"))
         val options = JSONObject(body).getJSONArray("video_options")
         return options.mapObjects(::parseVideoOption)
+    }
+
+    fun fetchActionStatus(actionId: String): ActionStatusSnapshot {
+        val normalizedActionId = actionId.trim()
+        require(SAFE_ACTION_ID.matches(normalizedActionId)) { "APP_GATEWAY_ACTION_ID_INVALID" }
+
+        val body = JSONObject(
+            transport.request(
+                AppGatewayTransportRequest("/api/v1/actions/$normalizedActionId", "GET"),
+            ),
+        )
+        val action = body.getJSONObject("action")
+        return ActionStatusSnapshot(
+            actionId = action.getString("action_id"),
+            correlationId = action.getString("correlation_id"),
+            state = ActionState.valueOf(action.getString("state")),
+            availability = ActionAvailability.valueOf(action.getString("availability")),
+            approvalHint = action.optBoolean("approval_hint", false),
+            reasons = action.optJSONArray("reasons")?.stringValues().orEmpty(),
+            createdAt = action.getString("created_at"),
+            persistence = body.optString("persistence", "IN_MEMORY_RUNTIME_ONLY"),
+        )
     }
 
     fun prepare(actionRequest: TocaActionRequest): TocaAction {
