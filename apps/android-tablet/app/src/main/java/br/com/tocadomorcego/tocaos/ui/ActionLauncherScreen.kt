@@ -34,7 +34,7 @@ import br.com.tocadomorcego.tocaos.domain.ActionCard
 import br.com.tocadomorcego.tocaos.domain.ActionType
 
 @Composable
-fun ActionLauncherScreen(cards: List<ActionCard>, onCreateContent: () -> Unit) {
+fun ActionLauncherScreen(cards: List<ActionCard>, onStartAction: (ActionType) -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(28.dp),
     ) {
@@ -76,10 +76,7 @@ fun ActionLauncherScreen(cards: List<ActionCard>, onCreateContent: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(cards, key = { it.type.name }) { card ->
-                ActionLauncherCard(
-                    card = card,
-                    onClick = if (card.type == ActionType.CREATE_CONTENT) onCreateContent else ({ }),
-                )
+                ActionLauncherCard(card = card, onClick = { onStartAction(card.type) })
             }
         }
     }
