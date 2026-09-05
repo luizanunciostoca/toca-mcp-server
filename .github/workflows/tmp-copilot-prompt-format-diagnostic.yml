@@ -33,6 +33,7 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      # Read-only diagnostic: Prettier mutates only the ephemeral runner workspace.
       - name: Print exact Prettier diff for Copilot customization
         shell: bash
         run: |
