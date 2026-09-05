@@ -20,6 +20,20 @@ export {
   type AppGatewayPrincipal,
 } from './http-boundary.js';
 export {
+  OidcVerificationError,
+  createOidcAppGatewayAuthorize,
+  createOidcBearerVerifier,
+  defaultOidcJwksTransport,
+  type OidcAppGatewayAuthorizeOptions,
+  type OidcBearerVerifier,
+  type OidcBearerVerifierOptions,
+  type OidcJwksFetchOptions,
+  type OidcJwksTransport,
+  type OidcPrincipalMapper,
+  type OidcVerificationErrorCode,
+  type VerifiedOidcIdentity,
+} from './oidc-verifier.js';
+export {
   createTocaHttpServerWithAppGateway,
   type TocaAppGatewayHttpCompositionOptions,
 } from './toca-http-composition.js';
