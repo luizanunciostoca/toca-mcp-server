@@ -7,7 +7,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Stories, Feed, Carrossel, Reels, vídeo e peças de campanha.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: [
         'design.brief.create',
         'copy.generate',
@@ -23,7 +23,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
       'Footage real, photo motion, source-bound, recut, motion editorial e rotas restritas.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['video.select_assets'],
     },
   },
@@ -33,7 +33,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Calendário, campanha, sequência editorial e cobertura de eventos.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['editorial.calendar.generate', 'campaign.content.plan'],
     },
   },
@@ -43,7 +43,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Preparar, agendar, publicar, reconciliar ou cancelar conteúdo autorizado.',
     defaultMode: 'GUIDED',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['instagram.toca_schedule.create', 'instagram.publication.publish'],
     },
   },
@@ -53,7 +53,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Diagnóstico, planejamento, criação controlada e performance de campanhas.',
     defaultMode: 'GUIDED',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['meta_ads.campaigns.list', 'meta_ads.campaign.prepare_paused'],
     },
   },
@@ -63,7 +63,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Comentários, Directs, leads, classificação, respostas e escalonamentos.',
     defaultMode: 'GUIDED',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['social.comments.list', 'social.directs.list'],
     },
   },
@@ -73,7 +73,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Buscar, ranquear, tratar, selecionar e acompanhar ativos de mídia.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['media.scan', 'media.rank', 'video.select_assets'],
     },
   },
@@ -83,7 +83,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Instagram, mídia, campanhas, comparação de períodos e recomendações.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['instagram.insights.account', 'meta_ads.insights.get'],
     },
   },
@@ -93,7 +93,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Leads, propostas, patrocínios, parceiros, follow-ups e pipeline.',
     defaultMode: 'GUIDED',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['sales.lead.create', 'sales.proposal.generate'],
     },
   },
@@ -103,7 +103,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Abertura, fechamento, checklists, prontidão de eventos e incidentes.',
     defaultMode: 'GUIDED',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['operations.opening.status', 'operations.event.readiness'],
     },
   },
@@ -113,7 +113,7 @@ export const ACTION_CARD_CATALOG: readonly ActionCardDefinition[] = [
     description: 'Apresentações, relatórios e materiais operacionais governados.',
     defaultMode: 'AUTO',
     requirement: {
-      allOf: ['system.capabilities'],
+      allOf: [],
       anyOf: ['presentation.brief.create', 'presentation.slides.generate'],
     },
   },
