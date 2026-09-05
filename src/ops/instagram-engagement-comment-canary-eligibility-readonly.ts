@@ -173,7 +173,7 @@ try {
   console.log(`RECENT_COMMENT_COUNT=${recentCommentCount}`);
   console.log(`STATE_CANDIDATE_COUNT=${stateCandidates.rowCount ?? stateCandidates.rows.length}`);
   console.log(`ELIGIBLE_COUNT=${eligible.length}`);
-  if (eligible.length === 1) console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
+  console.log(`ELIGIBLE_TARGET_SHA256=${eligible.length === 1 ? eligible[0] : 'NONE'}`);
   console.log(`UNRESOLVED_AMBIGUITY_COUNT=${unresolvedAmbiguityCount}`);
   console.log(`ACTIVE_RESERVATION_COUNT=${activeReservationCount}`);
   console.log(`REJECTED_SCOPE=${rejected.scope}`);
