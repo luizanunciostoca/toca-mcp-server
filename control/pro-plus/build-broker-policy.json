@@ -18,6 +18,7 @@
     "NO_SILENT_INVALIDATION_OF_ACTIVE_PRODUCTION_EVIDENCE"
   ],
   "artifactReusePolicy": "EXACT_TREE_AND_RUNTIME_CONTRACT_ONLY",
+  "sourceShaMustEqualCurrentMain": true,
   "subjectiveEquivalenceAllowed": false,
   "invalidateOn": ["MAIN_SHA_CHANGE", "TREE_SHA_CHANGE", "RUNTIME_CONTRACT_CHANGE"]
 }
