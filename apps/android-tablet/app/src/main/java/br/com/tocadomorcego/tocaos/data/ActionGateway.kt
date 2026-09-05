@@ -25,7 +25,14 @@ class FakeActionGateway : ActionGateway {
         ActionCard(
             type = ActionType.CREATE_CONTENT,
             title = "Criar conteúdo",
-            description = "Story, Feed, Carrossel, Reels e vídeo.",
+            description = "Story, Feed, Carrossel, Reels e peças de campanha.",
+            availability = ActionAvailability.AVAILABLE,
+            defaultMode = ActionMode.AUTO,
+        ),
+        ActionCard(
+            type = ActionType.CREATE_VIDEO,
+            title = "Criar vídeo",
+            description = "Footage real, photo motion, source-bound, recut e motion editorial.",
             availability = ActionAvailability.AVAILABLE,
             defaultMode = ActionMode.AUTO,
         ),
@@ -91,12 +98,16 @@ class FakeActionGateway : ActionGateway {
         state = ActionState.READY,
     )
 
-    override fun executionPreview(action: TocaAction): List<ActionEvent> = listOf(
-        ActionEvent(1, "Contexto identificado", ActionState.COMPLETED),
-        ActionEvent(2, "Edição e fatos validados", ActionState.COMPLETED),
-        ActionEvent(3, "Banco de mídia analisado", ActionState.COMPLETED),
-        ActionEvent(4, "Criativo em produção", ActionState.RUNNING),
-        ActionEvent(5, "QA visual e factual", ActionState.DRAFT),
-        ActionEvent(6, "Preparar resultado", ActionState.DRAFT),
-    )
+    override fun executionPreview(action: TocaAction): List<ActionEvent> {
+        val route = action.request.inputs["video_route"]
+        return listOfNotNull(
+            ActionEvent(1, "Contexto identificado", ActionState.COMPLETED),
+            route?.let { ActionEvent(2, "Rota de vídeo selecionada: $it", ActionState.COMPLETED) },
+            ActionEvent(3, "Source binding e verdade criativa validados", ActionState.COMPLETED),
+            ActionEvent(4, "Shot map, ranking e anti-repetição aplicados", ActionState.COMPLETED),
+            ActionEvent(5, "Master, approval e cover em produção", ActionState.RUNNING),
+            ActionEvent(6, "QA visual e factual", ActionState.DRAFT),
+            ActionEvent(7, "Preparar resultado", ActionState.DRAFT),
+        )
+    }
 }
