@@ -12,6 +12,14 @@ export {
   resolveActionCard,
 } from './action-service.js';
 export {
+  createAppGatewayHttpHandler,
+  createAppGatewayHttpServer,
+  type AppGatewayAuthorize,
+  type AppGatewayHttpHandler,
+  type AppGatewayHttpOptions,
+  type AppGatewayPrincipal,
+} from './http-boundary.js';
+export {
   actionEventTypeFromPhase,
   actionStateFromExecutionPhase,
   createTocaActionEvent,

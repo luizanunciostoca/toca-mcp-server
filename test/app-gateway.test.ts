@@ -25,7 +25,7 @@ function tool(overrides: Partial<ToolDefinition> & Pick<ToolDefinition, 'name'>)
 
 function baseRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.register(tool({ name: 'system.capabilities' }));
+  registry.register(tool({ name: 'system.capabilities', capabilityStatus: 'IMPLEMENTED' }));
   return registry;
 }
 
@@ -47,7 +47,7 @@ describe('Android app gateway contracts', () => {
     expect(createContent?.availability).toBe('UNAVAILABLE');
   });
 
-  it('advertises Create Content when at least one production-valid execution path is available', () => {
+  it('uses the action capability rather than system.capabilities lifecycle as executability truth', () => {
     const registry = baseRegistry();
     registry.register(tool({ name: 'copy.generate' }));
 
@@ -55,6 +55,7 @@ describe('Android app gateway contracts', () => {
       (card) => card.actionType === 'CREATE_CONTENT',
     );
 
+    expect(registry.get('system.capabilities')?.capabilityStatus).toBe('IMPLEMENTED');
     expect(createContent?.availability).toBe('AVAILABLE');
   });
 
@@ -235,7 +236,7 @@ describe('Android app gateway contracts', () => {
           let index = 0;
           return () => `action-${++index}`;
         })(),
-        now: () => '2026-09-05T02:00:00.000Z',
+        now: () => '2026-09-05T02:00:01.000Z',
       },
     );
 
