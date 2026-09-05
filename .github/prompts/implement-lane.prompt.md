@@ -9,6 +9,7 @@ Do not widen scope silently. Do not touch migrations/shared hotspots without an 
 For a bug, add a regression test first when practical. Implement the smallest compatible fix. Run all checks applicable to the lane. Do not merge to main or trigger ungoverned external writes.
 
 Finish with:
+
 - BASE_SHA / HEAD_SHA
 - changed files
 - implementation summary

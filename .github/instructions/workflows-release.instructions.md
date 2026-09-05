@@ -1,5 +1,5 @@
 ---
-applyTo: ".github/workflows/**,.github/CODEOWNERS"
+applyTo: '.github/workflows/**,.github/CODEOWNERS'
 ---
 
 # CI, workflow, and release-controller rules

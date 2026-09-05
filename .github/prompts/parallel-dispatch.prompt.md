@@ -3,6 +3,7 @@
 Act as the TOCA Control Tower.
 
 For the current development objective:
+
 1. revalidate live `main` and freeze exact `BASE_SHA`;
 2. inventory remaining work from live issues/PRs/code and canonical TOCA_OS docs;
 3. identify dependencies, shared hotspots, migration needs, active production SHA-bound gates, and overlapping PRs;

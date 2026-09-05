@@ -1,5 +1,5 @@
 ---
-applyTo: "migrations/**,**/migrations/**"
+applyTo: 'migrations/**,**/migrations/**'
 ---
 
 # Migration lane rules
@@ -7,6 +7,7 @@ applyTo: "migrations/**,**/migrations/**"
 Migrations are globally serialized resources.
 
 Before creating or renumbering a migration:
+
 1. inspect live `main` and all open migration-related PRs;
 2. confirm an explicit migration slot/number is assigned to this lane;
 3. verify dependency order and schema compatibility;

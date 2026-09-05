@@ -3,6 +3,7 @@
 Act as the TOCA Integration Coordinator for the candidate PR set.
 
 Revalidate:
+
 - current `main` SHA;
 - exact PR HEADs;
 - merge-base and ahead/behind;

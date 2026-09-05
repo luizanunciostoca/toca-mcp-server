@@ -1,5 +1,5 @@
 ---
-applyTo: "src/providers/**,src/policy/**,src/**/approval/**,src/**/authorization/**"
+applyTo: 'src/providers/**,src/policy/**,src/**/approval/**,src/**/authorization/**'
 ---
 
 # Provider, policy, and write-boundary rules

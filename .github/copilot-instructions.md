@@ -3,6 +3,7 @@
 Follow the root `AGENTS.md` as the standing development contract.
 
 For every coding task:
+
 - revalidate live `main` and record the exact base SHA before editing;
 - use the issue/task as the scope boundary;
 - search current PRs/branches for competing or reusable work;
