@@ -1,0 +1,50 @@
+name: Temporary Copilot Prompt Format Diagnostic
+
+on:
+  push:
+    branches:
+      - chore/copilot-pro-plus-parallel-orchestration
+
+permissions:
+  contents: read
+
+jobs:
+  prettier-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Print exact Prettier diff for Copilot customization
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write \
+            AGENTS.md \
+            .github/copilot-instructions.md \
+            .github/instructions \
+            .github/prompts
+          git diff --no-ext-diff --no-color -- \
+            AGENTS.md \
+            .github/copilot-instructions.md \
+            .github/instructions \
+            .github/prompts
+          test -n "$(git status --porcelain -- AGENTS.md .github/copilot-instructions.md .github/instructions .github/prompts)"
