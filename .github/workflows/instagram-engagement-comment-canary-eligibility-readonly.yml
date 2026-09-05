@@ -146,26 +146,26 @@ jobs:
           for attempt in 1 2 3 4 5 6; do
             POLL_ATTEMPTS="$attempt"
             LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
-              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=asc --format=json)"
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json)"
             SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
               | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
               || true)"
 
-            STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
+            STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
             if [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]; then
               MARKERS_COMPLETE=true
               for marker in "${numeric_markers[@]}"; do
-                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
+                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
                 if ! [[ "$value" =~ ^[0-9]+$ ]]; then
                   MARKERS_COMPLETE=false
                   break
                 fi
               done
 
-              TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
+              TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
               if [[ "$STATUS" == 'READY' ]] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; then
                 MARKERS_COMPLETE=false
-              elif [[ -n "$TARGET_SHA" ]] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+              elif [[ -n "$TARGET_SHA" && "$TARGET_SHA" != 'NONE' ]] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; then
                 MARKERS_COMPLETE=false
               fi
             fi
@@ -199,7 +199,7 @@ jobs:
           REPORT+="ELIGIBILITY=${STATUS}"$'\n'
           REPORT+="LOG_POLL_ATTEMPTS=${POLL_ATTEMPTS}"$'\n'
           for marker in "${numeric_markers[@]}"; do
-            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2-)"
             [[ "$value" =~ ^[0-9]+$ ]]
             REPORT+="${marker}=${value}"$'\n'
           done
