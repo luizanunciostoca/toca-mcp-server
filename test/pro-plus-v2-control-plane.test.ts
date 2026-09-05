@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+const readJson = (path: string) =>
+  JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
 
 describe('PRO+ v2 control plane', () => {
   it('keeps mutable coordination state out of main commits', () => {
@@ -13,7 +14,8 @@ describe('PRO+ v2 control plane', () => {
     expect(state.storage).toBe('GITHUB_ISSUES');
     expect(state.mutationsChangeMainSha).toBe(false);
     expect(Object.values(state.issues).map((entry) => entry.number)).toEqual([639, 640, 641, 642]);
-    for (const entry of Object.values(state.issues)) expect(entry.externalSideEffectsAuthorized).toBe(false);
+    for (const entry of Object.values(state.issues))
+      expect(entry.externalSideEffectsAuthorized).toBe(false);
   });
 
   it('fails closed on subjective artifact reuse and long-lived promotion as a default', () => {
