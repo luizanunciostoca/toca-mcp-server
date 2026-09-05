@@ -20,6 +20,10 @@ export {
   type AppGatewayPrincipal,
 } from './http-boundary.js';
 export {
+  createTocaHttpServerWithAppGateway,
+  type TocaAppGatewayHttpCompositionOptions,
+} from './toca-http-composition.js';
+export {
   actionEventTypeFromPhase,
   actionStateFromExecutionPhase,
   createTocaActionEvent,
