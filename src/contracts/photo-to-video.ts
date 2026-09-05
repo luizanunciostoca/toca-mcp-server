@@ -89,7 +89,10 @@ export const photoToVideoSourceRightsSchema = z.object({
   rightsRecordId: z.string().trim().min(1).optional(),
   evidenceType: z.string().trim().min(1).optional(),
   evidenceDriveFileId: z.string().trim().min(1).optional(),
-  evidenceSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  evidenceSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/i)
+    .optional(),
   validFrom: z.string().trim().min(1).optional(),
   validUntil: z.string().trim().min(1).optional(),
   territories: z.array(z.string().trim().min(1)).optional(),
@@ -185,7 +188,7 @@ export const photoToVideoCandidateManifestSchema = z
           message: 'PHOTO_TO_VIDEO_PROVIDER_ATTEMPT_CHAIN_MISMATCH',
         });
       }
-      if (candidate.providerFallbackUsed !== (candidate.providerAttemptChain.length > 1)) {
+      if (candidate.providerFallbackUsed !== candidate.providerAttemptChain.length > 1) {
         context.addIssue({
           code: 'custom',
           path: ['providerFallbackUsed'],
