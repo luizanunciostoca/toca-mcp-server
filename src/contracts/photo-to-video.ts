@@ -1,6 +1,7 @@
 import * as z from 'zod/v4';
 
-export const TOCA_PHOTO_TO_VIDEO_POLICY_ID = 'TOCA_PHOTO_TO_VIDEO_POLICY_V1' as const;
+export const TOCA_PHOTO_TO_VIDEO_POLICY_ID =
+  'TOCA_PHOTO_TO_VIDEO_POLICY_V1' as const;
 
 export const photoToVideoRouteTypeSchema = z.enum([
   'REAL_PHOTO_TO_MOTION_VIDEO',
@@ -11,7 +12,11 @@ export type PhotoToVideoRouteType = z.infer<typeof photoToVideoRouteTypeSchema>;
 export const photoToVideoOutputTypeSchema = z.enum(['STORY', 'REEL']);
 export type PhotoToVideoOutputType = z.infer<typeof photoToVideoOutputTypeSchema>;
 
-export const photoToVideoDurationSchema = z.union([z.literal(4), z.literal(8), z.literal(12)]);
+export const photoToVideoDurationSchema = z.union([
+  z.literal(4),
+  z.literal(8),
+  z.literal(12),
+]);
 export type PhotoToVideoDurationSeconds = z.infer<typeof photoToVideoDurationSchema>;
 
 export const photoToVideoSizeSchema = z.enum(['720x1280', '1024x1792']);
@@ -43,7 +48,11 @@ export const likenessConsentStatusSchema = z.enum([
 ]);
 export type LikenessConsentStatus = z.infer<typeof likenessConsentStatusSchema>;
 
-export const videoProviderIdSchema = z.enum(['LOCAL_FFMPEG', 'OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO']);
+export const videoProviderIdSchema = z.enum([
+  'LOCAL_FFMPEG',
+  'OPENAI_VIDEO_API',
+  'GOOGLE_VERTEX_VEO',
+]);
 export type VideoProviderId = z.infer<typeof videoProviderIdSchema>;
 
 export const productVideoPolicySchema = z.object({
@@ -144,14 +153,19 @@ export const photoToVideoCandidateManifestSchema = z
     artifactRef: z.string().regex(/^gcs:\/\/[^/]+\/instagram\/.+$/),
     artifactObjectName: z
       .string()
-      .regex(/^instagram\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/),
+      .regex(
+        /^instagram\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/,
+      ),
     outputContentType: z.literal('video/mp4'),
     size: photoToVideoSizeSchema,
     seconds: photoToVideoDurationSchema,
     provider: videoProviderIdSchema,
     providerJobId: z.string().trim().min(1).optional(),
     providerModel: z.string().trim().min(1).optional(),
-    providerAttemptChain: z.array(z.enum(['OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO'])).min(1).optional(),
+    providerAttemptChain: z
+      .array(z.enum(['OPENAI_VIDEO_API', 'GOOGLE_VERTEX_VEO']))
+      .min(1)
+      .optional(),
     providerFallbackUsed: z.boolean().optional(),
     exceptionId: z.string().trim().min(1).optional(),
     approvalRef: z.string().trim().min(1).optional(),
@@ -223,7 +237,9 @@ export const photoToVideoCandidateManifestSchema = z
       });
     }
   });
-export type PhotoToVideoCandidateManifest = z.infer<typeof photoToVideoCandidateManifestSchema>;
+export type PhotoToVideoCandidateManifest = z.infer<
+  typeof photoToVideoCandidateManifestSchema
+>;
 
 export const photoToVideoReviewEvidenceSchema = z.object({
   candidateSha256: z.string().regex(/^[a-f0-9]{64}$/i),
