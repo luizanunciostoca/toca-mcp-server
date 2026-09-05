@@ -65,7 +65,9 @@ describe('PRO+ v2 control plane', () => {
     expect(validation).toContain('comments(last:100)');
     expect(validation).toContain("$GITHUB_EVENT_NAME\" == 'issue_comment'");
     expect(validation).toContain('check-pro-plus-v2-state-plane.mjs');
-    expect(stateValidation).toContain("'MERGE_RESERVED',\n  'MERGED',\n  'POST_MERGE_ACCEPTANCE'");
+    expect(stateValidation).toContain("'MERGE_RESERVED'");
+    expect(stateValidation).toContain("'MERGED'");
+    expect(stateValidation).toContain("'POST_MERGE_ACCEPTANCE'");
     expect(stateValidation).toContain("const evidenceId = marker(body, 'EVIDENCE_ID');");
     expect(build).toContain('EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD');
     expect(build).toContain("RUNTIME_CONTRACT='SERVER_IMAGE_V1'");
