@@ -45,4 +45,5 @@ jobs:
           name: comment-watch-hardening-${{ github.run_id }}
           path: /tmp/comment-watch-patch
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 1
