@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "storage": "GITHUB_ISSUES",
+  "mutationsChangeMainSha": false,
+  "authority": "TOCA_CONTROL_TOWER",
+  "issues": {
+    "laneRegistryAndHotspotLocks": {
+      "number": 639,
+      "role": "LANE_REGISTRY_AND_HOTSPOT_LOCKS",
+      "externalSideEffectsAuthorized": false
+    },
+    "integrationQueueAndMainStability": {
+      "number": 640,
+      "role": "INTEGRATION_QUEUE_AND_MAIN_STABILITY",
+      "externalSideEffectsAuthorized": false
+    },
+    "evidenceLedger": {
+      "number": 641,
+      "role": "EVIDENCE_LEDGER",
+      "externalSideEffectsAuthorized": false
+    },
+    "backlogClassification": {
+      "number": 642,
+      "role": "BACKLOG_CLASSIFICATION",
+      "externalSideEffectsAuthorized": false
+    }
+  },
+  "sanitization": {
+    "secretsAllowed": false,
+    "rawProviderPayloadsAllowed": false,
+    "rawUserDataAllowed": false,
+    "unnecessaryPiiAllowed": false
+  }
+}

@@ -1,23 +1,15 @@
-# TOCA OS repository instructions for GitHub Copilot
+# TOCA OS repository instructions for GitHub Copilot — PRO+ v2
 
-Follow the root `AGENTS.md` as the standing development contract.
+Follow root `AGENTS.md` and `control/pro-plus/README.md`.
 
-For every coding task:
+Before coding, revalidate live `main`, read the v2 state plane (#639–#642), reconcile competing work, and obtain an isolated Lane Contract. Never write outside owned paths or a lock-required hotspot without Control Tower assignment.
 
-- revalidate live `main` and record the exact base SHA before editing;
-- use the issue/task as the scope boundary;
-- search current PRs/branches for competing or reusable work;
-- work on one isolated branch/worktree and one lane only;
-- respect declared file ownership and shared-hotspot locks;
-- do not expand scope silently;
-- write focused regression tests for behavior changes;
-- prefer the smallest compatible fix over broad refactoring;
-- do not create duplicate execution/control-plane components;
-- never hardcode secrets or real tokens;
-- do not run external provider writes to prove code works unless a separate governed production authorization explicitly permits it;
-- do not push or merge directly to `main`;
-- treat CI/acceptance as exact-SHA evidence and rerun after HEAD changes.
+Use #639 for mutable lanes/locks, #640 for Integration Queue/Main Stability, #641 for sanitized evidence validity, and #642 for backlog classification. Routine state changes must not create `main` commits.
 
-When a task touches a migration, shared contract, lockfile, workflow, policy/approval boundary, provider interface, or production controller, treat that path as lock-required and verify no concurrent lane owns it.
+For integration, require exact-HEAD CI and the queue lifecycle `FROZEN → CI_RUNNING → MERGE_RESERVED`. After merge, require post-merge acceptance and invalidate old SHA-bound evidence.
 
-When finished, provide a structured handoff with BASE_SHA, HEAD_SHA, changed files, test evidence, risks, blockers, dependencies, and next integration action.
+Before expensive runtime/build/evidence work, require #640 to contain `MAIN_STABILITY=PASS`, exact current `EVALUATED_MAIN_SHA`, and `MERGE_RESERVATION=NONE`. Do not reuse stale artifacts unless the Build Broker proves exact tree/runtime-contract equivalence.
+
+Prefer on-demand promotion materialization from current main. Never infer provider/production state from code or CI, never manufacture provider evidence, never hardcode secrets, never blind-retry ambiguous writes, and never push/merge directly to `main`.
+
+When finished, provide exact SHA-bound handoff and update only the control-plane state issue you are authorized to own.
