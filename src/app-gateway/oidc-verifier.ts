@@ -64,10 +64,7 @@ export interface OidcJwksFetchOptions {
   readonly maximumBytes: number;
 }
 
-export type OidcJwksTransport = (
-  jwksUri: string,
-  options: OidcJwksFetchOptions,
-) => Promise<string>;
+export type OidcJwksTransport = (jwksUri: string, options: OidcJwksFetchOptions) => Promise<string>;
 
 export type OidcPrincipalMapper = (
   identity: VerifiedOidcIdentity,
@@ -355,13 +352,7 @@ function normalizeAudienceConfiguration(value: string | readonly string[]): read
 function validateHttpsJwksUri(value: string): string {
   try {
     const url = new URL(value);
-    if (
-      url.protocol !== 'https:' ||
-      !url.hostname ||
-      url.username ||
-      url.password ||
-      url.hash
-    ) {
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash) {
       configurationError();
     }
     return url.toString();
@@ -448,12 +439,7 @@ function validateHeader(header: Readonly<Record<string, unknown>>): string {
   if (header.alg !== 'RS256') throw new OidcVerificationError('OIDC_ALGORITHM_REJECTED');
 
   const kid = header.kid;
-  if (
-    typeof kid !== 'string' ||
-    !kid ||
-    kid.trim() !== kid ||
-    kid.length > MAX_KID_LENGTH
-  ) {
+  if (typeof kid !== 'string' || !kid || kid.trim() !== kid || kid.length > MAX_KID_LENGTH) {
     throw new OidcVerificationError('OIDC_KID_REQUIRED');
   }
 
@@ -581,9 +567,7 @@ function numericDate(value: unknown): number {
 }
 
 function safeVerificationCode(error: unknown): OidcVerificationErrorCode {
-  return error instanceof OidcVerificationError
-    ? error.code
-    : 'OIDC_PRINCIPAL_MAPPING_FAILED';
+  return error instanceof OidcVerificationError ? error.code : 'OIDC_PRINCIPAL_MAPPING_FAILED';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
