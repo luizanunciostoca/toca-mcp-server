@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "migrationSerialization": "GLOBAL_SERIAL",
+  "migrationSlotRequiredBeforeEdit": true,
+  "packageManifestsLockRequired": true,
+  "allowOverlappingActiveOwnershipWithoutLock": false,
+  "resources": [
+    "migrations/**",
+    "package.json",
+    "pnpm-lock.yaml",
+    "shared-schemas-and-core-contracts",
+    "config-and-env-contracts",
+    "capability-route-agent-registries",
+    ".github/CODEOWNERS",
+    ".github/workflows/**",
+    "shared-provider-interfaces",
+    "policy-approval-authorization-contracts",
+    "production-authorization-watch-canary-promotion-controllers"
+  ]
+}

@@ -1,79 +1,62 @@
-# TOCA OS — Agent Development Contract
+# TOCA OS — Agent Development Contract / PRO+ v2
 
-This repository uses a single development authority with multiple isolated workers.
+This repository uses one development authority with multiple isolated workers and a machine-readable PRO+ v2 control plane.
 
 ## Canonical truth
 
-- GitHub live `main` is the source of truth for code and current technical state.
-- TOCA_OS Google Drive is the source of truth for approved architecture, business policy, SOPs, and operational rules.
-- Provider readback is the source of truth for external side effects.
-- Evidence is bound to the exact commit SHA that produced it. Never reuse CI or acceptance evidence after the HEAD changes.
+- GitHub live `main` is canonical for code and current technical state.
+- TOCA_OS Google Drive is canonical for approved architecture, business policy, SOPs and operational rules.
+- Provider readback is canonical for external side effects.
+- Evidence belongs to the exact SHA/runtime contract that produced it.
 
-Canonical parallel-development protocol: `TOCA_OS — ORQUESTRACAO_DE_DESENVOLVIMENTO_PARALELO_GITHUB_COPILOT_PRO_PLUS_v1.0`, Drive ID `18sOEv4GFrpSNjJg0Pbn8cR3RsiHlbiNhNEa0d_Jp9oQ`.
+Canonical protocol: `TOCA_OS — ORQUESTRACAO_DE_DESENVOLVIMENTO_PARALELO_GITHUB_COPILOT_PRO_PLUS_v2.0`, Drive ID `17DLQXnLkhVRfN2ina4WDcE-fjQL6AHqH2x6UzhXZxUw`.
 
-## Before doing material work
+## PRO+ v2 control plane
 
-1. Read live `main` and freeze `BASE_SHA`.
-2. Read the canonical issue/task and relevant current PRs/branches.
-3. Search for existing or competing implementation before writing new code.
-4. Declare a lane contract: `LANE_ID`, `BASE_SHA`, `ISSUE`, `BRANCH`, `FILES_OWNED`, `FILES_FORBIDDEN`, `HOTSPOT_LOCKS`, `DEPENDS_ON`, `MIGRATION_SLOT`, and `ACCEPTANCE`.
-5. Stop or request a lock if the work expands outside ownership.
+Before material work, read `control/pro-plus/README.md`, the static policies in `control/pro-plus/`, and the mutable state-plane issue pointers in `control/pro-plus/state-plane.json`.
 
-## Parallelism
+Routine lane/lock/queue/evidence state belongs in issues #639–#642, not in commits to `main`. Only the Control Tower or an explicitly delegated control-plane worker may mutate those issues.
 
-Parallelize only non-overlapping work. One lane = one owner = one isolated branch/worktree = one canonical PR.
+## Before editing
 
-Treat these as serialized/shared hotspots unless the Control Tower explicitly assigns a lock:
+1. Revalidate live `main` and freeze exact `BASE_SHA`.
+2. Reconcile related code, issues, PRs and branches before creating duplicate work.
+3. Read Lane Registry/locks (#639) and declare a Lane Contract.
+4. Acquire required hotspot/migration locks before editing.
+5. Work only in the assigned isolated branch/worktree and owned paths.
 
-- migrations and migration numbering;
-- package manifests and lockfiles;
-- shared schemas and core contracts;
-- capability/route registries;
-- config/env contracts;
-- CI/deploy/security/release workflows;
-- provider interfaces;
-- policy/approval/authorization contracts;
-- production authorization/watch controllers;
-- any file already owned by another active lane.
+One lane = one owner = one canonical PR. Never silently expand ownership.
 
-Migrations are globally serialized. Never independently choose a migration number when another migration lane is active.
+## Hotspots
 
-## Implementation rules
+Treat migrations, package manifests/lockfiles, shared contracts/schemas, registries, config/env contracts, CODEOWNERS, workflows, provider interfaces, policy/approval/authorization and production controllers as lock-required. Migrations are globally serialized and require a reserved slot.
 
-- Make the smallest architecturally correct change for the assigned lane.
-- Do not perform opportunistic unrelated refactors.
-- Reproduce bugs with a regression test when practical.
-- Preserve existing contracts unless contract change is explicitly in scope.
-- Never create a second MCP, CRM, scheduler, Policy Engine, Approval Engine, or parallel source of truth.
-- Never hardcode secrets or copy real credentials into tests/docs.
-- Fail closed on ambiguous provider outcomes and avoid blind retry of uncertain writes.
-- Never execute an external side effect only to manufacture evidence.
-- Workers must not push or merge directly to `main`.
+## Quality and integration
 
-## Quality and acceptance
+CI/acceptance is exact-HEAD evidence. A sync, rebase, conflict resolution or new commit requires fresh checks.
 
-Run the checks relevant to the lane. The repository's required CI is authoritative for merge acceptance. Typical gates include format, architecture, lint, typecheck, tests, build, migration/PostgreSQL E2E when applicable, and security/supply-chain checks.
+A PR becomes integration-ready only through the Integration Queue (#640): `READY_FOR_INTEGRATION → FROZEN → CI_RUNNING → MERGE_RESERVED → MERGED → POST_MERGE_ACCEPTANCE → ACCEPTED`.
 
-A missing check, startup failure, zero-job run, or CI from another SHA is not PASS.
+Before a main-changing merge, verify current production SHA-bound watches/authorizations/evidence. After every merge, re-read main, invalidate stale downstream evidence, recalculate the DAG and release the next lanes.
 
-## Integration
+## Main stability and Build Broker
 
-The integration coordinator compares merge-base, ahead/behind, file overlap, dependency order, and migration collisions before recommending merge order. Newer PRs do not automatically win. Preserve unique useful code from competing branches before superseding them.
+Do not start expensive SHA-bound runtime builds/evidence merely because CI is green. Recompute #640 and require `MAIN_STABILITY=PASS`, `EVALUATED_MAIN_SHA=<current main>` and `MERGE_RESERVATION=NONE`.
 
-After every merge: re-read `main`, invalidate stale bases/evidence, recalculate dependencies, and release the next safe lanes.
+Artifact reuse is allowed only for exact tree + runtime-contract equivalence. Subjective claims that a change is “non-functional” are insufficient.
 
-Before any main-changing merge, check whether active production authorization/watch/runtime evidence is bound to the current main SHA. Do not silently invalidate a live production evidence chain.
+## Backlog and promotion
 
-## Required handoff
+Use #642 to classify historical work before duplicating implementation. Prefer on-demand promotion materialization from current main after prerequisites; long-lived promotion drafts are exceptions.
 
-Every worker returns:
+## Safety
 
-- exact `BASE_SHA` and final `HEAD_SHA`;
-- files changed;
-- tests/checks executed and results;
-- assumptions and unresolved blockers;
-- migration/security/compatibility impact;
-- dependencies introduced or released;
-- evidence still required before integration or production.
+- Never hardcode secrets or raw provider/user data.
+- Never execute an external side effect merely to manufacture evidence.
+- Fail closed on ambiguous provider outcomes; no blind retry.
+- Workers never push/merge directly to `main`.
+- PRO+ v2 does not grant production/provider/deployment/database/autonomy authority.
 
-Never claim provider-verified or production-verified state from code/CI alone.
+## Handoff
+
+Return exact BASE_SHA/HEAD_SHA, files changed, checks, risks, blockers, dependencies, lock status, evidence validity and next integration action.

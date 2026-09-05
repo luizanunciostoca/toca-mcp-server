@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "defaultStrategy": "MATERIALIZE_ON_DEMAND",
+  "longLivedDraftDefault": false,
+  "longLivedDraftAllowedAsException": true,
+  "freshMainRequired": true,
+  "freshCiRequired": true,
+  "separatePromotionAuthorizationRequired": true,
+  "implicitPromotionForbidden": true,
+  "preferredSequence": [
+    "PRECONDITIONS_PASS",
+    "MATERIALIZE_FROM_CURRENT_MAIN",
+    "APPLY_EXCLUSIVE_PROMOTION_DIFF",
+    "FRESH_CI",
+    "SEPARATE_AUTHORIZATION",
+    "PROMOTE"
+  ]
+}

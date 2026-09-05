@@ -1,22 +1,9 @@
-# TOCA OS — Integration Gate
+# TOCA OS — PRO+ v2 Integration Gate
 
-Act as the TOCA Integration Coordinator for the candidate PR set.
+Act as the Integration / Merge Queue Controller.
 
-Revalidate:
+Revalidate current main, candidate HEADs, merge-base, ahead/behind, changed-file overlap, hotspot locks, migration order, dependencies, required checks and active production SHA-bound evidence.
 
-- current `main` SHA;
-- exact PR HEADs;
-- merge-base and ahead/behind;
-- changed-file overlaps;
-- hotspot locks;
-- migration numbers/order;
-- dependency DAG;
-- required checks on the exact HEAD;
-- active production authorization/watch/runtime evidence bound to the current main SHA.
+Use #640 and move candidates through `READY_FOR_INTEGRATION → FROZEN → CI_RUNNING → MERGE_RESERVED → MERGED → POST_MERGE_ACCEPTANCE → ACCEPTED`.
 
-Reject stale CI/evidence. Compare competing branches and preserve unique useful code before superseding. Determine deterministic merge order from dependencies, not PR age.
-
-For each candidate return one state:
-`INTEGRATION_READY | NEEDS_SYNC | NEEDS_FRESH_CI | CONFLICT | BLOCKED_DEPENDENCY | BLOCKED_PRODUCTION_GATE`.
-
-After every merge, require a new main read and recalculate downstream states before the next merge.
+Reject stale CI. Permit no conflicting critical merge reservation. Race-check main and expected HEAD immediately before merge. After merge, invalidate dependent bases/evidence and recompute Main Stability before expensive builds resume.

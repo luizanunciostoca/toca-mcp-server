@@ -78,6 +78,111 @@ jobs:
 
           echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
 
+      - name: Enforce PRO+ v2 Main Stability Gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STABILITY_ISSUE=640
+          STABILITY_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${STABILITY_ISSUE}")"
+          STABILITY_BODY="$(printf '%s' "$STABILITY_JSON" | jq -r '.body // ""')"
+
+          printf '%s' "$STABILITY_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PRO+ v2 CONTROL PLANE — Integration Queue & Main Stability")
+          ' >/dev/null
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          required_stability_lines=(
+            'PRO_PLUS_CONTROL_PLANE_SCHEMA_VERSION=2'
+            'CONTROL_PLANE_ROLE=INTEGRATION_QUEUE_AND_MAIN_STABILITY'
+            'MAIN_STABILITY=PASS'
+            "EVALUATED_MAIN_SHA=$GITHUB_SHA"
+            'MERGE_RESERVATION=NONE'
+            'EXTERNAL_SIDE_EFFECTS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'SERVICE_MUTATIONS_AUTHORIZED=false'
+          )
+          for required in "${required_stability_lines[@]}"; do
+            key="${required%%=*}"
+            key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"
+            value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"
+            if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+              echo "PRO_PLUS_V2_MAIN_STABILITY_BLOCKED: marker must be unique and exact: $required" >&2
+              exit 1
+            fi
+          done
+
+          {
+            echo 'PRO_PLUS_CONTROL_PLANE_SCHEMA_VERSION=2'
+            echo 'MAIN_STABILITY=PASS'
+            echo "EVALUATED_MAIN_SHA=$GITHUB_SHA"
+            echo 'MERGE_RESERVATION=NONE'
+            echo "MAIN_STABILITY_ISSUE=https://github.com/${GITHUB_REPOSITORY}/issues/640"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve PRO+ v2 Build Broker evidence index
+        id: broker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TREE_SHA="$(git rev-parse 'HEAD^{tree}')"
+          [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          RUNTIME_CONTRACT='SERVER_IMAGE_V1'
+          EVIDENCE_ID="runtime-build:${TREE_SHA}:${RUNTIME_CONTRACT}"
+          REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+
+          COMMENTS="$(gh api graphql \
+            -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){comments(last:100){nodes{body createdAt databaseId author{login}}}}}}' \
+            -f owner="$REPO_OWNER" -f repo="$REPO_NAME" -F number=641 \
+            | jq '[.data.repository.issue.comments.nodes[] | {body, created_at: .createdAt, id: .databaseId, user: {login: (.author.login // "")}}]')"
+          LATEST_BODY="$(jq -r --arg evidence_id "$EVIDENCE_ID" --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            [ .[]
+              | select(.user.login == $owner or .user.login == "github-actions[bot]")
+              | select((.body // "") | contains("EVIDENCE_ID=" + $evidence_id))
+            ]
+            | sort_by([.created_at, (.id // 0)])
+            | last
+            | .body // ""
+          ' <<< "$COMMENTS")"
+
+          CANDIDATE_DIGEST='NONE'
+          CANDIDATE_SOURCE_SHA='NONE'
+          if [[ -n "$LATEST_BODY" ]] && \
+            [[ "$(grep -Fxc "EVIDENCE_ID=$EVIDENCE_ID" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "SOURCE_SHA=$GITHUB_SHA" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "TREE_SHA=$TREE_SHA" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc 'VALIDITY=VALID' <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Ec '^RUNTIME_IMAGE_DIGEST=sha256:[0-9a-f]{64}$' <<< "$LATEST_BODY" || true)" == '1' ]]; then
+            CANDIDATE_SOURCE_SHA="$(grep '^SOURCE_SHA=' <<< "$LATEST_BODY" | cut -d= -f2-)"
+            CANDIDATE_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$LATEST_BODY" | cut -d= -f2-)"
+            [[ "$CANDIDATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || CANDIDATE_SOURCE_SHA='NONE'
+            [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || CANDIDATE_DIGEST='NONE'
+          fi
+
+          echo "tree_sha=$TREE_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_contract=$RUNTIME_CONTRACT" >> "$GITHUB_OUTPUT"
+          echo "evidence_id=$EVIDENCE_ID" >> "$GITHUB_OUTPUT"
+          echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_digest=$CANDIDATE_DIGEST" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "BUILD_BROKER_TREE_SHA=$TREE_SHA"
+            echo "BUILD_BROKER_RUNTIME_CONTRACT=$RUNTIME_CONTRACT"
+            echo "BUILD_BROKER_EVIDENCE_ID=$EVIDENCE_ID"
+            echo 'BUILD_BROKER_EVIDENCE_SCAN_LIMIT=100'
+            echo "BUILD_BROKER_REUSE_CANDIDATE=$([[ "$CANDIDATE_DIGEST" == 'NONE' ]] && echo false || echo true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -109,8 +214,11 @@ jobs:
         shell: bash
         run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
 
-      - name: Build and push immutable shadow runtime only
+      - name: Reuse or build immutable shadow runtime
         id: image
+        env:
+          CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}
+          CANDIDATE_DIGEST: ${{ steps.broker.outputs.candidate_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -118,27 +226,45 @@ jobs:
           test "$GCP_REGION" = 'southamerica-east1'
           test "$GCP_ARTIFACT_REPOSITORY" = 'toca-mcp'
 
-          IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
-          docker build --pull -t "$IMAGE_TAG" .
-          docker push "$IMAGE_TAG"
+          REUSED=false
+          DIGEST=''
+          RUNTIME_SOURCE_SHA="$GITHUB_SHA"
+          if [[ "$CANDIDATE_SOURCE_SHA" == "$GITHUB_SHA" ]] && \
+            [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            CANDIDATE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$CANDIDATE_DIGEST"
+            if DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$CANDIDATE_IMAGE" \
+              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)' 2>/dev/null)" && \
+              [[ "$DESCRIBED_DIGEST" == "$CANDIDATE_DIGEST" ]]; then
+              DIGEST="$CANDIDATE_DIGEST"
+              RUNTIME_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
+              REUSED=true
+            fi
+          fi
 
-          DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
-            --project "$GCP_PROJECT_ID" \
-            --format='value(image_summary.digest)')"
+          if [[ "$REUSED" != 'true' ]]; then
+            IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
+            docker build --pull -t "$IMAGE_TAG" .
+            docker push "$IMAGE_TAG"
+            DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
+              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+            RUNTIME_SOURCE_SHA="$GITHUB_SHA"
+          fi
+
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-            echo 'Published runtime digest is invalid' >&2
+            echo 'Published or reused runtime digest is invalid' >&2
             exit 1
           }
-
           IMMUTABLE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$DIGEST"
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$IMMUTABLE_IMAGE" \
-            --project "$GCP_PROJECT_ID" \
-            --format='value(image_summary.digest)')"
+            --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$DIGEST"
 
-          echo "runtime_source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_source_sha=$RUNTIME_SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "runtime_image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "runtime_image=$IMMUTABLE_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "build_reused=$REUSED" >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized immutable-runtime evidence to authorization issue
         env:
@@ -146,37 +272,81 @@ jobs:
           RUNTIME_SOURCE_SHA: ${{ steps.image.outputs.runtime_source_sha }}
           RUNTIME_IMAGE_DIGEST: ${{ steps.image.outputs.runtime_image_digest }}
           RUNTIME_IMAGE: ${{ steps.image.outputs.runtime_image }}
+          TREE_SHA: ${{ steps.broker.outputs.tree_sha }}
+          BUILD_REUSED: ${{ steps.image.outputs.build_reused }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
+          [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$RUNTIME_IMAGE" == *"@${RUNTIME_IMAGE_DIGEST}" ]]
+          [[ "$BUILD_REUSED" =~ ^(true|false)$ ]]
 
           printf -v COMMENT '%s\n' \
             'SHADOW_RUNTIME_BUILD_STATUS=PASS' \
             "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA" \
+            "TREE_SHA=$TREE_SHA" \
             "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" \
             "RUNTIME_IMAGE=$RUNTIME_IMAGE" \
+            "BUILD_REUSED=$BUILD_REUSED" \
             'BUILD_ONLY=true' \
             'DATABASE_MUTATIONS=false' \
             'SERVICE_DEPLOY=false' \
             'EXTERNAL_REPLY_WRITES=false'
 
-          gh api \
-            --method POST \
+          gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}/comments" \
             -f body="$COMMENT" >/dev/null
 
           {
             echo 'SHADOW_RUNTIME_BUILD_STATUS=PASS'
             echo "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA"
+            echo "TREE_SHA=$TREE_SHA"
             echo "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST"
+            echo "BUILD_REUSED=$BUILD_REUSED"
             echo 'BUILD_ONLY=true'
             echo 'DATABASE_MUTATIONS=false'
             echo 'SERVICE_DEPLOY=false'
             echo 'EXTERNAL_REPLY_WRITES=false'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Append sanitized build evidence to PRO+ v2 ledger
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_ID: ${{ steps.broker.outputs.evidence_id }}
+          RUNTIME_SOURCE_SHA: ${{ steps.image.outputs.runtime_source_sha }}
+          TREE_SHA: ${{ steps.broker.outputs.tree_sha }}
+          RUNTIME_CONTRACT: ${{ steps.broker.outputs.runtime_contract }}
+          RUNTIME_IMAGE_DIGEST: ${{ steps.image.outputs.runtime_image_digest }}
+          BUILD_REUSED: ${{ steps.image.outputs.build_reused }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$RUNTIME_SOURCE_SHA" = "$GITHUB_SHA"
+          [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUNTIME_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$BUILD_REUSED" =~ ^(true|false)$ ]]
+
+          printf -v LEDGER_RECORD '%s\n' \
+            "EVIDENCE_ID=$EVIDENCE_ID" \
+            'EVIDENCE_TYPE=IMMUTABLE_RUNTIME_BUILD' \
+            "SOURCE_SHA=$RUNTIME_SOURCE_SHA" \
+            "TREE_SHA=$TREE_SHA" \
+            "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" \
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_IMAGE_DIGEST" \
+            "WORKFLOW_RUN_ID=$GITHUB_RUN_ID" \
+            "BUILD_REUSED=$BUILD_REUSED" \
+            'RESULT=PASS' \
+            'VALIDITY=VALID' \
+            'EXTERNAL_SIDE_EFFECTS=false' \
+            'DATABASE_MUTATIONS=false' \
+            'SERVICE_MUTATIONS=false'
+
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/641/comments" \
+            -f body="$LEDGER_RECORD" >/dev/null
 
       - name: Consume single-use build authorization
         if: always() && env.AUTHORIZATION_ISSUE_NUMBER != ''
@@ -198,15 +368,11 @@ jobs:
           else
             grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
           fi
-
           BODY="$(sed 's/^AUTO_BUILD_AUTHORIZED=true$/AUTO_BUILD_AUTHORIZED=false/' <<< "$BODY")"
 
-          gh api \
-            --method PATCH \
+          gh api --method PATCH \
             "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
-            -f state=closed \
-            -f state_reason=completed \
-            -f body="$BODY" >/dev/null
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
 
           {
             echo 'SHADOW_RUNTIME_BUILD_AUTHORIZATION_CONSUMED=true'

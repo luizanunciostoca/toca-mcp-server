@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "metrics": [
+    "useful_parallel_throughput",
+    "invalidated_work_count",
+    "invalidated_work_ratio",
+    "stale_build_count",
+    "stale_build_ratio",
+    "mean_lane_cycle_time",
+    "mean_ci_cycle_time",
+    "merge_conflict_rate",
+    "hotspot_lock_wait_time",
+    "backlog_superseded_count",
+    "rebuild_avoided_count",
+    "evidence_stale_count",
+    "provider_ambiguity_count"
+  ],
+  "optimizationObjective": "INCREASE_USEFUL_THROUGHPUT_WITHOUT_PROPORTIONAL_INVALIDATED_WORK_OR_INCIDENTS",
+  "arbitraryCompletionPercentageForbidden": true
+}
