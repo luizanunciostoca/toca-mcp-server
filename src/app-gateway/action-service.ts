@@ -59,7 +59,9 @@ export function prepareTocaAction(
   } = {},
 ): TocaAction {
   const request = tocaActionRequestSchema.parse(rawRequest);
-  const definition = ACTION_CARD_CATALOG.find((candidate) => candidate.actionType === request.action_type);
+  const definition = ACTION_CARD_CATALOG.find(
+    (candidate) => candidate.actionType === request.action_type,
+  );
   if (!definition) {
     throw new Error(`ACTION_TYPE_NOT_CATALOGUED:${request.action_type}`);
   }
@@ -88,7 +90,9 @@ export function parseTocaActionRequest(input: unknown): TocaActionRequest {
   return tocaActionRequestSchema.parse(input);
 }
 
-function resolveAllOfAvailability(capabilities: readonly CapabilitySnapshot[]): ActionAvailability {
+function resolveAllOfAvailability(
+  capabilities: readonly CapabilitySnapshot[],
+): ActionAvailability {
   if (capabilities.length === 0) return 'AVAILABLE';
   return capabilities.reduce<ActionAvailability>(
     (current, capability) => worstAvailability(current, capability.availability),
@@ -96,7 +100,9 @@ function resolveAllOfAvailability(capabilities: readonly CapabilitySnapshot[]): 
   );
 }
 
-function resolveAnyOfAvailability(capabilities: readonly CapabilitySnapshot[]): ActionAvailability {
+function resolveAnyOfAvailability(
+  capabilities: readonly CapabilitySnapshot[],
+): ActionAvailability {
   if (capabilities.length === 0) return 'AVAILABLE';
   return capabilities.reduce<ActionAvailability>(
     (current, capability) => bestAvailability(current, capability.availability),
@@ -112,7 +118,9 @@ function bestAvailability(a: ActionAvailability, b: ActionAvailability): ActionA
   return availabilityScore[a] >= availabilityScore[b] ? a : b;
 }
 
-function deduplicateSnapshots(capabilities: readonly CapabilitySnapshot[]): readonly CapabilitySnapshot[] {
+function deduplicateSnapshots(
+  capabilities: readonly CapabilitySnapshot[],
+): readonly CapabilitySnapshot[] {
   const byId = new Map<string, CapabilitySnapshot>();
   for (const capability of capabilities) byId.set(capability.capabilityId, capability);
   return [...byId.values()];
