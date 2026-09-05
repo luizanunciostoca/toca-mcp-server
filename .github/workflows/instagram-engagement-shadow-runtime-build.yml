@@ -150,8 +150,13 @@ jobs:
           ' <<< "$COMMENTS")"
 
           CANDIDATE_DIGEST='NONE'
-          if [[ -n "$LATEST_BODY" ]] && grep -Fxq 'VALIDITY=VALID' <<< "$LATEST_BODY"; then
-            CANDIDATE_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$LATEST_BODY" | tail -1 | cut -d= -f2- || true)"
+          if [[ -n "$LATEST_BODY" ]] && \
+            [[ "$(grep -Fxc "EVIDENCE_ID=$EVIDENCE_ID" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "TREE_SHA=$TREE_SHA" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Fxc 'VALIDITY=VALID' <<< "$LATEST_BODY" || true)" == '1' ]] && \
+            [[ "$(grep -Ec '^RUNTIME_IMAGE_DIGEST=sha256:[0-9a-f]{64}$' <<< "$LATEST_BODY" || true)" == '1' ]]; then
+            CANDIDATE_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$LATEST_BODY" | cut -d= -f2-)"
             [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || CANDIDATE_DIGEST='NONE'
           fi
 
