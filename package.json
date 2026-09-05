@@ -41,7 +41,7 @@
     "start:deterministic-artist-composite": "node dist/src/deterministic-artist-composite.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier src/contracts/photo-to-video.ts && false",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
