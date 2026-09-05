@@ -1,0 +1,452 @@
+name: Instagram Engagement Comment Canary Opportunity Watch
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-comment-canary-opportunity-watch
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  authorization-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      active: ${{ steps.auth.outputs.active }}
+      watch_issue: ${{ steps.auth.outputs.watch_issue }}
+      runtime_digest: ${{ steps.auth.outputs.runtime_digest }}
+      runtime_image: ${{ steps.auth.outputs.runtime_image }}
+
+    steps:
+      - name: Checkout exact watch controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve one active owner-authored read-only watch
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO\""
+          SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+          MATCHES="$(jq -c --arg owner "$GITHUB_REPOSITORY_OWNER" '[.items[] | select(.pull_request == null) | select(.user.login == $owner) | select(.title | startswith("PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO"))]' <<< "$SEARCH_JSON")"
+          COUNT="$(jq 'length' <<< "$MATCHES")"
+
+          if [[ "$COUNT" = '0' ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH=INACTIVE_NO_AUTHORIZATION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$COUNT" != '1' ]]; then
+            echo "Expected exactly one active owner-authored Comment opportunity watch authorization, found $COUNT" >&2
+            exit 1
+          fi
+
+          ISSUE_NUMBER="$(jq -r '.[0].number' <<< "$MATCHES")"
+          BODY="$(jq -r '.[0].body // ""' <<< "$MATCHES")"
+          CREATED_AT="$(jq -r '.[0].created_at // empty' <<< "$MATCHES")"
+
+          close_watch() {
+            local status="$1"
+            local updated_body
+            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+            if ! grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$updated_body"; then
+              updated_body+=$'\nAUTHORIZATION_STATE=CONSUMED_AND_CLOSED'
+            fi
+            printf -v report '%s\n' \
+              "COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=$status" \
+              "CONTROLLER_SHA=$GITHUB_SHA" \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'AUTO_REAL_CANARY_AUTHORIZED=false'
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
+          }
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+
+          fixed_required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+            'WATCH_MODE=READ_ONLY'
+            'WATCH_INTERVAL_MINUTES=10'
+            'WATCH_MAX_LIFETIME_HOURS=12'
+            'CANARY_CHANNEL=COMMENT'
+            'MAX_AGE_MINUTES=30'
+            'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+            'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+          )
+          for required in "${fixed_required[@]}"; do
+            if ! grep -Fxq "$required" <<< "$BODY"; then
+              close_watch 'INVALID_AUTHORIZATION'
+              echo "Missing exact Comment opportunity watch authorization field: $required" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "$RUNTIME_SHA" != "$GITHUB_SHA" ]]; then
+            close_watch 'STALE_MAIN'
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH=CONSUMED_STALE_MAIN' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            close_watch 'INVALID_RUNTIME_DIGEST'
+            echo 'Runtime digest is invalid' >&2
+            exit 1
+          fi
+          if [[ -z "$WATCH_EXPIRES_AT" || -z "$CREATED_AT" ]]; then
+            close_watch 'INVALID_EXPIRY'
+            echo 'Watch expiry metadata is missing' >&2
+            exit 1
+          fi
+
+          if ! CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            echo 'Authorization created_at is invalid' >&2
+            exit 1
+          fi
+          if ! EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            echo 'WATCH_EXPIRES_AT is invalid' >&2
+            exit 1
+          fi
+          NOW_EPOCH="$(date -u +%s)"
+          if (( EXPIRES_EPOCH <= CREATED_EPOCH || EXPIRES_EPOCH - CREATED_EPOCH > 43200 )); then
+            close_watch 'INVALID_EXPIRY_WINDOW'
+            echo 'Watch lifetime must be greater than zero and at most 12 hours' >&2
+            exit 1
+          fi
+          if (( NOW_EPOCH >= EXPIRES_EPOCH )); then
+            close_watch 'EXPIRED'
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH=CONSUMED_EXPIRED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo 'active=true' >> "$GITHUB_OUTPUT"
+          echo "watch_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo 'COMMENT_CANARY_OPPORTUNITY_WATCH=ACTIVE_READ_ONLY' >> "$GITHUB_STEP_SUMMARY"
+          echo "WATCH_AUTHORIZATION_ISSUE=$ISSUE_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "WATCH_EXPIRES_AT=$WATCH_EXPIRES_AT" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+  comment-opportunity-probe:
+    needs: authorization-preflight
+    if: needs.authorization-preflight.outputs.active == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify exact immutable runtime image
+        env:
+          RUNTIME_IMAGE: ${{ needs.authorization-preflight.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ needs.authorization-preflight.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+      - name: Run one read-only Comment opportunity probe
+        id: probe
+        env:
+          RUNTIME_IMAGE: ${{ needs.authorization-preflight.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-comment-watch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --command node --args dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Parse only sanitized eligibility markers
+        id: decision
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE_LINES=''
+          MARKERS_COMPLETE=false
+          POLL_ATTEMPTS=0
+          required_markers=(
+            INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY
+            RECENT_COMMENT_COUNT STATE_CANDIDATE_COUNT ELIGIBLE_COUNT ELIGIBLE_TARGET_SHA256
+            UNRESOLVED_AMBIGUITY_COUNT ACTIVE_RESERVATION_COUNT
+            REJECTED_SCOPE REJECTED_AGE REJECTED_CONFIDENCE REJECTED_PRIORITY
+            REJECTED_SENSITIVE REJECTED_COMMERCIAL REJECTED_URGENCY
+            REJECTED_KNOWLEDGE REJECTED_POLICY
+            CANARY_CHANNEL READ_ONLY_ELIGIBILITY DATABASE_MUTATIONS PROVIDER_CALLS
+            EXTERNAL_REPLY_WRITES RAW_USER_DATA_LOGGED
+          )
+
+          for attempt in 1 2 3 4 5 6; do
+            POLL_ATTEMPTS="$attempt"
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
+              || true)"
+
+            MARKERS_COMPLETE=true
+            for marker in "${required_markers[@]}"; do
+              count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+              if [[ "$count" != '1' ]]; then
+                MARKERS_COMPLETE=false
+                break
+              fi
+            done
+            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then
+              break
+            fi
+            if [[ "$attempt" != '6' ]]; then
+              sleep 10
+            fi
+          done
+
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            echo "COMMENT_CANARY_OPPORTUNITY_WATCH=BLOCKED_LOG_PROPAGATION" >&2
+            exit 1
+          fi
+
+          read_single_marker() {
+            local marker="$1"
+            local matches count
+            matches="$(grep "^${marker}=" <<< "$SAFE_LINES" || true)"
+            count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+            test "$count" = '1'
+            printf '%s' "${matches#*=}"
+          }
+
+          read_exact_marker() {
+            local marker="$1"
+            local expected="$2"
+            local value
+            value="$(read_single_marker "$marker")"
+            test "$value" = "$expected"
+          }
+
+          STATUS="$(read_single_marker INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY)"
+          [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]
+
+          read_exact_marker CANARY_CHANNEL COMMENT
+          read_exact_marker READ_ONLY_ELIGIBILITY true
+          read_exact_marker DATABASE_MUTATIONS false
+          read_exact_marker PROVIDER_CALLS false
+          read_exact_marker EXTERNAL_REPLY_WRITES false
+          read_exact_marker RAW_USER_DATA_LOGGED false
+
+          read_numeric() {
+            local marker="$1"
+            local value
+            value="$(read_single_marker "$marker")"
+            [[ "$value" =~ ^[0-9]+$ ]]
+            printf '%s' "$value"
+          }
+
+          RECENT_COUNT="$(read_numeric RECENT_COMMENT_COUNT)"
+          ELIGIBLE_COUNT="$(read_numeric ELIGIBLE_COUNT)"
+          AMBIGUITY_COUNT="$(read_numeric UNRESOLVED_AMBIGUITY_COUNT)"
+          RESERVATION_COUNT="$(read_numeric ACTIVE_RESERVATION_COUNT)"
+          TARGET_SHA="$(read_single_marker ELIGIBLE_TARGET_SHA256)"
+
+          if [[ "$STATUS" = 'READY' ]]; then
+            test "$ELIGIBLE_COUNT" = '1'
+            test "$AMBIGUITY_COUNT" = '0'
+            test "$RESERVATION_COUNT" = '0'
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+          else
+            test "$TARGET_SHA" = 'NONE'
+          fi
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "recent_count=$RECENT_COUNT" >> "$GITHUB_OUTPUT"
+          echo "eligible_count=$ELIGIBLE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "ambiguity_count=$AMBIGUITY_COUNT" >> "$GITHUB_OUTPUT"
+          echo "reservation_count=$RESERVATION_COUNT" >> "$GITHUB_OUTPUT"
+          echo "target_sha=${TARGET_SHA:-NONE}" >> "$GITHUB_OUTPUT"
+
+      - name: Delete temporary Comment opportunity job
+        if: always()
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${JOB:-}" ]]; then
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          fi
+
+      - name: Handle sanitized eligibility decision
+        if: success()
+        env:
+          WATCH_ISSUE: ${{ needs.authorization-preflight.outputs.watch_issue }}
+          RUNTIME_DIGEST: ${{ needs.authorization-preflight.outputs.runtime_digest }}
+          STATUS: ${{ steps.decision.outputs.status }}
+          RECENT_COUNT: ${{ steps.decision.outputs.recent_count }}
+          ELIGIBLE_COUNT: ${{ steps.decision.outputs.eligible_count }}
+          AMBIGUITY_COUNT: ${{ steps.decision.outputs.ambiguity_count }}
+          RESERVATION_COUNT: ${{ steps.decision.outputs.reservation_count }}
+          TARGET_SHA: ${{ steps.decision.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          close_watch() {
+            local terminal_status="$1"
+            local issue_json body updated_body
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+            body="$(printf '%s' "$issue_json" | jq -r '.body // ""')"
+            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$body")"
+            printf -v report '%s\n' \
+              "COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=$terminal_status" \
+              "CONTROLLER_SHA=$GITHUB_SHA" \
+              "RECENT_COMMENT_COUNT=$RECENT_COUNT" \
+              "ELIGIBLE_COUNT=$ELIGIBLE_COUNT" \
+              "UNRESOLVED_AMBIGUITY_COUNT=$AMBIGUITY_COUNT" \
+              "ACTIVE_RESERVATION_COUNT=$RESERVATION_COUNT" \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'AUTO_REAL_CANARY_AUTHORIZED=false'
+            gh issue comment "$WATCH_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" \
+              -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
+          }
+
+          if [[ "$STATUS" = 'NO_ELIGIBLE_TARGET' ]]; then
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH_RESULT=NO_ELIGIBLE_TARGET' >> "$GITHUB_STEP_SUMMARY"
+            echo "RECENT_COMMENT_COUNT=$RECENT_COUNT" >> "$GITHUB_STEP_SUMMARY"
+            echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
+            echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+            echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [[ "$STATUS" = 'READY' ]]; then
+            test "$ELIGIBLE_COUNT" = '1'
+            test "$AMBIGUITY_COUNT" = '0'
+            test "$RESERVATION_COUNT" = '0'
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+
+            TARGET_SHORT="${TARGET_SHA:0:12}"
+            TITLE="INSTAGRAM COMMENT CANARY OPPORTUNITY — ${GITHUB_SHA:0:8} — ${TARGET_SHORT}"
+            QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"${TITLE}\""
+            SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+            DUPLICATES="$(jq --arg title "$TITLE" '[.items[] | select(.pull_request == null) | select(.title == $title)] | length' <<< "$SEARCH_JSON")"
+            if [[ "$DUPLICATES" != '0' ]]; then
+              close_watch 'BLOCKED_DUPLICATE_OPPORTUNITY'
+              echo "Expected zero existing open sanitized opportunity issues, found $DUPLICATES" >&2
+              exit 1
+            fi
+
+            printf -v opportunity_body '%s\n' \
+              'COMMENT_CANARY_OPPORTUNITY_STATUS=READY' \
+              "SOURCE_WATCH_AUTHORIZATION_ISSUE=$WATCH_ISSUE" \
+              "RUNTIME_SOURCE_SHA=$GITHUB_SHA" \
+              "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+              'CANARY_CHANNEL=COMMENT' \
+              "ELIGIBLE_TARGET_SHA256=$TARGET_SHA" \
+              "RECENT_COMMENT_COUNT=$RECENT_COUNT" \
+              'ELIGIBLE_COUNT=1' \
+              'UNRESOLVED_AMBIGUITY_COUNT=0' \
+              'ACTIVE_RESERVATION_COUNT=0' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'RAW_USER_DATA_LOGGED=false' \
+              'REAL_COMMENT_CANARY_AUTHORIZED=false' \
+              'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false'
+
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$opportunity_body" >/dev/null
+            close_watch 'READY_FOUND'
+            echo 'COMMENT_CANARY_OPPORTUNITY_WATCH_RESULT=READY_FOUND' >> "$GITHUB_STEP_SUMMARY"
+            echo "ELIGIBLE_TARGET_SHA256=$TARGET_SHA" >> "$GITHUB_STEP_SUMMARY"
+            echo 'REAL_COMMENT_CANARY_AUTHORIZED=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          close_watch "BLOCKED_${STATUS}"
+          echo "Comment opportunity watch stopped fail-closed with status $STATUS" >&2
+          exit 1
+
+      - name: Consume watch after probe or controller failure
+        if: failure()
+        env:
+          WATCH_ISSUE: ${{ needs.authorization-preflight.outputs.watch_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${WATCH_ISSUE:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+          if [[ "$(printf '%s' "$ISSUE_JSON" | jq -r '.state')" != 'open' ]]; then
+            exit 0
+          fi
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          UPDATED_BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          printf -v report '%s\n' \
+            'COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'PROVIDER_CALLS=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+          gh issue comment "$WATCH_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$UPDATED_BODY" >/dev/null
