@@ -10,10 +10,16 @@ import {
   type VideoCreationOptionDefinition,
 } from './contracts.js';
 import { listActionCards, prepareTocaAction } from './action-service.js';
+import {
+  createInMemoryAppGatewayActionRuntimeStore,
+  type AppGatewayActionOwner,
+  type AppGatewayActionRuntimeStore,
+} from './action-runtime-store.js';
 import { listVideoCreationOptions } from './video-creation-options.js';
 
 const API_PREFIX = '/api/v1';
 const MAX_ACTION_BODY_BYTES = 128 * 1024;
+const MAX_ACTION_ID_LENGTH = 200;
 const MAX_SESSION_SUBJECT_LENGTH = 512;
 const MAX_SESSION_TENANT_LENGTH = 160;
 const MAX_SESSION_ROLE_LENGTH = 120;
@@ -56,6 +62,7 @@ export interface AppGatewayHttpOptions {
   readonly onError?: (error: unknown) => void;
   readonly createId?: () => string;
   readonly now?: () => string;
+  readonly actionStore?: AppGatewayActionRuntimeStore;
 }
 
 export type AppGatewayHttpHandler = (
@@ -64,6 +71,8 @@ export type AppGatewayHttpHandler = (
 ) => Promise<boolean>;
 
 export function createAppGatewayHttpHandler(options: AppGatewayHttpOptions): AppGatewayHttpHandler {
+  const actionStore = options.actionStore ?? createInMemoryAppGatewayActionRuntimeStore();
+
   return async (request, response) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     if (!url.pathname.startsWith(`${API_PREFIX}/`) && url.pathname !== API_PREFIX) return false;
@@ -106,7 +115,23 @@ export function createAppGatewayHttpHandler(options: AppGatewayHttpOptions): App
 
     if (url.pathname === `${API_PREFIX}/actions`) {
       if (method !== 'POST') return methodNotAllowed(response);
-      await handlePrepareAction(request, response, options);
+      await handlePrepareAction(request, response, options, actionStore, principal);
+      return true;
+    }
+
+    const actionId = actionIdFromPath(url.pathname);
+    if (actionId !== undefined) {
+      if (method !== 'GET') return methodNotAllowed(response);
+      const action = actionStore.get(actionId, actionOwnerFromPrincipal(principal));
+      if (!action) {
+        sendJson(response, 404, { error: 'NOT_FOUND' });
+        return true;
+      }
+      sendJson(response, 200, {
+        api_version: 'v1',
+        action: serializeAction(action),
+        persistence: 'IN_MEMORY_RUNTIME_ONLY',
+      });
       return true;
     }
 
@@ -134,6 +159,8 @@ async function handlePrepareAction(
   request: IncomingMessage,
   response: ServerResponse,
   options: AppGatewayHttpOptions,
+  actionStore: AppGatewayActionRuntimeStore,
+  principal: AppGatewayPrincipal,
 ): Promise<void> {
   try {
     const body = appGatewayCreateActionSchema.parse(
@@ -156,14 +183,41 @@ async function handlePrepareAction(
       },
     );
 
+    actionStore.put(action, actionOwnerFromPrincipal(principal));
+
     sendJson(response, 201, {
       api_version: 'v1',
       client_request_id: body.client_request_id,
       action: serializeAction(action),
+      persistence: 'IN_MEMORY_RUNTIME_ONLY',
     });
   } catch (error) {
     const code = safeActionError(error);
     sendJson(response, code.status, { error: code.error });
+  }
+}
+
+function actionOwnerFromPrincipal(principal: AppGatewayPrincipal): AppGatewayActionOwner {
+  const subject = principal.subject.trim();
+  const tenantId = principal.tenantId?.trim();
+  return {
+    subject,
+    ...(tenantId ? { tenantId } : {}),
+  };
+}
+
+function actionIdFromPath(pathname: string): string | undefined {
+  const prefix = `${API_PREFIX}/actions/`;
+  if (!pathname.startsWith(prefix)) return undefined;
+  const encoded = pathname.slice(prefix.length);
+  if (!encoded || encoded.includes('/')) return undefined;
+
+  try {
+    const actionId = decodeURIComponent(encoded).trim();
+    if (!actionId || actionId.length > MAX_ACTION_ID_LENGTH) return undefined;
+    return actionId;
+  } catch {
+    return undefined;
   }
 }
 
@@ -272,6 +326,9 @@ function safeActionError(error: unknown): { status: number; error: string } {
     }
     if (error.message.startsWith('VIDEO_CREATION_ROUTE_NOT_CATALOGUED:')) {
       return { status: 400, error: 'VIDEO_CREATION_ROUTE_NOT_CATALOGUED' };
+    }
+    if (error.message === 'APP_GATEWAY_ACTION_OWNER_REQUIRED') {
+      return { status: 401, error: 'UNAUTHORIZED' };
     }
   }
   return { status: 500, error: 'APP_GATEWAY_PREPARE_FAILED' };

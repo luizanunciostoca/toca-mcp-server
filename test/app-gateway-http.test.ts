@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import {
   createAppGatewayHttpServer,
+  createInMemoryAppGatewayActionRuntimeStore,
   type AppGatewayHttpOptions,
 } from '../src/app-gateway/index.js';
 
@@ -70,6 +71,28 @@ async function startServer(server: ReturnType<typeof createAppGatewayHttpServer>
 
 function authorizedHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return { authorization: bearer, ...extra };
+}
+
+async function prepareVideo(baseUrl: string, authorization = bearer): Promise<string> {
+  const response = await fetch(`${baseUrl}/api/v1/actions`, {
+    method: 'POST',
+    headers: {
+      authorization,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      action_type: 'CREATE_VIDEO',
+      operation: 'THE_PARTY',
+      objective: 'Criar Reel hero com footage real',
+      mode: 'AUTO',
+      video_route: 'REAL_FOOTAGE_FILM',
+      payload: { duration_seconds: 30 },
+      client_request_id: 'client-request-readback',
+    }),
+  });
+  expect(response.status).toBe(201);
+  const body = (await response.json()) as { action: { action_id: string } };
+  return body.action.action_id;
 }
 
 describe('Android App Gateway HTTP boundary', () => {
@@ -186,6 +209,7 @@ describe('Android App Gateway HTTP boundary', () => {
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
       client_request_id: string;
+      persistence: string;
       action: {
         action_id: string;
         correlation_id: string;
@@ -194,6 +218,7 @@ describe('Android App Gateway HTTP boundary', () => {
       };
     };
     expect(body.client_request_id).toBe('client-request-1');
+    expect(body.persistence).toBe('IN_MEMORY_RUNTIME_ONLY');
     expect(body.action).toMatchObject({
       action_id: 'http-1',
       correlation_id: 'http-2',
@@ -201,6 +226,79 @@ describe('Android App Gateway HTTP boundary', () => {
       request: { video_route: 'REAL_FOOTAGE_FILM' },
     });
     expect(JSON.stringify(body)).not.toContain('app-session-token');
+  });
+
+  it('reads back a prepared action only for the same authenticated subject and tenant', async () => {
+    let index = 0;
+    const ownerToken = 'Bearer owner-token';
+    const otherToken = 'Bearer other-token';
+    const otherTenantToken = 'Bearer other-tenant-token';
+    const baseUrl = await listen({
+      createId: () => `read-${++index}`,
+      authorize: (request) => {
+        if (request.headers.authorization === ownerToken) {
+          return Promise.resolve({ subject: 'user-1', tenantId: 'toca-do-morcego' });
+        }
+        if (request.headers.authorization === otherToken) {
+          return Promise.resolve({ subject: 'user-2', tenantId: 'toca-do-morcego' });
+        }
+        if (request.headers.authorization === otherTenantToken) {
+          return Promise.resolve({ subject: 'user-1', tenantId: 'other-tenant' });
+        }
+        return Promise.resolve(undefined);
+      },
+    });
+
+    const actionId = await prepareVideo(baseUrl, ownerToken);
+    const ownerResponse = await fetch(`${baseUrl}/api/v1/actions/${actionId}`, {
+      headers: { authorization: ownerToken },
+    });
+    expect(ownerResponse.status).toBe(200);
+    const ownerBody = (await ownerResponse.json()) as {
+      persistence: string;
+      action: { action_id: string; state: string; correlation_id: string };
+    };
+    expect(ownerBody.persistence).toBe('IN_MEMORY_RUNTIME_ONLY');
+    expect(ownerBody.action).toMatchObject({
+      action_id: actionId,
+      state: 'READY',
+      correlation_id: 'read-2',
+    });
+
+    for (const authorization of [otherToken, otherTenantToken]) {
+      const hiddenResponse = await fetch(`${baseUrl}/api/v1/actions/${actionId}`, {
+        headers: { authorization },
+      });
+      expect(hiddenResponse.status).toBe(404);
+      await expect(hiddenResponse.json()).resolves.toEqual({ error: 'NOT_FOUND' });
+    }
+  });
+
+  it('returns 404 for unknown and expired prepared actions without existence leakage', async () => {
+    let now = 10_000;
+    let index = 0;
+    const actionStore = createInMemoryAppGatewayActionRuntimeStore({
+      ttlMs: 50,
+      nowEpochMs: () => now,
+    });
+    const baseUrl = await listen({
+      actionStore,
+      createId: () => `exp-${++index}`,
+    });
+
+    const unknownResponse = await fetch(`${baseUrl}/api/v1/actions/unknown`, {
+      headers: authorizedHeaders(),
+    });
+    expect(unknownResponse.status).toBe(404);
+    await expect(unknownResponse.json()).resolves.toEqual({ error: 'NOT_FOUND' });
+
+    const actionId = await prepareVideo(baseUrl);
+    now += 50;
+    const expiredResponse = await fetch(`${baseUrl}/api/v1/actions/${actionId}`, {
+      headers: authorizedHeaders(),
+    });
+    expect(expiredResponse.status).toBe(404);
+    await expect(expiredResponse.json()).resolves.toEqual({ error: 'NOT_FOUND' });
   });
 
   it('rejects CREATE_VIDEO without a governed route', async () => {
