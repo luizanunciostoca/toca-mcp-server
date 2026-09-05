@@ -21,7 +21,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun ResultScreen(correlationId: String, onHome: () -> Unit) {
+fun ResultScreen(
+    correlationId: String,
+    title: String,
+    message: String,
+    status: String,
+    onHome: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -29,16 +35,16 @@ fun ResultScreen(correlationId: String, onHome: () -> Unit) {
         Spacer(Modifier.weight(1f))
         Text("✓", color = MaterialTheme.colorScheme.primary, fontSize = 56.sp)
         Spacer(Modifier.height(12.dp))
-        Text("Produção concluída", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text(title, fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Text(
-            "O resultado está pronto para a próxima etapa governada.",
+            message,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(28.dp))
         Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(22.dp)) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Status: APPROVAL_PENDING", fontWeight = FontWeight.Bold)
+                Text("Status: $status", fontWeight = FontWeight.Bold)
                 Text("Correlation ID: $correlationId", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
