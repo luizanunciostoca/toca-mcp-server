@@ -20,6 +20,11 @@ import { LocalGeneratedVideoPostProcessor } from '../providers/local/local-gener
 import { LocalPhotoMotionVideoComposer } from '../providers/local/local-photo-motion-video-composer.js';
 import { LocalPhotoToVideoBrandComposer } from '../providers/local/local-photo-to-video-brand-composer.js';
 import { OpenAiSceneContinuationVideoProvider } from '../providers/openai/openai-scene-continuation-video-provider.js';
+import {
+  FailoverSceneContinuationVideoProvider,
+  type SceneContinuationProviderId,
+  type SceneContinuationVideoProviderLike,
+} from '../providers/video/failover-scene-continuation-video-provider.js';
 
 export interface VideoGenerativeRuntime {
   readonly generation: ControlledPhotoToVideoGenerationService;
@@ -28,7 +33,6 @@ export interface VideoGenerativeRuntime {
 }
 
 export type VideoGenerativeRuntimeResolver = () => VideoGenerativeRuntime;
-type SceneContinuationProviderId = 'OPENAI_VIDEO_API' | 'GOOGLE_VERTEX_VEO';
 
 interface GoogleAccessBinding {
   readonly resolver: SecretResolver;
@@ -54,10 +58,8 @@ export function videoGenerativeRuntimeConfigured(env: NodeJS.ProcessEnv = proces
   ) {
     return false;
   }
-  const provider = resolveSceneContinuationProviderId(env);
-  if (provider === 'GOOGLE_VERTEX_VEO') return true;
-  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
-  return Boolean(env[openAiApiKeyEnvKey]?.trim());
+  const providers = resolveSceneContinuationProviderIds(env);
+  return providers.every((provider) => sceneContinuationProviderConfigured(provider, env));
 }
 
 export function createVideoGenerativeRuntimeFromEnvironment(
@@ -128,8 +130,25 @@ function createSceneContinuationProvider(
     readonly gcpProjectId: string;
     readonly artifactBucket: string;
   },
-) {
-  const provider = resolveSceneContinuationProviderId(env);
+): SceneContinuationVideoProviderLike {
+  const providerIds = resolveSceneContinuationProviderIds(env);
+  const providers = providerIds.map((id) => ({
+    id,
+    provider: createSingleSceneContinuationProvider(id, env, input),
+  }));
+  if (providers.length === 1) return providers[0]!.provider;
+  return new FailoverSceneContinuationVideoProvider(providers);
+}
+
+function createSingleSceneContinuationProvider(
+  provider: SceneContinuationProviderId,
+  env: NodeJS.ProcessEnv,
+  input: {
+    readonly secrets: EnvironmentSecretResolver;
+    readonly gcpProjectId: string;
+    readonly artifactBucket: string;
+  },
+): SceneContinuationVideoProviderLike {
   if (provider === 'GOOGLE_VERTEX_VEO') {
     const cloudIdentity = new GoogleMetadataAccessTokenResolver();
     const vertexVeoModel = parseVertexVeoModel(env.VERTEX_VEO_MODEL?.trim());
@@ -228,10 +247,46 @@ function resolveGoogleAccessBinding(
   };
 }
 
+export function resolveSceneContinuationProviderIds(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly SceneContinuationProviderId[] {
+  const explicitOrder = env.VIDEO_SCENE_CONTINUATION_PROVIDER_ORDER?.trim();
+  if (explicitOrder) {
+    const providers = explicitOrder
+      .split(',')
+      .map((value) => normalizeSceneContinuationProviderId(value))
+      .filter((value, index, array) => array.indexOf(value) === index);
+    if (providers.length === 0) throw new Error('VIDEO_PROVIDER_FAILOVER_PLAN_EMPTY');
+    return providers;
+  }
+
+  const primary = resolveSceneContinuationProviderId(env);
+  const fallbackValue = env.VIDEO_SCENE_CONTINUATION_FALLBACK_PROVIDER?.trim();
+  if (!fallbackValue) return [primary];
+  const fallback = normalizeSceneContinuationProviderId(fallbackValue);
+  if (fallback === primary) throw new Error('VIDEO_PROVIDER_FAILOVER_PLAN_DUPLICATE');
+  return [primary, fallback];
+}
+
+function sceneContinuationProviderConfigured(
+  provider: SceneContinuationProviderId,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  if (provider === 'GOOGLE_VERTEX_VEO') return Boolean(env.GCP_PROJECT_ID?.trim());
+  const openAiApiKeyEnvKey = resolveOpenAiApiKeyEnvKey(env);
+  return Boolean(env[openAiApiKeyEnvKey]?.trim());
+}
+
 function resolveSceneContinuationProviderId(env: NodeJS.ProcessEnv): SceneContinuationProviderId {
-  const value = env.VIDEO_SCENE_CONTINUATION_PROVIDER?.trim().toUpperCase();
-  if (!value || value === 'OPENAI_VIDEO_API') return 'OPENAI_VIDEO_API';
-  if (value === 'GOOGLE_VERTEX_VEO') return 'GOOGLE_VERTEX_VEO';
+  const value = env.VIDEO_SCENE_CONTINUATION_PROVIDER?.trim();
+  if (!value) return 'OPENAI_VIDEO_API';
+  return normalizeSceneContinuationProviderId(value);
+}
+
+function normalizeSceneContinuationProviderId(value: string): SceneContinuationProviderId {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'OPENAI_VIDEO_API') return 'OPENAI_VIDEO_API';
+  if (normalized === 'GOOGLE_VERTEX_VEO') return 'GOOGLE_VERTEX_VEO';
   throw new Error('VIDEO_SCENE_CONTINUATION_PROVIDER_UNSUPPORTED');
 }
 

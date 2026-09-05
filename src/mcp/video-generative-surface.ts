@@ -18,8 +18,8 @@ export const VIDEO_TRIM_TOOL = 'video.postprocess.trim';
 export const VIDEO_GENERATIVE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: VIDEO_GENERATE_SCENE_CONTINUATION_TOOL,
-    version: '1.0.0',
-    provider: 'TOCA_OS+OpenAI Video API',
+    version: '1.1.0',
+    provider: 'TOCA_OS governed video provider plan',
     riskClass: 'WRITE_EXTERNAL',
     requiredScopes: [],
     capabilityStatus: 'IMPLEMENTED',
@@ -87,7 +87,7 @@ export function registerVideoGenerativeSurface(
     {
       title: 'Generate Governed Scene-Continuation Video',
       description:
-        'Generate an image-to-video continuation from the exact canonical TOCA_OS source bound to a CONTENT_ITEM. Requires cleared VIDEO_SOURCE_RIGHTS and an APPROVED VIDEO_GENERATIVE_EXCEPTIONS row. Uses OpenAI Video API and persists the exact candidate artifact before returning GENERATED_REVIEW_REQUIRED.',
+        'Generate an image-to-video continuation from the exact canonical TOCA_OS source bound to a CONTENT_ITEM. Requires cleared VIDEO_SOURCE_RIGHTS and an APPROVED VIDEO_GENERATIVE_EXCEPTIONS row. Uses the configured governed provider plan (canonical primary Vertex Veo, optional OpenAI Video fallback when configured). Fallback is permitted only for retryable provider availability/rate-limit failures and never bypasses policy, approval, rights, source binding, fidelity or technical gates. Persists the exact candidate artifact before returning GENERATED_REVIEW_REQUIRED.',
       inputSchema: generateInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -112,6 +112,8 @@ export function registerVideoGenerativeSurface(
         provider: result.manifest.provider,
         providerJobId: result.manifest.providerJobId ?? null,
         providerModel: result.manifest.providerModel ?? null,
+        providerAttemptChain: result.manifest.providerAttemptChain ?? [result.manifest.provider],
+        providerFallbackUsed: result.manifest.providerFallbackUsed ?? false,
         requiresPostGenerationHumanReview: true as const,
         publicationEligible: false as const,
         ...(parsed.returnBase64
