@@ -137,8 +137,13 @@ jobs:
           [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
           RUNTIME_CONTRACT='SERVER_IMAGE_V1'
           EVIDENCE_ID="runtime-build:${TREE_SHA}:${RUNTIME_CONTRACT}"
+          REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
 
-          COMMENTS="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/issues/641/comments?per_page=100" | jq '[.[][]]')"
+          COMMENTS="$(gh api graphql \
+            -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){comments(last:100){nodes{body createdAt databaseId author{login}}}}}}' \
+            -f owner="$REPO_OWNER" -f repo="$REPO_NAME" -F number=641 \
+            | jq '[.data.repository.issue.comments.nodes[] | {body, created_at: .createdAt, id: .databaseId, user: {login: (.author.login // "")}}]')"
           LATEST_BODY="$(jq -r --arg evidence_id "$EVIDENCE_ID" --arg owner "$GITHUB_REPOSITORY_OWNER" '
             [ .[]
               | select(.user.login == $owner or .user.login == "github-actions[bot]")
@@ -174,6 +179,7 @@ jobs:
             echo "BUILD_BROKER_TREE_SHA=$TREE_SHA"
             echo "BUILD_BROKER_RUNTIME_CONTRACT=$RUNTIME_CONTRACT"
             echo "BUILD_BROKER_EVIDENCE_ID=$EVIDENCE_ID"
+            echo 'BUILD_BROKER_EVIDENCE_SCAN_LIMIT=100'
             echo "BUILD_BROKER_REUSE_CANDIDATE=$([[ "$CANDIDATE_DIGEST" == 'NONE' ]] && echo false || echo true)"
           } >> "$GITHUB_STEP_SUMMARY"
 
