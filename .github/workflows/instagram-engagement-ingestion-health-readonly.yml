@@ -1,0 +1,259 @@
+name: Instagram Engagement Ingestion Health Readonly
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-ingestion-health-readonly
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_SECRET_ID: toca-meta-app-secret
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  META_APP_ID: '2281930145887404'
+
+jobs:
+  ingestion-health-readonly:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram ingestion health READONLY AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact ingestion health controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate live single-use read-only authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram ingestion health READONLY AUTO"))
+          ' >/dev/null
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          test "$(grep -c '^MAIN_STABILITY=PASS$' <<< "$CONTROL_BODY")" = '1'
+          test "$(grep -c "^EVALUATED_MAIN_SHA=${GITHUB_SHA}$" <<< "$CONTROL_BODY")" = '1'
+          test "$(grep -c '^MERGE_RESERVATION=NONE$' <<< "$CONTROL_BODY")" = '1'
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "READ_ONLY_HEALTH=true"
+            "TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true"
+            "PROVIDER_READS_AUTHORIZED=true"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+            "RAW_USER_DATA_LOGGED=false"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact ingestion-health authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable runtime and resolve callback URL read-only
+        id: boundary
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+          WEBHOOK_URL="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+          test -n "$WEBHOOK_URL"
+          echo "webhook_url=$WEBHOOK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run temporary ingestion health read-only probe
+        id: probe
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          WEBHOOK_URL: ${{ steps.boundary.outputs.webhook_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-ing-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest,META_ACCESS_TOKEN=$META_TOKEN_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_WEBHOOK_URL=$WEBHOOK_URL#META_APP_ID=$META_APP_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID#META_GRAPH_BASE_URL=https://graph.facebook.com#META_GRAPH_API_VERSION=v24.0" \
+            --command node --args dist/src/ops/instagram-engagement-ingestion-health-readonly.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Publish sanitized ingestion health result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE_LINES=''
+          STATUS=''
+          MARKERS_COMPLETE=false
+          POLL_ATTEMPTS=0
+          allowed_status='^(PASS|BLOCKED_DATABASE_READ|BLOCKED_PROVIDER_READ|BLOCKED_APP_SUBSCRIPTION|BLOCKED_APP_COMMENTS_FIELD|BLOCKED_APP_MESSAGES_FIELD|BLOCKED_PAGE_SUBSCRIPTION|BLOCKED_PAGE_MESSAGES_FIELD|BLOCKED_CALLBACK_CHALLENGE)$'
+          boolean_markers=(
+            DATABASE_READ_PASS PROVIDER_READ_PASS APP_INSTAGRAM_SUBSCRIPTION_PRESENT
+            APP_COMMENTS_FIELD_PRESENT APP_MESSAGES_FIELD_PRESENT PAGE_APP_SUBSCRIPTION_PRESENT
+            PAGE_MESSAGES_FIELD_PRESENT CALLBACK_CHALLENGE_PASS
+          )
+          numeric_markers=(
+            RECENT_COMMENT_COUNT_30M RECENT_COMMENT_COUNT_6H RECENT_COMMENT_COUNT_24H
+            VALID_COMMENT_COUNT_24H
+          )
+
+          for attempt in 1 2 3 4 5 6; do
+            POLL_ATTEMPTS="$attempt"
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY|SUBSCRIPTION_MODEL|DATABASE_READ_PASS|PROVIDER_READ_PASS|APP_INSTAGRAM_SUBSCRIPTION_PRESENT|APP_COMMENTS_FIELD_PRESENT|APP_MESSAGES_FIELD_PRESENT|PAGE_APP_SUBSCRIPTION_PRESENT|PAGE_MESSAGES_FIELD_PRESENT|CALLBACK_CHALLENGE_PASS|RECENT_COMMENT_COUNT_30M|RECENT_COMMENT_COUNT_6H|RECENT_COMMENT_COUNT_24H|VALID_COMMENT_COUNT_24H|LATEST_COMMENT_AGE_MINUTES|DATABASE_MUTATIONS|PROVIDER_METHODS|PROVIDER_WRITES|PERSISTENT_SERVICE_MUTATIONS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED|SECRETS_PRINTED)=' \
+              || true)"
+
+            STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+            if [[ "$STATUS" =~ $allowed_status ]]; then
+              MARKERS_COMPLETE=true
+              grep -Fxq 'SUBSCRIPTION_MODEL=FACEBOOK_LOGIN_PAGE_BOUND' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'DATABASE_MUTATIONS=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'PROVIDER_METHODS=GET_ONLY' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'PROVIDER_WRITES=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'PERSISTENT_SERVICE_MUTATIONS=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'EXTERNAL_REPLY_WRITES=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'RAW_USER_DATA_LOGGED=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+              grep -Fxq 'SECRETS_PRINTED=false' <<< "$SAFE_LINES" || MARKERS_COMPLETE=false
+
+              for marker in "${boolean_markers[@]}"; do
+                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+                [[ "$value" =~ ^(true|false)$ ]] || MARKERS_COMPLETE=false
+              done
+              for marker in "${numeric_markers[@]}"; do
+                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+                [[ "$value" =~ ^[0-9]+$ ]] || MARKERS_COMPLETE=false
+              done
+              age="$(grep '^LATEST_COMMENT_AGE_MINUTES=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+              [[ "$age" == 'NONE' || "$age" =~ ^[0-9]+$ ]] || MARKERS_COMPLETE=false
+            fi
+
+            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then
+              break
+            fi
+            if [[ "$attempt" != '6' ]]; then
+              sleep 10
+            fi
+          done
+
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            printf -v REPORT '%s\n' \
+              'INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY_STATUS=BLOCKED_LOG_PROPAGATION' \
+              "LOG_POLL_ATTEMPTS=$POLL_ATTEMPTS" \
+              'PROVIDER_WRITES=false' \
+              'DATABASE_MUTATIONS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'RAW_USER_DATA_LOGGED=false'
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$REPORT" >/dev/null
+            exit 1
+          fi
+
+          REPORT="INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY_STATUS=PASS"$'\n'
+          REPORT+="HEALTH=${STATUS}"$'\n'
+          REPORT+="LOG_POLL_ATTEMPTS=${POLL_ATTEMPTS}"$'\n'
+          for marker in SUBSCRIPTION_MODEL "${boolean_markers[@]}" "${numeric_markers[@]}" LATEST_COMMENT_AGE_MINUTES DATABASE_MUTATIONS PROVIDER_METHODS PROVIDER_WRITES PERSISTENT_SERVICE_MUTATIONS EXTERNAL_REPLY_WRITES RAW_USER_DATA_LOGGED SECRETS_PRINTED; do
+            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2-)"
+            REPORT+="${marker}=${value}"$'\n'
+          done
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$REPORT" >/dev/null
+
+      - name: Delete temporary ingestion health job
+        if: always()
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${JOB:-}" ]]; then
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          fi
+
+      - name: Consume ingestion health authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${AUTHORIZATION_ISSUE:-}" ]]; then
+            ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+            BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+              -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          fi
