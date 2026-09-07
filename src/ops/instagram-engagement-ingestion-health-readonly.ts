@@ -35,6 +35,7 @@ let latestCommentAgeMinutes: number | null = null;
 
 let providerReadPass = false;
 let appInstagramSubscriptionPresent = false;
+let appCallbackUrlMatch = false;
 let appCommentsFieldPresent = false;
 let appMessagesFieldPresent = false;
 let pageAppSubscriptionPresent = false;
@@ -89,6 +90,9 @@ try {
       .map(asRecord)
       .find((entry) => safeScalarString(entry.object) === 'instagram');
     appInstagramSubscriptionPresent = Boolean(instagramSubscription);
+    appCallbackUrlMatch =
+      normalizedCallbackUrl(safeScalarString(instagramSubscription?.callback_url)) ===
+      normalizedCallbackUrl(`${webhookUrl}/webhooks/meta`);
     const appFields = fieldNames(instagramSubscription?.fields);
     appCommentsFieldPresent = appFields.has('comments');
     appMessagesFieldPresent = appFields.has('messages');
@@ -127,6 +131,7 @@ try {
   console.log(`DATABASE_READ_PASS=${databaseReadPass}`);
   console.log(`PROVIDER_READ_PASS=${providerReadPass}`);
   console.log(`APP_INSTAGRAM_SUBSCRIPTION_PRESENT=${appInstagramSubscriptionPresent}`);
+  console.log(`APP_CALLBACK_URL_MATCH=${appCallbackUrlMatch}`);
   console.log(`APP_COMMENTS_FIELD_PRESENT=${appCommentsFieldPresent}`);
   console.log(`APP_MESSAGES_FIELD_PRESENT=${appMessagesFieldPresent}`);
   console.log(`PAGE_APP_SUBSCRIPTION_PRESENT=${pageAppSubscriptionPresent}`);
@@ -154,6 +159,7 @@ function resolveStatus(): string {
   if (!databaseReadPass) return 'BLOCKED_DATABASE_READ';
   if (!providerReadPass) return 'BLOCKED_PROVIDER_READ';
   if (!appInstagramSubscriptionPresent) return 'BLOCKED_APP_SUBSCRIPTION';
+  if (!appCallbackUrlMatch) return 'BLOCKED_APP_CALLBACK_URL';
   if (!appCommentsFieldPresent) return 'BLOCKED_APP_COMMENTS_FIELD';
   if (!appMessagesFieldPresent) return 'BLOCKED_APP_MESSAGES_FIELD';
   if (!pageAppSubscriptionPresent) return 'BLOCKED_PAGE_SUBSCRIPTION';
@@ -186,6 +192,10 @@ function fieldNames(value: unknown): Set<string> {
     if (name) names.add(name);
   }
   return names;
+}
+
+function normalizedCallbackUrl(value: string): string {
+  return value.trim().replace(/\/$/, '');
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
