@@ -18,9 +18,12 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
     expect(source).toContain('${graphBaseUrl}/${apiVersion}/${appId}/subscriptions');
     expect(source).toContain('${graphBaseUrl}/${apiVersion}/${pageId}/subscribed_apps');
     expect(source).toContain("safeScalarString(entry.object) === 'instagram'");
+    expect(source).toContain('safeScalarString(instagramSubscription?.callback_url)');
     expect(source).toContain("appFields.has('comments')");
     expect(source).toContain("appFields.has('messages')");
     expect(source).toContain("pageFields.has('messages')");
+    expect(source).toContain('APP_CALLBACK_URL_MATCH=');
+    expect(source).toContain("return 'BLOCKED_APP_CALLBACK_URL'");
     expect(source).toContain('SUBSCRIPTION_MODEL=FACEBOOK_LOGIN_PAGE_BOUND');
     expect(source).toContain('PROVIDER_METHODS=GET_ONLY');
     expect(source).toContain('PROVIDER_WRITES=false');
@@ -92,6 +95,8 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
   it('publishes only an allowlisted sanitized result and consumes the authorization', () => {
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_INGESTION_HEALTH_READONLY_STATUS=PASS');
     expect(workflow).toContain('HEALTH=${STATUS}');
+    expect(workflow).toContain('BLOCKED_APP_CALLBACK_URL');
+    expect(workflow).toContain('APP_CALLBACK_URL_MATCH');
     expect(workflow).toContain('PROVIDER_METHODS=GET_ONLY');
     expect(workflow).toContain('RAW_USER_DATA_LOGGED=false');
     expect(workflow).toContain('SECRETS_PRINTED=false');
