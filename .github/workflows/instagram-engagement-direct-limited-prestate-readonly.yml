@@ -1,0 +1,191 @@
+name: Instagram Engagement Direct LIMITED Prestate Readonly
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-direct-limited-prestate-readonly
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+
+jobs:
+  direct-limited-prestate-readonly:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram DIRECT LIMITED prestate READONLY AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact Direct prestate controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate live single-use read-only authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram DIRECT LIMITED prestate READONLY AUTO"))
+          ' >/dev/null
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_DIRECT_LIMITED_PRESTATE_READONLY=AUTHORIZED'
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            'READ_ONLY_DIRECT_PRESTATE=true'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'SERVICE_MUTATIONS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'DIRECT_STATE_MUTATION_AUTHORIZED=false'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+            'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false'
+            'GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true'
+          )
+          for marker in "${required[@]}"; do
+            grep -Fxq "$marker" <<< "$BODY" || {
+              echo "Missing exact Direct prestate authorization field: $marker" >&2
+              exit 1
+            }
+          done
+
+          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640")"
+          CONTROL_BODY="$(printf '%s' "$CONTROL_JSON" | jq -r '.body // ""')"
+          printf '%s' "$CONTROL_JSON" | jq -e '.state == "open"' >/dev/null
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read exact immutable runtime and Direct LIMITED serving boundary
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          DIRECT_REVISION_COUNT="$(printf '%s' "$SERVICE_JSON" | jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length')"
+          test "$DIRECT_REVISION_COUNT" = '1'
+          DIRECT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | .[0]')"
+          test -n "$DIRECT_REVISION"
+
+          REVISION_JSON="$(gcloud run revisions describe "$DIRECT_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e '
+            .status.conditions as $conditions |
+            .spec.containers[0] as $c |
+            ([$conditions[]? | select(.type == "Ready") | .status] | last) == "True" and
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true" and
+            ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true" and
+            (([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false") == "false") and
+            (([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last // "DIRECT") == "DIRECT")
+          ' >/dev/null
+
+          echo 'DIRECT_LIMITED_PRESTATE=PASS'
+          echo 'RUNTIME_IMAGE_DIGEST_MATCH=true'
+          echo 'DIRECT_100_PERCENT_REVISION_COUNT=1'
+          echo 'DIRECT_REVISION_READY=true'
+          echo 'INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true'
+          echo 'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true'
+          echo 'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false'
+          echo 'INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT'
+          echo 'PROVIDER_CALLS=false'
+          echo 'DATABASE_MUTATIONS=false'
+          echo 'SERVICE_MUTATIONS=false'
+          echo 'EXTERNAL_REPLY_WRITES=false'
+          echo 'DIRECT_STATE_MUTATION=false'
+          echo 'RAW_USER_DATA_LOGGED=false'
+          echo 'SECRETS_PRINTED=false'
+
+      - name: Publish sanitized Direct LIMITED prestate and consume authorization
+        env:
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and (.user.login == $owner)
+          ' >/dev/null
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
+
+          printf -v report '%s\n' \
+            'INSTAGRAM_ENGAGEMENT_DIRECT_LIMITED_PRESTATE_READONLY_STATUS=PASS' \
+            'DIRECT_LIMITED_PRESTATE=PASS' \
+            'RUNTIME_IMAGE_DIGEST_MATCH=true' \
+            'DIRECT_100_PERCENT_REVISION_COUNT=1' \
+            'DIRECT_REVISION_READY=true' \
+            'INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true' \
+            'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=true' \
+            'INSTAGRAM_PUBLICATION_WRITES_ENABLED=false' \
+            'INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT' \
+            'PROVIDER_CALLS=false' \
+            'DATABASE_MUTATIONS=false' \
+            'SERVICE_MUTATIONS=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'DIRECT_STATE_MUTATION=false' \
+            'RAW_USER_DATA_LOGGED=false' \
+            'SECRETS_PRINTED=false' \
+            'AUTO_REAL_CANARY_AUTHORIZED=false' \
+            'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+
+          UPDATED_BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$UPDATED_BODY"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$UPDATED_BODY" >/dev/null
