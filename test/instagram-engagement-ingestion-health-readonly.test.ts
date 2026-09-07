@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(
-  'src/ops/instagram-engagement-ingestion-health-readonly.ts',
-  'utf8',
-);
+const source = readFileSync('src/ops/instagram-engagement-ingestion-health-readonly.ts', 'utf8');
 const workflow = readFileSync(
   '.github/workflows/instagram-engagement-ingestion-health-readonly.yml',
   'utf8',
@@ -30,8 +27,8 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
   });
 
   it('uses SELECT-only database health signals without exposing inbound payloads', () => {
-    expect(source).toContain("from event_outbox inbound");
-    expect(source).toContain("inbound.event_type = $1");
+    expect(source).toContain('from event_outbox inbound');
+    expect(source).toContain('inbound.event_type = $1');
     expect(source).toContain("inbound.payload->>'channel' = 'COMMENT'");
     expect(source).toContain("inbound.payload->>'accountId' = $2");
     expect(source).toContain('RECENT_COMMENT_COUNT_30M=');
@@ -39,7 +36,9 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
     expect(source).toContain('RECENT_COMMENT_COUNT_24H=');
     expect(source).toContain('VALID_COMMENT_COUNT_24H=');
     expect(source).toContain('LATEST_COMMENT_AGE_MINUTES=');
-    expect(source).not.toMatch(/\b(insert|update|delete|truncate)\s+(into\s+|from\s+)?event_outbox\b/i);
+    expect(source).not.toMatch(
+      /\b(insert|update|delete|truncate)\s+(into\s+|from\s+)?event_outbox\b/i,
+    );
     expect(source).not.toContain('console.log(payload');
     expect(source).not.toContain('console.log(inbound');
     expect(source).toContain('DATABASE_MUTATIONS=false');
@@ -63,7 +62,9 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
-    expect(workflow).toContain('ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"');
+    expect(workflow).toContain(
+      'ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"',
+    );
     expect(workflow).toContain('(.state == "open") and');
     expect(workflow).toContain('(.user.login == $owner)');
     expect(workflow).toContain('test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"');

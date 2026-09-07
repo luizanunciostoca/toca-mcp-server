@@ -93,9 +93,7 @@ try {
     appCommentsFieldPresent = appFields.has('comments');
     appMessagesFieldPresent = appFields.has('messages');
 
-    const pageSubscriptionsUrl = new URL(
-      `${graphBaseUrl}/${apiVersion}/${pageId}/subscribed_apps`,
-    );
+    const pageSubscriptionsUrl = new URL(`${graphBaseUrl}/${apiVersion}/${pageId}/subscribed_apps`);
     pageSubscriptionsUrl.searchParams.set('fields', 'id,subscribed_fields');
     pageSubscriptionsUrl.searchParams.set('access_token', pageAccessToken);
     const pageSubscriptions = await readJson(pageSubscriptionsUrl);
