@@ -116,7 +116,7 @@ jobs:
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120" \
             --command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js \
             --tasks 1 --max-retries 0 --task-timeout 120s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
@@ -130,9 +130,9 @@ jobs:
         run: |
           set -euo pipefail
           LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
-            --project "$GCP_PROJECT_ID" --freshness=1h --limit=200 --order=asc --format=json)"
+            --project "$GCP_PROJECT_ID" --freshness=1h --limit=250 --order=asc --format=json)"
           SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
-            | grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' \
+            | grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|RECENT_DIRECT_[A-Z_]+|DIRECT_OUTBOX_[A-Z_]+|DIRECT_ACTION_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' \
             || true)"
           STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
           CANDIDATE_COUNT="$(grep '^CANDIDATE_COUNT=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
@@ -151,6 +151,12 @@ jobs:
           done
           if [[ -n "$TARGET_SHA" ]]; then [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; fi
 
+          TRACE_LINES="$(printf '%s\n' "$SAFE_LINES" | grep -E '^(RECENT_DIRECT_[A-Z_]+|DIRECT_OUTBOX_[A-Z_]+|DIRECT_ACTION_[A-Z_]+)=' || true)"
+          while IFS='=' read -r key value; do
+            [[ -z "${key:-}" ]] && continue
+            [[ "$value" =~ ^[0-9]+$ ]] || { echo "Invalid aggregate trace value for $key" >&2; exit 1; }
+          done <<< "$TRACE_LINES"
+
           printf -v COMMENT '%s\n' \
             'CANARY_ELIGIBILITY_READONLY_STATUS=PASS' \
             "ELIGIBILITY=${STATUS}" \
@@ -164,6 +170,7 @@ jobs:
             "REJECTED_URGENCY=${REJECTED_URGENCY}" \
             "REJECTED_INTENT=${REJECTED_INTENT}" \
             "REJECTED_KNOWLEDGE=${REJECTED_KNOWLEDGE}" \
+            "${TRACE_LINES}" \
             'READ_ONLY_ELIGIBILITY=true' \
             'DATABASE_MUTATIONS=false' \
             'PROVIDER_CALLS=false' \
