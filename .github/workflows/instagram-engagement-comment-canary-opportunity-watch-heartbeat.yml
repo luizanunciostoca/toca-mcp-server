@@ -1,0 +1,267 @@
+name: Instagram Engagement Comment Canary Opportunity Watch Heartbeat
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: instagram-engagement-comment-canary-opportunity-watch-heartbeat
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  HEARTBEAT_DELAY_SECONDS: '540'
+  WATCH_WORKFLOW: instagram-engagement-comment-canary-opportunity-watch.yml
+  HEARTBEAT_WORKFLOW: instagram-engagement-comment-canary-opportunity-watch-heartbeat.yml
+
+jobs:
+  heartbeat:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve one active owner-authored current-main read-only watch
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO\""
+          SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+          MATCHES="$(jq -c --arg owner "$GITHUB_REPOSITORY_OWNER" '[.items[] | select(.pull_request == null) | select(.user.login == $owner) | select(.title | startswith("PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO"))]' <<< "$SEARCH_JSON")"
+          COUNT="$(jq 'length' <<< "$MATCHES")"
+
+          if [[ "$COUNT" = '0' ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'finalize=false' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT=INACTIVE_NO_AUTHORIZATION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$COUNT" != '1' ]]; then
+            echo "Expected exactly one active owner-authored Comment watch authorization, found $COUNT" >&2
+            exit 1
+          fi
+
+          ISSUE_NUMBER="$(jq -r '.[0].number' <<< "$MATCHES")"
+          BODY="$(jq -r '.[0].body // ""' <<< "$MATCHES")"
+          if [[ "$GITHUB_EVENT_NAME" = 'issues' ]]; then
+            EVENT_ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+            test "$EVENT_ISSUE_NUMBER" = "$ISSUE_NUMBER"
+          fi
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+
+          required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+            'WATCH_MODE=READ_ONLY'
+            'WATCH_INTERVAL_MINUTES=10'
+            'WATCH_MAX_LIFETIME_HOURS=12'
+            'CANARY_CHANNEL=COMMENT'
+            'MAX_AGE_MINUTES=30'
+            'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+            'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+            'DIRECT_LIMITED_MUST_REMAIN_UNCHANGED=true'
+            'GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true'
+            'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false'
+          )
+          for marker in "${required[@]}"; do
+            grep -Fxq "$marker" <<< "$BODY" || {
+              echo "Missing exact Comment watch heartbeat safety marker: $marker" >&2
+              exit 1
+            }
+          done
+
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s)"
+          NOW_EPOCH="$(date -u +%s)"
+
+          echo "watch_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          if [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" || "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'finalize=true' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT=FINALIZE_STALE_OR_EXPIRED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo 'active=true' >> "$GITHUB_OUTPUT"
+          echo 'finalize=false' >> "$GITHUB_OUTPUT"
+          echo 'COMMENT_CANARY_WATCH_HEARTBEAT=ACTIVE_READ_ONLY' >> "$GITHUB_STEP_SUMMARY"
+          echo "WATCH_AUTHORIZATION_ISSUE=$ISSUE_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Finalize stale or expired watch through canonical controller
+        if: steps.auth.outputs.finalize == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${WATCH_WORKFLOW}/dispatches" \
+            -f ref=main
+          echo 'COMMENT_CANARY_WATCH_HEARTBEAT_FINALIZER=DISPATCHED' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_WORKFLOW=instagram-engagement-comment-canary-opportunity-watch.yml' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait bounded heartbeat interval
+        if: steps.auth.outputs.active == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep "$HEARTBEAT_DELAY_SECONDS"
+
+      - name: Revalidate watch and determine probe dispatch
+        if: steps.auth.outputs.active == 'true'
+        id: decision
+        env:
+          WATCH_ISSUE: ${{ steps.auth.outputs.watch_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+          if [[ "$(jq -r '.state' <<< "$ISSUE_JSON")" != 'open' ]]; then
+            echo 'action=stop' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=STOP_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+
+          required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+            'WATCH_MODE=READ_ONLY'
+            'WATCH_INTERVAL_MINUTES=10'
+            'WATCH_MAX_LIFETIME_HOURS=12'
+            'CANARY_CHANNEL=COMMENT'
+            'MAX_AGE_MINUTES=30'
+            'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+            'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+            'DIRECT_LIMITED_MUST_REMAIN_UNCHANGED=true'
+            'GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true'
+            'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false'
+          )
+          for marker in "${required[@]}"; do
+            if ! grep -Fxq "$marker" <<< "$BODY"; then
+              echo 'action=finalize' >> "$GITHUB_OUTPUT"
+              echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=FINALIZE_INVALID_AUTHORIZATION' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+
+          if ! [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'action=finalize' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=FINALIZE_INVALID_DIGEST' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s)"
+          NOW_EPOCH="$(date -u +%s)"
+          if [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" || "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]; then
+            echo 'action=finalize' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=FINALIZE_STALE_OR_EXPIRED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${WATCH_WORKFLOW}/runs?branch=main&per_page=20")"
+          ACTIVE_WATCH_RUNS="$(jq '[.workflow_runs[] | select(.status != "completed")] | length' <<< "$RUNS_JSON")"
+          if [[ "$ACTIVE_WATCH_RUNS" = '0' ]]; then
+            echo 'action=dispatch_probe' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=DISPATCH_PROBE' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'action=skip_probe' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_DECISION=SKIP_EXISTING_ACTIVE_PROBE' >> "$GITHUB_STEP_SUMMARY"
+            echo "ACTIVE_CANONICAL_WATCH_RUNS=$ACTIVE_WATCH_RUNS" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Dispatch only canonical read-only watch controller
+        if: steps.decision.outputs.action == 'dispatch_probe' || steps.decision.outputs.action == 'finalize'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${WATCH_WORKFLOW}/dispatches" \
+            -f ref=main
+          echo 'COMMENT_CANARY_WATCH_HEARTBEAT_PROBE_DISPATCH=DISPATCHED' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_WORKFLOW=instagram-engagement-comment-canary-opportunity-watch.yml' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_REF=main' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'DATABASE_MUTATIONS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'SERVICE_MUTATIONS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rearm heartbeat only while same watch remains current and active
+        if: steps.decision.outputs.action == 'dispatch_probe' || steps.decision.outputs.action == 'skip_probe'
+        env:
+          WATCH_ISSUE: ${{ steps.auth.outputs.watch_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+          if [[ "$(jq -r '.state' <<< "$ISSUE_JSON")" != 'open' ]]; then
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_CLOSED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          if ! grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY" || [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" ]]; then
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_STALE' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s)"
+          NOW_EPOCH="$(date -u +%s)"
+          if [[ "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]; then
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXPIRED' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          HEARTBEAT_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${HEARTBEAT_WORKFLOW}/runs?branch=main&per_page=20")"
+          OTHER_ACTIVE="$(jq --argjson current "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $current) | select(.status != "completed")] | length' <<< "$HEARTBEAT_RUNS")"
+          if [[ "$OTHER_ACTIVE" != '0' ]]; then
+            echo 'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXISTING_ACTIVE_HEARTBEAT' >> "$GITHUB_STEP_SUMMARY"
+            echo "OTHER_ACTIVE_HEARTBEATS=$OTHER_ACTIVE" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${HEARTBEAT_WORKFLOW}/dispatches" \
+            -f ref=main
+          echo 'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=DISPATCHED' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_REF=main' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
