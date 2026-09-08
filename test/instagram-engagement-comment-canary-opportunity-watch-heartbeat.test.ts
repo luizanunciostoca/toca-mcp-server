@@ -12,9 +12,7 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain('types: [opened]');
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
-    expect(workflow).toContain(
-      'github.event.issue.user.login == github.repository_owner',
-    );
+    expect(workflow).toContain('github.event.issue.user.login == github.repository_owner');
     expect(workflow).toContain(
       "startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO')",
     );
@@ -38,25 +36,19 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain('select(.user.login == $owner)');
     expect(workflow).toContain('if [[ "$COUNT" != \'1\' ]]');
     expect(workflow).toContain('AUTHORIZATION_STATE=ACTIVE');
-    expect(workflow).toContain(
-      'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED',
-    );
+    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED');
     expect(workflow).toContain('WATCH_MODE=READ_ONLY');
     expect(workflow).toContain('WATCH_INTERVAL_MINUTES=10');
     expect(workflow).toContain('WATCH_MAX_LIFETIME_HOURS=12');
     expect(workflow).toContain('CANARY_CHANNEL=COMMENT');
-    expect(workflow).toContain(
-      'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false',
-    );
+    expect(workflow).toContain('PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false');
     expect(workflow).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
     expect(workflow).toContain('PROVIDER_CALLS_AUTHORIZED=false');
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES_AUTHORIZED=false');
     expect(workflow).toContain('AUTO_REAL_CANARY_AUTHORIZED=false');
     expect(workflow).toContain('DIRECT_LIMITED_MUST_REMAIN_UNCHANGED=true');
     expect(workflow).toContain('GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true');
-    expect(workflow).toContain(
-      'PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false',
-    );
+    expect(workflow).toContain('PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false');
     expect(workflow).toContain('^sha256:[0-9a-f]{64}$');
   });
 
@@ -64,9 +56,7 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain("HEARTBEAT_DELAY_SECONDS: '540'");
     expect(workflow).toContain('sleep "$HEARTBEAT_DELAY_SECONDS"');
     expect(workflow).toContain('Revalidate watch and determine probe dispatch');
-    expect(workflow).toContain(
-      "if [[ \"$(jq -r '.state' <<< \"$ISSUE_JSON\")\" != 'open' ]]",
-    );
+    expect(workflow).toContain('if [[ "$(jq -r \' .state\' <<< "$ISSUE_JSON")" != \'open\' ]]'.replace("' .state'", "'.state'"));
     expect(workflow).toContain(
       'if [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" || "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]',
     );
@@ -86,12 +76,8 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain(
       'TARGET_WORKFLOW=instagram-engagement-comment-canary-opportunity-watch.yml',
     );
-    expect(workflow).not.toContain(
-      'instagram-engagement-comment-provider-canary.yml',
-    );
-    expect(workflow).not.toContain(
-      'INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED',
-    );
+    expect(workflow).not.toContain('instagram-engagement-comment-provider-canary.yml');
+    expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_REAL_COMMENT_CANARY=AUTHORIZED');
     expect(workflow).not.toContain('EXTERNAL_COMMENT_REPLY_AUTHORIZED=true');
   });
 
@@ -99,18 +85,10 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain(
       'HEARTBEAT_WORKFLOW: instagram-engagement-comment-canary-opportunity-watch-heartbeat.yml',
     );
-    expect(workflow).toContain(
-      'Rearm heartbeat only while same watch remains current and active',
-    );
-    expect(workflow).toContain(
-      'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_CLOSED',
-    );
-    expect(workflow).toContain(
-      'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_STALE',
-    );
-    expect(workflow).toContain(
-      'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXPIRED',
-    );
+    expect(workflow).toContain('Rearm heartbeat only while same watch remains current and active');
+    expect(workflow).toContain('COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_CLOSED');
+    expect(workflow).toContain('COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_STALE');
+    expect(workflow).toContain('COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXPIRED');
     expect(workflow).toContain('select(.id != $current)');
     expect(workflow).toContain(
       'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXISTING_ACTIVE_HEARTBEAT',
@@ -118,9 +96,7 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain(
       '"repos/${GITHUB_REPOSITORY}/actions/workflows/${HEARTBEAT_WORKFLOW}/dispatches"',
     );
-    expect(workflow).toContain(
-      'COMMENT_CANARY_WATCH_HEARTBEAT_REARM=DISPATCHED',
-    );
+    expect(workflow).toContain('COMMENT_CANARY_WATCH_HEARTBEAT_REARM=DISPATCHED');
   });
 
   it('keeps every declared side-effect attestation fail-closed', () => {
