@@ -6,7 +6,7 @@ on:
       - fix/instagram-direct-human-review-trace
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -23,12 +23,23 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Format target and print deterministic base64
+      - name: Apply exact Prettier output when needed
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec prettier --write src/ops/instagram-engagement-direct-human-review-trace-readonly.ts
-          echo 'FORMATTED_BASE64_BEGIN'
-          base64 -w0 src/ops/instagram-engagement-direct-human-review-trace-readonly.ts
-          echo
-          echo 'FORMATTED_BASE64_END'
+          TARGET='src/ops/instagram-engagement-direct-human-review-trace-readonly.ts'
+          pnpm exec prettier --write "$TARGET"
+          if git diff --quiet -- "$TARGET"; then
+            echo 'PRETTIER_ALREADY_EXACT=true'
+            exit 0
+          fi
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET}?ref=${GITHUB_REF_NAME}" --jq '.sha')"
+          CONTENT="$(base64 -w0 "$TARGET")"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${TARGET}" \
+            -f message='style(instagram): apply exact Prettier output' \
+            -f content="$CONTENT" \
+            -f sha="$SHA" \
+            -f branch="$GITHUB_REF_NAME" >/dev/null
+          echo 'PRETTIER_APPLIED=true'
