@@ -1,0 +1,61 @@
+name: Temporary Comment Watch Candidate Formatter
+
+on:
+  push:
+    branches:
+      - fix/comment-watch-transient-probe-resilience
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository_owner == 'luizanunciostoca'
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/comment-watch-transient-probe-resilience
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format only authorized candidate files
+        run: >-
+          pnpm exec prettier --write
+          .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
+          test/instagram-engagement-comment-canary-opportunity-watch.test.ts
+
+      - name: Verify exact formatting
+        run: >-
+          pnpm exec prettier --check
+          .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
+          test/instagram-engagement-comment-canary-opportunity-watch.test.ts
+
+      - name: Commit formatted candidate and remove temporary formatter
+        env:
+          BRANCH: fix/comment-watch-transient-probe-resilience
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
+          git add test/instagram-engagement-comment-canary-opportunity-watch.test.ts
+          git rm .github/workflows/tmp-comment-watch-prettier.yml
+          git commit -m 'chore: format Comment watch candidate'
+          git push origin "HEAD:${BRANCH}"
