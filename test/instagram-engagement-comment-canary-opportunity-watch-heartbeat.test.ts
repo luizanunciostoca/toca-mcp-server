@@ -56,7 +56,7 @@ describe('Instagram Comment canary opportunity watch heartbeat', () => {
     expect(workflow).toContain("HEARTBEAT_DELAY_SECONDS: '540'");
     expect(workflow).toContain('sleep "$HEARTBEAT_DELAY_SECONDS"');
     expect(workflow).toContain('Revalidate watch and determine probe dispatch');
-    expect(workflow).toContain('if [[ "$(jq -r \' .state\' <<< "$ISSUE_JSON")" != \'open\' ]]'.replace("' .state'", "'.state'"));
+    expect(workflow).toContain('if [[ "$(jq -r \' .state\' <<< "$ISSUE_JSON")" != \'open\' ]]'.replace(' .state', '.state'));
     expect(workflow).toContain(
       'if [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" || "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]',
     );
