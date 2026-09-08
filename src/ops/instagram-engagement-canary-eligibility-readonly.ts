@@ -12,7 +12,13 @@ const AUTO_ELIGIBLE = new Set([
   'LOCATION_HOURS',
   'GENERAL_SOCIAL',
 ]);
-const OUTBOX_STATUSES = ['PENDING', 'CLAIMED', 'FAILED_RETRYABLE', 'DELIVERED', 'DEAD_LETTER'] as const;
+const OUTBOX_STATUSES = [
+  'PENDING',
+  'CLAIMED',
+  'FAILED_RETRYABLE',
+  'DELIVERED',
+  'DEAD_LETTER',
+] as const;
 const ACTION_STATUSES = [
   'CLASSIFIED',
   'SUGGESTED',
@@ -81,7 +87,9 @@ try {
       group by status`,
     [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
   );
-  const outboxByStatus = new Map(outboxCounts.rows.map((row) => [row.status, Number(row.count)]));
+  const outboxByStatus = new Map(
+    outboxCounts.rows.map((row) => [row.status, Number(row.count)]),
+  );
   const recentDirectOutboxTotal = OUTBOX_STATUSES.reduce(
     (sum, status) => sum + (outboxByStatus.get(status) ?? 0),
     0,
@@ -98,7 +106,9 @@ try {
       group by status`,
     [tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
   );
-  const actionByStatus = new Map(actionCounts.rows.map((row) => [row.status, Number(row.count)]));
+  const actionByStatus = new Map(
+    actionCounts.rows.map((row) => [row.status, Number(row.count)]),
+  );
   const recentDirectActionTotal = ACTION_STATUSES.reduce(
     (sum, status) => sum + (actionByStatus.get(status) ?? 0),
     0,
@@ -172,11 +182,15 @@ try {
   console.log(`REJECTED_KNOWLEDGE=${rejected.knowledge}`);
   console.log(`RECENT_DIRECT_OUTBOX_TOTAL=${recentDirectOutboxTotal}`);
   for (const outboxStatus of OUTBOX_STATUSES) {
-    console.log(`DIRECT_OUTBOX_${outboxStatus}=${outboxByStatus.get(outboxStatus) ?? 0}`);
+    console.log(
+      `DIRECT_OUTBOX_${outboxStatus}=${outboxByStatus.get(outboxStatus) ?? 0}`,
+    );
   }
   console.log(`RECENT_DIRECT_ACTION_TOTAL=${recentDirectActionTotal}`);
   for (const actionStatus of ACTION_STATUSES) {
-    console.log(`DIRECT_ACTION_${actionStatus}=${actionByStatus.get(actionStatus) ?? 0}`);
+    console.log(
+      `DIRECT_ACTION_${actionStatus}=${actionByStatus.get(actionStatus) ?? 0}`,
+    );
   }
   console.log('READ_ONLY_ELIGIBILITY=true');
   console.log('DATABASE_MUTATIONS=false');
