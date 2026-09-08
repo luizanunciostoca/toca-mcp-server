@@ -39,18 +39,38 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('GH_TOKEN: ${{ github.token }}');
   });
 
-  it('reuses the Comment-specific read-only probe with no blind retries', () => {
+  it('uses at most one controller-level recovery execution while keeping Cloud Run retries disabled', () => {
     expect(workflow).toContain(
       '--command node --args dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js',
     );
     expect(workflow).toContain('--max-retries 0');
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30');
+    expect(workflow).toContain('for attempt in 1 2; do');
+    expect(workflow).toContain('JOB="${BASE_JOB}-${attempt}"');
+    expect(workflow).toContain('if gcloud run jobs execute "$JOB"');
+    expect(workflow).toContain("if [[ \"$attempt\" = '1' ]]; then");
+    expect(workflow).toContain('PROBE_EXECUTION_RECOVERY_ATTEMPT=2');
+    expect(workflow).toContain('sleep 5');
+    expect(workflow).toContain('PROBE_EXECUTION_TERMINAL_FAILURE=true');
+    expect(workflow).toContain('execution_attempts=$attempt');
+    expect(workflow).not.toContain('for attempt in 1 2 3; do');
     expect(workflow).toContain("grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY");
     expect(workflow).toContain('RAW_USER_DATA_LOGGED');
     expect(workflow).toContain('if [[ "$STATUS" = \'READY\' ]]');
     expect(workflow).toContain('test "$ELIGIBLE_COUNT" = \'1\'');
     expect(workflow).toContain('test "$AMBIGUITY_COUNT" = \'0\'');
     expect(workflow).toContain('test "$RESERVATION_COUNT" = \'0\'');
+  });
+
+  it('isolates recovery logs to the successful temporary job and cleans every deployed job', () => {
+    expect(workflow).toContain('DEPLOYED_JOBS=()');
+    expect(workflow).toContain('DEPLOYED_JOBS+=("$JOB")');
+    expect(workflow).toContain('echo "jobs=${DEPLOYED_JOBS[*]}" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain('echo "job=$JOB" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain('JOB: ${{ steps.probe.outputs.job }}');
+    expect(workflow).toContain('JOBS: ${{ steps.probe.outputs.jobs }}');
+    expect(workflow).toContain('for job in ${JOBS:-}; do');
+    expect(workflow).toContain('gcloud run jobs delete "$job"');
   });
 
   it('fails closed unless probe safety attestations are unique and exact', () => {
@@ -100,7 +120,7 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).not.toContain('gcloud scheduler ');
   });
 
-  it('keeps no-target watches active but consumes terminal, stale, expired, or failed watches', () => {
+  it('keeps no-target watches active but consumes terminal, stale, expired, or doubly-failed watches', () => {
     expect(workflow).toContain('if [[ "$STATUS" = \'NO_ELIGIBLE_TARGET\' ]]');
     expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
     expect(workflow).toContain("close_watch 'STALE_MAIN'");
@@ -110,13 +130,14 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain(
       'COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE',
     );
+    expect(workflow).toContain('PROBE_EXECUTION_ATTEMPTS=${PROBE_EXECUTION_ATTEMPTS:-0}');
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(workflow).toContain('-f state=closed -f state_reason=completed');
   });
 
   it('limits side effects to temporary diagnostic jobs and sanitized GitHub governance', () => {
     expect(workflow).toContain('gcloud run jobs deploy "$JOB"');
-    expect(workflow).toContain('gcloud run jobs delete "$JOB"');
+    expect(workflow).toContain('gcloud run jobs delete "$job"');
     expect(workflow).toContain('PROVIDER_CALLS=false');
     expect(workflow).toContain('EXTERNAL_REPLY_WRITES=false');
     expect(workflow).toContain('AUTO_REAL_CANARY_AUTHORIZED=false');
