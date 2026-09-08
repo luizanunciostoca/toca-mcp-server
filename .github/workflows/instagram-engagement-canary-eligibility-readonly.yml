@@ -135,17 +135,35 @@ jobs:
             | grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' \
             || true)"
           STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          CANDIDATE_COUNT="$(grep '^CANDIDATE_COUNT=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
           ELIGIBLE_COUNT="$(grep '^ELIGIBLE_COUNT=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
           TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2- || true)"
+          REJECTED_CONFIDENCE="$(grep '^REJECTED_CONFIDENCE=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_PRIORITY="$(grep '^REJECTED_PRIORITY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_SENSITIVE="$(grep '^REJECTED_SENSITIVE=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_COMMERCIAL="$(grep '^REJECTED_COMMERCIAL=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_URGENCY="$(grep '^REJECTED_URGENCY=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_INTENT="$(grep '^REJECTED_INTENT=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
+          REJECTED_KNOWLEDGE="$(grep '^REJECTED_KNOWLEDGE=' <<< "$SAFE_LINES" | tail -1 | cut -d= -f2-)"
           [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS)$ ]]
-          [[ "$ELIGIBLE_COUNT" =~ ^[0-9]+$ ]]
+          for value in "$CANDIDATE_COUNT" "$ELIGIBLE_COUNT" "$REJECTED_CONFIDENCE" "$REJECTED_PRIORITY" "$REJECTED_SENSITIVE" "$REJECTED_COMMERCIAL" "$REJECTED_URGENCY" "$REJECTED_INTENT" "$REJECTED_KNOWLEDGE"; do
+            [[ "$value" =~ ^[0-9]+$ ]]
+          done
           if [[ -n "$TARGET_SHA" ]]; then [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; fi
 
           printf -v COMMENT '%s\n' \
             'CANARY_ELIGIBILITY_READONLY_STATUS=PASS' \
             "ELIGIBILITY=${STATUS}" \
+            "CANDIDATE_COUNT=${CANDIDATE_COUNT}" \
             "ELIGIBLE_COUNT=${ELIGIBLE_COUNT}" \
             "ELIGIBLE_TARGET_SHA256=${TARGET_SHA:-NONE}" \
+            "REJECTED_CONFIDENCE=${REJECTED_CONFIDENCE}" \
+            "REJECTED_PRIORITY=${REJECTED_PRIORITY}" \
+            "REJECTED_SENSITIVE=${REJECTED_SENSITIVE}" \
+            "REJECTED_COMMERCIAL=${REJECTED_COMMERCIAL}" \
+            "REJECTED_URGENCY=${REJECTED_URGENCY}" \
+            "REJECTED_INTENT=${REJECTED_INTENT}" \
+            "REJECTED_KNOWLEDGE=${REJECTED_KNOWLEDGE}" \
             'READ_ONLY_ELIGIBILITY=true' \
             'DATABASE_MUTATIONS=false' \
             'PROVIDER_CALLS=false' \
