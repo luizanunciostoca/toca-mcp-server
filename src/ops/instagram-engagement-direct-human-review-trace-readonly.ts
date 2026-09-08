@@ -82,9 +82,7 @@ try {
       group by intent`,
     [tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
-  const byIntent = new Map(
-    intentCounts.rows.map((row) => [row.intent, Number(row.count)]),
-  );
+  const byIntent = new Map(intentCounts.rows.map((row) => [row.intent, Number(row.count)]));
   const knownIntentTotal = ACTION_INTENTS.reduce(
     (sum, intent) => sum + (byIntent.get(intent) ?? 0),
     0,
@@ -102,9 +100,7 @@ try {
       group by policy_reason`,
     [tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
-  const byReason = new Map(
-    reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]),
-  );
+  const byReason = new Map(reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]));
   const knownReasonTotal = POLICY_REASONS.reduce(
     (sum, reason) => sum + (byReason.get(reason) ?? 0),
     0,
@@ -116,13 +112,9 @@ try {
   for (const intent of ACTION_INTENTS) {
     console.log(`DIRECT_HUMAN_INTENT_${intent}=${byIntent.get(intent) ?? 0}`);
   }
-  console.log(
-    `DIRECT_HUMAN_INTENT_OTHER=${Math.max(0, humanReviewTotal - knownIntentTotal)}`,
-  );
+  console.log(`DIRECT_HUMAN_INTENT_OTHER=${Math.max(0, humanReviewTotal - knownIntentTotal)}`);
   for (const reason of POLICY_REASONS) {
-    console.log(
-      `DIRECT_HUMAN_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`,
-    );
+    console.log(`DIRECT_HUMAN_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`);
   }
   console.log(
     `DIRECT_HUMAN_POLICY_REASON_OTHER=${Math.max(0, humanReviewTotal - knownReasonTotal)}`,
