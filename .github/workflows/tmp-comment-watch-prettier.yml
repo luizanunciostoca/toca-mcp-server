@@ -47,15 +47,12 @@ jobs:
           .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
           test/instagram-engagement-comment-canary-opportunity-watch.test.ts
 
-      - name: Emit formatted files as base64
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo 'FORMAT_WORKFLOW_B64_BEGIN'
-          base64 -w0 .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
-          echo
-          echo 'FORMAT_WORKFLOW_B64_END'
-          echo 'FORMAT_TEST_B64_BEGIN'
-          base64 -w0 test/instagram-engagement-comment-canary-opportunity-watch.test.ts
-          echo
-          echo 'FORMAT_TEST_B64_END'
+      - name: Upload formatted candidate artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: comment-watch-formatted-${{ github.run_id }}
+          path: |
+            .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
+            test/instagram-engagement-comment-canary-opportunity-watch.test.ts
+          if-no-files-found: error
+          retention-days: 1
