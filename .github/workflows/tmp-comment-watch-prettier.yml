@@ -6,7 +6,7 @@ on:
       - fix/comment-watch-transient-probe-resilience
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   format:
@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/comment-watch-transient-probe-resilience
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Setup pnpm
@@ -46,16 +47,15 @@ jobs:
           .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
           test/instagram-engagement-comment-canary-opportunity-watch.test.ts
 
-      - name: Commit formatted candidate and remove temporary formatter
-        env:
-          BRANCH: fix/comment-watch-transient-probe-resilience
+      - name: Emit formatted files as base64
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
-          git add test/instagram-engagement-comment-canary-opportunity-watch.test.ts
-          git rm .github/workflows/tmp-comment-watch-prettier.yml
-          git commit -m 'chore: format Comment watch candidate'
-          git push origin "HEAD:${BRANCH}"
+          echo 'FORMAT_WORKFLOW_B64_BEGIN'
+          base64 -w0 .github/workflows/instagram-engagement-comment-canary-opportunity-watch.yml
+          echo
+          echo 'FORMAT_WORKFLOW_B64_END'
+          echo 'FORMAT_TEST_B64_BEGIN'
+          base64 -w0 test/instagram-engagement-comment-canary-opportunity-watch.test.ts
+          echo
+          echo 'FORMAT_TEST_B64_END'
