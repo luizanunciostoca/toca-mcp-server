@@ -9,7 +9,11 @@ interface InboundHealthRow {
   count_30m: number;
   count_6h: number;
   count_24h: number;
+  valid_count_30m: number;
   valid_count_24h: number;
+  missing_comment_id_count_30m: number;
+  missing_sender_id_count_30m: number;
+  missing_text_count_30m: number;
   latest_at: Date | string | null;
 }
 
@@ -30,7 +34,11 @@ let databaseReadPass = false;
 let recentCommentCount30m = 0;
 let recentCommentCount6h = 0;
 let recentCommentCount24h = 0;
+let validCommentCount30m = 0;
 let validCommentCount24h = 0;
+let missingCommentIdCount30m = 0;
+let missingSenderIdCount30m = 0;
+let missingTextCount30m = 0;
 let latestCommentAgeMinutes: number | null = null;
 
 let providerReadPass = false;
@@ -50,11 +58,29 @@ try {
          count(*) filter (where inbound.occurred_at >= now() - interval '6 hours')::int as count_6h,
          count(*) filter (where inbound.occurred_at >= now() - interval '24 hours')::int as count_24h,
          count(*) filter (
+           where inbound.occurred_at >= now() - interval '30 minutes'
+             and nullif(trim(inbound.payload->>'commentId'),'') is not null
+             and nullif(trim(inbound.payload->>'senderId'),'') is not null
+             and nullif(trim(inbound.payload->>'text'),'') is not null
+         )::int as valid_count_30m,
+         count(*) filter (
            where inbound.occurred_at >= now() - interval '24 hours'
              and nullif(trim(inbound.payload->>'commentId'),'') is not null
              and nullif(trim(inbound.payload->>'senderId'),'') is not null
              and nullif(trim(inbound.payload->>'text'),'') is not null
          )::int as valid_count_24h,
+         count(*) filter (
+           where inbound.occurred_at >= now() - interval '30 minutes'
+             and nullif(trim(inbound.payload->>'commentId'),'') is null
+         )::int as missing_comment_id_count_30m,
+         count(*) filter (
+           where inbound.occurred_at >= now() - interval '30 minutes'
+             and nullif(trim(inbound.payload->>'senderId'),'') is null
+         )::int as missing_sender_id_count_30m,
+         count(*) filter (
+           where inbound.occurred_at >= now() - interval '30 minutes'
+             and nullif(trim(inbound.payload->>'text'),'') is null
+         )::int as missing_text_count_30m,
          max(inbound.occurred_at) as latest_at
        from event_outbox inbound
       where inbound.event_type = $1
@@ -67,7 +93,11 @@ try {
     recentCommentCount30m = row?.count_30m ?? 0;
     recentCommentCount6h = row?.count_6h ?? 0;
     recentCommentCount24h = row?.count_24h ?? 0;
+    validCommentCount30m = row?.valid_count_30m ?? 0;
     validCommentCount24h = row?.valid_count_24h ?? 0;
+    missingCommentIdCount30m = row?.missing_comment_id_count_30m ?? 0;
+    missingSenderIdCount30m = row?.missing_sender_id_count_30m ?? 0;
+    missingTextCount30m = row?.missing_text_count_30m ?? 0;
     latestCommentAgeMinutes = ageMinutes(row?.latest_at ?? null);
     databaseReadPass = true;
   } catch {
@@ -140,7 +170,11 @@ try {
   console.log(`RECENT_COMMENT_COUNT_30M=${recentCommentCount30m}`);
   console.log(`RECENT_COMMENT_COUNT_6H=${recentCommentCount6h}`);
   console.log(`RECENT_COMMENT_COUNT_24H=${recentCommentCount24h}`);
+  console.log(`VALID_COMMENT_COUNT_30M=${validCommentCount30m}`);
   console.log(`VALID_COMMENT_COUNT_24H=${validCommentCount24h}`);
+  console.log(`MISSING_COMMENT_ID_COUNT_30M=${missingCommentIdCount30m}`);
+  console.log(`MISSING_SENDER_ID_COUNT_30M=${missingSenderIdCount30m}`);
+  console.log(`MISSING_TEXT_COUNT_30M=${missingTextCount30m}`);
   console.log(
     `LATEST_COMMENT_AGE_MINUTES=${latestCommentAgeMinutes === null ? 'NONE' : latestCommentAgeMinutes}`,
   );
