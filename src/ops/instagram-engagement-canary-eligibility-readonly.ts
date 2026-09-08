@@ -122,7 +122,10 @@ try {
     0,
   );
 
-  const knowledge = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
+  const knowledge = new PostgresInstagramEngagementKnowledgeSource(
+    pool,
+    spreadsheetId,
+  );
   const eligible: string[] = [];
   const rejected = {
     confidence: 0,
@@ -180,7 +183,9 @@ try {
   console.log(`INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY=${status}`);
   console.log(`CANDIDATE_COUNT=${candidates.rowCount ?? candidates.rows.length}`);
   console.log(`ELIGIBLE_COUNT=${eligible.length}`);
-  if (eligible.length === 1) console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
+  if (eligible.length === 1) {
+    console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
+  }
   console.log(`REJECTED_CONFIDENCE=${rejected.confidence}`);
   console.log(`REJECTED_PRIORITY=${rejected.priority}`);
   console.log(`REJECTED_SENSITIVE=${rejected.sensitive}`);
@@ -230,7 +235,9 @@ function boundedInteger(
 }
 
 function safeText(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
   const text = (payload as Record<string, unknown>).text;
   return typeof text === 'string' && text.trim() ? text : null;
 }
