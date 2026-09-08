@@ -48,7 +48,7 @@ describe('Instagram Comment canary opportunity watch', () => {
     expect(workflow).toContain('for attempt in 1 2; do');
     expect(workflow).toContain('JOB="${BASE_JOB}-${attempt}"');
     expect(workflow).toContain('if gcloud run jobs execute "$JOB"');
-    expect(workflow).toContain("if [[ \"$attempt\" = '1' ]]; then");
+    expect(workflow).toContain('if [[ "$attempt" = \'1\' ]]; then');
     expect(workflow).toContain('PROBE_EXECUTION_RECOVERY_ATTEMPT=2');
     expect(workflow).toContain('sleep 5');
     expect(workflow).toContain('PROBE_EXECUTION_TERMINAL_FAILURE=true');
