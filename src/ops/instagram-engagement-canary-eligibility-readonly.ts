@@ -12,6 +12,16 @@ const AUTO_ELIGIBLE = new Set([
   'LOCATION_HOURS',
   'GENERAL_SOCIAL',
 ]);
+const OUTBOX_STATUSES = ['PENDING', 'CLAIMED', 'FAILED_RETRYABLE', 'DELIVERED', 'DEAD_LETTER'] as const;
+const ACTION_STATUSES = [
+  'CLASSIFIED',
+  'SUGGESTED',
+  'HUMAN_REVIEW',
+  'READY_TO_SEND',
+  'SENT',
+  'SEND_FAILED',
+  'SEND_AMBIGUOUS',
+] as const;
 
 const databaseUrl = requiredEnv('DATABASE_URL');
 const tenantId = requiredEnv('INSTAGRAM_ENGAGEMENT_TENANT_ID');
@@ -57,6 +67,41 @@ try {
       order by candidate.occurred_at asc, candidate.event_id asc
       limit 100`,
     [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+  );
+
+  const outboxCounts = await pool.query<{ status: string; count: string }>(
+    `select status, count(*)::text as count
+       from event_outbox
+      where event_type = $1
+        and tenant_id = $2
+        and workspace_id = $3
+        and organization_id = $4
+        and occurred_at >= now() - ($5::text || ' minutes')::interval
+        and payload->>'channel' = 'DIRECT'
+      group by status`,
+    [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+  );
+  const outboxByStatus = new Map(outboxCounts.rows.map((row) => [row.status, Number(row.count)]));
+  const recentDirectOutboxTotal = OUTBOX_STATUSES.reduce(
+    (sum, status) => sum + (outboxByStatus.get(status) ?? 0),
+    0,
+  );
+
+  const actionCounts = await pool.query<{ status: string; count: string }>(
+    `select status, count(*)::text as count
+       from instagram_engagement_actions
+      where tenant_id = $1
+        and workspace_id = $2
+        and organization_id = $3
+        and channel = 'DIRECT'
+        and created_at >= now() - ($4::text || ' minutes')::interval
+      group by status`,
+    [tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+  );
+  const actionByStatus = new Map(actionCounts.rows.map((row) => [row.status, Number(row.count)]));
+  const recentDirectActionTotal = ACTION_STATUSES.reduce(
+    (sum, status) => sum + (actionByStatus.get(status) ?? 0),
+    0,
   );
 
   const knowledge = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
@@ -125,6 +170,14 @@ try {
   console.log(`REJECTED_URGENCY=${rejected.urgency}`);
   console.log(`REJECTED_INTENT=${rejected.intent}`);
   console.log(`REJECTED_KNOWLEDGE=${rejected.knowledge}`);
+  console.log(`RECENT_DIRECT_OUTBOX_TOTAL=${recentDirectOutboxTotal}`);
+  for (const outboxStatus of OUTBOX_STATUSES) {
+    console.log(`DIRECT_OUTBOX_${outboxStatus}=${outboxByStatus.get(outboxStatus) ?? 0}`);
+  }
+  console.log(`RECENT_DIRECT_ACTION_TOTAL=${recentDirectActionTotal}`);
+  for (const actionStatus of ACTION_STATUSES) {
+    console.log(`DIRECT_ACTION_${actionStatus}=${actionByStatus.get(actionStatus) ?? 0}`);
+  }
   console.log('READ_ONLY_ELIGIBILITY=true');
   console.log('DATABASE_MUTATIONS=false');
   console.log('PROVIDER_CALLS=false');
