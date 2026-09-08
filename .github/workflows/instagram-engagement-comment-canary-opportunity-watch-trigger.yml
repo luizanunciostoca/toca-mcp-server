@@ -1,0 +1,119 @@
+name: Instagram Engagement Comment Canary Opportunity Watch Trigger
+
+on:
+  issues:
+    types: [opened]
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: instagram-engagement-comment-canary-opportunity-watch-trigger
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  dispatch-readonly-watch:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'issues' ||
+        (github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Resolve one active owner-authored current-main read-only watch
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO\""
+          SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+          MATCHES="$(jq -c --arg owner "$GITHUB_REPOSITORY_OWNER" '[.items[] | select(.pull_request == null) | select(.user.login == $owner) | select(.title | startswith("PRODUCTION AUTHORIZATION — Instagram COMMENT canary opportunity watch READONLY AUTO"))]' <<< "$SEARCH_JSON")"
+          COUNT="$(jq 'length' <<< "$MATCHES")"
+
+          if [[ "$COUNT" = '0' ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'COMMENT_CANARY_WATCH_TRIGGER=INACTIVE_NO_AUTHORIZATION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$COUNT" != '1' ]]; then
+            echo "Expected exactly one active owner-authored Comment watch authorization, found $COUNT" >&2
+            exit 1
+          fi
+
+          ISSUE_NUMBER="$(jq -r '.[0].number' <<< "$MATCHES")"
+          BODY="$(jq -r '.[0].body // ""' <<< "$MATCHES")"
+
+          if [[ "$GITHUB_EVENT_NAME" = 'issues' ]]; then
+            EVENT_ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+            test "$EVENT_ISSUE_NUMBER" = "$ISSUE_NUMBER"
+          fi
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+
+          required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+            'WATCH_MODE=READ_ONLY'
+            'WATCH_INTERVAL_MINUTES=10'
+            'WATCH_MAX_LIFETIME_HOURS=12'
+            'CANARY_CHANNEL=COMMENT'
+            'MAX_AGE_MINUTES=30'
+            'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+            'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+          )
+          for marker in "${required[@]}"; do
+            grep -Fxq "$marker" <<< "$BODY" || {
+              echo "Missing exact Comment watch safety marker: $marker" >&2
+              exit 1
+            }
+          done
+
+          test "$RUNTIME_SHA" = "$CURRENT_MAIN_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          echo 'active=true' >> "$GITHUB_OUTPUT"
+          echo "watch_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo 'COMMENT_CANARY_WATCH_TRIGGER=AUTHORIZED_READ_ONLY_DISPATCH' >> "$GITHUB_STEP_SUMMARY"
+          echo "WATCH_AUTHORIZATION_ISSUE=$ISSUE_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'DATABASE_MUTATIONS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'SERVICE_MUTATIONS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch only the canonical read-only watch controller
+        if: steps.auth.outputs.active == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/instagram-engagement-comment-canary-opportunity-watch.yml/dispatches" \
+            -f ref=main
+
+          echo 'COMMENT_CANARY_WATCH_TRIGGER_RESULT=DISPATCHED' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_WORKFLOW=instagram-engagement-comment-canary-opportunity-watch.yml' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TARGET_REF=main' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
