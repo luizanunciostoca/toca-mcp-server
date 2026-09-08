@@ -37,8 +37,15 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
     expect(source).toContain('RECENT_COMMENT_COUNT_30M=');
     expect(source).toContain('RECENT_COMMENT_COUNT_6H=');
     expect(source).toContain('RECENT_COMMENT_COUNT_24H=');
+    expect(source).toContain('VALID_COMMENT_COUNT_30M=');
     expect(source).toContain('VALID_COMMENT_COUNT_24H=');
+    expect(source).toContain('MISSING_COMMENT_ID_COUNT_30M=');
+    expect(source).toContain('MISSING_SENDER_ID_COUNT_30M=');
+    expect(source).toContain('MISSING_TEXT_COUNT_30M=');
     expect(source).toContain('LATEST_COMMENT_AGE_MINUTES=');
+    expect(source).toContain("nullif(trim(inbound.payload->>'commentId'),'') is null");
+    expect(source).toContain("nullif(trim(inbound.payload->>'senderId'),'') is null");
+    expect(source).toContain("nullif(trim(inbound.payload->>'text'),'') is null");
     expect(source).not.toMatch(
       /\b(insert|update|delete|truncate)\s+(into\s+|from\s+)?event_outbox\b/i,
     );
@@ -97,6 +104,14 @@ describe('Instagram engagement ingestion health read-only diagnostic', () => {
     expect(workflow).toContain('HEALTH=${STATUS}');
     expect(workflow).toContain('BLOCKED_APP_CALLBACK_URL');
     expect(workflow).toContain('APP_CALLBACK_URL_MATCH');
+    for (const marker of [
+      'VALID_COMMENT_COUNT_30M',
+      'MISSING_COMMENT_ID_COUNT_30M',
+      'MISSING_SENDER_ID_COUNT_30M',
+      'MISSING_TEXT_COUNT_30M',
+    ]) {
+      expect(workflow).toContain(marker);
+    }
     expect(workflow).toContain('PROVIDER_METHODS=GET_ONLY');
     expect(workflow).toContain('RAW_USER_DATA_LOGGED=false');
     expect(workflow).toContain('SECRETS_PRINTED=false');
