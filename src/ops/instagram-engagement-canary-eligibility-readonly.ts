@@ -39,6 +39,14 @@ const maxAgeMinutes = boundedInteger(
   30,
   1,
   60,
+  'INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_INVALID',
+);
+const traceAgeMinutes = boundedInteger(
+  process.env.INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES,
+  120,
+  1,
+  360,
+  'INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_INVALID',
 );
 const pool = new Pool({ connectionString: databaseUrl, max: 2 });
 
@@ -85,7 +93,7 @@ try {
         and occurred_at >= now() - ($5::text || ' minutes')::interval
         and payload->>'channel' = 'DIRECT'
       group by status`,
-    [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+    [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
   const outboxByStatus = new Map(
     outboxCounts.rows.map((row) => [row.status, Number(row.count)]),
@@ -104,7 +112,7 @@ try {
         and channel = 'DIRECT'
         and created_at >= now() - ($4::text || ' minutes')::interval
       group by status`,
-    [tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+    [tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
   const actionByStatus = new Map(
     actionCounts.rows.map((row) => [row.status, Number(row.count)]),
@@ -180,6 +188,7 @@ try {
   console.log(`REJECTED_URGENCY=${rejected.urgency}`);
   console.log(`REJECTED_INTENT=${rejected.intent}`);
   console.log(`REJECTED_KNOWLEDGE=${rejected.knowledge}`);
+  console.log(`RECENT_DIRECT_TRACE_WINDOW_MINUTES=${traceAgeMinutes}`);
   console.log(`RECENT_DIRECT_OUTBOX_TOTAL=${recentDirectOutboxTotal}`);
   for (const outboxStatus of OUTBOX_STATUSES) {
     console.log(
@@ -211,10 +220,11 @@ function boundedInteger(
   fallback: number,
   min: number,
   max: number,
+  errorCode: string,
 ): number {
   const parsed = raw === undefined ? fallback : Number(raw);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error('INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_INVALID');
+    throw new Error(errorCode);
   }
   return parsed;
 }
