@@ -198,23 +198,51 @@ jobs:
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
 
-      - name: Run one read-only Comment opportunity probe
+      - name: Run bounded read-only Comment opportunity probe
         id: probe
         env:
           RUNTIME_IMAGE: ${{ needs.authorization-preflight.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
-          JOB="toca-ig-comment-watch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "job=$JOB" >> "$GITHUB_OUTPUT"
-          gcloud run jobs deploy "$JOB" \
-            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
-            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
-            --command node --args dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js \
-            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
-          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          BASE_JOB="toca-ig-comment-watch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DEPLOYED_JOBS=()
+          echo 'execution_attempts=0' >> "$GITHUB_OUTPUT"
+
+          for attempt in 1 2; do
+            JOB="${BASE_JOB}-${attempt}"
+            gcloud run jobs deploy "$JOB" \
+              --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+              --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+              --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+              --command node --args dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js \
+              --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+
+            DEPLOYED_JOBS+=("$JOB")
+            echo "jobs=${DEPLOYED_JOBS[*]}" >> "$GITHUB_OUTPUT"
+            echo "execution_attempts=$attempt" >> "$GITHUB_OUTPUT"
+
+            if gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet; then
+              echo "job=$JOB" >> "$GITHUB_OUTPUT"
+              echo "PROBE_EXECUTION_ATTEMPTS=$attempt" >> "$GITHUB_STEP_SUMMARY"
+              if [[ "$attempt" = '2' ]]; then
+                echo 'PROBE_EXECUTION_RECOVERED=true' >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo 'PROBE_EXECUTION_RECOVERED=false' >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit 0
+            fi
+
+            if [[ "$attempt" = '1' ]]; then
+              echo 'PROBE_EXECUTION_RECOVERY_ATTEMPT=2' >> "$GITHUB_STEP_SUMMARY"
+              sleep 5
+            fi
+          done
+
+          echo 'PROBE_EXECUTION_RECOVERED=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROBE_EXECUTION_TERMINAL_FAILURE=true' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: Parse only sanitized eligibility markers
         id: decision
@@ -332,13 +360,13 @@ jobs:
       - name: Delete temporary Comment opportunity job
         if: always()
         env:
-          JOB: ${{ steps.probe.outputs.job }}
+          JOBS: ${{ steps.probe.outputs.jobs }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${JOB:-}" ]]; then
-            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
-          fi
+          for job in ${JOBS:-}; do
+            gcloud run jobs delete "$job" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          done
 
       - name: Handle sanitized eligibility decision
         if: success()
@@ -443,6 +471,7 @@ jobs:
         if: failure()
         env:
           WATCH_ISSUE: ${{ needs.authorization-preflight.outputs.watch_issue }}
+          PROBE_EXECUTION_ATTEMPTS: ${{ steps.probe.outputs.execution_attempts }}
         shell: bash
         run: |
           set -euo pipefail
@@ -456,6 +485,7 @@ jobs:
           printf -v report '%s\n' \
             'COMMENT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE' \
             "CONTROLLER_SHA=$GITHUB_SHA" \
+            "PROBE_EXECUTION_ATTEMPTS=${PROBE_EXECUTION_ATTEMPTS:-0}" \
             'PROVIDER_CALLS=false' \
             'EXTERNAL_REPLY_WRITES=false' \
             'AUTO_REAL_CANARY_AUTHORIZED=false'
