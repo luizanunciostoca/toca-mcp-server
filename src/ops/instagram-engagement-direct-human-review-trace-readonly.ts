@@ -49,7 +49,7 @@ const workspaceId = requiredEnv('INSTAGRAM_ENGAGEMENT_WORKSPACE_ID');
 const organizationId = requiredEnv('INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID');
 const traceAgeMinutes = boundedInteger(
   process.env.INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES,
-  120,
+  360,
   1,
   360,
 );
