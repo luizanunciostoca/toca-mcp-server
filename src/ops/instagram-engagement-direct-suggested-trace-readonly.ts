@@ -55,7 +55,9 @@ try {
       group by policy_reason`,
     [tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
-  const byReason = new Map(reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]));
+  const byReason = new Map(
+    reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]),
+  );
   const knownReasonTotal = POLICY_REASONS.reduce(
     (sum, reason) => sum + (byReason.get(reason) ?? 0),
     0,
@@ -65,7 +67,9 @@ try {
   console.log(`DIRECT_SUGGESTED_TRACE_WINDOW_MINUTES=${traceAgeMinutes}`);
   console.log(`DIRECT_SUGGESTED_TOTAL=${suggestedTotal}`);
   for (const reason of POLICY_REASONS) {
-    console.log(`DIRECT_SUGGESTED_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`);
+    console.log(
+      `DIRECT_SUGGESTED_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`,
+    );
   }
   console.log(
     `DIRECT_SUGGESTED_POLICY_REASON_OTHER=${Math.max(0, suggestedTotal - knownReasonTotal)}`,
@@ -85,7 +89,12 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-function boundedInteger(raw: string | undefined, fallback: number, min: number, max: number): number {
+function boundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const value = raw === undefined ? fallback : Number(raw);
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error('INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_INVALID');
