@@ -216,7 +216,10 @@ export function knowledgeSimilarity(left: string, right: string): number {
   return similarity(normalizeText(left), normalizeText(right));
 }
 
-function isGenericOperatingHoursQuery(normalized: string, expectedIntent: EngagementIntent): boolean {
+function isGenericOperatingHoursQuery(
+  normalized: string,
+  expectedIntent: EngagementIntent,
+): boolean {
   if (expectedIntent !== 'LOCATION_HOURS') return false;
   const tokens = new Set(normalized.split(' '));
   const hasHours = tokens.has('horario') || tokens.has('horarios') || tokens.has('hora');
