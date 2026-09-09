@@ -1,5 +1,6 @@
 name: TEMP Prettier Human Review Trace
 
+# trigger exact formatting diagnostic
 on:
   push:
     branches:
