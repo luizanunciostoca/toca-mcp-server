@@ -71,8 +71,12 @@ describe('Instagram engagement LIMITED runtime refresh', () => {
     expect(workflow).toContain(
       'test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"',
     );
-    expect(workflow).toContain('Rollback traffic to previous LIMITED revision on failure');
-    expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100" --quiet');
+    expect(workflow).toContain(
+      'Rollback traffic to previous LIMITED revision on failure',
+    );
+    expect(workflow).toContain(
+      '--to-revisions="${PRE_REVISION}=100" --quiet',
+    );
     expect(workflow).toContain('ROLLBACK_ON_FAILURE=true');
   });
 });
