@@ -69,7 +69,7 @@ describe('Instagram engagement LIMITED runtime refresh', () => {
   it('fingerprints scheduler state and rolls traffic back on any failure', () => {
     expect(workflow).toContain("jq -c '{state,schedule,timeZone,httpTarget}'");
     expect(workflow).toContain('test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"');
-    expect(workflow).toContain('Rollback traffic to previous LIMITED revision on failure');
+    expect(workflow).toContain('Roll back traffic to previous LIMITED revision on failure');
     expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100" --quiet');
     expect(workflow).toContain('ROLLBACK_ON_FAILURE=true');
   });
