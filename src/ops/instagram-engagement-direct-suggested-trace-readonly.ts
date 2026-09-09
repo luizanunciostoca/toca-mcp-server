@@ -55,9 +55,7 @@ try {
       group by policy_reason`,
     [tenantId, workspaceId, organizationId, String(traceAgeMinutes)],
   );
-  const byReason = new Map(
-    reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]),
-  );
+  const byReason = new Map(reasonCounts.rows.map((row) => [row.policy_reason, Number(row.count)]));
   const knownReasonTotal = POLICY_REASONS.reduce(
     (sum, reason) => sum + (byReason.get(reason) ?? 0),
     0,
@@ -67,9 +65,7 @@ try {
   console.log(`DIRECT_SUGGESTED_TRACE_WINDOW_MINUTES=${traceAgeMinutes}`);
   console.log(`DIRECT_SUGGESTED_TOTAL=${suggestedTotal}`);
   for (const reason of POLICY_REASONS) {
-    console.log(
-      `DIRECT_SUGGESTED_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`,
-    );
+    console.log(`DIRECT_SUGGESTED_POLICY_REASON_${metricKey(reason)}=${byReason.get(reason) ?? 0}`);
   }
   console.log(
     `DIRECT_SUGGESTED_POLICY_REASON_OTHER=${Math.max(0, suggestedTotal - knownReasonTotal)}`,
