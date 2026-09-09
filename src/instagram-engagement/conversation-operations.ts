@@ -178,6 +178,15 @@ export class PostgresInstagramConversationOperations {
         [threadId],
       );
       const existingState = thread.rows[0]?.state ?? 'NEW';
+      const activeHumanQueue =
+        existingState === 'ESCALATED'
+          ? await client.query(
+              `select 1 from instagram_engagement_human_queue
+                where thread_id=$1 and state in ('PENDING','ACKNOWLEDGED')
+                limit 1`,
+              [threadId],
+            )
+          : null;
       const inserted = await client.query(
         `insert into instagram_engagement_message_groups (
            group_sha256, thread_id, claimed_event_id, event_ids, message_count, text_sha256,
@@ -204,7 +213,9 @@ export class PostgresInstagramConversationOperations {
         eventIds,
         messageCount: eventIds.length,
         isGroupOwner: inserted.rowCount === 1,
-        automationBlocked: existingState === 'ESCALATED' || existingState === 'AWAITING_APPROVAL',
+        automationBlocked:
+          existingState === 'AWAITING_APPROVAL' ||
+          (existingState === 'ESCALATED' && (activeHumanQueue?.rowCount ?? 0) > 0),
       };
     } catch (error) {
       await client.query('rollback');
