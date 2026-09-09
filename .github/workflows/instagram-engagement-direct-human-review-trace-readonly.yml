@@ -115,7 +115,7 @@ jobs:
             --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=360" \
             --command node --args dist/src/ops/instagram-engagement-direct-human-review-trace-readonly.js \
             --tasks 1 --max-retries 0 --task-timeout 120s --quiet
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
