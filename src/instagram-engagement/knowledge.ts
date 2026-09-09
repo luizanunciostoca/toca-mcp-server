@@ -97,13 +97,17 @@ export function resolveKnowledgeRows(
 ): InstagramEngagementKnowledgeMatch | null {
   const normalized = normalizeText(text);
   if (!normalized) return null;
+  const genericOperatingHours = isGenericOperatingHoursQuery(normalized, expectedIntent);
   let best: InstagramEngagementKnowledgeRow | undefined;
   let bestScore = 0;
 
   for (const row of rows) {
     if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
       continue;
-    const score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
+    let score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
+    if (genericOperatingHours && isVerifiedDailySunsetHoursRow(row)) {
+      score = Math.max(score, 0.9);
+    }
     if (score > bestScore) {
       best = row;
       bestScore = score;
@@ -210,6 +214,25 @@ export function normalizeKnowledgePrompt(value: string): string {
 
 export function knowledgeSimilarity(left: string, right: string): number {
   return similarity(normalizeText(left), normalizeText(right));
+}
+
+function isGenericOperatingHoursQuery(
+  normalized: string,
+  expectedIntent: EngagementIntent,
+): boolean {
+  if (expectedIntent !== 'LOCATION_HOURS') return false;
+  const tokens = new Set(normalized.split(' '));
+  const hasHours = tokens.has('horario') || tokens.has('horarios') || tokens.has('hora');
+  const hasOperating =
+    tokens.has('funcionamento') || tokens.has('funciona') || tokens.has('funcionar');
+  const namesSpecificEvent = tokens.has('sunset') || tokens.has('party') || tokens.has('festa');
+  return hasHours && hasOperating && !namesSpecificEvent;
+}
+
+function isVerifiedDailySunsetHoursRow(row: InstagramEngagementKnowledgeRow): boolean {
+  return row.prompts.some(
+    (prompt) => prompt.includes('sunset') && prompt.includes('funciona todos os dias'),
+  );
 }
 
 function cell(row: readonly unknown[], index: ReadonlyMap<string, number>, key: string): string {
