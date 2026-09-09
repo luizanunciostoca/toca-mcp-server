@@ -39,6 +39,25 @@ describe('social engagement event schedule classification', () => {
     });
   });
 
+  it('binds a generic operating-hours question only to the verified daily Sunset FAQ', () => {
+    const classification = classifySocialEngagement('Qual o horário de funcionamento?');
+
+    expect(classification.intent).toBe('LOCATION_HOURS');
+    expect(
+      resolveKnowledgeRows('Qual o horário de funcionamento?', classification.intent, [FAQ_001]),
+    ).toMatchObject({
+      faqId: 'FAQ-001',
+      intent: 'LOCATION_HOURS',
+      factsVerified: true,
+    });
+
+    expect(
+      resolveKnowledgeRows('Qual o horário de funcionamento?', classification.intent, [
+        { ...FAQ_001, factsVerified: false },
+      ]),
+    ).toBeNull();
+  });
+
   it.each([
     'Qual o horário do Sunset?',
     'Sunset começa quando?',
