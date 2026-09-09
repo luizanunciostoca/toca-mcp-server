@@ -24,7 +24,7 @@ const traceAgeMinutes = boundedInteger(
   process.env.INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES,
   30,
   1,
-  120,
+  360,
 );
 
 const pool = new Pool({ connectionString: databaseUrl, max: 1 });
