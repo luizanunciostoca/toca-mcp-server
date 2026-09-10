@@ -213,9 +213,12 @@ export class PostgresInstagramConversationOperations {
         eventIds,
         messageCount: eventIds.length,
         isGroupOwner: inserted.rowCount === 1,
+        // SUGGESTED maps the previous message to AWAITING_APPROVAL, but that state alone is
+        // not evidence of an active human escalation. A new inbound must be evaluated on
+        // its own policy/knowledge facts instead of inheriting a permanent automation block.
+        // Genuine human escalations remain fail-closed while their queue item is active.
         automationBlocked:
-          existingState === 'AWAITING_APPROVAL' ||
-          (existingState === 'ESCALATED' && (activeHumanQueue?.rowCount ?? 0) > 0),
+          existingState === 'ESCALATED' && (activeHumanQueue?.rowCount ?? 0) > 0,
       };
     } catch (error) {
       await client.query('rollback');
