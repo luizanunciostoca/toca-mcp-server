@@ -187,6 +187,7 @@ export class PostgresInstagramConversationOperations {
               [threadId],
             )
           : null;
+      const hasActiveHumanEscalation = (activeHumanQueue?.rowCount ?? 0) > 0;
       const inserted = await client.query(
         `insert into instagram_engagement_message_groups (
            group_sha256, thread_id, claimed_event_id, event_ids, message_count, text_sha256,
@@ -217,9 +218,7 @@ export class PostgresInstagramConversationOperations {
         // not evidence of an active human escalation. A new inbound must be evaluated on
         // its own policy/knowledge facts instead of inheriting a permanent automation block.
         // Genuine human escalations remain fail-closed while their queue item is active.
-        automationBlocked:
-          existingState === 'ESCALATED' &&
-          (activeHumanQueue?.rowCount ?? 0) > 0,
+        automationBlocked: existingState === 'ESCALATED' && hasActiveHumanEscalation,
       };
     } catch (error) {
       await client.query('rollback');
