@@ -218,7 +218,8 @@ export class PostgresInstagramConversationOperations {
         // its own policy/knowledge facts instead of inheriting a permanent automation block.
         // Genuine human escalations remain fail-closed while their queue item is active.
         automationBlocked:
-          existingState === 'ESCALATED' && (activeHumanQueue?.rowCount ?? 0) > 0,
+          existingState === 'ESCALATED' &&
+          (activeHumanQueue?.rowCount ?? 0) > 0,
       };
     } catch (error) {
       await client.query('rollback');
