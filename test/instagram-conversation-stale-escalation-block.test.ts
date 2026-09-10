@@ -22,8 +22,9 @@ describe('Instagram conversation stale escalation automation block', () => {
   });
 
   it('keeps genuine human escalation fail-closed while the queue remains active', () => {
+    expect(source).toContain('const hasActiveHumanEscalation =');
     expect(source).toContain(
-      "existingState === 'ESCALATED' && (activeHumanQueue?.rowCount ?? 0) > 0",
+      "automationBlocked: existingState === 'ESCALATED' && hasActiveHumanEscalation",
     );
   });
 });
