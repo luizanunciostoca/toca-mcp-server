@@ -6,11 +6,15 @@ export const GITHUB_NATIVE_PUBLICATION_TIMEZONE = 'America/Bahia' as const;
 export const GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS = 5 * 60 * 1000;
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
+const explicitOffsetTimestampSchema = z
+  .string()
+  .regex(/T.*(?:Z|[+-]\d{2}:\d{2})$/i, 'timestamp must include Z or an explicit numeric offset')
+  .refine((value) => Number.isFinite(Date.parse(value)), 'timestamp must be valid ISO-8601');
 
 export const githubNativePublicationItemSchema = z.object({
   contentItemId: z.string().min(1),
-  scheduledAt: z.string().min(1),
-  expiresAt: z.string().min(1).optional(),
+  scheduledAt: explicitOffsetTimestampSchema,
+  expiresAt: explicitOffsetTimestampSchema.optional(),
   operation: z.enum(['SUNSET', 'THE_PARTY']),
   channel: z.literal('INSTAGRAM'),
   contentStatus: z.literal('PRODUCED'),
@@ -41,26 +45,23 @@ export const githubNativePublicationQueueSchema = z
   .object({
     schemaVersion: z.literal(GITHUB_NATIVE_PUBLICATION_QUEUE_SCHEMA_VERSION),
     timezone: z.literal(GITHUB_NATIVE_PUBLICATION_TIMEZONE),
-    generatedAt: z.string().min(1),
+    generatedAt: explicitOffsetTimestampSchema,
     items: z.array(githubNativePublicationItemSchema),
   })
   .superRefine((queue, ctx) => {
     const contentItemIds = new Set<string>();
     const idempotencyKeys = new Set<string>();
     for (const [index, item] of queue.items.entries()) {
-      if (!Number.isFinite(Date.parse(item.scheduledAt))) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['items', index, 'scheduledAt'],
-          message: 'scheduledAt must be a valid ISO-8601 timestamp',
-        });
-      }
-      if (item.expiresAt && !Number.isFinite(Date.parse(item.expiresAt))) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['items', index, 'expiresAt'],
-          message: 'expiresAt must be a valid ISO-8601 timestamp',
-        });
+      const scheduledAt = Date.parse(item.scheduledAt);
+      if (item.expiresAt) {
+        const expiresAt = Date.parse(item.expiresAt);
+        if (expiresAt <= scheduledAt) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['items', index, 'expiresAt'],
+            message: 'expiresAt must be after scheduledAt',
+          });
+        }
       }
       if (contentItemIds.has(item.contentItemId)) {
         ctx.addIssue({
@@ -98,13 +99,20 @@ export function selectDuePublicationItems(
   return queue.items
     .filter((item) => {
       const scheduledAt = Date.parse(item.scheduledAt);
-      if (!Number.isFinite(scheduledAt)) return false;
       if (Math.abs(now - scheduledAt) > toleranceMs) return false;
-      if (item.expiresAt) {
-        const expiresAt = Date.parse(item.expiresAt);
-        if (!Number.isFinite(expiresAt) || now >= expiresAt) return false;
-      }
+      if (item.expiresAt && now >= Date.parse(item.expiresAt)) return false;
       return true;
     })
     .sort((left, right) => Date.parse(left.scheduledAt) - Date.parse(right.scheduledAt));
+}
+
+export function assertPublicationItemNotExpired(
+  item: GithubNativePublicationItem,
+  nowIso: string,
+): void {
+  if (!item.expiresAt) return;
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(now) || now >= Date.parse(item.expiresAt)) {
+    throw new Error('GITHUB_NATIVE_PUBLICATION_EXPIRED');
+  }
 }
