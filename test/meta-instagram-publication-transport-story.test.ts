@@ -4,16 +4,18 @@ import { MetaInstagramPublicationTransport } from '../src/providers/instagram/me
 
 describe('MetaInstagramPublicationTransport story readback', () => {
   it('reads recent Stories from the dedicated /stories edge', async () => {
-    const get = vi.fn(async () => ({
-      data: [
-        {
-          id: 'story-1',
-          media_type: 'IMAGE',
-          timestamp: '2026-09-12T12:00:01Z',
-          permalink: 'https://www.instagram.com/stories/example/1/',
-        },
-      ],
-    }));
+    const get = vi.fn(() =>
+      Promise.resolve({
+        data: [
+          {
+            id: 'story-1',
+            media_type: 'IMAGE',
+            timestamp: '2026-09-12T12:00:01Z',
+            permalink: 'https://www.instagram.com/stories/example/1/',
+          },
+        ],
+      }),
+    );
     const client = { get } as unknown as MetaApiClient;
     const transport = new MetaInstagramPublicationTransport(client);
 
