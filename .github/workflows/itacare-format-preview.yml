@@ -1,4 +1,4 @@
-name: Itacare Format Apply
+name: Itacare Format Export
 
 on:
   push:
@@ -6,11 +6,10 @@ on:
       - feat/the-party-itacare-generative-campaign
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  format:
-    if: github.event.head_commit.message != 'style(video): apply prettier to Itacare campaign'
+  export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -22,24 +21,19 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply Prettier to Itacare campaign files
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm prettier --write \
-            src/config/the-party-itacare-generative-campaign.ts \
-            src/the-party-itacare-generative-campaign.ts \
+      - name: Format exact campaign files
+        run: >-
+          pnpm prettier --write
+          src/config/the-party-itacare-generative-campaign.ts
+          src/the-party-itacare-generative-campaign.ts
+          test/the-party-itacare-generative-campaign.test.ts
+      - name: Upload formatted sources
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: itacare-formatted-sources
+          path: |
+            src/config/the-party-itacare-generative-campaign.ts
+            src/the-party-itacare-generative-campaign.ts
             test/the-party-itacare-generative-campaign.test.ts
-          git diff --check
-          if git diff --quiet; then
-            echo "No formatting changes required."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            src/config/the-party-itacare-generative-campaign.ts \
-            src/the-party-itacare-generative-campaign.ts \
-            test/the-party-itacare-generative-campaign.test.ts
-          git commit -m 'style(video): apply prettier to Itacare campaign'
-          git push origin HEAD:feat/the-party-itacare-generative-campaign
+          if-no-files-found: error
+          retention-days: 1
