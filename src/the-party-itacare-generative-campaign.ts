@@ -16,7 +16,8 @@ import { GcsPublicationAssetDelivery } from './providers/gcp/gcs-publication-ass
 
 const FINAL_ARTIFACT_ROUTE = 'GENERATIVE_SCENE_CONTINUATION_VIDEO' as const;
 const outputRoot =
-  process.env.CAMPAIGN_OUTPUT_DIR?.trim() || join(tmpdir(), 'the-party-itacare-generative-campaign');
+  process.env.CAMPAIGN_OUTPUT_DIR?.trim() ||
+  join(tmpdir(), 'the-party-itacare-generative-campaign');
 const concurrency = positiveInteger(process.env.CAMPAIGN_GENERATION_CONCURRENCY, 2);
 const selectedVideoIds = new Set(
   (process.env.CAMPAIGN_VIDEO_IDS ?? '')
@@ -45,48 +46,63 @@ const delivery = new GcsPublicationAssetDelivery({
 await mkdir(outputRoot, { recursive: true });
 const sceneSpecs = videos.flatMap((video) => video.scenes.map((scene) => ({ video, scene })));
 
-const generatedScenes = await mapWithConcurrency(sceneSpecs, concurrency, async ({ video, scene }) => {
-  const result = await runtime.generation.generate({
-    contentItemId: scene.contentItemId,
-    routeType: scene.routeType,
-    ...(scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO'
-      ? { creativeDirection: requiredCreativeDirection(scene.contentItemId, scene.creativeDirection) }
-      : {}),
-  });
-  const sceneDir = join(outputRoot, video.id.toLowerCase());
-  await mkdir(sceneDir, { recursive: true });
-  const path = join(sceneDir, `${scene.contentItemId}.mp4`);
-  await writeFile(path, result.outputBytes);
-  const observed = sha256(result.outputBytes);
-  if (observed !== result.manifest.outputSha256.toLowerCase()) {
-    throw new Error(`ITACARE_CAMPAIGN_SCENE_HASH_MISMATCH:${scene.contentItemId}`);
-  }
-  if (result.manifest.routeType !== scene.routeType) {
-    throw new Error(`ITACARE_CAMPAIGN_SCENE_ROUTE_MISMATCH:${scene.contentItemId}`);
-  }
-  await writeFile(`${path}.manifest.json`, `${JSON.stringify(result.manifest, null, 2)}\n`, 'utf8');
-  return {
-    videoId: video.id,
-    contentItemId: scene.contentItemId,
-    routeType: scene.routeType,
-    sourceAssetId: result.manifest.sourceAssetId,
-    sourceDriveFileId: result.manifest.sourceDriveFileId,
-    sourceSha256: result.manifest.sourceSha256,
-    path,
-    sha256: observed,
-    artifactRef: result.manifest.artifactRef,
-    artifactObjectName: result.manifest.artifactObjectName,
-    provider: result.manifest.provider,
-    providerModel: result.manifest.providerModel ?? null,
-    providerJobId: result.manifest.providerJobId ?? null,
-    status: result.manifest.status,
-  };
-});
+const generatedScenes = await mapWithConcurrency(
+  sceneSpecs,
+  concurrency,
+  async ({ video, scene }) => {
+    const result = await runtime.generation.generate({
+      contentItemId: scene.contentItemId,
+      routeType: scene.routeType,
+      ...(scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO'
+        ? {
+            creativeDirection: requiredCreativeDirection(
+              scene.contentItemId,
+              scene.creativeDirection,
+            ),
+          }
+        : {}),
+    });
+    const sceneDir = join(outputRoot, video.id.toLowerCase());
+    await mkdir(sceneDir, { recursive: true });
+    const path = join(sceneDir, `${scene.contentItemId}.mp4`);
+    await writeFile(path, result.outputBytes);
+    const observed = sha256(result.outputBytes);
+    if (observed !== result.manifest.outputSha256.toLowerCase()) {
+      throw new Error(`ITACARE_CAMPAIGN_SCENE_HASH_MISMATCH:${scene.contentItemId}`);
+    }
+    if (result.manifest.routeType !== scene.routeType) {
+      throw new Error(`ITACARE_CAMPAIGN_SCENE_ROUTE_MISMATCH:${scene.contentItemId}`);
+    }
+    await writeFile(
+      `${path}.manifest.json`,
+      `${JSON.stringify(result.manifest, null, 2)}\n`,
+      'utf8',
+    );
+    return {
+      videoId: video.id,
+      contentItemId: scene.contentItemId,
+      routeType: scene.routeType,
+      sourceAssetId: result.manifest.sourceAssetId,
+      sourceDriveFileId: result.manifest.sourceDriveFileId,
+      sourceSha256: result.manifest.sourceSha256,
+      path,
+      sha256: observed,
+      artifactRef: result.manifest.artifactRef,
+      artifactObjectName: result.manifest.artifactObjectName,
+      provider: result.manifest.provider,
+      providerModel: result.manifest.providerModel ?? null,
+      providerJobId: result.manifest.providerJobId ?? null,
+      status: result.manifest.status,
+    };
+  },
+);
 
 const finals = [];
 for (const video of videos) {
   const sceneRows = video.scenes.map((scene) => {
-    const found = generatedScenes.find((candidate) => candidate.contentItemId === scene.contentItemId);
+    const found = generatedScenes.find(
+      (candidate) => candidate.contentItemId === scene.contentItemId,
+    );
     if (!found) throw new Error(`ITACARE_CAMPAIGN_SCENE_MISSING:${scene.contentItemId}`);
     return found;
   });
@@ -152,7 +168,11 @@ const result = {
   requiresPostGenerationHumanReview: true,
   videos: finals,
 };
-await writeFile(join(outputRoot, 'campaign-result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+await writeFile(
+  join(outputRoot, 'campaign-result.json'),
+  `${JSON.stringify(result, null, 2)}\n`,
+  'utf8',
+);
 process.stdout.write(`THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=${JSON.stringify(result)}\n`);
 
 function buildFinalManifest(
@@ -253,9 +273,10 @@ async function runCommand(command: string, args: readonly string[]): Promise<voi
     child.once('error', reject);
     child.once('close', (code) => {
       if (code === 0) resolve();
-      else reject(
-        new Error(`ITACARE_CAMPAIGN_COMMAND_FAILED:${command}:${code}:${stderr.slice(-4000)}`),
-      );
+      else
+        reject(
+          new Error(`ITACARE_CAMPAIGN_COMMAND_FAILED:${command}:${code}:${stderr.slice(-4000)}`),
+        );
     });
   });
 }
