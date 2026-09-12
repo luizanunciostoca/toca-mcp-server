@@ -150,7 +150,12 @@ export async function runGithubNativePublicationCycle(
       assertPublicationItemNotExpired(item, now().toISOString());
       assertInsidePublicationWindow(item.scheduledAt, now());
 
-      const executor = new InstagramPublicationExecutor(store, transport, () => now().toISOString(), true);
+      const executor = new InstagramPublicationExecutor(
+        store,
+        transport,
+        () => now().toISOString(),
+        true,
+      );
       let result = await executor.execute(request);
       const pollDeadline = now().getTime() + 120_000;
       while (!result.completed && now().getTime() < pollDeadline) {
@@ -319,11 +324,17 @@ function candidateMatchesTimeAndCaption(
   if (!candidate.timestamp) return false;
   const providerAt = Date.parse(candidate.timestamp);
   const scheduledAt = Date.parse(item.scheduledAt);
-  if (!Number.isFinite(providerAt) || Math.abs(providerAt - scheduledAt) > GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS) {
+  if (
+    !Number.isFinite(providerAt) ||
+    Math.abs(providerAt - scheduledAt) > GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS
+  ) {
     return false;
   }
   if (item.mediaType === 'IMAGE' && candidate.mediaType !== 'IMAGE') return false;
-  if (item.mediaType === 'IMAGE' && normalizeCaption(candidate.caption) !== normalizeCaption(item.caption)) {
+  if (
+    item.mediaType === 'IMAGE' &&
+    normalizeCaption(candidate.caption) !== normalizeCaption(item.caption)
+  ) {
     return false;
   }
   return true;
@@ -334,7 +345,8 @@ async function requirePublishedReadback(
   externalMediaId: string | undefined,
 ): Promise<PublishedMediaEvidence> {
   if (!externalMediaId) throw new Error('GITHUB_NATIVE_PUBLICATION_MEDIA_ID_REQUIRED');
-  if (!transport.getPublishedMedia) throw new Error('GITHUB_NATIVE_PUBLICATION_READBACK_UNAVAILABLE');
+  if (!transport.getPublishedMedia)
+    throw new Error('GITHUB_NATIVE_PUBLICATION_READBACK_UNAVAILABLE');
   const readback = await transport.getPublishedMedia(externalMediaId);
   if (readback.mediaId !== externalMediaId) {
     throw new Error('GITHUB_NATIVE_PUBLICATION_READBACK_ID_MISMATCH');
