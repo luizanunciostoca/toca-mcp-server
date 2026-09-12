@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -105,7 +105,7 @@ describe('GitHub-native Drive asset stager', () => {
 
   it('does not download again when identical bytes are already staged', async () => {
     const paths = await workspace();
-    await import('node:fs/promises').then(({ mkdir }) => mkdir(paths.assetDirectory, { recursive: true }));
+    await mkdir(paths.assetDirectory, { recursive: true });
     await writeFile(join(paths.assetDirectory, `${sha256}.jpg`), jpeg);
     const fetchSource = vi.fn(() => Promise.reject(new Error('FETCH_MUST_NOT_RUN')));
 
