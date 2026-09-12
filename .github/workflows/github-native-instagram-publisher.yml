@@ -4,27 +4,9 @@ on:
   schedule:
     - cron: '2/5 * * * *'
       timezone: 'America/Bahia'
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Controlled rollout mode
-        required: true
-        type: choice
-        default: SHADOW
-        options:
-          - SHADOW
-          - CANARY
-          - LIMITED
-          - GENERAL
-      writes_enabled:
-        description: Explicit manual write confirmation for workflow_dispatch
-        required: true
-        type: boolean
-        default: false
-      canary_content_item_id:
-        description: Required exact content item when mode is CANARY
-        required: false
-        type: string
+  repository_dispatch:
+    types:
+      - github-native-instagram-publish-controlled
 
 permissions:
   contents: write
@@ -41,25 +23,30 @@ jobs:
       TOCA_PUBLICATION_QUEUE_PATH: control/github-native-publication-queue.json
       TOCA_PUBLICATION_STATE_DIR: .publication-state-worktree/publication-state
       TOCA_PUBLICATION_EVIDENCE_PATH: github-native-publication-evidence.json
-      TOCA_GITHUB_NATIVE_PUBLICATION_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW' }}
-      TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: ${{ vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false' }}
-      TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION: ${{ inputs.writes_enabled || false }}
-      TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.canary_content_item_id || vars.TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID || '' }}
-      INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID || '17841402033495654' }}
+      TOCA_GITHUB_NATIVE_PUBLICATION_MODE: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.mode || vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW' }}
+      TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.writes_enabled == 'true' && 'true' || vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false' }}
+      TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.writes_enabled == 'true' && 'true' || 'false' }}
+      TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.canary_content_item_id || vars.TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID || '' }}
+      INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
       META_GRAPH_BASE_URL: https://graph.facebook.com
       META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
-      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
 
     steps:
-      - name: Checkout exact controller SHA
+      - name: Checkout exact trusted default-branch controller SHA
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Verify exact controller SHA
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Verify exact controller SHA and trusted ref
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_REF}" = "refs/heads/${DEFAULT_BRANCH}"
 
       - name: Checkout immutable publication ledger branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -88,9 +75,11 @@ jobs:
 
       - name: Execute fail-closed GitHub-native publication cycle
         env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}
           TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID: ${{ github.run_id }}
           TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: node dist/src/github-native-publication/github-native-publication-runtime.js
 
       - name: Persist publication ledger only
