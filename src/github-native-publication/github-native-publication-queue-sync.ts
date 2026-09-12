@@ -166,7 +166,7 @@ export async function runGithubNativePublicationQueueSync(
     env.TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH?.trim() ||
     'github-native-publication-queue-sync-evidence.json';
 
-  const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'));
+  const snapshot: unknown = JSON.parse(await readFile(snapshotPath, 'utf8'));
   const result = compileGithubNativePublicationQueue(snapshot, now().toISOString());
   await writeFile(queuePath, `${JSON.stringify(result.queue, null, 2)}\n`, 'utf8');
   await writeFile(evidencePath, `${JSON.stringify(result.evidence, null, 2)}\n`, 'utf8');
