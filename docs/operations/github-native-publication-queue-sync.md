@@ -24,7 +24,8 @@ The CLI reads:
 
 - `TOCA_PUBLICATION_REGISTRY_SNAPSHOT_PATH`, default `control/github-native-publication-registry-snapshot.json`;
 - `TOCA_PUBLICATION_QUEUE_PATH`, default `control/github-native-publication-queue.json`;
-- `TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH`, default `github-native-publication-queue-sync-evidence.json`.
+- `TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH`, default `github-native-publication-queue-sync-evidence.json`, used only as the base filename for immutable per-run evidence;
+- optional `TOCA_PUBLICATION_QUEUE_SYNC_RUN_ID`; when absent the compiler generates a UUID.
 
 After the repository is built, run:
 
@@ -46,8 +47,8 @@ A sync worker may mirror an item only when all of these are true in the canonica
 - `publication_intent=SCHEDULED`;
 - operation is `SUNSET` or `THE_PARTY`;
 - format is `FEED` or `STORY`;
-- scheduled time is still in the future with the minimum lead time;
-- explicit timezone offset is present;
+- scheduled time is present, still in the future and has the minimum lead time;
+- explicit timezone offset is present on the scheduled time;
 - exact final asset Drive file ID is known;
 - final asset SHA-256 is known;
 - correlation and idempotency keys are known;
@@ -56,11 +57,31 @@ A sync worker may mirror an item only when all of these are true in the canonica
 - `exactAssetBinding=TRUE`;
 - operation and owner rules still allow the content to run.
 
-Rows that are still `IDEA`, `BRIEFED`, unapproved, unscheduled, unsupported, already due or too close to execution are recorded as `SKIPPED` in sync evidence and never promoted by the compiler.
+Rows that are still `IDEA`, `BRIEFED`, unapproved, unsupported, already due or too close to execution are recorded as `SKIPPED` in sync evidence and never promoted by the compiler. A row without `scheduledAt` is accepted at the snapshot boundary and recorded as `SKIPPED` with `SCHEDULE_NOT_SET`; the schedule becomes mandatory only when building an eligible queue item.
 
-An item that otherwise declares itself eligible but lacks its exact asset, identity, idempotency or Creative Truth evidence causes the compilation to fail closed. The existing queue file is not rewritten because output is written only after successful compilation.
+An item that otherwise declares itself eligible but lacks its exact asset, identity, idempotency or Creative Truth evidence causes the compilation to fail closed. Compilation completes for the entire snapshot before any final queue path is replaced.
 
 The sync worker must never convert pending content into approved content and must never backfill an expired slot.
+
+## Immutable sync evidence and atomic persistence
+
+Every successful compilation binds its audit record to both sides of the transformation:
+
+- `inputSnapshotSha256` hashes the canonical parsed registry snapshot;
+- `outputQueueSha256` hashes the validated queue produced from that snapshot;
+- `runId` identifies the execution;
+- the immutable evidence filename contains the generated timestamp, `runId`, and prefixes of both hashes.
+
+`TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH` is therefore a base filename only. The compiler never overwrites that base file. It derives a new run-specific evidence path for each execution and refuses to replace an existing evidence file with the same resolved name.
+
+Final queue and evidence files are never written in place. The runtime writes complete JSON payloads to unique temporary files in the same directories and exposes them only through atomic rename. Immutable evidence is installed first; the queue is renamed second. As a result:
+
+1. an interrupted temporary write cannot expose truncated final JSON;
+2. compilation failure leaves the existing queue untouched;
+3. a failure before the final queue rename leaves the previous queue intact;
+4. if queue replacement fails after evidence installation, the failed attempt still has an immutable audit record instead of a new queue paired with stale evidence.
+
+Temporary files are cleaned up on both success and failure.
 
 ## Protected-main rule
 
