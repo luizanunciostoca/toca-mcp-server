@@ -21,6 +21,16 @@ type TestTransport = InstagramPublicationTransport & {
   ): Promise<readonly PublishedMediaEvidence[]>;
 };
 
+type TransportFixture = {
+  readonly transport: TestTransport;
+  readonly createContainer: ReturnType<typeof vi.fn>;
+  readonly getContainerStatus: ReturnType<typeof vi.fn>;
+  readonly publishContainer: ReturnType<typeof vi.fn>;
+  readonly getPublishedMedia: ReturnType<typeof vi.fn>;
+  readonly listRecentPublishedMedia: ReturnType<typeof vi.fn>;
+  readonly listRecentPublishedStories: ReturnType<typeof vi.fn>;
+};
+
 async function workspace(overrides: Record<string, unknown> = {}): Promise<{
   readonly root: string;
   readonly queuePath: string;
@@ -100,23 +110,39 @@ function envFor(paths: Awaited<ReturnType<typeof workspace>>): NodeJS.ProcessEnv
 }
 
 function okAssetFetch() {
-  return vi.fn(async () => new Response(jpeg, { status: 200 })) as unknown as typeof fetch;
+  return vi.fn(() => Promise.resolve(new Response(jpeg, { status: 200 }))) as unknown as typeof fetch;
 }
 
-function transport(overrides: Partial<TestTransport> = {}): TestTransport {
-  return {
-    createContainer: vi.fn(async () => ({ containerId: 'container-1' })),
-    getContainerStatus: vi.fn(async () => 'FINISHED' as const),
-    publishContainer: vi.fn(async () => ({ mediaId: 'media-1' })),
-    getPublishedMedia: vi.fn(async (mediaId: string) => ({
+function transport(overrides: Partial<TestTransport> = {}): TransportFixture {
+  const createContainer = vi.fn(() => Promise.resolve({ containerId: 'container-1' }));
+  const getContainerStatus = vi.fn(() => Promise.resolve('FINISHED' as const));
+  const publishContainer = vi.fn(() => Promise.resolve({ mediaId: 'media-1' }));
+  const getPublishedMedia = vi.fn((mediaId: string) =>
+    Promise.resolve({
       mediaId,
       mediaType: 'IMAGE',
       permalink: `https://www.instagram.com/p/${mediaId}/`,
       timestamp: '2026-09-12T12:00:01Z',
-    })),
-    listRecentPublishedMedia: vi.fn(async () => []),
-    listRecentPublishedStories: vi.fn(async () => []),
-    ...overrides,
+    }),
+  );
+  const listRecentPublishedMedia = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
+  const listRecentPublishedStories = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
+  return {
+    transport: {
+      createContainer,
+      getContainerStatus,
+      publishContainer,
+      getPublishedMedia,
+      listRecentPublishedMedia,
+      listRecentPublishedStories,
+      ...overrides,
+    },
+    createContainer,
+    getContainerStatus,
+    publishContainer,
+    getPublishedMedia,
+    listRecentPublishedMedia,
+    listRecentPublishedStories,
   };
 }
 
@@ -135,7 +161,7 @@ describe('GitHub-native publication runtime', () => {
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
       now,
       fetch: okAssetFetch(),
-      createTransport: () => provider,
+      createTransport: () => provider.transport,
     });
 
     expect(provider.publishContainer).toHaveBeenCalledTimes(1);
@@ -164,22 +190,22 @@ describe('GitHub-native publication runtime', () => {
     const dependencies = {
       now,
       fetch: okAssetFetch(),
-      createTransport: () => provider,
+      createTransport: () => provider.transport,
     };
 
     await runGithubNativePublicationCycle(envFor(paths), dependencies);
-    const firstReadbackCount = vi.mocked(provider.getPublishedMedia!).mock.calls.length;
+    const firstReadbackCount = provider.getPublishedMedia.mock.calls.length;
     const second = await runGithubNativePublicationCycle(envFor(paths), dependencies);
 
     expect(provider.publishContainer).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(provider.getPublishedMedia!).mock.calls.length).toBe(firstReadbackCount + 1);
+    expect(provider.getPublishedMedia.mock.calls.length).toBe(firstReadbackCount + 1);
     expect(second.items[0]?.outcome).toBe('RECONCILED_ALREADY_PUBLISHED_READBACK_VERIFIED');
   });
 
   it('fails closed when provider media near the slot cannot be proven to be the exact approved asset', async () => {
     const paths = await workspace();
-    const provider = transport({
-      listRecentPublishedMedia: vi.fn(async () => [
+    const listRecentPublishedMedia = vi.fn(() =>
+      Promise.resolve([
         {
           mediaId: 'existing-media',
           mediaType: 'IMAGE',
@@ -187,12 +213,13 @@ describe('GitHub-native publication runtime', () => {
           timestamp: '2026-09-12T12:00:30Z',
         },
       ]),
-    });
+    );
+    const provider = transport({ listRecentPublishedMedia });
 
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
       now: () => new Date('2026-09-12T12:00:00Z'),
       fetch: okAssetFetch(),
-      createTransport: () => provider,
+      createTransport: () => provider.transport,
     });
 
     expect(provider.createContainer).not.toHaveBeenCalled();
@@ -205,24 +232,25 @@ describe('GitHub-native publication runtime', () => {
 
   it('uses the dedicated Stories readback path before a Story write', async () => {
     const paths = await workspace({ mediaType: 'STORY', caption: undefined });
-    const listStories = vi.fn(async () => [] as readonly PublishedMediaEvidence[]);
-    const listMedia = vi.fn(async () => {
-      throw new Error('MEDIA_COLLECTION_MUST_NOT_BE_USED_FOR_STORY');
-    });
-    const provider = transport({
-      listRecentPublishedMedia: listMedia,
-      listRecentPublishedStories: listStories,
-      getPublishedMedia: vi.fn(async (mediaId: string) => ({
+    const listStories = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
+    const listMedia = vi.fn(() => Promise.reject(new Error('MEDIA_COLLECTION_MUST_NOT_BE_USED_FOR_STORY')));
+    const storyReadback = vi.fn((mediaId: string) =>
+      Promise.resolve({
         mediaId,
         mediaType: 'IMAGE',
         timestamp: '2026-09-12T12:00:01Z',
-      })),
+      }),
+    );
+    const provider = transport({
+      listRecentPublishedMedia: listMedia,
+      listRecentPublishedStories: listStories,
+      getPublishedMedia: storyReadback,
     });
 
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
       now: () => new Date('2026-09-12T12:00:00Z'),
       fetch: okAssetFetch(),
-      createTransport: () => provider,
+      createTransport: () => provider.transport,
     });
 
     expect(listStories).toHaveBeenCalledTimes(1);
@@ -232,10 +260,11 @@ describe('GitHub-native publication runtime', () => {
 
   it('blocks redirects from the content-addressed publication asset URL', async () => {
     const paths = await workspace();
-    const providerFactory = vi.fn(() => transport());
-    const redirectingFetch = vi.fn(
-      async () =>
+    const providerFactory = vi.fn(() => transport().transport);
+    const redirectingFetch = vi.fn(() =>
+      Promise.resolve(
         new Response(null, { status: 302, headers: { location: 'https://example.com/x' } }),
+      ),
     ) as unknown as typeof fetch;
 
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
@@ -254,10 +283,10 @@ describe('GitHub-native publication runtime', () => {
   it('rechecks expiry after asset verification and blocks before provider side effects', async () => {
     const paths = await workspace({ expiresAt: '2026-09-12T09:00:10-03:00' });
     let current = Date.parse('2026-09-12T12:00:00Z');
-    const providerFactory = vi.fn(() => transport());
-    const delayedFetch = vi.fn(async () => {
+    const providerFactory = vi.fn(() => transport().transport);
+    const delayedFetch = vi.fn(() => {
       current += 20_000;
-      return new Response(jpeg, { status: 200 });
+      return Promise.resolve(new Response(jpeg, { status: 200 }));
     }) as unknown as typeof fetch;
 
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
@@ -275,7 +304,7 @@ describe('GitHub-native publication runtime', () => {
 
   it('validates exact asset bytes in SHADOW without constructing a provider client', async () => {
     const paths = await workspace();
-    const providerFactory = vi.fn(() => transport());
+    const providerFactory = vi.fn(() => transport().transport);
     const shadowEnv = {
       ...envFor(paths),
       TOCA_GITHUB_NATIVE_PUBLICATION_MODE: 'SHADOW',
