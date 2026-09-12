@@ -1,0 +1,118 @@
+name: GitHub Native Instagram Publisher
+
+on:
+  schedule:
+    - cron: '2/5 * * * *'
+      timezone: 'America/Bahia'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Controlled rollout mode
+        required: true
+        type: choice
+        default: SHADOW
+        options:
+          - SHADOW
+          - CANARY
+          - LIMITED
+          - GENERAL
+      writes_enabled:
+        description: Explicit manual write confirmation for workflow_dispatch
+        required: true
+        type: boolean
+        default: false
+      canary_content_item_id:
+        description: Required exact content item when mode is CANARY
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-native-instagram-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOCA_PUBLICATION_QUEUE_PATH: control/github-native-publication-queue.json
+      TOCA_PUBLICATION_STATE_DIR: .publication-state-worktree/publication-state
+      TOCA_PUBLICATION_EVIDENCE_PATH: github-native-publication-evidence.json
+      TOCA_GITHUB_NATIVE_PUBLICATION_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW' }}
+      TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: ${{ vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false' }}
+      TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION: ${{ inputs.writes_enabled || false }}
+      TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.canary_content_item_id || vars.TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID || '' }}
+      INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID || '17841402033495654' }}
+      META_GRAPH_BASE_URL: https://graph.facebook.com
+      META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v24.0' }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout exact controller SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact controller SHA
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Checkout immutable publication ledger branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: publication-state
+          path: .publication-state-worktree
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build exact controller
+        run: pnpm build
+
+      - name: Execute fail-closed GitHub-native publication cycle
+        env:
+          TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}
+          TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: node dist/src/github-native-publication/github-native-publication-runtime.js
+
+      - name: Persist publication ledger only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger=.publication-state-worktree
+          mkdir -p "$ledger/publication-state"
+          if [ -n "$(git -C "$ledger" status --porcelain -- publication-state)" ]; then
+            git -C "$ledger" config user.name "toca-publication-ledger[bot]"
+            git -C "$ledger" config user.email "toca-publication-ledger[bot]@users.noreply.github.com"
+            git -C "$ledger" add -- publication-state
+            git -C "$ledger" commit -m "state(instagram): run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            git -C "$ledger" push origin HEAD:publication-state
+          fi
+
+      - name: Upload immutable publication evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: github-native-instagram-${{ github.run_id }}-${{ github.run_attempt }}
+          path: github-native-publication-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
