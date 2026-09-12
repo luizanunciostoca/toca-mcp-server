@@ -1,20 +1,50 @@
+import type { PhotoToVideoRouteType } from '../contracts/photo-to-video.js';
+
 export const THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID =
   'TP-ITA-20261011-GENERATIVE-V1' as const;
 
 export const THE_PARTY_ITACARE_EDITION_ID = 'TP-ITA-20261011' as const;
 
 export const THE_PARTY_ITACARE_SOURCES = {
-  DAY: {
-    assetId: 'TP-ITA-GEN-DAY-001',
-    venueAssetId: 'VENUE-TP-ITA-GEN-DAY-001',
-    driveFileId: '1OU3ub3jdDzCsSCI37LfE7XfR5dddrMwM',
-    sha256: '28da2f953122065c511f59020d10a065720fc4683dfe13e4be71d9b5508165bc',
+  VENUE_DAY: {
+    assetId: 'TP-ITA-GEN-VENUE-DAY-001',
+    venueAssetId: 'VENUE-TP-ITA-GEN-VENUE-DAY-001',
+    driveFileId: '1Yb0_x2eh-gUDo0S-GrZ2Y9FKv3t6ZDmD',
+    sha256: '132a24cc60893abb132232c5a473ae42fb7fe7c5fd8f296b2ea546921c6e7047',
+    containsPeople: false,
+    approvedRoutes: ['GENERATIVE_SCENE_CONTINUATION_VIDEO'] as const,
   },
-  SUNSET: {
-    assetId: 'TP-ITA-GEN-SUNSET-001',
-    venueAssetId: 'VENUE-TP-ITA-GEN-SUNSET-001',
-    driveFileId: '1IYr00X98Nq3hIVbwneki0fH1DL3ACIT7',
-    sha256: '00a9eaca142cbf1b4b1744ae5c9f2238dc1a4ef9a74068a0265e922c3c11c72d',
+  VENUE_SUNSET: {
+    assetId: 'TP-ITA-GEN-VENUE-SUNSET-001',
+    venueAssetId: 'VENUE-TP-ITA-GEN-VENUE-SUNSET-001',
+    driveFileId: '1zLjYNjr3xP4uaBcCLQEY9jKbHOaKlN50',
+    sha256: 'a0ed04a0e9168e7f07b4094f3bfecd605707d55c57927e9fd5af6b1493943379',
+    containsPeople: false,
+    approvedRoutes: ['GENERATIVE_SCENE_CONTINUATION_VIDEO'] as const,
+  },
+  ILLUSIONIZE: {
+    assetId: 'TP-ITA-PHOTO-ILLUSIONIZE-001',
+    venueAssetId: 'VENUE-TP-ITA-PHOTO-ILLUSIONIZE-001',
+    driveFileId: '1dOP5xiNx3iI9fZStm47BTq737wtA2Wst',
+    sha256: '5a8e519354a04d1d4c11547f323a3641c70ae736779538013d9a3d49e1f31ca0',
+    containsPeople: true,
+    approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'] as const,
+  },
+  BRISOTTI: {
+    assetId: 'TP-ITA-PHOTO-BRISOTTI-001',
+    venueAssetId: 'VENUE-TP-ITA-PHOTO-BRISOTTI-001',
+    driveFileId: '1-Pl_A32eLNgbhZDZVb77uUGE0RZz7tfj',
+    sha256: '4de8d4b015bc58d425b46b6a689c2245bc9093ac629bc485f967fa8a88f09aa5',
+    containsPeople: true,
+    approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'] as const,
+  },
+  LINEUP_DUO: {
+    assetId: 'TP-ITA-PHOTO-LINEUP-DUO-001',
+    venueAssetId: 'VENUE-TP-ITA-PHOTO-LINEUP-DUO-001',
+    driveFileId: '1SKt19Uu5GNC942aS8lWnrdhsV3QpHYAY',
+    sha256: '2f704e3b82cd6ff808a110e344a73472ae3a5f96d769bebb052829f367a0984d',
+    containsPeople: true,
+    approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'] as const,
   },
 } as const;
 
@@ -23,7 +53,8 @@ export type ItacareCampaignSourceKey = keyof typeof THE_PARTY_ITACARE_SOURCES;
 export interface ItacareGenerativeSceneSpec {
   readonly contentItemId: string;
   readonly source: ItacareCampaignSourceKey;
-  readonly creativeDirection: string;
+  readonly routeType: PhotoToVideoRouteType;
+  readonly creativeDirection?: string;
 }
 
 export interface ItacareGenerativeVideoSpec {
@@ -42,11 +73,35 @@ export interface ItacareGenerativeVideoSpec {
   readonly scenes: readonly ItacareGenerativeSceneSpec[];
 }
 
-const SOURCE_LOCK =
-  'Preserve Praia da Ribeira, coastline, sea, vegetation, event identity, source perspective and source lighting facts. Do not invent architecture, artists, faces, crowds, sponsors, logos, typography, offers or ticket prices. Do not redraw, morph or translate any written text or logo. Do not create synthetic artist likeness or synthetic testimonials. Keep all motion physically plausible, premium and cinematic. This is a review candidate only; publication is not authorized.';
+const VENUE_SOURCE_LOCK =
+  'Treat the supplied Praia da Ribeira campaign artwork as the factual visual anchor. Animate only plausible photographic background motion supported by the visible coastline, sea, sky and vegetation. Preserve all existing typography, date, artist names, venue wording, logos, sponsor marks and CTA as source facts; do not redraw, translate, replace or invent them. Do not invent architecture, stages, crowds, people, products, offers, prices or scarcity claims. Keep motion physically plausible, premium and cinematic. This is a review candidate only; publication is not authorized.';
 
-function direction(action: string): string {
-  return `${action} ${SOURCE_LOCK}`;
+function venueDirection(action: string): string {
+  return `${action} ${VENUE_SOURCE_LOCK}`;
+}
+
+function realMotionScene(
+  contentItemId: string,
+  source: 'ILLUSIONIZE' | 'BRISOTTI' | 'LINEUP_DUO',
+): ItacareGenerativeSceneSpec {
+  return {
+    contentItemId,
+    source,
+    routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
+  };
+}
+
+function venueScene(
+  contentItemId: string,
+  source: 'VENUE_DAY' | 'VENUE_SUNSET',
+  action: string,
+): ItacareGenerativeSceneSpec {
+  return {
+    contentItemId,
+    source,
+    routeType: 'GENERATIVE_SCENE_CONTINUATION_VIDEO',
+    creativeDirection: venueDirection(action),
+  };
 }
 
 export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
@@ -57,20 +112,12 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'HIGH_IMPACT_CAMPAIGN',
     finalContentItemId: 'TP-ITA-VID01-HERO-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID01-HERO-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create a bold opening hero shot with a slow aerial-style push toward Praia da Ribeira, subtle ocean movement, gentle foliage motion and a restrained premium light sweep that makes the event key visual feel alive.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID01-HERO-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create the climax of a premium event trailer: a slow cinematic push across the sunset coastline, natural cloud drift, subtle water movement and an elegant rise in luminous atmosphere while the existing campaign information stays visually anchored.',
-        ),
-      },
+      realMotionScene('TP-ITA-VID01-HERO-S01', 'LINEUP_DUO'),
+      venueScene(
+        'TP-ITA-VID01-HERO-S02',
+        'VENUE_SUNSET',
+        'Create the climax of a premium event trailer with a restrained slow push into the visible golden-hour coast, subtle natural sea shimmer, cloud drift and vegetation movement.',
+      ),
     ],
   },
   {
@@ -80,27 +127,17 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'IMMERSIVE_ANNOUNCEMENT',
     finalContentItemId: 'TP-ITA-VID02-MANIFESTO-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID02-MANIFESTO-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Open as a destination manifesto: serene but magnetic movement over the tropical coastline, realistic waves and vegetation, a slow forward camera drift and clean daylight energy that sells nature and place before nightlife.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID02-MANIFESTO-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Continue the manifesto into golden hour with realistic sun rays through clouds, subtle wave motion and a measured cinematic push that increases anticipation without changing any factual venue or campaign element.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID02-MANIFESTO-GEN-S03',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Finish the manifesto with an emotionally stronger sunset hero moment: restrained atmospheric depth, natural sea shimmer and a deliberate closing push that makes the existing slogan and event identity feel definitive and premium.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID02-MANIFESTO-S01',
+        'VENUE_DAY',
+        'Open as a destination manifesto with a smooth forward drift over the visible tropical beach and coast, gentle waves and restrained foliage motion.',
+      ),
+      venueScene(
+        'TP-ITA-VID02-MANIFESTO-S02',
+        'VENUE_SUNSET',
+        'Continue into golden hour with source-consistent sunlight, subtle cloud movement, sea shimmer and a measured cinematic push.',
+      ),
+      realMotionScene('TP-ITA-VID02-MANIFESTO-S03', 'LINEUP_DUO'),
     ],
   },
   {
@@ -110,20 +147,12 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'SOCIAL_PROMOTION',
     finalContentItemId: 'TP-ITA-VID03-ILLUSIONIZE-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID03-ILLUSIONIZE-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create an energetic artist-announcement environment without generating the artist: quicker camera push over Praia da Ribeira, controlled light rhythm in the environment and crisp natural motion that supports the existing ILLUSIONIZE name in the source artwork.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID03-ILLUSIONIZE-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create a second high-impact artist spotlight environment with sunset depth, restrained pulse-like lighting in the sky and water, and a clean final push. Do not create a performer or face; the official artist identity remains only in existing source typography.',
-        ),
-      },
+      realMotionScene('TP-ITA-VID03-ILLUSIONIZE-S01', 'ILLUSIONIZE'),
+      venueScene(
+        'TP-ITA-VID03-ILLUSIONIZE-S02',
+        'VENUE_SUNSET',
+        'Create a high-impact destination support shot using only the visible sunset coastline, with a clean forward camera drift and restrained rhythmic movement in water, clouds and foliage.',
+      ),
     ],
   },
   {
@@ -133,20 +162,12 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'SOCIAL_PROMOTION',
     finalContentItemId: 'TP-ITA-VID04-BRISOTTI-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID04-BRISOTTI-GEN-S01',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create an energetic Brisotti announcement environment without generating the artist: elegant sunset camera movement, realistic water and cloud motion and restrained rhythmic light movement supporting the existing BRISOTTI name in the source artwork.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID04-BRISOTTI-GEN-S02',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create a bright destination-driven second shot with a confident forward camera drift over Praia da Ribeira and realistic coastal movement. Do not generate a performer or face; preserve official artist identity only through the existing campaign typography.',
-        ),
-      },
+      realMotionScene('TP-ITA-VID04-BRISOTTI-S01', 'BRISOTTI'),
+      venueScene(
+        'TP-ITA-VID04-BRISOTTI-S02',
+        'VENUE_DAY',
+        'Create a bright destination support shot with a confident but smooth push over the visible Praia da Ribeira coast, realistic water and vegetation movement.',
+      ),
     ],
   },
   {
@@ -156,20 +177,12 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'LINEUP',
     finalContentItemId: 'TP-ITA-VID05-LINEUP-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID05-LINEUP-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Animate the official line-up key visual with premium destination motion: slow push, subtle ocean parallax and vegetation movement. Keep both artist names, date, venue wording and campaign marks unchanged and readable.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID05-LINEUP-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create a stronger line-up closing scene using the sunset source: cinematic depth, natural wave movement and a restrained light rise. Keep ILLUSIONIZE and BRISOTTI as source-bound typography; do not synthesize artist faces or performances.',
-        ),
-      },
+      realMotionScene('TP-ITA-VID05-LINEUP-S01', 'LINEUP_DUO'),
+      venueScene(
+        'TP-ITA-VID05-LINEUP-S02',
+        'VENUE_SUNSET',
+        'Create a strong line-up closing environment from the visible golden-hour coast with cinematic depth, natural wave movement and a restrained light rise.',
+      ),
     ],
   },
   {
@@ -179,20 +192,16 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'EVENT',
     finalContentItemId: 'TP-ITA-VID06-VENUE-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID06-VENUE-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Make Praia da Ribeira the protagonist. Use a slow high-end travel-film push over the exact coastline with realistic water, small wave break, palm and forest movement, and subtle aerial parallax. Do not add buildings, stages or beach-club structures not visible in the source.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID06-VENUE-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Transition the destination feeling into sunset using only source-consistent geometry: natural clouds, golden rays, water shimmer, forest depth and a slow cinematic camera drift. The place must remain recognizably Praia da Ribeira.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID06-VENUE-S01',
+        'VENUE_DAY',
+        'Make the visible Praia da Ribeira coastline the protagonist with a slow high-end travel-film push, realistic sea movement, small wave action, tropical foliage movement and subtle aerial-style parallax.',
+      ),
+      venueScene(
+        'TP-ITA-VID06-VENUE-S02',
+        'VENUE_SUNSET',
+        'Transition the visible coast into an emotional golden-hour hero moment using only source-consistent clouds, sunlight, water shimmer, forest depth and slow camera drift.',
+      ),
     ],
   },
   {
@@ -202,27 +211,17 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'HIGH_IMPACT_CAMPAIGN',
     finalContentItemId: 'TP-ITA-VID07-EXPERIENCE-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID07-EXPERIENCE-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create a high-energy proof-of-place shot from the real campaign source with faster but smooth camera movement, realistic sea motion and tropical depth. Do not fabricate attendance, crowds or prior-event footage.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID07-EXPERIENCE-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Increase emotional energy with a sunset hero movement, natural wave action and controlled light dynamics. Keep the scene factual and do not invent people, crowd density or event infrastructure.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID07-EXPERIENCE-GEN-S03',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Close with a confident destination shot: a restrained aerial-style pull revealing the real beach and forest relationship, subtle water movement and a premium campaign finish. No fabricated social proof or synthetic crowd.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID07-EXPERIENCE-S01',
+        'VENUE_DAY',
+        'Create a more energetic proof-of-place movement from the visible beach source with smooth forward motion, realistic sea action and tropical depth.',
+      ),
+      venueScene(
+        'TP-ITA-VID07-EXPERIENCE-S02',
+        'VENUE_SUNSET',
+        'Increase emotional energy with a sunset hero movement, natural wave action, cloud drift and restrained light dynamics while keeping the place factual.',
+      ),
+      realMotionScene('TP-ITA-VID07-EXPERIENCE-S03', 'LINEUP_DUO'),
     ],
   },
   {
@@ -232,20 +231,12 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'INVITATION',
     finalContentItemId: 'TP-ITA-VID08-INVITE-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID08-INVITE-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create an intimate invitation-style opening with gentle camera movement, premium tropical atmosphere and realistic Praia da Ribeira motion. Do not generate a talking person, testimonial, presenter or synthetic UGC identity.',
-        ),
-      },
-      {
-        contentItemId: 'TP-ITA-VID08-INVITE-GEN-S02',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create the invitation close with warm sunset depth, subtle sea shimmer and an elegant slow push that leaves the official campaign message as the factual call to attend. No synthetic speaker or testimonial.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID08-INVITE-S01',
+        'VENUE_DAY',
+        'Create an intimate invitation-style opening with gentle camera movement, premium tropical atmosphere and realistic motion limited to the visible beach, sea, sky and vegetation.',
+      ),
+      realMotionScene('TP-ITA-VID08-INVITE-S02', 'LINEUP_DUO'),
     ],
   },
   {
@@ -255,13 +246,11 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'SOCIAL_PROMOTION',
     finalContentItemId: 'TP-ITA-VID09-COUNTDOWN-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID09-COUNTDOWN-GEN-S01',
-        source: 'DAY',
-        creativeDirection: direction(
-          'Create a compact urgency cut: brisk but controlled push toward the beach, realistic water movement and a short premium light pulse that emphasizes the existing 11 de outubro event date without generating any new countdown number or text.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID09-COUNTDOWN-S01',
+        'VENUE_DAY',
+        'Create a compact urgency cut with a brisk but controlled push toward the visible coast, realistic water motion and a restrained premium light pulse. Do not create any new countdown number or text.',
+      ),
     ],
   },
   {
@@ -271,13 +260,11 @@ export const THE_PARTY_ITACARE_GENERATIVE_VIDEOS = [
     intent: 'PEOPLE_FIRST_CONVERSION',
     finalContentItemId: 'TP-ITA-VID10-RETARGETING-GEN-FINAL',
     scenes: [
-      {
-        contentItemId: 'TP-ITA-VID10-RETARGETING-GEN-S01',
-        source: 'SUNSET',
-        creativeDirection: direction(
-          'Create a conversion-focused closing video with direct premium camera motion, natural sunset and sea movement and strong visual emphasis on the existing event identity and ticket CTA. Do not invent price, lot status, scarcity claims or new written text.',
-        ),
-      },
+      venueScene(
+        'TP-ITA-VID10-RETARGETING-S01',
+        'VENUE_SUNSET',
+        'Create a conversion-focused closing shot with direct premium camera motion and natural golden-hour sea, cloud and vegetation movement. Do not invent price, lot status, scarcity claims or new written text.',
+      ),
     ],
   },
 ] as const satisfies readonly ItacareGenerativeVideoSpec[];
