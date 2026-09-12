@@ -66,7 +66,9 @@ export async function stageGithubNativeDriveAssets(
       if (!sourceDriveFileId) {
         throw new Error('GITHUB_NATIVE_ASSET_SOURCE_DRIVE_ID_REQUIRED');
       }
-      if (item.creativeTruthBinding.outputSha256.toLowerCase() !== item.asset.sha256.toLowerCase()) {
+      if (
+        item.creativeTruthBinding.outputSha256.toLowerCase() !== item.asset.sha256.toLowerCase()
+      ) {
         throw new Error('GITHUB_NATIVE_CREATIVE_TRUTH_HASH_MISMATCH');
       }
 
@@ -148,9 +150,7 @@ function immutableEvidence(
 ): Omit<AssetStageEvidence, 'outcome' | 'effectiveSourceHost' | 'error'> {
   return {
     contentItemId: item.contentItemId,
-    ...(item.asset.sourceDriveFileId
-      ? { sourceDriveFileId: item.asset.sourceDriveFileId }
-      : {}),
+    ...(item.asset.sourceDriveFileId ? { sourceDriveFileId: item.asset.sourceDriveFileId } : {}),
     assetSha256: item.asset.sha256.toLowerCase(),
   };
 }
