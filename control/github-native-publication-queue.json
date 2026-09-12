@@ -1,6 +1,37 @@
 {
   "schemaVersion": 1,
   "timezone": "America/Bahia",
-  "generatedAt": "2026-09-12T06:31:00-03:00",
-  "items": []
+  "generatedAt": "2026-09-12T18:10:00-03:00",
+  "items": [
+    {
+      "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
+      "scheduledAt": "2026-09-17T09:00:00-03:00",
+      "operation": "SUNSET",
+      "channel": "INSTAGRAM",
+      "contentStatus": "PRODUCED",
+      "approvalStatus": "APPROVED",
+      "publicationIntent": "SCHEDULED",
+      "mediaType": "IMAGE",
+      "instagramAccountId": "17841402033495654",
+      "caption": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.",
+      "asset": {
+        "url": "https://raw.githubusercontent.com/luizanunciostoca/toca-mcp-server/publication-assets/publication-assets/a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6.jpg",
+        "contentType": "image/jpeg",
+        "sha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+        "sourceDriveFileId": "1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK"
+      },
+      "correlationId": "CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1",
+      "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-0900:V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
+        "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      }
+    }
+  ]
 }
