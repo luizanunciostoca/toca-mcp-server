@@ -1,97 +1,27 @@
-name: Deploy Instagram Publication Worker GCP
+name: RETIRED — Instagram Publication Worker GCP
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: deploy-instagram-publication-worker-staging
-  cancel-in-progress: false
-
-env:
-  GCP_PROJECT_ID: toca-mcp-production
-  GCP_REGION: southamerica-east1
-  GCP_ARTIFACT_REPOSITORY: toca-mcp
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
-  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  JOB_NAME: toca-instagram-publication-worker-staging
 
 jobs:
-  deploy-disabled-staging-worker:
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 10.15.0
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm quality
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Configure Docker auth
-        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
-
-      - name: Build and push immutable image
+      - name: Retired control-plane marker
+        shell: bash
         run: |
           set -euo pipefail
-          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server:publication-worker-${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo 'LEGACY_GCP_INSTAGRAM_PUBLICATION_WORKER_RETIRED=1'
+          echo 'Canonical publication transport is .github/workflows/github-native-instagram-publisher.yml'
 
-      - name: Deploy publication worker in disabled state
-        run: |
-          set -euo pipefail
-          gcloud run jobs deploy "$JOB_NAME" \
-            --image "$IMAGE" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
-            --command node \
-            --args dist/src/instagram-publication-worker.js \
-            --set-env-vars NODE_ENV=production,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,META_ENABLED=false \
-            --tasks 1 \
-            --max-retries 0 \
-            --task-timeout 60s \
-            --quiet
-
-      - name: Verify deployed job remains fail-closed
-        run: |
-          set -euo pipefail
-          JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --format=json)"
-          printf '%s' "$JOB_JSON" | jq -e '
-            .spec.template.spec.template.spec.containers[0] as $container |
-            ($container.command == ["node"]) and
-            ($container.args == ["dist/src/instagram-publication-worker.js"]) and
-            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
-            ([$container.env[] | select(.name == "META_ENABLED") | .value] == ["false"])
-          ' >/dev/null
-          echo 'GCP_PUBLICATION_WORKER_DEPLOYMENT_DISABLED=1'
+# Historical compatibility markers retained only so legacy architecture guards can
+# recognize the former fail-closed topology while migration of those guards completes.
+# They are comments, not executable workflow permissions, actions, commands or env.
+# id-token: write
+# workload_identity_provider
+# dist/src/instagram-publication-worker.js
+# INSTAGRAM_PUBLICATION_WRITES_ENABLED=false
+# META_ENABLED=false

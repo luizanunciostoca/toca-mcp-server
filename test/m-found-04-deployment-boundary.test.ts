@@ -5,13 +5,16 @@ const repositoryFile = (path: string): string =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 describe('M-FOUND-04 deployment identity boundary', () => {
-  it('keeps the production MCP Cloud Run service authentication-required', () => {
+  it('keeps the retired Instagram GCP daemon unable to deploy the production MCP service', () => {
     const workflow = repositoryFile(
       '.github/workflows/deploy-toca-managed-instagram-daemon-gcp.yml',
     );
-    expect(workflow).toMatch(
-      /gcloud run deploy "\$MCP_SERVICE_NAME"[\s\S]*?--no-allow-unauthenticated/,
-    );
+
+    expect(workflow).toContain('LEGACY_GCP_INSTAGRAM_DAEMON_RETIRED=1');
+    expect(workflow).toContain('permissions:\n  contents: read');
+    expect(workflow).not.toMatch(/^\s*id-token:\s*write\s*$/m);
+    expect(workflow).not.toMatch(/^\s*gcloud run deploy /m);
+    expect(workflow).not.toContain('google-github-actions/auth');
   });
 
   it('removes the generic mcp-client requester from mutable MCP registration paths', () => {
