@@ -3,7 +3,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
 import type { PublicationExecutionStore } from '../providers/instagram/instagram-publication-executor.js';
-import type { PublicationRecord, PublicationState } from '../providers/instagram/publication-state.js';
+import type {
+  PublicationRecord,
+  PublicationState,
+} from '../providers/instagram/publication-state.js';
 
 const publicationStates = new Set<PublicationState>([
   'DRAFT',
@@ -88,8 +91,6 @@ function parsePublicationRecord(value: unknown): PublicationRecord {
 
 function isNotFound(error: unknown): boolean {
   return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ENOENT'
+    error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
 }
