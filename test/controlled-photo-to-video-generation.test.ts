@@ -145,7 +145,7 @@ function dependencies(storeFailure = false) {
     await Promise.resolve();
     return {
       bytes: sourceBytes,
-      contentType: 'image/jpeg',
+      contentType: 'image/jpeg' as const,
       driveFileId: 'master-drive',
       sha256: sourceSha256,
     };
