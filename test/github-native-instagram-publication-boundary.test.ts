@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 const publisher = readFileSync('.github/workflows/github-native-instagram-publisher.yml', 'utf8');
 const stager = readFileSync('.github/workflows/github-native-instagram-stage-asset.yml', 'utf8');
-const legacy = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
+const legacyPublishNow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
+const legacyAutopilot = readFileSync(
+  '.github/workflows/marketing-autopilot-publication.yml',
+  'utf8',
+);
 const runtime = readFileSync(
   'src/github-native-publication/github-native-publication-runtime.ts',
   'utf8',
@@ -71,7 +75,17 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(stager).toContain('raw.githubusercontent.com');
   });
 
-  it('disables the legacy GCP publishing lane unless explicitly re-authorized', () => {
-    expect(legacy).toContain("if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'");
+  it('keeps the older publish-now GCP lane disabled unless explicitly re-authorized', () => {
+    expect(legacyPublishNow).toContain("if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'");
+  });
+
+  it('retires the command-file GCP autopilot lane with no cloud or provider side effects', () => {
+    expect(legacyAutopilot).toContain('LEGACY_GCP_MARKETING_AUTOPILOT_PUBLICATION=RETIRED');
+    expect(legacyAutopilot).toContain('github-native-instagram-publisher.yml');
+    expect(legacyAutopilot).not.toContain('google-github-actions/');
+    expect(legacyAutopilot).not.toContain('gcloud ');
+    expect(legacyAutopilot).not.toContain('id-token: write');
+    expect(legacyAutopilot).not.toContain('META_ACCESS_TOKEN');
+    expect(legacyAutopilot).not.toContain('Cloud Run jobs deploy');
   });
 });
