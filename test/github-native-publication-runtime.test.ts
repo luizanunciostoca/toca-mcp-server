@@ -21,9 +21,7 @@ type TestTransport = InstagramPublicationTransport & {
   ): Promise<readonly PublishedMediaEvidence[]>;
 };
 
-async function workspace(
-  overrides: Record<string, unknown> = {},
-): Promise<{
+async function workspace(overrides: Record<string, unknown> = {}): Promise<{
   readonly root: string;
   readonly queuePath: string;
   readonly stateDirectory: string;
@@ -236,7 +234,8 @@ describe('GitHub-native publication runtime', () => {
     const paths = await workspace();
     const providerFactory = vi.fn(() => transport());
     const redirectingFetch = vi.fn(
-      async () => new Response(null, { status: 302, headers: { location: 'https://example.com/x' } }),
+      async () =>
+        new Response(null, { status: 302, headers: { location: 'https://example.com/x' } }),
     ) as unknown as typeof fetch;
 
     const cycle = await runGithubNativePublicationCycle(envFor(paths), {
