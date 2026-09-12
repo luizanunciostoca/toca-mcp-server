@@ -24,7 +24,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
         "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
         "brandIntegrityStatus": "PASSED",
@@ -54,7 +54,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260903-SUNSET-FEED-1500-V2",
         "outputSha256": "71a769eff30e43b034304da6ab49c2d0ce410af1f1fbc877b810fd21b4ec59d2",
         "brandIntegrityStatus": "PASSED",
@@ -84,7 +84,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260918-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260904-SUNSET-FEED-0900-V1",
         "outputSha256": "a2fab33e97b93c45552d04ce6eb8ebad93ed000e72369654816914d4ab6097d3",
         "brandIntegrityStatus": "PASSED",
@@ -114,7 +114,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260919-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260905-SUNSET-FEED-0900-V1",
         "outputSha256": "336a5f7004326894101f97a9c2844d4b7d5c04bfadbd75be914b03538db7983a",
         "brandIntegrityStatus": "PASSED",
@@ -144,7 +144,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260919-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260905-SUNSET-FEED-1500-V1",
         "outputSha256": "1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226",
         "brandIntegrityStatus": "PASSED",
@@ -174,7 +174,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260920-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260906-SUNSET-FEED-0900-V1",
         "outputSha256": "907f9436fd7c453920285d3d0db75a57404e7d998e154b7f2f8a011fc4fb0158",
         "brandIntegrityStatus": "PASSED",
@@ -204,7 +204,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260920-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260906-SUNSET-FEED-1500-V1",
         "outputSha256": "917209cada52c3bf1971ab3cffb66ca368805687ae3060ec1b80d585d0b3b7f6",
         "brandIntegrityStatus": "PASSED",
@@ -234,7 +234,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260921-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260907-SUNSET-FEED-0900-V1",
         "outputSha256": "f8a85ccf0c49923299a079dddeb4dbc9da041027366c4e3a3d079d23c9350907",
         "brandIntegrityStatus": "PASSED",
@@ -264,7 +264,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260921-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260907-SUNSET-FEED-1500-V1",
         "outputSha256": "c015ab8b82e528a0014ce346d119ced19c611833691b5ab4c5d92a71b4759aa9",
         "brandIntegrityStatus": "PASSED",
@@ -294,7 +294,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260922-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260908-SUNSET-FEED-0900-V1",
         "outputSha256": "1d53186159ea36edbe20c9ca79463a7fd0545d7afcfb6f8abe3c46719815b4ba",
         "brandIntegrityStatus": "PASSED",
@@ -324,7 +324,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260922-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260908-SUNSET-FEED-1500-V1",
         "outputSha256": "cb070dc8d56a7868e2def07d2c0945267043fdf22e3a729912179ae7c5ad1abb",
         "brandIntegrityStatus": "PASSED",
@@ -354,7 +354,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260923-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260909-SUNSET-FEED-0900-V1",
         "outputSha256": "6c7127cd77f4558a43894628c417eef5d4e4add8194309aab5206b729df9f434",
         "brandIntegrityStatus": "PASSED",
@@ -384,7 +384,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260923-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260909-SUNSET-FEED-1500-V1",
         "outputSha256": "be574bbfd50a25c09d65182b2d27e3a497183affa39a0db586283fad1fb2b3d5",
         "brandIntegrityStatus": "PASSED",
@@ -414,7 +414,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260924-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260910-SUNSET-FEED-0900-V1",
         "outputSha256": "78735811e8cece92b033775b73187838fda375291987e01c0de82bffaa8b6a38",
         "brandIntegrityStatus": "PASSED",
@@ -444,7 +444,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260924-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260910-SUNSET-FEED-1500-V1",
         "outputSha256": "23b30b645395522b55d9c06a603df903fd1ed5a1f47dbe0ea6c8d96d2878bd60",
         "brandIntegrityStatus": "PASSED",
@@ -474,7 +474,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260925-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260911-SUNSET-FEED-0900-V1",
         "outputSha256": "ccbc5615038d5e834f64a689e018ad97a7f84ef9e8ce69cb62f0d454a5c479b9",
         "brandIntegrityStatus": "PASSED",
@@ -504,7 +504,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260925-SUNSET-FEED-1500:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_PHOTO_V1",
         "creativeId": "CR-MKT-20260911-SUNSET-FEED-1500-V1",
         "outputSha256": "80ae5236e3695b8aa21e1f09165b239882d9d568651f834e751087c4d8a1b732",
         "brandIntegrityStatus": "PASSED",
