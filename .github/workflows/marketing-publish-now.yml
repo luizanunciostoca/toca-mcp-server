@@ -34,6 +34,7 @@ env:
 
 jobs:
   publish-now:
+    if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -102,7 +103,7 @@ jobs:
 
       - name: Upload immutable publication and reconciliation evidence
         if: always() && steps.command.outputs.action == 'PUBLISH_NOW'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65e75b540449e92b4886f43607fa02 # v4
         with:
           name: marketing-publish-now-${{ github.run_id }}-${{ github.run_attempt }}
           path: marketing-publish-now-*.json
