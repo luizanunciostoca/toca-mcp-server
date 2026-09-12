@@ -23,8 +23,8 @@ jobs:
       TOCA_PUBLICATION_QUEUE_PATH: control/github-native-publication-queue.json
       TOCA_PUBLICATION_STATE_DIR: .publication-state-worktree/publication-state
       TOCA_PUBLICATION_EVIDENCE_PATH: github-native-publication-evidence.json
-      TOCA_GITHUB_NATIVE_PUBLICATION_MODE: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.mode || vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW' }}
-      TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.writes_enabled == 'true' && 'true' || vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false' }}
+      TOCA_GITHUB_NATIVE_PUBLICATION_MODE: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.mode || github.event_name == 'repository_dispatch' && 'SHADOW' || vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW' }}
+      TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.writes_enabled == 'true' && 'true' || github.event_name == 'repository_dispatch' && 'false' || vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false' }}
       TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.writes_enabled == 'true' && 'true' || 'false' }}
       TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.canary_content_item_id || vars.TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID || '' }}
       INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
