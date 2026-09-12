@@ -110,7 +110,9 @@ function envFor(paths: Awaited<ReturnType<typeof workspace>>): NodeJS.ProcessEnv
 }
 
 function okAssetFetch() {
-  return vi.fn(() => Promise.resolve(new Response(jpeg, { status: 200 }))) as unknown as typeof fetch;
+  return vi.fn(() =>
+    Promise.resolve(new Response(jpeg, { status: 200 })),
+  ) as unknown as typeof fetch;
 }
 
 function transport(overrides: Partial<TestTransport> = {}): TransportFixture {
@@ -125,8 +127,12 @@ function transport(overrides: Partial<TestTransport> = {}): TransportFixture {
       timestamp: '2026-09-12T12:00:01Z',
     }),
   );
-  const listRecentPublishedMedia = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
-  const listRecentPublishedStories = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
+  const listRecentPublishedMedia = vi.fn(() =>
+    Promise.resolve([] as readonly PublishedMediaEvidence[]),
+  );
+  const listRecentPublishedStories = vi.fn(() =>
+    Promise.resolve([] as readonly PublishedMediaEvidence[]),
+  );
   return {
     transport: {
       createContainer,
@@ -233,7 +239,9 @@ describe('GitHub-native publication runtime', () => {
   it('uses the dedicated Stories readback path before a Story write', async () => {
     const paths = await workspace({ mediaType: 'STORY', caption: undefined });
     const listStories = vi.fn(() => Promise.resolve([] as readonly PublishedMediaEvidence[]));
-    const listMedia = vi.fn(() => Promise.reject(new Error('MEDIA_COLLECTION_MUST_NOT_BE_USED_FOR_STORY')));
+    const listMedia = vi.fn(() =>
+      Promise.reject(new Error('MEDIA_COLLECTION_MUST_NOT_BE_USED_FOR_STORY')),
+    );
     const storyReadback = vi.fn((mediaId: string) =>
       Promise.resolve({
         mediaId,
