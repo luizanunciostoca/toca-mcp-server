@@ -34,6 +34,7 @@ env:
 
 jobs:
   publish-now:
+    if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

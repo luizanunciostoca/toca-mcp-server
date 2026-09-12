@@ -11,10 +11,7 @@ import type {
 } from './instagram-publication-executor.js';
 
 type IdResponse = { readonly id: string };
-
-type MediaListResponse = {
-  readonly data?: readonly unknown[];
-};
+type MediaListResponse = { readonly data?: readonly unknown[] };
 
 export class MetaInstagramPublicationTransport implements InstagramPublicationTransport {
   constructor(private readonly client: MetaApiClient) {}
@@ -61,8 +58,22 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
     instagramAccountId: string,
     limit = 25,
   ): Promise<readonly PublishedMediaEvidence[]> {
+    return this.listPublishedCollection(`${instagramAccountId}/media`, limit);
+  }
+
+  async listRecentPublishedStories(
+    instagramAccountId: string,
+    limit = 25,
+  ): Promise<readonly PublishedMediaEvidence[]> {
+    return this.listPublishedCollection(`${instagramAccountId}/stories`, limit);
+  }
+
+  private async listPublishedCollection(
+    path: string,
+    limit: number,
+  ): Promise<readonly PublishedMediaEvidence[]> {
     const response = requireObject(
-      await this.client.get(`${instagramAccountId}/media`, {
+      await this.client.get(path, {
         fields: 'id,caption,media_type,permalink,timestamp',
         limit: String(limit),
       }),
