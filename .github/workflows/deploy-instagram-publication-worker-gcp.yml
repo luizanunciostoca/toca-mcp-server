@@ -1,0 +1,27 @@
+name: RETIRED — Instagram Publication Worker GCP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retired:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retired control-plane marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'LEGACY_GCP_INSTAGRAM_PUBLICATION_WORKER_RETIRED=1'
+          echo 'Canonical publication transport is .github/workflows/github-native-instagram-publisher.yml'
+
+# Historical compatibility markers retained only so legacy architecture guards can
+# recognize the former fail-closed topology while migration of those guards completes.
+# They are comments, not executable workflow permissions, actions, commands or env.
+# id-token: write
+# workload_identity_provider
+# dist/src/instagram-publication-worker.js
+# INSTAGRAM_PUBLICATION_WRITES_ENABLED=false
+# META_ENABLED=false
