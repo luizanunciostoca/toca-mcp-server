@@ -55,6 +55,12 @@ const engagementWorkflowsUsingManagedDaemon = readdirSync(workflowDirectory)
   }))
   .filter(({ content }) => content.includes('toca-managed-instagram-daemon'));
 
+const engagementWorkflowsMutatingManagedDaemon = engagementWorkflowsUsingManagedDaemon.filter(
+  ({ content }) =>
+    content.includes('gcloud run deploy "$DAEMON_SERVICE_NAME"') ||
+    content.includes('gcloud run services update "$DAEMON_SERVICE_NAME"'),
+);
+
 describe('legacy GCP Instagram publication runtime retirement', () => {
   it('keeps the former publication worker deployer as an inert historical stub', () => {
     expect(worker).toContain('LEGACY_GCP_INSTAGRAM_PUBLICATION_WORKER_RETIRED=1');
@@ -113,6 +119,17 @@ describe('legacy GCP Instagram publication runtime retirement', () => {
         content.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=true'),
         `${filename} must not enable Instagram publication writes`,
       ).toBe(false);
+    }
+  });
+
+  it('requires every engagement workflow that mutates the managed daemon to pin publication writes false', () => {
+    expect(engagementWorkflowsMutatingManagedDaemon.length).toBeGreaterThan(0);
+
+    for (const { filename, content } of engagementWorkflowsMutatingManagedDaemon) {
+      expect(
+        content.includes('INSTAGRAM_PUBLICATION_WRITES_ENABLED=false'),
+        `${filename} must explicitly pin Instagram publication writes false`,
+      ).toBe(true);
     }
   });
 });
