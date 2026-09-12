@@ -6,6 +6,7 @@ export const GITHUB_NATIVE_PUBLICATION_TIMEZONE = 'America/Bahia' as const;
 export const GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS = 5 * 60 * 1000;
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
+const driveFileIdSchema = z.string().regex(/^[A-Za-z0-9_-]{10,}$/);
 const explicitOffsetTimestampSchema = z
   .string()
   .regex(/T.*(?:Z|[+-]\d{2}:\d{2})$/i, 'timestamp must include Z or an explicit numeric offset')
@@ -28,6 +29,7 @@ export const githubNativePublicationItemSchema = z.object({
     url: z.string().url(),
     contentType: z.literal('image/jpeg'),
     sha256: sha256Schema,
+    sourceDriveFileId: driveFileIdSchema.optional(),
   }),
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
