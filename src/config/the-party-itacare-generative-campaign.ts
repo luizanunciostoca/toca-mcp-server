@@ -1,7 +1,6 @@
 import type { PhotoToVideoRouteType } from '../contracts/photo-to-video.js';
 
-export const THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID =
-  'TP-ITA-20261011-GENERATIVE-V1' as const;
+export const THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID = 'TP-ITA-20261011-GENERATIVE-V1' as const;
 
 export const THE_PARTY_ITACARE_EDITION_ID = 'TP-ITA-20261011' as const;
 
