@@ -1,0 +1,69 @@
+name: TEMP Fix Queue Sync Lint
+
+on:
+  push:
+    branches:
+      - fix/github-native-publication-queue-sync
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temp-fix-queue-sync-lint
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/github-native-publication-queue-sync
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply exact lint-safe JSON boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/github-native-publication/github-native-publication-queue-sync.ts')
+          text = path.read_text()
+          old = "  const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'));"
+          new = "  const snapshot: unknown = JSON.parse(await readFile(snapshotPath, 'utf8'));"
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one JSON parse assignment')
+          path.write_text(text.replace(old, new))
+          PY
+          pnpm exec prettier --write src/github-native-publication/github-native-publication-queue-sync.ts
+
+      - name: Commit exact lint fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=src/github-native-publication/github-native-publication-queue-sync.ts
+          git diff --check
+          test -n "$(git diff --name-only -- "$path")"
+          git config user.name 'toca-lintfix[bot]'
+          git config user.email 'toca-lintfix[bot]@users.noreply.github.com'
+          git add -- "$path"
+          git commit -m 'fix(instagram): validate queue sync JSON from unknown'
+          git push origin HEAD:fix/github-native-publication-queue-sync
