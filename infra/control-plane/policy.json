@@ -112,8 +112,28 @@
       }
     }
   },
+  "publicationControlPlane": {
+    "canonicalTransport": "github-native-instagram-publication",
+    "canonicalWorkflow": ".github/workflows/github-native-instagram-publisher.yml",
+    "assetTransport": "github-publication-assets-branch",
+    "stateTransport": "github-publication-state-branch",
+    "legacyGcpInstagramRuntime": {
+      "lifecycleStatus": "RETIRED",
+      "deploymentAuthorized": false,
+      "executionAuthorized": false,
+      "schedulerAuthorized": false,
+      "providerWriteAuthorized": false,
+      "replacedBy": "github-native-instagram-publication",
+      "retiredAt": "2026-09-12",
+      "historicalTopologyRetainedForEvidence": true
+    }
+  },
   "activeRuntime": {
     "tocaManagedInstagramScheduler": {
+      "lifecycleStatus": "RETIRED_COMPATIBILITY_SNAPSHOT",
+      "deploymentAuthorized": false,
+      "executionAuthorized": false,
+      "replacedBy": "github-native-instagram-publication",
       "resourceType": "cloud-run-service",
       "resourceName": "toca-managed-instagram-daemon",
       "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
@@ -169,6 +189,8 @@
     "legacyHeartbeatRecreation": true,
     "alwaysOnSchedulerPolling": true,
     "unboundedCloudRunScaling": true,
-    "deployAsSchedulingTransport": true
+    "deployAsSchedulingTransport": true,
+    "legacyGcpInstagramPublicationDeployment": true,
+    "legacyGcpInstagramSchedulerExecution": true
   }
 }
