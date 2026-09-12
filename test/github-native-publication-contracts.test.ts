@@ -27,6 +27,7 @@ function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {})
           url: `https://raw.githubusercontent.com/example/repo/publication-assets/publication-assets/${sha256}.jpg`,
           contentType: 'image/jpeg',
           sha256,
+          sourceDriveFileId: '1-P3RdbWi_X4H1_X5L_xrLiY2UA3cte1o',
         },
         correlationId: 'CORR-1',
         idempotencyKey: 'IDEMP-1',
@@ -86,5 +87,18 @@ describe('GitHub-native publication queue', () => {
       caption: undefined,
     });
     expect(queue.items[0]?.mediaType).toBe('STORY');
+  });
+
+  it('rejects malformed Drive source asset identifiers', () => {
+    expect(() =>
+      queueWith('2026-09-12T09:00:00-03:00', {
+        asset: {
+          url: `https://raw.githubusercontent.com/example/repo/publication-assets/publication-assets/${sha256}.jpg`,
+          contentType: 'image/jpeg',
+          sha256,
+          sourceDriveFileId: '../bad',
+        },
+      }),
+    ).toThrow();
   });
 });
