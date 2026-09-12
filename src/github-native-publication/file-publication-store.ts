@@ -19,12 +19,17 @@ const publicationStates = new Set<PublicationState>([
   'CANCELED',
 ]);
 
+type FingerprintedPublicationRecord = PublicationRecord & {
+  readonly requestFingerprint: string;
+};
+
 export class FilePublicationExecutionStore implements PublicationExecutionStore {
   constructor(private readonly directory: string) {}
 
   async reserve(request: InstagramPublishRequest, nowIso: string): Promise<PublicationRecord> {
     await mkdir(this.directory, { recursive: true });
     const path = this.pathFor(request.idempotencyKey);
+    const expectedFingerprint = fingerprintPublicationRequest(request);
     try {
       const existing = parsePublicationRecord(JSON.parse(await readFile(path, 'utf8')));
       if (existing.idempotencyKey !== request.idempotencyKey) {
@@ -33,16 +38,20 @@ export class FilePublicationExecutionStore implements PublicationExecutionStore 
       if (existing.correlationId !== request.correlationId) {
         throw new Error('GITHUB_NATIVE_PUBLICATION_CORRELATION_MISMATCH');
       }
+      if (existing.requestFingerprint !== expectedFingerprint) {
+        throw new Error('GITHUB_NATIVE_PUBLICATION_REQUEST_FINGERPRINT_MISMATCH');
+      }
       return existing;
     } catch (error) {
       if (!isNotFound(error)) throw error;
     }
 
     const digest = digestKey(request.idempotencyKey);
-    const created: PublicationRecord = {
+    const created: FingerprintedPublicationRecord = {
       publicationId: `github-native-${digest.slice(0, 24)}`,
       correlationId: request.correlationId,
       idempotencyKey: request.idempotencyKey,
+      requestFingerprint: expectedFingerprint,
       state: 'DRAFT',
       updatedAt: nowIso,
     };
@@ -66,11 +75,25 @@ export class FilePublicationExecutionStore implements PublicationExecutionStore 
   }
 }
 
+export function fingerprintPublicationRequest(request: InstagramPublishRequest): string {
+  return createHash('sha256').update(stableJson(request)).digest('hex');
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`)
+    .join(',')}}`;
+}
+
 function digestKey(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function parsePublicationRecord(value: unknown): PublicationRecord {
+function parsePublicationRecord(value: unknown): FingerprintedPublicationRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('GITHUB_NATIVE_PUBLICATION_STATE_INVALID');
   }
@@ -80,13 +103,15 @@ function parsePublicationRecord(value: unknown): PublicationRecord {
     typeof record.publicationId !== 'string' ||
     typeof record.correlationId !== 'string' ||
     typeof record.idempotencyKey !== 'string' ||
+    typeof record.requestFingerprint !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(record.requestFingerprint) ||
     typeof state !== 'string' ||
     !publicationStates.has(state as PublicationState) ||
     typeof record.updatedAt !== 'string'
   ) {
     throw new Error('GITHUB_NATIVE_PUBLICATION_STATE_INVALID');
   }
-  return value as PublicationRecord;
+  return value as FingerprintedPublicationRecord;
 }
 
 function isNotFound(error: unknown): boolean {
