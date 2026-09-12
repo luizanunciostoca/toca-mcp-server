@@ -41,7 +41,9 @@ describe('GitHub-native Instagram publication boundary', () => {
   it('keeps provider writes fail-closed and SHA-bound', () => {
     expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW'");
     expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false'");
-    expect(publisher).toContain('INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID }}');
+    expect(publisher).toContain(
+      'INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID }}',
+    );
     expect(publisher).not.toContain("INSTAGRAM_BUSINESS_ACCOUNT_ID || '17841402033495654'");
     expect(publisher.match(/META_ACCESS_TOKEN:/g)).toHaveLength(1);
     expect(publisher).toContain('TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}');
