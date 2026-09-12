@@ -21,7 +21,10 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/i);
 const driveFileIdSchema = z.string().regex(/^[A-Za-z0-9_-]{10,}$/);
 const explicitOffsetTimestampSchema = z
   .string()
-  .regex(/T.*(?:Z|[+-]\d{2}:\d{2})$/i, 'timestamp must include Z or an explicit numeric offset')
+  .regex(
+    /T.*(?:Z|[+-]\d{2}:\d{2})$/i,
+    'timestamp must include Z or an explicit numeric offset',
+  )
   .refine((value) => Number.isFinite(Date.parse(value)), 'timestamp must be valid ISO-8601');
 
 const canonicalRegistryCandidateSchema = z.object({
@@ -228,10 +231,14 @@ function buildEligibleQueueItem(
   );
   const creativeTruthBinding = candidate.creativeTruthBinding;
   if (!creativeTruthBinding) {
-    throw new Error(`GITHUB_NATIVE_QUEUE_SYNC_CREATIVE_TRUTH_REQUIRED:${candidate.contentItemId}`);
+    throw new Error(
+      `GITHUB_NATIVE_QUEUE_SYNC_CREATIVE_TRUTH_REQUIRED:${candidate.contentItemId}`,
+    );
   }
   if (creativeTruthBinding.outputSha256.toLowerCase() !== finalAssetSha256) {
-    throw new Error(`GITHUB_NATIVE_QUEUE_SYNC_CREATIVE_TRUTH_HASH_MISMATCH:${candidate.contentItemId}`);
+    throw new Error(
+      `GITHUB_NATIVE_QUEUE_SYNC_CREATIVE_TRUTH_HASH_MISMATCH:${candidate.contentItemId}`,
+    );
   }
 
   return {
@@ -264,8 +271,12 @@ function buildEligibleQueueItem(
   };
 }
 
-function requireField<T>(value: T | undefined, contentItemId: string, field: string): T {
-  if (value === undefined || value === null || value === '') {
+function requireField(
+  value: string | undefined,
+  contentItemId: string,
+  field: string,
+): string {
+  if (!value?.trim()) {
     throw new Error(`GITHUB_NATIVE_QUEUE_SYNC_${field}_REQUIRED:${contentItemId}`);
   }
   return value;
