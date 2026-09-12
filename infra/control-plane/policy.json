@@ -117,12 +117,12 @@
     "canonicalWorkflow": ".github/workflows/github-native-instagram-publisher.yml",
     "assetTransport": "github-publication-assets-branch",
     "stateTransport": "github-publication-state-branch",
-    "legacyGcpInstagramRuntime": {
+    "legacyGcpInstagramPublicationTransport": {
       "lifecycleStatus": "RETIRED",
-      "deploymentAuthorized": false,
-      "executionAuthorized": false,
-      "schedulerAuthorized": false,
-      "providerWriteAuthorized": false,
+      "publicationExecutionAuthorized": false,
+      "publicationSchedulerAuthorized": false,
+      "providerPublicationWriteAuthorized": false,
+      "physicalEngagementRuntimeMayRemain": true,
       "replacedBy": "github-native-instagram-publication",
       "retiredAt": "2026-09-12",
       "historicalTopologyRetainedForEvidence": true
@@ -130,10 +130,12 @@
   },
   "activeRuntime": {
     "tocaManagedInstagramScheduler": {
-      "lifecycleStatus": "RETIRED_COMPATIBILITY_SNAPSHOT",
-      "deploymentAuthorized": false,
-      "executionAuthorized": false,
-      "replacedBy": "github-native-instagram-publication",
+      "lifecycleStatus": "ACTIVE_ENGAGEMENT_ONLY",
+      "deploymentAuthorized": true,
+      "executionAuthorized": true,
+      "publicationAuthority": false,
+      "providerPublicationWriteAuthorized": false,
+      "engagementAuthority": "GOVERNED_BY_ENGAGEMENT_ROLLOUT",
       "resourceType": "cloud-run-service",
       "resourceName": "toca-managed-instagram-daemon",
       "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
@@ -191,6 +193,7 @@
     "unboundedCloudRunScaling": true,
     "deployAsSchedulingTransport": true,
     "legacyGcpInstagramPublicationDeployment": true,
-    "legacyGcpInstagramSchedulerExecution": true
+    "legacyGcpInstagramPublicationSchedulerExecution": true,
+    "gcpEngagementRuntimePublicationAuthority": true
   }
 }
