@@ -15,9 +15,7 @@ describe('The Party Itacare governed video campaign', () => {
     const sceneIds = THE_PARTY_ITACARE_GENERATIVE_VIDEOS.flatMap((video) =>
       video.scenes.map((scene) => scene.contentItemId),
     );
-    const finalIds = THE_PARTY_ITACARE_GENERATIVE_VIDEOS.map(
-      (video) => video.finalContentItemId,
-    );
+    const finalIds = THE_PARTY_ITACARE_GENERATIVE_VIDEOS.map((video) => video.finalContentItemId);
     expect(new Set(sceneIds).size).toBe(sceneIds.length);
     expect(new Set(finalIds).size).toBe(finalIds.length);
   });
@@ -46,9 +44,7 @@ describe('The Party Itacare governed video campaign', () => {
 
   it('requires source-locked direction for every generative venue scene', () => {
     const generativeScenes = THE_PARTY_ITACARE_GENERATIVE_VIDEOS.flatMap((video) =>
-      video.scenes.filter(
-        (scene) => scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO',
-      ),
+      video.scenes.filter((scene) => scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO'),
     );
     expect(generativeScenes.length).toBeGreaterThan(0);
     for (const scene of generativeScenes) {
