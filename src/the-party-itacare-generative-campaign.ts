@@ -7,17 +7,17 @@ import {
   THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID,
   THE_PARTY_ITACARE_GENERATIVE_SCENE_COUNT,
   THE_PARTY_ITACARE_GENERATIVE_VIDEOS,
-  type ItacareGenerativeSceneSpec,
   type ItacareGenerativeVideoSpec,
 } from './config/the-party-itacare-generative-campaign.js';
+import type { PhotoToVideoRouteType } from './contracts/photo-to-video.js';
 import { createVideoGenerativeRuntimeFromEnvironment } from './mcp/video-generative-runtime.js';
 import { GcsPhotoToVideoArtifactStore } from './providers/gcp/gcs-photo-to-video-artifact-store.js';
 import { GcsPublicationAssetDelivery } from './providers/gcp/gcs-publication-asset-delivery.js';
 
-const ROUTE = 'GENERATIVE_SCENE_CONTINUATION_VIDEO' as const;
-const outputRoot = process.env.CAMPAIGN_OUTPUT_DIR?.trim() ||
-  join(tmpdir(), 'the-party-itacare-generative-campaign');
-const concurrency = positiveInteger(process.env.CAMPAIGN_GENERATION_CONCURRENCY, 4);
+const FINAL_ARTIFACT_ROUTE = 'GENERATIVE_SCENE_CONTINUATION_VIDEO' as const;
+const outputRoot =
+  process.env.CAMPAIGN_OUTPUT_DIR?.trim() || join(tmpdir(), 'the-party-itacare-generative-campaign');
+const concurrency = positiveInteger(process.env.CAMPAIGN_GENERATION_CONCURRENCY, 2);
 const selectedVideoIds = new Set(
   (process.env.CAMPAIGN_VIDEO_IDS ?? '')
     .split(',')
@@ -43,15 +43,15 @@ const delivery = new GcsPublicationAssetDelivery({
 });
 
 await mkdir(outputRoot, { recursive: true });
-const sceneSpecs = videos.flatMap((video) =>
-  video.scenes.map((scene) => ({ video, scene })),
-);
+const sceneSpecs = videos.flatMap((video) => video.scenes.map((scene) => ({ video, scene })));
 
 const generatedScenes = await mapWithConcurrency(sceneSpecs, concurrency, async ({ video, scene }) => {
   const result = await runtime.generation.generate({
     contentItemId: scene.contentItemId,
-    routeType: ROUTE,
-    creativeDirection: scene.creativeDirection,
+    routeType: scene.routeType,
+    ...(scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO'
+      ? { creativeDirection: requiredCreativeDirection(scene.contentItemId, scene.creativeDirection) }
+      : {}),
   });
   const sceneDir = join(outputRoot, video.id.toLowerCase());
   await mkdir(sceneDir, { recursive: true });
@@ -61,14 +61,17 @@ const generatedScenes = await mapWithConcurrency(sceneSpecs, concurrency, async 
   if (observed !== result.manifest.outputSha256.toLowerCase()) {
     throw new Error(`ITACARE_CAMPAIGN_SCENE_HASH_MISMATCH:${scene.contentItemId}`);
   }
-  await writeFile(
-    `${path}.manifest.json`,
-    `${JSON.stringify(result.manifest, null, 2)}\n`,
-    'utf8',
-  );
+  if (result.manifest.routeType !== scene.routeType) {
+    throw new Error(`ITACARE_CAMPAIGN_SCENE_ROUTE_MISMATCH:${scene.contentItemId}`);
+  }
+  await writeFile(`${path}.manifest.json`, `${JSON.stringify(result.manifest, null, 2)}\n`, 'utf8');
   return {
     videoId: video.id,
     contentItemId: scene.contentItemId,
+    routeType: scene.routeType,
+    sourceAssetId: result.manifest.sourceAssetId,
+    sourceDriveFileId: result.manifest.sourceDriveFileId,
+    sourceSha256: result.manifest.sourceSha256,
     path,
     sha256: observed,
     artifactRef: result.manifest.artifactRef,
@@ -89,12 +92,16 @@ for (const video of videos) {
   });
   const videoDir = join(outputRoot, video.id.toLowerCase());
   const finalPath = join(videoDir, `${video.finalContentItemId}.mp4`);
-  await assembleVideo(sceneRows.map((scene) => scene.path), finalPath, video.targetSeconds);
+  await assembleVideo(
+    sceneRows.map((scene) => scene.path),
+    finalPath,
+    video.targetSeconds,
+  );
   const bytes = new Uint8Array(await readFile(finalPath));
   const finalSha256 = sha256(bytes);
   const stored = await artifactStore.store({
     contentItemId: video.finalContentItemId,
-    routeType: ROUTE,
+    routeType: FINAL_ARTIFACT_ROUTE,
     bytes,
     expectedSha256: finalSha256,
   });
@@ -121,6 +128,8 @@ for (const video of videos) {
     artifactRef: stored.artifactRef,
     artifactObjectName: stored.objectName,
     deliveryUrl,
+    outputPath: finalPath,
+    manifestPath,
     outputFileName: basename(finalPath),
     manifestFileName: basename(manifestPath),
     publicationAuthorized: false,
@@ -132,28 +141,28 @@ const result = {
   schemaVersion: 1,
   campaignId: THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID,
   status: 'GENERATED_REVIEW_REQUIRED',
+  requestedVideoIds: videos.map((video) => video.id),
   requestedVideoCount: videos.length,
   configuredVideoCount: THE_PARTY_ITACARE_GENERATIVE_VIDEOS.length,
   configuredSceneCount: THE_PARTY_ITACARE_GENERATIVE_SCENE_COUNT,
   generatedSceneCount: generatedScenes.length,
   generatedVideoCount: finals.length,
-  provider: 'GOOGLE_VERTEX_VEO',
-  routeType: ROUTE,
+  sceneRoutes: [...new Set(generatedScenes.map((scene) => scene.routeType))],
   publicationAuthorized: false,
   requiresPostGenerationHumanReview: true,
   videos: finals,
 };
-await writeFile(
-  join(outputRoot, 'campaign-result.json'),
-  `${JSON.stringify(result, null, 2)}\n`,
-  'utf8',
-);
+await writeFile(join(outputRoot, 'campaign-result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
 process.stdout.write(`THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=${JSON.stringify(result)}\n`);
 
 function buildFinalManifest(
   video: ItacareGenerativeVideoSpec,
   sceneRows: readonly {
     readonly contentItemId: string;
+    readonly routeType: PhotoToVideoRouteType;
+    readonly sourceAssetId: string;
+    readonly sourceDriveFileId: string;
+    readonly sourceSha256: string;
     readonly sha256: string;
     readonly artifactRef: string;
     readonly artifactObjectName: string;
@@ -176,13 +185,15 @@ function buildFinalManifest(
     title: video.title,
     intent: video.intent,
     finalContentItemId: video.finalContentItemId,
-    routeType: ROUTE,
+    routeType: 'MIXED_GOVERNED_VIDEO_ASSEMBLY',
     targetSeconds: video.targetSeconds,
     assembly: 'FFMPEG_CONCAT_REENCODE_NO_AUDIO_V1',
     sourceScenes: sceneRows,
     output,
     requiresPostGenerationHumanReview: true,
-    requiresSceneContinuationFidelityGate: true,
+    requiresSceneContinuationFidelityGate: sceneRows.some(
+      (scene) => scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO',
+    ),
     publicationEligible: false,
     publicationAuthorized: false,
   };
@@ -242,7 +253,9 @@ async function runCommand(command: string, args: readonly string[]): Promise<voi
     child.once('error', reject);
     child.once('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`ITACARE_CAMPAIGN_COMMAND_FAILED:${command}:${code}:${stderr.slice(-4000)}`));
+      else reject(
+        new Error(`ITACARE_CAMPAIGN_COMMAND_FAILED:${command}:${code}:${stderr.slice(-4000)}`),
+      );
     });
   });
 }
@@ -259,11 +272,17 @@ async function mapWithConcurrency<T, R>(
       const index = next;
       next += 1;
       if (index >= values.length) return;
-      results[index] = await worker(values[index]!);
+      results[index] = await worker(values[index] as T);
     }
   });
   await Promise.all(runners);
   return results;
+}
+
+function requiredCreativeDirection(contentItemId: string, value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) throw new Error(`ITACARE_CAMPAIGN_CREATIVE_DIRECTION_REQUIRED:${contentItemId}`);
+  return normalized;
 }
 
 function escapeConcatPath(path: string): string {
