@@ -1,8 +1,12 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_CONTENT_REGISTRY_SHEET_NAME,
   CANONICAL_CONTENT_REGISTRY_SPREADSHEET_ID,
   compileGithubNativePublicationQueue,
+  runGithubNativePublicationQueueSync,
 } from '../src/github-native-publication/github-native-publication-queue-sync.js';
 
 const sha256 = 'b'.repeat(64);
@@ -78,10 +82,13 @@ describe('GitHub-native publication queue sync', () => {
     );
     expect(result.evidence.mirroredCount).toBe(1);
     expect(result.evidence.skippedCount).toBe(0);
+    expect(result.evidence.inputSnapshotSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.evidence.outputQueueSha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it('skips BRIEFED content without requiring publication-only fields', () => {
+  it('skips unscheduled BRIEFED content without requiring publication-only fields', () => {
     const candidate = validCandidate({
+      scheduledAt: undefined,
       status: 'BRIEFED',
       approvalStatus: undefined,
       publicationIntent: undefined,
@@ -96,7 +103,7 @@ describe('GitHub-native publication queue sync', () => {
     expect(result.queue.items).toHaveLength(0);
     expect(result.evidence.decisions[0]).toMatchObject({
       decision: 'SKIPPED',
-      reason: 'STATUS_NOT_PRODUCED',
+      reason: 'SCHEDULE_NOT_SET',
     });
   });
 
@@ -183,5 +190,75 @@ describe('GitHub-native publication queue sync', () => {
     );
     expect(result.queue.items[0]?.mediaType).toBe('STORY');
     expect(result.queue.items[0]?.caption).toBeUndefined();
+  });
+
+  it('writes run-specific immutable evidence before replacing the queue', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'toca-queue-sync-'));
+    const snapshotPath = join(directory, 'registry-snapshot.json');
+    const queuePath = join(directory, 'queue.json');
+    const evidenceBasePath = join(directory, 'queue-sync-evidence.json');
+
+    try {
+      await writeFile(snapshotPath, `${JSON.stringify(snapshot([validCandidate()]))}\n`, 'utf8');
+      await writeFile(queuePath, '{"previous":true}\n', 'utf8');
+
+      const result = await runGithubNativePublicationQueueSync(
+        {
+          TOCA_PUBLICATION_REGISTRY_SNAPSHOT_PATH: snapshotPath,
+          TOCA_PUBLICATION_QUEUE_PATH: queuePath,
+          TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH: evidenceBasePath,
+          TOCA_PUBLICATION_QUEUE_SYNC_RUN_ID: 'test-run-001',
+        },
+        () => new Date(nowIso),
+      );
+
+      expect(result.evidencePath).not.toBe(evidenceBasePath);
+      expect(result.evidencePath).toContain('test-run-001');
+      const persistedEvidence = JSON.parse(await readFile(result.evidencePath, 'utf8')) as unknown;
+      expect(persistedEvidence).toMatchObject({
+        runId: 'test-run-001',
+        inputSnapshotSha256: result.evidence.inputSnapshotSha256,
+        outputQueueSha256: result.evidence.outputQueueSha256,
+      });
+
+      const persistedQueue = JSON.parse(await readFile(queuePath, 'utf8')) as {
+        items?: unknown[];
+      };
+      expect(persistedQueue.items).toHaveLength(1);
+      await expect(readFile(evidenceBasePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the previous queue when compilation fails before persistence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'toca-queue-sync-fail-'));
+    const snapshotPath = join(directory, 'registry-snapshot.json');
+    const queuePath = join(directory, 'queue.json');
+
+    try {
+      await writeFile(
+        snapshotPath,
+        `${JSON.stringify(snapshot([validCandidate({ creativeTruthBinding: undefined })]))}\n`,
+        'utf8',
+      );
+      await writeFile(queuePath, '{"previous":true}\n', 'utf8');
+
+      await expect(
+        runGithubNativePublicationQueueSync(
+          {
+            TOCA_PUBLICATION_REGISTRY_SNAPSHOT_PATH: snapshotPath,
+            TOCA_PUBLICATION_QUEUE_PATH: queuePath,
+            TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH: join(directory, 'evidence.json'),
+            TOCA_PUBLICATION_QUEUE_SYNC_RUN_ID: 'test-run-fail',
+          },
+          () => new Date(nowIso),
+        ),
+      ).rejects.toThrow('GITHUB_NATIVE_QUEUE_SYNC_CREATIVE_TRUTH_REQUIRED');
+
+      expect(await readFile(queuePath, 'utf8')).toBe('{"previous":true}\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
