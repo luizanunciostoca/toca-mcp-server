@@ -1,4 +1,6 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join } from 'node:path';
 import * as z from 'zod/v4';
 import { creativeTruthPublicationBindingSchema } from '../contracts/creative-truth.js';
 import {
@@ -27,7 +29,7 @@ const explicitOffsetTimestampSchema = z
 const canonicalRegistryCandidateSchema = z.object({
   rowRef: z.string().min(1),
   contentItemId: z.string().min(1),
-  scheduledAt: explicitOffsetTimestampSchema,
+  scheduledAt: explicitOffsetTimestampSchema.optional(),
   expiresAt: explicitOffsetTimestampSchema.optional(),
   operation: z.string().min(1),
   channel: z.string().min(1),
@@ -71,6 +73,8 @@ export type GithubNativeQueueSyncEvidence = {
   readonly schemaVersion: 1;
   readonly generatedAt: string;
   readonly source: GithubNativePublicationRegistrySnapshot['source'];
+  readonly inputSnapshotSha256: string;
+  readonly outputQueueSha256: string;
   readonly mirroredCount: number;
   readonly skippedCount: number;
   readonly decisions: readonly QueueSyncDecision[];
@@ -79,6 +83,16 @@ export type GithubNativeQueueSyncEvidence = {
 export type GithubNativeQueueSyncResult = {
   readonly queue: GithubNativePublicationQueue;
   readonly evidence: GithubNativeQueueSyncEvidence;
+};
+
+export type GithubNativeQueueSyncRuntimeEvidence = GithubNativeQueueSyncEvidence & {
+  readonly runId: string;
+};
+
+export type GithubNativeQueueSyncRuntimeResult = {
+  readonly queue: GithubNativePublicationQueue;
+  readonly evidence: GithubNativeQueueSyncRuntimeEvidence;
+  readonly evidencePath: string;
 };
 
 type CompileOptions = {
@@ -133,10 +147,17 @@ export function compileGithubNativePublicationQueue(
     });
   }
 
+  items.sort(
+    (left, right) =>
+      left.scheduledAt.localeCompare(right.scheduledAt) ||
+      left.contentItemId.localeCompare(right.contentItemId),
+  );
+
+  const generatedAt = new Date(now).toISOString();
   const queue = parseGithubNativePublicationQueue({
     schemaVersion: GITHUB_NATIVE_PUBLICATION_QUEUE_SCHEMA_VERSION,
     timezone: GITHUB_NATIVE_PUBLICATION_TIMEZONE,
-    generatedAt: new Date(now).toISOString(),
+    generatedAt,
     items,
   });
 
@@ -144,8 +165,10 @@ export function compileGithubNativePublicationQueue(
     queue,
     evidence: {
       schemaVersion: 1,
-      generatedAt: new Date(now).toISOString(),
+      generatedAt,
       source: snapshot.source,
+      inputSnapshotSha256: sha256Json(snapshot),
+      outputQueueSha256: sha256Json(queue),
       mirroredCount: decisions.filter((decision) => decision.decision === 'MIRRORED').length,
       skippedCount: decisions.filter((decision) => decision.decision === 'SKIPPED').length,
       decisions,
@@ -156,21 +179,32 @@ export function compileGithubNativePublicationQueue(
 export async function runGithubNativePublicationQueueSync(
   env: NodeJS.ProcessEnv = process.env,
   now: () => Date = () => new Date(),
-): Promise<GithubNativeQueueSyncResult> {
+): Promise<GithubNativeQueueSyncRuntimeResult> {
   const snapshotPath =
     env.TOCA_PUBLICATION_REGISTRY_SNAPSHOT_PATH?.trim() ||
     'control/github-native-publication-registry-snapshot.json';
   const queuePath =
     env.TOCA_PUBLICATION_QUEUE_PATH?.trim() || 'control/github-native-publication-queue.json';
-  const evidencePath =
+  const evidenceBasePath =
     env.TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH?.trim() ||
     'github-native-publication-queue-sync-evidence.json';
 
   const snapshot: unknown = JSON.parse(await readFile(snapshotPath, 'utf8'));
   const result = compileGithubNativePublicationQueue(snapshot, now().toISOString());
-  await writeFile(queuePath, `${JSON.stringify(result.queue, null, 2)}\n`, 'utf8');
-  await writeFile(evidencePath, `${JSON.stringify(result.evidence, null, 2)}\n`, 'utf8');
-  return result;
+  const runId = resolveRunId(env.TOCA_PUBLICATION_QUEUE_SYNC_RUN_ID);
+  const evidence: GithubNativeQueueSyncRuntimeEvidence = {
+    ...result.evidence,
+    runId,
+  };
+  const evidencePath = buildImmutableEvidencePath(evidenceBasePath, evidence);
+
+  await persistQueueAndEvidence(queuePath, evidencePath, result.queue, evidence);
+
+  return {
+    queue: result.queue,
+    evidence,
+    evidencePath,
+  };
 }
 
 function getSkipReason(
@@ -179,6 +213,7 @@ function getSkipReason(
   minimumLeadMs: number,
 ): string | undefined {
   if (candidate.channel !== 'INSTAGRAM') return 'CHANNEL_NOT_INSTAGRAM';
+  if (!candidate.scheduledAt) return 'SCHEDULE_NOT_SET';
   if (candidate.status !== 'PRODUCED') return 'STATUS_NOT_PRODUCED';
   if (candidate.approvalStatus !== 'APPROVED') return 'APPROVAL_NOT_APPROVED';
   if (candidate.publicationIntent !== 'SCHEDULED') return 'PUBLICATION_INTENT_NOT_SCHEDULED';
@@ -201,6 +236,7 @@ function getSkipReason(
 function buildEligibleQueueItem(
   candidate: z.infer<typeof canonicalRegistryCandidateSchema>,
 ): GithubNativePublicationItem {
+  const scheduledAt = requireField(candidate.scheduledAt, candidate.contentItemId, 'SCHEDULED_AT');
   const instagramAccountId = requireField(
     candidate.instagramAccountId,
     candidate.contentItemId,
@@ -238,7 +274,7 @@ function buildEligibleQueueItem(
 
   return {
     contentItemId: candidate.contentItemId,
-    scheduledAt: candidate.scheduledAt,
+    scheduledAt,
     ...(candidate.expiresAt ? { expiresAt: candidate.expiresAt } : {}),
     operation: candidate.operation as 'SUNSET' | 'THE_PARTY',
     channel: 'INSTAGRAM',
@@ -264,6 +300,93 @@ function buildEligibleQueueItem(
       rowRef: candidate.rowRef,
     },
   };
+}
+
+async function persistQueueAndEvidence(
+  queuePath: string,
+  evidencePath: string,
+  queue: GithubNativePublicationQueue,
+  evidence: GithubNativeQueueSyncRuntimeEvidence,
+): Promise<void> {
+  if (queuePath === evidencePath) {
+    throw new Error('GITHUB_NATIVE_QUEUE_SYNC_OUTPUT_PATH_COLLISION');
+  }
+
+  await Promise.all([
+    mkdir(dirname(queuePath), { recursive: true }),
+    mkdir(dirname(evidencePath), { recursive: true }),
+  ]);
+  await assertPathAbsent(evidencePath);
+
+  const nonce = randomUUID();
+  const queueTempPath = join(dirname(queuePath), `.${basename(queuePath)}.${nonce}.tmp`);
+  const evidenceTempPath = join(dirname(evidencePath), `.${basename(evidencePath)}.${nonce}.tmp`);
+
+  try {
+    await writeFile(queueTempPath, `${JSON.stringify(queue, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    await writeFile(evidenceTempPath, `${JSON.stringify(evidence, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+
+    // Evidence is immutable and installed first. If queue replacement fails afterwards,
+    // the previous queue remains intact while the failed attempt still has an audit record.
+    await rename(evidenceTempPath, evidencePath);
+    await rename(queueTempPath, queuePath);
+  } finally {
+    await Promise.all([
+      rm(queueTempPath, { force: true }),
+      rm(evidenceTempPath, { force: true }),
+    ]);
+  }
+}
+
+function buildImmutableEvidencePath(
+  basePath: string,
+  evidence: GithubNativeQueueSyncRuntimeEvidence,
+): string {
+  const extension = extname(basePath) || '.json';
+  const stem = basename(basePath, extname(basePath));
+  const timestamp = evidence.generatedAt.replace(/[:.]/g, '-');
+  const fileName = [
+    stem,
+    timestamp,
+    evidence.runId,
+    evidence.inputSnapshotSha256.slice(0, 12),
+    evidence.outputQueueSha256.slice(0, 12),
+  ].join('.');
+  return join(dirname(basePath), `${fileName}${extension}`);
+}
+
+function resolveRunId(value: string | undefined): string {
+  const runId = value?.trim() || randomUUID();
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(runId)) {
+    throw new Error('GITHUB_NATIVE_QUEUE_SYNC_RUN_ID_INVALID');
+  }
+  return runId;
+}
+
+async function assertPathAbsent(path: string): Promise<void> {
+  try {
+    await stat(path);
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') return;
+    throw error;
+  }
+  throw new Error(`GITHUB_NATIVE_QUEUE_SYNC_EVIDENCE_ALREADY_EXISTS:${path}`);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
+
+function sha256Json(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function requireField(value: string | undefined, contentItemId: string, field: string): string {
