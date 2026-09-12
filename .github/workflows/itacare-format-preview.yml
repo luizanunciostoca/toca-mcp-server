@@ -1,4 +1,4 @@
-name: Itacare Format Preview
+name: Itacare Format Apply
 
 on:
   push:
@@ -6,15 +6,14 @@ on:
       - feat/the-party-itacare-generative-campaign
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  preview:
+  format:
+    if: github.event.head_commit.message != 'style(video): apply prettier to Itacare campaign'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.15.0
@@ -23,7 +22,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Format target files and emit base64
+      - name: Apply Prettier to Itacare campaign files
         shell: bash
         run: |
           set -euo pipefail
@@ -31,12 +30,16 @@ jobs:
             src/config/the-party-itacare-generative-campaign.ts \
             src/the-party-itacare-generative-campaign.ts \
             test/the-party-itacare-generative-campaign.test.ts
-          for file in \
+          git diff --check
+          if git diff --quiet; then
+            echo "No formatting changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
             src/config/the-party-itacare-generative-campaign.ts \
             src/the-party-itacare-generative-campaign.ts \
-            test/the-party-itacare-generative-campaign.test.ts; do
-            echo "FORMAT_FILE_BEGIN=$file"
-            base64 -w0 "$file"
-            echo
-            echo "FORMAT_FILE_END=$file"
-          done
+            test/the-party-itacare-generative-campaign.test.ts
+          git commit -m 'style(video): apply prettier to Itacare campaign'
+          git push origin HEAD:feat/the-party-itacare-generative-campaign
