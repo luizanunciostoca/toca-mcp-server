@@ -130,6 +130,7 @@
   },
   "activeRuntime": {
     "tocaManagedInstagramScheduler": {
+      "compatibilityKeyNote": "Historical key name retained; runtime authority is engagement-only.",
       "lifecycleStatus": "ACTIVE_ENGAGEMENT_ONLY",
       "deploymentAuthorized": true,
       "executionAuthorized": true,
