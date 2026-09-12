@@ -32,6 +32,9 @@ type CycleEvidence = {
   readonly writesEnabled: boolean;
   readonly queuePath: string;
   readonly stateDirectory: string;
+  readonly controllerSha?: string;
+  readonly workflowRunId?: string;
+  readonly workflowRunAttempt?: string;
   readonly items: readonly ItemEvidence[];
 };
 
@@ -45,17 +48,24 @@ export async function runGithubNativePublicationCycle(
     env.TOCA_PUBLICATION_STATE_DIR?.trim() || '.publication-state-worktree/publication-state';
   const evidencePath =
     env.TOCA_PUBLICATION_EVIDENCE_PATH?.trim() || 'github-native-publication-evidence.json';
-  const nowIso = env.TOCA_PUBLICATION_NOW?.trim() || new Date().toISOString();
+  const nowOverride = env.TOCA_PUBLICATION_NOW?.trim();
+  const nowIso = nowOverride || new Date().toISOString();
   const mode = parseMode(env.TOCA_GITHUB_NATIVE_PUBLICATION_MODE);
   const writesEnabled = env.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED === 'true';
+  const controllerSha = env.TOCA_GITHUB_NATIVE_CONTROLLER_SHA?.trim();
+  const manualConfirmation = env.TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION === 'true';
   const queue = parseGithubNativePublicationQueue(JSON.parse(await readFile(queuePath, 'utf8')));
   const due = selectDuePublicationItems(queue, nowIso);
   const evidence: ItemEvidence[] = [];
 
+  if (controllerSha && !/^[a-f0-9]{40}$/i.test(controllerSha)) {
+    throw new Error('GITHUB_NATIVE_CONTROLLER_SHA_INVALID');
+  }
+
   for (const item of due) {
     try {
-      await waitUntilScheduled(item.scheduledAt, nowIso);
-      assertInsidePublicationWindow(item.scheduledAt);
+      await waitUntilScheduled(item.scheduledAt, nowIso, Boolean(nowOverride));
+      assertInsidePublicationWindow(item.scheduledAt, Boolean(nowOverride));
       await verifyExactAsset(item);
 
       if (mode === 'SHADOW') {
@@ -67,7 +77,11 @@ export async function runGithubNativePublicationCycle(
         continue;
       }
 
+      if (!controllerSha) throw new Error('GITHUB_NATIVE_CONTROLLER_SHA_REQUIRED');
       if (!writesEnabled) throw new Error('GITHUB_NATIVE_PUBLICATION_WRITES_DISABLED');
+      if (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && !manualConfirmation) {
+        throw new Error('GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION_REQUIRED');
+      }
       if (mode === 'CANARY') {
         const canary = env.TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID?.trim();
         if (!canary || canary !== item.contentItemId) {
@@ -146,6 +160,13 @@ export async function runGithubNativePublicationCycle(
     writesEnabled,
     queuePath,
     stateDirectory,
+    ...(controllerSha ? { controllerSha } : {}),
+    ...(env.TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID
+      ? { workflowRunId: env.TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID }
+      : {}),
+    ...(env.TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ATTEMPT
+      ? { workflowRunAttempt: env.TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ATTEMPT }
+      : {}),
     items: evidence,
   };
   await writeFile(evidencePath, `${JSON.stringify(cycle, null, 2)}\n`, 'utf8');
@@ -210,8 +231,12 @@ async function verifyExactAsset(item: GithubNativePublicationItem): Promise<void
   }
 }
 
-async function waitUntilScheduled(scheduledAt: string, initialNowIso: string): Promise<void> {
-  if (process.env.TOCA_PUBLICATION_NOW) return;
+async function waitUntilScheduled(
+  scheduledAt: string,
+  initialNowIso: string,
+  hasNowOverride: boolean,
+): Promise<void> {
+  if (hasNowOverride) return;
   const scheduled = Date.parse(scheduledAt);
   const initial = Date.parse(initialNowIso);
   if (!Number.isFinite(scheduled) || !Number.isFinite(initial)) {
@@ -221,8 +246,8 @@ async function waitUntilScheduled(scheduledAt: string, initialNowIso: string): P
   if (waitMs > 0) await sleep(Math.min(waitMs, GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS));
 }
 
-function assertInsidePublicationWindow(scheduledAt: string): void {
-  if (process.env.TOCA_PUBLICATION_NOW) return;
+function assertInsidePublicationWindow(scheduledAt: string, hasNowOverride: boolean): void {
+  if (hasNowOverride) return;
   const delta = Date.now() - Date.parse(scheduledAt);
   if (!Number.isFinite(delta) || Math.abs(delta) > GITHUB_NATIVE_PUBLICATION_TOLERANCE_MS) {
     throw new Error('GITHUB_NATIVE_PUBLICATION_OUTSIDE_TOLERANCE_WINDOW');
