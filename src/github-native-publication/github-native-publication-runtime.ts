@@ -43,7 +43,8 @@ const deniedAssetHosts = new Set(['storage.googleapis.com', 'storage.cloud.googl
 export async function runGithubNativePublicationCycle(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<CycleEvidence> {
-  const queuePath = env.TOCA_PUBLICATION_QUEUE_PATH?.trim() || 'control/github-native-publication-queue.json';
+  const queuePath =
+    env.TOCA_PUBLICATION_QUEUE_PATH?.trim() || 'control/github-native-publication-queue.json';
   const stateDirectory =
     env.TOCA_PUBLICATION_STATE_DIR?.trim() || '.publication-state-worktree/publication-state';
   const evidencePath =
