@@ -35,10 +35,17 @@ export interface ControlledPhotoToVideoGenerationOptions {
   readonly now?: () => Date;
 }
 
+export interface ExpectedPhotoToVideoSourceBinding {
+  readonly sourceAssetId: string;
+  readonly driveFileId: string;
+  readonly sha256: string;
+}
+
 export interface ControlledPhotoToVideoGenerationRequest {
   readonly contentItemId: string;
   readonly routeType: PhotoToVideoRouteType;
   readonly creativeDirection?: string;
+  readonly expectedSourceBinding?: ExpectedPhotoToVideoSourceBinding;
 }
 
 export interface ControlledPhotoToVideoGenerationResult {
@@ -82,10 +89,29 @@ export class ControlledPhotoToVideoGenerationService {
         false,
       );
     }
+    const expectedSourceBinding = request.expectedSourceBinding
+      ? normalizeExpectedSourceBinding(request.expectedSourceBinding)
+      : undefined;
+    if (expectedSourceBinding) {
+      assertExpectedSourceBinding(
+        expectedSourceBinding,
+        resolved.content.sourceAssetId,
+        masterDriveFileId,
+        masterSha256,
+      );
+    }
     const source = await this.options.sourceLoader.load({
       driveFileId: masterDriveFileId,
       expectedSha256: masterSha256,
     });
+    if (expectedSourceBinding) {
+      assertExpectedSourceBinding(
+        expectedSourceBinding,
+        resolved.content.sourceAssetId,
+        source.driveFileId,
+        source.sha256,
+      );
+    }
 
     let providerCandidate:
       | {
@@ -231,6 +257,15 @@ export class ControlledPhotoToVideoGenerationService {
       createdAt,
     });
 
+    if (expectedSourceBinding) {
+      assertExpectedSourceBinding(
+        expectedSourceBinding,
+        manifest.sourceAssetId,
+        manifest.sourceDriveFileId,
+        manifest.sourceSha256,
+      );
+    }
+
     await this.options.writeback.writeCandidate({
       contentItemId: manifest.contentItemId,
       productId: manifest.productId,
@@ -242,6 +277,47 @@ export class ControlledPhotoToVideoGenerationService {
     });
 
     return { outputBytes: branded.outputBytes, manifest };
+  }
+}
+
+function normalizeExpectedSourceBinding(
+  binding: ExpectedPhotoToVideoSourceBinding,
+): ExpectedPhotoToVideoSourceBinding {
+  const normalized = {
+    sourceAssetId: binding.sourceAssetId.trim(),
+    driveFileId: binding.driveFileId.trim(),
+    sha256: binding.sha256.trim().toLowerCase(),
+  };
+  if (
+    !normalized.sourceAssetId ||
+    !normalized.driveFileId ||
+    !/^[a-f0-9]{64}$/u.test(normalized.sha256)
+  ) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'PHOTO_TO_VIDEO_EXPECTED_SOURCE_BINDING_INVALID',
+      false,
+    );
+  }
+  return normalized;
+}
+
+function assertExpectedSourceBinding(
+  expected: ExpectedPhotoToVideoSourceBinding,
+  sourceAssetId: string,
+  driveFileId: string,
+  sha256: string,
+): void {
+  if (
+    sourceAssetId !== expected.sourceAssetId ||
+    driveFileId !== expected.driveFileId ||
+    sha256.toLowerCase() !== expected.sha256
+  ) {
+    throw new ExecutionError(
+      'SOURCE_IMAGE_BINDING_FAILURE',
+      'PHOTO_TO_VIDEO_EXPECTED_SOURCE_BINDING_MISMATCH',
+      false,
+    );
   }
 }
 
