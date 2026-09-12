@@ -7,6 +7,7 @@ import {
   THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_ID,
   THE_PARTY_ITACARE_GENERATIVE_SCENE_COUNT,
   THE_PARTY_ITACARE_GENERATIVE_VIDEOS,
+  THE_PARTY_ITACARE_SOURCES,
   type ItacareGenerativeVideoSpec,
 } from './config/the-party-itacare-generative-campaign.js';
 import type { PhotoToVideoRouteType } from './contracts/photo-to-video.js';
@@ -50,9 +51,15 @@ const generatedScenes = await mapWithConcurrency(
   sceneSpecs,
   concurrency,
   async ({ video, scene }) => {
+    const expectedSource = THE_PARTY_ITACARE_SOURCES[scene.source];
     const result = await runtime.generation.generate({
       contentItemId: scene.contentItemId,
       routeType: scene.routeType,
+      expectedSourceBinding: {
+        sourceAssetId: expectedSource.assetId,
+        driveFileId: expectedSource.driveFileId,
+        sha256: expectedSource.sha256,
+      },
       ...(scene.routeType === 'GENERATIVE_SCENE_CONTINUATION_VIDEO'
         ? {
             creativeDirection: requiredCreativeDirection(
@@ -62,6 +69,7 @@ const generatedScenes = await mapWithConcurrency(
           }
         : {}),
     });
+    assertGeneratedSourceBinding(scene.contentItemId, result.manifest, expectedSource);
     const sceneDir = join(outputRoot, video.id.toLowerCase());
     await mkdir(sceneDir, { recursive: true });
     const path = join(sceneDir, `${scene.contentItemId}.mp4`);
@@ -87,11 +95,15 @@ const generatedScenes = await mapWithConcurrency(
       sourceSha256: result.manifest.sourceSha256,
       path,
       sha256: observed,
+      size: result.manifest.size,
+      seconds: result.manifest.seconds,
       artifactRef: result.manifest.artifactRef,
       artifactObjectName: result.manifest.artifactObjectName,
       provider: result.manifest.provider,
       providerModel: result.manifest.providerModel ?? null,
       providerJobId: result.manifest.providerJobId ?? null,
+      exceptionId: result.manifest.exceptionId ?? null,
+      approvalRef: result.manifest.approvalRef ?? null,
       status: result.manifest.status,
     };
   },
@@ -106,13 +118,15 @@ for (const video of videos) {
     if (!found) throw new Error(`ITACARE_CAMPAIGN_SCENE_MISSING:${scene.contentItemId}`);
     return found;
   });
+  const availableSeconds = sceneRows.reduce((sum, scene) => sum + scene.seconds, 0);
+  if (availableSeconds < video.targetSeconds) {
+    throw new Error(
+      `ITACARE_CAMPAIGN_DURATION_INSUFFICIENT:${video.id}:${availableSeconds}:${video.targetSeconds}`,
+    );
+  }
   const videoDir = join(outputRoot, video.id.toLowerCase());
   const finalPath = join(videoDir, `${video.finalContentItemId}.mp4`);
-  await assembleVideo(
-    sceneRows.map((scene) => scene.path),
-    finalPath,
-    video.targetSeconds,
-  );
+  await assembleVideo(sceneRows, finalPath, video.targetSeconds);
   const bytes = new Uint8Array(await readFile(finalPath));
   const finalSha256 = sha256(bytes);
   const stored = await artifactStore.store({
@@ -148,6 +162,7 @@ for (const video of videos) {
     manifestPath,
     outputFileName: basename(finalPath),
     manifestFileName: basename(manifestPath),
+    manifest,
     publicationAuthorized: false,
     reviewRequired: true,
   });
@@ -175,6 +190,28 @@ await writeFile(
 );
 process.stdout.write(`THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=${JSON.stringify(result)}\n`);
 
+function assertGeneratedSourceBinding(
+  contentItemId: string,
+  manifest: {
+    readonly sourceAssetId: string;
+    readonly sourceDriveFileId: string;
+    readonly sourceSha256: string;
+  },
+  expected: {
+    readonly assetId: string;
+    readonly driveFileId: string;
+    readonly sha256: string;
+  },
+): void {
+  if (
+    manifest.sourceAssetId !== expected.assetId ||
+    manifest.sourceDriveFileId !== expected.driveFileId ||
+    manifest.sourceSha256.toLowerCase() !== expected.sha256.toLowerCase()
+  ) {
+    throw new Error(`ITACARE_CAMPAIGN_EXPECTED_SOURCE_BINDING_MISMATCH:${contentItemId}`);
+  }
+}
+
 function buildFinalManifest(
   video: ItacareGenerativeVideoSpec,
   sceneRows: readonly {
@@ -184,11 +221,15 @@ function buildFinalManifest(
     readonly sourceDriveFileId: string;
     readonly sourceSha256: string;
     readonly sha256: string;
+    readonly size: string;
+    readonly seconds: number;
     readonly artifactRef: string;
     readonly artifactObjectName: string;
     readonly provider: string;
     readonly providerModel: string | null;
     readonly providerJobId: string | null;
+    readonly exceptionId: string | null;
+    readonly approvalRef: string | null;
   }[],
   output: {
     readonly outputSha256: string;
@@ -207,7 +248,8 @@ function buildFinalManifest(
     finalContentItemId: video.finalContentItemId,
     routeType: 'MIXED_GOVERNED_VIDEO_ASSEMBLY',
     targetSeconds: video.targetSeconds,
-    assembly: 'FFMPEG_CONCAT_REENCODE_NO_AUDIO_V1',
+    availableSourceSeconds: sceneRows.reduce((sum, scene) => sum + scene.seconds, 0),
+    assembly: 'FFMPEG_NORMALIZE_CONCAT_REENCODE_NO_AUDIO_V1',
     sourceScenes: sceneRows,
     output,
     requiresPostGenerationHumanReview: true,
@@ -220,15 +262,22 @@ function buildFinalManifest(
 }
 
 async function assembleVideo(
-  scenePaths: readonly string[],
+  sceneRows: readonly { readonly path: string; readonly size: string }[],
   outputPath: string,
   targetSeconds: number,
 ): Promise<void> {
-  if (scenePaths.length === 0) throw new Error('ITACARE_CAMPAIGN_ASSEMBLY_SCENES_REQUIRED');
+  if (sceneRows.length === 0) throw new Error('ITACARE_CAMPAIGN_ASSEMBLY_SCENES_REQUIRED');
   const workspace = await mkdtemp(join(tmpdir(), 'itacare-assembly-'));
   try {
+    const targetSize = parseVideoSize(sceneRows[0]!.size);
+    const normalizedPaths: string[] = [];
+    for (const [index, scene] of sceneRows.entries()) {
+      const normalizedPath = join(workspace, `normalized-${String(index).padStart(2, '0')}.mp4`);
+      await normalizeScene(scene.path, normalizedPath, targetSize.width, targetSize.height);
+      normalizedPaths.push(normalizedPath);
+    }
     const listPath = join(workspace, 'concat.txt');
-    const list = scenePaths.map((path) => `file '${escapeConcatPath(path)}'`).join('\n');
+    const list = normalizedPaths.map((path) => `file '${escapeConcatPath(path)}'`).join('\n');
     await writeFile(listPath, `${list}\n`, 'utf8');
     await runCommand(process.env.FFMPEG_BINARY?.trim() || 'ffmpeg', [
       '-y',
@@ -260,6 +309,42 @@ async function assembleVideo(
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+async function normalizeScene(
+  inputPath: string,
+  outputPath: string,
+  width: number,
+  height: number,
+): Promise<void> {
+  await runCommand(process.env.FFMPEG_BINARY?.trim() || 'ffmpeg', [
+    '-y',
+    '-i',
+    inputPath,
+    '-vf',
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p`,
+    '-an',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'medium',
+    '-crf',
+    '18',
+    '-video_track_timescale',
+    '90000',
+    '-movflags',
+    '+faststart',
+    outputPath,
+  ]);
+}
+
+function parseVideoSize(size: string): { readonly width: number; readonly height: number } {
+  const match = /^(\d+)x(\d+)$/u.exec(size.trim());
+  if (!match) throw new Error(`ITACARE_CAMPAIGN_VIDEO_SIZE_INVALID:${size}`);
+  const width = Number.parseInt(match[1]!, 10);
+  const height = Number.parseInt(match[2]!, 10);
+  if (width <= 0 || height <= 0) throw new Error(`ITACARE_CAMPAIGN_VIDEO_SIZE_INVALID:${size}`);
+  return { width, height };
 }
 
 async function runCommand(command: string, args: readonly string[]): Promise<void> {
