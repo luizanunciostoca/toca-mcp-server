@@ -11,24 +11,27 @@ The canonical editorial/approval source remains TOCA OS. `control/github-native-
 ## Runtime architecture
 
 1. TOCA OS approves the content item and its final asset.
-2. The approved JPEG is staged to branch `publication-assets` with `.github/workflows/github-native-instagram-stage-asset.yml`.
-3. The stager validates the JPEG magic bytes and exact SHA-256 before committing it as `publication-assets/<sha256>.jpg`.
-4. The controlled queue references the resulting `raw.githubusercontent.com` URL and the same SHA-256 recorded by Creative Truth.
-5. `.github/workflows/github-native-instagram-publisher.yml` wakes every five minutes at minute `2/5` in `America/Bahia`, avoiding the top-of-hour GitHub Actions hotspot.
-6. The runtime selects only items within a maximum ±5 minute window. Missed slots outside that window are not backfilled.
-7. The runtime re-downloads the exact public asset, validates JPEG bytes, SHA-256, and Creative Truth output hash, and rejects Google Cloud asset hosts.
-8. Before a write, it checks the durable publication ledger and provider reconciliation path.
-9. Meta publication uses the existing TOCA OS container → processing status → `media_publish` implementation.
-10. A publication is accepted only after an independent provider readback returns the external media ID. Permalink is preserved when returned.
-11. State transitions are written to branch `publication-state`; immutable run evidence is uploaded as a GitHub Actions artifact.
+2. A controlled `repository_dispatch` event of type `github-native-instagram-stage-asset` executes only the workflow committed on the protected default branch.
+3. The approved JPEG is staged to branch `publication-assets` with `.github/workflows/github-native-instagram-stage-asset.yml`.
+4. The stager validates the initial and effective HTTPS source hosts, JPEG magic bytes, and exact SHA-256 before committing it as `publication-assets/<sha256>.jpg`.
+5. The controlled queue references the resulting `raw.githubusercontent.com` URL and the same SHA-256 recorded by Creative Truth.
+6. `.github/workflows/github-native-instagram-publisher.yml` wakes every five minutes at minute `2/5` in `America/Bahia`, avoiding the top-of-hour GitHub Actions hotspot.
+7. The runtime selects only items within a maximum ±5 minute window. Missed slots outside that window are not backfilled. Timestamps must include `Z` or an explicit numeric offset.
+8. The runtime re-downloads only the content-addressed `raw.githubusercontent.com/.../publication-assets/.../<sha256>.jpg` URL, refuses redirects, validates JPEG bytes, SHA-256, and Creative Truth output hash, and rechecks expiry immediately before side effects.
+9. Before a write, it validates the durable request fingerprint. IMAGE reconciliation checks `/media`; STORY reconciliation checks the dedicated `/stories` edge. A provider candidate near the target slot is never auto-adopted when exact asset identity cannot be proven; the cycle blocks instead.
+10. Meta publication uses the existing TOCA OS container → processing status → `media_publish` implementation.
+11. A publication is accepted only after an independent provider readback returns the same external media ID. A locally `PUBLISHED` record also requires a fresh provider readback on the next cycle.
+12. State transitions are written to branch `publication-state`; immutable run evidence includes the approved asset SHA, Creative Truth output SHA, correlation ID, idempotency key, request fingerprint, external media ID/permalink when available, and is uploaded as a GitHub Actions artifact.
 
 ## Required GitHub configuration
 
-The GitHub connector cannot create or read repository secrets. Configure the following in **Repository Settings → Secrets and variables → Actions** before CANARY:
+The GitHub connector used by ChatGPT cannot create or read repository secrets/variables. Configure these under **Repository Settings → Secrets and variables → Actions** before CANARY.
 
 ### Secret
 
-- `META_ACCESS_TOKEN`: valid Meta access token for the target Instagram professional/business account, with the permissions required by the existing Instagram content publishing integration. Never put this token in the queue, source code, issue, PR, artifact, or asset manifest.
+- `META_ACCESS_TOKEN`: valid Meta access token for the target Instagram professional/business account, with the permissions required by the existing Instagram content publishing integration. Never put this token in the queue, source code, issue, PR, artifact, asset manifest, or chat.
+
+The secret is injected only into the provider-execution step; install/build/setup steps do not receive it.
 
 ### Variables
 
@@ -39,24 +42,71 @@ The GitHub connector cannot create or read repository secrets. Configure the fol
 - `TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID` unset until a real canary item is explicitly authorized.
 - `ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW` must remain unset/false. Setting it to `true` re-enables the legacy GCP publish-now lane and is outside the GitHub-native operating mode.
 
+There is deliberately **no fallback Instagram account ID**. If `INSTAGRAM_BUSINESS_ACCOUNT_ID` is absent or differs from the queue item, writes fail closed.
+
+## Controlled dispatches
+
+Write-capable workflows do not expose `workflow_dispatch`. This prevents a user-selected feature branch from executing modified controller code with `contents: write` or the Meta token.
+
+After merge, controlled operators may create repository dispatch events against the repository. GitHub executes the workflow from the default branch.
+
+### Stage an approved asset
+
+Event type:
+
+`github-native-instagram-stage-asset`
+
+Client payload:
+
+```json
+{
+  "source_url": "https://approved-non-gcp-source.example/asset.jpg",
+  "expected_sha256": "<64-hex-approved-sha256>",
+  "content_item_id": "<canonical-content-item-id>"
+}
+```
+
+The stager blocks Google Cloud Storage hosts including virtual-hosted bucket subdomains, blocks `run.app`, validates the final effective URL after HTTPS redirects, and then commits only the hash-addressed JPEG and sanitized manifest.
+
+### Controlled publication cycle
+
+Event type:
+
+`github-native-instagram-publish-controlled`
+
+Client payload example for CANARY:
+
+```json
+{
+  "mode": "CANARY",
+  "writes_enabled": "true",
+  "canary_content_item_id": "<exact-authorized-content-item-id>"
+}
+```
+
+Use the literal string `"true"` for `writes_enabled`. Scheduled cycles continue to use repository variables.
+
 ## Queue contract
 
 `control/github-native-publication-queue.json` is fail-closed. Each item must include:
 
 - canonical `contentItemId`;
-- `scheduledAt` and optional `expiresAt`;
+- `scheduledAt` and optional `expiresAt`, always with `Z` or an explicit numeric UTC offset;
+- `expiresAt`, when present, strictly after `scheduledAt`;
 - operation (`SUNSET` or `THE_PARTY`);
 - `contentStatus=PRODUCED`;
 - `approvalStatus=APPROVED`;
 - `publicationIntent=SCHEDULED`;
 - `channel=INSTAGRAM`;
-- `mediaType=IMAGE` or `STORY` for this first controlled lane;
+- `mediaType=IMAGE` or `STORY` for this controlled lane;
 - exact Instagram account ID;
-- public content-addressed JPEG URL;
+- content-addressed JPEG URL on the `publication-assets` branch;
 - exact SHA-256;
 - stable `correlationId` and `idempotencyKey`;
 - full `creativeTruthBinding` with all gates passed and `exactAssetBinding=true`;
 - optional source registry coordinates for audit traceability.
+
+A durable state record includes a canonical request fingerprint. Reusing the same idempotency key with changed account, media URL, caption, asset hash, correlation, or Creative Truth binding is rejected.
 
 The initial queue is intentionally empty. An empty queue performs no provider write.
 
@@ -73,27 +123,29 @@ After merge, keep:
 - `TOCA_GITHUB_NATIVE_PUBLICATION_MODE=SHADOW`
 - `TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED=false`
 
-Populate one future approved item and stage its exact asset. The workflow must produce `SHADOW_WOULD_PUBLISH` evidence without requiring the Meta write secret.
+Populate one future approved item and stage its exact asset. The workflow must produce `SHADOW_WOULD_PUBLISH` evidence without constructing the Meta provider client or requiring the Meta write secret.
 
 ### CANARY
 
 Only after SHADOW evidence is correct:
 
+- configure `META_ACCESS_TOKEN`;
+- configure the exact `INSTAGRAM_BUSINESS_ACCOUNT_ID`;
 - set `TOCA_GITHUB_NATIVE_PUBLICATION_MODE=CANARY`;
 - set `TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED=true`;
-- set `TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID` to exactly one explicitly authorized future content item;
-- ensure `META_ACCESS_TOKEN` is configured.
+- set `TOCA_GITHUB_NATIVE_CANARY_CONTENT_ITEM_ID` to exactly one explicitly authorized future content item.
 
 Success requires:
 
 - exactly one provider write for the canary item;
 - durable ledger transition to `PUBLISHED`;
 - external media ID;
-- independent provider readback;
-- no duplicate on the next scheduler cycle;
-- immutable workflow evidence.
+- independent provider readback with the same ID;
+- fresh provider readback on the next scheduler cycle rather than a blind local-state acceptance;
+- no duplicate write;
+- immutable evidence containing the exact approved binding.
 
-If provider state is uncertain, do not retry blindly. The existing executor leaves a fail-closed state requiring reconciliation.
+If provider state is uncertain or a nearby provider item cannot be proven to be the exact approved asset, do not retry or auto-adopt it. The lane blocks for reconciliation.
 
 ### LIMITED
 
@@ -113,18 +165,21 @@ The variable must stay absent/false during normal GitHub-native operation. There
 
 ## Incident behavior
 
-The system intentionally prefers missed publication over duplicate or unverified publication. It blocks instead of writing when:
+The system intentionally prefers a missed publication over a duplicate or unverified publication. It blocks instead of writing when:
 
 - the item is outside the ±5 minute window;
-- asset URL is not HTTPS;
-- asset URL is not content-addressed by the approved SHA;
-- asset resolves to denied Google Cloud publication infrastructure;
+- the item expires before side effects complete;
+- a timestamp lacks an explicit timezone offset;
+- asset URL is not the exact content-addressed GitHub publication asset;
+- the asset endpoint redirects;
 - downloaded JPEG hash differs from Creative Truth;
-- account ID differs from configured production account;
+- a durable idempotency key is reused with a changed canonical request fingerprint;
+- account ID is absent or differs from the queue item;
 - write mode is not explicitly enabled;
 - CANARY item ID differs from the approved canary;
-- manual workflow dispatch lacks explicit write confirmation;
-- local ledger indicates `PUBLISHING`, uncertain write state, canceled, or already published;
-- provider readback cannot confirm the published media.
+- a controlled repository dispatch lacks explicit write confirmation;
+- local ledger indicates canceled or uncertain write state;
+- provider reconciliation finds a nearby publication whose exact asset identity cannot be proven;
+- provider readback cannot confirm the external media ID.
 
 Never clear or edit `publication-state` merely to force a retry. Reconcile provider state first.
