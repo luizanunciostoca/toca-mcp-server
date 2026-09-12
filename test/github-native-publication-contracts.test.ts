@@ -58,10 +58,11 @@ describe('GitHub-native publication queue', () => {
 
   it('rejects duplicate idempotency keys', () => {
     const queue = queueWith('2026-09-12T09:00:00-03:00');
+    const item = queue.items[0]!;
     expect(() =>
       parseGithubNativePublicationQueue({
         ...queue,
-        items: [queue.items[0], { ...queue.items[0], contentItemId: 'MKT-OTHER' }],
+        items: [item, { ...item, contentItemId: 'MKT-OTHER' }],
       }),
     ).toThrow();
   });
