@@ -8,9 +8,33 @@ The queue is **not** an approval system. It is a protected execution mirror.
 
 ## Authority flow
 
-`TOCA OS Content Registry → protected queue PR → main → verified asset staging → GitHub scheduler → Meta provider`
+`TOCA OS Content Registry → trusted registry snapshot → queue compiler → protected queue PR → main → verified asset staging → GitHub scheduler → Meta provider`
 
 Only items already authorized by TOCA OS may enter `control/github-native-publication-queue.json`.
+
+## Queue sync compiler
+
+The fail-closed compiler lives at:
+
+`src/github-native-publication/github-native-publication-queue-sync.ts`
+
+It does not fetch or mutate Google Drive. A trusted TOCA OS control-plane session or connector must read the live canonical registry and provide a temporary JSON snapshot. This keeps private Drive access outside GitHub Actions and prevents GitHub from becoming an approval authority.
+
+The CLI reads:
+
+- `TOCA_PUBLICATION_REGISTRY_SNAPSHOT_PATH`, default `control/github-native-publication-registry-snapshot.json`;
+- `TOCA_PUBLICATION_QUEUE_PATH`, default `control/github-native-publication-queue.json`;
+- `TOCA_PUBLICATION_QUEUE_SYNC_EVIDENCE_PATH`, default `github-native-publication-queue-sync-evidence.json`.
+
+After the repository is built, run:
+
+```bash
+node dist/src/github-native-publication/github-native-publication-queue-sync.js
+```
+
+The snapshot must identify the canonical spreadsheet ID and `CONTENT_ITEMS` sheet, include an explicit-offset `fetchedAt`, and be no more than 15 minutes old. A timestamp more than five minutes in the future is rejected as clock/source ambiguity.
+
+The compiler requires at least 30 minutes of lead time before an item may be mirrored. This protects time for a queue PR, protected-main CI and content-addressed asset staging. Near-due and expired items are skipped rather than replayed.
 
 ## Queue sync eligibility
 
@@ -20,13 +44,21 @@ A sync worker may mirror an item only when all of these are true in the canonica
 - `status=PRODUCED`;
 - `approval_status=APPROVED`;
 - `publication_intent=SCHEDULED`;
-- scheduled time is still in the future;
-- explicit `America/Bahia` timestamp can be produced;
+- operation is `SUNSET` or `THE_PARTY`;
+- format is `FEED` or `STORY`;
+- scheduled time is still in the future with the minimum lead time;
+- explicit timezone offset is present;
 - exact final asset Drive file ID is known;
 - final asset SHA-256 is known;
-- Creative Truth / visual QA gates are passed;
-- `exact_asset_binding=TRUE`;
+- correlation and idempotency keys are known;
+- Creative Truth binding exists with Brand, Venue and Quality gates passed;
+- `creativeTruthBinding.outputSha256` exactly equals the final asset SHA-256;
+- `exactAssetBinding=TRUE`;
 - operation and owner rules still allow the content to run.
+
+Rows that are still `IDEA`, `BRIEFED`, unapproved, unscheduled, unsupported, already due or too close to execution are recorded as `SKIPPED` in sync evidence and never promoted by the compiler.
+
+An item that otherwise declares itself eligible but lacks its exact asset, identity, idempotency or Creative Truth evidence causes the compilation to fail closed. The existing queue file is not rewritten because output is written only after successful compilation.
 
 The sync worker must never convert pending content into approved content and must never backfill an expired slot.
 
@@ -44,7 +76,7 @@ Each mirrored item carries:
 - exact `asset.sha256`;
 - exact `creativeTruthBinding.outputSha256`;
 - `asset.sourceDriveFileId` for staging provenance;
-- registry coordinates when available.
+- canonical registry spreadsheet, sheet and row reference.
 
 The raw GitHub publication URL is deterministic from the approved SHA-256. It may be written to the queue before the bytes are staged because the publisher cannot use the asset unless the exact hash-addressed object exists.
 
