@@ -1,0 +1,119 @@
+name: GitHub Native Instagram Asset Stager
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: Public HTTPS URL for the approved JPEG; never pass credentials or signed secrets
+        required: true
+        type: string
+      expected_sha256:
+        description: Exact approved SHA-256 from Creative Truth
+        required: true
+        type: string
+      content_item_id:
+        description: Canonical TOCA OS content item id
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-native-instagram-asset-stager
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact controller SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact controller SHA
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Checkout publication assets branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: publication-assets
+          path: .publication-assets-worktree
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Download and bind exact approved JPEG
+        id: asset
+        shell: bash
+        env:
+          SOURCE_URL: ${{ inputs.source_url }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          CONTENT_ITEM_ID: ${{ inputs.content_item_id }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$EXPECTED_SHA256" | grep -Eq '^[a-fA-F0-9]{64}$'
+          printf '%s' "$CONTENT_ITEM_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          case "$SOURCE_URL" in
+            https://storage.googleapis.com/*|https://storage.cloud.google.com/*|https://*.run.app/*)
+              echo "GITHUB_NATIVE_GCP_ASSET_HOST_DENIED" >&2
+              exit 1
+              ;;
+            https://*) ;;
+            *)
+              echo "GITHUB_NATIVE_ASSET_HTTPS_REQUIRED" >&2
+              exit 1
+              ;;
+          esac
+
+          sha="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')"
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --max-redirs 5 \
+            "$SOURCE_URL" --output "$work/asset.jpg"
+          test -s "$work/asset.jpg"
+          magic="$(od -An -tx1 -N3 "$work/asset.jpg" | tr -d ' \n')"
+          test "$magic" = "ffd8ff"
+          actual="$(sha256sum "$work/asset.jpg" | awk '{print $1}')"
+          test "$actual" = "$sha"
+
+          dest=".publication-assets-worktree/publication-assets/${sha}.jpg"
+          manifest=".publication-assets-worktree/publication-assets/${sha}.json"
+          mkdir -p "$(dirname "$dest")"
+          cp "$work/asset.jpg" "$dest"
+          jq -n \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg sha256 "$sha" \
+            --arg stagedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg controllerSha "$GITHUB_SHA" \
+            --arg workflowRunId "$GITHUB_RUN_ID" \
+            '{schemaVersion:1,contentItemId:$contentItemId,sha256:$sha256,contentType:"image/jpeg",stagedAt:$stagedAt,controllerSha:$controllerSha,workflowRunId:$workflowRunId}' \
+            > "$manifest"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Commit only content-addressed publication asset
+        shell: bash
+        env:
+          SHA256: ${{ steps.asset.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          worktree=.publication-assets-worktree
+          git -C "$worktree" config user.name "toca-publication-assets[bot]"
+          git -C "$worktree" config user.email "toca-publication-assets[bot]@users.noreply.github.com"
+          git -C "$worktree" add -- "publication-assets/${SHA256}.jpg" "publication-assets/${SHA256}.json"
+          if git -C "$worktree" diff --cached --quiet; then
+            echo "Asset already staged with identical bytes."
+          else
+            git -C "$worktree" commit -m "asset(instagram): stage ${SHA256}"
+            git -C "$worktree" push origin HEAD:publication-assets
+          fi
+
+      - name: Emit content-addressed raw URL
+        env:
+          SHA256: ${{ steps.asset.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          echo "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/publication-assets/publication-assets/${SHA256}.jpg" >> "$GITHUB_STEP_SUMMARY"
