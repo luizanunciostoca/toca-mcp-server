@@ -1,20 +1,9 @@
 name: GitHub Native Instagram Asset Stager
 
 on:
-  workflow_dispatch:
-    inputs:
-      source_url:
-        description: Public HTTPS URL for the approved JPEG; never pass credentials or signed secrets
-        required: true
-        type: string
-      expected_sha256:
-        description: Exact approved SHA-256 from Creative Truth
-        required: true
-        type: string
-      content_item_id:
-        description: Canonical TOCA OS content item id
-        required: true
-        type: string
+  repository_dispatch:
+    types:
+      - github-native-instagram-stage-asset
 
 permissions:
   contents: write
@@ -28,15 +17,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Checkout exact controller SHA
+      - name: Checkout exact trusted default-branch controller SHA
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Verify exact controller SHA
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Verify exact controller SHA and trusted ref
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_REF}" = "refs/heads/${DEFAULT_BRANCH}"
 
       - name: Checkout publication assets branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -50,30 +45,43 @@ jobs:
         id: asset
         shell: bash
         env:
-          SOURCE_URL: ${{ inputs.source_url }}
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
-          CONTENT_ITEM_ID: ${{ inputs.content_item_id }}
+          SOURCE_URL: ${{ github.event.client_payload.source_url }}
+          EXPECTED_SHA256: ${{ github.event.client_payload.expected_sha256 }}
+          CONTENT_ITEM_ID: ${{ github.event.client_payload.content_item_id }}
         run: |
           set -euo pipefail
           printf '%s' "$EXPECTED_SHA256" | grep -Eq '^[a-fA-F0-9]{64}$'
           printf '%s' "$CONTENT_ITEM_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
-          case "$SOURCE_URL" in
-            https://storage.googleapis.com/*|https://storage.cloud.google.com/*|https://*.run.app/*)
-              echo "GITHUB_NATIVE_GCP_ASSET_HOST_DENIED" >&2
-              exit 1
-              ;;
-            https://*) ;;
-            *)
-              echo "GITHUB_NATIVE_ASSET_HTTPS_REQUIRED" >&2
-              exit 1
-              ;;
-          esac
+
+          validate_url() {
+            node - "$1" <<'NODE'
+          const value = process.argv[2];
+          const url = new URL(value);
+          const host = url.hostname.toLowerCase();
+          if (url.protocol !== 'https:') process.exit(10);
+          if (
+            host === 'storage.googleapis.com' ||
+            host === 'storage.cloud.google.com' ||
+            host.endsWith('.storage.googleapis.com') ||
+            host.endsWith('.run.app')
+          ) process.exit(11);
+          NODE
+          }
+
+          if ! validate_url "$SOURCE_URL"; then
+            echo "GITHUB_NATIVE_ASSET_SOURCE_URL_DENIED" >&2
+            exit 1
+          fi
 
           sha="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')"
           work="$(mktemp -d)"
           trap 'rm -rf "$work"' EXIT
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --max-redirs 5 \
-            "$SOURCE_URL" --output "$work/asset.jpg"
+          effective_url="$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --max-redirs 5 \
+            --write-out '%{url_effective}' --output "$work/asset.jpg" "$SOURCE_URL")"
+          if ! validate_url "$effective_url"; then
+            echo "GITHUB_NATIVE_ASSET_REDIRECT_TARGET_DENIED" >&2
+            exit 1
+          fi
           test -s "$work/asset.jpg"
           magic="$(od -An -tx1 -N3 "$work/asset.jpg" | tr -d ' \n')"
           test "$magic" = "ffd8ff"
@@ -90,7 +98,8 @@ jobs:
             --arg stagedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg controllerSha "$GITHUB_SHA" \
             --arg workflowRunId "$GITHUB_RUN_ID" \
-            '{schemaVersion:1,contentItemId:$contentItemId,sha256:$sha256,contentType:"image/jpeg",stagedAt:$stagedAt,controllerSha:$controllerSha,workflowRunId:$workflowRunId}' \
+            --arg effectiveHost "$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$effective_url")" \
+            '{schemaVersion:1,contentItemId:$contentItemId,sha256:$sha256,contentType:"image/jpeg",stagedAt:$stagedAt,controllerSha:$controllerSha,workflowRunId:$workflowRunId,effectiveSourceHost:$effectiveHost}' \
             > "$manifest"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
 
