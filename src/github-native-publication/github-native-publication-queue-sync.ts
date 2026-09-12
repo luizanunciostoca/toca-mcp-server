@@ -109,8 +109,9 @@ export function compileGithubNativePublicationQueue(
   options: CompileOptions = {},
 ): GithubNativeQueueSyncResult {
   const snapshot = githubNativePublicationRegistrySnapshotSchema.parse(value);
-  const now = Date.parse(nowIso);
-  if (!Number.isFinite(now)) throw new Error('GITHUB_NATIVE_QUEUE_SYNC_NOW_INVALID');
+  const parsedNow = explicitOffsetTimestampSchema.safeParse(nowIso);
+  if (!parsedNow.success) throw new Error('GITHUB_NATIVE_QUEUE_SYNC_NOW_INVALID');
+  const now = Date.parse(parsedNow.data);
 
   const fetchedAt = Date.parse(snapshot.source.fetchedAt);
   const maxStalenessMs = options.maxStalenessMs ?? GITHUB_NATIVE_QUEUE_SYNC_MAX_STALENESS_MS;

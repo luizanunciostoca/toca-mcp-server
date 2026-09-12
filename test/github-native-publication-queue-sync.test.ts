@@ -134,6 +134,12 @@ describe('GitHub-native publication queue sync', () => {
     expect(result.evidence.decisions[0]?.reason).toBe('INSUFFICIENT_LEAD_TIME');
   });
 
+  it('rejects an offset-less reference clock', () => {
+    expect(() =>
+      compileGithubNativePublicationQueue(snapshot([validCandidate()]), '2026-09-12T10:00:00'),
+    ).toThrow('GITHUB_NATIVE_QUEUE_SYNC_NOW_INVALID');
+  });
+
   it('rejects a stale canonical snapshot', () => {
     expect(() =>
       compileGithubNativePublicationQueue(
