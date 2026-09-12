@@ -104,7 +104,9 @@ jobs:
           test -n "$PREVIOUS_DAEMON_REVISION"
           echo "PREVIOUS_DAEMON_REVISION=$PREVIOUS_DAEMON_REVISION" >> "$GITHUB_ENV"
           WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last // "false"')"
+          PUB_WRITES="$(printf '%s' "$DAEMON_JSON" | jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false"')"
           test "$WRITES" = false
+          test "$PUB_WRITES" = false
 
       - name: Prove fail-closed tiered readiness by process exit
         env:
@@ -159,13 +161,14 @@ jobs:
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
-            --update-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --update-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_PUBLICATION_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_PAGE_ID=$INSTAGRAM_PAGE_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE=postgres#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED=true#INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS=$KB_SOURCE_IDS#INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE=0.58#INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT=12#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
             --command node --args dist/src/toca-managed-instagram-daemon.js --quiet
           DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           printf '%s' "$DAEMON_JSON" | jq -e '
             .spec.template.spec.containers[0] as $c |
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last == "true") and
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last == "false") and
+            ([$c.env[]? | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last == "false") and
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE") | .value] | last == "postgres") and
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED") | .value] | last == "true") and
             ([$c.env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_KB_SOURCE_IDS") | .value] | last == "SRC-OPS-001,SRC-MENU-002,SRC-LOC-001")
