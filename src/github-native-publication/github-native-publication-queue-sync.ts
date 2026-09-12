@@ -339,10 +339,7 @@ async function persistQueueAndEvidence(
     await rename(evidenceTempPath, evidencePath);
     await rename(queueTempPath, queuePath);
   } finally {
-    await Promise.all([
-      rm(queueTempPath, { force: true }),
-      rm(evidenceTempPath, { force: true }),
-    ]);
+    await Promise.all([rm(queueTempPath, { force: true }), rm(evidenceTempPath, { force: true })]);
   }
 }
 
