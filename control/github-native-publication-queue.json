@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "timezone": "America/Bahia",
-  "generatedAt": "2026-09-12T18:10:00-03:00",
+  "generatedAt": "2026-09-12T19:28:03-03:00",
   "items": [
     {
       "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
@@ -24,7 +24,7 @@
       "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-0900:V1",
       "creativeTruthBinding": {
         "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_IMAGE_V1",
+        "standardId": "SUNSET_FEED_V1",
         "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
         "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
         "brandIntegrityStatus": "PASSED",
