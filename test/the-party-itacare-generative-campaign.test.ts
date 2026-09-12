@@ -20,13 +20,49 @@ describe('The Party Itacare governed video campaign', () => {
     expect(new Set(finalIds).size).toBe(finalIds.length);
   });
 
-  it('pins every source to an exact Drive file and sha256 digest', () => {
-    for (const source of Object.values(THE_PARTY_ITACARE_SOURCES)) {
-      expect(source.driveFileId).toMatch(/^[A-Za-z0-9_-]+$/u);
-      expect(source.sha256).toMatch(/^[a-f0-9]{64}$/u);
-      expect(source.assetId).toMatch(/^TP-ITA-/u);
-      expect(source.venueAssetId).toMatch(/^VENUE-TP-ITA-/u);
-    }
+  it('pins every source to the exact governed Drive file and sha256 digest', () => {
+    expect(THE_PARTY_ITACARE_SOURCES).toEqual({
+      VENUE_DAY: {
+        assetId: 'TP-ITA-GEN-VENUE-DAY-001',
+        venueAssetId: 'VENUE-TP-ITA-GEN-VENUE-DAY-001',
+        driveFileId: '1Yb0_x2eh-gUDo0S-GrZ2Y9FKv3t6ZDmD',
+        sha256: '132a24cc60893abb132232c5a473ae42fb7fe7c5fd8f296b2ea546921c6e7047',
+        containsPeople: false,
+        approvedRoutes: ['GENERATIVE_SCENE_CONTINUATION_VIDEO'],
+      },
+      VENUE_SUNSET: {
+        assetId: 'TP-ITA-GEN-VENUE-SUNSET-001',
+        venueAssetId: 'VENUE-TP-ITA-GEN-VENUE-SUNSET-001',
+        driveFileId: '1zLjYNjr3xP4uaBcCLQEY9jKbHOaKlN50',
+        sha256: 'a0ed04a0e9168e7f07b4094f3bfecd605707d55c57927e9fd5af6b1493943379',
+        containsPeople: false,
+        approvedRoutes: ['GENERATIVE_SCENE_CONTINUATION_VIDEO'],
+      },
+      ILLUSIONIZE: {
+        assetId: 'TP-ITA-PHOTO-ILLUSIONIZE-001',
+        venueAssetId: 'VENUE-TP-ITA-PHOTO-ILLUSIONIZE-001',
+        driveFileId: '1dOP5xiNx3iI9fZStm47BTq737wtA2Wst',
+        sha256: '5a8e519354a04d1d4c11547f323a3641c70ae736779538013d9a3d49e1f31ca0',
+        containsPeople: true,
+        approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'],
+      },
+      BRISOTTI: {
+        assetId: 'TP-ITA-PHOTO-BRISOTTI-001',
+        venueAssetId: 'VENUE-TP-ITA-PHOTO-BRISOTTI-001',
+        driveFileId: '1-Pl_A32eLNgbhZDZVb77uUGE0RZz7tfj',
+        sha256: '4de8d4b015bc58d425b46b6a689c2245bc9093ac629bc485f967fa8a88f09aa5',
+        containsPeople: true,
+        approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'],
+      },
+      LINEUP_DUO: {
+        assetId: 'TP-ITA-PHOTO-LINEUP-DUO-001',
+        venueAssetId: 'VENUE-TP-ITA-PHOTO-LINEUP-DUO-001',
+        driveFileId: '1SKt19Uu5GNC942aS8lWnrdhsV3QpHYAY',
+        sha256: '2f704e3b82cd6ff808a110e344a73472ae3a5f96d769bebb052829f367a0984d',
+        containsPeople: true,
+        approvedRoutes: ['REAL_PHOTO_TO_MOTION_VIDEO'],
+      },
+    });
   });
 
   it('never sends recognizable artist sources through scene continuation', () => {
