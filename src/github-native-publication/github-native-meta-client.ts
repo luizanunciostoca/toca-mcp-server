@@ -10,9 +10,8 @@ export function createGithubNativeMetaClient(env: NodeJS.ProcessEnv = process.en
     throw new Error('GITHUB_NATIVE_META_API_VERSION_INVALID');
   }
 
-  return new MetaApiClient(
-    { graphBaseUrl, apiVersion },
-    new EnvironmentSecretResolver(env),
-    { provider: 'env', key: tokenEnvKey },
-  );
+  return new MetaApiClient({ graphBaseUrl, apiVersion }, new EnvironmentSecretResolver(env), {
+    provider: 'env',
+    key: tokenEnvKey,
+  });
 }
