@@ -141,16 +141,17 @@ function dependencies(storeFailure = false) {
       return undefined;
     },
   };
+  const loadSource = vi.fn(async () => {
+    await Promise.resolve();
+    return {
+      bytes: sourceBytes,
+      contentType: 'image/jpeg' as const,
+      driveFileId: 'master-drive',
+      sha256: sourceSha256,
+    };
+  });
   const sourceLoader: CreativeVideoSourceLoader = {
-    load: async () => {
-      await Promise.resolve();
-      return {
-        bytes: sourceBytes,
-        contentType: 'image/jpeg',
-        driveFileId: 'master-drive',
-        sha256: sourceSha256,
-      };
-    },
+    load: loadSource,
   };
   const brandLoader: CreativeTruthBrandAssetLoader = {
     load: async () => {
@@ -225,6 +226,7 @@ function dependencies(storeFailure = false) {
     brandComposer,
     assertCanonical,
     resolve,
+    loadSource,
     store,
     writeCandidate,
   };
@@ -269,6 +271,28 @@ describe('ControlledPhotoToVideoGenerationService', () => {
     expect(deps.store.mock.invocationCallOrder[0]).toBeLessThan(
       deps.writeCandidate.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('fails before source loading/provider work when caller source binding differs from the registry', async () => {
+    const deps = dependencies();
+    const service = new ControlledPhotoToVideoGenerationService(deps);
+
+    await expect(
+      service.generate({
+        contentItemId: 'CONTENT-1',
+        routeType: 'REAL_PHOTO_TO_MOTION_VIDEO',
+        expectedSourceBinding: {
+          sourceAssetId: 'SUN-0244',
+          driveFileId: 'different-master-drive',
+          sha256: sourceSha256,
+        },
+      }),
+    ).rejects.toThrow('PHOTO_TO_VIDEO_EXPECTED_SOURCE_BINDING_MISMATCH');
+
+    expect(deps.resolve).toHaveBeenCalledOnce();
+    expect(deps.loadSource).not.toHaveBeenCalled();
+    expect(deps.store).not.toHaveBeenCalled();
+    expect(deps.writeCandidate).not.toHaveBeenCalled();
   });
 
   it('does not write GENERATED_REVIEW_REQUIRED state when durable artifact persistence fails', async () => {
