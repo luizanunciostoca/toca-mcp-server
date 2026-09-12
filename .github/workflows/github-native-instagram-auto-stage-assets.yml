@@ -1,0 +1,94 @@
+name: GitHub Native Instagram Auto Stage Assets
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - control/github-native-publication-queue.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-native-instagram-asset-stager
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact trusted default-branch controller SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact controller SHA and trusted ref
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_REF}" = "refs/heads/${DEFAULT_BRANCH}"
+
+      - name: Checkout publication assets branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: publication-assets
+          path: .publication-assets-worktree
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build exact controller
+        run: pnpm build
+
+      - name: Stage exact approved Drive assets from protected queue
+        env:
+          TOCA_PUBLICATION_QUEUE_PATH: control/github-native-publication-queue.json
+          TOCA_PUBLICATION_ASSET_DIR: .publication-assets-worktree/publication-assets
+          TOCA_PUBLICATION_ASSET_STAGING_EVIDENCE_PATH: github-native-asset-staging-evidence.json
+          TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}
+          TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: node dist/src/github-native-publication/github-native-drive-asset-stager.js
+
+      - name: Commit only verified content-addressed assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          worktree=.publication-assets-worktree
+          git -C "$worktree" config user.name "toca-publication-assets[bot]"
+          git -C "$worktree" config user.email "toca-publication-assets[bot]@users.noreply.github.com"
+          git -C "$worktree" add -- publication-assets
+          if git -C "$worktree" diff --cached --quiet; then
+            echo "No new publication assets to stage."
+          else
+            git -C "$worktree" commit -m "asset(instagram): auto-stage queue ${GITHUB_SHA::12}"
+            git -C "$worktree" push origin HEAD:publication-assets
+          fi
+
+      - name: Upload immutable staging evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: github-native-asset-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: github-native-asset-staging-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
