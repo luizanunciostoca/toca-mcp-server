@@ -6,7 +6,7 @@ import {
 
 const sha256 = 'a'.repeat(64);
 
-function queueWith(scheduledAt: string) {
+function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {}) {
   return parseGithubNativePublicationQueue({
     schemaVersion: 1,
     timezone: 'America/Bahia',
@@ -24,7 +24,7 @@ function queueWith(scheduledAt: string) {
         instagramAccountId: '17841402033495654',
         caption: 'Teste',
         asset: {
-          url: `https://raw.githubusercontent.com/example/assets/${sha256}.jpg`,
+          url: `https://raw.githubusercontent.com/example/repo/publication-assets/publication-assets/${sha256}.jpg`,
           contentType: 'image/jpeg',
           sha256,
         },
@@ -40,6 +40,7 @@ function queueWith(scheduledAt: string) {
           qualityGateStatus: 'PASSED',
           exactAssetBinding: true,
         },
+        ...overrides,
       },
     ],
   });
@@ -65,5 +66,25 @@ describe('GitHub-native publication queue', () => {
         items: [item, { ...item, contentItemId: 'MKT-OTHER' }],
       }),
     ).toThrow();
+  });
+
+  it('rejects timestamps without an explicit timezone offset', () => {
+    expect(() => queueWith('2026-09-12T09:00:00')).toThrow();
+  });
+
+  it('rejects an expiry that is not after the scheduled instant', () => {
+    expect(() =>
+      queueWith('2026-09-12T09:00:00-03:00', {
+        expiresAt: '2026-09-12T09:00:00-03:00',
+      }),
+    ).toThrow();
+  });
+
+  it('supports STORY items while preserving explicit offset scheduling', () => {
+    const queue = queueWith('2026-09-12T09:00:00-03:00', {
+      mediaType: 'STORY',
+      caption: undefined,
+    });
+    expect(queue.items[0]?.mediaType).toBe('STORY');
   });
 });
