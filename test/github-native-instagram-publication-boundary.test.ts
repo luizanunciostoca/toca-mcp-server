@@ -1,14 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const publisher = readFileSync(
-  '.github/workflows/github-native-instagram-publisher.yml',
-  'utf8',
-);
-const stager = readFileSync(
-  '.github/workflows/github-native-instagram-stage-asset.yml',
-  'utf8',
-);
+const publisher = readFileSync('.github/workflows/github-native-instagram-publisher.yml', 'utf8');
+const stager = readFileSync('.github/workflows/github-native-instagram-stage-asset.yml', 'utf8');
 const legacy = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
 const runtime = readFileSync(
   'src/github-native-publication/github-native-publication-runtime.ts',
@@ -35,9 +29,7 @@ describe('GitHub-native Instagram publication boundary', () => {
 
   it('keeps provider writes fail-closed and SHA-bound', () => {
     expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW'");
-    expect(publisher).toContain(
-      "vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false'",
-    );
+    expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false'");
     expect(publisher).toContain('TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}');
     expect(runtime).toContain('GITHUB_NATIVE_CONTROLLER_SHA_REQUIRED');
     expect(runtime).toContain('GITHUB_NATIVE_PUBLICATION_WRITES_DISABLED');
