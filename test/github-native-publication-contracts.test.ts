@@ -51,10 +51,7 @@ function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {})
 describe('GitHub-native publication queue', () => {
   it('keeps the checked-in SUNSET feed queue bound to the canonical creative standard', () => {
     const checkedInQueue = JSON.parse(
-      readFileSync(
-        new URL('../control/github-native-publication-queue.json', import.meta.url),
-        'utf8',
-      ),
+      readFileSync(new URL('../control/github-native-publication-queue.json', import.meta.url), 'utf8'),
     ) as unknown;
     const queue = parseGithubNativePublicationQueue(checkedInQueue);
     const sunsetFeedItems = queue.items.filter(
