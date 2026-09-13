@@ -6,6 +6,7 @@ import {
 } from '../src/github-native-publication/github-native-publication-contracts.js';
 
 const sha256 = 'a'.repeat(64);
+const checkedInQueuePath = '../control/github-native-publication-queue.json';
 
 function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {}) {
   return parseGithubNativePublicationQueue({
@@ -49,24 +50,18 @@ function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {})
 }
 
 describe('GitHub-native publication queue', () => {
-  it('keeps the checked-in SUNSET feed queue bound to the canonical creative standard', () => {
-    const checkedInQueue = JSON.parse(
-      readFileSync(
-        new URL('../control/github-native-publication-queue.json', import.meta.url),
-        'utf8',
-      ),
-    ) as unknown;
+  it('uses the canonical SUNSET feed creative standard', () => {
+    const queueUrl = new URL(checkedInQueuePath, import.meta.url);
+    const checkedInQueue = JSON.parse(readFileSync(queueUrl, 'utf8')) as unknown;
     const queue = parseGithubNativePublicationQueue(checkedInQueue);
     const sunsetFeedItems = queue.items.filter(
       (item) => item.operation === 'SUNSET' && item.mediaType === 'IMAGE',
     );
 
     expect(sunsetFeedItems.length).toBeGreaterThan(0);
-    expect(
-      sunsetFeedItems.every(
-        (item) => item.creativeTruthBinding.standardId === 'SUNSET_FEED_V1',
-      ),
-    ).toBe(true);
+    for (const item of sunsetFeedItems) {
+      expect(item.creativeTruthBinding.standardId).toBe('SUNSET_FEED_V1');
+    }
   });
 
   it('selects an item within the five-minute execution window', () => {
