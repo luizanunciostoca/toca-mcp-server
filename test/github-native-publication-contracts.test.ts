@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   parseGithubNativePublicationQueue,
@@ -5,6 +6,7 @@ import {
 } from '../src/github-native-publication/github-native-publication-contracts.js';
 
 const sha256 = 'a'.repeat(64);
+const checkedInQueuePath = '../control/github-native-publication-queue.json';
 
 function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {}) {
   return parseGithubNativePublicationQueue({
@@ -33,7 +35,7 @@ function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {})
         idempotencyKey: 'IDEMP-1',
         creativeTruthBinding: {
           policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
-          standardId: 'SUNSET_FEED_IMAGE_V1',
+          standardId: 'SUNSET_FEED_V1',
           creativeId: 'CR-1',
           outputSha256: sha256,
           brandIntegrityStatus: 'PASSED',
@@ -48,6 +50,20 @@ function queueWith(scheduledAt: string, overrides: Record<string, unknown> = {})
 }
 
 describe('GitHub-native publication queue', () => {
+  it('uses the canonical SUNSET feed creative standard', () => {
+    const queueUrl = new URL(checkedInQueuePath, import.meta.url);
+    const checkedInQueue = JSON.parse(readFileSync(queueUrl, 'utf8')) as unknown;
+    const queue = parseGithubNativePublicationQueue(checkedInQueue);
+    const sunsetFeedItems = queue.items.filter(
+      (item) => item.operation === 'SUNSET' && item.mediaType === 'IMAGE',
+    );
+
+    expect(sunsetFeedItems.length).toBeGreaterThan(0);
+    for (const item of sunsetFeedItems) {
+      expect(item.creativeTruthBinding.standardId).toBe('SUNSET_FEED_V1');
+    }
+  });
+
   it('selects an item within the five-minute execution window', () => {
     const queue = queueWith('2026-09-12T09:00:00-03:00');
     expect(selectDuePublicationItems(queue, '2026-09-12T08:57:00-03:00')).toHaveLength(1);
