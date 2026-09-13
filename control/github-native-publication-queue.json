@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "timezone": "America/Bahia",
-  "generatedAt": "2026-09-13T10:30:51-03:00",
+  "generatedAt": "2026-09-13T11:31:13-03:00",
   "items": [
     {
       "contentItemId": "MKT-20260913-SUNSET-FEED-1500-ROLLOVER-V1",
@@ -66,41 +66,6 @@
         "venueFidelityStatus": "PASSED",
         "qualityGateStatus": "PASSED",
         "exactAssetBinding": true
-      }
-    },
-    {
-      "contentItemId": "MKT-20260917-SUNSET-FEED-1500",
-      "scheduledAt": "2026-09-17T15:00:00-03:00",
-      "operation": "SUNSET",
-      "channel": "INSTAGRAM",
-      "contentStatus": "PRODUCED",
-      "approvalStatus": "APPROVED",
-      "publicationIntent": "SCHEDULED",
-      "mediaType": "IMAGE",
-      "instagramAccountId": "17841402033495654",
-      "caption": "Conforto, serviço e uma vista que transforma o fim de tarde em experiência na Toca do Morcego.\n\nViva essa experiência no Sunset.",
-      "asset": {
-        "url": "https://raw.githubusercontent.com/luizanunciostoca/toca-mcp-server/publication-assets/publication-assets/71a769eff30e43b034304da6ab49c2d0ce410af1f1fbc877b810fd21b4ec59d2.jpg",
-        "contentType": "image/jpeg",
-        "sha256": "71a769eff30e43b034304da6ab49c2d0ce410af1f1fbc877b810fd21b4ec59d2",
-        "sourceDriveFileId": "1C0aYM7_Sz8NRlNEUtT6wLd66BrnmMGhP"
-      },
-      "correlationId": "CORR-MKT-20260917-SUNSET-FEED-1500-ROLLOVER-V1",
-      "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-1500:V1",
-      "creativeTruthBinding": {
-        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-        "standardId": "SUNSET_FEED_PHOTO_V1",
-        "creativeId": "CR-MKT-20260903-SUNSET-FEED-1500-V2",
-        "outputSha256": "71a769eff30e43b034304da6ab49c2d0ce410af1f1fbc877b810fd21b4ec59d2",
-        "brandIntegrityStatus": "PASSED",
-        "venueFidelityStatus": "PASSED",
-        "qualityGateStatus": "PASSED",
-        "exactAssetBinding": true
-      },
-      "sourceRegistry": {
-        "driveFileId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
-        "sheetName": "CONTENT_ITEMS",
-        "rowRef": "223"
       }
     }
   ]
