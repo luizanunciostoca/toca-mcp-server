@@ -1,8 +1,78 @@
 {
   "schemaVersion": 1,
   "timezone": "America/Bahia",
-  "generatedAt": "2026-09-12T19:28:03-03:00",
+  "generatedAt": "2026-09-13T00:40:47-03:00",
   "items": [
+    {
+      "contentItemId": "MKT-20260913-SUNSET-FEED-0900-ROLLOVER-V1",
+      "scheduledAt": "2026-09-13T09:00:00-03:00",
+      "operation": "SUNSET",
+      "channel": "INSTAGRAM",
+      "contentStatus": "PRODUCED",
+      "approvalStatus": "APPROVED",
+      "publicationIntent": "SCHEDULED",
+      "mediaType": "IMAGE",
+      "instagramAccountId": "17841402033495654",
+      "caption": "Domingo pede calma, horizonte e alguns minutos para assistir Morro de São Paulo mudar de cor.\n\nViva esse fim de tarde na Toca.",
+      "asset": {
+        "url": "https://raw.githubusercontent.com/luizanunciostoca/toca-mcp-server/publication-assets/publication-assets/907f9436fd7c453920285d3d0db75a57404e7d998e154b7f2f8a011fc4fb0158.jpg",
+        "contentType": "image/jpeg",
+        "sha256": "907f9436fd7c453920285d3d0db75a57404e7d998e154b7f2f8a011fc4fb0158",
+        "sourceDriveFileId": "1ZqrQaVBxnbMt9WLmIYViJK1PqfyhSHWv"
+      },
+      "correlationId": "CORR-MKT-20260913-SUNSET-FEED-0900-ROLLOVER-V1",
+      "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260913-SUNSET-FEED-0900-ROLLOVER-V1:V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20260906-SUNSET-FEED-0900-V1",
+        "outputSha256": "907f9436fd7c453920285d3d0db75a57404e7d998e154b7f2f8a011fc4fb0158",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "sourceRegistry": {
+        "driveFileId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+        "sheetName": "CONTENT_ITEMS",
+        "rowRef": "351"
+      }
+    },
+    {
+      "contentItemId": "MKT-20260913-SUNSET-FEED-1500-ROLLOVER-V1",
+      "scheduledAt": "2026-09-13T15:00:00-03:00",
+      "operation": "SUNSET",
+      "channel": "INSTAGRAM",
+      "contentStatus": "PRODUCED",
+      "approvalStatus": "APPROVED",
+      "publicationIntent": "SCHEDULED",
+      "mediaType": "IMAGE",
+      "instagramAccountId": "17841402033495654",
+      "caption": "Há momentos que ficam na memória pelo lugar e outros pela companhia. No Sunset, os dois se encontram.\n\nCompartilhe com quem viveria esse momento com você.",
+      "asset": {
+        "url": "https://raw.githubusercontent.com/luizanunciostoca/toca-mcp-server/publication-assets/publication-assets/917209cada52c3bf1971ab3cffb66ca368805687ae3060ec1b80d585d0b3b7f6.jpg",
+        "contentType": "image/jpeg",
+        "sha256": "917209cada52c3bf1971ab3cffb66ca368805687ae3060ec1b80d585d0b3b7f6",
+        "sourceDriveFileId": "1TlZyvEnzPhgNR77bHVKFpow4_rXHNtK0"
+      },
+      "correlationId": "CORR-MKT-20260913-SUNSET-FEED-1500-ROLLOVER-V1",
+      "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260913-SUNSET-FEED-1500-ROLLOVER-V1:V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20260906-SUNSET-FEED-1500-V1",
+        "outputSha256": "917209cada52c3bf1971ab3cffb66ca368805687ae3060ec1b80d585d0b3b7f6",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "sourceRegistry": {
+        "driveFileId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+        "sheetName": "CONTENT_ITEMS",
+        "rowRef": "352"
+      }
+    },
     {
       "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
       "scheduledAt": "2026-09-17T09:00:00-03:00",
