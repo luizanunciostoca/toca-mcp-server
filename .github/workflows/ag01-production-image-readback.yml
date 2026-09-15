@@ -47,9 +47,16 @@ jobs:
           DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/revision.json)"
           [[ -n "$IMAGE" && -n "$DIGEST" ]] || { echo 'Serving image identity unavailable' >&2; exit 1; }
 
-          BASE_IMAGE="${IMAGE%@*}"
-          BASE_IMAGE="${BASE_IMAGE%:*}"
-          DIGEST_REF="${BASE_IMAGE}@${DIGEST}"
+          if [[ "$DIGEST" == *@sha256:* ]]; then
+            DIGEST_REF="$DIGEST"
+          elif [[ "$DIGEST" == sha256:* ]]; then
+            BASE_IMAGE="${IMAGE%@*}"
+            BASE_IMAGE="${BASE_IMAGE%:*}"
+            DIGEST_REF="${BASE_IMAGE}@${DIGEST}"
+          else
+            echo "Unexpected Cloud Run imageDigest form: $DIGEST" >&2
+            exit 1
+          fi
 
           IMAGE_EXISTS=false
           if gcloud artifacts docker images describe "$DIGEST_REF" --project "$PROJECT_ID" --format=json > /tmp/image.json 2>/tmp/image.err; then
@@ -58,12 +65,13 @@ jobs:
             echo '{}' > /tmp/image.json
           fi
 
-          jq --arg image "$IMAGE" --arg digest "$DIGEST" --arg digestRef "$DIGEST_REF" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.v1",revision:.metadata.name,readyConditions:[.status.conditions[]? | {type,status,reason,message,lastTransitionTime}],container:{image:$image,imageDigest:$digest,digestReference:$digestRef,imageExistsInArtifactRegistry:($imageExists=="true"),startupProbe:(.spec.containers[0].startupProbe // null),livenessProbe:(.spec.containers[0].livenessProbe // null),resources:(.spec.containers[0].resources // null)},scaling:{containerConcurrency:(.spec.containerConcurrency // null),timeoutSeconds:(.spec.timeoutSeconds // null),annotations:(.metadata.annotations // {})}}' /tmp/revision.json > ag01-image-readback/revision-image.json
-          jq '{schemaVersion:"toca.ag01.production-image-artifact.v1",package:(.package // null),version:(.version // null),imageSummary:(.image_summary // null),buildTime:(.build_time // null),updateTime:(.update_time // null)}' /tmp/image.json > ag01-image-readback/artifact-registry.json
-          jq -n --arg sourceSha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg revision "$REVISION" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.run.v1",sourceSha:$sourceSha,runId:$runId,productionRevision:$revision,imageExistsInArtifactRegistry:($imageExists=="true"),providerMutationExecuted:false,cloudRunMutationExecuted:false,trafficMutationExecuted:false,databaseMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' > ag01-image-readback/run-metadata.json
+          jq --arg image "$IMAGE" --arg digest "$DIGEST" --arg digestRef "$DIGEST_REF" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.v2",revision:.metadata.name,readyConditions:[.status.conditions[]? | {type,status,reason,message,lastTransitionTime}],container:{image:$image,imageDigest:$digest,digestReference:$digestRef,imageExistsInArtifactRegistry:($imageExists=="true"),startupProbe:(.spec.containers[0].startupProbe // null),livenessProbe:(.spec.containers[0].livenessProbe // null),resources:(.spec.containers[0].resources // null)},scaling:{containerConcurrency:(.spec.containerConcurrency // null),timeoutSeconds:(.spec.timeoutSeconds // null),annotations:(.metadata.annotations // {})}}' /tmp/revision.json > ag01-image-readback/revision-image.json
+          jq '{schemaVersion:"toca.ag01.production-image-artifact.v2",package:(.package // null),version:(.version // null),imageSummary:(.image_summary // null),buildTime:(.build_time // null),updateTime:(.update_time // null)}' /tmp/image.json > ag01-image-readback/artifact-registry.json
+          jq -n --arg sourceSha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg revision "$REVISION" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.run.v2",sourceSha:$sourceSha,runId:$runId,productionRevision:$revision,imageExistsInArtifactRegistry:($imageExists=="true"),providerMutationExecuted:false,cloudRunMutationExecuted:false,trafficMutationExecuted:false,databaseMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' > ag01-image-readback/run-metadata.json
 
           if [[ "$IMAGE_EXISTS" != "true" ]]; then
             echo "Serving AG-01 image digest is no longer retrievable from Artifact Registry: $DIGEST_REF" >&2
+            cat /tmp/image.err >&2 || true
             exit 1
           fi
 
