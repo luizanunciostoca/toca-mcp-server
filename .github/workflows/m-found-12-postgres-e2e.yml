@@ -25,6 +25,7 @@ on:
       - 'test/instagram-engagement-postgres-e2e.test.ts'
       - 'test/finops-postgres-e2e.test.ts'
       - 'test/finops-runtime-cost-postgres-e2e.test.ts'
+      - 'test/finops-billing-postgres-e2e.test.ts'
       - '.github/workflows/m-found-12-postgres-e2e.yml'
       - 'migrations/**'
       - 'src/assets/**'
@@ -93,7 +94,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply real repository migrations
         run: pnpm migrate
-      - name: Execute PostgreSQL E2E including FinOps ledger and runtime reconciliation
+      - name: Execute PostgreSQL E2E including FinOps ledger, runtime and billing reconciliation
         run: >-
           pnpm exec vitest run
           test/m-found-12-postgres-e2e.test.ts
@@ -114,5 +115,6 @@ jobs:
           test/scheduler-multitenancy-postgres-e2e.test.ts
           test/finops-postgres-e2e.test.ts
           test/finops-runtime-cost-postgres-e2e.test.ts
+          test/finops-billing-postgres-e2e.test.ts
       - name: Verify no migration drift was introduced during execution
         run: pnpm migrate
