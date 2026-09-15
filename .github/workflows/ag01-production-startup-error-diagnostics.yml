@@ -1,0 +1,81 @@
+name: AG-01 Production Startup Error Diagnostics
+
+on:
+  push:
+    branches:
+      - ops/ag01-readonly-readback-20260915
+    paths:
+      - '.github/workflows/ag01-production-startup-error-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Authenticate read-only GCP boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture bounded sanitized startup errors only
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-startup-errors
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
+          REVISION="$(jq -r '.status.traffic[]? | select((.percent // 0) == 100) | .revisionName // empty' /tmp/service.json | head -n1)"
+          [[ -n "$REVISION" ]] || { echo 'Serving revision unavailable' >&2; exit 1; }
+
+          FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND resource.labels.revision_name=\"$REVISION\" AND (logName:\"run.googleapis.com%2Fstderr\" OR logName:\"run.googleapis.com%2Fstdout\") AND timestamp>=\"$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)\""
+          gcloud logging read "$FILTER" --project "$PROJECT_ID" --limit=100 --order=desc --format=json > /tmp/app.json || echo '[]' > /tmp/app.json
+
+          jq '[.[]
+            | select(
+                ((.textPayload // "") | test("AG01|Error|error|failed|FAILED|exception|Exception"))
+                or ((.jsonPayload.event // "") | tostring | test("ag01\\.|failed|error"; "i"))
+              )
+            | {
+                timestamp,
+                severity,
+                revision:(.resource.labels.revision_name // null),
+                message:(
+                  ((.textPayload // .jsonPayload.message // .jsonPayload.errorDetail // .jsonPayload.event // "") | tostring)
+                  | gsub("Bearer[ ]+[A-Za-z0-9._~+/-]+=*"; "Bearer [REDACTED]")
+                  | gsub("postgres(ql)?://[^ ]+"; "[REDACTED_DATABASE_URL]")
+                  | gsub("access[_-]?token[=:][ ]*[^ ,;]+"; "access_token=[REDACTED]"; "i")
+                  | gsub("api[_-]?key[=:][ ]*[^ ,;]+"; "api_key=[REDACTED]"; "i")
+                  | .[0:700]
+                )
+              }
+          ]' /tmp/app.json > ag01-startup-errors/errors.json
+
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg revision "$REVISION" \
+            '{schemaVersion:"toca.ag01.production-startup-errors.v1",sourceSha:$sourceSha,runId:$runId,productionRevision:$revision,scope:"bounded-last-2h-startup-errors-only",redactionApplied:true,providerMutationExecuted:false,cloudRunMutationExecuted:false,trafficMutationExecuted:false,databaseMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' \
+            > ag01-startup-errors/run-metadata.json
+
+      - name: Upload sanitized diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-startup-errors-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-startup-errors
+          if-no-files-found: error
+          retention-days: 7
