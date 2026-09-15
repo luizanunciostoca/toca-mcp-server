@@ -16,7 +16,7 @@ function databaseUrl(): string {
 }
 
 postgresDescribe('TOCA OS FinOps runtime cost PostgreSQL E2E', () => {
-  it('persists estimate, actual provider usage and reconciliation under one scoped correlation', async () => {
+  it('persists runtime estimate actual and reconciliation', async () => {
     const pool = createPostgresPool({ connectionString: databaseUrl(), max: 2 });
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const correlationId = `finops-runtime-correlation-${suffix}`;
