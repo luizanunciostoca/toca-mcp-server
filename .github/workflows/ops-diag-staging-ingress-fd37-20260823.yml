@@ -1,0 +1,170 @@
+name: TEMP Staging Ingress IAM Diagnostic fd37 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'ops/diag-staging-ingress-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate and load staging config
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a
+          source /tmp/staging.env
+          set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read staging Cloud Run network IAM and revision state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$GCP_DEPLOY_SERVICE_ACCOUNT"
+          mkdir -p /tmp/diag
+          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/diag/${service}.json"
+            gcloud run services get-iam-policy "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/diag/${service}-iam.json"
+          done
+          MCP_REVISION='toca-mcp-next-staging-mcp-fd379915'
+          WEBHOOK_REVISION='toca-webhook-next-staging-webhook-fd379915'
+          gcloud run revisions describe "$MCP_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/diag/mcp-revision.json
+          gcloud run revisions describe "$WEBHOOK_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/diag/webhook-revision.json
+
+          MCP_SERVICE_URL="$(jq -r '.status.url // empty' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}.json")"
+          MCP_TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}.json")"
+          WEBHOOK_TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "wh-fd37991") | .url) // empty' "/tmp/diag/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}.json")"
+          test -n "$MCP_SERVICE_URL"; test -n "$MCP_TAG_URL"; test -n "$WEBHOOK_TAG_URL"
+
+          MCP_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // .spec.template.metadata.annotations["run.googleapis.com/ingress"] // "unset"' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}.json")"
+          WEBHOOK_INGRESS="$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // .spec.template.metadata.annotations["run.googleapis.com/ingress"] // "unset"' "/tmp/diag/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}.json")"
+          MCP_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}.json")"
+          WEBHOOK_DEFAULT_URL_DISABLED="$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' "/tmp/diag/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}.json")"
+          MCP_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready")][0].status // "unknown"' /tmp/diag/mcp-revision.json)"
+          WEBHOOK_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready")][0].status // "unknown"' /tmp/diag/webhook-revision.json)"
+          MCP_INVOKER_DEPLOYER="$(jq -r --arg member "serviceAccount:$GCP_DEPLOY_SERVICE_ACCOUNT" '[.bindings[]? | select(.role == "roles/run.invoker") | .members[]? | select(. == $member)] | length' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}-iam.json")"
+          MCP_INVOKER_ALLUSERS="$(jq -r '[.bindings[]? | select(.role == "roles/run.invoker") | .members[]? | select(. == "allUsers")] | length' "/tmp/diag/${GCP_CLOUD_RUN_MCP_SERVICE}-iam.json")"
+          WEBHOOK_INVOKER_ALLUSERS="$(jq -r '[.bindings[]? | select(.role == "roles/run.invoker") | .members[]? | select(. == "allUsers")] | length' "/tmp/diag/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}-iam.json")"
+
+          {
+            echo "mcp_service_url=$MCP_SERVICE_URL"
+            echo "mcp_tag_url=$MCP_TAG_URL"
+            echo "webhook_tag_url=$WEBHOOK_TAG_URL"
+            echo "mcp_ingress=$MCP_INGRESS"
+            echo "webhook_ingress=$WEBHOOK_INGRESS"
+            echo "mcp_default_url_disabled=$MCP_DEFAULT_URL_DISABLED"
+            echo "webhook_default_url_disabled=$WEBHOOK_DEFAULT_URL_DISABLED"
+            echo "mcp_ready=$MCP_READY"
+            echo "webhook_ready=$WEBHOOK_READY"
+            echo "mcp_invoker_deployer=$MCP_INVOKER_DEPLOYER"
+            echo "mcp_invoker_allusers=$MCP_INVOKER_ALLUSERS"
+            echo "webhook_invoker_allusers=$WEBHOOK_INVOKER_ALLUSERS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint diagnostic MCP ID token with canonical service audience
+        id: probe_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.mcp_service_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Probe staging endpoints without mutation
+        id: probe
+        env:
+          MCP_TOKEN: ${{ steps.probe_auth.outputs.id_token }}
+          MCP_SERVICE_URL: ${{ steps.state.outputs.mcp_service_url }}
+          MCP_TAG_URL: ${{ steps.state.outputs.mcp_tag_url }}
+          WEBHOOK_TAG_URL: ${{ steps.state.outputs.webhook_tag_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$@" || true; }
+          echo "mcp_tag_auth=$(status -H "Authorization: Bearer $MCP_TOKEN" "$MCP_TAG_URL/healthz")" >> "$GITHUB_OUTPUT"
+          echo "mcp_tag_xauth=$(status -H "X-Serverless-Authorization: Bearer $MCP_TOKEN" "$MCP_TAG_URL/healthz")" >> "$GITHUB_OUTPUT"
+          echo "mcp_tag_anon=$(status "$MCP_TAG_URL/healthz")" >> "$GITHUB_OUTPUT"
+          echo "mcp_service_auth=$(status -H "Authorization: Bearer $MCP_TOKEN" "$MCP_SERVICE_URL/healthz")" >> "$GITHUB_OUTPUT"
+          echo "webhook_tag_anon=$(status "$WEBHOOK_TAG_URL/healthz")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized diagnostic evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCP_INGRESS: ${{ steps.state.outputs.mcp_ingress }}
+          WEBHOOK_INGRESS: ${{ steps.state.outputs.webhook_ingress }}
+          MCP_DEFAULT_URL_DISABLED: ${{ steps.state.outputs.mcp_default_url_disabled }}
+          WEBHOOK_DEFAULT_URL_DISABLED: ${{ steps.state.outputs.webhook_default_url_disabled }}
+          MCP_READY: ${{ steps.state.outputs.mcp_ready }}
+          WEBHOOK_READY: ${{ steps.state.outputs.webhook_ready }}
+          MCP_INVOKER_DEPLOYER: ${{ steps.state.outputs.mcp_invoker_deployer }}
+          MCP_INVOKER_ALLUSERS: ${{ steps.state.outputs.mcp_invoker_allusers }}
+          WEBHOOK_INVOKER_ALLUSERS: ${{ steps.state.outputs.webhook_invoker_allusers }}
+          MCP_TAG_AUTH: ${{ steps.probe.outputs.mcp_tag_auth }}
+          MCP_TAG_XAUTH: ${{ steps.probe.outputs.mcp_tag_xauth }}
+          MCP_TAG_ANON: ${{ steps.probe.outputs.mcp_tag_anon }}
+          MCP_SERVICE_AUTH: ${{ steps.probe.outputs.mcp_service_auth }}
+          WEBHOOK_TAG_ANON: ${{ steps.probe.outputs.webhook_tag_anon }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/comment.md <<EOF
+          STAGING_INGRESS_IAM_DIAG RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          MCP_INGRESS=${MCP_INGRESS}
+          WEBHOOK_INGRESS=${WEBHOOK_INGRESS}
+          MCP_DEFAULT_URL_DISABLED=${MCP_DEFAULT_URL_DISABLED}
+          WEBHOOK_DEFAULT_URL_DISABLED=${WEBHOOK_DEFAULT_URL_DISABLED}
+          MCP_REVISION_READY=${MCP_READY}
+          WEBHOOK_REVISION_READY=${WEBHOOK_READY}
+          MCP_DEPLOYER_RUN_INVOKER_BINDING_COUNT=${MCP_INVOKER_DEPLOYER}
+          MCP_ALLUSERS_RUN_INVOKER_BINDING_COUNT=${MCP_INVOKER_ALLUSERS}
+          WEBHOOK_ALLUSERS_RUN_INVOKER_BINDING_COUNT=${WEBHOOK_INVOKER_ALLUSERS}
+          MCP_TAG_AUTH_HTTP=${MCP_TAG_AUTH}
+          MCP_TAG_X_SERVERLESS_AUTH_HTTP=${MCP_TAG_XAUTH}
+          MCP_TAG_ANON_HTTP=${MCP_TAG_ANON}
+          MCP_CANONICAL_AUTH_HTTP=${MCP_SERVICE_AUTH}
+          WEBHOOK_TAG_ANON_HTTP=${WEBHOOK_TAG_ANON}
+
+          READ_ONLY=true
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
