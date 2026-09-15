@@ -54,11 +54,7 @@ postgresDescribe('TOCA OS FinOps runtime cost PostgreSQL E2E', () => {
               responseId: `vertex-response-${suffix}`,
               routeId: 'R17',
               agentId: 'AG-01',
-              usage: {
-                inputTokens: 8_000,
-                cachedInputTokens: 1_000,
-                outputTokens: 1_000,
-              },
+              usage: { inputTokens: 8_000, cachedInputTokens: 1_000, outputTokens: 1_000 },
             });
           },
         );
