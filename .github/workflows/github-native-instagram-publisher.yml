@@ -15,10 +15,17 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: github-native-instagram-publisher
   cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_META_TOKEN_SECRET_ID: toca-meta-oauth-token
 
 jobs:
   publish:
@@ -78,14 +85,37 @@ jobs:
       - name: Build exact controller
         run: pnpm build
 
+      - name: Authenticate one-shot Meta token bridge
+        if: github.event_name == 'push'
+        id: gcp_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform
+
+      - name: Setup gcloud for one-shot token bridge
+        if: github.event_name == 'push'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
       - name: Execute fail-closed GitHub-native publication cycle
+        shell: bash
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           TOCA_GITHUB_NATIVE_CONTROLLER_SHA: ${{ github.sha }}
           TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ID: ${{ github.run_id }}
           TOCA_GITHUB_NATIVE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-        run: node dist/src/github-native-publication/github-native-publication-runtime.js
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            meta_token="$(gcloud secrets versions access latest --secret="$GCP_META_TOKEN_SECRET_ID" --project="$GCP_PROJECT_ID")"
+            test -n "$meta_token"
+            echo "::add-mask::$meta_token"
+            export META_ACCESS_TOKEN="$meta_token"
+          fi
+          node dist/src/github-native-publication/github-native-publication-runtime.js
 
       - name: Persist publication ledger only
         if: always()
