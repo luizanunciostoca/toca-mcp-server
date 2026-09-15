@@ -116,7 +116,7 @@ if (workflow.includes('push:') || workflow.includes('pull_request:')) {
 }
 
 if (
-  policy.version !== 10 ||
+  policy.version !== 11 ||
   policy.projectId !== 'toca-mcp-production' ||
   policy.adminServiceAccount !== infraAdmin ||
   policy.runtimeServiceAccount !== runtime
@@ -265,6 +265,40 @@ if (
   daemon?.legacyHeartbeatSuperseded !== true
 ) {
   console.error('TOCA-managed Instagram scheduler topology is outside the minimum-cost envelope');
+  process.exit(1);
+}
+
+const ag01 = policy.activeRuntime?.ag01Orchestrator;
+const ag01ReadinessAliases = ag01?.readinessAliases;
+const ag01PersistenceRequired = ag01?.persistenceRequired;
+if (
+  ag01?.lifecycleStatus !== 'PRODUCTION_VERIFIED' ||
+  ag01?.deploymentAuthorized !== true ||
+  ag01?.executionAuthority !== 'CORE_POLICY_APPROVAL_ONLY' ||
+  ag01?.directProviderWriteAuthorized !== false ||
+  ag01?.resourceType !== 'cloud-run-service' ||
+  ag01?.resourceName !== 'toca-ag01-orchestrator' ||
+  ag01?.runtimeServiceAccount !== runtime ||
+  ag01?.private !== true ||
+  ag01?.ingress !== 'all' ||
+  ag01?.modelProvider !== 'google-vertex-ai' ||
+  ag01?.model !== 'gemini-2.5-flash' ||
+  ag01?.googleRegistryAuth !== 'GCP_RUNTIME_IDENTITY_SCOPED_TOKEN' ||
+  ag01?.staticModelOrSheetsCredentialRequired !== false ||
+  ag01?.canonicalProductionRevision !== 'toca-ag01-orchestrator-vtx-d2c85284-2' ||
+  ag01?.canonicalRuntimeSourceSha !== 'd2c85284f3f67d017ee800e4c4b772f5418542d6' ||
+  ag01ReadinessAliases?.externalHealth !== '/health' ||
+  ag01ReadinessAliases?.externalReady !== '/ready' ||
+  ag01ReadinessAliases?.cloudRunStartup !== '/readyz' ||
+  ag01ReadinessAliases?.cloudRunLiveness !== '/healthz' ||
+  !Array.isArray(ag01PersistenceRequired) ||
+  ag01PersistenceRequired.length !== 3 ||
+  ag01PersistenceRequired[0] !== 'ag01_conversations' ||
+  ag01PersistenceRequired[1] !== 'ag01_message_records' ||
+  ag01PersistenceRequired[2] !== 'ag01_runtime_circuits' ||
+  ag01?.sourceReconciliationTracking !== '#815'
+) {
+  console.error('AG-01 production runtime is outside the verified governed envelope');
   process.exit(1);
 }
 
