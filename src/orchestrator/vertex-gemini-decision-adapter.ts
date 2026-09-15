@@ -10,6 +10,7 @@ import type {
 
 const DEFAULT_METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
+const DEFAULT_METADATA_TIMEOUT_MS = 10_000;
 
 export interface VertexAccessTokenProvider {
   getAccessToken(): Promise<string>;
@@ -19,18 +20,31 @@ export class GcpMetadataAccessTokenProvider implements VertexAccessTokenProvider
   constructor(
     private readonly fetchFn: typeof fetch = fetch,
     private readonly tokenUrl = DEFAULT_METADATA_TOKEN_URL,
+    private readonly timeoutMs = DEFAULT_METADATA_TIMEOUT_MS,
   ) {}
 
   async getAccessToken(): Promise<string> {
-    const response = await this.fetchFn(this.tokenUrl, {
-      headers: { 'Metadata-Flavor': 'Google' },
-    });
-    if (!response.ok) throw new Error(`AG01_VERTEX_METADATA_TOKEN_FAILED:${response.status}`);
-    const payload = (await response.json()) as { access_token?: unknown };
-    if (typeof payload.access_token !== 'string' || !payload.access_token.trim()) {
-      throw new Error('AG01_VERTEX_METADATA_TOKEN_MISSING');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchFn(this.tokenUrl, {
+        headers: { 'Metadata-Flavor': 'Google' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`AG01_VERTEX_METADATA_TOKEN_FAILED:${response.status}`);
+      const payload = (await response.json()) as { access_token?: unknown };
+      if (typeof payload.access_token !== 'string' || !payload.access_token.trim()) {
+        throw new Error('AG01_VERTEX_METADATA_TOKEN_MISSING');
+      }
+      return payload.access_token;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('AG01_VERTEX_METADATA_TOKEN_TIMEOUT');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return payload.access_token;
   }
 }
 
@@ -67,7 +81,9 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
     if (!options.model.trim()) throw new Error('AG01_VERTEX_MODEL_REQUIRED');
     this.#fetch = options.fetchFn ?? fetch;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-    this.#tokens = options.accessTokenProvider ?? new GcpMetadataAccessTokenProvider(this.#fetch);
+    this.#tokens =
+      options.accessTokenProvider ??
+      new GcpMetadataAccessTokenProvider(this.#fetch, DEFAULT_METADATA_TOKEN_URL, options.timeoutMs);
   }
 
   async readiness(): Promise<void> {
