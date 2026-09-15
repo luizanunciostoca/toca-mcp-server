@@ -4,12 +4,13 @@ import {
   buildProductionIdempotencyKey,
   deriveCompleteDayCoverage,
   deriveLifecycleStatus,
+  deriveOperationalDisposition,
   deriveSlotWindow,
   isReservationExpired,
 } from '../src/marketing-autopilot-lifecycle.js';
 
 describe('Marketing Autopilot lifecycle guards', () => {
-  it('marks a slot expired after the 30-minute tolerance and blocks PREPARE', () => {
+  it('marks a slot expired without corrupting the lifecycle state', () => {
     const result = deriveSlotWindow({
       scheduledAt: '2026-08-13T09:00:00-03:00',
       now: '2026-08-13T09:30:01-03:00',
@@ -17,7 +18,8 @@ describe('Marketing Autopilot lifecycle guards', () => {
 
     expect(result.state).toBe('EXPIRED');
     expect(result.isPrepareEligible).toBe(false);
-    expect(deriveLifecycleStatus('REVIEW', result.state)).toBe('MISSED_WINDOW');
+    expect(deriveLifecycleStatus('PRODUCED', result.state)).toBe('PRODUCED');
+    expect(deriveOperationalDisposition('PRODUCED', result.state)).toBe('MISSED_WINDOW');
   });
 
   it('keeps future and active slots eligible for preparation', () => {
@@ -34,6 +36,7 @@ describe('Marketing Autopilot lifecycle guards', () => {
     });
     expect(active.state).toBe('ACTIVE');
     expect(active.isPrepareEligible).toBe(true);
+    expect(deriveOperationalDisposition('SOURCE_BOUND', active.state)).toBe('ACTIVE');
   });
 
   it('fails closed for external writes unless capability is production validated', () => {
@@ -54,7 +57,7 @@ describe('Marketing Autopilot lifecycle guards', () => {
 
   it('counts coverage only when every required slot in a day reached the threshold', () => {
     const items = [
-      { date: '2026-08-13', required: true, status: 'READY_FOR_SCHEDULING' as const },
+      { date: '2026-08-13', required: true, status: 'SCHEDULER_READY' as const },
       { date: '2026-08-13', required: true, status: 'BRIEFED' as const },
       { date: '2026-08-14', required: true, status: 'BRIEFED' as const },
       { date: '2026-08-14', required: true, status: 'BRIEFED' as const },
@@ -63,7 +66,7 @@ describe('Marketing Autopilot lifecycle guards', () => {
 
     expect(deriveCompleteDayCoverage(items, 'BRIEFED')).toBe(2);
     expect(deriveCompleteDayCoverage(items, 'PRODUCED')).toBe(0);
-    expect(deriveCompleteDayCoverage(items, 'READY_FOR_SCHEDULING')).toBe(0);
+    expect(deriveCompleteDayCoverage(items, 'SCHEDULER_READY')).toBe(0);
   });
 
   it('detects orphan reservations after their TTL', () => {
