@@ -92,6 +92,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: FinOps canonical Prettier probe
+        run: pnpm format:check
       - name: Apply real repository migrations
         run: pnpm migrate
       - name: Execute PostgreSQL E2E including FinOps ledger, runtime and billing reconciliation
