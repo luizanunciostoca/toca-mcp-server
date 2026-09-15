@@ -1,12 +1,14 @@
+import type { VertexRuntimeCostObserver } from '../finops/ag01-runtime-cost-observer.js';
+import type { AiTextUsage } from '../finops/cost-estimator.js';
 import { resolveCapabilityDefinition } from '../governance/capability-resolution.js';
 import { getRouteDefinition } from '../governance/route-catalog.js';
 import { ROUTE_IDS, type RouteId } from '../governance/types.js';
-import { AG01_DECISION_JSON_SCHEMA, parseAg01StructuredDecision } from './structured-decision.js';
 import type {
   Ag01DecisionModelAdapter,
   Ag01ModelDecisionInput,
   Ag01ModelDecisionResult,
 } from './openai-responses-adapter.js';
+import { AG01_DECISION_JSON_SCHEMA, parseAg01StructuredDecision } from './structured-decision.js';
 
 const DEFAULT_METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
@@ -56,6 +58,7 @@ export interface VertexGeminiDecisionAdapterOptions {
   readonly maxRetries: number;
   readonly maxOutputTokens: number;
   readonly accessTokenProvider?: VertexAccessTokenProvider;
+  readonly costObserver?: VertexRuntimeCostObserver;
   readonly fetchFn?: typeof fetch;
   readonly sleep?: (ms: number) => Promise<void>;
 }
@@ -68,6 +71,13 @@ interface VertexGenerateContentResponse {
     readonly finishReason?: unknown;
   }[];
   readonly promptFeedback?: { readonly blockReason?: unknown };
+  readonly usageMetadata?: {
+    readonly promptTokenCount?: unknown;
+    readonly cachedContentTokenCount?: unknown;
+    readonly candidatesTokenCount?: unknown;
+    readonly thoughtsTokenCount?: unknown;
+    readonly totalTokenCount?: unknown;
+  };
 }
 
 export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
@@ -98,6 +108,23 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
   async decide(input: Ag01ModelDecisionInput): Promise<Ag01ModelDecisionResult> {
     const token = await this.#tokens.getAccessToken();
     const governed = buildGovernedPayload(input);
+    const requestBody = JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: governed.instructions }],
+      },
+      contents: [{ role: 'user', parts: [{ text: governed.input }] }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: this.options.maxOutputTokens,
+        responseMimeType: 'application/json',
+        responseSchema: toVertexSchema(AG01_DECISION_JSON_SCHEMA),
+      },
+    });
+    await this.options.costObserver?.beforeRequest({
+      configuredModel: this.options.model,
+      estimatedInputTokens: conservativeTokenEstimate(requestBody),
+      maxOutputTokens: this.options.maxOutputTokens,
+    });
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
@@ -112,18 +139,7 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
             accept: 'application/json',
           },
           signal: controller.signal,
-          body: JSON.stringify({
-            systemInstruction: {
-              parts: [{ text: governed.instructions }],
-            },
-            contents: [{ role: 'user', parts: [{ text: governed.input }] }],
-            generationConfig: {
-              temperature: 0,
-              maxOutputTokens: this.options.maxOutputTokens,
-              responseMimeType: 'application/json',
-              responseSchema: toVertexSchema(AG01_DECISION_JSON_SCHEMA),
-            },
-          }),
+          body: requestBody,
         });
 
         if (!response.ok) {
@@ -163,6 +179,14 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
           typeof body.modelVersion === 'string' && body.modelVersion.trim()
             ? body.modelVersion
             : this.options.model;
+        await this.options.costObserver?.afterResponse({
+          configuredModel: this.options.model,
+          responseModel,
+          responseId,
+          routeId: decision.routeId,
+          agentId: decision.agent,
+          usage: parseVertexUsage(body.usageMetadata),
+        });
         return {
           decision,
           responseId,
@@ -315,6 +339,47 @@ function toVertexSchema(value: unknown): unknown {
     result[key] = toVertexSchema(child);
   }
   return result;
+}
+
+function parseVertexUsage(
+  metadata: VertexGenerateContentResponse['usageMetadata'],
+): AiTextUsage | null {
+  if (!metadata) return null;
+  const inputTokens = tokenCount(metadata.promptTokenCount);
+  const candidateTokens = tokenCount(metadata.candidatesTokenCount);
+  const cachedInputTokens = optionalTokenCount(metadata.cachedContentTokenCount);
+  const thoughtTokens = optionalTokenCount(metadata.thoughtsTokenCount);
+  if (
+    inputTokens === null ||
+    candidateTokens === null ||
+    cachedInputTokens === null ||
+    thoughtTokens === null ||
+    cachedInputTokens > inputTokens
+  ) {
+    return null;
+  }
+  const outputTokens = safeTokenSum(candidateTokens, thoughtTokens);
+  if (outputTokens === null) return null;
+  return { inputTokens, cachedInputTokens, outputTokens };
+}
+
+function tokenCount(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
+  return value;
+}
+
+function optionalTokenCount(value: unknown): number | null {
+  return value === undefined ? 0 : tokenCount(value);
+}
+
+function safeTokenSum(left: number, right: number): number | null {
+  const total = BigInt(left) + BigInt(right);
+  return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
+}
+
+function conservativeTokenEstimate(serializedRequest: string): number {
+  const bytes = Buffer.byteLength(serializedRequest, 'utf8');
+  return Math.max(1, Math.ceil(bytes / 3));
 }
 
 function normalizeError(error: unknown): Error {

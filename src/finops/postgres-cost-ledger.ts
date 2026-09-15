@@ -116,7 +116,14 @@ export class PostgresCostLedger implements CostLedger {
          and workspace_id = $2
          and organization_id = $3
          and correlation_id = $4
-       order by created_at asc, event_id asc
+       order by created_at asc,
+         case phase
+           when 'ESTIMATE' then 1
+           when 'ACTUAL' then 2
+           when 'RECONCILIATION' then 3
+           else 4
+         end asc,
+         event_id asc
        limit $5`,
       [tenantId, workspaceId, organizationId, correlationId, limit],
     );

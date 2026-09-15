@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
+import type { AiTextUsage } from '../src/finops/cost-estimator.js';
 import { getRouteDefinition } from '../src/governance/route-catalog.js';
 import { ROUTE_IDS } from '../src/governance/types.js';
 import { loadAg01ProductionConfig } from '../src/orchestrator/production-config.js';
@@ -95,6 +96,13 @@ function vertexResponse(status = 200): Response {
           responseId: 'vertex-response-1',
           modelVersion: 'gemini-2.5-flash',
           candidates: [{ content: { parts: [{ text: decisionJson() }] } }],
+          usageMetadata: {
+            promptTokenCount: 1_000,
+            cachedContentTokenCount: 200,
+            candidatesTokenCount: 300,
+            thoughtsTokenCount: 50,
+            totalTokenCount: 1_350,
+          },
         })
       : '{}',
     { status, headers: { 'content-type': 'application/json' } },
@@ -185,9 +193,10 @@ describe('AG-01 production-verified Vertex binding', () => {
     await expect(provider.getAccessToken()).rejects.toThrow('AG01_VERTEX_METADATA_TOKEN_TIMEOUT');
   });
 
-  it('uses Vertex structured output while preserving a planning-only R17 decision', async () => {
+  it('uses Vertex structured output and accounts for response plus reasoning tokens', async () => {
     let requestedUrl = '';
     let requestBody: unknown;
+    let observedUsage: AiTextUsage | null | undefined;
     const adapter = new VertexGeminiDecisionAdapter({
       projectId: 'toca-mcp-production',
       location: 'global',
@@ -196,6 +205,13 @@ describe('AG-01 production-verified Vertex binding', () => {
       maxRetries: 0,
       maxOutputTokens: 1024,
       accessTokenProvider: new StaticToken(),
+      costObserver: {
+        beforeRequest: () => Promise.resolve(),
+        afterResponse: (observation) => {
+          observedUsage = observation.usage;
+          return Promise.resolve();
+        },
+      },
       fetchFn: (url, init) => {
         requestedUrl = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
         const body = init?.body;
@@ -219,6 +235,11 @@ describe('AG-01 production-verified Vertex binding', () => {
         temperature: 0,
         responseMimeType: 'application/json',
       },
+    });
+    expect(observedUsage).toEqual({
+      inputTokens: 1_000,
+      cachedInputTokens: 200,
+      outputTokens: 350,
     });
     expect(result.responseId).toBe('vertex-response-1');
     expect(result.model).toBe('gemini-2.5-flash');

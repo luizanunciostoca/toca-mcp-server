@@ -39,5 +39,32 @@ requireIncludes('docs/architecture/finops-cost-control-v1.md', [
   'COST GATE -> CORE POLICY/APPROVAL',
   'must not silently replace the production AG-01 model binding',
 ]);
+requireIncludes('src/finops/ag01-runtime-cost-observer.ts', [
+  "'MISSING_ACTUAL_USAGE'",
+  "'WITHIN_ESTIMATE'",
+  "'OVER_ESTIMATE'",
+  'FINOPS_RUNTIME_PRICE_UNKNOWN',
+  "provider: 'GOOGLE_VERTEX_AI'",
+]);
+requireIncludes('src/orchestrator/vertex-gemini-decision-adapter.ts', [
+  'costObserver?.beforeRequest',
+  'costObserver?.afterResponse',
+  'usageMetadata',
+  'thoughtsTokenCount',
+  'safeTokenSum',
+  'conservativeTokenEstimate',
+]);
+requireIncludes('src/orchestrator/production-runtime.ts', [
+  'new PostgresCostLedger(pool)',
+  'Ag01RuntimeCostContext',
+  'costObserver: runtimeCostObserver',
+]);
+requireIncludes('docs/architecture/finops-runtime-cost-reconciliation-v1.md', [
+  'OBSERVABILITY_ENFORCED',
+  'does not invent a zero cost',
+  'response and reasoning',
+  'performs no automatic model switching',
+  'not invoice settlement',
+]);
 
 console.log('FINOPS_COST_CONTROL_CONTRACT=PASS');

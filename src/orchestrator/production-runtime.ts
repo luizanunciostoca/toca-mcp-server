@@ -1,5 +1,10 @@
 import { createTrustedServiceExecutionIdentity, type ExecutionIdentity } from '../core/identity.js';
 import { EnvironmentSecretResolver } from '../core/secrets.js';
+import {
+  Ag01RuntimeCostContext,
+  Ag01VertexRuntimeCostObserver,
+} from '../finops/ag01-runtime-cost-observer.js';
+import { PostgresCostLedger } from '../finops/postgres-cost-ledger.js';
 import { bindApprovalStoreToScope } from '../governance/approval-scope.js';
 import { PostgresCrmSalesStore } from '../persistence/postgres-crm-sales-store.js';
 import { createTocaRuntimeComposition } from '../server.js';
@@ -116,6 +121,11 @@ export function createAg01ProductionRuntime(
     cacheTtlMs: config.registryCacheTtlMs,
     timeoutMs: config.registryTimeoutMs,
   });
+  const runtimeCostContext = new Ag01RuntimeCostContext();
+  const runtimeCostObserver = new Ag01VertexRuntimeCostObserver(
+    new PostgresCostLedger(pool),
+    runtimeCostContext,
+  );
   const model: Ag01DecisionModelAdapter =
     config.modelProvider === 'vertex'
       ? new VertexGeminiDecisionAdapter({
@@ -125,6 +135,7 @@ export function createAg01ProductionRuntime(
           timeoutMs: config.openAiTimeoutMs,
           maxRetries: config.openAiMaxRetries,
           maxOutputTokens: config.openAiMaxOutputTokens,
+          costObserver: runtimeCostObserver,
         })
       : new OpenAiResponsesDecisionAdapter({
           baseUrl: config.openAiBaseUrl,
@@ -159,42 +170,64 @@ export function createAg01ProductionRuntime(
     deadLetters,
   });
 
-  const execute = (request: Ag01RuntimeRequest): Promise<Ag01RuntimeResult> =>
-    decisionContext.run(async () => {
-      const conversationId =
-        request.conversationId?.trim() ||
-        deterministicId('ag01conv', identity.principal.tenantId, request.idempotencyKey);
-      const correlationId =
-        request.correlationId?.trim() ||
-        deterministicId('ag01corr', identity.principal.tenantId, request.idempotencyKey);
-      try {
-        const orchestration = await orchestrator.handle({
-          idempotencyKey: request.idempotencyKey,
-          message: request.message,
-          conversationId,
+  const execute = (request: Ag01RuntimeRequest): Promise<Ag01RuntimeResult> => {
+    const conversationId =
+      request.conversationId?.trim() ||
+      deterministicId('ag01conv', identity.principal.tenantId, request.idempotencyKey);
+    const correlationId =
+      request.correlationId?.trim() ||
+      deterministicId('ag01corr', identity.principal.tenantId, request.idempotencyKey);
+    const startedAt = new Date().toISOString();
+    const executionId = deterministicId(
+      'ag01costexec',
+      identity.principal.tenantId,
+      request.idempotencyKey,
+      correlationId,
+      startedAt,
+    );
+
+    return decisionContext.run(() =>
+      runtimeCostContext.run(
+        {
+          executionId,
           correlationId,
-          identity,
-          ...(request.messageId ? { messageId: request.messageId } : {}),
-          ...(request.causationId !== undefined ? { causationId: request.causationId } : {}),
-          ...(request.routeHint ? { routeHint: request.routeHint } : {}),
-        });
-        const result = decisionContext.result();
-        return {
-          orchestration,
-          decision: result?.decision ?? null,
-          modelResponseId: result?.responseId ?? null,
-          model: result?.model ?? null,
-        };
-      } catch (error) {
-        await persistPlanningFailure(
-          conversations,
-          identity,
-          conversationId,
-          normalizeErrorCode(error),
-        );
-        throw error;
-      }
-    });
+          tenantId: config.tenantId,
+          workspaceId: config.workspaceId,
+          organizationId: config.organizationId,
+          startedAt,
+        },
+        async () => {
+          try {
+            const orchestration = await orchestrator.handle({
+              idempotencyKey: request.idempotencyKey,
+              message: request.message,
+              conversationId,
+              correlationId,
+              identity,
+              ...(request.messageId ? { messageId: request.messageId } : {}),
+              ...(request.causationId !== undefined ? { causationId: request.causationId } : {}),
+              ...(request.routeHint ? { routeHint: request.routeHint } : {}),
+            });
+            const result = decisionContext.result();
+            return {
+              orchestration,
+              decision: result?.decision ?? null,
+              modelResponseId: result?.responseId ?? null,
+              model: result?.model ?? null,
+            };
+          } catch (error) {
+            await persistPlanningFailure(
+              conversations,
+              identity,
+              conversationId,
+              normalizeErrorCode(error),
+            );
+            throw error;
+          }
+        },
+      ),
+    );
+  };
 
   const resume = (conversationId: string): Promise<Ag01RuntimeResult> =>
     decisionContext.run(async () => ({
