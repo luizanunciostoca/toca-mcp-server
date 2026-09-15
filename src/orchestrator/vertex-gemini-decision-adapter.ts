@@ -340,7 +340,9 @@ function toVertexSchema(value: unknown): unknown {
   return result;
 }
 
-function parseVertexUsage(metadata: VertexGenerateContentResponse['usageMetadata']): AiTextUsage | null {
+function parseVertexUsage(
+  metadata: VertexGenerateContentResponse['usageMetadata'],
+): AiTextUsage | null {
   if (!metadata) return null;
   const inputTokens = tokenCount(metadata.promptTokenCount);
   const outputTokens = tokenCount(metadata.candidatesTokenCount);
@@ -350,8 +352,8 @@ function parseVertexUsage(metadata: VertexGenerateContentResponse['usageMetadata
 }
 
 function tokenCount(value: unknown): number | null {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) return null;
-  return value as number;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
+  return value;
 }
 
 function conservativeTokenEstimate(serializedRequest: string): number {
