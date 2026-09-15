@@ -1,0 +1,79 @@
+name: AG-01 Production Cold Start System Readback
+
+on:
+  push:
+    branches:
+      - ops/ag01-readonly-readback-20260915
+    paths:
+      - '.github/workflows/ag01-production-coldstart-system-readback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Authenticate read-only GCP boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture bounded Cloud Run system and request evidence
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-coldstart-readback
+
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
+          REVISION="$(jq -r '.status.traffic[]? | select((.percent // 0)==100) | .revisionName // empty' /tmp/service.json | head -n1)"
+          [[ -n "$REVISION" ]] || { echo 'Serving revision unavailable' >&2; exit 1; }
+          SINCE="$(date -u -d '30 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
+
+          SYSTEM_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND resource.labels.revision_name=\"$REVISION\" AND timestamp>=\"$SINCE\" AND logName=\"projects/$PROJECT_ID/logs/run.googleapis.com%2Fvarlog%2Fsystem\""
+          REQUEST_FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND resource.labels.revision_name=\"$REVISION\" AND timestamp>=\"$SINCE\" AND logName=\"projects/$PROJECT_ID/logs/run.googleapis.com%2Frequests\" AND severity>=WARNING"
+
+          gcloud logging read "$SYSTEM_FILTER" --project "$PROJECT_ID" --limit=100 --order=desc --format=json > /tmp/system.json || echo '[]' > /tmp/system.json
+          gcloud logging read "$REQUEST_FILTER" --project "$PROJECT_ID" --limit=100 --order=desc --format=json > /tmp/requests.json || echo '[]' > /tmp/requests.json
+
+          jq '[.[] | {timestamp,severity,insertId,textPayload:(.textPayload // null),message:(.jsonPayload.message // null),reason:(.jsonPayload.reason // null),instanceId:(.labels.instanceId // null)}]' /tmp/system.json > ag01-coldstart-readback/system-events.json
+          jq '[.[] | {timestamp,severity,insertId,httpRequest:{status:(.httpRequest.status // null),latency:(.httpRequest.latency // null),requestMethod:(.httpRequest.requestMethod // null)},trace:(.trace // null)}]' /tmp/requests.json > ag01-coldstart-readback/request-errors.json
+
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg revision "$REVISION" \
+            --arg since "$SINCE" \
+            --argjson systemEventCount "$(jq 'length' ag01-coldstart-readback/system-events.json)" \
+            --argjson requestErrorCount "$(jq 'length' ag01-coldstart-readback/request-errors.json)" \
+            '{schemaVersion:"toca.ag01.production-coldstart-system-readback.v1",sourceSha:$sourceSha,runId:$runId,revision:$revision,since:$since,systemEventCount:$systemEventCount,requestErrorCount:$requestErrorCount,logScope:"CLOUD_RUN_PLATFORM_SYSTEM_AND_REQUEST_ONLY",applicationStdoutRead:false,applicationStderrRead:false,providerMutationExecuted:false,cloudRunMutationExecuted:false,trafficMutationExecuted:false,databaseMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' \
+            > ag01-coldstart-readback/run-metadata.json
+
+          echo "revision=$REVISION"
+          echo "system_event_count=$(jq 'length' ag01-coldstart-readback/system-events.json)"
+          echo "request_error_count=$(jq 'length' ag01-coldstart-readback/request-errors.json)"
+          jq -c '.[]' ag01-coldstart-readback/system-events.json || true
+          jq -c '.[]' ag01-coldstart-readback/request-errors.json || true
+
+      - name: Upload immutable cold-start evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-coldstart-system-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-coldstart-readback
+          if-no-files-found: error
+          retention-days: 30
