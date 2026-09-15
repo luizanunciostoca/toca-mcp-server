@@ -24,10 +24,7 @@ export interface BillingReconciliationResult {
 export function reconcileBillingAmounts(
   input: BillingReconciliationInput,
 ): BillingReconciliationResult {
-  const ledgerActualCostMicroUsd = safeCost(
-    input.ledgerActualCostMicroUsd,
-    'LEDGER_ACTUAL_COST',
-  );
+  const ledgerActualCostMicroUsd = safeCost(input.ledgerActualCostMicroUsd, 'LEDGER_ACTUAL_COST');
   const billedCostMicroUsd = safeCost(input.billedCostMicroUsd, 'BILLED_COST');
   const toleranceMicroUsd = safeCost(input.toleranceMicroUsd ?? 0, 'TOLERANCE');
   const deltaMicroUsd = billedCostMicroUsd - ledgerActualCostMicroUsd;
