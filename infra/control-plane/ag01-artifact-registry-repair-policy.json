@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "toca.ag01.artifact-registry-repair-policy.v1",
+  "operationId": "restore-ag01-artifact-registry-service",
+  "parentControlPlane": {
+    "path": "infra/control-plane/policy.json",
+    "version": 10,
+    "projectId": "toca-mcp-production"
+  },
+  "target": {
+    "projectId": "toca-mcp-production",
+    "region": "southamerica-east1",
+    "serviceName": "artifactregistry.googleapis.com",
+    "artifactRepository": "toca-mcp",
+    "immutableImageDigest": "southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/ag01@sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96"
+  },
+  "execution": {
+    "mode": "MANUAL_EXPLICIT_CONFIRMATION_ONLY",
+    "environment": "infrastructure-admin",
+    "confirmation": "RESTORE_ARTIFACT_REGISTRY_ONLY",
+    "allowedMutation": "ENABLE_EXACT_SERVICE_ONLY",
+    "stopAfter": "IMMUTABLE_IMAGE_READBACK",
+    "requiredPermission": "serviceusage.services.enable",
+    "permissionObservedAtPreparation": false,
+    "permissionEvidence": "github-actions:35016168143:attempt-1"
+  },
+  "preconditions": {
+    "projectBillingEnabled": true,
+    "ag01OperationalStatus": "DEGRADED",
+    "ag01ExecutionAuthorized": false,
+    "ag01DeploymentAuthorized": false,
+    "artifactRegistryServiceEnabled": false
+  },
+  "postconditions": {
+    "artifactRegistryServiceEnabled": true,
+    "immutableImageDigestReadable": true,
+    "cloudRunDeploymentExecuted": false,
+    "cloudRunTrafficMutationExecuted": false,
+    "businessCapabilityExecuted": false
+  },
+  "forbid": {
+    "billingMutation": true,
+    "iamMutation": true,
+    "privilegeEscalation": true,
+    "arbitraryServiceEnable": true,
+    "cloudRunDeploy": true,
+    "cloudRunTrafficMutation": true,
+    "databaseMutation": true,
+    "providerMutation": true,
+    "businessCapabilityExecution": true,
+    "serviceAccountKeyCreation": true
+  }
+}
