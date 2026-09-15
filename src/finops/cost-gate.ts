@@ -59,11 +59,7 @@ function validatePolicy(policy: CostGatePolicy): void {
   }
 }
 
-function result(
-  input: CostGateInput,
-  decision: CostGateDecision,
-  reason: string,
-): CostGateResult {
+function result(input: CostGateInput, decision: CostGateDecision, reason: string): CostGateResult {
   return {
     decision,
     reason,
