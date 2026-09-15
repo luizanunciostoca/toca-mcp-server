@@ -28,16 +28,17 @@ export interface CostGateResult {
 export function evaluateCostGate(input: CostGateInput): CostGateResult {
   validatePolicy(input.policy);
 
-  if (input.estimatedCostMicroUsd === null || input.priceCatalogVersion === null) {
+  const cost = input.estimatedCostMicroUsd;
+  if (cost === null || input.priceCatalogVersion === null) {
     return result(input, 'BLOCK', 'FINOPS_COST_OR_PRICE_UNKNOWN');
   }
-  if (!Number.isSafeInteger(input.estimatedCostMicroUsd) || input.estimatedCostMicroUsd < 0) {
+  if (!Number.isSafeInteger(cost) || cost < 0) {
     return result(input, 'BLOCK', 'FINOPS_COST_INVALID');
   }
-  if (input.estimatedCostMicroUsd > input.policy.approvalLimitMicroUsd) {
+  if (cost > input.policy.approvalLimitMicroUsd) {
     return result(input, 'BLOCK', 'FINOPS_HARD_COST_LIMIT_EXCEEDED');
   }
-  if (input.estimatedCostMicroUsd > input.policy.automaticLimitMicroUsd) {
+  if (cost > input.policy.automaticLimitMicroUsd) {
     return result(input, 'REQUIRE_APPROVAL', 'FINOPS_FORMAL_APPROVAL_REQUIRED');
   }
   return result(input, 'ALLOW', 'FINOPS_WITHIN_AUTOMATIC_LIMIT');
@@ -45,9 +46,14 @@ export function evaluateCostGate(input: CostGateInput): CostGateResult {
 
 function validatePolicy(policy: CostGatePolicy): void {
   if (!policy.policyRef.trim()) throw new Error('FINOPS_COST_POLICY_REF_REQUIRED');
-  for (const value of [policy.automaticLimitMicroUsd, policy.approvalLimitMicroUsd]) {
-    if (!Number.isSafeInteger(value) || value < 0) throw new Error('FINOPS_COST_POLICY_INVALID');
+
+  const limits = [policy.automaticLimitMicroUsd, policy.approvalLimitMicroUsd];
+  for (const value of limits) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error('FINOPS_COST_POLICY_INVALID');
+    }
   }
+
   if (policy.automaticLimitMicroUsd > policy.approvalLimitMicroUsd) {
     throw new Error('FINOPS_COST_POLICY_LIMIT_ORDER_INVALID');
   }
