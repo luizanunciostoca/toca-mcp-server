@@ -37,6 +37,16 @@ describe('TOCA OS FinOps cost control', () => {
     expect(result.totalCostMicroUsd).toBe(5_840);
   });
 
+  it('fails closed when the combined micro-USD total would overflow', () => {
+    expect(() =>
+      estimateAiTextCost('gemini-2.5-flash', 'STANDARD', {
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        cachedInputTokens: 0,
+        outputTokens: 2_800_000_000_000_000,
+      }),
+    ).toThrow('FINOPS_COST_OVERFLOW');
+  });
+
   it('fails closed when pricing is unknown', () => {
     const usage = {
       inputTokens: 1,
@@ -156,5 +166,51 @@ describe('TOCA OS FinOps cost control', () => {
         createdAt: '2026-09-15T20:20:00Z',
       }),
     ).toThrow();
+  });
+
+  it('allows only sanitized opaque-reference metadata', () => {
+    const base = {
+      eventId: 'cost-metadata-1',
+      executionId: 'exec-metadata-1',
+      correlationId: 'corr-metadata-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      organizationId: 'org-1',
+      provider: 'GOOGLE_VERTEX_AI',
+      model: 'gemini-2.5-flash',
+      category: 'AI_TEXT',
+      phase: 'ESTIMATE',
+      priceCatalogVersion: 'v1',
+      currency: 'USD',
+      estimatedCostMicroUsd: 100,
+      usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 20 },
+      createdAt: '2026-09-15T20:20:00Z',
+    } as const;
+
+    expect(
+      parseCostEvent({
+        ...base,
+        metadata: {
+          providerReadbackRef: 'provider:readback-1',
+          evidenceRefs: ['audit:event-1', 'usage:vertex-1'],
+        },
+      }).metadata,
+    ).toEqual({
+      providerReadbackRef: 'provider:readback-1',
+      evidenceRefs: ['audit:event-1', 'usage:vertex-1'],
+    });
+
+    expect(() =>
+      parseCostEvent({
+        ...base,
+        metadata: { rawProviderPayload: 'must-not-be-persisted' },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseCostEvent({
+        ...base,
+        metadata: { evidenceRefs: ['contains free-form user data'] },
+      }),
+    ).toThrow('FINOPS_METADATA_REF_INVALID');
   });
 });

@@ -16,13 +16,21 @@ A Cost Gate may only add restrictions. `ALLOW` means only that the estimate is w
 
 Migration `041_finops_cost_ledger.sql` adds `finops_cost_events` as an append-only evidence ledger. Every event is tenant/workspace/organization scoped and carries stable execution/correlation IDs. Monetary values are stored as integer micro-USD to avoid floating-point money. Updates and deletes are rejected by a database trigger.
 
-The ledger supports ESTIMATE, ACTUAL and RECONCILIATION events. Provider/business-specific usage remains evidence, not authority. A repeated `eventId` is idempotent only when its canonical SHA-256 is identical; a conflicting payload fails closed.
+The PostgreSQL boundary enforces non-empty scoped identifiers, JSON-object storage for usage/metadata and safe-integer monetary bounds. Correlation reads require tenant, workspace and organization scope in addition to `correlationId`, preventing cross-tenant reads when correlation IDs collide.
+
+The ledger supports ESTIMATE, ACTUAL and RECONCILIATION events. Provider/business-specific usage remains evidence, not authority. A repeated `eventId` is idempotent only when its canonical SHA-256 is identical; canonicalization includes persisted metadata defaults and normalized timestamps so a read/replay remains stable. A conflicting payload fails closed.
+
+`metadata` is deliberately not an arbitrary JSON sink. It accepts only a strict allowlist of bounded opaque evidence/reference identifiers and rejects free-form provider/user payloads. Database rows with non-object usage or metadata fail closed instead of being silently coerced.
+
+A `DATABASE_URL`-gated PostgreSQL E2E suite covers migration application, scoped reads, row round-tripping, idempotent replay/conflict, append-only mutation rejection and database constraint enforcement.
 
 ## Pricing catalog
 
 `src/finops/pricing-catalog.ts` pins a versioned provider price catalog. v1 was verified against the official Google Cloud generative-AI pricing page on 2026-09-15. Historical CostEvents always carry the catalog version used for their calculation.
 
 Provider prices are technical inputs. Business budgets, automatic-spend limits and approval ceilings must remain canonical business policy supplied to the Cost Gate; they are deliberately not hard-coded into this module.
+
+All monetary arithmetic remains integer micro-USD. Per-component and aggregate totals fail closed on `Number.MAX_SAFE_INTEGER` overflow before reaching the Cost Gate.
 
 ## AI Cost Router
 

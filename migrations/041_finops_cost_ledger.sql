@@ -1,27 +1,33 @@
 create table if not exists finops_cost_events (
-  event_id text primary key,
+  event_id text primary key check (btrim(event_id) <> ''),
   event_sha256 text not null check (event_sha256 ~ '^[0-9a-f]{64}$'),
-  execution_id text not null,
-  correlation_id text not null,
-  tenant_id text not null,
-  workspace_id text not null,
-  organization_id text not null,
-  route_id text,
-  agent_id text,
-  provider text not null,
-  model text,
+  execution_id text not null check (btrim(execution_id) <> ''),
+  correlation_id text not null check (btrim(correlation_id) <> ''),
+  tenant_id text not null check (btrim(tenant_id) <> ''),
+  workspace_id text not null check (btrim(workspace_id) <> ''),
+  organization_id text not null check (btrim(organization_id) <> ''),
+  route_id text check (route_id is null or btrim(route_id) <> ''),
+  agent_id text check (agent_id is null or btrim(agent_id) <> ''),
+  provider text not null check (btrim(provider) <> ''),
+  model text check (model is null or btrim(model) <> ''),
   category text not null check (category in (
     'AI_TEXT','AI_IMAGE','AI_VIDEO','COMPUTE','STORAGE','NETWORK','MEDIA_SPEND','OTHER'
   )),
   phase text not null check (phase in ('ESTIMATE','ACTUAL','RECONCILIATION')),
-  price_catalog_version text not null,
+  price_catalog_version text not null check (btrim(price_catalog_version) <> ''),
   currency text not null check (currency = 'USD'),
-  estimated_cost_micro_usd bigint check (estimated_cost_micro_usd is null or estimated_cost_micro_usd >= 0),
-  actual_cost_micro_usd bigint check (actual_cost_micro_usd is null or actual_cost_micro_usd >= 0),
-  usage jsonb not null,
-  content_item_id text,
-  campaign_id text,
-  metadata jsonb not null default '{}'::jsonb,
+  estimated_cost_micro_usd bigint check (
+    estimated_cost_micro_usd is null
+    or estimated_cost_micro_usd between 0 and 9007199254740991
+  ),
+  actual_cost_micro_usd bigint check (
+    actual_cost_micro_usd is null
+    or actual_cost_micro_usd between 0 and 9007199254740991
+  ),
+  usage jsonb not null check (jsonb_typeof(usage) = 'object'),
+  content_item_id text check (content_item_id is null or btrim(content_item_id) <> ''),
+  campaign_id text check (campaign_id is null or btrim(campaign_id) <> ''),
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
   created_at timestamptz not null,
   check (phase <> 'ESTIMATE' or estimated_cost_micro_usd is not null),
   check (phase <> 'ACTUAL' or actual_cost_micro_usd is not null)

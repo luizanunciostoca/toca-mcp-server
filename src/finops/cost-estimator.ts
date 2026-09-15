@@ -42,6 +42,11 @@ export function estimateAiTextCost(
       ? 0
       : priceUnits(usage.cachedInputTokens, price.cachedInputMicroUsdPerMillion ?? 0);
   const outputCostMicroUsd = priceUnits(usage.outputTokens, price.outputMicroUsdPerMillion);
+  const totalCostMicroUsd = sumCosts(
+    inputCostMicroUsd,
+    cachedInputCostMicroUsd,
+    outputCostMicroUsd,
+  );
 
   return {
     priceCatalogVersion: FINOPS_PRICE_CATALOG_VERSION,
@@ -54,7 +59,7 @@ export function estimateAiTextCost(
     inputCostMicroUsd,
     cachedInputCostMicroUsd,
     outputCostMicroUsd,
-    totalCostMicroUsd: inputCostMicroUsd + cachedInputCostMicroUsd + outputCostMicroUsd,
+    totalCostMicroUsd,
   };
 }
 
@@ -77,4 +82,10 @@ function priceUnits(units: number, microUsdPerMillion: number): number {
   const result = (numerator + 999_999n) / 1_000_000n;
   if (result > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('FINOPS_COST_OVERFLOW');
   return Number(result);
+}
+
+function sumCosts(...values: readonly number[]): number {
+  const total = values.reduce((sum, value) => sum + BigInt(value), 0n);
+  if (total > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('FINOPS_COST_OVERFLOW');
+  return Number(total);
 }

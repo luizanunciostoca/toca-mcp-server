@@ -32,16 +32,24 @@ export interface CostLedgerAppendResult {
   readonly eventHash: string;
 }
 
+export interface CostLedgerCorrelationQuery {
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly organizationId: string;
+  readonly correlationId: string;
+  readonly limit?: number;
+}
+
 export interface CostLedger {
   append(event: CostEvent): Promise<CostLedgerAppendResult>;
-  listByCorrelation(correlationId: string, limit?: number): Promise<readonly CostEvent[]>;
+  listByCorrelation(query: CostLedgerCorrelationQuery): Promise<readonly CostEvent[]>;
 }
 
 export class PostgresCostLedger implements CostLedger {
   constructor(private readonly pool: pg.Pool) {}
 
   async append(candidate: CostEvent): Promise<CostLedgerAppendResult> {
-    const event = parseCostEvent(candidate);
+    const event = canonicalizeCostEvent(candidate);
     const eventHash = hashCostEvent(event);
     const inserted = await this.pool.query<{ readonly event_id: string }>(
       `insert into finops_cost_events (
@@ -93,25 +101,41 @@ export class PostgresCostLedger implements CostLedger {
     return { status: 'IDEMPOTENT_REPLAY', eventHash };
   }
 
-  async listByCorrelation(correlationId: string, limit = 500): Promise<readonly CostEvent[]> {
-    if (!correlationId.trim()) throw new Error('FINOPS_CORRELATION_ID_REQUIRED');
+  async listByCorrelation(query: CostLedgerCorrelationQuery): Promise<readonly CostEvent[]> {
+    const tenantId = requiredScope(query.tenantId, 'TENANT_ID');
+    const workspaceId = requiredScope(query.workspaceId, 'WORKSPACE_ID');
+    const organizationId = requiredScope(query.organizationId, 'ORGANIZATION_ID');
+    const correlationId = requiredScope(query.correlationId, 'CORRELATION_ID');
+    const limit = query.limit ?? 500;
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
       throw new Error('FINOPS_LIMIT_INVALID');
     }
     const result = await this.pool.query<CostEventRow>(
       `select * from finops_cost_events
-       where correlation_id = $1
+       where tenant_id = $1
+         and workspace_id = $2
+         and organization_id = $3
+         and correlation_id = $4
        order by created_at asc, event_id asc
-       limit $2`,
-      [correlationId, limit],
+       limit $5`,
+      [tenantId, workspaceId, organizationId, correlationId, limit],
     );
     return result.rows.map(costEventFromRow);
   }
 }
 
 export function hashCostEvent(event: CostEvent): string {
-  const canonical = stableJson(parseCostEvent(event));
+  const canonical = stableJson(canonicalizeCostEvent(event));
   return createHash('sha256').update(canonical).digest('hex');
+}
+
+function canonicalizeCostEvent(candidate: CostEvent): CostEvent {
+  const event = parseCostEvent(candidate);
+  return parseCostEvent({
+    ...event,
+    metadata: event.metadata ?? {},
+    createdAt: new Date(event.createdAt).toISOString(),
+  });
 }
 
 function costEventFromRow(row: CostEventRow): CostEvent {
@@ -136,10 +160,10 @@ function costEventFromRow(row: CostEventRow): CostEvent {
     ...(row.actual_cost_micro_usd !== null
       ? { actualCostMicroUsd: safeInteger(row.actual_cost_micro_usd) }
       : {}),
-    usage: asObject(row.usage),
+    usage: requireJsonObject(row.usage, 'USAGE'),
     ...(row.content_item_id ? { contentItemId: row.content_item_id } : {}),
     ...(row.campaign_id ? { campaignId: row.campaign_id } : {}),
-    metadata: asObject(row.metadata),
+    metadata: requireJsonObject(row.metadata, 'METADATA'),
     createdAt: iso(row.created_at),
   });
 }
@@ -150,14 +174,23 @@ function safeInteger(value: string | number): number {
   return parsed;
 }
 
-function asObject(value: unknown): Readonly<Record<string, unknown>> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : {};
+function requireJsonObject(value: unknown, field: 'USAGE' | 'METADATA'): Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`FINOPS_DB_JSON_INVALID:${field}`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function requiredScope(value: string, field: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`FINOPS_${field}_REQUIRED`);
+  return normalized;
 }
 
 function iso(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error('FINOPS_DB_TIMESTAMP_INVALID');
+  return parsed.toISOString();
 }
 
 function stableJson(value: unknown): string {

@@ -16,18 +16,37 @@ export const costEventPhaseSchema = z.enum(['ESTIMATE', 'ACTUAL', 'RECONCILIATIO
 export type CostEventPhase = z.infer<typeof costEventPhaseSchema>;
 
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const opaqueReferenceSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/#-]*$/, 'FINOPS_METADATA_REF_INVALID');
 
-export const costUsageSchema = z.object({
-  inputTokens: nonNegativeInteger.optional(),
-  cachedInputTokens: nonNegativeInteger.optional(),
-  outputTokens: nonNegativeInteger.optional(),
-  videoSeconds: nonNegativeInteger.optional(),
-  imageCount: nonNegativeInteger.optional(),
-  storageBytes: nonNegativeInteger.optional(),
-  computeMilliseconds: nonNegativeInteger.optional(),
-  providerOperations: nonNegativeInteger.optional(),
-});
+export const costUsageSchema = z
+  .object({
+    inputTokens: nonNegativeInteger.optional(),
+    cachedInputTokens: nonNegativeInteger.optional(),
+    outputTokens: nonNegativeInteger.optional(),
+    videoSeconds: nonNegativeInteger.optional(),
+    imageCount: nonNegativeInteger.optional(),
+    storageBytes: nonNegativeInteger.optional(),
+    computeMilliseconds: nonNegativeInteger.optional(),
+    providerOperations: nonNegativeInteger.optional(),
+  })
+  .strict();
 export type CostUsage = z.infer<typeof costUsageSchema>;
+
+export const costMetadataSchema = z
+  .object({
+    providerUsageRef: opaqueReferenceSchema.optional(),
+    providerReadbackRef: opaqueReferenceSchema.optional(),
+    billingRecordRef: opaqueReferenceSchema.optional(),
+    reconciliationRef: opaqueReferenceSchema.optional(),
+    evidenceRefs: z.array(opaqueReferenceSchema).max(64).optional(),
+  })
+  .strict();
+export type CostMetadata = z.infer<typeof costMetadataSchema>;
 
 export const costEventSchema = z
   .object({
@@ -50,7 +69,7 @@ export const costEventSchema = z
     usage: costUsageSchema,
     contentItemId: z.string().trim().min(1).optional(),
     campaignId: z.string().trim().min(1).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
+    metadata: costMetadataSchema.optional(),
     createdAt: z.iso.datetime(),
   })
   .superRefine((value, context) => {
