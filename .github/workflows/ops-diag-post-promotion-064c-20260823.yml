@@ -1,0 +1,158 @@
+name: TEMP Post-Promotion Staging Diagnostic 064c 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'ops/diag-post-promotion-064c-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 064ce49901adea9c93a0bf02835ae07d3f121af2
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '064ce49901adea9c93a0bf02835ae07d3f121af2'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          test "$GCP_REGION" = 'southamerica-east1'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read exact current staging service and revision state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)" = "$GCP_DEPLOY_SERVICE_ACCOUNT"
+          mkdir -p /tmp/postpromo
+
+          read_service() {
+            local service="$1" expected_revision="$2" expected_sa="$3" output="$4"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/postpromo/${service}.json"
+            local serving_revision traffic_sum matching_100 latest_ready service_url
+            serving_revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100) | .revisionName) // empty' "/tmp/postpromo/${service}.json")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' "/tmp/postpromo/${service}.json")"
+            matching_100="$(jq --arg revision "$expected_revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' "/tmp/postpromo/${service}.json")"
+            latest_ready="$(jq -r '.status.latestReadyRevisionName // .status.latestReadyRevision // empty' "/tmp/postpromo/${service}.json")"
+            service_url="$(jq -r '.status.url // empty' "/tmp/postpromo/${service}.json")"
+
+            gcloud run revisions describe "$expected_revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "/tmp/postpromo/${expected_revision}.json"
+            local release_sha runtime_sa image image_digest
+            release_sha="$(jq -r 'first(.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value) // empty' "/tmp/postpromo/${expected_revision}.json")"
+            runtime_sa="$(jq -r '.spec.serviceAccountName // empty' "/tmp/postpromo/${expected_revision}.json")"
+            image="$(jq -r '.spec.containers[0].image // empty' "/tmp/postpromo/${expected_revision}.json")"
+            image_digest="${image##*@}"
+
+            jq -n \
+              --arg service "$service" \
+              --arg servingRevision "$serving_revision" \
+              --arg expectedRevision "$expected_revision" \
+              --argjson trafficSum "$traffic_sum" \
+              --argjson expectedAt100 "$matching_100" \
+              --arg latestReady "$latest_ready" \
+              --arg serviceUrl "$service_url" \
+              --arg releaseSha "$release_sha" \
+              --arg expectedReleaseSha '064ce49901adea9c93a0bf02835ae07d3f121af2' \
+              --arg runtimeSa "$runtime_sa" \
+              --arg expectedRuntimeSa "$expected_sa" \
+              --arg imageDigest "$image_digest" \
+              --arg expectedImageDigest 'sha256:272b563274d359abbe49c7b7f588705d17a438e13917d4c354b5741c7b5217c2' \
+              '{service:$service,servingRevision:$servingRevision,expectedRevision:$expectedRevision,trafficSum:$trafficSum,expectedRevisionAt100Count:$expectedAt100,latestReadyRevision:$latestReady,serviceUrlPresent:($serviceUrl!=""),releaseSha:$releaseSha,releaseShaMatches:($releaseSha==$expectedReleaseSha),runtimeIdentityMatches:($runtimeSa==$expectedRuntimeSa),imageDigest:$imageDigest,imageDigestMatches:($imageDigest==$expectedImageDigest)}' > "$output"
+          }
+
+          read_service "$GCP_CLOUD_RUN_MCP_SERVICE" 'toca-mcp-next-staging-mcp-064ce499' "$GCP_MCP_RUNTIME_SERVICE_ACCOUNT" /tmp/postpromo/mcp-safe.json
+          read_service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" 'toca-webhook-next-staging-webhook-064ce499' "$GCP_WEBHOOK_RUNTIME_SERVICE_ACCOUNT" /tmp/postpromo/webhook-safe.json
+
+          MCP_SERVICE_URL="$(jq -r '.status.url' /tmp/postpromo/${GCP_CLOUD_RUN_MCP_SERVICE}.json)"
+          WEBHOOK_SERVICE_URL="$(jq -r '.status.url' /tmp/postpromo/${GCP_CLOUD_RUN_WEBHOOK_SERVICE}.json)"
+          test -n "$MCP_SERVICE_URL"; test -n "$WEBHOOK_SERVICE_URL"
+          echo "mcp_service_url=$MCP_SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "webhook_service_url=$WEBHOOK_SERVICE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint MCP staging identity token
+        id: mcp_token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.mcp_service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Probe current staging endpoints and IAM readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCP_TOKEN: ${{ steps.mcp_token.outputs.id_token }}
+          MCP_SERVICE_URL: ${{ steps.state.outputs.mcp_service_url }}
+          WEBHOOK_SERVICE_URL: ${{ steps.state.outputs.webhook_service_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_auth() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$1" || true; }
+          status_anon() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$1" || true; }
+
+          MCP_HEALTH="$(status_auth "$MCP_SERVICE_URL/health")"
+          MCP_READY="$(status_auth "$MCP_SERVICE_URL/ready")"
+          WEBHOOK_HEALTH="$(status_anon "$WEBHOOK_SERVICE_URL/health")"
+          WEBHOOK_READY="$(status_anon "$WEBHOOK_SERVICE_URL/ready")"
+          WEBHOOK_MCP="$(status_anon "$WEBHOOK_SERVICE_URL/mcp")"
+
+          gcloud run services get-iam-policy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/postpromo/webhook-iam.json
+          WEBHOOK_ALLUSERS_INVOKER="$(jq '[.bindings[]? | select(.role == "roles/run.invoker") | select(any(.members[]?; . == "allUsers"))] | length' /tmp/postpromo/webhook-iam.json)"
+
+          MCP_SAFE="$(jq -c . /tmp/postpromo/mcp-safe.json)"
+          WEBHOOK_SAFE="$(jq -c . /tmp/postpromo/webhook-safe.json)"
+          cat > /tmp/comment.md <<EOF
+          STAGING_POST_PROMOTION_DIAG RUN_ID=${GITHUB_RUN_ID} CANDIDATE=064ce49901adea9c93a0bf02835ae07d3f121af2
+
+          MCP_STATE=${MCP_SAFE}
+          WEBHOOK_STATE=${WEBHOOK_SAFE}
+          MCP_HEALTH_HTTP=${MCP_HEALTH}
+          MCP_READY_HTTP=${MCP_READY}
+          WEBHOOK_HEALTH_ANON_HTTP=${WEBHOOK_HEALTH}
+          WEBHOOK_READY_ANON_HTTP=${WEBHOOK_READY}
+          WEBHOOK_MCP_ANON_HTTP=${WEBHOOK_MCP}
+          WEBHOOK_ALLUSERS_INVOKER_BINDING_COUNT=${WEBHOOK_ALLUSERS_INVOKER}
+
+          READ_ONLY=true
+          TOKEN_EXPOSED=false
+          SECRET_PAYLOAD_READ=false
+          DATABASE_ACCESS=false
+          PROVIDER_ACCESS=false
+          PRODUCTION_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
