@@ -1,0 +1,240 @@
+name: Instagram Engagement Comment Canary Recovery Eligibility 60m
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-comment-canary-recovery-eligibility-60m
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+
+jobs:
+  recovery-comment-eligibility:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram COMMENT canary recovery eligibility 60M READONLY AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact recovery eligibility controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact recovery read-only authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | cut -d= -f2-)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          test "$RUNTIME_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_RECOVERY_ELIGIBILITY_60M=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "CANARY_CHANNEL=COMMENT"
+            "MAX_AGE_MINUTES=60"
+            "RECOVERY_ONE_SHOT=true"
+            "READ_ONLY_ELIGIBILITY=true"
+            "TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true"
+            "PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false"
+            "DATABASE_MUTATIONS_AUTHORIZED=false"
+            "PROVIDER_CALLS_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+            "PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=false"
+            "GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true"
+          )
+          for line in "${required[@]}"; do
+            grep -Fxq "$line" <<< "$BODY" || {
+              echo "Missing exact recovery eligibility authorization field: $line" >&2
+              exit 1
+            }
+          done
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+      - name: Run 60m read-only Comment recovery eligibility probe
+        id: probe
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-comment-recovery-elig-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_MAX_AGE_MINUTES=60#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID" \
+            --command node --args dist/src/ops/instagram-engagement-comment-canary-eligibility-readonly.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Publish sanitized 60m recovery eligibility result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          numeric_markers=(
+            RECENT_COMMENT_COUNT STATE_CANDIDATE_COUNT ELIGIBLE_COUNT
+            UNRESOLVED_AMBIGUITY_COUNT ACTIVE_RESERVATION_COUNT
+            REJECTED_SCOPE REJECTED_AGE REJECTED_CONFIDENCE REJECTED_PRIORITY
+            REJECTED_SENSITIVE REJECTED_COMMERCIAL REJECTED_URGENCY
+            REJECTED_KNOWLEDGE REJECTED_POLICY
+          )
+
+          SAFE_LINES=''
+          STATUS=''
+          TARGET_SHA=''
+          MARKERS_COMPLETE=false
+          POLL_ATTEMPTS=0
+
+          for attempt in 1 2 3 4 5 6; do
+            POLL_ATTEMPTS="$attempt"
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY|RECENT_COMMENT_COUNT|STATE_CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|UNRESOLVED_AMBIGUITY_COUNT|ACTIVE_RESERVATION_COUNT|REJECTED_[A-Z_]+|CANARY_CHANNEL|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|EXTERNAL_REPLY_WRITES|RAW_USER_DATA_LOGGED)=' \
+              || true)"
+
+            STATUS="$(grep '^INSTAGRAM_ENGAGEMENT_COMMENT_CANARY_ELIGIBILITY=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+            if [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|BLOCKED_UNRESOLVED_AMBIGUITY|BLOCKED_ACTIVE_RESERVATION)$ ]]; then
+              MARKERS_COMPLETE=true
+              for marker in "${numeric_markers[@]}"; do
+                value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+                if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                  MARKERS_COMPLETE=false
+                  break
+                fi
+              done
+              TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+              if [[ -z "$TARGET_SHA" ]]; then
+                MARKERS_COMPLETE=false
+              elif [[ "$STATUS" == 'READY' ]] && ! [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+                MARKERS_COMPLETE=false
+              elif [[ "$STATUS" != 'READY' && "$TARGET_SHA" != 'NONE' ]]; then
+                MARKERS_COMPLETE=false
+              fi
+            fi
+            [[ "$MARKERS_COMPLETE" == 'true' ]] && break
+            [[ "$attempt" == '6' ]] || sleep 10
+          done
+
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            printf -v BLOCKED_REPORT '%s\n' \
+              'COMMENT_CANARY_RECOVERY_ELIGIBILITY_60M_STATUS=BLOCKED_LOG_PROPAGATION' \
+              "LOG_POLL_ATTEMPTS=$POLL_ATTEMPTS" \
+              'ELIGIBILITY=UNAVAILABLE' \
+              'MAX_AGE_MINUTES=60' \
+              'RECOVERY_ONE_SHOT=true' \
+              'CANARY_CHANNEL=COMMENT' \
+              'READ_ONLY_ELIGIBILITY=true' \
+              'DATABASE_MUTATIONS=false' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'RAW_USER_DATA_LOGGED=false'
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$BLOCKED_REPORT" >/dev/null
+            exit 1
+          fi
+
+          REPORT="COMMENT_CANARY_RECOVERY_ELIGIBILITY_60M_STATUS=PASS"$'\n'
+          REPORT+="ELIGIBILITY=${STATUS}"$'\n'
+          REPORT+="LOG_POLL_ATTEMPTS=${POLL_ATTEMPTS}"$'\n'
+          for marker in "${numeric_markers[@]}"; do
+            value="$(grep "^${marker}=" <<< "$SAFE_LINES" | head -1 | cut -d= -f2-)"
+            REPORT+="${marker}=${value}"$'\n'
+          done
+          REPORT+="ELIGIBLE_TARGET_SHA256=${TARGET_SHA}"$'\n'
+          REPORT+='MAX_AGE_MINUTES=60'$'\n'
+          REPORT+='RECOVERY_ONE_SHOT=true'$'\n'
+          REPORT+='CANARY_CHANNEL=COMMENT'$'\n'
+          REPORT+='READ_ONLY_ELIGIBILITY=true'$'\n'
+          REPORT+='DATABASE_MUTATIONS=false'$'\n'
+          REPORT+='PROVIDER_CALLS=false'$'\n'
+          REPORT+='EXTERNAL_REPLY_WRITES=false'$'\n'
+          REPORT+='RAW_USER_DATA_LOGGED=false'$'\n'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$REPORT" >/dev/null
+
+      - name: Delete temporary recovery eligibility job
+        if: always()
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${JOB:-}" ]]; then
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          fi
+
+      - name: Consume recovery eligibility authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
