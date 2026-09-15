@@ -161,7 +161,18 @@ function iso(value: Date | string): string {
 }
 
 function stableJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+    throw new Error('FINOPS_COST_EVENT_NON_JSON_VALUE');
+  }
+  if (typeof value === 'bigint') throw new Error('FINOPS_COST_EVENT_NON_JSON_VALUE');
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error('FINOPS_COST_EVENT_NON_JSON_VALUE');
+  }
+  if (value === null || typeof value !== 'object') {
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error('FINOPS_COST_EVENT_NON_JSON_VALUE');
+    return encoded;
+  }
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   const object = value as Readonly<Record<string, unknown>>;
   return `{${Object.keys(object)
