@@ -50,6 +50,8 @@ requireIncludes('src/orchestrator/vertex-gemini-decision-adapter.ts', [
   'costObserver?.beforeRequest',
   'costObserver?.afterResponse',
   'usageMetadata',
+  'thoughtsTokenCount',
+  'safeTokenSum',
   'conservativeTokenEstimate',
 ]);
 requireIncludes('src/orchestrator/production-runtime.ts', [
@@ -60,6 +62,7 @@ requireIncludes('src/orchestrator/production-runtime.ts', [
 requireIncludes('docs/architecture/finops-runtime-cost-reconciliation-v1.md', [
   'OBSERVABILITY_ENFORCED',
   'does not invent a zero cost',
+  'response and reasoning',
   'performs no automatic model switching',
   'not invoice settlement',
 ]);
