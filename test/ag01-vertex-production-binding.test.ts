@@ -132,8 +132,10 @@ describe('AG-01 production-verified Vertex binding', () => {
       maxOutputTokens: 1024,
       accessTokenProvider: new StaticToken(),
       fetchFn: (url, init) => {
-        requestedUrl = String(url);
-        requestBody = JSON.parse(String(init?.body ?? '{}')) as unknown;
+        requestedUrl = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+        const body = init?.body;
+        if (typeof body !== 'string') throw new Error('EXPECTED_STRING_BODY');
+        requestBody = JSON.parse(body) as unknown;
         return Promise.resolve(vertexResponse());
       },
     });
