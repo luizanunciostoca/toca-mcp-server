@@ -1,14 +1,14 @@
-import type { AiTextUsage } from '../finops/cost-estimator.js';
 import type { VertexRuntimeCostObserver } from '../finops/ag01-runtime-cost-observer.js';
+import type { AiTextUsage } from '../finops/cost-estimator.js';
 import { resolveCapabilityDefinition } from '../governance/capability-resolution.js';
 import { getRouteDefinition } from '../governance/route-catalog.js';
 import { ROUTE_IDS, type RouteId } from '../governance/types.js';
-import { AG01_DECISION_JSON_SCHEMA, parseAg01StructuredDecision } from './structured-decision.js';
 import type {
   Ag01DecisionModelAdapter,
   Ag01ModelDecisionInput,
   Ag01ModelDecisionResult,
 } from './openai-responses-adapter.js';
+import { AG01_DECISION_JSON_SCHEMA, parseAg01StructuredDecision } from './structured-decision.js';
 
 const DEFAULT_METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
@@ -75,6 +75,7 @@ interface VertexGenerateContentResponse {
     readonly promptTokenCount?: unknown;
     readonly cachedContentTokenCount?: unknown;
     readonly candidatesTokenCount?: unknown;
+    readonly thoughtsTokenCount?: unknown;
     readonly totalTokenCount?: unknown;
   };
 }
@@ -345,15 +346,35 @@ function parseVertexUsage(
 ): AiTextUsage | null {
   if (!metadata) return null;
   const inputTokens = tokenCount(metadata.promptTokenCount);
-  const outputTokens = tokenCount(metadata.candidatesTokenCount);
-  const cachedInputTokens = tokenCount(metadata.cachedContentTokenCount) ?? 0;
-  if (inputTokens === null || outputTokens === null || cachedInputTokens > inputTokens) return null;
+  const candidateTokens = tokenCount(metadata.candidatesTokenCount);
+  const cachedInputTokens = optionalTokenCount(metadata.cachedContentTokenCount);
+  const thoughtTokens = optionalTokenCount(metadata.thoughtsTokenCount);
+  if (
+    inputTokens === null ||
+    candidateTokens === null ||
+    cachedInputTokens === null ||
+    thoughtTokens === null ||
+    cachedInputTokens > inputTokens
+  ) {
+    return null;
+  }
+  const outputTokens = safeTokenSum(candidateTokens, thoughtTokens);
+  if (outputTokens === null) return null;
   return { inputTokens, cachedInputTokens, outputTokens };
 }
 
 function tokenCount(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
   return value;
+}
+
+function optionalTokenCount(value: unknown): number | null {
+  return value === undefined ? 0 : tokenCount(value);
+}
+
+function safeTokenSum(left: number, right: number): number | null {
+  const total = BigInt(left) + BigInt(right);
+  return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
 }
 
 function conservativeTokenEstimate(serializedRequest: string): number {
