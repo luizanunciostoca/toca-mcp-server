@@ -7,6 +7,7 @@ const DEFAULT_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 export const GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER = 'gcp-iam-scoped-token';
 export const GOOGLE_SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+export const GOOGLE_DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 
 export interface GcpGoogleWorkspaceTokenResolverOptions {
   readonly serviceAccountEmail: string;
