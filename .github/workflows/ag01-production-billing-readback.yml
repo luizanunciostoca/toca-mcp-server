@@ -1,0 +1,64 @@
+name: AG-01 Production Billing Readback
+
+on:
+  push:
+    branches:
+      - ops/ag01-readonly-readback-20260915
+    paths:
+      - '.github/workflows/ag01-production-billing-readback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Authenticate read-only GCP boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read billing attachment only
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-billing-readback
+          STATUS=UNKNOWN
+          if gcloud billing projects describe "$PROJECT_ID" --format=json > /tmp/billing.json 2>/tmp/billing.err; then
+            ENABLED="$(jq -r '.billingEnabled // false' /tmp/billing.json)"
+            if [[ "$ENABLED" == "true" ]]; then STATUS=ENABLED; else STATUS=DISABLED; fi
+          else
+            ENABLED=null
+            if grep -Fq 'BILLING_DISABLED' /tmp/billing.err; then STATUS=DISABLED; fi
+            echo '{}' > /tmp/billing.json
+          fi
+          jq --arg status "$STATUS" '{schemaVersion:"toca.ag01.production-billing-readback.v1",billingEnabled:(.billingEnabled // null),billingAccountLinked:((.billingAccountName // "") != ""),status:$status}' /tmp/billing.json > ag01-billing-readback/billing.json
+          jq -n --arg sourceSha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg status "$STATUS" '{schemaVersion:"toca.ag01.production-billing-readback.run.v1",sourceSha:$sourceSha,runId:$runId,status:$status,billingMutationExecuted:false,providerMutationExecuted:false,cloudRunMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' > ag01-billing-readback/run-metadata.json
+          if [[ "$STATUS" == "UNKNOWN" ]]; then
+            echo 'Billing status could not be read with the production deployer identity.' >&2
+            cat /tmp/billing.err >&2 || true
+            exit 1
+          fi
+          echo "BILLING_STATUS=$STATUS"
+
+      - name: Upload immutable billing readback
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-billing-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-billing-readback
+          if-no-files-found: error
+          retention-days: 30
