@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  AG01_REQUIRED_TABLES,
-  assertAg01PersistenceReady,
-} from '../src/orchestrator/readiness.js';
+import { AG01_REQUIRED_TABLES, assertAg01PersistenceReady } from '../src/orchestrator/readiness.js';
 
 describe('AG-01 production persistence readiness', () => {
   it('passes only when every AG-01 durable table exists', async () => {
