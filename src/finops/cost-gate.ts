@@ -31,10 +31,7 @@ export function evaluateCostGate(input: CostGateInput): CostGateResult {
   if (input.estimatedCostMicroUsd === null || input.priceCatalogVersion === null) {
     return result(input, 'BLOCK', 'FINOPS_COST_OR_PRICE_UNKNOWN');
   }
-  if (
-    !Number.isSafeInteger(input.estimatedCostMicroUsd) ||
-    input.estimatedCostMicroUsd < 0
-  ) {
+  if (!Number.isSafeInteger(input.estimatedCostMicroUsd) || input.estimatedCostMicroUsd < 0) {
     return result(input, 'BLOCK', 'FINOPS_COST_INVALID');
   }
   if (input.estimatedCostMicroUsd > input.policy.approvalLimitMicroUsd) {
