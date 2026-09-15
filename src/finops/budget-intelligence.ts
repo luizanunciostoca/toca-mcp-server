@@ -1,9 +1,5 @@
 export type BudgetUtilizationStatus =
-  | 'BELOW_50'
-  | 'NOTICE_50'
-  | 'WARNING_70'
-  | 'CRITICAL_85'
-  | 'EXCEEDED_100';
+  'BELOW_50' | 'NOTICE_50' | 'WARNING_70' | 'CRITICAL_85' | 'EXCEEDED_100';
 
 export interface BudgetUtilizationInput {
   readonly actualCostMicroUsd: number;
