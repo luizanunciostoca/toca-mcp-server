@@ -35,13 +35,11 @@ if (ag01.currentOperationalStatus !== 'DEGRADED') fail('current degraded status 
 if (ag01.deploymentAuthorized !== false) fail('deployment must fail closed while degraded');
 if (ag01.executionAuthorized !== false) fail('execution must fail closed while degraded');
 if (ag01.executionAuthority !== 'CORE_POLICY_APPROVAL_ONLY') fail('execution authority widened');
-if (ag01.directProviderWriteAuthorized !== false) fail('direct provider write must remain forbidden');
+if (ag01.directProviderWriteAuthorized !== false)
+  fail('direct provider write must remain forbidden');
 if (ag01.resourceType !== 'cloud-run-service') fail('unexpected resource type');
 if (ag01.resourceName !== 'toca-ag01-orchestrator') fail('unexpected Cloud Run service');
-if (
-  ag01.runtimeServiceAccount !==
-  'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
-) {
+if (ag01.runtimeServiceAccount !== 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com') {
   fail('runtime identity drift');
 }
 if (ag01.private !== true) fail('runtime must remain private');
@@ -68,8 +66,7 @@ if (
 const requiredTables = ag01.persistenceRequired;
 if (
   !Array.isArray(requiredTables) ||
-  requiredTables.join(',') !==
-    'ag01_conversations,ag01_message_records,ag01_runtime_circuits'
+  requiredTables.join(',') !== 'ag01_conversations,ag01_message_records,ag01_runtime_circuits'
 ) {
   fail('durable persistence contract drift');
 }
