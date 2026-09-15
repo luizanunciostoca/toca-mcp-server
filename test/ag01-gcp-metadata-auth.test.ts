@@ -105,7 +105,10 @@ describe('AG-01 GCP service-identity Sheets auth', () => {
 
   it('fails closed when IAM Credentials omits token expiry', async () => {
     await expect(
-      createMetadataResolver(undefined).resolve({ provider: 'google-oauth', key: 'sheets-readonly' }),
+      createMetadataResolver(undefined).resolve({
+        provider: 'google-oauth',
+        key: 'sheets-readonly',
+      }),
     ).rejects.toThrow('AG01_GCP_SHEETS_EXPIRY_MISSING');
   });
 
