@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -159,6 +159,35 @@
       "scheduleTransport": "protected-mcp",
       "contentPayloadInInfrastructureTimer": false,
       "legacyHeartbeatSuperseded": true
+    },
+    "ag01Orchestrator": {
+      "lifecycleStatus": "PRODUCTION_VERIFIED",
+      "deploymentAuthorized": true,
+      "executionAuthority": "CORE_POLICY_APPROVAL_ONLY",
+      "directProviderWriteAuthorized": false,
+      "resourceType": "cloud-run-service",
+      "resourceName": "toca-ag01-orchestrator",
+      "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+      "private": true,
+      "ingress": "all",
+      "modelProvider": "google-vertex-ai",
+      "model": "gemini-2.5-flash",
+      "googleRegistryAuth": "GCP_RUNTIME_IDENTITY_SCOPED_TOKEN",
+      "staticModelOrSheetsCredentialRequired": false,
+      "canonicalProductionRevision": "toca-ag01-orchestrator-vtx-d2c85284-2",
+      "canonicalRuntimeSourceSha": "d2c85284f3f67d017ee800e4c4b772f5418542d6",
+      "readinessAliases": {
+        "externalHealth": "/health",
+        "externalReady": "/ready",
+        "cloudRunStartup": "/readyz",
+        "cloudRunLiveness": "/healthz"
+      },
+      "persistenceRequired": [
+        "ag01_conversations",
+        "ag01_message_records",
+        "ag01_runtime_circuits"
+      ],
+      "sourceReconciliationTracking": "#815"
     },
     "mcpProduction": {
       "resourceType": "cloud-run-service",
