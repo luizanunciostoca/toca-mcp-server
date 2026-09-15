@@ -11,6 +11,7 @@ export async function assertAg01PersistenceReady(database: Pick<Pool, 'query'>):
     `select table_name
        from information_schema.tables
       where table_schema = 'public'
+        and table_type = 'BASE TABLE'
         and table_name = any($1::text[])`,
     [[...AG01_REQUIRED_TABLES]],
   );
