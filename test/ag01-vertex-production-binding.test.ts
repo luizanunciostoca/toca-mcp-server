@@ -129,9 +129,7 @@ describe('AG-01 production-verified Vertex binding', () => {
   it('fails closed when production omits an explicit model provider', () => {
     const env = productionEnv();
     delete env.AG01_MODEL_PROVIDER;
-    expect(() => loadAg01ProductionConfig(env)).toThrow(
-      'AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED',
-    );
+    expect(() => loadAg01ProductionConfig(env)).toThrow('AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED');
   });
 
   it('fails closed when production selects a non-Vertex model provider', () => {
@@ -182,11 +180,7 @@ describe('AG-01 production-verified Vertex binding', () => {
         if (init?.signal?.aborted) rejectAbort();
         else init?.signal?.addEventListener('abort', rejectAbort, { once: true });
       });
-    const provider = new GcpMetadataAccessTokenProvider(
-      fetchFn,
-      'http://metadata.test/token',
-      5,
-    );
+    const provider = new GcpMetadataAccessTokenProvider(fetchFn, 'http://metadata.test/token', 5);
 
     await expect(provider.getAccessToken()).rejects.toThrow('AG01_VERTEX_METADATA_TOKEN_TIMEOUT');
   });
