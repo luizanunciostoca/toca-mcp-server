@@ -71,25 +71,35 @@ describe('TOCA OS FinOps billing reconciliation and budget intelligence', () => 
 
   it('emits advisory budget bands at 50, 70, 85 and 100 percent', () => {
     const budgetMicroUsd = 100_000;
-    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 49_999, budgetMicroUsd })).toMatchObject({
-      status: 'BELOW_50',
-      thresholdPercent: 0,
-      advisoryOnly: true,
-      sideEffects: false,
-    });
-    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 50_000, budgetMicroUsd })).toMatchObject({
-      status: 'NOTICE_50',
-      thresholdPercent: 50,
-    });
-    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 70_000, budgetMicroUsd })).toMatchObject({
-      status: 'WARNING_70',
-      thresholdPercent: 70,
-    });
-    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 85_000, budgetMicroUsd })).toMatchObject({
-      status: 'CRITICAL_85',
-      thresholdPercent: 85,
-    });
-    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 110_000, budgetMicroUsd })).toMatchObject({
+    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 49_999, budgetMicroUsd })).toMatchObject(
+      {
+        status: 'BELOW_50',
+        thresholdPercent: 0,
+        advisoryOnly: true,
+        sideEffects: false,
+      },
+    );
+    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 50_000, budgetMicroUsd })).toMatchObject(
+      {
+        status: 'NOTICE_50',
+        thresholdPercent: 50,
+      },
+    );
+    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 70_000, budgetMicroUsd })).toMatchObject(
+      {
+        status: 'WARNING_70',
+        thresholdPercent: 70,
+      },
+    );
+    expect(evaluateBudgetUtilization({ actualCostMicroUsd: 85_000, budgetMicroUsd })).toMatchObject(
+      {
+        status: 'CRITICAL_85',
+        thresholdPercent: 85,
+      },
+    );
+    expect(
+      evaluateBudgetUtilization({ actualCostMicroUsd: 110_000, budgetMicroUsd }),
+    ).toMatchObject({
       status: 'EXCEEDED_100',
       thresholdPercent: 100,
       remainingMicroUsd: 0,
