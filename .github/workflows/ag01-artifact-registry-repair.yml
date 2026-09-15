@@ -1,0 +1,209 @@
+name: AG-01 Artifact Registry Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_main_sha:
+        description: Exact main SHA authorized for this repair
+        required: true
+        type: string
+      expected_parent_policy_sha256:
+        description: SHA-256 of infra/control-plane/policy.json
+        required: true
+        type: string
+      expected_repair_policy_sha256:
+        description: SHA-256 of AG-01 repair policy
+        required: true
+        type: string
+      confirmation:
+        description: Type RESTORE_ARTIFACT_REGISTRY_ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ag01-artifact-registry-repair-production
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE_NAME: artifactregistry.googleapis.com
+  ARTIFACT_REPOSITORY: toca-mcp
+  IMMUTABLE_IMAGE_DIGEST: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/ag01@sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96
+  INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PARENT_POLICY: infra/control-plane/policy.json
+  REPAIR_POLICY: infra/control-plane/ag01-artifact-registry-repair-policy.json
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact canonical main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify exact source and bounded repair policy before privileged auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_SHA="$(git rev-parse HEAD)"
+          test "$CURRENT_SHA" = '${{ inputs.expected_main_sha }}'
+          test '${{ inputs.confirmation }}' = 'RESTORE_ARTIFACT_REGISTRY_ONLY'
+
+          PARENT_SHA="$(sha256sum "$PARENT_POLICY" | awk '{print $1}')"
+          REPAIR_SHA="$(sha256sum "$REPAIR_POLICY" | awk '{print $1}')"
+          test "$PARENT_SHA" = '${{ inputs.expected_parent_policy_sha256 }}'
+          test "$REPAIR_SHA" = '${{ inputs.expected_repair_policy_sha256 }}'
+
+          jq -e --arg digest "$IMMUTABLE_IMAGE_DIGEST" '
+            .schemaVersion == "toca.ag01.artifact-registry-repair-policy.v1" and
+            .operationId == "restore-ag01-artifact-registry-service" and
+            .parentControlPlane.path == "infra/control-plane/policy.json" and
+            .parentControlPlane.version == 10 and
+            .parentControlPlane.projectId == "toca-mcp-production" and
+            .target.projectId == "toca-mcp-production" and
+            .target.region == "southamerica-east1" and
+            .target.serviceName == "artifactregistry.googleapis.com" and
+            .target.artifactRepository == "toca-mcp" and
+            .target.immutableImageDigest == $digest and
+            .execution.mode == "MANUAL_EXPLICIT_CONFIRMATION_ONLY" and
+            .execution.environment == "infrastructure-admin" and
+            .execution.confirmation == "RESTORE_ARTIFACT_REGISTRY_ONLY" and
+            .execution.allowedMutation == "ENABLE_EXACT_SERVICE_ONLY" and
+            .execution.stopAfter == "IMMUTABLE_IMAGE_READBACK" and
+            .execution.requiredPermission == "serviceusage.services.enable" and
+            .preconditions.projectBillingEnabled == true and
+            .preconditions.ag01OperationalStatus == "DEGRADED" and
+            .preconditions.ag01ExecutionAuthorized == false and
+            .preconditions.ag01DeploymentAuthorized == false and
+            .preconditions.artifactRegistryServiceEnabled == false and
+            .forbid.billingMutation == true and
+            .forbid.iamMutation == true and
+            .forbid.privilegeEscalation == true and
+            .forbid.arbitraryServiceEnable == true and
+            .forbid.cloudRunDeploy == true and
+            .forbid.cloudRunTrafficMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.providerMutation == true and
+            .forbid.businessCapabilityExecution == true and
+            .forbid.serviceAccountKeyCreation == true
+          ' "$REPAIR_POLICY" >/dev/null
+
+          jq -e '
+            .projectId == "toca-mcp-production" and
+            .adminServiceAccount == "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com" and
+            .activeRuntime.ag01Orchestrator.currentOperationalStatus == "DEGRADED" and
+            .activeRuntime.ag01Orchestrator.executionAuthorized == false and
+            .activeRuntime.ag01Orchestrator.deploymentAuthorized == false and
+            .activeRuntime.ag01Orchestrator.cloudPlatformReadback.projectBillingEnabled == true and
+            .activeRuntime.ag01Orchestrator.cloudPlatformReadback.artifactRegistryServiceEnabled == false
+          ' "$PARENT_POLICY" >/dev/null
+
+          echo "AG01_ARTIFACT_REGISTRY_REPAIR_POLICY_PRECHECK=PASS"
+
+      - name: Authenticate as infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify live authority and production preconditions
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-artifact-registry-repair-evidence
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          HTTP="$(curl --silent --show-error \
+            --output /tmp/permissions.json \
+            --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data '{"permissions":["serviceusage.services.enable","serviceusage.services.get","artifactregistry.repositories.get"]}' \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:testIamPermissions")"
+          unset ACCESS_TOKEN
+          test "$HTTP" = 200
+
+          if ! jq -e '.permissions // [] | index("serviceusage.services.enable") != null' /tmp/permissions.json >/dev/null; then
+            jq '{schemaVersion:"toca.ag01.artifact-registry-repair.preflight.v1",grantedPermissions:(.permissions // [] | sort),repairAuthorized:false,reason:"MISSING_SERVICEUSAGE_SERVICES_ENABLE",mutationExecuted:false}' \
+              /tmp/permissions.json > ag01-artifact-registry-repair-evidence/preflight.json
+            echo 'AG01_ARTIFACT_REGISTRY_REPAIR_BLOCKED=MISSING_SERVICEUSAGE_SERVICES_ENABLE' >&2
+            exit 1
+          fi
+
+          BILLING_ENABLED="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')"
+          test "$BILLING_ENABLED" = 'True' -o "$BILLING_ENABLED" = 'true'
+
+          if gcloud services list --enabled --project "$PROJECT_ID" --filter="config.name:${SERVICE_NAME}" --format='value(config.name)' | grep -Fxq "$SERVICE_NAME"; then
+            echo 'AG01_ARTIFACT_REGISTRY_REPAIR_NOT_NEEDED=SERVICE_ALREADY_ENABLED' >&2
+            exit 1
+          fi
+
+          jq '{schemaVersion:"toca.ag01.artifact-registry-repair.preflight.v1",grantedPermissions:(.permissions // [] | sort),repairAuthorized:true,reason:"PRECONDITIONS_SATISFIED",mutationExecuted:false}' \
+            /tmp/permissions.json > ag01-artifact-registry-repair-evidence/preflight.json
+          echo 'AG01_ARTIFACT_REGISTRY_REPAIR_PREFLIGHT=PASS'
+
+      - name: Enable exact Artifact Registry service only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud services enable "$SERVICE_NAME" \
+            --project "$PROJECT_ID" \
+            --quiet
+          echo 'AG01_ARTIFACT_REGISTRY_SERVICE_ENABLE_SUBMITTED=1'
+
+      - name: Verify exact service and immutable AG-01 image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENABLED=false
+          for attempt in $(seq 1 30); do
+            if gcloud services list --enabled --project "$PROJECT_ID" --filter="config.name:${SERVICE_NAME}" --format='value(config.name)' | grep -Fxq "$SERVICE_NAME"; then
+              ENABLED=true
+              break
+            fi
+            sleep 5
+          done
+          test "$ENABLED" = true
+
+          gcloud artifacts repositories describe "$ARTIFACT_REPOSITORY" \
+            --project "$PROJECT_ID" \
+            --location "$REGION" \
+            --format=json > /tmp/repository.json
+          gcloud artifacts docker images describe "$IMMUTABLE_IMAGE_DIGEST" \
+            --project "$PROJECT_ID" \
+            --format=json > /tmp/image.json
+
+          jq -n \
+            --arg projectId "$PROJECT_ID" \
+            --arg serviceName "$SERVICE_NAME" \
+            --arg imageDigest "$IMMUTABLE_IMAGE_DIGEST" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg sourceSha "$GITHUB_SHA" \
+            '{schemaVersion:"toca.ag01.artifact-registry-repair.evidence.v1",projectId:$projectId,serviceName:$serviceName,serviceEnabled:true,immutableImageDigest:$imageDigest,immutableImageDigestReadable:true,runId:$runId,sourceSha:$sourceSha,serviceUsageMutationExecuted:true,cloudRunDeploymentExecuted:false,cloudRunTrafficMutationExecuted:false,databaseMutationExecuted:false,providerMutationExecuted:false,businessCapabilityExecuted:false,billingMutationExecuted:false,iamMutationExecuted:false}' \
+            > ag01-artifact-registry-repair-evidence/result.json
+
+          echo 'AG01_ARTIFACT_REGISTRY_REPAIR=VERIFIED'
+
+      - name: Upload immutable repair evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-artifact-registry-repair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-artifact-registry-repair-evidence
+          if-no-files-found: warn
+          retention-days: 90
