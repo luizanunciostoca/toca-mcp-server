@@ -66,5 +66,38 @@ requireIncludes('docs/architecture/finops-runtime-cost-reconciliation-v1.md', [
   'performs no automatic model switching',
   'not invoice settlement',
 ]);
+requireIncludes('migrations/042_finops_billing_snapshots.sql', [
+  'create table if not exists finops_billing_snapshots',
+  "currency text not null check (currency = 'USD')",
+  'billed_cost_micro_usd bigint not null',
+  'FINOPS_BILLING_SNAPSHOT_APPEND_ONLY',
+  'before update or delete on finops_billing_snapshots',
+]);
+requireIncludes('src/finops/billing-reconciliation.ts', [
+  "'MISSING_LEDGER_COST'",
+  "'BILLING_EXCEEDS_LEDGER'",
+  "'LEDGER_EXCEEDS_BILLING'",
+  'sideEffects: false',
+]);
+requireIncludes('src/finops/budget-intelligence.ts', [
+  "'NOTICE_50'",
+  "'WARNING_70'",
+  "'CRITICAL_85'",
+  "'EXCEEDED_100'",
+  'advisoryOnly: true',
+  'sideEffects: false',
+]);
+requireIncludes('src/finops/postgres-finops-read-model.ts', [
+  "'PROVIDER' | 'CATEGORY' | 'ROUTE' | 'AGENT' | 'CAMPAIGN'",
+  "phase = 'ACTUAL'",
+  'reconcileBillingSnapshot',
+]);
+requireIncludes('docs/architecture/finops-billing-budget-intelligence-v1.md', [
+  'ADVISORY_ONLY',
+  'NO_FX_CONVERSION',
+  'no automatic budget change',
+  'no provider write',
+  'real `DATABASE_URL`',
+]);
 
 console.log('FINOPS_COST_CONTROL_CONTRACT=PASS');
