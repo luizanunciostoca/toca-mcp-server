@@ -13,9 +13,7 @@ const policy = {
 describe('TOCA OS FinOps cost control', () => {
   it('prices Flash and Flash Lite deterministically in integer micro-USD', () => {
     const usage = { inputTokens: 10_000, cachedInputTokens: 0, outputTokens: 2_000 };
-    expect(estimateAiTextCost('gemini-2.5-flash', 'STANDARD', usage).totalCostMicroUsd).toBe(
-      8_000,
-    );
+    expect(estimateAiTextCost('gemini-2.5-flash', 'STANDARD', usage).totalCostMicroUsd).toBe(8_000);
     expect(
       estimateAiTextCost('gemini-2.5-flash-lite', 'STANDARD', usage).totalCostMicroUsd,
     ).toBe(1_800);
