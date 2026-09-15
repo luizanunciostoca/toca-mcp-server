@@ -6,9 +6,7 @@ export const AG01_REQUIRED_TABLES = [
   'ag01_runtime_circuits',
 ] as const;
 
-export async function assertAg01PersistenceReady(
-  database: Pick<Pool, 'query'>,
-): Promise<void> {
+export async function assertAg01PersistenceReady(database: Pick<Pool, 'query'>): Promise<void> {
   const result = await database.query<{ table_name: string }>(
     `select table_name
        from information_schema.tables
