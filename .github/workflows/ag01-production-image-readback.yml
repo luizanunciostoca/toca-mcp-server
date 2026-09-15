@@ -1,0 +1,77 @@
+name: AG-01 Production Image Readback
+
+on:
+  push:
+    branches:
+      - ops/ag01-readonly-readback-20260915
+    paths:
+      - '.github/workflows/ag01-production-image-readback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Authenticate read-only GCP boundary
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify exact serving image and revision platform contract
+        run: |
+          set -euo pipefail
+          mkdir -p ag01-image-readback
+          gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/service.json
+          REVISION="$(jq -r '.status.traffic[]? | select((.percent // 0)==100) | .revisionName // empty' /tmp/service.json | head -n1)"
+          [[ -n "$REVISION" ]] || { echo 'Serving revision unavailable' >&2; exit 1; }
+          gcloud run revisions describe "$REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/revision.json
+
+          IMAGE="$(jq -r '.spec.containers[0].image // empty' /tmp/revision.json)"
+          DIGEST="$(jq -r '.status.imageDigest // empty' /tmp/revision.json)"
+          [[ -n "$IMAGE" && -n "$DIGEST" ]] || { echo 'Serving image identity unavailable' >&2; exit 1; }
+
+          BASE_IMAGE="${IMAGE%@*}"
+          BASE_IMAGE="${BASE_IMAGE%:*}"
+          DIGEST_REF="${BASE_IMAGE}@${DIGEST}"
+
+          IMAGE_EXISTS=false
+          if gcloud artifacts docker images describe "$DIGEST_REF" --project "$PROJECT_ID" --format=json > /tmp/image.json 2>/tmp/image.err; then
+            IMAGE_EXISTS=true
+          else
+            echo '{}' > /tmp/image.json
+          fi
+
+          jq --arg image "$IMAGE" --arg digest "$DIGEST" --arg digestRef "$DIGEST_REF" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.v1",revision:.metadata.name,readyConditions:[.status.conditions[]? | {type,status,reason,message,lastTransitionTime}],container:{image:$image,imageDigest:$digest,digestReference:$digestRef,imageExistsInArtifactRegistry:($imageExists=="true"),startupProbe:(.spec.containers[0].startupProbe // null),livenessProbe:(.spec.containers[0].livenessProbe // null),resources:(.spec.containers[0].resources // null)},scaling:{containerConcurrency:(.spec.containerConcurrency // null),timeoutSeconds:(.spec.timeoutSeconds // null),annotations:(.metadata.annotations // {})}}' /tmp/revision.json > ag01-image-readback/revision-image.json
+          jq '{schemaVersion:"toca.ag01.production-image-artifact.v1",package:(.package // null),version:(.version // null),imageSummary:(.image_summary // null),buildTime:(.build_time // null),updateTime:(.update_time // null)}' /tmp/image.json > ag01-image-readback/artifact-registry.json
+          jq -n --arg sourceSha "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg revision "$REVISION" --arg imageExists "$IMAGE_EXISTS" '{schemaVersion:"toca.ag01.production-image-readback.run.v1",sourceSha:$sourceSha,runId:$runId,productionRevision:$revision,imageExistsInArtifactRegistry:($imageExists=="true"),providerMutationExecuted:false,cloudRunMutationExecuted:false,trafficMutationExecuted:false,databaseMutationExecuted:false,businessCapabilityExecuted:false,secretPayloadRead:false}' > ag01-image-readback/run-metadata.json
+
+          if [[ "$IMAGE_EXISTS" != "true" ]]; then
+            echo "Serving AG-01 image digest is no longer retrievable from Artifact Registry: $DIGEST_REF" >&2
+            exit 1
+          fi
+
+      - name: Upload immutable image readback
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-production-image-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ag01-image-readback
+          if-no-files-found: error
+          retention-days: 30
