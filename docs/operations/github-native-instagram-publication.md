@@ -4,7 +4,7 @@
 
 Replace the publication scheduler/runtime dependency on Google Cloud with a GitHub-native control plane while preserving TOCA OS approval, Creative Truth, exact asset binding, idempotency, provider readback, evidence, and fail-closed behavior.
 
-This lane does **not** use Cloud Scheduler, Cloud Run, Cloud SQL, GCS, Workload Identity Federation, Google Secret Manager, or the TOCA_POSTGRES publication daemon.
+The canonical scheduler, publisher, and asset-stager lane does **not** use Cloud Scheduler, Cloud Run, Cloud SQL, GCS, Workload Identity Federation, Google Secret Manager, or the TOCA_POSTGRES publication daemon. A temporary recovery bridge may use WIF and Secret Manager only under the one-shot contract documented below; that bridge is not the canonical steady-state publisher.
 
 The canonical editorial/approval source remains TOCA OS. `control/github-native-publication-queue.json` is a controlled execution mirror containing only already-produced and already-approved items.
 
@@ -32,6 +32,22 @@ The GitHub connector used by ChatGPT cannot create or read repository secrets/va
 - `META_ACCESS_TOKEN`: valid Meta access token for the target Instagram professional/business account, with the permissions required by the existing Instagram content publishing integration. Never put this token in the queue, source code, issue, PR, artifact, asset manifest, or chat.
 
 The secret is injected only into the provider-execution step; install/build/setup steps do not receive it.
+
+### Temporary one-shot recovery bridge
+
+When the canonical GitHub secret is unavailable during an explicitly authorized production recovery, `.github/workflows/github-native-instagram-canary-secret-bridge.yml` may be used temporarily to read the existing `toca-meta-oauth-token` from Google Secret Manager. This exception does not change the steady-state architecture or credential contract.
+
+The recovery bridge must satisfy all of the following:
+
+- run only from a protected `main` push and never expose `workflow_dispatch`, schedule, or repository-dispatch triggers;
+- be guarded by the exact immutable `github.event.before` SHA for the single authorized transition, so later queue pushes cannot re-enter the write path;
+- authenticate directly as `toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com` through the canonical WIF provider and `production` environment; do not widen deployer/infra-admin permissions or create service-account keys;
+- read only `toca-meta-oauth-token`, keep its value in runner memory, mask it before provider execution, and never persist it in logs, source, artifacts, queue, ledger, issue, PR, or chat;
+- bind to exactly one approved canary item and recheck its time window immediately before provider execution;
+- fail unless the immutable evidence contains exactly that item with `PUBLISHED_AND_READBACK_VERIFIED` or `RECONCILED_ALREADY_PUBLISHED_READBACK_VERIFIED` plus a non-empty external media ID;
+- be removed or rendered unreachable in the first protected cleanup change after the authorized run, whether the run succeeds or fails.
+
+The bridge is a bounded recovery mechanism only. Once the canonical `META_ACCESS_TOKEN` GitHub secret is configured, normal CANARY/LIMITED/GENERAL operations must use `.github/workflows/github-native-instagram-publisher.yml` instead.
 
 ### Variables
 

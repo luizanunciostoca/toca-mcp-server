@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 const publisher = readFileSync('.github/workflows/github-native-instagram-publisher.yml', 'utf8');
 const stager = readFileSync('.github/workflows/github-native-instagram-stage-asset.yml', 'utf8');
+const canaryBridge = readFileSync(
+  '.github/workflows/github-native-instagram-canary-secret-bridge.yml',
+  'utf8',
+);
 const legacyPublishNow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
 const legacyAutopilot = readFileSync(
   '.github/workflows/marketing-autopilot-publication.yml',
@@ -19,7 +23,7 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(publisher).toContain("timezone: 'America/Bahia'");
   });
 
-  it('has no Google Cloud execution or identity dependency', () => {
+  it('has no Google Cloud execution or identity dependency in the canonical lane', () => {
     for (const content of [publisher, stager]) {
       expect(content).not.toContain('google-github-actions/');
       expect(content).not.toContain('gcloud ');
@@ -73,6 +77,29 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(stager).toContain('test "$magic" = "ffd8ff"');
     expect(stager).toContain('publication-assets/${sha}.jpg');
     expect(stager).toContain('raw.githubusercontent.com');
+  });
+
+  it('keeps the temporary canary bridge one-shot, runtime-only, and readback-gated', () => {
+    expect(canaryBridge).toContain('push:');
+    expect(canaryBridge).not.toContain('schedule:');
+    expect(canaryBridge).not.toContain('repository_dispatch:');
+    expect(canaryBridge).not.toContain('workflow_dispatch:');
+    expect(canaryBridge).toContain(
+      "if: github.event.before == '69f388b2726b64f622b7fb2e51a65460b68e7022'",
+    );
+    expect(canaryBridge).toContain('environment: production');
+    expect(canaryBridge).toContain(
+      'GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
+    );
+    expect(canaryBridge).toContain(
+      'service_account: ${{ env.GCP_RUNTIME_SERVICE_ACCOUNT }}',
+    );
+    expect(canaryBridge).not.toContain('toca-mcp-deployer@');
+    expect(canaryBridge).not.toContain('toca-mcp-infra-admin@');
+    expect(canaryBridge).toContain('GCP_META_TOKEN_SECRET_ID: toca-meta-oauth-token');
+    expect(canaryBridge).toContain('item_count=');
+    expect(canaryBridge).toContain('PUBLISHED_AND_READBACK_VERIFIED');
+    expect(canaryBridge).toContain('RECONCILED_ALREADY_PUBLISHED_READBACK_VERIFIED');
   });
 
   it('keeps the older publish-now GCP lane disabled unless explicitly re-authorized', () => {
