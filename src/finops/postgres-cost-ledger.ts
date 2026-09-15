@@ -174,7 +174,10 @@ function safeInteger(value: string | number): number {
   return parsed;
 }
 
-function requireJsonObject(value: unknown, field: 'USAGE' | 'METADATA'): Readonly<Record<string, unknown>> {
+function requireJsonObject(
+  value: unknown,
+  field: 'USAGE' | 'METADATA',
+): Readonly<Record<string, unknown>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`FINOPS_DB_JSON_INVALID:${field}`);
   }

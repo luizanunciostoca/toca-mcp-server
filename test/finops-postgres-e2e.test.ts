@@ -89,7 +89,9 @@ postgresDescribe('TOCA OS FinOps PostgreSQL E2E', () => {
       ).rejects.toThrow('FINOPS_COST_EVENT_ID_CONFLICT');
 
       await expect(
-        pool.query('update finops_cost_events set provider = provider where event_id = $1', [eventId]),
+        pool.query('update finops_cost_events set provider = provider where event_id = $1', [
+          eventId,
+        ]),
       ).rejects.toThrow('FINOPS_COST_LEDGER_APPEND_ONLY');
       await expect(
         pool.query('delete from finops_cost_events where event_id = $1', [eventId]),
