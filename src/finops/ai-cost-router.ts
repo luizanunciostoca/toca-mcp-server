@@ -42,7 +42,7 @@ export type AiCostRoutingPlan =
 
 /**
  * Cost-aware recommendation only. The caller must still pass Core Policy,
- * Approval and provider-readback gates. This function performs no model call.
+ * Approval and provider-readback gates. This function performs no provider call.
  */
 export function routeAiCost(request: AiCostRoutingRequest): AiCostRoutingPlan {
   if (request.deterministicAvailable && !request.requiresGenerativeLanguage) {
