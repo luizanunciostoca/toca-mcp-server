@@ -16,8 +16,11 @@ const required = [
   'src/contracts/creative-truth.ts',
   'src/creative/creative-truth.ts',
   'src/creative/creative-truth-resolver.ts',
+  'src/creative/sunset-story-template-engine.ts',
+  'control/creative-standards/sunset-story-reference-template-library.v1.json',
   'src/providers/google-sheets/creative-truth-registry.ts',
   'src/providers/local/local-creative-composer.ts',
+  'src/providers/local/local-story-composer.ts',
   'src/providers/local/local-video-composer.ts',
   'docs/architecture/creative-truth-and-venue-fidelity.md',
 ];
@@ -93,7 +96,7 @@ const story = JSON.parse(
   readFileSync('control/creative-standards/sunset-story-standard.v1.json', 'utf8'),
 );
 if (
-  story.standardVersion !== '1.2' ||
+  story.standardVersion !== '1.3' ||
   story.referencePolicy?.derivedExamplesClassification !== 'VISUAL_DIRECTION_REFERENCE_ONLY' ||
   story.referencePolicy?.venueTruthComesOnlyFromVenueRegistry !== true
 ) {
@@ -115,6 +118,25 @@ if (
 }
 
 const creativeTruth = readFileSync('src/creative/creative-truth.ts', 'utf8');
+const templateEngine = readFileSync('src/creative/sunset-story-template-engine.ts', 'utf8');
+const resolver = readFileSync('src/creative/creative-truth-resolver.ts', 'utf8');
+for (const marker of ['templateId?: SunsetTemplateId', 'resolveSunsetTemplate']) {
+  if (!resolver.includes(marker)) {
+    console.error(`Sunset resolver missing explicit template selection: ${marker}`);
+    process.exit(1);
+  }
+}
+for (const marker of [
+  'SUNSET_REFERENCE_TEMPLATE_LIBRARY_ID',
+  'evaluateSunsetStoryTemplateGate',
+  'FAILED_TEMPLATE_REQUIRED_ELEMENT_MISSING',
+  'FAILED_TEMPLATE_ELEMENT_OVERLAP',
+]) {
+  if (!templateEngine.includes(marker)) {
+    console.error(`Sunset pure-template engine missing hard contract: ${marker}`);
+    process.exit(1);
+  }
+}
 for (const marker of [
   'FAILED_AI_LOGO_RECONSTRUCTION',
   'FAILED_SCENE_INVENTION_DETECTED',
