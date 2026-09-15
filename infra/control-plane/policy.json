@@ -160,6 +160,70 @@
       "contentPayloadInInfrastructureTimer": false,
       "legacyHeartbeatSuperseded": true
     },
+    "ag01Orchestrator": {
+      "lifecycleStatus": "PRODUCTION_VERIFIED_DEGRADED",
+      "historicalVerification": {
+        "status": "PRODUCTION_VERIFIED",
+        "verifiedAt": "2026-08-28",
+        "canonicalProductionRevision": "toca-ag01-orchestrator-vtx-d2c85284-2",
+        "canonicalRuntimeSourceSha": "d2c85284f3f67d017ee800e4c4b772f5418542d6"
+      },
+      "currentOperationalStatus": "DEGRADED",
+      "currentFreshnessObservedAt": "2026-09-15T19:43:48Z",
+      "deploymentAuthorized": false,
+      "executionAuthorized": false,
+      "executionAuthority": "CORE_POLICY_APPROVAL_ONLY",
+      "directProviderWriteAuthorized": false,
+      "resourceType": "cloud-run-service",
+      "resourceName": "toca-ag01-orchestrator",
+      "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+      "private": true,
+      "ingress": "all",
+      "modelProvider": "google-vertex-ai",
+      "model": "gemini-2.5-flash",
+      "googleRegistryAuth": "GCP_RUNTIME_IDENTITY_SCOPED_TOKEN",
+      "staticModelOrSheetsCredentialRequired": false,
+      "readinessAliases": {
+        "externalHealth": "/health",
+        "externalReady": "/ready",
+        "cloudRunStartup": "/readyz",
+        "cloudRunLiveness": "/healthz"
+      },
+      "persistenceRequired": [
+        "ag01_conversations",
+        "ag01_message_records",
+        "ag01_runtime_circuits"
+      ],
+      "sourceReconciliation": {
+        "status": "MERGED",
+        "pr": "#815",
+        "mainSha": "5d88effafb399099bbc3cef03b42bcb7a4ea6449"
+      },
+      "cloudPlatformReadback": {
+        "projectBillingEnabled": true,
+        "billingAccountLinked": true,
+        "artifactRegistryServiceEnabled": false,
+        "artifactRegistryRepositoryReadback": "BILLING_DISABLED",
+        "baseHealthHttpStatus": 500,
+        "baseReadyHttpStatus": 503,
+        "taggedHealthHttpStatus": 503,
+        "taggedReadyHttpStatus": 503,
+        "failedRequestLatency": "0s",
+        "containerSystemEventCount": 0
+      },
+      "freshnessEvidence": [
+        "github-actions:35012288857:attempt-2",
+        "github-actions:35015095866:attempt-1",
+        "github-actions:35015308326:attempt-1"
+      ],
+      "repairRequirements": [
+        "ARTIFACT_REGISTRY_SERVICE_ENABLED",
+        "IMMUTABLE_IMAGE_READBACK_VERIFIED",
+        "HEALTH_200",
+        "READY_200",
+        "EXACT_HEAD_DEPLOYMENT_CERTIFIED"
+      ]
+    },
     "mcpProduction": {
       "resourceType": "cloud-run-service",
       "resourceName": "toca-mcp-production",
