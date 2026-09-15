@@ -77,16 +77,33 @@ export function loadAg01ProductionConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Ag01ProductionConfig {
   const value = schema.parse(env);
+
+  if (value.NODE_ENV === 'production') {
+    if (!env.AG01_MODEL_PROVIDER?.trim()) {
+      throw new Error('AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED');
+    }
+    if (value.AG01_MODEL_PROVIDER !== 'vertex') {
+      throw new Error('AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED');
+    }
+    if (!env.AG01_GOOGLE_AUTH_MODE?.trim()) {
+      throw new Error('AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED');
+    }
+    if (value.AG01_GOOGLE_AUTH_MODE !== 'gcp_metadata') {
+      throw new Error('AG01_PRODUCTION_GCP_METADATA_REQUIRED');
+    }
+  }
+
   if (value.AG01_MODEL_PROVIDER === 'openai') {
     if (!value.AG01_OPENAI_API_KEY_ENV_KEY) throw new Error('AG01_OPENAI_API_KEY_ENV_KEY_REQUIRED');
     if (!value.AG01_OPENAI_MODEL) throw new Error('AG01_OPENAI_MODEL_REQUIRED');
     requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
   }
-  const vertexProjectId =
-    value.AG01_VERTEX_PROJECT_ID ??
-    env.GOOGLE_CLOUD_PROJECT?.trim() ??
-    env.GCP_PROJECT_ID?.trim() ??
-    '';
+
+  const vertexProjectId = firstNonEmpty(
+    value.AG01_VERTEX_PROJECT_ID,
+    env.GOOGLE_CLOUD_PROJECT,
+    env.GCP_PROJECT_ID,
+  );
   if (value.AG01_MODEL_PROVIDER === 'vertex' && !vertexProjectId) {
     throw new Error('AG01_VERTEX_PROJECT_ID_REQUIRED');
   }
@@ -188,6 +205,14 @@ function csv(raw: string): string[] {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function firstNonEmpty(...values: readonly (string | undefined)[]): string {
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized) return normalized;
+  }
+  return '';
 }
 
 function requireReferencedSecret(env: NodeJS.ProcessEnv, key: string, source: string): void {
