@@ -9,13 +9,17 @@ import { DurableFollowupCoordinator } from './durable-followup.js';
 import { GoogleOAuthRefreshSecretResolver } from './google-oauth-secret-resolver.js';
 import { PostgresConversationStore } from './postgres-conversation-store.js';
 import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
-import { OpenAiResponsesDecisionAdapter } from './openai-responses-adapter.js';
+import {
+  OpenAiResponsesDecisionAdapter,
+  type Ag01DecisionModelAdapter,
+} from './openai-responses-adapter.js';
 import {
   Ag01DecisionContext,
   ModelBackedIntentRouteResolver,
   StructuredDecisionPlanBuilder,
 } from './production-planning.js';
 import type { Ag01ProductionConfig } from './production-config.js';
+import { assertAg01PersistenceReady } from './readiness.js';
 import { TocaOrchestratorRuntime } from './runtime.js';
 import { deterministicId } from './safety.js';
 import {
@@ -23,9 +27,10 @@ import {
   TocaOsCanonicalArtifactResolver,
 } from './toca-os-registry.js';
 import type { Ag01StructuredDecision } from './structured-decision.js';
+import { VertexGeminiDecisionAdapter } from './vertex-gemini-decision-adapter.js';
 
 export const AG01_SERVICE_NAME = 'toca-ag01-orchestrator';
-export const AG01_SERVICE_VERSION = '0.1.0';
+export const AG01_SERVICE_VERSION = '0.2.0';
 
 export interface Ag01RuntimeRequest {
   readonly conversationId?: string;
@@ -111,15 +116,25 @@ export function createAg01ProductionRuntime(
     cacheTtlMs: config.registryCacheTtlMs,
     timeoutMs: config.registryTimeoutMs,
   });
-  const model = new OpenAiResponsesDecisionAdapter({
-    baseUrl: config.openAiBaseUrl,
-    model: config.openAiModel,
-    apiKeyReference: { provider: 'env', key: config.openAiApiKeyEnvKey },
-    secrets,
-    timeoutMs: config.openAiTimeoutMs,
-    maxRetries: config.openAiMaxRetries,
-    maxOutputTokens: config.openAiMaxOutputTokens,
-  });
+  const model: Ag01DecisionModelAdapter =
+    config.modelProvider === 'vertex'
+      ? new VertexGeminiDecisionAdapter({
+          projectId: config.vertexProjectId,
+          location: config.vertexLocation,
+          model: config.vertexModel,
+          timeoutMs: config.openAiTimeoutMs,
+          maxRetries: config.openAiMaxRetries,
+          maxOutputTokens: config.openAiMaxOutputTokens,
+        })
+      : new OpenAiResponsesDecisionAdapter({
+          baseUrl: config.openAiBaseUrl,
+          model: config.openAiModel,
+          apiKeyReference: { provider: 'env', key: config.openAiApiKeyEnvKey },
+          secrets,
+          timeoutMs: config.openAiTimeoutMs,
+          maxRetries: config.openAiMaxRetries,
+          maxOutputTokens: config.openAiMaxOutputTokens,
+        });
   const runtimeCapabilityIds = Object.freeze(
     coreComposition.registry
       .list()
@@ -198,7 +213,12 @@ export function createAg01ProductionRuntime(
     execute,
     resume,
     readiness: async () => {
-      await Promise.all([pool.query('select 1'), model.readiness(), tocaOs.snapshot(true)]);
+      await Promise.all([
+        pool.query('select 1'),
+        assertAg01PersistenceReady(pool),
+        model.readiness(),
+        tocaOs.snapshot(true),
+      ]);
       if (runtimeCapabilityIds.length === 0)
         throw new Error('AG01_CORE_RUNTIME_CAPABILITIES_EMPTY');
     },
@@ -218,6 +238,7 @@ function productionIdentity(config: Ag01ProductionConfig): ExecutionIdentity {
     allowedTargetAccounts: config.allowedTargetAccounts,
     evidence: [
       `ag01-runtime:${AG01_SERVICE_VERSION}`,
+      `ag01-model-provider:${config.modelProvider}`,
       `runtime:tenant:${config.tenantId}`,
       'architecture:ag01-to-core-only',
       'deployment-contract:cloud-run-authenticated-boundary',

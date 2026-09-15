@@ -1,6 +1,7 @@
 import * as z from 'zod/v4';
 import { AUTHORIZATION_ROLES, type AuthorizationRole } from '../core/identity.js';
 import { isRouteId, type RouteId } from '../governance/types.js';
+import { AG01_GCP_METADATA_REFERENCE_KEY } from './google-oauth-secret-resolver.js';
 
 const positiveInteger = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 
@@ -9,17 +10,22 @@ const schema = z.object({
   DATABASE_URL: z.string().trim().min(1),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   AG01_HOST: z.string().trim().min(1).optional(),
+  AG01_MODEL_PROVIDER: z.enum(['openai', 'vertex']).default('openai'),
   AG01_OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  AG01_OPENAI_API_KEY_ENV_KEY: z.string().trim().min(1),
-  AG01_OPENAI_MODEL: z.string().trim().min(1),
+  AG01_OPENAI_API_KEY_ENV_KEY: z.string().trim().min(1).optional(),
+  AG01_OPENAI_MODEL: z.string().trim().min(1).optional(),
+  AG01_VERTEX_PROJECT_ID: z.string().trim().min(1).optional(),
+  AG01_VERTEX_LOCATION: z.string().trim().min(1).default('global'),
+  AG01_VERTEX_MODEL: z.string().trim().min(1).default('gemini-2.5-flash'),
   AG01_OPENAI_TIMEOUT_MS: positiveInteger(20_000),
   AG01_OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   AG01_OPENAI_MAX_OUTPUT_TOKENS: positiveInteger(4096),
   AG01_TOCA_OS_ROUTING_SPREADSHEET_ID: z.string().trim().min(1),
   AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID: z.string().trim().min(1),
-  AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY: z.string().trim().min(1),
-  AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY: z.string().trim().min(1),
-  AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY: z.string().trim().min(1),
+  AG01_GOOGLE_AUTH_MODE: z.enum(['oauth_refresh', 'gcp_metadata']).default('oauth_refresh'),
+  AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY: z.string().trim().min(1).optional(),
+  AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY: z.string().trim().min(1).optional(),
+  AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY: z.string().trim().min(1).optional(),
   AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT: z.string().url().default('https://oauth2.googleapis.com/token'),
   AG01_REGISTRY_CACHE_TTL_MS: positiveInteger(60_000),
   AG01_REGISTRY_TIMEOUT_MS: positiveInteger(10_000),
@@ -38,14 +44,19 @@ export interface Ag01ProductionConfig {
   readonly databaseUrl: string;
   readonly host: string;
   readonly port: number;
+  readonly modelProvider: 'openai' | 'vertex';
   readonly openAiBaseUrl: string;
   readonly openAiApiKeyEnvKey: string;
   readonly openAiModel: string;
+  readonly vertexProjectId: string;
+  readonly vertexLocation: string;
+  readonly vertexModel: string;
   readonly openAiTimeoutMs: number;
   readonly openAiMaxRetries: number;
   readonly openAiMaxOutputTokens: number;
   readonly routingSpreadsheetId: string;
   readonly canonicalResourcesSpreadsheetId: string;
+  readonly googleAuthMode: 'oauth_refresh' | 'gcp_metadata';
   readonly googleOAuthClientIdEnvKey: string;
   readonly googleOAuthClientSecretEnvKey: string;
   readonly googleOAuthRefreshTokenEnvKey: string;
@@ -66,22 +77,66 @@ export function loadAg01ProductionConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Ag01ProductionConfig {
   const value = schema.parse(env);
-  requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
-  requireReferencedSecret(
-    env,
-    value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
-    'AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY',
+
+  if (value.NODE_ENV === 'production') {
+    if (!env.AG01_MODEL_PROVIDER?.trim()) {
+      throw new Error('AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED');
+    }
+    if (value.AG01_MODEL_PROVIDER !== 'vertex') {
+      throw new Error('AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED');
+    }
+    if (!env.AG01_GOOGLE_AUTH_MODE?.trim()) {
+      throw new Error('AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED');
+    }
+    if (value.AG01_GOOGLE_AUTH_MODE !== 'gcp_metadata') {
+      throw new Error('AG01_PRODUCTION_GCP_METADATA_REQUIRED');
+    }
+  }
+
+  if (value.AG01_MODEL_PROVIDER === 'openai') {
+    if (!value.AG01_OPENAI_API_KEY_ENV_KEY) throw new Error('AG01_OPENAI_API_KEY_ENV_KEY_REQUIRED');
+    if (!value.AG01_OPENAI_MODEL) throw new Error('AG01_OPENAI_MODEL_REQUIRED');
+    requireReferencedSecret(env, value.AG01_OPENAI_API_KEY_ENV_KEY, 'AG01_OPENAI_API_KEY_ENV_KEY');
+  }
+
+  const vertexProjectId = firstNonEmpty(
+    value.AG01_VERTEX_PROJECT_ID,
+    env.GOOGLE_CLOUD_PROJECT,
+    env.GCP_PROJECT_ID,
   );
-  requireReferencedSecret(
-    env,
-    value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY,
-    'AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY',
-  );
-  requireReferencedSecret(
-    env,
-    value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY,
-    'AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY',
-  );
+  if (value.AG01_MODEL_PROVIDER === 'vertex' && !vertexProjectId) {
+    throw new Error('AG01_VERTEX_PROJECT_ID_REQUIRED');
+  }
+
+  let googleOAuthClientIdEnvKey = AG01_GCP_METADATA_REFERENCE_KEY;
+  let googleOAuthClientSecretEnvKey = AG01_GCP_METADATA_REFERENCE_KEY;
+  let googleOAuthRefreshTokenEnvKey = AG01_GCP_METADATA_REFERENCE_KEY;
+  if (value.AG01_GOOGLE_AUTH_MODE === 'oauth_refresh') {
+    if (!value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY)
+      throw new Error('AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY_REQUIRED');
+    if (!value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY)
+      throw new Error('AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY_REQUIRED');
+    if (!value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY)
+      throw new Error('AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY_REQUIRED');
+    requireReferencedSecret(
+      env,
+      value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
+      'AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY',
+    );
+    requireReferencedSecret(
+      env,
+      value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY,
+      'AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY',
+    );
+    requireReferencedSecret(
+      env,
+      value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY,
+      'AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY',
+    );
+    googleOAuthClientIdEnvKey = value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY;
+    googleOAuthClientSecretEnvKey = value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY;
+    googleOAuthRefreshTokenEnvKey = value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY;
+  }
 
   const authorizationRoles = parseRoles(value.AG01_AUTHORIZATION_ROLES);
   const allowedRouteIds = parseRoutes(value.AG01_ALLOWED_ROUTE_IDS);
@@ -94,17 +149,22 @@ export function loadAg01ProductionConfig(
     databaseUrl: value.DATABASE_URL,
     host: value.AG01_HOST ?? (value.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'),
     port: value.PORT,
+    modelProvider: value.AG01_MODEL_PROVIDER,
     openAiBaseUrl: value.AG01_OPENAI_BASE_URL.replace(/\/$/, ''),
-    openAiApiKeyEnvKey: value.AG01_OPENAI_API_KEY_ENV_KEY,
-    openAiModel: value.AG01_OPENAI_MODEL,
+    openAiApiKeyEnvKey: value.AG01_OPENAI_API_KEY_ENV_KEY ?? '',
+    openAiModel: value.AG01_OPENAI_MODEL ?? '',
+    vertexProjectId,
+    vertexLocation: value.AG01_VERTEX_LOCATION,
+    vertexModel: value.AG01_VERTEX_MODEL,
     openAiTimeoutMs: value.AG01_OPENAI_TIMEOUT_MS,
     openAiMaxRetries: value.AG01_OPENAI_MAX_RETRIES,
     openAiMaxOutputTokens: value.AG01_OPENAI_MAX_OUTPUT_TOKENS,
     routingSpreadsheetId: value.AG01_TOCA_OS_ROUTING_SPREADSHEET_ID,
     canonicalResourcesSpreadsheetId: value.AG01_TOCA_OS_CANONICAL_RESOURCES_SPREADSHEET_ID,
-    googleOAuthClientIdEnvKey: value.AG01_GOOGLE_OAUTH_CLIENT_ID_ENV_KEY,
-    googleOAuthClientSecretEnvKey: value.AG01_GOOGLE_OAUTH_CLIENT_SECRET_ENV_KEY,
-    googleOAuthRefreshTokenEnvKey: value.AG01_GOOGLE_OAUTH_REFRESH_TOKEN_ENV_KEY,
+    googleAuthMode: value.AG01_GOOGLE_AUTH_MODE,
+    googleOAuthClientIdEnvKey,
+    googleOAuthClientSecretEnvKey,
+    googleOAuthRefreshTokenEnvKey,
     googleOAuthTokenEndpoint: value.AG01_GOOGLE_OAUTH_TOKEN_ENDPOINT,
     registryCacheTtlMs: value.AG01_REGISTRY_CACHE_TTL_MS,
     registryTimeoutMs: value.AG01_REGISTRY_TIMEOUT_MS,
@@ -145,6 +205,14 @@ function csv(raw: string): string[] {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function firstNonEmpty(...values: readonly (string | undefined)[]): string {
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized) return normalized;
+  }
+  return '';
 }
 
 function requireReferencedSecret(env: NodeJS.ProcessEnv, key: string, source: string): void {
