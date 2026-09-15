@@ -83,7 +83,11 @@ export class VertexGeminiDecisionAdapter implements Ag01DecisionModelAdapter {
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#tokens =
       options.accessTokenProvider ??
-      new GcpMetadataAccessTokenProvider(this.#fetch, DEFAULT_METADATA_TOKEN_URL, options.timeoutMs);
+      new GcpMetadataAccessTokenProvider(
+        this.#fetch,
+        DEFAULT_METADATA_TOKEN_URL,
+        options.timeoutMs,
+      );
   }
 
   async readiness(): Promise<void> {
