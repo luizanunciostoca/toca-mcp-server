@@ -1,0 +1,8 @@
+{
+  "publicationId": "github-native-3e9356148b41946660e2afd8",
+  "correlationId": "CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1",
+  "idempotencyKey": "GITHUB_NATIVE_ROLLOVER:MKT-20260917-SUNSET-FEED-0900:V1",
+  "requestFingerprint": "64601769c2fe5cbdb39c6b78b320f2643a32c0067361284aed03d94fd4d4957d",
+  "state": "DRAFT",
+  "updatedAt": "2026-09-15T19:16:24.912Z"
+}
