@@ -26,7 +26,7 @@ The estimate is priced with the pinned catalog in integer micro-USD and appended
 
 ## Actual usage
 
-After a successful Vertex response, `usageMetadata.promptTokenCount`, `cachedContentTokenCount` and `candidatesTokenCount` are normalized into canonical input, cached-input and output token usage. The configured catalog model remains the pricing key while the provider-reported response model is retained only as a hashed evidence reference.
+After a successful Vertex response, `usageMetadata.promptTokenCount`, `cachedContentTokenCount`, `candidatesTokenCount` and `thoughtsTokenCount` are normalized into canonical input, cached-input and output usage. Billable output is the safe-integer sum of response candidate tokens plus reasoning/thought tokens, matching the Google pricing category for text output as response and reasoning. The configured catalog model remains the pricing key while the provider-reported response model is retained only as a hashed evidence reference.
 
 A valid usage payload produces an `ACTUAL` CostEvent with provider response evidence hashed before persistence. FinOps never stores provider response content, tokens, credentials or arbitrary metadata.
 
