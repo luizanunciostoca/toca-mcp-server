@@ -63,11 +63,7 @@ postgresDescribe('TOCA OS FinOps runtime cost PostgreSQL E2E', () => {
         organizationId: 'organization-finops-runtime',
         correlationId,
       });
-      expect(events.map((event) => event.phase)).toEqual([
-        'ESTIMATE',
-        'ACTUAL',
-        'RECONCILIATION',
-      ]);
+      expect(events.map((event) => event.phase)).toEqual(['ESTIMATE', 'ACTUAL', 'RECONCILIATION']);
       expect(events[0]?.estimatedCostMicroUsd).toBe(8_000);
       expect(events[1]?.actualCostMicroUsd).toBe(4_630);
       expect(events[2]?.estimatedCostMicroUsd).toBe(8_000);
