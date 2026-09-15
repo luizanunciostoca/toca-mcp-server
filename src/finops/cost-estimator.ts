@@ -36,10 +36,7 @@ export function estimateAiTextCost(
   }
 
   const nonCachedInputTokens = usage.inputTokens - usage.cachedInputTokens;
-  const inputCostMicroUsd = priceUnits(
-    nonCachedInputTokens,
-    price.inputMicroUsdPerMillion,
-  );
+  const inputCostMicroUsd = priceUnits(nonCachedInputTokens, price.inputMicroUsdPerMillion);
   const cachedInputCostMicroUsd =
     usage.cachedInputTokens === 0
       ? 0
