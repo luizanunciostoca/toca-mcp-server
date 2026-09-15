@@ -15,7 +15,7 @@ describe('AG-01 GCP service-identity Sheets auth', () => {
   it('mints a Sheets-readonly token from metadata identity without OAuth refresh secrets', async () => {
     const calls: string[] = [];
     const fetchFn: typeof fetch = (url, init) => {
-      const target = String(url);
+      const target = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
       calls.push(target);
       if (target.includes('/instance/service-accounts/default/token')) {
         expect(init?.headers).toMatchObject({ 'Metadata-Flavor': 'Google' });
@@ -34,9 +34,9 @@ describe('AG-01 GCP service-identity Sheets auth', () => {
       }
       if (target.includes(':generateAccessToken')) {
         expect(init?.method).toBe('POST');
-        expect(String(init?.body)).toContain(
-          'https://www.googleapis.com/auth/spreadsheets.readonly',
-        );
+        const body = init?.body;
+        if (typeof body !== 'string') throw new Error('EXPECTED_STRING_BODY');
+        expect(body).toContain('https://www.googleapis.com/auth/spreadsheets.readonly');
         return Promise.resolve(
           new Response(
             JSON.stringify({
