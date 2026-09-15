@@ -1,0 +1,56 @@
+name: AG-01 Format Preview
+
+on:
+  push:
+    branches:
+      - ops/ag01-readonly-readback-20260915
+    paths:
+      - '.github/workflows/ag01-format-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  format-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout AG-01 P0 branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: wave/backend-autonomy-p0-current-20260915
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format affected files without committing
+        run: |
+          pnpm exec prettier --write \
+            src/orchestrator/vertex-gemini-decision-adapter.ts \
+            test/ag01-gcp-metadata-auth.test.ts \
+            test/ag01-vertex-production-binding.test.ts
+          mkdir -p format-preview/src/orchestrator format-preview/test
+          cp src/orchestrator/vertex-gemini-decision-adapter.ts format-preview/src/orchestrator/
+          cp test/ag01-gcp-metadata-auth.test.ts format-preview/test/
+          cp test/ag01-vertex-production-binding.test.ts format-preview/test/
+
+      - name: Upload exact formatter output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-format-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: format-preview
+          if-no-files-found: error
+          retention-days: 1
