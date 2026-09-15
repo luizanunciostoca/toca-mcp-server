@@ -139,11 +139,16 @@ export class GoogleOAuthRefreshSecretResolver implements SecretResolver {
       if (typeof scopedPayload.accessToken !== 'string' || !scopedPayload.accessToken.trim()) {
         throw new Error('AG01_GCP_SHEETS_ACCESS_TOKEN_MISSING');
       }
-      const expiresAtMs =
-        typeof scopedPayload.expireTime === 'string' &&
-        Number.isFinite(Date.parse(scopedPayload.expireTime))
-          ? Date.parse(scopedPayload.expireTime)
-          : this.#now().getTime() + 3_600_000;
+      if (typeof scopedPayload.expireTime !== 'string' || !scopedPayload.expireTime.trim()) {
+        throw new Error('AG01_GCP_SHEETS_EXPIRY_MISSING');
+      }
+      const expiresAtMs = Date.parse(scopedPayload.expireTime);
+      if (!Number.isFinite(expiresAtMs)) {
+        throw new Error('AG01_GCP_SHEETS_EXPIRY_INVALID');
+      }
+      if (expiresAtMs <= this.#now().getTime()) {
+        throw new Error('AG01_GCP_SHEETS_TOKEN_EXPIRED');
+      }
       this.#cache = { token: scopedPayload.accessToken, expiresAtMs };
       return scopedPayload.accessToken;
     } catch (error) {
