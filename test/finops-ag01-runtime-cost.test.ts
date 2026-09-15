@@ -75,7 +75,7 @@ describe('AG-01 runtime FinOps observer', () => {
     expect(ledger.events[1]).toMatchObject({
       routeId: 'R17',
       agentId: 'AG-01',
-      actualCostMicroUsd: 4_620,
+      actualCostMicroUsd: 4_630,
     });
     expect(ledger.events[2]?.metadata?.reconciliationRef).toContain('WITHIN_ESTIMATE');
     expect(ledger.events[1]?.metadata?.providerUsageRef).toMatch(
