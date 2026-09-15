@@ -1,4 +1,8 @@
-import type { SunsetStoryImageProfile, SunsetStoryZone } from './sunset-story-image-profile.js';
+import type {
+  SunsetStoryImageProfile,
+  SunsetStorySubjectKind,
+  SunsetStoryZone,
+} from './sunset-story-image-profile.js';
 import { planSunsetStoryCrop, type SunsetStoryCropPlan } from './sunset-story-crop-planner.js';
 import {
   SUNSET_STORY_TEMPLATE_REGISTRY,
@@ -8,10 +12,10 @@ import {
 } from './sunset-story-template-registry.js';
 
 export const SUNSET_TEMPLATE_SELECTION_WEIGHTS = {
-  subjectPreservation: 0.3,
-  textSpaceCompatibility: 0.2,
-  collisionClearance: 0.2,
-  semanticCompatibility: 0.1,
+  subjectPreservation: 0.25,
+  textSpaceCompatibility: 0.18,
+  collisionClearance: 0.25,
+  semanticCompatibility: 0.12,
   contrastReadability: 0.1,
   cropQuality: 0.05,
   antiRepeat: 0.05,
@@ -23,6 +27,8 @@ export const SUNSET_TEMPLATE_SELECTION_THRESHOLDS = {
   minimumWinningMargin: 5,
   minimumCropFitness: 35,
   minimumSubjectCoverage: 0.78,
+  maximumProtectedFeatureOverlap: 0.02,
+  minimumProtectedFeatureCoverage: 0.85,
 } as const;
 
 export interface SunsetStorySelectionHistoryItem {
@@ -101,6 +107,59 @@ function semanticScore(
   return clampScore(score);
 }
 
+function hasSubject(
+  profile: SunsetStoryImageProfile,
+  kinds: readonly SunsetStorySubjectKind[],
+): boolean {
+  return profile.subjects.some((subject) => kinds.includes(subject.kind));
+}
+
+function editorialRejectionReasons(
+  profile: SunsetStoryImageProfile,
+  intent: SunsetStoryIntent,
+): readonly string[] {
+  const reasons: string[] = [];
+
+  if (intent === 'MUSIC') {
+    if (profile.sceneClass !== 'MUSIC_DJ' && !hasSubject(profile, ['DJ_GEAR'])) {
+      reasons.push('ASSET_EDITORIAL_MISMATCH:MUSIC_REQUIRES_DJ_OR_GEAR');
+    }
+  }
+
+  if (intent === 'AMBIENCE') {
+    const allowedScenes = new Set(['VENUE_AMBIENCE', 'ARCHITECTURE', 'SEA_VIEW', 'SCENERY']);
+    if (!allowedScenes.has(profile.sceneClass)) {
+      reasons.push('ASSET_EDITORIAL_MISMATCH:AMBIENCE_REQUIRES_PLACE_DOMINANCE');
+    }
+    if (
+      profile.primarySubject &&
+      ['PERSON', 'COUPLE', 'GROUP'].includes(profile.primarySubject.kind) &&
+      profile.primarySubject.salience >= 0.65
+    ) {
+      reasons.push('ASSET_EDITORIAL_MISMATCH:AMBIENCE_PERSON_DOMINANT');
+    }
+  }
+
+  if (intent === 'SCENERY') {
+    const allowedScenes = new Set(['SEA_VIEW', 'SCENERY', 'VENUE_AMBIENCE', 'ARCHITECTURE']);
+    if (!allowedScenes.has(profile.sceneClass)) {
+      reasons.push('ASSET_EDITORIAL_MISMATCH:SCENERY_REQUIRES_PLACE_OR_HORIZON');
+    }
+  }
+
+  if (intent === 'DRINKS') {
+    if (!hasSubject(profile, ['DRINK'])) {
+      reasons.push('ASSET_EDITORIAL_MISMATCH:DRINK_REQUIRED');
+    }
+    const hasExperienceContext = hasSubject(profile, ['PERSON', 'ARCHITECTURE', 'SCENERY']);
+    if (!hasExperienceContext && profile.sceneClass === 'DRINKS') {
+      reasons.push('PRODUCT_ONLY_COMPOSITION');
+    }
+  }
+
+  return reasons;
+}
+
 function zoneLuma(
   regionLuma: SunsetStoryImageProfile['regionLuma'],
   zones: readonly SunsetStoryZone[],
@@ -160,7 +219,13 @@ function scoreTemplate(
 ): SunsetStoryTemplateCandidate {
   const history = request.history ?? [];
   const cropPlan = planSunsetStoryCrop(request.profile, template);
-  const rejectionReasons: string[] = [];
+  const rejectionReasons: string[] = [
+    ...editorialRejectionReasons(request.profile, request.intent),
+  ];
+
+  if (!template.intents.includes(request.intent)) {
+    rejectionReasons.push('TEMPLATE_INTENT_MISMATCH');
+  }
   if (request.profile.crop9x16Fitness < SUNSET_TEMPLATE_SELECTION_THRESHOLDS.minimumCropFitness) {
     rejectionReasons.push('CROP_9X16_FITNESS_TOO_LOW');
   }
@@ -173,11 +238,24 @@ function scoreTemplate(
   if (cropPlan.protectedOverlap > template.maxPrimarySubjectOverlap) {
     rejectionReasons.push('PRIMARY_SUBJECT_COLLIDES_WITH_PROTECTED_LAYOUT');
   }
+  if (
+    cropPlan.protectedFeatureOverlap >
+    SUNSET_TEMPLATE_SELECTION_THRESHOLDS.maximumProtectedFeatureOverlap
+  ) {
+    rejectionReasons.push('PROTECTED_FEATURE_OVERLAP');
+  }
+  if (
+    cropPlan.minimumProtectedFeatureCoverage <
+    SUNSET_TEMPLATE_SELECTION_THRESHOLDS.minimumProtectedFeatureCoverage
+  ) {
+    rejectionReasons.push('PROTECTED_FEATURE_CROPPED');
+  }
 
   const components: SunsetStoryScoreComponents = {
     subjectPreservation: cropPlan.subjectCoverage * 100,
     textSpaceCompatibility: textSpaceScore(template, request.profile),
-    collisionClearance: (1 - cropPlan.protectedOverlap) * 100,
+    collisionClearance:
+      (1 - Math.max(cropPlan.protectedOverlap, cropPlan.protectedFeatureOverlap)) * 100,
     semanticCompatibility: semanticScore(template, request.profile, request.intent),
     contrastReadability: contrastScore(template, request.profile),
     cropQuality: request.profile.crop9x16Fitness * 0.6 + Math.min(100, cropPlan.planScore) * 0.4,
