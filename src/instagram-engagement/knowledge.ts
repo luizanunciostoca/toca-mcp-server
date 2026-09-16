@@ -98,6 +98,8 @@ export function resolveKnowledgeRows(
   const normalized = normalizeText(text);
   if (!normalized) return null;
   const genericOperatingHours = isGenericOperatingHoursQuery(normalized, expectedIntent);
+  const todayOperatingHours = isTodayOperatingHoursQuery(normalized, expectedIntent);
+  const namesSpecificEvent = namesSpecificEventQuery(normalized);
   let best: InstagramEngagementKnowledgeRow | undefined;
   let bestScore = 0;
 
@@ -105,7 +107,12 @@ export function resolveKnowledgeRows(
     if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
       continue;
     let score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
-    if (genericOperatingHours && isVerifiedDailySunsetHoursRow(row)) {
+    if (todayOperatingHours && !namesSpecificEvent && isVerifiedRegularTocaHoursRow(row)) {
+      score = Math.max(score, 0.95);
+    } else if (
+      (genericOperatingHours || todayOperatingHours) &&
+      isVerifiedDailySunsetHoursRow(row)
+    ) {
       score = Math.max(score, 0.9);
     }
     if (score > bestScore) {
@@ -225,8 +232,41 @@ function isGenericOperatingHoursQuery(
   const hasHours = tokens.has('horario') || tokens.has('horarios') || tokens.has('hora');
   const hasOperating =
     tokens.has('funcionamento') || tokens.has('funciona') || tokens.has('funcionar');
-  const namesSpecificEvent = tokens.has('sunset') || tokens.has('party') || tokens.has('festa');
-  return hasHours && hasOperating && !namesSpecificEvent;
+  return hasHours && hasOperating && !namesSpecificEventQuery(normalized);
+}
+
+function isTodayOperatingHoursQuery(normalized: string, expectedIntent: EngagementIntent): boolean {
+  if (expectedIntent !== 'LOCATION_HOURS') return false;
+  const tokens = new Set(normalized.split(' '));
+  if (!tokens.has('hoje')) return false;
+  if (tokens.has('party') || tokens.has('festa')) return false;
+  return [
+    'abre',
+    'abrem',
+    'abrir',
+    'aberto',
+    'aberta',
+    'abertos',
+    'abertas',
+    'funciona',
+    'funcionam',
+    'funcionar',
+    'funcionando',
+  ].some((token) => tokens.has(token));
+}
+
+function namesSpecificEventQuery(normalized: string): boolean {
+  const tokens = new Set(normalized.split(' '));
+  return tokens.has('sunset') || tokens.has('party') || tokens.has('festa');
+}
+
+function isVerifiedRegularTocaHoursRow(row: InstagramEngagementKnowledgeRow): boolean {
+  return row.prompts.some(
+    (prompt) =>
+      prompt.includes('quais dias e horarios a toca funciona') ||
+      prompt.includes('a toca abre todo dia') ||
+      prompt.includes('quando a toca abre'),
+  );
 }
 
 function isVerifiedDailySunsetHoursRow(row: InstagramEngagementKnowledgeRow): boolean {
