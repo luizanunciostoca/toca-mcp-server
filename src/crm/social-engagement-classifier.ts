@@ -37,7 +37,14 @@ const LOCATION_HOURS_PATTERNS = [
   'qual a programacao regular da toca',
 ];
 
-const GASTRONOMY_OPERATIONAL_PATTERNS = ['o que tem para comer', 'o que tem para beber'];
+const GASTRONOMY_OPERATIONAL_PATTERNS = [
+  'o que tem para comer',
+  'o que tem para beber',
+  'o que tem hoje para comer',
+  'o que tem hoje para beber',
+  'hoje tem o que para comer',
+  'hoje tem o que para beber',
+];
 
 const OFFICIAL_OPERATIONAL_PATTERNS = [
   'tem site',
@@ -105,11 +112,14 @@ const EVENT_INFO_PATTERNS = [
   'qual e a programacao de hoje',
   'programacao de hoje',
   'programacao hoje',
+  'tem evento hoje',
+];
+
+const EXACT_TODAY_EVENT_INFO_PATTERNS = [
   'o que tem hoje',
   'hoje tem o que',
   'o que acontece hoje',
   'tem algo hoje',
-  'tem evento hoje',
   'agenda de hoje',
   'agenda hoje',
 ];
@@ -164,9 +174,12 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
     };
   }
 
-  // FAQ-036 and other explicit experience-description questions must remain
-  // EVENT_INFO even when they contain temporal words such as "sábado".
-  if (matchesAny(normalized, EVENT_INFO_PATTERNS)) {
+  // Keep ambiguous generic "today" aliases exact so a phrase such as
+  // "o que tem hoje para comer?" cannot be widened into EVENT_INFO.
+  if (
+    matchesAny(normalized, EVENT_INFO_PATTERNS) ||
+    matchesExactAny(normalized, EXACT_TODAY_EVENT_INFO_PATTERNS)
+  ) {
     return {
       intent: 'EVENT_INFO',
       topic: 'EVENT_INFO',
@@ -221,6 +234,10 @@ function mergeConversationIntents(
 
 function matchesAny(value: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => value === pattern || value.includes(pattern));
+}
+
+function matchesExactAny(value: string, patterns: readonly string[]): boolean {
+  return patterns.includes(value);
 }
 
 function normalizeCanonicalText(value: string): string {
