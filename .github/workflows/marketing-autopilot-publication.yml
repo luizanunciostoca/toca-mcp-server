@@ -1,28 +1,134 @@
-name: Marketing Autopilot Publication — Legacy Retired
+name: Marketing Autopilot Publication — GCP Governed Scheduler
 
 on:
+  schedule:
+    - cron: '*/15 * * * *'
   push:
     branches:
       - main
     paths:
-      - control/marketing-autopilot-publication-command.json
+      - control/gcp-instagram-publication-queue.json
+      - .github/workflows/marketing-autopilot-publication.yml
+      - scripts/marketing-scheduled-publication-controller.mjs
+      - scripts/marketing-publish-now.sh
+      - scripts/marketing-publish-now-fixed.sh
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
-  group: marketing-autopilot-instagram-publication-legacy-retired
+  group: marketing-autopilot-instagram-gcp-scheduler
   cancel-in-progress: false
 
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  DATABASE_SECRET_VERSION: '1'
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  PREPARE_JOB_NAME: toca-marketing-autopilot-prepare
+  EXECUTE_JOB_NAME: toca-marketing-autopilot-execute
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  SCHEDULED_MAX_DELAY_SECONDS: '1800'
+
 jobs:
-  legacy-retired:
+  scheduled-publication:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 25
     steps:
-      - name: Confirm legacy GCP publication lane is retired
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Guard exact protected main snapshot
         shell: bash
         run: |
           set -euo pipefail
-          echo "LEGACY_GCP_MARKETING_AUTOPILOT_PUBLICATION=RETIRED"
-          echo "Canonical execution lane: .github/workflows/github-native-instagram-publisher.yml"
-          echo "No provider write, Google Cloud authentication, Cloud Run, Cloud SQL, GCS, WIF or TOCA_POSTGRES action is executed by this workflow."
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          live_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$live_main"
+          test "$live_main" = "$GITHUB_SHA"
+
+      - name: Select exactly one due approved item
+        id: selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOW="$(TZ=America/Bahia date --iso-8601=seconds)"
+          SCHEDULED_PUBLICATION_NOW="$NOW" \
+            node scripts/marketing-scheduled-publication-controller.mjs
+          test -s /tmp/marketing-scheduled-publication-summary.json
+          due="$(jq -r '.due' /tmp/marketing-scheduled-publication-summary.json)"
+          test "$due" = 'true' || test "$due" = 'false'
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+          if [ "$due" = 'true' ]; then
+            target="$(jq -r '.targetCodeSha' /tmp/marketing-scheduled-publication-summary.json)"
+            item="$(jq -r '.contentItemId' /tmp/marketing-scheduled-publication-summary.json)"
+            printf '%s' "$target" | grep -Eq '^[a-f0-9]{40}$'
+            echo "target_code_sha=$target" >> "$GITHUB_OUTPUT"
+            echo "content_item_id=$item" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud and Drive only when due
+        if: steps.selection.outputs.due == 'true'
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - if: steps.selection.outputs.due == 'true'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Bind execution to the approved audited code snapshot
+        if: steps.selection.outputs.due == 'true'
+        shell: bash
+        env:
+          TARGET_CODE_SHA: ${{ steps.selection.outputs.target_code_sha }}
+        run: |
+          set -euo pipefail
+          test -s /tmp/marketing-scheduled-publication-command.json
+          git cat-file -e "${TARGET_CODE_SHA}^{commit}"
+          git merge-base --is-ancestor "$TARGET_CODE_SHA" "$GITHUB_SHA"
+          git checkout --detach "$TARGET_CODE_SHA"
+          test "$(git rev-parse HEAD)" = "$TARGET_CODE_SHA"
+          grep -Fq 'PUBLICATION_POLICY_MODE="${PUBLICATION_POLICY_MODE:-FAST_PATH}"' scripts/marketing-publish-now.sh
+          grep -Fq '.schedulingPolicy == "SCHEDULED_GCP"' scripts/marketing-publish-now.sh
+          echo "AUDITED_CODE_SHA=$TARGET_CODE_SHA" >> "$GITHUB_ENV"
+
+      - name: Execute exact scheduled GCP publication
+        if: steps.selection.outputs.due == 'true'
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          COMMAND_FILE: /tmp/marketing-scheduled-publication-command.json
+          PUBLICATION_POLICY_MODE: SCHEDULED
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"
+          GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh
+
+      - name: Upload scheduled publication evidence
+        if: always() && steps.selection.outputs.due == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: marketing-autopilot-gcp-${{ steps.selection.outputs.content_item_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: marketing-publish-now-*.json
+          if-no-files-found: warn
+          retention-days: 90
