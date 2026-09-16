@@ -84,7 +84,6 @@
   },
   "rollout": {
     "phase": "CANARY",
-    "allowedContentItemIds": ["MKT-20260916-SUNSET-STORY-1600"],
     "promoteOnlyAfterVerifiedOperations": 3,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false,
