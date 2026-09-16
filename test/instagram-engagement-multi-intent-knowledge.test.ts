@@ -252,7 +252,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('fails closed when a composed verified reply would exceed the provider envelope', async () => {
-    const delegateResolve = vi.fn((text: string, _intent: EngagementIntent) =>
+    const delegateResolve = vi.fn((text: string) =>
       Promise.resolve(
         ticketKnowledgeMatch(`${text} ${'A'.repeat(300)}`, `FAQ-${text}`, `TOCA_OS — ${text}`),
       ),
