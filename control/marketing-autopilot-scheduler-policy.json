@@ -30,7 +30,7 @@
     "preparationLeadSeconds": 300,
     "lateWindowSeconds": 1800,
     "maxCandidatesPerRun": 1,
-    "cron": "3/5 * * * *"
+    "cron": "*/5 * * * *"
   },
   "requiredEligibility": {
     "status": "PRODUCED",
