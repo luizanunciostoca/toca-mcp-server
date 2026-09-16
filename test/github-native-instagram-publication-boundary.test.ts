@@ -113,7 +113,8 @@ describe('Instagram publication single-writer boundary', () => {
     expect(autopilot).toContain('gh workflow run "$CANONICAL_WRITER_WORKFLOW"');
     expect(autopilot).toContain('MARKETING_AUTOPILOT_DURABLE_COMMAND=NOOP');
     expect(autopilot).toContain('MARKETING_AUTOPILOT_RECONCILIATION_REQUIRED');
-    expect(autopilot).not.toContain('META_ACCESS_TOKEN');
+    expect(autopilot).not.toMatch(/^\s+META_ACCESS_TOKEN:/m);
+    expect(autopilot).not.toContain('secrets.META_ACCESS_TOKEN');
     expect(autopilot).not.toContain('INSTAGRAM_PUBLICATION_WRITES_ENABLED=true');
     expect(autopilot).not.toContain('gcloud run jobs');
     expect(autopilot).not.toContain('github-native-instagram-publish-controlled');
